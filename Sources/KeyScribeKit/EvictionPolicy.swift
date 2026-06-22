@@ -9,6 +9,11 @@ public enum EvictionDecision: Equatable, Sendable {
 public enum EvictionPolicy {
     public static let defaultIdleSeconds: Double = 120
 
+    // The Fastest profile keeps the engine resident (afterDictation → .keepLoaded), but nothing
+    // preloads it, so the very first press still paid a cold load. Preload at launch for that profile
+    // only; Balanced/Frugal stay lazy.
+    public static func preloadAtLaunch(mode: Eviction) -> Bool { mode == .fastest }
+
     public static func afterDictation(mode: Eviction, idleSeconds: Double?) -> EvictionDecision {
         switch mode {
         case .fastest: return .keepLoaded

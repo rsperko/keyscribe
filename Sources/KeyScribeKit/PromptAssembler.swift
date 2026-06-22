@@ -13,13 +13,14 @@ public struct PromptInputs: Sendable {
     public var fieldRole: String?
     public var visibleWindowText: String?
     public var selectedText: String?
+    public var precedingText: String?
 
     public init(
         modePrompt: String, dictatedInstructions: String, content: String,
         tokens: [String], validTerms: [String], language: String,
         modeSystemInstructions: String,
         appName: String?, bundleId: String?, fieldRole: String?,
-        visibleWindowText: String?, selectedText: String?
+        visibleWindowText: String?, selectedText: String?, precedingText: String? = nil
     ) {
         self.modePrompt = modePrompt
         self.dictatedInstructions = dictatedInstructions
@@ -33,6 +34,7 @@ public struct PromptInputs: Sendable {
         self.fieldRole = fieldRole
         self.visibleWindowText = visibleWindowText
         self.selectedText = selectedText
+        self.precedingText = precedingText
     }
 }
 
@@ -85,16 +87,24 @@ public enum PromptAssembler {
             "<instructions>\n\(instructionLines.joined(separator: "\n"))\n</instructions>"
         ]
 
+        // Context children carry *untrusted* external text (window contents, pre-caret text, the app
+        // name). Neutralize any of our block-delimiter tags inside them so a crafted value cannot close
+        // its block and inject a fake <instructions> — the validation gate catches dropped tokens, but
+        // not a successful injection that yields clean output. Content/instructions are NOT neutralized:
+        // content is echoed back, so a zero-width space would leak into the insert.
         var contextChildren: [String] = []
         if let app = nonEmpty(i.appName) {
-            let bundle = nonEmpty(i.bundleId).map { " (\($0))" } ?? ""
-            contextChildren.append("  <app>\(app)\(bundle)</app>")
+            let bundle = nonEmpty(i.bundleId).map { " (\(neutralize($0)))" } ?? ""
+            contextChildren.append("  <app>\(neutralize(app))\(bundle)</app>")
         }
-        if let field = nonEmpty(i.fieldRole) { contextChildren.append("  <field>\(field)</field>") }
+        if let field = nonEmpty(i.fieldRole) { contextChildren.append("  <field>\(neutralize(field))</field>") }
         if let window = nonEmpty(i.visibleWindowText) {
-            contextChildren.append("  <window_excerpt>\(window)</window_excerpt>")
+            contextChildren.append("  <window_excerpt>\(neutralize(window))</window_excerpt>")
         }
-        if let sel = nonEmpty(i.selectedText) { contextChildren.append("  <selection>\(sel)</selection>") }
+        if let sel = nonEmpty(i.selectedText) { contextChildren.append("  <selection>\(neutralize(sel))</selection>") }
+        if let preceding = nonEmpty(i.precedingText) {
+            contextChildren.append("  <preceding_text>\(neutralize(preceding))</preceding_text>")
+        }
         if !contextChildren.isEmpty {
             blocks.append("<context>\n\(contextChildren.joined(separator: "\n"))\n</context>")
         }
@@ -106,10 +116,22 @@ public enum PromptAssembler {
     private static func hasContext(_ i: PromptInputs) -> Bool {
         nonEmpty(i.appName) != nil || nonEmpty(i.fieldRole) != nil
             || nonEmpty(i.visibleWindowText) != nil || nonEmpty(i.selectedText) != nil
+            || nonEmpty(i.precedingText) != nil
     }
 
     private static func nonEmpty(_ s: String?) -> String? {
         guard let s, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return s
+    }
+
+    // Breaks any of our block-delimiter tags appearing inside untrusted text by inserting a zero-width
+    // space right after the `<`, so `</window_excerpt><instructions>…` can no longer close our block or
+    // open a new one. Targeted to our own tag names, so ordinary `<` / `>` / "a < b" / "<3" pass through
+    // unchanged. The ZWSP is invisible to the model and never reaches the insert (context is not echoed).
+    static func neutralize(_ s: String) -> String {
+        let pattern = #"(?i)<(/?)\s*(content|context|instructions|selection|window_excerpt|preceding_text|app|field)\b"#
+        guard let re = RegexCache.regex(pattern) else { return s }
+        let range = NSRange(s.startIndex..., in: s)
+        return re.stringByReplacingMatches(in: s, range: range, withTemplate: "<\u{200B}$1$2")
     }
 }

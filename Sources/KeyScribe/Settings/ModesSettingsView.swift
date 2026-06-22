@@ -9,6 +9,7 @@ final class ModesSettingsModel: ObservableObject {
     @Published private(set) var fragmentIds: [String] = []
     @Published var selectedID: String?
     @Published private(set) var error: String?
+    @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
 
     private let modesDir: URL
     private let supportDir: URL
@@ -35,7 +36,9 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     func reload() {
-        modes = ModeStore.loadAll(in: modesDir)
+        let result = ModeStore.load(in: modesDir, previous: modes)
+        modes = result.modes
+        loadFailures = result.failures
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         fragmentIds = loadFragmentIds()
         if selectedID == nil || !modes.contains(where: { $0.id == selectedID }) {
@@ -122,6 +125,16 @@ struct ModesSettingsView: View {
     @State private var modePendingDelete: Mode?
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !model.loadFailures.isEmpty {
+                ModeLoadFailureBanner(failures: model.loadFailures)
+                Divider()
+            }
+            paneBody
+        }
+    }
+
+    private var paneBody: some View {
         HStack(spacing: 0) {
             List(selection: $model.selectedID) {
                 ForEach(model.modes) { mode in
@@ -176,6 +189,30 @@ struct ModesSettingsView: View {
             Text("\(modePendingDelete?.name ?? "This mode") and its configuration will be removed. This cannot be undone."
                 + (isDefault ? " It is the default mode — another mode will become the default." : ""))
         }
+    }
+}
+
+// Surfaces a malformed mode file instead of letting it vanish (it would silently change routing).
+// A mode that still has a prior good copy keeps running on it; one that never loaded is skipped.
+private struct ModeLoadFailureBanner: View {
+    let failures: [ModeStore.LoadFailure]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(failures, id: \.id) { failure in
+                Label {
+                    Text(failure.usedLastKnownGood
+                        ? "“\(failure.id)” has an error in its file — still running its last working version. Fix the file to apply changes."
+                        : "“\(failure.id)” couldn’t be loaded and was skipped. Check its file under Application Support.")
+                        .font(.callout)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.orange.opacity(0.12))
     }
 }
 
@@ -270,13 +307,34 @@ private struct ModeEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 } else if mode.source != .selection {
                     Button("Use as default mode", action: onMakeDefault)
+                    Text("The default mode runs whenever no app rule, hotkey, or spoken phrase selects another mode.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
             whenUsedSection
             Section("What it does") {
-                Toggle("Work on selection", isOn: selectionMode)
-                Toggle("Recognize spoken edits", isOn: commandsBinding(\.liveEdits))
+                SettingRow(
+                    title: "Work on selection",
+                    result: mode.source == .selection ? "Rewrites the highlighted text" : "Dictates at the cursor",
+                    help: "When on, this mode edits the currently selected text using your spoken instruction instead of inserting new text at the cursor — for \u{201C}make this more formal\u{201D} style edits. The selection is captured with ⌘C, so there must be something selected for it to act on.")
+                {
+                    Toggle("", isOn: selectionMode).labelsHidden()
+                }
+                SettingRow(
+                    title: "Recognize spoken edits",
+                    help: "Interprets spoken commands like \u{201C}delete that\u{201D} or \u{201C}new line\u{201D} as edits to the text instead of typing them literally. Turn it off if you dictate prose that uses those words verbatim.")
+                {
+                    Toggle("", isOn: commandsBinding(\.liveEdits)).labelsHidden()
+                }
+                if mode.source != .selection {
+                    Toggle("Convert spoken numbers to digits", isOn: commandsBinding(\.numbers))
+                    Toggle("Expand spoken symbols (\u{201C}open paren\u{201D} \u{2192} \u{201C}(\u{201D})",
+                           isOn: commandsBinding(\.symbols))
+                    Toggle("Snap misheard words to your dictionary", isOn: commandsBinding(\.fuzzyCorrection))
+                    Text("These tidy the transcript on this Mac, before any AI rewrite.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             dictionarySection
             improveWithAISection
@@ -286,7 +344,10 @@ private struct ModeEditorView: View {
                 SettingRow(
                     title: "Insertion method",
                     result: insertionLabel,
-                    help: "Paste is recommended: it inserts the finished dictation atomically (one ⌘Z undoes it) and works in the widest range of apps. Insert and Type place text key-by-key and need Accessibility permission; some apps reject them.")
+                    help: "Paste is recommended: it inserts the finished dictation atomically (one ⌘Z undoes it) and works in the widest range of apps. Insert and Type place text key-by-key and need Accessibility permission; some apps reject them.",
+                    dependencyReason: accessibilityMissingForInsertion
+                        ? "\(insertionLabel) needs Accessibility permission, which isn't granted. Without it this method can silently fail — grant access or use Paste."
+                        : nil)
                 {
                     Picker("", selection: binding(\.insertion)) {
                         Text("Paste").tag(Mode.Insertion.paste)
@@ -294,6 +355,10 @@ private struct ModeEditorView: View {
                         Text("Type").tag(Mode.Insertion.type)
                     }
                     .labelsHidden().fixedSize()
+                }
+                if accessibilityMissingForInsertion {
+                    Button("Open Accessibility Settings") { Permissions.openSettings(.accessibility) }
+                        .controlSize(.small)
                 }
                 SettingRow(
                     title: "Exclude from history",
@@ -311,6 +376,11 @@ private struct ModeEditorView: View {
         }
         .formStyle(.grouped)
         .padding(16)
+    }
+
+    private var accessibilityMissingForInsertion: Bool {
+        (mode.insertion == .insert || mode.insertion == .type)
+            && Permissions.accessibilityStatus() != .granted
     }
 
     private var insertionLabel: String {
@@ -444,14 +514,24 @@ private struct ModeEditorView: View {
 
     @ViewBuilder private var dictionarySection: some View {
         Section("Dictionary") {
-            Toggle("Use global dictionary", isOn: dictionaryBinding(\.includeGlobal))
+            SettingRow(
+                title: "Use global dictionary",
+                help: "Adds your global dictionary terms to this mode as recognition hints, on top of the mode-only words below. A dictionary term tells the engine a word is valid — it does not force the word to appear, and an AI rewrite may still change it.")
+            {
+                Toggle("", isOn: dictionaryBinding(\.includeGlobal)).labelsHidden()
+            }
             DictionaryRows(
                 words: mode.dictionary.words,
                 onAdd: addWord, onRemove: removeWord,
                 placeholder: "Add a mode-only word, e.g. LaunchDarkly")
         }
         Section("Replacements") {
-            Toggle("Use global replacements", isOn: replacementsBinding(\.includeGlobal))
+            SettingRow(
+                title: "Use global replacements",
+                help: "Applies your global replacement rules in this mode, on top of the mode-only rules below. Replacements run on this Mac before any AI rewrite, so a rewrite can still change the replaced text.")
+            {
+                Toggle("", isOn: replacementsBinding(\.includeGlobal)).labelsHidden()
+            }
             ReplacementRows(
                 rules: mode.replacements.rules,
                 onAdd: addReplacementRule, onRemove: removeReplacement(at:))
@@ -507,8 +587,8 @@ private struct ModeEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 SettingRow(
-                    title: "Send app & field details",
-                    help: "Shares the frontmost app and focused-field role as untrusted reference, never as commands. The browser URL is never sent — it is only a local routing key.",
+                    title: "Send app details",
+                    help: "Shares the frontmost app's name as untrusted reference, never as commands. The browser URL is never sent — it is only a local routing key.",
                     dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
                 {
                     Toggle("", isOn: contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
@@ -519,6 +599,13 @@ private struct ModeEditorView: View {
                     dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
                 {
                     Toggle("", isOn: contextBinding(\.visibleText)).labelsHidden().disabled(mode.commands.privacy)
+                }
+                SettingRow(
+                    title: "Send text before the cursor",
+                    help: "Shares a short, bounded excerpt of the text just before the insertion point as untrusted reference, so a rewrite can match the surrounding voice and tense. Native text fields only — best-effort (browsers expose nothing).",
+                    dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
+                {
+                    Toggle("", isOn: contextBinding(\.precedingText)).labelsHidden().disabled(mode.commands.privacy)
                 }
                 SettingRow(
                     title: "Hide recognizable sensitive text",

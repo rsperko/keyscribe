@@ -47,8 +47,9 @@ final class SettingsController {
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "KeyScribe Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 940, height: 640))
+        window.minSize = NSSize(width: 760, height: 520)
         window.center()
         window.isReleasedWhenClosed = false
         NSApp.activate(ignoringOtherApps: true)
@@ -92,7 +93,7 @@ struct SettingsRootView: View {
                 AdvancedSettingsView(model: general)
             }
         }
-        .frame(width: 940, height: 640)
+        .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
     }
 }
 

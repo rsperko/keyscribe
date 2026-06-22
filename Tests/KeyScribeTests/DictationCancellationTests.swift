@@ -82,7 +82,10 @@ struct DictationCancellationTests {
         let hud: HUDSpy
     }
 
-    private func makeHarness() -> Harness {
+    private func makeHarness(
+        micStatus: @escaping @MainActor () -> PermissionStatus = { .granted },
+        accessibilityGranted: @escaping @MainActor () -> Bool = { true }
+    ) -> Harness {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
@@ -105,7 +108,9 @@ struct DictationCancellationTests {
             history: history, hud: hud,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _ in await insertSpy.record() },
-            snapshot: { TargetSnapshot(bundleId: "test.bundle") })
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: micStatus,
+            accessibilityGranted: accessibilityGranted)
 
         return Harness(
             controller: controller, history: history, insertSpy: insertSpy,
@@ -154,6 +159,36 @@ struct DictationCancellationTests {
 
         #expect(h.hud.states.last == .recording(mode: "Work on Selection", level: 0))
         #expect(h.controller.nextModeOverrideName == nil)
+    }
+
+    @Test func deniedMicrophoneSurfacesAnErrorWithSettingsActionInsteadOfRecordingSilence() {
+        let h = makeHarness(micStatus: { .denied })
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart()
+
+        #expect(h.hud.states.last == .error(message: "Microphone access is off", action: .openMicrophoneSettings))
+        #expect(h.controller.dictationTask == nil)
+    }
+
+    @Test func withoutAccessibilityDictationIsCopiedTruthfullyNotPhantomInserted() async {
+        let h = makeHarness(accessibilityGranted: { false })
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart()
+        h.controller.handleCommit()
+        await h.started.wait()
+        let task = h.controller.dictationTask
+        h.release.fire()
+        await task?.value
+
+        #expect(h.controller.lastResult == "hello world")
+        #expect(h.history.entries().first?.outcome == .copied)
+        let completeOutcomes = h.hud.states.compactMap { state -> DictationOutcome? in
+            if case .complete(let outcome, _) = state { return outcome }
+            return nil
+        }
+        #expect(completeOutcomes.contains(.copied(.accessibilityDenied)))
     }
 
     @Test func rewriteHUDNamesTheActualSharedContext() {

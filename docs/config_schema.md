@@ -91,10 +91,15 @@ bundle_id = "com.apple.mail"
 
 # ── Pipeline commands (spoken-command / pipeline features, opt-in per mode) ──
 [commands]
-live_edits = true           # spoken commands: new line / paragraph / scratch that /
+live_edits = true           # spoken commands: new line / paragraph / scratch that / tab /
                             #   "begin verbatim".."end verbatim" (verbatim is a live edit)
 privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
+numbers    = false          # inverse text normalization: "twenty five" -> "25"
+                            #   (leaves year idioms like "twenty twenty six" as words)
+symbols    = false          # spoken-symbol expansion: "open paren" -> "(" (for code/terminal modes)
+fuzzy_correction = false    # snap mangled words to dictionary terms ("charge bee" -> "ChargeBee");
+                            #   conservative — the dictionary is a hint, not authoritative
 
 # ── Vocabulary (mode-local; may exclude the global sets) ─────────────────────
 [dictionary]
@@ -118,7 +123,10 @@ connection = "gemini-flash"     # references a [[connection]] in connections.tom
 prompt = "Rewrite the dictation as a clear, professional email. Keep my meaning."
 fragments = ["my-voice"]        # shared prompt fragments, appended in order
 # Context opt-in (what gets sent to the LLM):
-context = { app = true, visible_text = false }       # selection is sent when source = "selection".
+context = { app = true, visible_text = false, preceding_text = false }
+                                                     # selection is sent when source = "selection".
+                                                     #   preceding_text = bounded text before the caret
+                                                     #   (native-only, best-effort via AX).
                                                      #   Forced to all-false when commands.privacy = true.
 ```
 
@@ -134,12 +142,15 @@ context = { app = true, visible_text = false }       # selection is sent when so
 | `constraints[]` | table[] | `bundle_id` (+ optional `url_pattern`). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection`. |
-| `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **begin/end verbatim**). |
+| `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **tab**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
+| `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
+| `commands.symbols` | bool | Opt-in to spoken-symbol expansion ("open paren" → "("); for code/terminal modes. |
+| `commands.fuzzy_correction` | bool | Opt-in to snapping mangled words to dictionary terms; conservative (the dictionary stays a hint). |
 | `dictionary` | table | `include_global` + `words[]`. |
 | `replacements` | table | `include_global` + `rules[]` of `{heard, replace, regex}`. |
 | `[ai_rewrite]` | table | Absent ⇒ no rewrite. `connection`, `prompt`, `fragments[]`, `context`. |
-| `ai_rewrite.context` | inline table | `{ app, visible_text }` booleans. (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
+| `ai_rewrite.context` | inline table | `{ app, visible_text, preceding_text }` booleans. `preceding_text` sends bounded text before the caret (native-only, best-effort via AX). (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
 | `insertion` | enum | `paste` \| `insert` \| `type`. |
 | `exclude_from_history` | bool | Skip writing this mode's dictations to history. |
 

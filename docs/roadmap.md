@@ -252,10 +252,16 @@ restored after; verbatim spans never mutate — proven in logic + the round-trip
       Heard→Result detail, processing details, storage-truth footer) — **needs interactive verification**.
 - [x] **History as correction surface:** **Add to Dictionary** / **Create Replacement** from a
       history entry (dedup-aware `adding(word:)` / `addingLiteral(heard:replace:)` + store `write`,
-      tested). Detail-view buttons — **needs interactive verification**.
+      tested). Detail-view buttons **verified live (2026-06-22)**; corrections now pre-fill (term when
+      the result is one word; replacement from Heard→Result) and **label scope as global** before save.
 - [~] **Load-on-login** done (M1). General settings pass — partial.
-- [ ] Progressive-disclosure UX pass: simple defaults forward, advanced tucked away.
-- [ ] Accessibility, error states, onboarding polish.
+- [~] Progressive-disclosure UX pass: simple defaults forward, advanced tucked away.
+      **Partial (UI-review pass, 2026-06-22):** Settings now resizable; under-explained Mode controls
+      moved to `SettingRow` inline help; truthful labels ("Send app details"). **Remaining:** the Mode
+      editor's top-level basic/advanced split (P1-3) — kept the two existing `DisclosureSection`s for now.
+- [~] Accessibility, error states, onboarding polish.
+      **Partial:** error HUD now offers a repair action (Open Microphone Settings on a mic failure);
+      first-run gained **Skip for now** on the model + permissions steps so a snag never traps setup.
 - [ ] **Distribution:** direct, **notarized** (Developer ID); **in-app updates** (Sparkle)
       with the **update badge** (blue dot, top-right of the menu-bar icon — `ui_design.md` §6).
 - [ ] **Error badge** (red dot, top-left of the menu-bar icon) for a configuration/model problem,

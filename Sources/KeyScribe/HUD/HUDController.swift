@@ -29,7 +29,12 @@ final class HUDController: HUDPresenting {
         let hosting = NSHostingView(rootView: HUDView(
             model: model,
             onInsertLocalTranscript: { [weak self] in self?.onInsertLocalTranscript?() },
-            onPasteLast: { [weak self] in self?.onPasteLast?() }))
+            onPasteLast: { [weak self] in self?.onPasteLast?() },
+            onErrorAction: { action in
+                switch action {
+                case .openMicrophoneSettings: Permissions.openSettings(.microphone)
+                }
+            }))
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 280, height: 92),
             styleMask: [.nonactivatingPanel, .borderless],
@@ -61,19 +66,30 @@ private struct HUDView: View {
     @ObservedObject var model: HUDModel
     let onInsertLocalTranscript: () -> Void
     let onPasteLast: () -> Void
+    let onErrorAction: (HUDErrorAction) -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             icon
             VStack(alignment: .leading, spacing: 2) {
                 Text(primary).font(.system(size: 13, weight: .semibold))
-                if let secondary { Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary) }
+                if !model.state.dataBoundaryBadges.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(model.state.dataBoundaryBadges, id: \.self) { DataBoundaryBadge(label: $0) }
+                    }
+                } else if let secondary {
+                    Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 if model.state.offersLocalTranscript {
                     Button("Insert local transcript") { onInsertLocalTranscript() }
                         .controlSize(.small)
                 }
                 if model.state.offersPasteLast {
                     Button("Paste last dictation") { onPasteLast() }
+                        .controlSize(.small)
+                }
+                if let action = model.state.errorAction {
+                    Button(action.buttonTitle) { onErrorAction(action) }
                         .controlSize(.small)
                 }
             }
@@ -89,7 +105,7 @@ private struct HUDView: View {
     }
 
     private var hasAction: Bool {
-        model.state.offersLocalTranscript || model.state.offersPasteLast
+        model.state.offersLocalTranscript || model.state.offersPasteLast || model.state.errorAction != nil
     }
 
     @ViewBuilder private var icon: some View {

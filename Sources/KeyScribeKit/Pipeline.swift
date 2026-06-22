@@ -22,7 +22,10 @@ public enum StagePosition: Int, Comparable, Sendable {
 // live edits run before replacements so a replacement can't rewrite spoken-command output.
 public enum StageOrder {
     public static let liveEdits = 0
+    public static let spokenSymbols = 5
     public static let replacements = 10
+    public static let numbers = 20
+    public static let fuzzy = 30
 }
 
 public struct PipelineContext: Sendable {

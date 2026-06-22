@@ -12,6 +12,10 @@ public enum FallbackReason: Equatable, Sendable {
     case appChanged
     case focusChanged
     case unknownTarget
+    // Accessibility is not granted, so no synthetic insertion (⌘V paste, AX-set, or typing) can reach
+    // the target — every path needs a trusted process. The only safe delivery is the clipboard, and the
+    // outcome must say "copied", never "inserted" (otherwise the text is silently lost).
+    case accessibilityDenied
 }
 
 public enum InsertionDecision: Equatable, Sendable {

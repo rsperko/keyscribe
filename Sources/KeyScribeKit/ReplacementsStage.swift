@@ -29,7 +29,7 @@ public struct ReplacementsStage: PipelineStage {
 
     private func apply(_ rule: ReplacementRule, to text: String) -> String {
         if rule.isRegex {
-            guard let re = RegexCache.regex(rule.heard) else { return text }
+            guard ReplacementSafety.isSafe(rule.heard), let re = RegexCache.regex(rule.heard) else { return text }
             let range = NSRange(text.startIndex..., in: text)
             return re.stringByReplacingMatches(in: text, range: range, withTemplate: rule.replace)
         }

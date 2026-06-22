@@ -17,6 +17,129 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## GPT UI-review fixes — M7 polish (2026-06-22, uncommitted working tree)
+
+Worked `agent_notes/gpt_ui_review/review.md` against the live app (a UX pass comparing the build to
+`ui_design.md` / `ui_components.md`). Every claim was checked against source first; one was an
+overstatement (History "Create Replacement" was already pre-filled). **`swift build` clean; full
+`swift test` passes; HUDStateTests now 10/10** (5 added for the new pure logic). A live visual pass
+(drive-with-AppleScript + `screencapture` + read) confirmed the static surfaces; the conditional/
+transient ones are noted below as still-needing a live trigger.
+
+**First run (P0 — was a dead end):** `FirstRunView` now offers a low-prominence **Skip for now** on the
+**model** and **permissions** steps (previously only on the final trial step), each with an in-place
+limitation note. Taking it calls `model.finish()` = setup complete, per `ui_design.md` §2. *Verified
+live:* the model-step skip + caption render and the click dismisses the wizard.
+
+**Settings resizable (P0):** `SettingsController` window gains `.resizable` + a `minSize` (760×520) and
+`SettingsRootView` swaps its fixed `.frame` for `minWidth/idealWidth…`. *Verified live* (resized to
+1180×1000).
+
+**Inline help / truthful labels (P1/P2, `ModesSettingsView`):** converted the under-explained controls
+to `SettingRow` (outcome + Learn-more): *Work on selection*, *Recognize spoken edits*, *Use global
+dictionary*, *Use global replacements*; added a default-mode caption. Renamed **"Send app & field
+details" → "Send app details"** (the only call site passes `fieldRole: nil`, so no field role is ever
+sent). Insertion-method row now shows an Accessibility `dependencyReason` + **Open Accessibility
+Settings** when Insert/Type is picked without AX. *Verified live* (AX-dependency correctly hidden while
+granted).
+
+**Shared data-boundary badge (P2):** new `DataBoundaryBadge` in `SettingsComponents.swift`, fed by the
+centralized `HistoryEntry` label strings. Replaced the two duplicated History badge views and wired it
+into the **HUD** (`.rewriting` now shows discrete badges instead of a collapsed text line via
+`HUDState.dataBoundaryBadges`). *History badges verified live; HUD rewriting badges still need a live
+cloud rewrite.*
+
+**History corrections scope-aware (P1):** `HistoryController` pre-fills the dictionary **term** when the
+result is a single word, states scope explicitly ("Adds to your **global** dictionary/replacement…"),
+and previews the resulting replacement rule. Empty state gained an **Open History Settings** button
+(wired through `AppDelegate`). *Corrections captions verified live; empty-state link only renders with
+zero entries.*
+
+**Error HUD action (P2):** `HUDState.error` now carries an optional `HUDErrorAction`; a mic-start failure
+offers **Open Microphone Settings** (and stays up 8s, not 2s). Deliberately **no generic Retry** — the
+wav is deleted on failure, so retry would mislead. *Still needs a live mic-denied dictation to see.*
+
+**Deferred (still open):** P1-3, the Mode editor's top-level basic/advanced split — the most invasive
+item, overlaps the M7 progressive-disclosure pass; the two existing `DisclosureSection`s remain. See the
+roadmap M7 checkboxes (progressive-disclosure / accessibility-error-onboarding now marked partial).
+
+## Scribe-comparison hardening pass (2026-06-22, uncommitted working tree)
+
+Ported the high-value lessons from the older `shopify-playground/scribe` predecessor (a read-only
+comparison report), skipping everything that violates KeyScribe's invariants (cloud STT, screen OCR,
+shell key-commands, local-endpoint redaction bypass). **`swift test` = 353 tests / 51 suites pass**;
+full app target compiles. Ten of eleven items landed; per-engine ASR-confidence + HUD preview deferred
+(needs a live session — see end).
+
+**Pure logic (KeyScribeKit, TDD red→green):**
+- **Redaction breadth + checksums** (`RedactionTokenizer`). Was 7 unvalidated regexes; now ~20 vendor
+  patterns (Stripe/Slack/JWT/AWS family/Google/Shopify/GitHub PAT/PEM/Bearer/`KEY=`…) + **Luhn**-gated
+  cards + **IBAN mod-97** (dedicated trim-to-valid finder, since IBANs allow letters and a greedy regex
+  over-extends into the next word) + a conservative **Shannon-entropy** sweep for novel secrets.
+  Over-matching is safe — a token restores to its original after the LLM.
+- **Regex backtracking guard** (`ReplacementSafety`) — static nested-quantifier detector; `ReplacementsStage`
+  skips an evil user pattern (`(a+)+$`) instead of hanging the hot path. (Can't time-out a synchronous
+  `NSRegularExpression`, so static refusal is the only real defence.)
+- **Inverse text normalization** (`InverseTextNormalizer` / `NumbersStage`, `commands.numbers`) —
+  "twenty five" → "25", **bails on ambiguous/year runs** ("twenty twenty six" stays words).
+- **Spoken symbols** (`SpokenSymbols` / `SymbolsStage`, `commands.symbols`) — "open paren" → "(".
+- **Fuzzy correction** (`FuzzyCorrector` / `FuzzyStage`, `commands.fuzzy_correction`) — Levenshtein +
+  Soundex snap to dictionary terms; multi-token windows only on exact-normalized match (so a glue word
+  can't be merged away). Dictionary stays a hint.
+- **Configurable voice commands** — `LiveEditsStage` generalized to a phrase→action map with defaults,
+  adds a **tab** command; `LiveEditsStage()` still works for existing callers.
+- **Lenient mode decode + last-known-good** — `ModeStore.load(in:previous:)` surfaces per-mode
+  `LoadFailure`s and reuses the prior good copy instead of silently dropping a malformed mode;
+  `ConfigCache` keeps last-known-good across `invalidate()` and logs failures (category `config`).
+- **Prompt-injection hardening** (`PromptAssembler.neutralize`, from the reverse "parity" report) —
+  inserts a zero-width space into any of our block-delimiter tags found inside *untrusted context*
+  (window text, preceding text, app name, selection), so a crafted value can't close its block and
+  inject a fake `<instructions>`. Content/instructions are not neutralized (content is echoed back).
+  The hard validation gate catches dropped tokens; this catches a successful injection that produces
+  clean output. (Data-fence for the edit-in-place selection deferred — needs live LLM-behavior checks.)
+- GitLab `glpat-` added to the redactor; "lean protected terms" was already done
+  (`DictationController` only sends dictionary terms present in the content).
+
+**Performance (the report's remaining MEDIUM items):**
+- **Bound the transcription wait** — `DictationController.transcribeBounded` races `transcribe()` against
+  a duration-scaled timeout (20× real-time, ≥30s floor), so a wedged CoreML/MLX call surfaces a clean
+  "Transcription timed out" HUD error instead of hanging forever. Robustness, not speed (batch can't
+  salvage a partial).
+- **Gate Parakeet CTC load on a non-empty dictionary** — split install vs runtime warm: `load(progress:)`
+  (Settings install) still fetches + prewarms the CTC bias model; `loadIfNeeded()` (warm-on-press /
+  launch preload) now loads **TDT only**. Empty-dictionary users never pay the CTC CoreML load; bias
+  users get it lazily from disk inside `transcribe()` on first actual bias (no mid-dictation download —
+  install already fetched it).
+- **Memory-pressure eviction** — `DictationController` installs a `.critical` `DispatchSource` that
+  evicts the active engine when idle (`!machine.isBusy`); an in-flight dictation keeps its engine.
+  Local reaction to a local signal, no telemetry.
+- Correctly **skipped** (per the report's own SKIP/CONSIDER calls): vDSP/level-meter throttle (micro),
+  streaming partial transcription (conflicts with batch/atomic-insert), and `StageTimings` instrumentation
+  (no consumer yet — would be dead code; revisit if/when measuring warm-on-press's payoff).
+
+**OS edges (adapters):**
+- **TextInserter pasteboard guard** — full-type snapshot/restore (`PasteboardSnapshot`, no longer
+  `.string`-only, so images/RTF/files survive a dictation), ⌘C settle **polled on changeCount** (not a
+  blind 120 ms sleep — the M0 "slamic…" race), paste-restore **gated on changeCount** (don't clobber a
+  newer write), scratch write marked **transient + concealed** so clipboard managers skip it.
+- **Warm-on-press + launch preload** — `DictationController.handleStart` fires an idempotent
+  `loadIfNeeded()` so model load overlaps speech; `EvictionPolicy.preloadAtLaunch` preloads the active
+  engine at launch for the Fastest profile (AppDelegate).
+- **Preceding-text context** — `ai_rewrite.context.preceding_text` opt-in; `ContextProbe.precedingText()`
+  reads bounded pre-caret text from the focused field's AX selected range (native-only, best-effort,
+  Chromium → nil). Forced off in privacy mode like all context; assembled into a `<preceding_text>` block.
+
+**Deferred — needs an interactive session:** ASR confidence + low-confidence HUD preview. No uniform
+per-transcript confidence exists across the 7 engines today (logProbs are only in Parakeet's CTC-WS
+spotter path); surfacing it means per-SDK extraction (WhisperKit segment avgLogprob, FluidAudio token
+confidences, Apple/Qwen3; Moonshine has none) + HUD preview UX + threshold tuning against real
+distributions — none verifiable headlessly. Left unbuilt rather than land an unwired seam + untested HUD.
+
+Not yet verified interactively: TextInserter changes (use the clipboard-marker probe), warm-on-press
+latency win, and preceding-text capture across real apps. Settings UI checkboxes for the four new
+toggles (`numbers` / `symbols` / `fuzzy_correction` / `preceding_text`) are not yet wired — the fields
+are functional via TOML and decode/encode round-trip.
+
 ## Custom hotkey recorder + app picker (2026-06-21, uncommitted working tree)
 
 Two Modes-editor UX gaps closed — both **UI-only**, the model already supported them:

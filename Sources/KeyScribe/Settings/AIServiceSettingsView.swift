@@ -33,6 +33,7 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published var selectedID: String?
     @Published private(set) var error: String?
     @Published private(set) var testStates: [String: ConnectionTestState] = [:]
+    @Published private(set) var keyedRefs: Set<String> = []
 
     private let supportDir: URL
     private let tester: ConnectionTester
@@ -61,7 +62,12 @@ final class AIServiceSettingsModel: ObservableObject {
         if selectedID == nil || !connections.contains(where: { $0.id == selectedID }) {
             selectedID = connections.first?.id
         }
+        refreshKeyedRefs()
         error = nil
+    }
+
+    private func refreshKeyedRefs() {
+        keyedRefs = Set(connections.map(\.keyRef).filter(KeychainStore.has))
     }
 
     func create() {
@@ -75,7 +81,10 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func update(_ connection: Connection, apiKey: String?) {
-        if let apiKey, !apiKey.isEmpty { KeychainStore.set(apiKey, for: connection.keyRef) }
+        if let apiKey, !apiKey.isEmpty {
+            KeychainStore.set(apiKey, for: connection.keyRef)
+            keyedRefs.insert(connection.keyRef)
+        }
         testStates[connection.id] = nil
         save(connection)
     }
@@ -86,6 +95,7 @@ final class AIServiceSettingsModel: ObservableObject {
         do {
             try ConnectionStore.write(ConnectionSet(connections: updated), to: supportDir)
             KeychainStore.delete(connection.keyRef)
+            keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
             connections = updated
             selectedID = updated.first?.id
@@ -97,7 +107,7 @@ final class AIServiceSettingsModel: ObservableObject {
 
     var selected: Connection? { connections.first { $0.id == selectedID } }
 
-    func hasKey(_ connection: Connection) -> Bool { KeychainStore.get(connection.keyRef) != nil }
+    func hasKey(_ connection: Connection) -> Bool { keyedRefs.contains(connection.keyRef) }
 
     private func save(_ connection: Connection) {
         var updated = connections

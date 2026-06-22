@@ -88,6 +88,22 @@ struct SettingRow<Control: View>: View {
     }
 }
 
+// ui_components.md data-boundary badge: one shared capsule for "On this Mac", "Cloud rewrite",
+// "Best-effort redaction", "App shared", "Visible text shared", "Selected text shared". The label
+// strings come from KeyScribeKit (HistoryEntry); this is the single view used in HUD, Mode
+// summaries, and History so the categories never collapse into a generic "context" label.
+struct DataBoundaryBadge: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(.quaternary, in: Capsule())
+            .accessibilityLabel(label)
+    }
+}
+
 struct PromptEditor: View {
     let title: String
     @Binding var text: String

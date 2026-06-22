@@ -81,7 +81,7 @@ keyscribe/
     KeyScribe/           # the menu-bar app: adapters + SwiftUI/AppKit + main
   Tests/KeyScribeKitTests/ # pure-logic unit tests
   Tests/KeyScribeTests/    # app-target tests (@testable import KeyScribe) — OS-edge orchestration via DI seams
-  make-app.sh          # → KeyScribe.app (LSUIElement, codesigned with SnagShot Dev)
+  make-app.sh          # → KeyScribe.app (LSUIElement; stable-cert or ad-hoc signed — see BUILD.md)
   docs/                # the design docs (tracked product spec)
   benchmark/           # STT benchmark kit: manifest.json + record.sh + README (committed);
                        #   *.wav recordings + results.json are gitignored (your own voice).
@@ -226,8 +226,15 @@ the live frontier.
 `Sources/KeyScribe` app + `Tests/KeyScribeKitTests` pure-logic tests + `Tests/KeyScribeTests` app-target
 tests via `@testable import KeyScribe`, used when an OS-edge orchestrator needs a regression test
 through DI seams), bundled into an LSUIElement `.app` by
-`./make-app.sh` (auto-signs with the **`SnagShot Dev`** identity for stable TCC; a `Developer ID`
-cert for notarization is an M7 need). Config lives under `~/Library/Application Support/KeyScribe/`,
+`./make-app.sh` (signs with a stable self-signed cert for persistent TCC if one is present —
+contributors create a **`KeyScribe Local`** cert, the maintainer's **`SnagShot Dev`** also
+auto-detects; else ad-hoc. Identity override: `CODESIGN_IDENTITY` / `KEYSCRIBE_SIGN_ID`. Full
+from-source build, prerequisites, and signing steps live in **`BUILD.md`**. A `Developer ID` cert
+for notarization is an M7 need; `KeyScribe.entitlements` is the tracked hardened-runtime entitlements
+file, **dormant** until M7 — `make-app.sh` doesn't pass it yet. The bundle's `Info.plist` is a tracked
+source file at `Resources/Info.plist`; `make-app.sh` stamps `CFBundleShortVersionString` from the
+latest git tag and `CFBundleVersion` from the commit count, so don't hand-edit version keys).
+Config lives under `~/Library/Application Support/KeyScribe/`,
 loaded once into `ConfigCache` and invalidated by an FSEvents watcher (no per-dictation I/O).
 
 **Keep building pure logic test-first** (`principles.md` §9): the OS-free core in `KeyScribeKit`

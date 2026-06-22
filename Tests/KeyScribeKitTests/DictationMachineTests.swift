@@ -37,6 +37,7 @@ struct DictationMachineTests {
     @Test func outcomeMapsInsertDecision() {
         #expect(DictationMachine.outcome(for: .insert) == .inserted)
         #expect(DictationMachine.outcome(for: .clipboardFallback(reason: .appChanged)) == .copied(.appChanged))
+        #expect(DictationMachine.outcome(for: .clipboardFallback(reason: .accessibilityDenied)) == .copied(.accessibilityDenied))
     }
 
     @Test func emptyTranscriptIsNoSpeech() {

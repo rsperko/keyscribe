@@ -42,4 +42,10 @@ struct EvictionPolicyTests {
         #expect(EvictionPolicy.afterDictation(mode: .balanced, idleSeconds: nil)
             == .scheduleIdleCheck(afterSeconds: EvictionPolicy.defaultIdleSeconds))
     }
+
+    @Test func onlyFastestPreloadsAtLaunch() {
+        #expect(EvictionPolicy.preloadAtLaunch(mode: .fastest))
+        #expect(!EvictionPolicy.preloadAtLaunch(mode: .balanced))
+        #expect(!EvictionPolicy.preloadAtLaunch(mode: .frugal))
+    }
 }

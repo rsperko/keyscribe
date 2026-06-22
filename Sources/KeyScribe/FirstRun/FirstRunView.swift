@@ -58,11 +58,19 @@ struct FirstRunView: View {
                 Text(error).foregroundStyle(.red).font(.callout)
             }
             Spacer()
-            Button(model.downloading ? "Downloading…" : "Download \(model.selectedInfo?.displayName ?? "model")") {
-                model.beginDownload()
+            HStack {
+                Button("Skip for now") { model.finish() }
+                    .buttonStyle(.link)
+                    .disabled(model.downloading)
+                Spacer()
+                Button(model.downloading ? "Downloading…" : "Download \(model.selectedInfo?.displayName ?? "model")") {
+                    model.beginDownload()
+                }
+                .keyboardShortcut(.defaultAction).controlSize(.large)
+                .disabled(model.downloading)
             }
-            .keyboardShortcut(.defaultAction).controlSize(.large)
-            .disabled(model.downloading)
+            Text("Skipping finishes setup without a model — dictation can't transcribe until you download one in Settings.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -108,12 +116,21 @@ struct FirstRunView: View {
             permissionStep
 
             Spacer()
-            Button("Continue") {
-                model.onReadyToDictate()
-                model.step = .tryIt
+            if !model.allPermissionsGranted {
+                Text("You can skip and finish setup now, then grant any remaining permissions later in Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .keyboardShortcut(.defaultAction).controlSize(.large)
-            .disabled(!model.allPermissionsGranted)
+            HStack {
+                Button("Skip for now") { model.finish() }
+                    .buttonStyle(.link)
+                Spacer()
+                Button("Continue") {
+                    model.onReadyToDictate()
+                    model.step = .tryIt
+                }
+                .keyboardShortcut(.defaultAction).controlSize(.large)
+                .disabled(!model.allPermissionsGranted)
+            }
         }
     }
 

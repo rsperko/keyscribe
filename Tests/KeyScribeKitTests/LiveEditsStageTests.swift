@@ -54,4 +54,19 @@ struct LiveEditsStageTests {
         #expect(stage.order == StageOrder.liveEdits)
         #expect(stage.order < StageOrder.replacements)
     }
+
+    @Test func tabCommandInsertsTab() {
+        #expect(run("def foo tab key bar") == "def foo\tbar")
+        #expect(run("insert tab value") == "\tvalue")
+    }
+
+    @Test func bareTabIsNotACommand() {
+        #expect(run("press the tab to indent") == "press the tab to indent")
+    }
+
+    @Test func customCommandPhrases() {
+        var ctx = PipelineContext(text: "alpha next line beta")
+        LiveEditsStage(commands: .init(newLine: ["next line"])).run(&ctx)
+        #expect(ctx.text == "alpha\nbeta")
+    }
 }

@@ -133,6 +133,22 @@ struct ModeTests {
         #expect(m.effectiveContext == Mode.ContextOptIn(app: true, visibleText: false))
     }
 
+    @Test func privacyForcesPrecedingTextOff() throws {
+        var m = Mode(id: "x", name: "X")
+        m.commands.privacy = true
+        m.aiRewrite = .init(connection: "c", prompt: "p", context: .init(precedingText: true))
+        #expect(m.effectiveContext.precedingText == false)
+        #expect(!m.effectiveContextCategories.contains("preceding text"))
+    }
+
+    @Test func precedingTextContextRoundTrips() throws {
+        var m = Mode(id: "x", name: "X")
+        m.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: false, visibleText: false, precedingText: true))
+        let again = try ModeStore.decode(from: ModeStore.encode(m), id: "x")
+        #expect(again.aiRewrite?.context.precedingText == true)
+        #expect(again.effectiveContextCategories.contains("preceding text"))
+    }
+
     @Test func effectiveContextWithNoRewriteIsAllOff() {
         #expect(Mode(id: "x", name: "X").effectiveContext == Mode.ContextOptIn(app: false, visibleText: false))
     }

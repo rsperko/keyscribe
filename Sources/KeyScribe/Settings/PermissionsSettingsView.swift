@@ -1,9 +1,16 @@
+import AppKit
 import SwiftUI
 
 struct PermissionsSettingsView: View {
     @State private var microphoneStatus = Permissions.microphoneStatus()
     @State private var inputMonitoringStatus = Permissions.inputMonitoringStatus()
     @State private var accessibilityStatus = Permissions.accessibilityStatus()
+
+    // Permission grants land out-of-process: Microphone/Input Monitoring are toggled in System
+    // Settings (we re-check when the app reactivates), while Accessibility is granted in another app
+    // that never reactivates us — so there is no event to hook and we poll while the pane is visible.
+    // TCC exposes no general "permission changed" callback, so this poll is the live-status mechanism.
+    private let pollTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
@@ -40,13 +47,16 @@ struct PermissionsSettingsView: View {
                         Permissions.openSettings(.accessibility)
                     },
                     openSettings: { Permissions.openSettings(.accessibility) })
-                Button("Refresh Permission Status", action: refreshPermissions)
             }
         }
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear(perform: refreshPermissions)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
+        }
+        .onReceive(pollTimer) { _ in refreshPermissions() }
     }
 
     private func refreshPermissions() {

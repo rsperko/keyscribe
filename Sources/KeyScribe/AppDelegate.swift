@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history, hud: hud)
+        controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
 
@@ -51,7 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let set = ReplacementsStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
                     .addingLiteral(heard: heard, replace: replace)
                 try? ReplacementsStore.write(set, to: KeyScribePaths.supportDir)
-            })
+            },
+            openSettings: { [weak self] in self?.settingsController.present() })
 
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }

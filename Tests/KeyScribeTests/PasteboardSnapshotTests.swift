@@ -1,0 +1,58 @@
+import AppKit
+import Testing
+@testable import KeyScribe
+
+// Regression tests for the TextInserter pasteboard guard. The bugs these lock in:
+//  1. Restore saved only `.string`, silently destroying images / RTF / file lists on every dictation.
+//  2. A failed round-trip write left the clipboard EMPTY, so a late ⌘V pasted nothing.
+// They run against an isolated pasteboard (withUniqueName) so they need no GUI and don't touch the
+// user's real clipboard. The 250ms restore delay is a timing constant tuned to a real app's paste
+// latency — not unit-testable here — so it is verified by hand, not asserted.
+@MainActor
+struct PasteboardSnapshotTests {
+    @Test func restoresAllTypesNotJustString() {
+        let pb = NSPasteboard.withUniqueName()
+        let binaryType = NSPasteboard.PasteboardType("com.keyscribe.test.binary")
+        let item = NSPasteboardItem()
+        item.setString("the user's note", forType: .string)
+        item.setData(Data([0xDE, 0xAD, 0xBE, 0xEF]), forType: binaryType)
+        pb.clearContents()
+        pb.writeObjects([item])
+
+        let snapshot = TextInserter.PasteboardSnapshot.capture(from: pb)
+
+        // A dictation overwrites the clipboard with its scratch text…
+        pb.clearContents()
+        pb.setString("scratch dictation text", forType: .string)
+
+        snapshot.restore(to: pb)
+
+        // …and restore brings back BOTH the text and the non-string representation.
+        #expect(pb.string(forType: .string) == "the user's note")
+        #expect(pb.data(forType: binaryType) == Data([0xDE, 0xAD, 0xBE, 0xEF]))
+    }
+
+    @Test func restoreNeverLeavesAContentfulSnapshotEmpty() {
+        let pb = NSPasteboard.withUniqueName()
+        pb.clearContents()
+        pb.setString("keepme", forType: .string)
+        let snapshot = TextInserter.PasteboardSnapshot.capture(from: pb)
+
+        pb.clearContents()
+        pb.setString("scratch", forType: .string)
+        snapshot.restore(to: pb)
+
+        #expect(pb.string(forType: .string) == "keepme")
+    }
+
+    @Test func emptySnapshotRestoresToEmpty() {
+        let pb = NSPasteboard.withUniqueName()
+        pb.clearContents()
+        let snapshot = TextInserter.PasteboardSnapshot.capture(from: pb)
+
+        pb.setString("scratch", forType: .string)
+        snapshot.restore(to: pb)
+
+        #expect(pb.string(forType: .string) == nil)
+    }
+}

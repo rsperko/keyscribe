@@ -82,30 +82,19 @@ actor ParakeetEngine: SpeechEngine {
         self.modelsDir = modelsDir
     }
 
+    // Runtime warm (warm-on-press / launch preload): load only the TDT transcription model. The CTC
+    // bias model is NOT loaded here — users with an empty dictionary never pay its CoreML load, and
+    // bias users get it lazily from disk inside transcribe() the first time they actually bias (the
+    // install path below already downloaded it, so that lazy load never blocks on the network).
     func loadIfNeeded() async throws {
-        try await load(progress: nil)
+        try await ensureManager(progress: nil)
     }
 
+    // Install path (Settings download/verify): fetch + compile BOTH the TDT model and the paired CTC
+    // bias model, so the first biased dictation neither downloads nor compiles the bias model
+    // mid-dictation. Runtime warming uses loadIfNeeded() above and skips the eager CTC load.
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
-        if manager == nil {
-            let share = tdtDownloadShare
-            var handler: DownloadUtils.ProgressHandler?
-            if let progress {
-                handler = { snapshot in
-                    progress(.init(phase: "Downloading speech model…", fraction: snapshot.fractionCompleted * share))
-                }
-            }
-            // FluidAudio's `to:` is the full model-bundle path (it downloads into the parent), so
-            // target the bundle *inside* models/. The dir name comes from FluidAudio (not hardcoded).
-            let target = modelsDir.appendingPathComponent(
-                AsrModels.defaultCacheDirectory(for: version).lastPathComponent, isDirectory: true)
-            let models = try await AsrModels.downloadAndLoad(
-                to: target, version: version, progressHandler: handler)
-            progress?(.init(phase: "Compiling speech model…", fraction: share))
-            let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
-            self.manager = manager
-        }
+        try await ensureManager(progress: progress)
         // The CTC bias model ships with the engine. CtcModels exposes no progress callback, so these
         // phases advance the bar by guesstimate. Best-effort: bias is optional, transcription is not.
         let share = tdtDownloadShare
@@ -113,6 +102,27 @@ actor ParakeetEngine: SpeechEngine {
         await ensureCtc()
         progress?(.init(phase: "Compiling recognition-bias model…", fraction: share + (1 - share) * 0.9))
         progress?(.init(phase: "Ready", fraction: 1))
+    }
+
+    private func ensureManager(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
+        guard manager == nil else { return }
+        let share = tdtDownloadShare
+        var handler: DownloadUtils.ProgressHandler?
+        if let progress {
+            handler = { snapshot in
+                progress(.init(phase: "Downloading speech model…", fraction: snapshot.fractionCompleted * share))
+            }
+        }
+        // FluidAudio's `to:` is the full model-bundle path (it downloads into the parent), so
+        // target the bundle *inside* models/. The dir name comes from FluidAudio (not hardcoded).
+        let target = modelsDir.appendingPathComponent(
+            AsrModels.defaultCacheDirectory(for: version).lastPathComponent, isDirectory: true)
+        let models = try await AsrModels.downloadAndLoad(
+            to: target, version: version, progressHandler: handler)
+        progress?(.init(phase: "Compiling speech model…", fraction: share))
+        let manager = AsrManager(config: .default)
+        try await manager.loadModels(models)
+        self.manager = manager
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {

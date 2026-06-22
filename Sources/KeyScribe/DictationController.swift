@@ -21,6 +21,8 @@ final class DictationController {
     private let audio: AudioCapturing
     private let insert: (InsertionDecision, Mode.Insertion, String) async -> Void
     private let snapshot: @MainActor () -> TargetSnapshot
+    private let micStatus: @MainActor () -> PermissionStatus
+    private let accessibilityGranted: @MainActor () -> Bool
     private let llmClient: any LLMClient
     private let effects = DuringDictationEffects()
     private weak var hud: HUDPresenting?
@@ -32,6 +34,7 @@ final class DictationController {
     private var routingContext = RoutingContext()
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
     private(set) var dictationTask: Task<Void, Never>?
     private var lastUsedAt: Double = 0
     private(set) var lastResult: String?
@@ -56,6 +59,8 @@ final class DictationController {
         audio: AudioCapturing = AudioCapture(),
         insert: @escaping (InsertionDecision, Mode.Insertion, String) async -> Void = TextInserter.perform,
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
+        micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
+        accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         llmClient: any LLMClient = HTTPLLMClient()
     ) {
         self.settings = settings
@@ -66,10 +71,46 @@ final class DictationController {
         self.audio = audio
         self.insert = insert
         self.snapshot = snapshot
+        self.micStatus = micStatus
+        self.accessibilityGranted = accessibilityGranted
         self.llmClient = llmClient
+        installMemoryPressureHandler()
+    }
+
+    // Free the resident STT model (27–38MB up to the larger Qwen3 tiers) when the OS reports critical
+    // memory pressure — but only when idle. An in-flight dictation keeps its engine (evicting mid-flight
+    // would lose the transcription); the next idle check or the post-dictation eviction policy reclaims
+    // it later. Local reaction to a local signal — never reported anywhere (no telemetry).
+    private func installMemoryPressureHandler() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: .critical, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.machine.isBusy else { return }
+                let active = self.provider.active
+                self.log.notice("memory pressure (critical): evicting \(active.id, privacy: .public)")
+                Task { await active.evict() }
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
     }
 
     func updateSettings(_ settings: Settings) { self.settings = settings }
+
+    // Warm the active STT engine the instant a press begins, overlapping model load (CoreML/MLX
+    // compile, ANE warmup) with the user's speech instead of paying it after key-release. Idempotent
+    // — a no-op once loaded — and never blocks recording: failures surface later at transcribe time.
+    private func warmActiveEngine() {
+        let active = provider.active
+        Task { try? await active.loadIfNeeded() }
+    }
+
+    // Launch-time preload for the Fastest eviction profile, so the first dictation isn't a cold load
+    // (design: EvictionPolicy.preloadAtLaunch). Other profiles stay lazy.
+    func preloadActiveEngineIfNeeded() {
+        guard EvictionPolicy.preloadAtLaunch(mode: settings.stt.eviction) else { return }
+        warmActiveEngine()
+    }
 
     func setNextModeOverride(id: String?) {
         nextModeOverrideID = id.flatMap { candidate in
@@ -89,8 +130,16 @@ final class DictationController {
         guard machine.beginRecording() else { return }
         hideTask?.cancel()
         idleEvictionTask?.cancel()
+        // A denied mic does NOT make AVAudioEngine throw — it starts and captures silence, which would
+        // surface as a misleading "No speech detected". Catch the real cause up front and point the user
+        // at the fix instead of recording nothing.
+        if micStatus() == .denied {
+            finishError("Microphone access is off", action: .openMicrophoneSettings)
+            return
+        }
         capturedSnapshot = snapshot()
         resolveMode(triggerKey: triggerKey)
+        warmActiveEngine()
         effects.begin(settings.duringDictation)
         hud?.render(.recording(mode: currentModeName, level: 0))
         do {
@@ -101,7 +150,7 @@ final class DictationController {
                 }
             }
         } catch {
-            finishError("Could not start the microphone")
+            finishError("Could not start the microphone", action: .openMicrophoneSettings)
         }
     }
 
@@ -155,10 +204,39 @@ final class DictationController {
         return merged.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
+    struct TranscribeTimeout: Error {}
+
+    // Bound the STT call so a wedged CoreML/MLX transcribe can't leave the HUD spinning forever.
+    // Batch dictation can't salvage a partial, so this is robustness, not speed — the cap scales with
+    // the recording length (20× real-time, ≥30s floor), generous enough to never trip on a legitimately
+    // long or slow transcription while still abandoning a true hang. The losing engine task is
+    // cancelled; if the engine ignores cancellation it finishes in the background, harmlessly discarded.
+    private func transcribeBounded(url: URL, biasTerms: [String]) async throws -> String {
+        let engine = provider.active
+        let audioSeconds = (try? AVAudioFile(forReading: url))
+            .map { Double($0.length) / $0.fileFormat.sampleRate } ?? 0
+        let timeout = max(30, audioSeconds * 20)
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask { try await engine.transcribe(wavURL: url, biasTerms: biasTerms) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeout))
+                throw TranscribeTimeout()
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw TranscribeTimeout() }
+            return first
+        }
+    }
+
     private func transcribeAndInsert(url: URL) async {
         let raw: String
         do {
-            raw = try await provider.active.transcribe(wavURL: url, biasTerms: recognitionBiasTerms())
+            raw = try await transcribeBounded(url: url, biasTerms: recognitionBiasTerms())
+        } catch is TranscribeTimeout {
+            log.error("transcribe timed out (\(self.provider.active.id, privacy: .public))")
+            try? FileManager.default.removeItem(at: url)
+            finishError("Transcription timed out")
+            return
         } catch {
             log.error("transcribe failed (\(self.provider.active.id, privacy: .public)): \(error, privacy: .public)")
             try? FileManager.default.removeItem(at: url)
@@ -203,8 +281,12 @@ final class DictationController {
         clearRewriteEscapeHatch()
         machine.beginInserting()
         let current = snapshot()
-        let decision = decideInsertion(
+        let targetDecision = decideInsertion(
             captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: current)
+        // Without Accessibility every synthetic insertion path is silently dropped by the OS (the M0
+        // false-`.success` data-loss footgun). Divert to the clipboard so the text survives and the
+        // outcome reports "copied" truthfully instead of a phantom "inserted".
+        let decision = accessibilityGranted() ? targetDecision : .clipboardFallback(reason: .accessibilityDenied)
         let outcome = DictationMachine.outcomeForTranscript(transcript, decision: decision)
         switch outcome {
         case .noSpeech:
@@ -398,6 +480,13 @@ final class DictationController {
         var contextCategories: [String] = []
         if ctx.app { contextCategories.append("app") }
 
+        var precedingText: String?
+        if ctx.precedingText {
+            contextCategories.append("preceding text")
+            precedingText = ContextProbe.precedingText()
+            Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")
+        }
+
         var visibleWindowText: String?
         if ctx.visibleText {
             contextCategories.append("visible text")
@@ -421,7 +510,7 @@ final class DictationController {
             tokens: tokenizer.issuedTokens, validTerms: validTerms, language: "English",
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
-            visibleWindowText: visibleWindowText, selectedText: nil)
+            visibleWindowText: visibleWindowText, selectedText: nil, precedingText: precedingText)
 
         // The exact prompt stored in history (design.md §4.7) — tokens, not their originals.
         let assembled = PromptAssembler.assemble(inputs)
@@ -448,11 +537,21 @@ final class DictationController {
         let global = config.replacements
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
+        if mode?.commands.symbols ?? false { stages.append(SymbolsStage()) }
         let rules = VocabularyMerge.rules(
             global: global.toRules(),
             local: mode?.replacements.toRules() ?? [],
             includeGlobal: mode?.replacements.includeGlobal ?? true)
         stages.append(ReplacementsStage(rules: rules))
+        if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
+        if mode?.commands.fuzzyCorrection ?? false {
+            let terms = mode.map { m in
+                VocabularyMerge.words(
+                    global: config.dictionary.words,
+                    local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
+            } ?? config.dictionary.words
+            stages.append(FuzzyStage(terms: terms))
+        }
         return Pipeline(stages).run(raw)
     }
 
@@ -499,17 +598,17 @@ final class DictationController {
         pendingHeardTranscript = nil
     }
 
-    private func finishError(_ message: String) {
+    private func finishError(_ message: String, action: HUDErrorAction? = nil) {
         machine.finish(.failed(message))
         effects.end(settings.duringDictation)
-        hud?.render(.error(message))
-        scheduleHide()
+        hud?.render(.error(message: message, action: action))
+        scheduleHide(after: action == nil ? 2 : 8)
     }
 
-    private func scheduleHide() {
+    private func scheduleHide(after seconds: Double = 2) {
         hideTask?.cancel()
         hideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, !machine.isBusy else { return }
             hud?.render(.hidden)
         }

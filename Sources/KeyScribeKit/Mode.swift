@@ -59,15 +59,30 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public struct Commands: Codable, Equatable, Sendable {
         public var liveEdits: Bool
         public var privacy: Bool
-        enum CodingKeys: String, CodingKey { case liveEdits = "live_edits"; case privacy }
-        public init(liveEdits: Bool = false, privacy: Bool = false) {
+        public var numbers: Bool          // inverse text normalization ("twenty five" → "25")
+        public var symbols: Bool          // spoken-symbol expansion ("open paren" → "(")
+        public var fuzzyCorrection: Bool  // snap mangled words to dictionary terms
+        enum CodingKeys: String, CodingKey {
+            case liveEdits = "live_edits"; case privacy
+            case numbers; case symbols; case fuzzyCorrection = "fuzzy_correction"
+        }
+        public init(
+            liveEdits: Bool = false, privacy: Bool = false,
+            numbers: Bool = false, symbols: Bool = false, fuzzyCorrection: Bool = false
+        ) {
             self.liveEdits = liveEdits
             self.privacy = privacy
+            self.numbers = numbers
+            self.symbols = symbols
+            self.fuzzyCorrection = fuzzyCorrection
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             liveEdits = try c.decodeIfPresent(Bool.self, forKey: .liveEdits) ?? false
             privacy = try c.decodeIfPresent(Bool.self, forKey: .privacy) ?? false
+            numbers = try c.decodeIfPresent(Bool.self, forKey: .numbers) ?? false
+            symbols = try c.decodeIfPresent(Bool.self, forKey: .symbols) ?? false
+            fuzzyCorrection = try c.decodeIfPresent(Bool.self, forKey: .fuzzyCorrection) ?? false
         }
     }
 
@@ -105,15 +120,20 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public struct ContextOptIn: Codable, Equatable, Sendable {
         public var app: Bool
         public var visibleText: Bool
-        enum CodingKeys: String, CodingKey { case app; case visibleText = "visible_text" }
-        public init(app: Bool = false, visibleText: Bool = false) {
+        public var precedingText: Bool   // bounded text before the caret (native-only, best-effort)
+        enum CodingKeys: String, CodingKey {
+            case app; case visibleText = "visible_text"; case precedingText = "preceding_text"
+        }
+        public init(app: Bool = false, visibleText: Bool = false, precedingText: Bool = false) {
             self.app = app
             self.visibleText = visibleText
+            self.precedingText = precedingText
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             app = try c.decodeIfPresent(Bool.self, forKey: .app) ?? false
             visibleText = try c.decodeIfPresent(Bool.self, forKey: .visibleText) ?? false
+            precedingText = try c.decodeIfPresent(Bool.self, forKey: .precedingText) ?? false
         }
     }
 
@@ -206,8 +226,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     // Context the mode may actually send: privacy mode forces everything off (design.md §4.4).
     public var effectiveContext: ContextOptIn {
-        if commands.privacy { return ContextOptIn(app: false, visibleText: false) }
-        return aiRewrite?.context ?? ContextOptIn(app: false, visibleText: false)
+        if commands.privacy { return ContextOptIn() }
+        return aiRewrite?.context ?? ContextOptIn()
     }
 
     public var effectiveContextCategories: [String] {
@@ -215,6 +235,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         var categories: [String] = []
         if context.app { categories.append("app") }
         if context.visibleText { categories.append("visible text") }
+        if context.precedingText { categories.append("preceding text") }
         return categories
     }
 }
@@ -276,16 +297,49 @@ public enum ModeStore {
         return [plain, polished, message, email, prompt, selection]
     }
 
+    public struct LoadFailure: Equatable, Sendable {
+        public let id: String
+        public let message: String
+        public let usedLastKnownGood: Bool
+    }
+
+    public struct LoadResult: Sendable {
+        public let modes: [Mode]
+        public let failures: [LoadFailure]
+    }
+
     public static func loadAll(in dir: URL) -> [Mode] {
+        load(in: dir, previous: []).modes
+    }
+
+    // Lenient load: a single malformed mode file must not vanish silently (it would change routing
+    // with no signal). Each file is decoded independently; on failure we fall back to the
+    // last-known-good copy from `previous` (so an in-progress hand edit keeps the prior mode live)
+    // and record a LoadFailure the caller can surface. A file that never decoded is reported and
+    // skipped — never substituted with a guess.
+    public static func load(in dir: URL, previous: [Mode]) -> LoadResult {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
-        return files
-            .filter { $0.pathExtension == "toml" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .compactMap { url in
-                guard let toml = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-                return try? decode(from: toml, id: url.deletingPathExtension().lastPathComponent)
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
+            return LoadResult(modes: [], failures: [])
+        }
+        let prior = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var modes: [Mode] = []
+        var failures: [LoadFailure] = []
+        for url in files.filter({ $0.pathExtension == "toml" }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let id = url.deletingPathExtension().lastPathComponent
+            do {
+                let toml = try String(contentsOf: url, encoding: .utf8)
+                modes.append(try decode(from: toml, id: id))
+            } catch {
+                if let lastGood = prior[id] {
+                    modes.append(lastGood)
+                    failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: true))
+                } else {
+                    failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: false))
+                }
             }
+        }
+        return LoadResult(modes: modes, failures: failures)
     }
 
     public static func write(_ mode: Mode, to dir: URL) throws {

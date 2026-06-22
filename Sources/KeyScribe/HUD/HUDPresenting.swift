@@ -1,5 +1,18 @@
 import KeyScribeKit
 
+// A single repair action an error HUD can offer (ui_design.md §5: an error state gives one clear next
+// step). Only used where a concrete fix exists — a failure with no safe recovery offers nothing rather
+// than a misleading Retry.
+enum HUDErrorAction: Equatable {
+    case openMicrophoneSettings
+
+    var buttonTitle: String {
+        switch self {
+        case .openMicrophoneSettings: "Open Microphone Settings"
+        }
+    }
+}
+
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
@@ -8,7 +21,7 @@ enum HUDState: Equatable {
     case rewriting(connection: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)
     case complete(outcome: DictationOutcome, mode: String)
-    case error(String)
+    case error(message: String, action: HUDErrorAction?)
 }
 
 extension HUDState {
@@ -29,9 +42,14 @@ extension HUDState {
             return "Inserted local transcript"
         case .complete(let outcome, _):
             return Self.completePrimary(outcome)
-        case .error(let message):
+        case .error(let message, _):
             return message
         }
+    }
+
+    var errorAction: HUDErrorAction? {
+        if case .error(_, let action) = self { return action }
+        return nil
     }
 
     var secondaryText: String? {
@@ -46,8 +64,8 @@ extension HUDState {
             if redacted { return "Best-effort redaction" }
             let labels = contextCategories.compactMap(HistoryEntry.contextLabel)
             return labels.isEmpty ? "Cloud rewrite" : labels.joined(separator: " · ")
-        case .complete(.copied, _), .localFallback(.copied, _):
-            return "Focus changed while KeyScribe was working"
+        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _):
+            return Self.copiedSecondary(reason)
         case .complete(_, let mode):
             return mode
         case .localFallback:
@@ -57,12 +75,34 @@ extension HUDState {
         }
     }
 
+    // The data-boundary categories for the cloud-rewrite step, as discrete badge labels rather than a
+    // collapsed text line (ui_components.md). A rewrite is always cloud; redaction forces context off,
+    // mirroring HistoryEntry.dataBoundaryLabels.
+    var dataBoundaryBadges: [String] {
+        guard case .rewriting(_, let redacted, let contextCategories, _) = self else { return [] }
+        var labels = ["Cloud rewrite"]
+        if redacted { labels.append("Best-effort redaction") }
+        labels.append(contentsOf: contextCategories.compactMap(HistoryEntry.contextLabel))
+        return labels
+    }
+
     var offersPasteLast: Bool {
         switch self {
-        case .complete(.copied, _), .localFallback(.copied, _):
-            return true
+        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _):
+            // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that
+            // can't work — the text is already on the clipboard for a manual paste.
+            return reason != .accessibilityDenied
         default:
             return false
+        }
+    }
+
+    private static func copiedSecondary(_ reason: FallbackReason) -> String {
+        switch reason {
+        case .accessibilityDenied:
+            return "Accessibility is off — copied to the clipboard. Paste with ⌘V."
+        case .appChanged, .focusChanged, .unknownTarget:
+            return "Focus changed while KeyScribe was working"
         }
     }
 

@@ -24,6 +24,33 @@ enum ContextProbe {
         return await Task.detached { AXVisibleText.capture(pid: pid) }.value
     }
 
+    // Bounded text immediately before the caret in the focused field, for a mode that opted into
+    // preceding-text context (design.md §4.4). Read straight from the focused element's selected range
+    // via AX — precise and native-only: Chromium/Electron expose no caret range, so this returns nil
+    // there (best-effort, like visible text). Privacy mode forces the opt-in off upstream
+    // (Mode.effectiveContext), so this is never called when redaction is active.
+    static func precedingText(maxChars: Int = 600) -> String? {
+        let system = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef else { return nil }
+        let element = focusedRef as! AXUIElement
+
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID() else { return nil }
+        var selection = CFRange(location: 0, length: 0)
+        guard AXValueGetValue((rangeRef as! AXValue), .cfRange, &selection), selection.location > 0 else { return nil }
+
+        let start = max(0, selection.location - maxChars)
+        var wanted = CFRange(location: start, length: selection.location - start)
+        guard let wantedValue = AXValueCreate(.cfRange, &wanted) else { return nil }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, "AXStringForRange" as CFString, wantedValue, &out) == .success,
+              let text = out as? String, !text.isEmpty else { return nil }
+        return text
+    }
+
     // Browser URL for URL-constrained modes (design.md §4.4): AppleScript/Apple Events, never AX
     // (AX returns nil on Chromium — M0 fact). "Is it a browser" comes from Launch Services (any app
     // registered to open https), so no bundle-id list. The URL itself uses one of two AppleScript

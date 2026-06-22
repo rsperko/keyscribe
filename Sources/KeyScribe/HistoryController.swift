@@ -10,10 +10,12 @@ final class HistoryController {
     init(
         store: HistoryStore,
         addDictionaryWord: @escaping (String) -> Void,
-        addReplacement: @escaping (String, String) -> Void
+        addReplacement: @escaping (String, String) -> Void,
+        openSettings: @escaping () -> Void
     ) {
         model = HistoryViewModel(
-            store: store, addDictionaryWord: addDictionaryWord, addReplacement: addReplacement)
+            store: store, addDictionaryWord: addDictionaryWord,
+            addReplacement: addReplacement, openSettings: openSettings)
     }
 
     func present() {
@@ -55,6 +57,7 @@ private final class HistoryViewModel: ObservableObject {
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Void
     let addReplacement: (String, String) -> Void
+    let openSettings: () -> Void
 
     private let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -66,11 +69,13 @@ private final class HistoryViewModel: ObservableObject {
     init(
         store: HistoryStore,
         addDictionaryWord: @escaping (String) -> Void,
-        addReplacement: @escaping (String, String) -> Void
+        addReplacement: @escaping (String, String) -> Void,
+        openSettings: @escaping () -> Void
     ) {
         self.store = store
         self.addDictionaryWord = addDictionaryWord
         self.addReplacement = addReplacement
+        self.openSettings = openSettings
     }
 
     func reload() {
@@ -109,9 +114,13 @@ private struct HistoryView: View {
                     ProgressView("Loading history…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if !model.hasEntries {
-                    ContentUnavailableView(
-                        "No dictations yet", systemImage: "clock",
-                        description: Text("Future dictations appear here when history is enabled."))
+                    ContentUnavailableView {
+                        Label("No dictations yet", systemImage: "clock")
+                    } description: {
+                        Text("Future dictations appear here when history is enabled.")
+                    } actions: {
+                        Button("Open History Settings") { model.openSettings() }
+                    }
                 } else if model.groups.isEmpty {
                     ContentUnavailableView(
                         "No matching dictations", systemImage: "magnifyingglass",
@@ -167,7 +176,7 @@ private struct HistoryRowView: View {
             .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 4) {
                 ForEach(entry.dataBoundaryLabels, id: \.self) { label in
-                    HistoryBadge(label: label)
+                    DataBoundaryBadge(label: label)
                 }
             }
         }
@@ -202,16 +211,27 @@ private struct HistoryDetailView: View {
     }
 
     private func syncFields() {
-        dictionaryTerm = ""
+        let trimmedResult = entry.result.trimmingCharacters(in: .whitespacesAndNewlines)
+        dictionaryTerm = trimmedResult.contains(where: \.isWhitespace) ? "" : trimmedResult
         heard = entry.heard
         replace = entry.result
+    }
+
+    private var heardPreview: String {
+        let t = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "the heard text" : t
+    }
+
+    private var replacePreview: String {
+        let t = replace.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "(nothing)" : t
     }
 
     private var header: some View {
         HStack(spacing: 8) {
             Text(entry.modeName).font(.headline)
             badge(outcomeLabel(entry.outcome))
-            ForEach(entry.dataBoundaryLabels, id: \.self) { badge($0) }
+            ForEach(entry.dataBoundaryLabels, id: \.self) { DataBoundaryBadge(label: $0) }
             Spacer()
             Text(entry.timestamp, style: .time).foregroundStyle(.secondary).font(.caption)
         }
@@ -225,22 +245,30 @@ private struct HistoryDetailView: View {
     }
 
     private var corrections: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Corrections").font(.headline)
-            HStack {
-                TextField("Add a term to the dictionary", text: $dictionaryTerm)
-                Button("Add to Dictionary") {
-                    model.addDictionaryWord(dictionaryTerm)
-                    dictionaryTerm = ""
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    TextField("Add a term to the dictionary", text: $dictionaryTerm)
+                    Button("Add to Dictionary") {
+                        model.addDictionaryWord(dictionaryTerm)
+                        dictionaryTerm = ""
+                    }
+                    .disabled(dictionaryTerm.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                .disabled(dictionaryTerm.trimmingCharacters(in: .whitespaces).isEmpty)
+                Text("Adds to your global dictionary — a recognition hint for every mode that uses it.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            HStack {
-                TextField("Heard", text: $heard)
-                Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                TextField("Replace with", text: $replace)
-                Button("Create Replacement") { model.addReplacement(heard, replace) }
-                    .disabled(heard.trimmingCharacters(in: .whitespaces).isEmpty)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    TextField("Heard", text: $heard)
+                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                    TextField("Replace with", text: $replace)
+                    Button("Create Replacement") { model.addReplacement(heard, replace) }
+                        .disabled(heard.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Text("Adds a global replacement — every mode that uses replacements turns \u{201C}\(heardPreview)\u{201D} into \u{201C}\(replacePreview)\u{201D}.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -284,23 +312,10 @@ private struct HistoryDetailView: View {
     }
 }
 
-private struct HistoryBadge: View {
-    let label: String
-
-    var body: some View {
-        Text(label)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
-    }
-}
-
-
 private func outcomeLabel(_ outcome: HistoryEntry.Outcome) -> String {
     switch outcome {
     case .inserted: "Inserted"
-    case .copied: "Copied"
+    case .copied: "Copied instead of inserted"
     case .localFallback: "Local fallback"
     case .failed: "Failed"
     }

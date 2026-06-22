@@ -71,4 +71,64 @@ struct RedactionTokenizerTests {
         let (out, _) = redact("my key is ess kay dash abc")
         #expect(out == "my key is ess kay dash abc")   // not caught; acceptable
     }
+
+    @Test func redactsStripeAndSlackTokens() {
+        let (stripe, t1) = redact("charge with sk_live_abcdef0123456789ABCD now")
+        #expect(!stripe.contains("sk_live"))
+        #expect(t1.restore(stripe) == "charge with sk_live_abcdef0123456789ABCD now")
+        let (slack, _) = redact("hook xoxb-123456789012-abcdefABCDEF here")
+        #expect(!slack.contains("xoxb-"))
+        #expect(slack.contains("⟦SN:REDACT:1⟧"))
+    }
+
+    @Test func redactsGitLabToken() {
+        let (out, t) = redact("ci uses glpat-ABCdef0123456789ghijk now")
+        #expect(!out.contains("glpat-"))
+        #expect(t.restore(out) == "ci uses glpat-ABCdef0123456789ghijk now")
+    }
+
+    @Test func redactsJWT() {
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"
+        let (out, t) = redact("token \(jwt) end")
+        #expect(!out.contains("eyJ"))
+        #expect(t.restore(out) == "token \(jwt) end")
+    }
+
+    @Test func redactsKeyAssignment() {
+        let (out, _) = redact("set API_KEY=swordfish123456 in env")
+        #expect(!out.contains("swordfish123456"))
+        #expect(out.contains("⟦SN:REDACT:1⟧"))
+    }
+
+    @Test func luhnRejectsNonCardDigitRuns() {
+        #expect(RedactionTokenizer.luhnValid("4111111111111111"))
+        #expect(!RedactionTokenizer.luhnValid("4111111111111112"))
+        #expect(RedactionTokenizer.luhnValid("4111 1111 1111 1111"))
+    }
+
+    @Test func ibanValidatesMod97() {
+        #expect(RedactionTokenizer.ibanValid("GB82WEST12345698765432"))
+        #expect(RedactionTokenizer.ibanValid("GB82 WEST 1234 5698 7654 32"))
+        #expect(!RedactionTokenizer.ibanValid("GB82WEST12345698765433"))
+    }
+
+    @Test func redactsValidIBAN() {
+        let (out, t) = redact("wire to GB82 WEST 1234 5698 7654 32 today")
+        #expect(!out.contains("WEST"))
+        #expect(t.restore(out) == "wire to GB82 WEST 1234 5698 7654 32 today")
+    }
+
+    @Test func highEntropyBlobRedacted() {
+        #expect(RedactionTokenizer.isHighEntropySecret("Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFC"))
+        let (out, _) = redact("creds Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFC done")
+        #expect(out.contains("⟦SN:REDACT:1⟧"))
+        #expect(!out.contains("Zm9vYmFy"))
+    }
+
+    @Test func ordinaryProseNotHighEntropy() {
+        #expect(!RedactionTokenizer.isHighEntropySecret("antidisestablishmentarianism"))
+        #expect(!RedactionTokenizer.isHighEntropySecret("0000000000000000000000000000"))
+        let (out, _) = redact("this is an ordinary sentence about establishment matters")
+        #expect(out == "this is an ordinary sentence about establishment matters")
+    }
 }

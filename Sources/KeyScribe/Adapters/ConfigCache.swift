@@ -1,5 +1,6 @@
 import Foundation
 import KeyScribeKit
+import os
 
 // In-memory cache of the on-disk config. Loaded lazily on first access and invalidated on demand
 // (by the ConfigWatcher when files change, or the Settings reload button) — so a normal dictation
@@ -8,6 +9,12 @@ import KeyScribeKit
 @MainActor
 final class ConfigCache {
     private let supportDir: URL
+    private let log = Logger(subsystem: "com.keyscribe.app", category: "config")
+
+    // Survives invalidate(): the last set of modes that decoded cleanly, so a mid-edit malformed
+    // file falls back to its prior good copy instead of disappearing (design discipline §5.1).
+    private var lastGoodModes: [Mode] = []
+    private(set) var modeLoadFailures: [ModeStore.LoadFailure] = []
 
     private var modesCache: [Mode]?
     private var replacementsCache: ReplacementsSet?
@@ -29,9 +36,15 @@ final class ConfigCache {
 
     var modes: [Mode] {
         if let modesCache { return modesCache }
-        let loaded = ModeStore.loadAll(in: supportDir.appendingPathComponent("modes", isDirectory: true))
-        modesCache = loaded
-        return loaded
+        let result = ModeStore.load(
+            in: supportDir.appendingPathComponent("modes", isDirectory: true), previous: lastGoodModes)
+        for failure in result.failures {
+            log.error("mode '\(failure.id, privacy: .public)' failed to load\(failure.usedLastKnownGood ? " (kept last-known-good)" : " (skipped)", privacy: .public): \(failure.message, privacy: .public)")
+        }
+        modeLoadFailures = result.failures
+        modesCache = result.modes
+        lastGoodModes = result.modes
+        return result.modes
     }
 
     var replacements: ReplacementsSet {

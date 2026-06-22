@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # Build KeyScribe into a signed KeyScribe.app (LSUIElement menu-bar app) so TCC permissions
 # (Microphone / Input Monitoring / Accessibility) attach to a stable signed identity and
-# survive rebuilds. Signs with "SnagShot Dev" if present, else ad-hoc (TCC may reset).
+# survive rebuilds. Signs with a stable cert if one is found, else ad-hoc (TCC may reset).
+# Full from-source build / signing guide: BUILD.md.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="KeyScribe.app"
 BIN=".build/release/KeyScribe"
-BUNDLE_ID="com.keyscribe.app"
 CONFIG="${1:-release}"
+
+# Version stamped into Info.plist: marketing version from the latest git tag (else 0.1), build
+# number from the monotonic commit count (else 1). Both fall back when built from a non-git tarball.
+SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+[ -z "$SHORT_VERSION" ] && SHORT_VERSION="0.1"
+BUILD_VERSION="$(git rev-list --count HEAD 2>/dev/null || true)"
+[ -z "$BUILD_VERSION" ] && BUILD_VERSION="1"
 
 echo "== building KeyScribe ($CONFIG) =="
 swift build -c "$CONFIG" --product KeyScribe
@@ -41,56 +48,52 @@ else
 fi
 # Bundled model self-test clip (loaded via Bundle.main at runtime).
 cp Resources/model-selftest.wav "$APP/Contents/Resources/model-selftest.wav"
-cat > "$APP/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-  <key>CFBundleName</key><string>KeyScribe</string>
-  <key>CFBundleExecutable</key><string>KeyScribe</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
-  <key>LSUIElement</key><true/>
-  <key>NSPrincipalClass</key><string>NSApplication</string>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>KeyScribe transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
-  <key>NSAppleEventsUsageDescription</key>
-  <string>KeyScribe reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
-</dict>
-</plist>
-PLIST
+# Info.plist is a tracked source file (Resources/Info.plist); stamp the git-derived version into it.
+echo "== Info.plist: $SHORT_VERSION (build $BUILD_VERSION) =="
+sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \
+  Resources/Info.plist > "$APP/Contents/Info.plist"
 
-# Stable-identity signing keeps TCC grants across rebuilds. Pass KEYSCRIBE_SIGN_ID to choose a
-# cert (e.g. "SnagShot Dev" or a "Developer ID Application: …" name); signing with a real cert
-# prompts once for keychain access — run this from your terminal and click "Always Allow".
-# Identity: KEYSCRIBE_SIGN_ID if set, else auto-detect a "SnagShot Dev" cert in the keychain (stable
-# TCC across rebuilds), else fall back to ad-hoc (TCC may reset each rebuild). Sign inner Mach-O
-# then the bundle (no --deep: Swift linker-signs the binary and --deep mishandles it).
-ID="${KEYSCRIBE_SIGN_ID:-}"
+# Stable-identity signing keeps TCC grants (Mic / Input Monitoring / Accessibility) across rebuilds.
+# macOS TCC only needs a *valid, stable* signature — a self-signed cert works; no Apple account is
+# required. See BUILD.md for the one-time "create a self-signed cert named KeyScribe Local" steps.
+# Identity precedence: KEYSCRIBE_SIGN_ID, then CODESIGN_IDENTITY (conventional name), then auto-detect
+# the project cert "KeyScribe Local" (BUILD.md has create-it steps), else ad-hoc ("-", which works but
+# may reset TCC each rebuild). For any other cert, pass it via KEYSCRIBE_SIGN_ID/CODESIGN_IDENTITY.
+# Signing with a real cert prompts once for keychain access — run from your terminal and click "Always
+# Allow". Sign inner Mach-O then the bundle (no --deep: Swift linker-signs the binary and --deep
+# mishandles it).
+ID="${KEYSCRIBE_SIGN_ID:-${CODESIGN_IDENTITY:-}}"
 if [ -z "$ID" ]; then
-  if security find-identity -v -p codesigning 2>/dev/null | grep -q "SnagShot Dev"; then
-    ID="SnagShot Dev"
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q "KeyScribe Local"; then
+    ID="KeyScribe Local"
   else
     ID="-"
   fi
 fi
 find "$APP" -name "*.cstemp" -delete 2>/dev/null || true
 if [ "$ID" = "-" ]; then
-  echo "== AD-HOC signing (no SnagShot Dev cert found; TCC may reset) =="
+  echo "== AD-HOC signing (no stable cert found; macOS may re-prompt for permissions each rebuild) =="
+  echo "   For TCC grants that survive rebuilds, create a self-signed cert — see BUILD.md." >&2
 else
   echo "== signing with: $ID =="
 fi
 # mlx.metallib sits in MacOS/ (next to the binary, where MLX looks for it) so codesign treats it as
 # a nested code object — it must be signed before the main executable and bundle, or bundle signing
 # fails with "code object is not signed at all".
+#
+# mlx.metallib sits in MacOS/ (next to the binary, where MLX looks for it) so codesign treats it as
+# a nested code object — it must be signed before the main executable and bundle, or bundle signing
+# fails with "code object is not signed at all".
+#
+# Local dev signs WITHOUT --entitlements on purpose: a self-signed teamless cert can't authorize a
+# restricted entitlement like keychain-access-groups (AMFI SIGKILLs the app at launch). M7
+# notarization (Developer ID cert) adds `--options runtime --entitlements KeyScribe.entitlements`:
+#   codesign --force --options runtime --entitlements KeyScribe.entitlements --sign "$ID" ...
 [ -f "$APP/Contents/MacOS/mlx.metallib" ] && codesign --force --sign "$ID" "$APP/Contents/MacOS/mlx.metallib"
 codesign --force --sign "$ID" "$APP/Contents/MacOS/KeyScribe"
 codesign --force --sign "$ID" "$APP"
 
 echo
-echo "Done: $APP"
+echo "Done: $APP  (signed: ${ID/#-/ad-hoc})"
 echo "Run:  open ./$APP"
 echo "Logs: log stream --predicate 'process == \"KeyScribe\"' --level debug"

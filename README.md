@@ -2,10 +2,14 @@
 
 Privacy-first, local-first voice dictation for macOS. Speech recognition always runs on-device.
 
-See `AGENTS.md` for orientation and `docs/` for the full design spec. This is **M1**: the core
-one-gesture dictation loop (on-device, no settings required).
+See `AGENTS.md` for orientation and `docs/` for the full design spec.
 
 ## Build & run
+
+No Apple Developer account, certificate, or password required — just the Swift toolchain.
+**Prerequisites:** macOS 26+ on Apple silicon, Xcode installed and selected
+(`sudo xcode-select -s /Applications/Xcode.app`), and — one-time, for the Qwen3-ASR engine —
+`xcodebuild -downloadComponent MetalToolchain`.
 
 ```bash
 swift build            # build everything
@@ -14,11 +18,10 @@ swift test             # run KeyScribeKit unit tests (pure logic)
 open ./KeyScribe.app     # launch (menu-bar app — look for the waveform glyph)
 ```
 
-For TCC grants that survive rebuilds, sign with a real identity (prompts once for keychain access):
-
-```bash
-KEYSCRIBE_SIGN_ID="SnagShot Dev" ./make-app.sh
-```
+Ad-hoc builds get a new signature each rebuild, so macOS may re-prompt for permissions. To make
+the Microphone / Input Monitoring / Accessibility grants survive rebuilds, create a self-signed
+`KeyScribe Local` certificate (`make-app.sh` auto-detects it). **Full instructions, prerequisites,
+signing options, and troubleshooting are in [`BUILD.md`](BUILD.md).**
 
 Logs: `log stream --predicate 'process == "KeyScribe"' --level debug`
 
