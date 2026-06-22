@@ -24,14 +24,11 @@ enum KeychainStore {
     static func set(_ secret: String, for keyRef: String) {
         let data = Data(secret.utf8)
         let query = baseQuery(keyRef)
-        if SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecSuccess {
-            return
-        }
-        // Either there is no item yet, or one exists that this build can't update — e.g. it was
-        // written by an earlier code signature, so its Keychain ACL no longer trusts us and
-        // SecItemUpdate fails with errSecAuthFailed. A plain "update only" leaves the key permanently
-        // unreadable (get() returns nil → "no key"). Delete any stale item and add a fresh one owned
-        // by the current build so re-entering the key always repairs it.
+        // Always delete + re-add rather than SecItemUpdate: an update keeps the item's existing ACL, so
+        // an item created by an earlier signature (e.g. a pre-cert ad-hoc build) keeps trusting that old
+        // identity and every read prompts. Re-adding gives the item a fresh default ACL owned by the
+        // current code signature, which can then decrypt it silently. Re-entering the key migrates a
+        // stale item in one step.
         SecItemDelete(query as CFDictionary)
         var add = query
         add[kSecValueData as String] = data

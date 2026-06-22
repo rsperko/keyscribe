@@ -252,9 +252,21 @@ sounds = true                   # start/end sounds
 enabled = true
 retention_days = 7              # default; delete day-files older than this (or retention_entries)
 
+[shortcuts]                     # optional global shortcuts for the standalone correction panel
+add_dictionary_entry = ""       # canonical chord, e.g. "control+option+shift+d"; "" = off
+add_replacement = ""            # canonical chord, e.g. "control+option+shift+r"; "" = off
+
 [hud]
 # persisted HUD position, etc.
 ```
+
+> **`[shortcuts]`** drive the standalone **Add Dictionary Entry…** / **Add Replacement…** panel
+> (also always available in the menu bar). Empty = off; only **chord** descriptors are honored (a
+> bare modifier key already drives dictation). The event tap is **active** (`.defaultTap`), so a
+> registered chord — for these shortcuts and for mode triggers — is **swallowed** before the focused
+> app sees it (otherwise e.g. ⌃⌥E reaches the app as the Option-E dead key and replaces the selection).
+> The tap falls back to listen-only when an active tap can't be created (Accessibility not yet granted),
+> in which case the chord passes through until Accessibility is granted. Set in Settings ▸ General.
 
 > **M1 note:** `load_on_login` defaults to **false** in code (KeyScribe does not install a login item
 > unless the user opts in via General settings / first-run), even though the example above shows `true`.

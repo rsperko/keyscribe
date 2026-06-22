@@ -37,6 +37,19 @@ public struct HistoryStore: Sendable {
         return items.filter { $0.hasSuffix(".jsonl") }.sorted()
     }
 
+    // Cheap fingerprint of the history's current state (file count + the latest day file's name, size,
+    // and mtime). Appends always land in the latest day file and retention deletes whole files, so this
+    // changes whenever the entries do — letting a viewer skip a full re-parse when nothing has changed.
+    public func signature() -> String {
+        let files = dayFiles()
+        guard let latest = files.last else { return "empty" }
+        let attrs = try? FileManager.default.attributesOfItem(
+            atPath: dir.appendingPathComponent(latest).path)
+        let size = (attrs?[.size] as? Int) ?? 0
+        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(files.count)|\(latest)|\(size)|\(mtime)"
+    }
+
     // Newest entry first. Reads day files newest-first and stops once `limit` entries are collected,
     // so a paged list never materializes older days. Files are memory-mapped and parsed line-by-line
     // (no whole-file String, no all-substrings split) to bound peak memory. Malformed lines (e.g.

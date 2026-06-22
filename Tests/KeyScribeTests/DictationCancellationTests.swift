@@ -191,6 +191,24 @@ struct DictationCancellationTests {
         #expect(completeOutcomes.contains(.copied(.accessibilityDenied)))
     }
 
+    @Test func selectionModeWithoutAccessibilityNamesTheRealCauseNotMissingSelection() async {
+        let h = makeHarness(accessibilityGranted: { false })
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.setNextModeOverride(id: "work-on-selection")
+        h.controller.handleStart()
+        h.controller.handleCommit()
+        await h.started.wait()
+        let task = h.controller.dictationTask
+        h.release.fire()
+        await task?.value
+
+        #expect(await h.insertSpy.calls == 0)
+        #expect(h.hud.states.last == .error(
+            message: "Accessibility is off — KeyScribe can't read the selected text.",
+            action: .openAccessibilitySettings))
+    }
+
     @Test func rewriteHUDNamesTheActualSharedContext() {
         let state = HUDState.rewriting(
             connection: "Gemini", redacted: false, contextCategories: ["app", "visible text"],

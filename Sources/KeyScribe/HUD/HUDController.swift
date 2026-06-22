@@ -15,6 +15,7 @@ final class HUDController: HUDPresenting {
     var onPasteLast: (() -> Void)?
 
     func render(_ state: HUDState) {
+        guard model.state != state else { return }
         model.state = state
         if case .hidden = state {
             panel?.orderOut(nil)
@@ -33,6 +34,7 @@ final class HUDController: HUDPresenting {
             onErrorAction: { action in
                 switch action {
                 case .openMicrophoneSettings: Permissions.openSettings(.microphone)
+                case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
                 }
             }))
         let panel = NSPanel(

@@ -122,6 +122,8 @@ final class ModesSettingsModel: ObservableObject {
 
 struct ModesSettingsView: View {
     @ObservedObject var model: ModesSettingsModel
+    var brokenConnectionIds: Set<String> = []
+    @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var modePendingDelete: Mode?
 
     var body: some View {
@@ -138,7 +140,9 @@ struct ModesSettingsView: View {
         HStack(spacing: 0) {
             List(selection: $model.selectedID) {
                 ForEach(model.modes) { mode in
-                    ModeSummaryRow(mode: mode, isDefault: model.isDefault(mode))
+                    ModeSummaryRow(
+                        mode: mode, isDefault: model.isDefault(mode),
+                        connectionBroken: usesBrokenConnection(mode))
                         .tag(mode.id)
                 }
             }
@@ -148,6 +152,7 @@ struct ModesSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
             }
+            .disabled(recordingState.isRecording)
             .frame(width: 240)
 
             Divider()
@@ -190,6 +195,11 @@ struct ModesSettingsView: View {
                 + (isDefault ? " It is the default mode — another mode will become the default." : ""))
         }
     }
+
+    private func usesBrokenConnection(_ mode: Mode) -> Bool {
+        guard let rewrite = mode.aiRewrite else { return false }
+        return brokenConnectionIds.contains(rewrite.connection)
+    }
 }
 
 // Surfaces a malformed mode file instead of letting it vanish (it would silently change routing).
@@ -219,6 +229,7 @@ private struct ModeLoadFailureBanner: View {
 private struct ModeSummaryRow: View {
     let mode: Mode
     let isDefault: Bool
+    var connectionBroken = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -231,6 +242,11 @@ private struct ModeSummaryRow: View {
                 }
                 if !mode.enabled {
                     Text("Disabled").font(.caption2).foregroundStyle(.secondary)
+                }
+                if connectionBroken {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(.red)
+                        .help("This mode's AI service failed its last connection test")
                 }
             }
             Text(summary).font(.caption).foregroundStyle(.secondary)
@@ -290,7 +306,7 @@ private struct ModeEditorView: View {
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
     @State private var newFragmentName = ""
-    @State private var customTriggerSelected = false
+    @State private var capturingCustom = false
     @State private var manualBundleId = ""
     @State private var enteringBundleId = false
 
@@ -307,7 +323,7 @@ private struct ModeEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 } else if mode.source != .selection {
                     Button("Use as default mode", action: onMakeDefault)
-                    Text("The default mode runs whenever no app rule, hotkey, or spoken phrase selects another mode.")
+                    Text("The default mode runs whenever no app rule, shortcut, or spoken phrase selects another mode.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -418,19 +434,23 @@ private struct ModeEditorView: View {
 
     @ViewBuilder private var whenUsedSection: some View {
         Section("When this mode is used") {
-            Picker("Trigger key", selection: triggerSelection) {
-                Text("No dedicated hotkey").tag("")
-                Text("Fn (Globe)").tag("fn")
-                Text("Right Option").tag("right_option")
-                Text("Right Command").tag("right_command")
-                Text("Hyper").tag("hyper")
-                Text("Custom shortcut…").tag(customTriggerTag)
-            }
-            if showsRecorder {
-                HStack {
-                    Text("Shortcut").foregroundStyle(.secondary)
-                    Spacer()
-                    HotkeyRecorder(key: triggerKey)
+            // The Trigger key row holds either the menu or, for a custom chord, the recorder itself —
+            // no separate "Shortcut" row. Choosing "Custom shortcut…" arms it in place immediately;
+            // Esc or clearing reverts to the menu. (autostart only when freshly entering custom.)
+            if isCustom {
+                LabeledContent("Trigger key") {
+                    HotkeyRecorder(
+                        key: triggerKey, autostart: capturingCustom,
+                        onCancel: { capturingCustom = false })
+                }
+            } else {
+                Picker("Trigger key", selection: triggerSelection) {
+                    Text("No dedicated shortcut").tag("")
+                    Text("Fn (Globe)").tag("fn")
+                    Text("Right Option").tag("right_option")
+                    Text("Right Command").tag("right_command")
+                    Text("Hyper").tag("hyper")
+                    Text("Custom shortcut…").tag(customTriggerTag)
                 }
             }
             Picker("Press style", selection: pressStyle) {
@@ -444,7 +464,7 @@ private struct ModeEditorView: View {
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
-            Text("A mode hotkey starts this mode directly. Without one, it can still be selected by its app rules and spoken routing.")
+            Text("A mode shortcut starts this mode directly. Without one, it can still be selected by its app rules and spoken routing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DisclosureSection("Advanced routing", isExpanded: $routingExpanded) {
@@ -783,7 +803,7 @@ private struct ModeEditorView: View {
     private var triggerSelection: Binding<String> {
         Binding(
             get: {
-                if customTriggerSelected { return customTriggerTag }
+                if capturingCustom { return customTriggerTag }
                 let key = mode.triggerKeys.first?.key ?? ""
                 guard !key.isEmpty else { return "" }
                 if let descriptor = try? KeyDescriptor(parsing: key), case .named = descriptor {
@@ -793,16 +813,16 @@ private struct ModeEditorView: View {
             },
             set: { selection in
                 if selection == customTriggerTag {
-                    customTriggerSelected = true
+                    capturingCustom = true
                 } else {
-                    customTriggerSelected = false
+                    capturingCustom = false
                     triggerKey.wrappedValue = selection
                 }
             })
     }
 
-    private var showsRecorder: Bool {
-        if customTriggerSelected { return true }
+    private var isCustom: Bool {
+        if capturingCustom { return true }
         guard let descriptor = try? KeyDescriptor(parsing: mode.triggerKeys.first?.key ?? "") else { return false }
         if case .chord = descriptor { return true }
         return false
@@ -818,6 +838,7 @@ private struct ModeEditorView: View {
         Binding(
             get: { mode.triggerKeys.first?.key ?? "" },
             set: { key in
+                capturingCustom = false
                 var updated = mode
                 if key.isEmpty {
                     updated.triggerKeys = []

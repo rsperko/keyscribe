@@ -46,12 +46,22 @@ enum TextInserter {
         try? await Task.sleep(for: .milliseconds(30))
         let stamp = pb.changeCount
         postCommand(vKeyCode)
-        // Wait long enough for the target to actually consume ⌘V before we touch the clipboard again —
-        // restoring too early clobbers the paste (M0 proved ~200ms is needed; restore is best-effort).
-        try? await Task.sleep(for: .milliseconds(250))
-        // Only restore the user's clipboard if our scratch write is still the latest — if the target
-        // (or a clipboard manager) wrote after our ⌘V, leave it; clobbering it would lose their data.
-        if pb.changeCount == stamp { snapshot.restore() }
+        // Give the target time to consume ⌘V before we touch the clipboard again — restoring too early
+        // clobbers the paste (M0 proved ~200ms is needed; restore is best-effort). A paste produces no
+        // observable pasteboard event, so we wait out a bounded window, but bail early if anything wrote
+        // after our scratch (target or clipboard manager) — then we must not restore over it.
+        if await scratchSurvived(stamp, timeoutMs: 250, stepMs: 25) { snapshot.restore() }
+    }
+
+    private static func scratchSurvived(_ stamp: Int, timeoutMs: Int, stepMs: Int) async -> Bool {
+        let pb = NSPasteboard.general
+        var waited = 0
+        while waited < timeoutMs {
+            try? await Task.sleep(for: .milliseconds(stepMs))
+            waited += stepMs
+            if pb.changeCount != stamp { return false }
+        }
+        return pb.changeCount == stamp
     }
 
     // Our temporary clipboard write for the paste. Marked transient + concealed so clipboard managers

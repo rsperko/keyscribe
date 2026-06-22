@@ -6,6 +6,7 @@ import SwiftUI
 final class HistoryController {
     private var window: NSWindow?
     private let model: HistoryViewModel
+    private var loadedSignature: String?
 
     init(
         store: HistoryStore,
@@ -19,7 +20,13 @@ final class HistoryController {
     }
 
     func present() {
-        model.reload()
+        // Re-parsing the JSONL on every open is wasteful when nothing has changed since the last load;
+        // the store's cheap signature gates the reload so re-fronting the window is free.
+        let signature = model.storeSignature()
+        if window == nil || signature != loadedSignature {
+            model.reload()
+            loadedSignature = signature
+        }
         if let window {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
@@ -41,6 +48,7 @@ final class HistoryController {
 private struct HistoryRow: Identifiable {
     let id = UUID()
     let entry: HistoryEntry
+    let day: String
 }
 
 @MainActor
@@ -78,6 +86,8 @@ private final class HistoryViewModel: ObservableObject {
         self.openSettings = openSettings
     }
 
+    func storeSignature() -> String { store.signature() }
+
     func reload() {
         isLoading = true
         let store = self.store
@@ -85,7 +95,7 @@ private final class HistoryViewModel: ObservableObject {
         Task { @MainActor [weak self] in
             let loaded = await Task.detached { store.entries(limit: limit) }.value
             guard let self else { return }
-            rows = loaded.map(HistoryRow.init)
+            rows = loaded.map { HistoryRow(entry: $0, day: dayFormatter.string(from: $0.timestamp)) }
             entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
             recomputeGroups()
             isLoading = false
@@ -93,9 +103,10 @@ private final class HistoryViewModel: ObservableObject {
     }
 
     private func recomputeGroups() {
-        let kept = Set(HistorySearch.filter(rows.map(\.entry), query: query).map(\.timestamp))
-        let filtered = rows.filter { kept.contains($0.entry.timestamp) }
-        groups = Dictionary(grouping: filtered) { dayFormatter.string(from: $0.entry.timestamp) }
+        let filtered = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? rows
+            : rows.filter { HistorySearch.matches($0.entry, query: query) }
+        groups = Dictionary(grouping: filtered, by: \.day)
             .map { (day: $0.key, rows: $0.value) }
             .sorted { ($0.rows.first?.entry.timestamp ?? .distantPast) > ($1.rows.first?.entry.timestamp ?? .distantPast) }
     }

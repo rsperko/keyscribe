@@ -14,6 +14,13 @@ struct RegexCacheTests {
         #expect(RegexCache.regex("(unclosed") == nil)
     }
 
+    @Test func invalidPatternIsMemoizedAsFailed() {
+        let pattern = "(still-unclosed-\(#function)"
+        #expect(!RegexCache.isKnownInvalid(pattern))
+        #expect(RegexCache.regex(pattern) == nil)
+        #expect(RegexCache.isKnownInvalid(pattern))
+    }
+
     @Test func differentOptionsAreCachedSeparately() {
         let plain = RegexCache.regex("a.b")
         let dotAll = RegexCache.regex("a.b", options: [.dotMatchesLineSeparators])

@@ -17,6 +17,28 @@ struct ConnectionsTests {
     max_tokens = 2048
     """
 
+    private func connection(provider: Connection.Provider, model: String, baseUrl: String? = nil) -> Connection {
+        Connection(id: "c", name: "c", provider: provider, model: model, keyRef: "k", baseUrl: baseUrl)
+    }
+
+    @Test func configuredConnectionHasNoIssue() {
+        #expect(connection(provider: .openai, model: "gpt-4.1-mini").configIssue == nil)
+        #expect(connection(provider: .openaiCompatible, model: "local", baseUrl: "http://127.0.0.1:11234/v1").configIssue == nil)
+    }
+
+    @Test func emptyModelIsAnIssue() {
+        #expect(connection(provider: .openai, model: "   ").configIssue == .missingModel)
+    }
+
+    @Test func openAICompatibleWithoutBaseURLIsAnIssue() {
+        #expect(connection(provider: .openaiCompatible, model: "local", baseUrl: nil).configIssue == .missingBaseURL)
+        #expect(connection(provider: .openaiCompatible, model: "local", baseUrl: " ").configIssue == .missingBaseURL)
+    }
+
+    @Test func nonCompatibleProviderDoesNotNeedBaseURL() {
+        #expect(connection(provider: .anthropic, model: "claude-x", baseUrl: nil).configIssue == nil)
+    }
+
     @Test func decodesConnection() throws {
         let set = try ConnectionStore.decode(from: toml)
         let c = try #require(set.connection(id: "gemini-flash"))

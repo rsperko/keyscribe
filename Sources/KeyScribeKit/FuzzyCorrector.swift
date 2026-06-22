@@ -7,8 +7,24 @@ import Foundation
 // allowing the looser distance. A pure casing/spacing fix (same normalized form) is always safe.
 // Bias-less engines (Moonshine) benefit most; bias-capable engines rarely need it.
 public enum FuzzyCorrector {
+    // Canonicalized dictionary, with each term's Soundex precomputed once. Built when the stage is
+    // constructed (per mode/config generation) so a dictation never re-normalizes or re-Soundexes the
+    // whole dictionary, and never recomputes a term's Soundex per input token.
+    public struct Prepared: Sendable {
+        fileprivate let terms: [Term]
+        public var isEmpty: Bool { terms.isEmpty }
+    }
+
+    public static func prepare(_ terms: [String]) -> Prepared {
+        Prepared(terms: canonicalize(terms))
+    }
+
     public static func apply(_ text: String, terms: [String]) -> String {
-        let canonical = canonicalize(terms)
+        apply(text, prepared: prepare(terms))
+    }
+
+    public static func apply(_ text: String, prepared: Prepared) -> String {
+        let canonical = prepared.terms
         guard !canonical.isEmpty else { return text }
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
 
@@ -38,7 +54,7 @@ public enum FuzzyCorrector {
         return out.joined(separator: " ")
     }
 
-    private struct Term { let canonical: String; let norm: String }
+    fileprivate struct Term: Sendable { let canonical: String; let norm: String; let soundex: String }
 
     private static func canonicalize(_ terms: [String]) -> [Term] {
         var seen = Set<String>()
@@ -47,7 +63,7 @@ public enum FuzzyCorrector {
             let canonical = term.trimmingCharacters(in: .whitespaces)
             let norm = normalize(canonical)
             guard norm.count >= 4, seen.insert(norm).inserted else { continue }
-            result.append(Term(canonical: canonical, norm: norm))
+            result.append(Term(canonical: canonical, norm: norm, soundex: soundex(norm)))
         }
         return result
     }
@@ -55,12 +71,13 @@ public enum FuzzyCorrector {
     private static func bestMatch(_ norm: String, in terms: [Term], allowFuzzy: Bool) -> Term? {
         var best: Term?
         var bestDistance = Int.max
+        let normSoundex = allowFuzzy ? soundex(norm) : ""
         for term in terms {
             if term.norm == norm { return term }                                   // casing/spacing only
             guard allowFuzzy else { continue }
             let distance = levenshtein(norm, term.norm)
             let cap = norm.count >= 8 ? 2 : 1
-            let allowed = soundex(norm) == soundex(term.norm) ? cap + 1 : cap
+            let allowed = normSoundex == term.soundex ? cap + 1 : cap
             if distance <= allowed && distance < bestDistance {
                 bestDistance = distance
                 best = term
@@ -129,9 +146,9 @@ public enum FuzzyCorrector {
 public struct FuzzyStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.fuzzy
-    public let terms: [String]
-    public init(terms: [String]) { self.terms = terms }
+    private let prepared: FuzzyCorrector.Prepared
+    public init(terms: [String]) { self.prepared = FuzzyCorrector.prepare(terms) }
     public func run(_ context: inout PipelineContext) {
-        context.text = FuzzyCorrector.apply(context.text, terms: terms)
+        context.text = FuzzyCorrector.apply(context.text, prepared: prepared)
     }
 }

@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notices = NoticesController()
     private var history: HistoryStore!
     private var historyController: HistoryController!
+    private var correctionPanel: CorrectionPanelController!
 
     private let firstRunKey = "didCompleteFirstRun"
 
@@ -44,16 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         historyController = HistoryController(
             store: history,
-            addDictionaryWord: { word in
-                let set = DictionaryStore.loadOrDefault(supportDir: KeyScribePaths.supportDir).adding(word: word)
-                try? DictionaryStore.write(set, to: KeyScribePaths.supportDir)
-            },
-            addReplacement: { heard, replace in
-                let set = ReplacementsStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
-                    .addingLiteral(heard: heard, replace: replace)
-                try? ReplacementsStore.write(set, to: KeyScribePaths.supportDir)
-            },
+            addDictionaryWord: { [weak self] word in self?.addDictionaryWord(word) },
+            addReplacement: { [weak self] heard, replace in self?.addReplacement(heard: heard, replace: replace) },
             openSettings: { [weak self] in self?.settingsController.present() })
+        correctionPanel = CorrectionPanelController(
+            addDictionaryWord: { [weak self] word in self?.addDictionaryWord(word) },
+            addReplacement: { [weak self] heard, replace in self?.addReplacement(heard: heard, replace: replace) })
 
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
@@ -66,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.acknowledgeNextMode()
             self?.refreshStatus()
         }
+        menu.onAddDictionaryEntry = { [weak self] in self?.correctionPanel.present(.dictionary) }
+        menu.onAddReplacement = { [weak self] in self?.correctionPanel.present(.replacement) }
+        controller.onRecordingChanged = { [weak self] active in self?.menu.setDictating(active) }
 
         speechModels = SpeechModelsModel(
             activeId: settings.stt.engine,
@@ -85,7 +85,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels,
             onChange: { [weak self] updated in self?.applySettings(updated) },
-            onReload: { [weak self] in self?.reloadConfig() })
+            onReload: { [weak self] in self?.reloadConfig() },
+            detectProblems: { [weak self] in self?.currentProblems() ?? [] })
+        settingsController.recordingState.onChange = { [weak self] recording in
+            self?.hotkey?.isSuspended = recording
+        }
 
         buildHotkeyMonitor()
         applyLoginItem(settings.loadOnLogin)
@@ -119,29 +123,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? (try! SpeechEngineProvider(engines: engines, activeId: SpeechModelCatalog.defaultEnglishId))
     }
 
+    // Precedence order for the app-wide hotkey namespace: Modes (config order) then the two globals.
+    // The losers of a chord collision are suppressed at dispatch so the higher-precedence owner fires
+    // (first match wins; Modes beat the globals) — and the same set drives the Settings red-dot.
+    private func shadowedHotkeyIds() -> Set<String> {
+        var ordered: [HotkeyConflicts.Registrant] = []
+        for mode in config.modes where mode.enabled {
+            for tk in mode.triggerKeys {
+                ordered.append(.init(id: "\(mode.id)#\(tk.key)", key: tk.key))
+            }
+        }
+        ordered.append(.init(id: GlobalHotkey.dictionaryId, key: settings.shortcuts.addDictionaryEntry))
+        ordered.append(.init(id: GlobalHotkey.replacementId, key: settings.shortcuts.addReplacement))
+        return HotkeyConflicts.shadowed(ordered)
+    }
+
     private func buildHotkeyMonitor() {
+        let shadowed = shadowedHotkeyIds()
         var bindings: [HotkeyMonitor.Binding] = []
         for mode in config.modes where mode.enabled {
             for tk in mode.triggerKeys {
-                guard let desc = try? KeyDescriptor(parsing: tk.key) else { continue }
+                guard !shadowed.contains("\(mode.id)#\(tk.key)"),
+                      let desc = try? KeyDescriptor(parsing: tk.key) else { continue }
                 bindings.append(.init(
                     triggerKey: tk.key, descriptor: desc,
                     style: PressStyle(rawValue: tk.pressStyle) ?? .holdOrTap,
                     tapThreshold: Double(tk.tapThresholdMs) / 1000))
             }
         }
+        let actionBindings = self.actionBindings(shadowed: shadowed)
 
         if hotkey == nil {
             hotkey = HotkeyMonitor(
-                bindings: bindings,
+                bindings: bindings, actionBindings: actionBindings,
                 onStart: { [weak self] key in self?.controller.handleStart(triggerKey: key) },
                 onCommit: { [weak self] _ in
                     self?.controller.handleCommit()
                     self?.refreshStatus()
-                })
+                },
+                onAction: { [weak self] id in self?.handleHotkeyAction(id) })
         } else {
-            hotkey.update(bindings: bindings)
+            hotkey.update(bindings: bindings, actionBindings: actionBindings)
         }
+    }
+
+    private enum HotkeyAction: String { case addDictionary, addReplacement }
+
+    // Only chord descriptors are honored — a modifier-only named key would also drive dictation and
+    // makes no sense as a discrete action. An unparseable or non-chord string is silently skipped.
+    private func actionBindings(shadowed: Set<String>) -> [HotkeyMonitor.ActionBinding] {
+        let entries: [(HotkeyAction, String, String)] = [
+            (.addDictionary, settings.shortcuts.addDictionaryEntry, GlobalHotkey.dictionaryId),
+            (.addReplacement, settings.shortcuts.addReplacement, GlobalHotkey.replacementId),
+        ]
+        return entries.compactMap { action, key, globalId in
+            guard !shadowed.contains(globalId), !key.isEmpty,
+                  let desc = try? KeyDescriptor(parsing: key), case .chord = desc else { return nil }
+            return .init(id: action.rawValue, descriptor: desc)
+        }
+    }
+
+    private func handleHotkeyAction(_ id: String) {
+        switch HotkeyAction(rawValue: id) {
+        case .addDictionary: correctionPanel.present(.dictionary)
+        case .addReplacement: correctionPanel.present(.replacement)
+        case nil: break
+        }
+    }
+
+    private func addDictionaryWord(_ word: String) {
+        let set = DictionaryStore.loadOrDefault(supportDir: KeyScribePaths.supportDir).adding(word: word)
+        try? DictionaryStore.write(set, to: KeyScribePaths.supportDir)
+    }
+
+    private func addReplacement(heard: String, replace: String) {
+        let set = ReplacementsStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
+            .addingLiteral(heard: heard, replace: replace)
+        try? ReplacementsStore.write(set, to: KeyScribePaths.supportDir)
     }
 
     // Drop the cached config and re-register per-mode key bindings from the fresh modes. Called by
@@ -153,7 +211,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startListening() {
-        _ = hotkey.start()
+        if Permissions.inputMonitoringStatus() == .granted {
+            _ = hotkey.start()
+        }
         refreshStatus()
     }
 
@@ -216,20 +276,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let modes = config.modes.filter(\.enabled)
         let automatic = modes.first { $0.id == settings.defaultModeId } ?? modes.first
         var inertReasons: [String: String] = [:]
-        for mode in modes {
-            guard let rewrite = mode.aiRewrite else { continue }
-            if rewrite.connection.isEmpty || config.connections.connection(id: rewrite.connection) == nil {
-                inertReasons[mode.id] = "needs an AI service"
-            }
+        for mode in modes where connectionUnavailable(for: mode) {
+            inertReasons[mode.id] = "needs an AI service"
         }
         menu.setModes(
             modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideName,
             inertReasons: inertReasons)
+        let problems = currentProblems()
+        menu.setErrorBadge(!problems.isEmpty)
+        settingsController?.refreshProblems()
+
         if let configError {
             menu.setStatus(configError)
-            return
-        }
-        if Permissions.microphoneStatus() != .granted {
+        } else if Permissions.microphoneStatus() != .granted {
             menu.setStatus("Microphone permission needed")
         } else if Permissions.inputMonitoringStatus() != .granted {
             menu.setStatus("Input Monitoring permission needed")
@@ -238,5 +297,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             menu.setStatus("Ready · Local transcription")
         }
+    }
+
+    private func currentProblems() -> [SettingsProblem] {
+        let modes = config.modes.filter(\.enabled)
+        let failedConnectionIds = settingsController?.failedConnectionIds ?? []
+        return SettingsProblem.detect(
+            hasConfigError: configError != nil,
+            microphoneGranted: Permissions.microphoneStatus() == .granted,
+            inputMonitoringGranted: Permissions.inputMonitoringStatus() == .granted,
+            accessibilityGranted: Permissions.accessibilityStatus() == .granted,
+            activeEngineUsable: speechModels?.activeEngineUsable ?? true,
+            aiConnectionMissing: modes.contains { connectionDangling(for: $0) },
+            aiConnectionTestFailed: failedConnectionIds.isEmpty == false,
+            aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
+            modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
+            hotkeyConflict: shadowedHotkeyIds().contains {
+                $0 == GlobalHotkey.dictionaryId || $0 == GlobalHotkey.replacementId
+            })
+    }
+
+    // Mode wants AI but the named connection cannot be used right now — empty (not yet chosen) or
+    // not found. Drives the menu's inert "needs an AI service" label; the empty case is the optional
+    // "no AI yet" default, so it is *not* an error badge.
+    private func connectionUnavailable(for mode: Mode) -> Bool {
+        guard let rewrite = mode.aiRewrite else { return false }
+        return rewrite.connection.isEmpty || config.connections.connection(id: rewrite.connection) == nil
+    }
+
+    // A *dangling* reference: the mode names a non-empty connection that does not exist (it was
+    // deleted). Only a broken pointer is a misconfiguration — an empty connection is not.
+    private func connectionDangling(for mode: Mode) -> Bool {
+        guard let rewrite = mode.aiRewrite, !rewrite.connection.isEmpty else { return false }
+        return config.connections.connection(id: rewrite.connection) == nil
+    }
+
+    // The mode is wired to an AI connection whose last Test Connection failed — the mode itself won't
+    // rewrite, so the Modes pane is flagged in addition to AI Services.
+    private func usesFailedConnection(_ mode: Mode, failed: Set<String>) -> Bool {
+        guard let rewrite = mode.aiRewrite else { return false }
+        return failed.contains(rewrite.connection)
     }
 }

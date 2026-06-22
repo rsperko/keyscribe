@@ -4,6 +4,8 @@
 agent_notes/
 .claude/
 .codex/
+.pi/
+.agents/
 AGENTS.override.md
 CLAUDE.local.md
 

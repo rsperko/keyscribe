@@ -74,6 +74,21 @@ struct SettingsTests {
         #expect(try SettingsStore.decode(from: SettingsStore.encode(s)).stt.evictionIdleSeconds == 45)
     }
 
+    @Test func shortcutsRoundTrip() throws {
+        var s = Settings.defaults
+        s.shortcuts = .init(addDictionaryEntry: "control+option+shift+d", addReplacement: "control+option+shift+r")
+        let decoded = try SettingsStore.decode(from: SettingsStore.encode(s))
+        #expect(decoded.shortcuts.addDictionaryEntry == "control+option+shift+d")
+        #expect(decoded.shortcuts.addReplacement == "control+option+shift+r")
+        #expect(decoded == s)
+    }
+
+    @Test func absentShortcutsDefaultToEmpty() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(s.shortcuts.addDictionaryEntry.isEmpty)
+        #expect(s.shortcuts.addReplacement.isEmpty)
+    }
+
     @Test func negativeRetentionIsRejected() {
         #expect(throws: ConfigError.self) {
             try SettingsStore.decode(from: "schema_version = 1\n[history]\nretention_days = -1")

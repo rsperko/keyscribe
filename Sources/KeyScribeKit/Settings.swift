@@ -12,6 +12,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var stt: STT
     public var duringDictation: DuringDictation
     public var history: History
+    public var shortcuts: Shortcuts
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -20,6 +21,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case stt
         case duringDictation = "during_dictation"
         case history
+        case shortcuts
     }
 
     public init(from decoder: Decoder) throws {
@@ -30,11 +32,13 @@ public struct Settings: Codable, Equatable, Sendable {
         stt = try c.decodeIfPresent(STT.self, forKey: .stt) ?? Settings.defaults.stt
         duringDictation = try c.decodeIfPresent(DuringDictation.self, forKey: .duringDictation) ?? Settings.defaults.duringDictation
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? Settings.defaults.history
+        shortcuts = try c.decodeIfPresent(Shortcuts.self, forKey: .shortcuts) ?? Settings.defaults.shortcuts
     }
 
     public init(
         schemaVersion: Int, loadOnLogin: Bool, defaultModeId: String,
-        stt: STT, duringDictation: DuringDictation, history: History
+        stt: STT, duringDictation: DuringDictation, history: History,
+        shortcuts: Shortcuts = Shortcuts()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -42,6 +46,7 @@ public struct Settings: Codable, Equatable, Sendable {
         self.stt = stt
         self.duringDictation = duringDictation
         self.history = history
+        self.shortcuts = shortcuts
     }
 
     public struct STT: Codable, Equatable, Sendable {
@@ -117,13 +122,37 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
+    // Optional global shortcuts for the standalone correction surfaces (design.md §4.7). An empty
+    // string means the shortcut is off; only chord descriptors are honored at registration.
+    public struct Shortcuts: Codable, Equatable, Sendable {
+        public var addDictionaryEntry: String
+        public var addReplacement: String
+
+        enum CodingKeys: String, CodingKey {
+            case addDictionaryEntry = "add_dictionary_entry"
+            case addReplacement = "add_replacement"
+        }
+
+        public init(addDictionaryEntry: String = "", addReplacement: String = "") {
+            self.addDictionaryEntry = addDictionaryEntry
+            self.addReplacement = addReplacement
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            addDictionaryEntry = try c.decodeIfPresent(String.self, forKey: .addDictionaryEntry) ?? ""
+            addReplacement = try c.decodeIfPresent(String.self, forKey: .addReplacement) ?? ""
+        }
+    }
+
     public static let defaults = Settings(
         schemaVersion: 1,
         loadOnLogin: false,
         defaultModeId: "plain-dictation",
         stt: STT(engine: "parakeet-tdt-ctc-110m", eviction: .frugal),
         duringDictation: DuringDictation(muteSystemAudio: true, keepDisplayAwake: true, sounds: true),
-        history: History(enabled: true, retentionDays: 7)
+        history: History(enabled: true, retentionDays: 7),
+        shortcuts: Shortcuts()
     )
 
     func validate() throws {

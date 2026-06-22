@@ -48,7 +48,13 @@ public enum ValidationGate {
 
     private static func occurrences(of token: String, in text: String) -> Int {
         guard !token.isEmpty else { return 0 }
-        return text.components(separatedBy: token).count - 1
+        var count = 0
+        var from = text.startIndex
+        while let r = text.range(of: token, range: from..<text.endIndex) {
+            count += 1
+            from = r.upperBound
+        }
+        return count
     }
 
     private static func sentinels(in text: String) -> [String] {

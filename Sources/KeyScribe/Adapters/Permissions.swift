@@ -1,7 +1,7 @@
 import AVFoundation
 import AppKit
 import ApplicationServices
-import IOKit.hid
+import CoreGraphics
 
 enum PermissionStatus: Equatable {
     case granted, denied, notDetermined
@@ -21,16 +21,12 @@ enum Permissions {
     }
 
     static func inputMonitoringStatus() -> PermissionStatus {
-        switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
-        case kIOHIDAccessTypeGranted: return .granted
-        case kIOHIDAccessTypeDenied: return .denied
-        default: return .notDetermined
-        }
+        CGPreflightListenEventAccess() ? .granted : .denied
     }
 
     @discardableResult
     static func requestInputMonitoring() -> Bool {
-        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        CGRequestListenEventAccess()
     }
 
     static func accessibilityStatus(prompt: Bool = false) -> PermissionStatus {

@@ -18,10 +18,10 @@ enum ContextProbe {
     // Chrome/Electron). Runs off the main actor with a messaging timeout + wall-clock deadline so a
     // slow app (some native AX trees take ~1s) never blocks the dictation flow. Best-effort: nil
     // when AX exposes nothing.
-    static func visibleText(forBundleId bundleId: String) async -> String? {
+    static func visibleText(forBundleId bundleId: String, maxChars: Int = 8000) async -> String? {
         guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?.processIdentifier else { return nil }
-        return await Task.detached { AXVisibleText.capture(pid: pid) }.value
+        return await Task.detached { AXVisibleText.capture(pid: pid, maxChars: maxChars) }.value
     }
 
     // Bounded text immediately before the caret in the focused field, for a mode that opted into
@@ -29,12 +29,20 @@ enum ContextProbe {
     // via AX — precise and native-only: Chromium/Electron expose no caret range, so this returns nil
     // there (best-effort, like visible text). Privacy mode forces the opt-in off upstream
     // (Mode.effectiveContext), so this is never called when redaction is active.
-    static func precedingText(maxChars: Int = 600) -> String? {
+    static func precedingText(maxChars: Int = 600) async -> String? {
+        await Task.detached { precedingTextSync(maxChars: maxChars) }.value
+    }
+
+    // Synchronous AX walk, run off the main actor (each AXUIElementCopy… is cross-process IPC; a slow
+    // target must never stall the dictation flow on the main thread). A per-element messaging timeout
+    // bounds a wedged AX server.
+    nonisolated private static func precedingTextSync(maxChars: Int) -> String? {
         let system = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focusedRef else { return nil }
         let element = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.3)
 
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
@@ -61,12 +69,22 @@ enum ContextProbe {
         guard handlesHTTPS(bundleId) else { return nil }
         for property in ["URL of active tab of front window", "URL of front document"] {
             let source = "tell application id \"\(bundleId)\" to return \(property)"
-            guard let script = NSAppleScript(source: source) else { continue }
+            guard let script = compiledScript(source) else { continue }
             var error: NSDictionary?
             let result = script.executeAndReturnError(&error)
             if error == nil, let url = result.stringValue, !url.isEmpty { return url }
         }
         return nil
+    }
+
+    // NSAppleScript compiles its source on first execution; reusing the same object across dictations
+    // avoids recompiling the (per-bundle) script every time a URL-constrained mode runs.
+    private static var compiledScripts: [String: NSAppleScript] = [:]
+    private static func compiledScript(_ source: String) -> NSAppleScript? {
+        if let cached = compiledScripts[source] { return cached }
+        guard let script = NSAppleScript(source: source) else { return nil }
+        compiledScripts[source] = script
+        return script
     }
 
     private static func handlesHTTPS(_ bundleId: String) -> Bool {
@@ -93,10 +111,10 @@ enum AXVisibleText {
     private static let textRoles: Set<String> = ["AXStaticText", "AXTextArea", "AXTextField", "AXTextView"]
     private static let regionRoles: Set<String> = ["AXScrollArea", "AXWebArea"]
 
-    static func capture(pid: pid_t) -> String? {
+    static func capture(pid: pid_t, maxChars: Int) -> String? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, messagingTimeout)
-        if let text = read(app: app, deadline: deadline) { return text }
+        if let text = read(app: app, deadline: deadline, maxChars: maxChars) { return text }
         // Empty tree — the case for lazy-AX Electron apps (VS Code, Claude desktop) that only expose
         // their AX tree once an assistive technology asks. Set Electron's documented
         // AXManualAccessibility wake on the app element and retry. Strictly safe: only runs when the
@@ -104,10 +122,12 @@ enum AXVisibleText {
         // never touched; a harmless no-op (-25205 unsupported) on non-Electron. The wake persists, so
         // even if this first read is too early for the tree to build, the next dictation reads cold.
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        return read(app: app, deadline: wakeDeadline)
+        return read(app: app, deadline: wakeDeadline, maxChars: maxChars)
     }
 
-    private static func read(app: AXUIElement, deadline: TimeInterval) -> String? {
+    // `maxChars` stops the walk once enough text is gathered — the downstream context budget caps the
+    // result anyway, so a large window's tree need not be fully traversed or its strings retained.
+    private static func read(app: AXUIElement, deadline: TimeInterval, maxChars: Int) -> String? {
         guard let window = focusedWindow(of: app) else { return nil }
         let windowFrame = frame(window)
         let stopAt = Date().addingTimeInterval(deadline)
@@ -116,9 +136,10 @@ enum AXVisibleText {
         var texts: [String] = []
         var seen = Set<AXKey>()
         var nodes = 0
+        var chars = 0
 
         func collect(_ el: AXUIElement, _ depth: Int) {
-            if nodes >= maxNodes || depth > maxDepth || Date() >= stopAt { return }
+            if nodes >= maxNodes || depth > maxDepth || chars >= maxChars || Date() >= stopAt { return }
             let key = AXKey(el)
             if seen.contains(key) { return }
             seen.insert(key)
@@ -126,6 +147,7 @@ enum AXVisibleText {
             let role = string(el, kAXRoleAttribute as String) ?? ""
             if textRoles.contains(role), onScreen(el, clip: windowFrame), let s = visibleString(el, role: role) {
                 texts.append(s)
+                chars += s.count
             }
             for child in children(el) { collect(child, depth + 1) }
         }

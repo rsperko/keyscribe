@@ -47,6 +47,18 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func testState(for id: String) -> ConnectionTestState? { testStates[id] }
 
+    // Connections (still present) whose last Test Connection failed. Drives the error badge and the
+    // per-mode "uses a broken AI service" flag.
+    var failedTestIds: Set<String> {
+        let present = Set(connections.map(\.id))
+        return Set(testStates.compactMap { id, state -> String? in
+            guard present.contains(id), case .failed = state else { return nil }
+            return id
+        })
+    }
+
+    var hasFailedTest: Bool { !failedTestIds.isEmpty }
+
     func test(_ connection: Connection) {
         let id = connection.id
         guard testStates[id] != .testing else { return }
@@ -131,15 +143,14 @@ struct AIServiceSettingsView: View {
         HStack(spacing: 0) {
             List(selection: $model.selectedID) {
                 ForEach(model.connections) { connection in
-                    let ready = model.hasKey(connection)
+                    let status = rowStatus(connection)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(connection.name)
                         Text("\(providerLabel(connection.provider)) · \(connection.model)")
                             .font(.caption).foregroundStyle(.secondary)
-                        Label(ready ? "Key stored · ready" : "No key — add one to use this service",
-                              systemImage: ready ? "key.fill" : "key")
+                        Label(status.text, systemImage: status.icon)
                             .font(.caption2)
-                            .foregroundStyle(ready ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(status.style)
                     }
                     .tag(connection.id)
                 }
@@ -179,6 +190,32 @@ struct AIServiceSettingsView: View {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
             Text("Its connection settings and API key will be removed. This cannot be undone.")
+        }
+    }
+
+    // A failed Test Connection is the only attention state — a missing key is legitimate for a
+    // local/no-auth endpoint, so it reads neutral, not as an error.
+    private func rowStatus(_ connection: Connection) -> (text: String, icon: String, style: AnyShapeStyle) {
+        if case .failed = model.testState(for: connection.id) {
+            return ("Connection test failed", "exclamationmark.triangle.fill", AnyShapeStyle(.red))
+        }
+        switch connection.configIssue {
+        case .missingModel:
+            return ("No model set", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
+        case .missingBaseURL:
+            return ("Needs a base URL", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
+        case nil:
+            break
+        }
+        switch model.testState(for: connection.id) {
+        case .passed:
+            return ("Connection works", "checkmark.circle.fill", AnyShapeStyle(.green))
+        case .testing:
+            return ("Testing…", "ellipsis.circle", AnyShapeStyle(.secondary))
+        default:
+            return model.hasKey(connection)
+                ? ("Key stored", "key.fill", AnyShapeStyle(.secondary))
+                : ("No key set", "key", AnyShapeStyle(.secondary))
         }
     }
 }

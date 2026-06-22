@@ -72,6 +72,13 @@ actor ParakeetEngine: SpeechEngine {
     private var ctcDir: URL?
     private var ctcUnavailable = false
 
+    // Bias terms rarely change between consecutive dictations, so the tokenized vocabulary and the
+    // rescorer it feeds are cached keyed on the term set. Both are rebuilt only when the terms change
+    // (the rescorer reads from the CTC model dir, so recreating it per dictation was needless I/O).
+    private var cachedBiasTerms: [String]?
+    private var cachedVocab: CustomVocabularyContext?
+    private var cachedRescorer: VocabularyRescorer?
+
     init(profile: ParakeetModelProfile, modelsDir: URL) {
         self.id = profile.id
         self.displayName = profile.displayName
@@ -145,7 +152,7 @@ actor ParakeetEngine: SpeechEngine {
             return result.text
         }
 
-        let vocab = makeVocabulary(biasTerms)
+        let vocab = vocabulary(for: biasTerms)
         guard !vocab.terms.isEmpty else {
             Log.bias.info("\(self.id, privacy: .public) terms=\(biasTerms.joined(separator: "|"), privacy: .private) applied=false")
             return result.text
@@ -159,8 +166,7 @@ actor ParakeetEngine: SpeechEngine {
             }
 
             let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocab.terms.count)
-            let rescorer = try await VocabularyRescorer.create(
-                spotter: spotter, vocabulary: vocab, config: .default, ctcModelDirectory: ctcDir)
+            let rescorer = try await rescorer(vocab: vocab, ctcDir: ctcDir, spotter: spotter)
             let rescored = rescorer.ctcTokenRescore(
                 transcript: result.text,
                 tokenTimings: timings,
@@ -183,6 +189,25 @@ actor ParakeetEngine: SpeechEngine {
             Log.bias.error("\(self.id, privacy: .public) bias rescoring failed: \(error, privacy: .public)")
             return result.text
         }
+    }
+
+    private func vocabulary(for biasTerms: [String]) -> CustomVocabularyContext {
+        if cachedBiasTerms == biasTerms, let cachedVocab { return cachedVocab }
+        let vocab = makeVocabulary(biasTerms)
+        cachedBiasTerms = biasTerms
+        cachedVocab = vocab
+        cachedRescorer = nil
+        return vocab
+    }
+
+    private func rescorer(
+        vocab: CustomVocabularyContext, ctcDir: URL, spotter: CtcKeywordSpotter
+    ) async throws -> VocabularyRescorer {
+        if let cachedRescorer { return cachedRescorer }
+        let rescorer = try await VocabularyRescorer.create(
+            spotter: spotter, vocabulary: vocab, config: .default, ctcModelDirectory: ctcDir)
+        cachedRescorer = rescorer
+        return rescorer
     }
 
     private func makeVocabulary(_ biasTerms: [String]) -> CustomVocabularyContext {
@@ -221,7 +246,8 @@ actor ParakeetEngine: SpeechEngine {
         ctcTokenizer = nil
         ctcDir = nil
         ctcUnavailable = false
+        cachedBiasTerms = nil
+        cachedVocab = nil
+        cachedRescorer = nil
     }
 }
-
-enum ASRError: Error { case notInitialized }

@@ -5,10 +5,12 @@ import KeyScribeKit
 // than a misleading Retry.
 enum HUDErrorAction: Equatable {
     case openMicrophoneSettings
+    case openAccessibilitySettings
 
     var buttonTitle: String {
         switch self {
         case .openMicrophoneSettings: "Open Microphone Settings"
+        case .openAccessibilitySettings: "Open Accessibility Settings"
         }
     }
 }

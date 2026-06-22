@@ -23,31 +23,59 @@ final class HotkeyMonitor {
         }
     }
 
+    // A global chord that fires a one-shot action (e.g. open the Add-Dictionary panel) rather than
+    // driving a dictation gesture. Only chord descriptors are accepted; a modifier-only named key
+    // makes no sense as a discrete action trigger.
+    struct ActionBinding {
+        let id: String
+        let descriptor: KeyDescriptor
+    }
+
     private var bindings: [Binding]
+    private var actionBindings: [ActionBinding]
+    private var engagedActions: Set<String> = []
+    private var suppressedKeyCodes: Set<Int64> = []
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
     let onStart: (String?) -> Void
     let onCommit: (String?) -> Void
+    let onAction: (String) -> Void
 
-    init(bindings: [Binding], onStart: @escaping (String?) -> Void, onCommit: @escaping (String?) -> Void) {
+    init(
+        bindings: [Binding], actionBindings: [ActionBinding] = [],
+        onStart: @escaping (String?) -> Void, onCommit: @escaping (String?) -> Void,
+        onAction: @escaping (String) -> Void = { _ in }
+    ) {
         self.bindings = bindings
+        self.actionBindings = actionBindings
         self.onStart = onStart
         self.onCommit = onCommit
+        self.onAction = onAction
     }
 
-    func update(bindings: [Binding]) { self.bindings = bindings }
+    func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
+        self.bindings = bindings
+        self.actionBindings = actionBindings
+        engagedActions.removeAll(keepingCapacity: true)
+        suppressedKeyCodes.removeAll(keepingCapacity: true)
+    }
 
+    // An active (.defaultTap) tap so a *chord* trigger (mode or action) can be swallowed before the
+    // focused app sees it — a listen-only tap can only observe, so the chord double-fires into the app
+    // (e.g. ⌃⌥E reaches the app as the Option-E dead key and replaces the very selection an edit-in-place
+    // mode is about to rewrite). An active tap needs Accessibility, which the app already requires to
+    // insert; if it can't be created (e.g. Accessibility not yet granted) we fall back to a listen-only
+    // tap — hotkeys still fire, the chord still passes through — rather than losing the hotkey entirely.
+    // Only exact chord matches are consumed (see `consume`); modifier-only named keys never are.
     @discardableResult
     func start() -> Bool {
         if tap != nil { return true }
-        let mask = (1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask((1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
-            | (1 << CGEventType.flagsChanged.rawValue)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
-            eventsOfInterest: CGEventMask(mask), callback: hotkeyTapCallback, userInfo: nil
-        ) else { return false }
+            | (1 << CGEventType.flagsChanged.rawValue))
+        guard let tap = makeTap(mask: mask, options: .defaultTap)
+            ?? makeTap(mask: mask, options: .listenOnly) else { return false }
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
@@ -57,11 +85,18 @@ final class HotkeyMonitor {
         return true
     }
 
+    private func makeTap(mask: CGEventMask, options: CGEventTapOptions) -> CFMachPort? {
+        CGEvent.tapCreate(
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: options,
+            eventsOfInterest: mask, callback: hotkeyTapCallback, userInfo: nil)
+    }
+
     func stop() {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes) }
         tap = nil
         runLoopSource = nil
+        suppressedKeyCodes.removeAll(keepingCapacity: true)
         activeHotkeyMonitor = nil
     }
 
@@ -74,14 +109,74 @@ final class HotkeyMonitor {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    fileprivate func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags) {
+    // Suspended while a HotkeyRecorder is capturing in Settings, so pressing a chord to record it can't
+    // also fire an existing global shortcut or mode trigger. While suspended `handle` consumes nothing,
+    // so the keystroke still reaches the recorder — we just don't act on it here.
+    var isSuspended = false
+
+    // Returns true when the event is a chord trigger (mode or action) that should be swallowed — the
+    // active tap then discards it so the focused app never sees the keystroke. Modifier-only named
+    // triggers arrive as `.flagsChanged` and are never consumed: they type nothing, and swallowing a
+    // bare modifier would break it system-wide.
+    @discardableResult
+    func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags) -> Bool {
+        guard !isSuspended else { return false }
+        let consumed = consume(type: type, keyCode: keyCode, flags: flags)
         let now = ProcessInfo.processInfo.systemUptime
         for i in bindings.indices {
             guard let edge = edge(binding: i, type: type, keyCode: keyCode, flags: flags) else { continue }
+            let key = bindings[i].triggerKey
             switch bindings[i].gesture.handle(edge, at: now) {
-            case .start: onStart(bindings[i].triggerKey)
-            case .commit: onCommit(bindings[i].triggerKey)
+            case .start: dispatchSideEffect { self.onStart(key) }
+            case .commit: dispatchSideEffect { self.onCommit(key) }
             case .none: break
+            }
+        }
+        handleActions(type: type, keyCode: keyCode, flags: flags)
+        return consumed
+    }
+
+    // Run a gesture/action callback off the event-tap callback. An active (.defaultTap) tap holds the
+    // event until the callback returns, and `onStart`/`onCommit`/`onAction` do real work (engine resolve,
+    // audio start, SwiftUI HUD) — keeping that on the callback would stall input and risk a
+    // `tapDisabledByTimeout`. Gesture *state* already advanced synchronously above; only the side-effect
+    // is deferred, FIFO on the main queue so a start always runs before its commit.
+    private func dispatchSideEffect(_ work: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: work)
+    }
+
+    // Swallow only an exact chord match (mode trigger or action chord). On a matching key-down we record
+    // the base keyCode and consume it; we consume the matching key-up only when we consumed its key-down,
+    // so later typing the chord's base key *alone* (no modifiers) passes through untouched on both edges —
+    // never a half-swallowed key-up that would strand the app in a stuck-key state.
+    private func consume(type: CGEventType, keyCode: Int64, flags: CGEventFlags) -> Bool {
+        switch type {
+        case .keyDown:
+            let mods = Self.activeModifiers(flags)
+            let matches = bindings.contains { $0.descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods) }
+                || actionBindings.contains { $0.descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods) }
+            if matches { suppressedKeyCodes.insert(keyCode) }
+            return matches
+        case .keyUp:
+            return suppressedKeyCodes.remove(keyCode) != nil
+        default:
+            return false
+        }
+    }
+
+    // One-shot chord actions. keyDown auto-repeats while a key is held, so an `engaged` set debounces
+    // to a single fire per physical press; the key's keyUp clears it so the next press fires again.
+    private func handleActions(type: CGEventType, keyCode: Int64, flags: CGEventFlags) {
+        let mods = Self.activeModifiers(flags)
+        for action in actionBindings {
+            let matches = action.descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods)
+            if type == .keyDown, matches {
+                if engagedActions.insert(action.id).inserted {
+                    let id = action.id
+                    dispatchSideEffect { self.onAction(id) }
+                }
+            } else if type == .keyUp, keyCode == Int64(action.descriptor.triggerKeyCode) {
+                engagedActions.remove(action.id)
             }
         }
     }
@@ -139,8 +234,8 @@ private func hotkeyTapCallback(
     }
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let rawFlags = event.flags.rawValue
-    MainActor.assumeIsolated {
-        activeHotkeyMonitor?.handle(type: type, keyCode: keyCode, flags: CGEventFlags(rawValue: rawFlags))
+    let consumed = MainActor.assumeIsolated {
+        activeHotkeyMonitor?.handle(type: type, keyCode: keyCode, flags: CGEventFlags(rawValue: rawFlags)) ?? false
     }
-    return Unmanaged.passUnretained(event)
+    return consumed ? nil : Unmanaged.passUnretained(event)
 }

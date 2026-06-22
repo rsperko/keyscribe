@@ -140,8 +140,8 @@ struct FirstRunView: View {
             permissionRow("Microphone", "So KeyScribe can hear you.",
                           "Dictation cannot start without it.", model.micStatus) { model.requestMicrophone() }
         case .inputMonitoring:
-            permissionRow("Input Monitoring", "So the hotkey can start dictation from any app.",
-                          "You can still open KeyScribe, but the hotkey cannot listen.", model.inputStatus) {
+            permissionRow("Input Monitoring", "So the shortcut can start dictation from any app.",
+                          "You can still open KeyScribe, but the shortcut cannot listen.", model.inputStatus) {
                 model.requestInputMonitoring()
             }
         case .accessibility:

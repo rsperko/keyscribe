@@ -107,8 +107,15 @@ Carried forward — **not gates**, handled in the milestone where they belong:
       replacements before tokenization). Wired into the live dictation flow before insertion.
 - [x] **Replacements**: heard→replace, literal (case-insensitive) + regex with capture-group
       substitution; invalid regex skipped. Applied globally now; mode-local merge helper built.
-- [x] **Live edits**: documented list — new line, new paragraph, scratch that (sentence/newline
+- [x] **Live edits**: documented list — new line, new paragraph, scratch that, tab (sentence/newline
       aware). Applied globally now; per-mode opt-in lands with M4. (Verbatim tokenization is M6.)
+- [x] **Additional post-STT stages** (opt-in per mode, canonical order in `design.md` §4.2.1):
+      **Spoken symbols** (`SymbolsStage` — "open paren" → `(`, before replacements), **Numbers / inverse
+      text normalization** (`NumbersStage`/`InverseTextNormalizer` — "twenty five" → "25", bails on
+      ambiguous/year-like runs), and **Fuzzy correction** (`FuzzyStage`/`FuzzyCorrector` — snap mangled
+      words to dictionary terms, Levenshtein+Soundex gated; helps bias-less engines most). User
+      replacement regexes are screened by **`ReplacementSafety`** (refuses nested-quantifier "evil"
+      patterns before they run on the hot path). All pure-logic, tested.
 - [x] **Dictionary** + Replacements **config models** (TOML, `schema_version`, global+local
       merge) — tested. Dictionary's recognition effect uses per-engine bias (Whisper prompt, Apple
       contextual strings, Parakeet CTC-WS) plus the LLM "valid term" hint (M5).
@@ -116,11 +123,15 @@ Carried forward — **not gates**, handled in the milestone where they belong:
       (`VocabularySettingsView`) edits the global Dictionary and Replacements (shared `DictionaryRows`/
       `ReplacementRows`, reused by each mode's own vocabulary section). See "Settings UI" in
       session-status.
-- [~] **Minimal correction loop** — the History detail's **Add to Dictionary** / **Create
-      Replacement** (M7) is the correction surface; the standalone global "add correction" panel
-      (global shortcut, Heard pre-filled from selection) is still deferred (`design.md` §4.7).
+- [x] **Minimal correction loop** — two surfaces now ship: the History detail's **Add to
+      Dictionary** / **Create Replacement**, and the **standalone correction panel**
+      (`CorrectionPanelController`) — **Add Dictionary Entry…** / **Add Replacement…** in the menu
+      bar and via **optional global shortcuts** (Settings ▸ General; off by default, chord only).
+      The Heard/term field is **pre-filled best-effort from the current selection** — captured before
+      KeyScribe activates so the synthetic ⌘C still reaches the user's app (`design.md` §4.7). Writes
+      go to the global Dictionary/Replacements stores; the FSEvents watcher picks them up live.
 **Exit:** spoken structural commands work end-to-end (done); global vocab editing ships in the
-Vocabulary pane (done); the standalone correction-panel shortcut remains.
+Vocabulary pane (done); the standalone correction panel + optional shortcuts ship (done).
 
 ## M4 — Modes
 **Goal:** per-context configuration with auto-switching.
@@ -264,8 +275,23 @@ restored after; verbatim spans never mutate — proven in logic + the round-trip
       first-run gained **Skip for now** on the model + permissions steps so a snag never traps setup.
 - [ ] **Distribution:** direct, **notarized** (Developer ID); **in-app updates** (Sparkle)
       with the **update badge** (blue dot, top-right of the menu-bar icon — `ui_design.md` §6).
-- [ ] **Error badge** (red dot, top-left of the menu-bar icon) for a configuration/model problem,
-      with Settings surfacing visual hints to the exact cause (`ui_design.md` §6).
+- [x] **Error badge** (red dot, top-left of the menu-bar icon) — `MenuBarController.setErrorBadge`.
+      **Navigates to the cause:** one `SettingsProblem.detect` mapping feeds both the menu dot and a
+      `SettingsProblemModel` that flags the offending Settings sidebar pane with a matching red dot;
+      the sidebar polls while open so a flag clears the instant it's fixed. **Triggers:** malformed
+      config → Advanced; any missing required permission → Permissions; **active STT model
+      unusable** (deleted out from under us, `SpeechModelsModel.activeEngineUsable`) → Speech Models;
+      and the AI checks: a **dangling connection** (a mode names a deleted connection — an
+      *empty/optional* connection is not flagged), a **structurally misconfigured connection** (no
+      model, or an OpenAI-compatible connection with no base URL — `Connection.configIssue`, tested),
+      and a **failed Test Connection** → all flag AI Services (the offending connection's row is
+      flagged in-pane: orange for incomplete, red for a failed test). A mode wired to a **failed**
+      connection additionally flags the **Modes** pane and that mode's row. A missing key is **not** an
+      error — it is legitimate for a local/no-auth endpoint. **No passive API probe** (privacy
+      invariant); the only live AI signal is the user-initiated test. *(Distinct from the dictating
+      indicator:
+      the glyph tints fully red while capture is active — `setDictating`.)* Remaining nicety: a
+      cached post-install **self-test-failed** flag (needs persisted state).
 - [x] **Open-source release hygiene:** `THIRD-PARTY-NOTICES.md` (all engines + model weights),
       **GPLv3 `LICENSE`** at the repo root, weights downloaded at runtime (not committed), and the
       **in-app credits/notices screen** expanded to all 7 engines incl. CC-BY-4.0 attribution

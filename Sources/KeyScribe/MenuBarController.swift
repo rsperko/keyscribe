@@ -37,17 +37,36 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
     private let modesMenu = NSMenu()
 
+    private let badgeDot: NSView = {
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.cornerRadius = 3
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.isHidden = true
+        return dot
+    }()
+
     var onPasteLast: (() -> Void)?
     var onOpenHistory: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onOpenNotices: (() -> Void)?
     var onMenuWillOpen: (() -> Void)?
     var onSelectNextMode: ((String?) -> Void)?
+    var onAddDictionaryEntry: (() -> Void)?
+    var onAddReplacement: (() -> Void)?
 
     func install() {
         if let button = statusItem.button {
             button.image = Self.statusIcon
             button.image?.accessibilityDescription = "KeyScribe"
+            button.addSubview(badgeDot)
+            NSLayoutConstraint.activate([
+                badgeDot.widthAnchor.constraint(equalToConstant: 6),
+                badgeDot.heightAnchor.constraint(equalToConstant: 6),
+                badgeDot.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 1),
+                badgeDot.topAnchor.constraint(equalTo: button.topAnchor, constant: 2),
+            ])
         }
         let menu = NSMenu()
         statusLine.isEnabled = false
@@ -71,6 +90,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(history)
 
         menu.addItem(.separator())
+        let addDictionary = NSMenuItem(title: "Add Dictionary Entry…", action: #selector(addDictionaryEntry), keyEquivalent: "")
+        addDictionary.target = self
+        menu.addItem(addDictionary)
+        let addReplacement = NSMenuItem(title: "Add Replacement…", action: #selector(addReplacementEntry), keyEquivalent: "")
+        addReplacement.target = self
+        menu.addItem(addReplacement)
+
+        menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -89,6 +116,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func setStatus(_ text: String) { statusLine.title = "Status: \(text)" }
     func setHasResult(_ hasResult: Bool) { pasteLastItem.isEnabled = hasResult }
+
+    // Tint the whole glyph red while capture is active (ui_design.md §Dynamic status — recording
+    // reflects that capture is active); reverts on commit. The template image takes the tint.
+    func setDictating(_ active: Bool) {
+        statusItem.button?.contentTintColor = active ? .systemRed : nil
+    }
+
+    // The error badge — a small red dot, top-left (ui_design.md §6) — for a configuration, model, or
+    // permission problem. A separate colored layer so it survives the recording tint and the template
+    // glyph's appearance adaptation.
+    func setErrorBadge(_ visible: Bool) { badgeDot.isHidden = !visible }
     func setModes(
         _ modes: [Mode], automaticName: String?, overrideName: String?,
         inertReasons: [String: String] = [:]
@@ -129,4 +167,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openNotices() { onOpenNotices?() }
     @objc private func selectAutomatic() { onSelectNextMode?(nil) }
     @objc private func selectMode(_ sender: NSMenuItem) { onSelectNextMode?(sender.representedObject as? String) }
+    @objc private func addDictionaryEntry() { onAddDictionaryEntry?() }
+    @objc private func addReplacementEntry() { onAddReplacement?() }
 }

@@ -258,23 +258,34 @@ spoken routing can choose a different remaining pipeline after transcription.
 
 - Idle: show the local STT readiness state, a required permission issue, model download status,
   or an update indicator.
-- Recording: reflect that capture is active. The menu remains secondary to the HUD.
+- Recording: reflect that capture is active — the menu-bar glyph **tints red while recording** and
+  reverts on commit. The menu remains secondary to the HUD.
 - Cloud rewrite: show that a request is in progress and the connection name.
 - Do not permanently change the menu-bar glyph to imply that all future dictations use cloud.
   The actual route is determined at dictation time.
 
-### Status badges on the menu-bar icon (proposed — not yet built)
+### Status badges on the menu-bar icon
 
 Two small corner badges on the menu-bar glyph, distinct by position and color so they read at a
 glance and can show simultaneously:
 
-- **Error badge — small red dot, top-left.** Shown when there is a configuration or model problem
-  (e.g. a missing/failed model, a malformed config file, a required permission not granted). Opening
-  Settings from this state surfaces **visual hints that lead the user to the exact problem** — the
-  affected pane/row is flagged (e.g. the broken model card, the offending setting) rather than a
-  generic "something's wrong." Clears when the problem is resolved.
-- **Update badge — small blue dot, top-right.** Shown when an app update is available. (Pairs with
-  the M7 Sparkle update mechanism.)
+- **Error badge — small red dot, top-left. Built.** Shown when there is a configuration or model
+  problem (e.g. a missing/failed model, a malformed config file, a required permission not granted).
+  *Wired to:* a malformed config, any missing required permission, an **unusable active STT model**
+  (deleted out from under us), and the AI checks — a **dangling connection** (a mode names a deleted
+  connection), a **structurally misconfigured connection** (no model, or OpenAI-compatible with no
+  base URL), and a **failed Test Connection**. Opening Settings **flags the offending sidebar pane
+  with a matching red dot** — Advanced (config) · Permissions · Speech Models (model) · AI Services
+  (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
+  and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. The sidebar polls
+  while open and clears the flag the moment it's fixed. **A missing key is not an error** — it is
+  legitimate for a local/no-auth endpoint. **KeyScribe never passively probes the provider** (privacy
+  invariant); the only live AI signal is the **user-initiated** Test Connection. *Still to broaden:* a
+  cached **self-test-failed** model flag (needs persisted state). Clears when resolved.
+  (Drawn as a separate colored layer so it survives both the template glyph's appearance adaptation
+  and the red recording tint.)
+- **Update badge — small blue dot, top-right. Not yet built.** Will show when an app update is
+  available. (Pairs with the still-pending M7 Sparkle update mechanism.)
 
 Both are non-modal, dismiss themselves when their condition clears, and never block dictation. Keep
 them subtle — they hint, they don't alarm.
@@ -360,7 +371,8 @@ sections:
 
 1. **Basics** — name, enabled, and `Use as default` where appropriate.
 2. **When this mode is used** — its hotkey, app rules, and spoken routing, each with examples.
-3. **What it does** — plain dictation, work on selection, live edits, dictionary, and replacements.
+3. **What it does** — plain dictation, work on selection, live edits, spoken symbols, numbers
+   (inverse text normalization), fuzzy correction, dictionary, and replacements.
 4. **Improve with AI** — disabled by default; connection and plain-language instruction.
 5. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
    mutually exclusive by design; the UI makes the tradeoff explicit before allowing either.

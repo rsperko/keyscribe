@@ -54,6 +54,7 @@ public struct LiveEditsStage: PipelineStage {
 
     public func run(_ context: inout PipelineContext) {
         let tokens = context.text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        let lowered = tokens.map { $0.lowercased() }
         var parts: [String] = []
         var segmentStart = 0
         var i = 0
@@ -61,7 +62,7 @@ public struct LiveEditsStage: PipelineStage {
         func resetSegment() { segmentStart = parts.count }
 
         while i < tokens.count {
-            if let (action, length) = match(tokens, at: i) {
+            if let (action, length) = match(lowered, at: i) {
                 switch action {
                 case .newline: parts.append(Self.newline); resetSegment()
                 case .paragraph: parts.append(Self.paragraph); resetSegment()
@@ -82,11 +83,11 @@ public struct LiveEditsStage: PipelineStage {
         context.text = join(parts)
     }
 
-    private func match(_ tokens: [String], at i: Int) -> (Action, Int)? {
+    private func match(_ lowered: [String], at i: Int) -> (Action, Int)? {
         for phrase in phrases {
             let length = phrase.words.count
-            guard i + length <= tokens.count else { continue }
-            if (0..<length).allSatisfy({ tokens[i + $0].lowercased() == phrase.words[$0] }) {
+            guard i + length <= lowered.count else { continue }
+            if (0..<length).allSatisfy({ lowered[i + $0] == phrase.words[$0] }) {
                 return (phrase.action, length)
             }
         }

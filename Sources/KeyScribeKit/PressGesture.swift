@@ -21,6 +21,7 @@ public struct PressGesture: Sendable {
     private var recording = false
     private var latched = false
     private var downAt: Double?
+    private var physicallyDown = false
 
     public init(style: PressStyle, tapThreshold: Double) {
         self.style = style
@@ -31,9 +32,17 @@ public struct PressGesture: Sendable {
         recording = false
         latched = false
         downAt = nil
+        physicallyDown = false
     }
 
     public mutating func handle(_ edge: TriggerEdge, at time: Double) -> DictationCommand {
+        switch edge {
+        case .down:
+            if physicallyDown { return .none }
+            physicallyDown = true
+        case .up:
+            physicallyDown = false
+        }
         switch style {
         case .holdOnly:
             switch edge {

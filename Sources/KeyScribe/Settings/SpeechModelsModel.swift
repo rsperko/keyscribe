@@ -25,6 +25,11 @@ final class SpeechModelsModel: ObservableObject {
 
     var activeName: String { SpeechModelCatalog.entry(for: set.activeId)?.displayName ?? set.activeId }
 
+    // The selected engine's files are present (or it's system-managed). False means the active model
+    // was deleted out from under us and dictation is silently running on a fallback — a problem worth
+    // flagging (ui_design.md §6).
+    var activeEngineUsable: Bool { self.set.isUsable(self.set.activeId) }
+
     private var set: SpeechModelSet
     private var downloading: [String: ModelLoadProgress] = [:]
     private var verifying: Set<String> = []
@@ -62,12 +67,22 @@ final class SpeechModelsModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    // Sizing each installed model recursively enumerates its on-disk bundle (many files); doing it
+    // synchronously here would block the main actor, including at launch where this model is built.
+    // Snapshot the usable ids on the main actor, compute bytes on a utility task, then publish back.
     private func refreshSizes() {
-        var sizes: [String: Int64] = [:]
-        for info in SpeechModelCatalog.all where !info.systemManaged && set.isUsable(info.id) {
-            sizes[info.id] = ModelInstallStore.installedBytes(for: info.id)
+        let ids = SpeechModelCatalog.all
+            .filter { !$0.systemManaged && set.isUsable($0.id) }
+            .map(\.id)
+        Task.detached(priority: .utility) { [weak self] in
+            var sizes: [String: Int64] = [:]
+            for id in ids { sizes[id] = ModelInstallStore.installedBytes(for: id) }
+            await MainActor.run {
+                guard let self else { return }
+                self.installedSizes = sizes
+                self.rebuild()
+            }
         }
-        installedSizes = sizes
     }
 
     func syncActive(_ id: String) {
@@ -96,7 +111,7 @@ final class SpeechModelsModel: ObservableObject {
                 try await download(id) { progress in
                     Task { @MainActor in
                         self.downloading[id] = progress
-                        self.rebuild()
+                        self.updateRow(id)
                     }
                 }
             } catch {
@@ -214,20 +229,31 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     private func rebuild() {
-        rows = SpeechModelCatalog.all.map { info in
-            let installed = !info.systemManaged && set.isUsable(info.id) && downloading[info.id] == nil
-            return Row(
-                info: info,
-                isActive: set.activeId == info.id,
-                isUsable: set.isUsable(info.id),
-                downloadFraction: downloading[info.id]?.fraction,
-                downloadPhase: downloading[info.id]?.phase,
-                verifying: verifying.contains(info.id),
-                verificationFailed: verifyFailed.contains(info.id),
-                testPassed: verifiedOk.contains(info.id),
-                errorText: errors[info.id],
-                installedBytes: installed ? installedSizes[info.id] : nil,
-                installPath: installed ? ModelInstallStore.presentInstallURLs(for: info.id).first?.path : nil)
-        }
+        rows = SpeechModelCatalog.all.map(makeRow)
+    }
+
+    // Rebuild only the one row whose state changed (e.g. a download-progress tick) — fires many times
+    // per second, so reconstructing every row (and re-statting installed model dirs) each tick was
+    // needless churn. SwiftUI's identified ForEach re-renders just the changed row.
+    private func updateRow(_ id: String) {
+        guard let info = SpeechModelCatalog.all.first(where: { $0.id == id }),
+              let index = rows.firstIndex(where: { $0.id == id }) else { rebuild(); return }
+        rows[index] = makeRow(info)
+    }
+
+    private func makeRow(_ info: SpeechModelInfo) -> Row {
+        let installed = !info.systemManaged && set.isUsable(info.id) && downloading[info.id] == nil
+        return Row(
+            info: info,
+            isActive: set.activeId == info.id,
+            isUsable: set.isUsable(info.id),
+            downloadFraction: downloading[info.id]?.fraction,
+            downloadPhase: downloading[info.id]?.phase,
+            verifying: verifying.contains(info.id),
+            verificationFailed: verifyFailed.contains(info.id),
+            testPassed: verifiedOk.contains(info.id),
+            errorText: errors[info.id],
+            installedBytes: installed ? installedSizes[info.id] : nil,
+            installPath: installed ? ModelInstallStore.presentInstallURLs(for: info.id).first?.path : nil)
     }
 }

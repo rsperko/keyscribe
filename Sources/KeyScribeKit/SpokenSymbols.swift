@@ -21,10 +21,26 @@ public enum SpokenSymbols {
         "semicolon": ";", "colon": ":",
     ]
 
+    // The symbol map with its longest-phrase word count precomputed once, so a dictation never
+    // rescans every key to derive `maxWords` on each call.
+    public struct Prepared: Sendable {
+        fileprivate let map: [String: String]
+        fileprivate let maxWords: Int
+    }
+
+    public static func prepare(_ map: [String: String] = defaultMap) -> Prepared {
+        let maxWords = map.keys.map { $0.split(separator: " ").count }.max() ?? 1
+        return Prepared(map: map, maxWords: maxWords)
+    }
+
     public static func apply(_ text: String, map: [String: String] = defaultMap) -> String {
+        apply(text, prepared: prepare(map))
+    }
+
+    public static func apply(_ text: String, prepared: Prepared) -> String {
+        let map = prepared.map
         guard !map.isEmpty else { return text }
-        let phrases = map.keys.map { $0.split(separator: " ").map(String.init) }
-        let maxWords = phrases.map(\.count).max() ?? 1
+        let maxWords = prepared.maxWords
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
 
         var out: [String] = []
@@ -49,9 +65,9 @@ public enum SpokenSymbols {
 public struct SymbolsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.spokenSymbols
-    public let map: [String: String]
-    public init(map: [String: String] = SpokenSymbols.defaultMap) { self.map = map }
+    private let prepared: SpokenSymbols.Prepared
+    public init(map: [String: String] = SpokenSymbols.defaultMap) { self.prepared = SpokenSymbols.prepare(map) }
     public func run(_ context: inout PipelineContext) {
-        context.text = SpokenSymbols.apply(context.text, map: map)
+        context.text = SpokenSymbols.apply(context.text, prepared: prepared)
     }
 }

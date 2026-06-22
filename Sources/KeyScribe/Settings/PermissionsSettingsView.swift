@@ -6,12 +6,6 @@ struct PermissionsSettingsView: View {
     @State private var inputMonitoringStatus = Permissions.inputMonitoringStatus()
     @State private var accessibilityStatus = Permissions.accessibilityStatus()
 
-    // Permission grants land out-of-process: Microphone/Input Monitoring are toggled in System
-    // Settings (we re-check when the app reactivates), while Accessibility is granted in another app
-    // that never reactivates us — so there is no event to hook and we poll while the pane is visible.
-    // TCC exposes no general "permission changed" callback, so this poll is the live-status mechanism.
-    private let pollTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
-
     var body: some View {
         Form {
             Section("Permissions") {
@@ -31,11 +25,12 @@ struct PermissionsSettingsView: View {
                     openSettings: { Permissions.openSettings(.microphone) })
                 PermissionRow(
                     title: "Input Monitoring", status: inputMonitoringStatus,
-                    purpose: "Lets a mode's hotkey start dictation from any app.",
-                    unavailable: "You can still open KeyScribe, but mode hotkeys cannot listen.",
+                    purpose: "Lets a mode's shortcut start dictation from any app.",
+                    unavailable: "You can still open KeyScribe, but mode shortcuts cannot listen.",
+                    requestableWhenDenied: true,
                     request: {
+                        NSApp.activate(ignoringOtherApps: true)
                         Permissions.requestInputMonitoring()
-                        Permissions.openSettings(.inputMonitoring)
                     },
                     openSettings: { Permissions.openSettings(.inputMonitoring) })
                 PermissionRow(
@@ -52,11 +47,19 @@ struct PermissionsSettingsView: View {
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear(perform: refreshPermissions)
+        // Permission grants land out-of-process: Microphone/Input Monitoring are toggled in System
+        // Settings (re-checked when the app reactivates), while Accessibility is granted in another app
+        // that never reactivates us — so there is no event to hook. TCC exposes no "permission changed"
+        // callback, so we poll, but only while this pane is on screen (.task is cancelled on disappear).
+        .task {
+            while !Task.isCancelled {
+                refreshPermissions()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
         }
-        .onReceive(pollTimer) { _ in refreshPermissions() }
     }
 
     private func refreshPermissions() {
@@ -71,6 +74,7 @@ private struct PermissionRow: View {
     let status: PermissionStatus
     let purpose: String
     let unavailable: String
+    var requestableWhenDenied: Bool = false
     let request: () -> Void
     let openSettings: () -> Void
 
@@ -86,7 +90,7 @@ private struct PermissionRow: View {
             if status != .granted {
                 Text(unavailable).font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    if status == .notDetermined {
+                    if status == .notDetermined || (requestableWhenDenied && status == .denied) {
                         Button("Allow", action: request)
                     }
                     Button("Open System Settings", action: openSettings)

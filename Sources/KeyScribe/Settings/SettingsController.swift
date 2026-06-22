@@ -4,6 +4,65 @@ import KeyScribeKit
 
 typealias Settings = KeyScribeKit.Settings
 
+// A live problem that lights the menu-bar error dot and flags the Settings pane that fixes it
+// (ui_design.md §6). `detect` is the single mapping from raw signals → problems, shared by the menu
+// badge and the Settings sidebar so they never disagree.
+enum SettingsProblem: Equatable, CaseIterable {
+    case malformedConfig
+    case microphonePermission
+    case inputMonitoringPermission
+    case accessibilityPermission
+    case activeEngineUnavailable
+    case aiConnectionMissing
+    case aiConnectionTestFailed
+    case aiConnectionMisconfigured
+    case modeUsesFailedConnection
+    case hotkeyConflict
+
+    var pane: SettingsDestination {
+        switch self {
+        case .malformedConfig: .advanced
+        case .microphonePermission, .inputMonitoringPermission, .accessibilityPermission: .permissions
+        case .activeEngineUnavailable: .speechModels
+        case .aiConnectionMissing, .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
+        case .modeUsesFailedConnection: .modes
+        case .hotkeyConflict: .general
+        }
+    }
+
+    // The single mapping from raw signals → problems. We never *passively* probe a provider to judge
+    // a connection (privacy invariant, and a missing key is legitimate for a local/no-auth endpoint).
+    // The authoritative AI health signal is a **user-initiated Test Connection that failed**;
+    // `aiConnectionMisconfigured` is the structural check (no model / no base URL) that needs no call.
+    static func detect(
+        hasConfigError: Bool, microphoneGranted: Bool,
+        inputMonitoringGranted: Bool, accessibilityGranted: Bool,
+        activeEngineUsable: Bool = true,
+        aiConnectionMissing: Bool = false, aiConnectionTestFailed: Bool = false,
+        aiConnectionMisconfigured: Bool = false, modeUsesFailedConnection: Bool = false,
+        hotkeyConflict: Bool = false
+    ) -> [SettingsProblem] {
+        var problems: [SettingsProblem] = []
+        if hasConfigError { problems.append(.malformedConfig) }
+        if !microphoneGranted { problems.append(.microphonePermission) }
+        if !inputMonitoringGranted { problems.append(.inputMonitoringPermission) }
+        if !accessibilityGranted { problems.append(.accessibilityPermission) }
+        if !activeEngineUsable { problems.append(.activeEngineUnavailable) }
+        if aiConnectionMissing { problems.append(.aiConnectionMissing) }
+        if aiConnectionTestFailed { problems.append(.aiConnectionTestFailed) }
+        if aiConnectionMisconfigured { problems.append(.aiConnectionMisconfigured) }
+        if modeUsesFailedConnection { problems.append(.modeUsesFailedConnection) }
+        if hotkeyConflict { problems.append(.hotkeyConflict) }
+        return problems
+    }
+}
+
+@MainActor
+final class SettingsProblemModel: ObservableObject {
+    @Published var flaggedPanes: Set<SettingsDestination> = []
+    func update(_ problems: [SettingsProblem]) { flaggedPanes = Set(problems.map(\.pane)) }
+}
+
 @MainActor
 final class SettingsController {
     private var window: NSWindow?
@@ -13,11 +72,18 @@ final class SettingsController {
     private let replacements: ReplacementsSettingsModel
     private let modes: ModesSettingsModel
     private let aiServices: AIServiceSettingsModel
+    private let problems = SettingsProblemModel()
+    private let detectProblems: () -> [SettingsProblem]
+    // Shared with the recorders (via the environment) and the app, which suspends the global hotkey
+    // monitor while a recorder is capturing so the chord can't fire an existing shortcut.
+    let recordingState = HotkeyRecordingState()
 
     init(
         settings: Settings, speechModels: SpeechModelsModel,
-        onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void
+        onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
+        detectProblems: @escaping () -> [SettingsProblem]
     ) {
+        self.detectProblems = detectProblems
         model = SettingsModel(settings: settings, onChange: onChange, onReload: onReload)
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(supportDir: KeyScribePaths.supportDir)
@@ -35,7 +101,15 @@ final class SettingsController {
         speechModels.syncActive(settings.stt.engine)
     }
 
+    func refreshProblems() { problems.update(detectProblems()) }
+
+    // Connections whose last user-run Test Connection failed — the authoritative "this AI service is
+    // broken" signal that drives the error badge (AppDelegate.currentProblems reads it).
+    var hasFailedConnectionTest: Bool { aiServices.hasFailedTest }
+    var failedConnectionIds: Set<String> { aiServices.failedTestIds }
+
     func present() {
+        refreshProblems()
         if let window {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
@@ -43,7 +117,9 @@ final class SettingsController {
         }
         let root = SettingsRootView(
             general: model, speechModels: speechModels, dictionary: dictionary,
-            replacements: replacements, aiServices: aiServices, modes: modes)
+            replacements: replacements, aiServices: aiServices, modes: modes,
+            problems: problems, recordingState: recordingState,
+            refresh: { [weak self] in self?.refreshProblems() })
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "KeyScribe Settings"
@@ -65,20 +141,56 @@ struct SettingsRootView: View {
     @ObservedObject var replacements: ReplacementsSettingsModel
     @ObservedObject var aiServices: AIServiceSettingsModel
     @ObservedObject var modes: ModesSettingsModel
+    @ObservedObject var problems: SettingsProblemModel
+    @ObservedObject var recordingState: HotkeyRecordingState
+    let refresh: () -> Void
     @State private var destination: SettingsDestination? = .general
 
+    // Precedence order for the app-wide hotkey namespace: Modes (routing order) then the two globals.
+    // The losers of any chord collision are "shadowed" — flagged with a red dot, and suppressed at
+    // dispatch so the higher-precedence owner fires. No rejection; first match in this order wins.
+    private func shadowedHotkeys() -> Set<String> {
+        var ordered = modes.modes.map {
+            HotkeyConflicts.Registrant(
+                id: $0.id, key: $0.triggerKeys.first?.key ?? "", enabled: $0.enabled)
+        }
+        ordered.append(.init(id: GlobalHotkey.dictionaryId, key: general.addDictionaryShortcut))
+        ordered.append(.init(id: GlobalHotkey.replacementId, key: general.addReplacementShortcut))
+        return HotkeyConflicts.shadowed(ordered)
+    }
+
     var body: some View {
-        NavigationSplitView {
+        let shadowed = shadowedHotkeys()
+        return NavigationSplitView {
             List(SettingsDestination.allCases, selection: $destination) { destination in
-                Label(destination.title, systemImage: destination.symbol)
-                    .tag(destination)
+                HStack {
+                    Label(destination.title, systemImage: destination.symbol)
+                    Spacer()
+                    if problems.flaggedPanes.contains(destination) {
+                        Circle().fill(.red).frame(width: 7, height: 7)
+                            .accessibilityLabel("Needs attention")
+                    }
+                }
+                .tag(destination)
             }
+            .disabled(recordingState.isRecording)
             .navigationTitle("Settings")
             .frame(minWidth: 180)
+            // Permissions are granted out-of-process; poll while the window is open so a flag clears
+            // as soon as the user fixes the problem (mirrors the Permissions pane's own poll).
+            .task {
+                while !Task.isCancelled {
+                    refresh()
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
         } detail: {
             switch destination ?? .general {
             case .general:
-                GeneralSettingsView(model: general)
+                GeneralSettingsView(
+                    model: general,
+                    dictionaryShadowed: shadowed.contains(GlobalHotkey.dictionaryId),
+                    replacementShadowed: shadowed.contains(GlobalHotkey.replacementId))
             case .speechModels:
                 SpeechModelsView(model: speechModels)
             case .vocabulary:
@@ -86,7 +198,7 @@ struct SettingsRootView: View {
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:
-                ModesSettingsView(model: modes)
+                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds)
             case .permissions:
                 PermissionsSettingsView()
             case .advanced:
@@ -94,10 +206,11 @@ struct SettingsRootView: View {
             }
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
+        .environmentObject(recordingState)
     }
 }
 
-private enum SettingsDestination: CaseIterable, Hashable, Identifiable {
+enum SettingsDestination: CaseIterable, Hashable, Identifiable {
     case general
     case speechModels
     case vocabulary
@@ -160,6 +273,8 @@ final class SettingsModel: ObservableObject {
     @Published var historyEnabled: Bool { didSet { persist() } }
     @Published var retentionDays: Int { didSet { persist() } }
     @Published var eviction: String { didSet { persist() } }
+    @Published var addDictionaryShortcut: String { didSet { persist() } }
+    @Published var addReplacementShortcut: String { didSet { persist() } }
 
     static let evictions: [(id: String, label: String)] = [
         ("fastest", "Fastest — keep model in memory"),
@@ -183,6 +298,8 @@ final class SettingsModel: ObservableObject {
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
         eviction = settings.stt.eviction.rawValue
+        addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
+        addReplacementShortcut = settings.shortcuts.addReplacement
     }
 
     func apply(_ settings: Settings) {
@@ -195,6 +312,8 @@ final class SettingsModel: ObservableObject {
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
         eviction = settings.stt.eviction.rawValue
+        addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
+        addReplacementShortcut = settings.shortcuts.addReplacement
         loading = false
     }
 
@@ -221,6 +340,8 @@ final class SettingsModel: ObservableObject {
             engine: settings.stt.engine,
             eviction: Eviction(rawValue: eviction) ?? .balanced,
             evictionIdleSeconds: settings.stt.evictionIdleSeconds)
+        settings.shortcuts = .init(
+            addDictionaryEntry: addDictionaryShortcut, addReplacement: addReplacementShortcut)
         onChange(settings)
     }
 }

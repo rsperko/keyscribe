@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 import Foundation
 
@@ -58,13 +59,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
         try? file?.write(from: buffer)
 
+        guard let handler else { return }
         guard let channel = buffer.floatChannelData?[0] else { return }
         let count = Int(buffer.frameLength)
         guard count > 0 else { return }
-        var sum: Float = 0
-        for i in 0..<count { sum += channel[i] * channel[i] }
-        let rms = (sum / Float(count)).squareRoot()
+        var rms: Float = 0
+        vDSP_rmsqv(channel, 1, &rms, vDSP_Length(count))
         let level = min(1, max(0, rms * 8))
-        if let handler { handler(level) }
+        handler(level)
     }
 }

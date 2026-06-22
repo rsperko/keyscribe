@@ -98,7 +98,8 @@ The same app serves both via progressive disclosure.
                               │  post-STT pipeline; strip suffix      │  pipeline ◀┘
                               └─────────────────┬───────────────────┘
                                                 ▼
-                          [ post-STT stages ]   replacements · live edits
+                          [ post-STT stages ]   live edits · spoken symbols · replacements
+                                                · numbers (ITN) · fuzzy correction
                           [ stateful stages ]   verbatim-mark · redaction-tokenize
                                                 │  (nonce tokens; local map kept)
                                                 ▼
@@ -198,8 +199,11 @@ stages are **stateful within a single dictation** (they hold a token→original 
 | Command type | Position(s) | Purpose |
 |---|---|---|
 | **Dictionary** | pre-STT bias (where supported) + dynamic system-prompt | Bias recognition toward known terms via the active engine's **decode-time** mechanism (§4.1 *Engine bias support* — Whisper/Apple/Parakeet yes; Moonshine no); and always hint to the LLM that those terms are valid/intentional (not misspellings). A hint, not a directive — the LLM may still transform them per the mode. |
-| **Replacements** | post-STT | Heard→Replace, literal or regex with substitutions. The result flows into the LLM normally and may be transformed by it (e.g. a "pig latin" mode). Replacements are not protected from rewrite. |
-| **Live edits** | post-STT | Spoken commands from a **small documented list** (*new line*, *paragraph*, *scratch that*, *begin/end verbatim* — sentence/newline-aware), **opt-in per mode** (one toggle). Custom trigger words and an escape mechanism come later. |
+| **Replacements** | post-STT | Heard→Replace, literal or regex with substitutions. The result flows into the LLM normally and may be transformed by it (e.g. a "pig latin" mode). Replacements are not protected from rewrite. A user regex is screened by **`ReplacementSafety`** before it runs: a nested-quantifier ("evil") pattern that could catastrophically backtrack on the dictation hot path is refused, not executed (there is no way to interrupt a synchronous `NSRegularExpression` match). |
+| **Live edits** | post-STT | Spoken commands from a **small documented list** (*new line*, *paragraph*, *scratch that*, *tab*, *begin/end verbatim* — sentence/newline-aware), **opt-in per mode** (one toggle). Custom trigger words and an escape mechanism come later. |
+| **Spoken symbols** | post-STT | Optional per-mode expansion of spoken punctuation/symbol names ("open paren" → `(`) for code/terminal modes (`commands.symbols`). Runs **before replacements** so a replacement still sees the expanded text. |
+| **Numbers (inverse text normalization)** | post-STT | Optional per-mode deterministic spoken-number → digits ("twenty five" → "25"), `commands.numbers`. Conservative by design: a run that does not form one unambiguous cardinal is left exactly as spoken (preserves year idioms like "twenty twenty six"). Wrong number output is worse than none. |
+| **Fuzzy correction** | post-STT | Optional per-mode snap of mangled words to dictionary terms ("charge bee" → "ChargeBee"), `commands.fuzzy_correction`. Conservative (Levenshtein + Soundex gated); the dictionary stays a *hint*, not a protected substitution. Bias-less engines (Moonshine) benefit most. |
 | **Verbatim** | post-STT tokenize / restore | A **live edit** (enabled by the live-edits toggle): spans delimited by spoken triggers ("begin verbatim" / "end verbatim") are pulled into a **single nonce token** so the LLM cannot touch them; restored verbatim after. Same machinery as redaction, different intent (protect-from-edit vs withhold-sensitive). |
 | **Privacy / redaction** | post-STT tokenize / restore (+ system-prompt) | **Best-effort pattern matching** of sensitive data (API keys, PII, credit cards, …); matched spans are tokenized out **before** the (possibly cloud) LLM and restored after. Enabled per-mode via a **privacy** toggle. Privacy mode also **forces context off** (§4.4), so the redacted transcript is the only user content that can leave the machine. |
 
@@ -247,7 +251,8 @@ corrupts output**, so the canonical order is fixed and explicit:
 ```
 1. pre-STT        dictionary bias / system-prompt vocab seeding
 2. STT            (single global engine, batch)
-3. post-STT text  live edits (new line / paragraph / scratch that)  → then replacements
+3. post-STT text  live edits → spoken symbols → replacements → numbers (ITN) → fuzzy correction
+                  (StageOrder: liveEdits 0 · spokenSymbols 5 · replacements 10 · numbers 20 · fuzzy 30)
 4. post-STT mark  verbatim tokenize  → then redaction tokenize      (produce nonce tokens +
                                                                       system-prompt constraints)
 5. assemble       dynamic system prompt + user prompt (context blocks)

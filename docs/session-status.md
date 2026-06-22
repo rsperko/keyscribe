@@ -17,6 +17,152 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## Input Monitoring permission: wrong TCC subsystem + stale-grant footgun (2026-06-22, uncommitted)
+
+**Symptom:** Input Monitoring showed orange "Needs attention" while the System Settings toggle was on
+and the hotkey actually worked. Verified live fixed (all permission rows green, hotkey starts dictation).
+
+**Root-cause code bug (this ships):** `Permissions.swift` checked/requested Input Monitoring via the
+**IOHID** subsystem (`IOHIDCheckAccess`/`IOHIDRequestAccess`, `kIOHIDRequestTypeListenEvent`), but the
+app listens for keys through a **`CGEventTap`** (`HotkeyMonitor`, `.listenOnly` `.cgSessionEventTap`),
+whose permission lives in Core Graphics' **ListenEvent** TCC service. The two subsystems can disagree —
+IOHID reported denied while the CG-level tap was authorized and functioning. Fixed by switching to the
+APIs that match the mechanism: **`CGPreflightListenEventAccess()`** (check) / **`CGRequestListenEventAccess()`**
+(request). Rule of thumb: **query the permission API that matches how you consume the input** — CGEventTap
+⇒ CG ListenEvent, not IOHID.
+
+Supporting changes (all uncommitted):
+- **`Resources/Info.plist`** — added `NSInputMonitoringUsageDescription` (declaration for an input-
+  monitoring app; ships in the bundle via `make-app.sh`).
+- **`PermissionsSettingsView` / `FirstRunController`** — the request now `NSApp.activate(...)`s first and
+  **no longer immediately deep-links to System Settings** (that focus-steal pre-empted the consent
+  dialog). The pane shows the **Allow** button in the *denied* state too (`requestableWhenDenied`),
+  because `CGPreflightListenEventAccess` is a bool → only ever `.granted`/`.denied`, never
+  `.notDetermined` (unlike Microphone/AVCapture).
+- **`AppDelegate.startListening`** — only creates the tap once `inputMonitoringStatus() == .granted`
+  (no doomed speculative tap when ungranted). Requesting stays owned by onboarding + the Settings Allow
+  button, so launch doesn't prompt out of sequence.
+
+**The footgun that ate the session (dev-env, NOT a shipping bug):** years of rebuilds left **stale TCC
+grants bound to older code signatures**. The vicious part: a **stale Accessibility entry** (toggle on,
+but its stored `csreq` no longer matched the current binary, so `AXIsProcessTrusted` returned false)
+was **silently suppressing the Input Monitoring prompt** — TCC's prompt logic saw "client already has
+Accessibility → skip the IM prompt", so `CGRequestListenEventAccess()` no-opped every time even from a
+freshly-`tccutil reset` ListenEvent state. The cure was resetting **both** services so neither had a
+stale record, then re-granting fresh:
+`tccutil reset Accessibility com.keyscribe.app && tccutil reset ListenEvent com.keyscribe.app`. A fresh
+notarized install has no stale entries, so the prompt fires and auto-registers normally — users won't
+hit this; it's a dev-machine artifact.
+
+**Diagnostic facts proven this session (don't re-derive):**
+- `IOHIDCheckAccess(ListenEvent)` returns **Denied, never Unknown**, for a never-granted app on macOS 26
+  (so it never surfaces "not determined"). `CGPreflightListenEventAccess()` is a plain bool.
+- TCC verdicts (`IOHIDCheckAccess`, `AXIsProcessTrusted`, `CGPreflightListenEventAccess`) are **read at
+  process launch and cached for the process lifetime** — a grant/revoke needs an app **relaunch** to
+  register. "Toggled on but app says missing" almost always = needs relaunch *or* a stale-signature entry.
+- Toggling an app off→on in the System Settings list **does not rebind** its `csreq`; only remove+re-add
+  (the "−"/"+" buttons) or `tccutil reset` re-binds the grant to the current signature.
+- The system TCC.db (`/Library/Application Support/com.apple.TCC/TCC.db`) is **not readable even with
+  `sudo`** (SIP `authorization denied`) unless Terminal has Full Disk Access — don't waste time on it.
+- Signing is verified **stable**: one `KeyScribe Local` identity, leaf SHA1 `E7F0D9B0…` == the bundle's
+  designated requirement; every `make-app.sh` re-signs with it, so grants persist across rebuilds *for
+  the current cert* (stale grants are from earlier certs/ad-hoc/Stenoir-era builds).
+
+## Correction panel + error badge + recording tint (2026-06-22, uncommitted working tree)
+
+Three user-requested features. `swift build` clean; full `swift test` passes (371; +2 new Settings
+schema tests). **UI not yet verified live** — needs an interactive pass (menu items, panel layout,
+red glyph while recording, red dot on a problem state).
+
+- **Standalone correction panel** (`CorrectionPanelController`, new) — closes the long-deferred M3/M7
+  item. **Add Dictionary Entry…** / **Add Replacement…** in the menu bar (`MenuBarController`) and via
+  **optional global shortcuts**. A small titled window (SwiftUI) writes to the global
+  Dictionary/Replacements stores (reusing `adding(word:)` / `addingLiteral` via `AppDelegate`
+  helpers shared with the History correction surface); the FSEvents watcher reloads live. The
+  Heard/term field is **pre-filled best-effort from the current selection** — `captureSelection()`
+  runs *before* `NSApp.activate`, so the synthetic ⌘C still reaches the app the user was in.
+- **Optional global shortcuts** — new `[shortcuts]` table in `Settings` (`add_dictionary_entry` /
+  `add_replacement`, empty = off, no schema bump; decode/encode tested). Edited in **Settings ▸
+  General** via the existing `HotkeyRecorder`. `HotkeyMonitor` gained **action bindings**: chord-only,
+  fire `onAction(id)` once per press (an `engaged` set debounces keyDown auto-repeat, cleared on
+  keyUp). `AppDelegate.buildHotkeyMonitor` builds them from settings and skips unparseable / non-chord
+  strings.
+- **Chord triggers are now suppressed (2026-06-22).** `HotkeyMonitor`'s tap is **active**
+  (`.defaultTap`, falling back to `.listenOnly` when an active tap can't be created without
+  Accessibility). `handle` returns a consume flag and `consume(type:keyCode:flags:)` swallows an exact
+  chord match — mode trigger or action chord — on key-down, tracks the base keyCode in
+  `suppressedKeyCodes`, and swallows the matching key-up only if it swallowed the key-down (so typing
+  the base key *alone* still passes through, no stuck key). Modifier-only named triggers (flagsChanged)
+  are never consumed. **Fixes the edit-in-place footgun**: a chord like ⌃⌥E used to pass through and the
+  app read Option-E as the acute-accent **dead key**, replacing the selection before the rewrite ran
+  (root cause confirmed by reproduction: text deleted with no synthesized key from KeyScribe; fix
+  verified — selection survives the press). Covered by `HotkeyMonitorSuppressionTests`.
+  - Because the tap is now active, `onStart`/`onCommit`/`onAction` are **dispatched off the callback**
+    (`dispatchSideEffect`, FIFO on the main queue): an active tap holds the event until the callback
+    returns, and `handleStart` does ~200ms of real work (engine resolve, audio start, HUD). The consume
+    decision and gesture *state* stay synchronous; only the side-effect is deferred (start always runs
+    before its commit). This also shrinks the `tapDisabledByTimeout` window that would otherwise strand
+    a hold mid-gesture.
+- **Recording tint** — `DictationController.onRecordingChanged` fires true after `audio.start`, false
+  on commit/cancel; `MenuBarController.setDictating` sets `button.contentTintColor = .systemRed` on
+  the template glyph (reverts to nil). Idempotent, so duplicate falses are harmless.
+- **Error badge (red dot, top-left)** — `MenuBarController.setErrorBadge` toggles a 6pt red CALayer-
+  backed `NSView` pinned top-left of the status button (separate layer so it survives the template
+  adaptation *and* the recording tint). `AppDelegate.refreshStatus` shows it for a config-load failure
+  or any missing required permission. **Navigates to the cause:** a single pure mapping
+  `SettingsProblem.detect(…)` (tested, KeyScribeTests) feeds *both* the menu dot and a
+  `SettingsProblemModel` that flags the offending Settings sidebar pane with its own red dot
+  (Permissions / Advanced); the sidebar `.task`-polls while open so the flag clears on fix. AppDelegate
+  injects `detectProblems` into `SettingsController` so there is one source of truth. **Triggers now
+  also cover model + AI:** unusable active STT engine (`SpeechModelsModel.activeEngineUsable`) →
+  Speech Models. **AI checks (all → AI Services pane + the offending connection's row):** a **dangling**
+  connection (a mode names a *deleted* connection — empty/optional connections are deliberately *not*
+  flagged, else fresh installs with the AI starter modes would false-alarm); a **structural
+  misconfiguration** (`Connection.configIssue`, KeyScribeKit + tested — empty model, or
+  OpenAI-compatible with no base URL); and a **failed Test Connection**
+  (`AIServiceSettingsModel.failedTestIds` → `SettingsController.failedConnectionIds`). A mode wired to a
+  **failed** connection additionally flags the **Modes** pane and that mode's row (`brokenConnectionIds`
+  passed into `ModesSettingsView`). Row styling: orange = incomplete config, red = failed test. **A
+  missing key is *not* an error** — legitimate for a local/no-auth endpoint (the earlier keyless flag
+  was removed per user feedback). **No passive probe** (privacy invariant); the only live AI signal is
+  the user-initiated test. **Still to do (roadmap M7):** a cached post-install self-test-failed flag
+  (needs persisted state).
+
+## Hot-path hardening pass (2026-06-22, uncommitted working tree)
+
+A behavior-preserving performance + concurrency pass over the per-dictation hot path (one UX fix is
+the only behavior change). No new features, no contract changes — design/roadmap/config unchanged.
+
+- **Per-(mode, config-generation) derived caches** (`DictationController`): the compiled post-STT
+  pipeline and the merged global⊕mode dictionary are built once per mode and reused, dropped wholesale
+  when `ConfigCache.generation` advances (bumped on every `invalidate()`). Previously each commit
+  re-merged the dictionary three times (bias / valid-term hint / fuzzy) and rebuilt every stage. Stages
+  precompute their derived tables in `init` (`FuzzyCorrector.Prepared` Soundex, `SpokenSymbols.Prepared`
+  maxWords), so caching the pipeline also keeps that work off the per-dictation path.
+- **Off-main, bounded AX for preceding-text** (`ContextProbe.precedingText` is now `async`): the AX walk
+  runs on `Task.detached` with `AXUIElementSetMessagingTimeout(0.3)` so a wedged target can't stall the
+  dictation flow; browser-URL `NSAppleScript` objects are compiled once and cached per bundle.
+- **Mic-level + HUD**: RMS via `vDSP_rmsqv` (Accelerate), audio work skipped entirely when no handler;
+  the HUD level is forwarded only on a *quantized* change (per-buffer → step changes) and `HUDController`
+  skips a render when state is unchanged.
+- **Parakeet bias caching** (`ParakeetEngine`): tokenized vocabulary + `VocabularyRescorer` cached keyed
+  on the term set, rebuilt only when terms change (the rescorer reads the CTC model dir, so per-dictation
+  recreation was needless I/O); removed dead `ASRError`.
+- **Paste restore** (`TextInserter`): the post-⌘V wait now polls `changeCount` and bails early if anything
+  wrote after our scratch (was a flat 250 ms sleep); still gated so we never clobber a newer write.
+- **History**: `HistoryStore.signature()` (file count + latest day-file name/size/mtime) gates re-parse,
+  so re-fronting the window when nothing changed is free; `HistorySearch.matches` filters per-entry and
+  `HistoryRow` precomputes its day key. `ValidationGate` counts token occurrences by range scan (no
+  `components(separatedBy:)` allocation); `RedactionTokenizer` precomputes span length for its sort;
+  `LiveEditsStage` lowercases tokens once.
+- **Settings**: the Permissions poll moved from a always-on `Timer.publish` to a `.task` loop cancelled
+  on disappear (polls only while the pane is visible); `SpeechModelsModel.updateRow(id)` rebuilds just the
+  changed row per download-progress tick instead of reconstructing (and re-statting) every row.
+- **UX fix (the one behavior change):** *Work on Selection* now checks Accessibility before the synthetic
+  ⌘C selection capture — without it the read silently fails and the old abort misreported "no selection."
+  It now names the cause ("Accessibility is off — KeyScribe can't read the selected text.") and offers an
+  **Open Accessibility Settings** repair action (`HUDErrorAction.openAccessibilitySettings`).
+
 ## GPT UI-review fixes — M7 polish (2026-06-22, uncommitted working tree)
 
 Worked `agent_notes/gpt_ui_review/review.md` against the live app (a UX pass comparing the build to
@@ -113,7 +259,9 @@ full app target compiles. Ten of eleven items landed; per-engine ASR-confidence 
 - **Memory-pressure eviction** — `DictationController` installs a `.critical` `DispatchSource` that
   evicts the active engine when idle (`!machine.isBusy`); an in-flight dictation keeps its engine.
   Local reaction to a local signal, no telemetry.
-- Correctly **skipped** (per the report's own SKIP/CONSIDER calls): vDSP/level-meter throttle (micro),
+- Deferred then **done** (later hot-path hardening pass, 2026-06-22 — see top): vDSP RMS + HUD
+  level-quantization throttle (was filed "micro," picked up with the rest of the hot-path pass).
+  Still correctly **skipped** (per the report's own SKIP/CONSIDER calls):
   streaming partial transcription (conflicts with batch/atomic-insert), and `StageTimings` instrumentation
   (no consumer yet — would be dead code; revisit if/when measuring warm-on-press's payoff).
 

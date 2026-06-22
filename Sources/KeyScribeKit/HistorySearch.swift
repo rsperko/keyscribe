@@ -6,10 +6,18 @@ public enum HistorySearch {
     public static func filter(_ entries: [HistoryEntry], query: String) -> [HistoryEntry] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return entries }
-        return entries.filter {
-            $0.heard.localizedCaseInsensitiveContains(q)
-                || $0.result.localizedCaseInsensitiveContains(q)
-                || $0.modeName.localizedCaseInsensitiveContains(q)
-        }
+        return entries.filter { matches($0, trimmedQuery: q) }
+    }
+
+    public static func matches(_ entry: HistoryEntry, query: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return true }
+        return matches(entry, trimmedQuery: q)
+    }
+
+    private static func matches(_ entry: HistoryEntry, trimmedQuery q: String) -> Bool {
+        entry.heard.localizedCaseInsensitiveContains(q)
+            || entry.result.localizedCaseInsensitiveContains(q)
+            || entry.modeName.localizedCaseInsensitiveContains(q)
     }
 }

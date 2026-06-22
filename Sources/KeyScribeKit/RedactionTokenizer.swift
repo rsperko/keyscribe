@@ -51,7 +51,16 @@ public enum RedactionTokenizer {
             #"(?i)\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|API)[A-Z0-9_]*\s*[=:]\s*["']?[^\s"']{6,}["']?"#),
     ]
 
-    private struct Span { let range: Range<String.Index>; let value: String }
+    private struct Span {
+        let range: Range<String.Index>
+        let value: String
+        let length: Int
+        init(range: Range<String.Index>, value: String) {
+            self.range = range
+            self.value = value
+            self.length = value.count
+        }
+    }
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
         var spans: [Span] = []
@@ -71,8 +80,7 @@ public enum RedactionTokenizer {
         spans.sort {
             $0.range.lowerBound != $1.range.lowerBound
                 ? $0.range.lowerBound < $1.range.lowerBound
-                : text.distance(from: $0.range.lowerBound, to: $0.range.upperBound)
-                    > text.distance(from: $1.range.lowerBound, to: $1.range.upperBound)
+                : $0.length > $1.length
         }
         var kept: [Span] = []
         var lastUpper: String.Index?

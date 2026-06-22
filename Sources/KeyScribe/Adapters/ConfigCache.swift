@@ -22,6 +22,11 @@ final class ConfigCache {
     private var dictionaryCache: DictionarySet?
     private var fragmentCache: [String: String] = [:]
 
+    // Bumped on every invalidate(). Consumers that derive their own expensive per-mode artifacts
+    // (DictationController's compiled pipeline and merged dictionary) key on this so they recompute
+    // only when the config actually changed, not on every dictation.
+    private(set) var generation = 0
+
     init(supportDir: URL) {
         self.supportDir = supportDir
     }
@@ -32,6 +37,7 @@ final class ConfigCache {
         connectionsCache = nil
         dictionaryCache = nil
         fragmentCache = [:]
+        generation += 1
     }
 
     var modes: [Mode] {

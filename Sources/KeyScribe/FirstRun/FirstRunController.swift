@@ -115,8 +115,8 @@ final class FirstRunModel: ObservableObject {
     }
 
     func requestInputMonitoring() {
+        NSApp.activate(ignoringOtherApps: true)
         Permissions.requestInputMonitoring()
-        Permissions.openSettings(.inputMonitoring)
         refreshStatuses()
     }
 

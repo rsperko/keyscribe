@@ -147,6 +147,26 @@ load-bearing results were promoted here; this section is now the record, not a p
 - **Permissions = 3 TCC categories:** Accessibility (post ⌘V/⌘C + AX reads), Input Monitoring
   (the event tap), Automation (browser URL via AppleScript — request only when a mode opts into
   URL context).
+  - **Input Monitoring must be checked/requested via the CG ListenEvent APIs, NOT IOHID**
+    (`Permissions.swift`, 2026-06-22). The hotkey is a **`CGEventTap`** (`HotkeyMonitor`), so its
+    Input-Monitoring permission lives in Core Graphics' ListenEvent service — use
+    `CGPreflightListenEventAccess()` / `CGRequestListenEventAccess()`. (The tap is now created
+    **active** — `.defaultTap` — so it can *swallow* a registered chord trigger before the focused app
+    sees it; an active tap also needs **Accessibility**, and falls back to `.listenOnly` if that isn't
+    granted. See session-status "Chord triggers are now suppressed".) `IOHIDCheckAccess` queries a
+    *different* subsystem and reported denied while the tap was authorized → false "Needs attention"
+    while the toggle was on and the hotkey worked. Match the permission API to how you consume input.
+    `CGPreflightListenEventAccess()` is a plain bool (granted/denied, never "not determined").
+  - **TCC verdicts are read at launch and cached for the process lifetime** — a grant/revoke needs an
+    app **relaunch** to take effect. "Toggle on in System Settings but the app says missing" = relaunch
+    needed, *or* a stale-signature grant. Toggling off→on does **not** rebind a grant's `csreq`; only
+    remove+re-add or `tccutil reset <service> com.keyscribe.app` rebinds it to the current signature.
+  - **A stale grant for one service can suppress another's prompt.** A stale Accessibility entry
+    (toggle on, `csreq` mismatched → `AXIsProcessTrusted` false) made TCC skip the Input Monitoring
+    consent dialog ("already has Accessibility"), so `CGRequestListenEventAccess()` silently no-opped.
+    When a prompt won't fire on the dev machine, `tccutil reset` **both** Accessibility and ListenEvent,
+    then re-grant fresh. This is dev-machine cruft from rebuilds under old certs — fresh notarized
+    installs don't have it. (System TCC.db is unreadable even with `sudo` under SIP — don't bother.)
 - **Token-fencing:** `⟦SN:…⟧` nonce tokens survive LLM rewrite (local proxy). Final sentinel +
   Gemini 2.5 Flash adversarial pass deferred to M5/M6.
 

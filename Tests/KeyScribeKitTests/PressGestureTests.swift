@@ -23,6 +23,28 @@ struct PressGestureTests {
         #expect(g.handle(.up, at: 0.9) == .commit)
     }
 
+    @Test func holdOrTapTreatsAutoRepeatDownsAsContinuedHoldNotNewTaps() {
+        var g = PressGesture(style: .holdOrTap, tapThreshold: 0.3)
+        #expect(g.handle(.down, at: 0.0) == .start)
+        #expect(g.handle(.down, at: 2.95) == .none)
+        #expect(g.handle(.up, at: 3.0) == .commit)
+    }
+
+    @Test func holdOnlyIgnoresAutoRepeatDowns() {
+        var g = PressGesture(style: .holdOnly, tapThreshold: 0.3)
+        #expect(g.handle(.down, at: 0.0) == .start)
+        #expect(g.handle(.down, at: 0.1) == .none)
+        #expect(g.handle(.up, at: 1.0) == .commit)
+    }
+
+    @Test func tapToToggleIgnoresAutoRepeatDowns() {
+        var g = PressGesture(style: .tapToToggle, tapThreshold: 0.3)
+        #expect(g.handle(.down, at: 0.0) == .start)
+        #expect(g.handle(.down, at: 0.1) == .none)
+        #expect(g.handle(.up, at: 1.0) == .none)
+        #expect(g.handle(.down, at: 2.0) == .commit)
+    }
+
     @Test func holdOrTapQuickTapLatchesThenNextTapCommits() {
         var g = PressGesture(style: .holdOrTap, tapThreshold: 0.3)
         #expect(g.handle(.down, at: 0.0) == .start)

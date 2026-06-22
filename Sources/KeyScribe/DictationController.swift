@@ -43,9 +43,41 @@ final class DictationController {
     private var pendingHeardTranscript: String?
     private var rewriteEscapeTask: Task<Void, Never>?
 
+    // Per-(mode, config generation) derived artifacts, so a dictation reuses them instead of
+    // re-merging the dictionary three times and rebuilding the pipeline stages every commit. Both are
+    // dropped wholesale whenever the config generation advances (see refreshDerivedCachesIfNeeded).
+    private var derivedGeneration = -1
+    private var pipelineCache: [String: Pipeline] = [:]
+    private var mergedDictionaryCache: [String: [String]] = [:]
+    private static let nilModeKey = "\u{0}nil"
+
+    // Last HUD level rendered while recording (quantized). The mic level callback fires per audio
+    // buffer; forwarding only on a meaningful change keeps the HUD from re-rendering its whole tree at
+    // buffer rate (the indicator animates between steps anyway). Reset at the start of each recording.
+    private var lastRenderedLevel: Float = -1
+
+    // The mic level callback fires per audio buffer on a background thread. Rather than hop to the main
+    // actor for each one (which can pile up unbounded if the main actor is busy), the coalescer keeps a
+    // single pending level and at most one in-flight update — late buffers overwrite the pending value.
+    // A `let` (not a lazy var) so the Sendable callback can reach it off the main actor; its render
+    // closure is wired in init once self is available.
+    private let levelCoalescer = LevelCoalescer()
+
+    private func renderLevel(_ level: Float) {
+        guard case .recording = machine.state else { return }
+        let quantized = (level * 20).rounded() / 20
+        guard quantized != lastRenderedLevel else { return }
+        lastRenderedLevel = quantized
+        hud?.render(.recording(mode: currentModeName, level: quantized))
+    }
+
     // Fired after every terminal insertion outcome. First run uses it to require one real successful
     // dictation before completing onboarding (ui_design.md §2).
     var onDictationCompleted: ((DictationOutcome) -> Void)?
+
+    // Fired true when capture starts, false when it ends (commit or a start failure). The menu-bar
+    // glyph tints red while true (ui_design.md §Dynamic status).
+    var onRecordingChanged: ((Bool) -> Void)?
 
     var hasResult: Bool { lastResult != nil }
     var nextModeOverrideName: String? {
@@ -74,6 +106,7 @@ final class DictationController {
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
         self.llmClient = llmClient
+        levelCoalescer.onLevel = { [weak self] level in self?.renderLevel(level) }
         installMemoryPressureHandler()
     }
 
@@ -141,14 +174,13 @@ final class DictationController {
         resolveMode(triggerKey: triggerKey)
         warmActiveEngine()
         effects.begin(settings.duringDictation)
+        lastRenderedLevel = 0
         hud?.render(.recording(mode: currentModeName, level: 0))
         do {
             _ = try audio.start { [weak self] level in
-                Task { @MainActor in
-                    guard let self, case .recording = self.machine.state else { return }
-                    self.hud?.render(.recording(mode: self.currentModeName, level: level))
-                }
+                self?.levelCoalescer.submit(level)
             }
+            onRecordingChanged?(true)
         } catch {
             finishError("Could not start the microphone", action: .openMicrophoneSettings)
         }
@@ -156,6 +188,7 @@ final class DictationController {
 
     func handleCommit() {
         guard machine.state == .recording else { return }
+        onRecordingChanged?(false)
         machine.beginTranscribing()
         guard let url = audio.stop() else {
             machine.cancel()
@@ -196,12 +229,31 @@ final class DictationController {
     // bias ignore these.
     private func recognitionBiasTerms() -> [String] {
         guard provider.active.supportsRecognitionBias else { return [] }
-        let merged = activeMode.map { mode in
+        return mergedDictionaryWords(for: activeMode)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    // Global ⊕ mode dictionary, merged once per (mode, config generation). Three call sites need it
+    // each dictation (recognition bias, the rewrite "valid term" hint, fuzzy correction); the merge
+    // (VocabularyMerge dedups in stable order) is pure config, so it is cached, not recomputed.
+    private func mergedDictionaryWords(for mode: Mode?) -> [String] {
+        refreshDerivedCachesIfNeeded()
+        let key = mode?.id ?? Self.nilModeKey
+        if let cached = mergedDictionaryCache[key] { return cached }
+        let words = mode.map { m in
             VocabularyMerge.words(
                 global: config.dictionary.words,
-                local: mode.dictionary.words, includeGlobal: mode.dictionary.includeGlobal)
+                local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
         } ?? config.dictionary.words
-        return merged.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        mergedDictionaryCache[key] = words
+        return words
+    }
+
+    private func refreshDerivedCachesIfNeeded() {
+        guard config.generation != derivedGeneration else { return }
+        derivedGeneration = config.generation
+        pipelineCache.removeAll(keepingCapacity: true)
+        mergedDictionaryCache.removeAll(keepingCapacity: true)
     }
 
     struct TranscribeTimeout: Error {}
@@ -262,11 +314,11 @@ final class DictationController {
         if Task.isCancelled { return }
 
         switch final {
-        case .abort(let message):
+        case .abort(let message, let action):
             // A selection rewrite that failed (or had nothing to do) leaves the target untouched —
             // a destructive op must never overwrite the user's text on failure.
             log.info("aborted: \(message, privacy: .public)")
-            finishError(message)
+            finishError(message, action: action)
             clearRewriteEscapeHatch()
             applyEvictionAfterDictation()
 
@@ -365,7 +417,8 @@ final class DictationController {
 
     private enum FinalText {
         case insert(String)
-        case abort(String)   // leave the target untouched; surface this message
+        // leave the target untouched; surface this message, optionally with a repair action
+        case abort(String, HUDErrorAction?)
     }
 
     // What a cloud rewrite involved, captured for the History detail view. Built only when a rewrite
@@ -408,16 +461,22 @@ final class DictationController {
     // no selection, no connection, or a rewrite that fell back — aborts and leaves the selection
     // untouched. A destructive operation must never clobber the user's text on failure.
     private func rewriteSelection(instruction: String, mode: Mode?) async -> (FinalText, RewriteDetails?) {
-        guard let mode else { return (.abort("No mode resolved"), nil) }
+        guard let mode else { return (.abort("No mode resolved", nil), nil) }
+        // Capturing the selection fires a synthetic ⌘C, which the OS drops without Accessibility — so
+        // the read silently fails and the abort below would misreport it as "no selection". Name the
+        // real cause and offer the fix instead.
+        guard accessibilityGranted() else {
+            return (.abort("Accessibility is off — KeyScribe can't read the selected text.", .openAccessibilitySettings), nil)
+        }
         guard let selection = await TextInserter.captureSelection(), !selection.isEmpty else {
-            return (.abort("Select some text first"), nil)
+            return (.abort("Select some text first", nil), nil)
         }
         guard let connection = connection(for: mode) else {
-            return (.abort("Work on Selection needs an AI connection"), nil)
+            return (.abort("Work on Selection needs an AI connection", nil), nil)
         }
         let result = await tokenizeRewriteRestore(
             content: selection, instruction: instruction, mode: mode, connection: connection)
-        let final: FinalText = result.ok ? .insert(result.text) : .abort("Rewrite failed — selection unchanged")
+        let final: FinalText = result.ok ? .insert(result.text) : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
     }
 
@@ -466,9 +525,7 @@ final class DictationController {
             .joined(separator: "\n\n")
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
-        let effectiveDict = VocabularyMerge.words(
-            global: config.dictionary.words,
-            local: mode.dictionary.words, includeGlobal: mode.dictionary.includeGlobal)
+        let effectiveDict = mergedDictionaryWords(for: mode)
         let validTerms = effectiveDict.filter { content.range(of: $0, options: .caseInsensitive) != nil }
 
         // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity and
@@ -483,7 +540,7 @@ final class DictationController {
         var precedingText: String?
         if ctx.precedingText {
             contextCategories.append("preceding text")
-            precedingText = ContextProbe.precedingText()
+            precedingText = await ContextProbe.precedingText()
             Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")
         }
 
@@ -492,7 +549,7 @@ final class DictationController {
             contextCategories.append("visible text")
             var captured: String?
             if let visibleBundleId = capturedSnapshot?.bundleId {
-                captured = await ContextProbe.visibleText(forBundleId: visibleBundleId)
+                captured = await ContextProbe.visibleText(forBundleId: visibleBundleId, maxChars: Self.visibleTextCap * 2)
             }
             let mandatoryChars = modePrompt.count + instruction.count + content.count
             switch ContextBudget.fit(mandatoryChars: mandatoryChars, visibleText: captured,
@@ -534,25 +591,36 @@ final class DictationController {
     // (mode-local merged with global per include_global). Redaction/verbatim tokenization is M6;
     // AI rewrite is M5.
     private func processTranscript(_ raw: String, mode: Mode?) -> String {
-        let global = config.replacements
+        compiledPipeline(for: mode).run(raw)
+    }
+
+    // The post-STT pipeline is pure config (mode flags + global/mode replacements & dictionary), so it
+    // is compiled once per (mode, config generation) and reused. Stages precompute their own derived
+    // data in init (prepared symbol/fuzzy tables, compiled replacement rules), so caching the pipeline
+    // also keeps that work out of the per-dictation path.
+    private func compiledPipeline(for mode: Mode?) -> Pipeline {
+        refreshDerivedCachesIfNeeded()
+        let key = mode?.id ?? Self.nilModeKey
+        if let cached = pipelineCache[key] { return cached }
+        let pipeline = Pipeline(buildStages(for: mode))
+        pipelineCache[key] = pipeline
+        return pipeline
+    }
+
+    private func buildStages(for mode: Mode?) -> [any PipelineStage] {
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
         if mode?.commands.symbols ?? false { stages.append(SymbolsStage()) }
         let rules = VocabularyMerge.rules(
-            global: global.toRules(),
+            global: config.replacements.toRules(),
             local: mode?.replacements.toRules() ?? [],
             includeGlobal: mode?.replacements.includeGlobal ?? true)
         stages.append(ReplacementsStage(rules: rules))
         if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
         if mode?.commands.fuzzyCorrection ?? false {
-            let terms = mode.map { m in
-                VocabularyMerge.words(
-                    global: config.dictionary.words,
-                    local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
-            } ?? config.dictionary.words
-            stages.append(FuzzyStage(terms: terms))
+            stages.append(FuzzyStage(terms: mergedDictionaryWords(for: mode)))
         }
-        return Pipeline(stages).run(raw)
+        return stages
     }
 
     func pasteLast() {
@@ -562,6 +630,7 @@ final class DictationController {
 
     func cancel() {
         guard machine.isBusy else { return }
+        onRecordingChanged?(false)
         dictationTask?.cancel()
         dictationTask = nil
         _ = audio.stop()

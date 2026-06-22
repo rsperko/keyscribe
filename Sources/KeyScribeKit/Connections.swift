@@ -62,6 +62,26 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+extension Connection {
+    // A structural misconfiguration detectable without any network call (distinct from a wrong key,
+    // which only a Test Connection reveals). Every provider needs a model; an OpenAI-compatible
+    // connection also needs a base URL to reach. A missing key is *not* here — it is legitimate for a
+    // local/no-auth endpoint.
+    public enum ConfigIssue: Equatable, Sendable {
+        case missingModel
+        case missingBaseURL
+    }
+
+    public var configIssue: ConfigIssue? {
+        if model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
+        if provider == .openaiCompatible,
+           (baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .missingBaseURL
+        }
+        return nil
+    }
+}
+
 public struct ConnectionSet: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var connections: [Connection]
