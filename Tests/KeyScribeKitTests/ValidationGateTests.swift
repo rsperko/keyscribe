@@ -1,0 +1,53 @@
+import Testing
+@testable import KeyScribeKit
+
+struct ValidationGateTests {
+    @Test func passesWhenEachTokenReturnsExactlyOnce() {
+        let v = ValidationGate.check(
+            output: "Email ⟦SN:REDACT:1⟧ and ⟦SN:VERB:1⟧ here",
+            issuedTokens: ["⟦SN:REDACT:1⟧", "⟦SN:VERB:1⟧"])
+        #expect(v == .pass)
+    }
+
+    @Test func passesWithNoTokensAndCleanOutput() {
+        #expect(ValidationGate.check(output: "just text", issuedTokens: []) == .pass)
+    }
+
+    @Test func emptyOutputFails() {
+        #expect(ValidationGate.check(output: "   ", issuedTokens: []) == .fail(.empty))
+    }
+
+    @Test func missingTokenFails() {
+        #expect(ValidationGate.check(output: "no token here", issuedTokens: ["⟦SN:REDACT:1⟧"])
+            == .fail(.missingToken("⟦SN:REDACT:1⟧")))
+    }
+
+    @Test func duplicatedTokenFails() {
+        #expect(ValidationGate.check(
+            output: "⟦SN:REDACT:1⟧ and again ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"])
+            == .fail(.duplicatedToken("⟦SN:REDACT:1⟧")))
+    }
+
+    @Test func straySentinelFails() {
+        // model invented a token we never issued
+        let v = ValidationGate.check(output: "text ⟦SN:REDACT:9⟧", issuedTokens: [])
+        #expect(v == .fail(.strayToken("⟦SN:REDACT:9⟧")))
+    }
+
+    @Test func allowDeletionLetsTokenBeAbsent() {
+        #expect(ValidationGate.check(
+            output: "clean output", issuedTokens: ["⟦SN:VERB:1⟧"], allowDeletion: true) == .pass)
+    }
+
+    @Test func allowDeletionStillRejectsDuplicates() {
+        #expect(ValidationGate.check(
+            output: "⟦SN:VERB:1⟧ ⟦SN:VERB:1⟧", issuedTokens: ["⟦SN:VERB:1⟧"], allowDeletion: true)
+            == .fail(.duplicatedToken("⟦SN:VERB:1⟧")))
+    }
+
+    @Test func retryAndFallbackDecision() {
+        // first failure → retry stricter; second failure → local fallback
+        #expect(ValidationGate.recovery(attempt: 0) == .retryStricter)
+        #expect(ValidationGate.recovery(attempt: 1) == .localFallback)
+    }
+}

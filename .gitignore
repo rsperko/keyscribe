@@ -1,0 +1,20 @@
+.DS_Store
+.build/
+*.app
+agent_notes/
+.claude/
+.codex/
+AGENTS.override.md
+CLAUDE.local.md
+
+# Throwaway M0 de-risk spikes — not production (spikes/README.md)
+spikes/
+
+# Downloaded STT weights — runtime-downloaded, never committed (design.md §4.1, §5)
+models/
+
+# Benchmark corpus — personal voice recordings + run output stay local. The kit (manifest.json,
+# record.sh, README.md) IS committed so the benchmark is reproducible against your own voice.
+benchmark/*.wav
+benchmark/results.json
+

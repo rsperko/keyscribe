@@ -1,0 +1,20 @@
+{
+  "entries": [
+    { "id": "01", "text": "The quarterly report is due on Friday afternoon.", "biasTerms": [] },
+    { "id": "02", "text": "Can you move our meeting to three o'clock tomorrow?", "biasTerms": [] },
+    { "id": "03", "text": "I think we should rewrite this paragraph to be more concise.", "biasTerms": [] },
+    { "id": "04", "text": "Let's deploy the service to Kubernetes before the demo.", "biasTerms": ["Kubernetes"] },
+    { "id": "05", "text": "I love using KeyScribe for dictation every single day.", "biasTerms": ["KeyScribe"] },
+    { "id": "06", "text": "The Postgres query is slow, so check the Grafana dashboard.", "biasTerms": ["Postgres", "Grafana"] },
+    { "id": "07", "text": "Ask Anthropic whether Claude supports tool use.", "biasTerms": ["Anthropic", "Claude"] },
+    { "id": "08", "text": "We pinned the WhisperKit and FluidAudio forks in the package.", "biasTerms": ["WhisperKit", "FluidAudio"] },
+    { "id": "09", "text": "Run the model through oMLX and Parakeet for comparison.", "biasTerms": ["oMLX", "Parakeet"] },
+    { "id": "10", "text": "The patient presented with tachycardia and mild dyspnea.", "biasTerms": ["tachycardia", "dyspnea"] },
+    { "id": "11", "text": "Configure OAuth and rotate the JWT signing key.", "biasTerms": ["OAuth", "JWT"] },
+    { "id": "12", "text": "Send the subpoena to opposing counsel by end of day.", "biasTerms": ["subpoena"] },
+    { "id": "13", "text": "Our GraphQL endpoint needs a new resolver for invoices.", "biasTerms": ["GraphQL"] },
+    { "id": "14", "text": "Schedule a sync with Rajesh and Anya next Tuesday.", "biasTerms": ["Rajesh", "Anya"] },
+    { "id": "15", "text": "The Nginx config proxies requests to the Redis cache layer.", "biasTerms": ["Nginx", "Redis"] },
+    { "id": "16", "text": "When I dictate long passages I want the engine to keep up without dropping words, handle natural pauses, and still get domain terms like Kubernetes and Prometheus right.", "biasTerms": ["Kubernetes", "Prometheus"] }
+  ]
+}

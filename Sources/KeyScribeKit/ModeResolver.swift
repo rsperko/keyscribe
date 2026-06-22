@@ -1,0 +1,145 @@
+import Foundation
+
+public struct RoutingContext: Equatable, Sendable {
+    public var bundleId: String?
+    public var url: String?
+    public init(bundleId: String? = nil, url: String? = nil) {
+        self.bundleId = bundleId
+        self.url = url
+    }
+}
+
+public struct PhaseBResult: Equatable, Sendable {
+    public var routedModeId: String?
+    public var transcript: String
+    public init(routedModeId: String?, transcript: String) {
+        self.routedModeId = routedModeId
+        self.transcript = transcript
+    }
+}
+
+// Two-phase routing (design.md §4.3). Phase A runs before STT from key + app/URL context;
+// Phase B runs after STT from trigger-phrase suffixes, constrained to Phase A's eligible set.
+public enum ModeResolver {
+    public static func eligibleModes(_ modes: [Mode], context: RoutingContext) -> [Mode] {
+        modes.filter { $0.enabled && isEligible($0, context) }
+    }
+
+    public static func resolvePhaseA(
+        modes: [Mode], defaultModeId: String, context: RoutingContext, triggerKey: String?
+    ) -> Mode? {
+        let enabled = modes.filter(\.enabled)
+        let eligible = enabled.filter { isEligible($0, context) }
+
+        // 1. Explicit key binding forces its mode, overriding context (constraints gate only
+        //    automatic selection, never a deliberate key press — design.md §4.3).
+        if let key = triggerKey {
+            let wanted = normalizeKey(key)
+            if let m = enabled.first(where: { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }) {
+                return m
+            }
+        }
+        // 2. Context auto-start: the most specific eligible *constrained* mode (ties → declaration
+        //    order). Only constrained modes auto-start; unconstrained non-defaults need key/voice.
+        if let m = mostSpecific(eligible.filter { !$0.constraints.isEmpty }, context) { return m }
+        // 3. Global default mode, if eligible here.
+        if let m = eligible.first(where: { $0.id == defaultModeId }) { return m }
+        // 4. Last resort: the default by id regardless, else any enabled mode.
+        return enabled.first(where: { $0.id == defaultModeId }) ?? enabled.first
+    }
+
+    public static func resolvePhaseB(
+        eligibleModes: [Mode], transcript: String, context: RoutingContext = .init()
+    ) -> PhaseBResult {
+        // Among eligible modes whose phrase matches the suffix, pick by specificity → declaration
+        // order (same resolver as Phase A). Iterating in declaration order with a strict `>` keeps
+        // the earliest-declared on a specificity tie.
+        var best: (mode: Mode, stripped: String)?
+        var bestScore = Int.min
+        for mode in eligibleModes {
+            for phrase in mode.triggerPhrases {
+                guard let stripped = matchSuffix(phrase, in: transcript) else { continue }
+                let score = specificity(mode, context)
+                if score > bestScore {
+                    bestScore = score
+                    best = (mode, stripped)
+                }
+                break
+            }
+        }
+        if let best { return PhaseBResult(routedModeId: best.mode.id, transcript: best.stripped) }
+        return PhaseBResult(routedModeId: nil, transcript: transcript)
+    }
+
+    // Whether any enabled mode could match on URL — the gate for probing the browser URL at all
+    // (the probe needs Apple Events + the Automation prompt, so it's opt-in; design.md §4.4).
+    public static func requiresURLContext(_ modes: [Mode]) -> Bool {
+        modes.contains { $0.enabled && $0.constraints.contains { $0.urlPattern != nil } }
+    }
+
+    private static func isEligible(_ mode: Mode, _ context: RoutingContext) -> Bool {
+        if mode.constraints.isEmpty { return true }
+        return mode.constraints.contains { matches($0, context) }
+    }
+
+    // Specificity of a mode in this context: the most specific *matching* constraint wins. URL is
+    // narrower than app, so app=1 + URL=2 sums to app+URL=3 > URL=2 > app=1 > unconstrained=0
+    // (design.md §4.3).
+    private static func specificity(_ mode: Mode, _ context: RoutingContext) -> Int {
+        mode.constraints.filter { matches($0, context) }.map(constraintScore).max() ?? 0
+    }
+
+    private static func constraintScore(_ c: Mode.Constraint) -> Int {
+        (c.bundleId != nil ? 1 : 0) + (c.urlPattern != nil ? 2 : 0)
+    }
+
+    private static func mostSpecific(_ modes: [Mode], _ context: RoutingContext) -> Mode? {
+        var best: Mode?
+        var bestScore = Int.min
+        for m in modes {
+            let score = specificity(m, context)
+            if score > bestScore { bestScore = score; best = m }
+        }
+        return best
+    }
+
+    private static func matches(_ constraint: Mode.Constraint, _ context: RoutingContext) -> Bool {
+        if let bundle = constraint.bundleId, bundle != context.bundleId { return false }
+        if let pattern = constraint.urlPattern {
+            guard let url = context.url, regexFound(pattern, in: url) else { return false }
+        }
+        return true
+    }
+
+    private static func normalizeKey(_ key: String) -> String {
+        key.lowercased().trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func regexFound(_ pattern: String, in text: String) -> Bool {
+        guard let re = RegexCache.regex(pattern) else { return false }
+        return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    // Returns the transcript with the matched suffix removed (trimmed), or nil if the phrase does
+    // not match at the end. STT engines commonly capitalize and append a period, so trailing
+    // whitespace/punctuation is trimmed before matching — only the phrase itself is then stripped.
+    private static func matchSuffix(_ pattern: String, in transcript: String) -> String? {
+        let trimmed = trimTrailingNoise(transcript)
+        guard let re = RegexCache.regex(pattern) else { return nil }
+        let full = NSRange(trimmed.startIndex..., in: trimmed)
+        guard let match = re.firstMatch(in: trimmed, range: full),
+              match.range.location + match.range.length == full.length,
+              let r = Range(match.range, in: trimmed) else { return nil }
+        return String(trimmed[trimmed.startIndex..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func trimTrailingNoise(_ s: String) -> String {
+        var end = s.endIndex
+        while end > s.startIndex {
+            let prev = s.index(before: end)
+            guard s[prev].isWhitespace || s[prev].isPunctuation else { break }
+            end = prev
+        }
+        return String(s[s.startIndex..<end])
+    }
+}

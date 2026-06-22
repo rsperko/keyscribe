@@ -1,0 +1,869 @@
+import AppKit
+import SwiftUI
+import KeyScribeKit
+
+@MainActor
+final class ModesSettingsModel: ObservableObject {
+    @Published private(set) var modes: [Mode] = []
+    @Published private(set) var connections: [Connection] = []
+    @Published private(set) var fragmentIds: [String] = []
+    @Published var selectedID: String?
+    @Published private(set) var error: String?
+
+    private let modesDir: URL
+    private let supportDir: URL
+    private let defaultModeId: () -> String
+    private let onSetDefault: (String) -> Void
+
+    init(
+        modesDir: URL, supportDir: URL,
+        defaultModeId: @escaping () -> String = { "" },
+        onSetDefault: @escaping (String) -> Void = { _ in }
+    ) {
+        self.modesDir = modesDir
+        self.supportDir = supportDir
+        self.defaultModeId = defaultModeId
+        self.onSetDefault = onSetDefault
+        reload()
+    }
+
+    func isDefault(_ mode: Mode) -> Bool { mode.id == defaultModeId() }
+
+    func makeDefault(_ mode: Mode) {
+        onSetDefault(mode.id)
+        objectWillChange.send()
+    }
+
+    func reload() {
+        modes = ModeStore.loadAll(in: modesDir)
+        connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+        fragmentIds = loadFragmentIds()
+        if selectedID == nil || !modes.contains(where: { $0.id == selectedID }) {
+            selectedID = modes.first?.id
+        }
+        error = nil
+    }
+
+    func create() {
+        let name = "New Mode"
+        let mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
+        save(mode)
+        selectedID = mode.id
+    }
+
+    func update(_ mode: Mode) {
+        save(mode)
+    }
+
+    func delete(_ mode: Mode) {
+        do {
+            try ModeStore.delete(mode, from: modesDir)
+            let wasDefault = mode.id == defaultModeId()
+            modes.removeAll { $0.id == mode.id }
+            selectedID = modes.first?.id
+            // Default-mode delete guard (session-status follow-up): hand the default to a remaining
+            // mode so settings.default_mode_id never dangles after the default is removed.
+            if wasDefault, let next = modes.first { onSetDefault(next.id) }
+            error = nil
+        } catch {
+            self.error = "Could not delete \(mode.name): \(error.localizedDescription)"
+        }
+    }
+
+    var selected: Mode? {
+        modes.first { $0.id == selectedID }
+    }
+
+    private var fragmentsDir: URL { supportDir.appendingPathComponent("fragments", isDirectory: true) }
+
+    private func loadFragmentIds() -> [String] {
+        FragmentStore.ids(in: fragmentsDir)
+    }
+
+    // Create (or resolve) a fragment file by name, refresh the list, and reveal it so the user can
+    // fill in the instruction text. Returns the fragment id to add to the mode.
+    func addFragmentFile(named name: String) -> String? {
+        do {
+            let id = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
+            fragmentIds = loadFragmentIds()
+            error = nil
+            NSWorkspace.shared.activateFileViewerSelecting(
+                [fragmentsDir.appendingPathComponent("\(id).md")])
+            return id
+        } catch {
+            self.error = "Could not create the instruction file: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func revealFragment(_ id: String) {
+        let url = fragmentsDir.appendingPathComponent("\(id).md")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func save(_ mode: Mode) {
+        do {
+            try ModeStore.write(mode, to: modesDir)
+            if let index = modes.firstIndex(where: { $0.id == mode.id }) {
+                modes[index] = mode
+            } else {
+                modes.append(mode)
+            }
+            error = nil
+        } catch {
+            self.error = "Could not save \(mode.name): \(error.localizedDescription)"
+        }
+    }
+}
+
+struct ModesSettingsView: View {
+    @ObservedObject var model: ModesSettingsModel
+    @State private var modePendingDelete: Mode?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            List(selection: $model.selectedID) {
+                ForEach(model.modes) { mode in
+                    ModeSummaryRow(mode: mode, isDefault: model.isDefault(mode))
+                        .tag(mode.id)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button("Add Mode", systemImage: "plus", action: model.create)
+                    .buttonStyle(.borderless)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(width: 240)
+
+            Divider()
+
+            Group {
+                if let mode = model.selected {
+                    ModeEditorView(
+                        mode: mode, allModes: model.modes,
+                        connections: model.connections, fragmentIds: model.fragmentIds,
+                        isDefault: model.isDefault(mode),
+                        onUpdate: model.update,
+                        onMakeDefault: { model.makeDefault(mode) },
+                        onAddFragmentFile: model.addFragmentFile(named:),
+                        onRevealFragment: model.revealFragment,
+                        onDelete: { modePendingDelete = mode })
+                        .id(mode.id)
+                } else {
+                    ContentUnavailableView(
+                        "No modes", systemImage: "square.stack.3d.up",
+                        description: Text("Create a mode to choose how KeyScribe handles a dictation."))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear { model.reload() }
+        .confirmationDialog(
+            "Delete this mode?", isPresented: Binding(
+                get: { modePendingDelete != nil },
+                set: { if !$0 { modePendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let mode = modePendingDelete { model.delete(mode) }
+                modePendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { modePendingDelete = nil }
+        } message: {
+            let isDefault = modePendingDelete.map(model.isDefault) ?? false
+            Text("\(modePendingDelete?.name ?? "This mode") and its configuration will be removed. This cannot be undone."
+                + (isDefault ? " It is the default mode — another mode will become the default." : ""))
+        }
+    }
+}
+
+private struct ModeSummaryRow: View {
+    let mode: Mode
+    let isDefault: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(mode.name)
+                if isDefault {
+                    Text("Default").font(.caption2)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.tint.opacity(0.2), in: Capsule()).foregroundStyle(.tint)
+                }
+                if !mode.enabled {
+                    Text("Disabled").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Text(summary).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var summary: String {
+        var values = [ModeSummary.whenRuns(mode, isDefault: isDefault)]
+        values.append(mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite")
+        if mode.excludeFromHistory { values.append("No history") }
+        return values.joined(separator: " · ")
+    }
+}
+
+// Shared user-facing summary phrasing (ui_components.md "Mode summary"): when a mode runs and
+// where its text goes, in plain words — never bundle IDs or raw regex.
+enum ModeSummary {
+    static func whenRuns(_ mode: Mode, isDefault: Bool) -> String {
+        if let key = mode.triggerKeys.first?.key,
+           let descriptor = try? KeyDescriptor(parsing: key) {
+            return "Triggered by \(triggerLabel(descriptor))"
+        }
+        if mode.constraints.contains(where: { $0.bundleId != nil || $0.urlPattern != nil }) {
+            return "App or URL rule"
+        }
+        if !mode.triggerPhrases.isEmpty { return "Spoken phrase" }
+        if isDefault { return "Automatic default" }
+        return "Pick from the menu"
+    }
+
+    static func triggerLabel(_ descriptor: KeyDescriptor) -> String {
+        switch descriptor.canonical {
+        case "fn": "Fn (Globe)"
+        case "right_option": "Right Option"
+        case "right_command": "Right Command"
+        case "hyper": "Hyper"
+        default: descriptor.canonical
+        }
+    }
+}
+
+private let customTriggerTag = "__custom__"
+
+private struct ModeEditorView: View {
+    let mode: Mode
+    let allModes: [Mode]
+    let connections: [Connection]
+    let fragmentIds: [String]
+    let isDefault: Bool
+    let onUpdate: (Mode) -> Void
+    let onMakeDefault: () -> Void
+    let onAddFragmentFile: (String) -> String?
+    let onRevealFragment: (String) -> Void
+    let onDelete: () -> Void
+    @State private var routingExpanded = false
+    @State private var advancedExpanded = false
+    @State private var newPhrase = ""
+    @State private var newURLPattern = ""
+    @State private var newFragmentName = ""
+    @State private var customTriggerSelected = false
+    @State private var manualBundleId = ""
+    @State private var enteringBundleId = false
+
+    var body: some View {
+        Form {
+            Section { summaryCard }
+
+            Section("Basics") {
+                TextField("Name", text: binding(\.name))
+                Toggle("Enabled", isOn: binding(\.enabled))
+                if isDefault {
+                    Label("Used automatically when no app rule or spoken phrase applies",
+                          systemImage: "star.fill")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if mode.source != .selection {
+                    Button("Use as default mode", action: onMakeDefault)
+                }
+            }
+
+            whenUsedSection
+            Section("What it does") {
+                Toggle("Work on selection", isOn: selectionMode)
+                Toggle("Recognize spoken edits", isOn: commandsBinding(\.liveEdits))
+            }
+            dictionarySection
+            improveWithAISection
+            dataSentWithAISection
+
+            Section("Result handling") {
+                SettingRow(
+                    title: "Insertion method",
+                    result: insertionLabel,
+                    help: "Paste is recommended: it inserts the finished dictation atomically (one ⌘Z undoes it) and works in the widest range of apps. Insert and Type place text key-by-key and need Accessibility permission; some apps reject them.")
+                {
+                    Picker("", selection: binding(\.insertion)) {
+                        Text("Paste").tag(Mode.Insertion.paste)
+                        Text("Insert").tag(Mode.Insertion.insert)
+                        Text("Type").tag(Mode.Insertion.type)
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                SettingRow(
+                    title: "Exclude from history",
+                    help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
+                {
+                    Toggle("", isOn: binding(\.excludeFromHistory)).labelsHidden()
+                }
+            }
+
+            advancedSection
+
+            Section {
+                Button("Delete Mode", role: .destructive, action: onDelete)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(16)
+    }
+
+    private var insertionLabel: String {
+        switch mode.insertion {
+        case .paste: "Paste"
+        case .insert: "Insert"
+        case .type: "Type"
+        }
+    }
+
+    @ViewBuilder private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            summaryLine("When", ModeSummary.whenRuns(mode, isDefault: isDefault))
+            summaryLine("Does", mode.source == .selection
+                ? "Replaces the selected text using your spoken instruction"
+                : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))
+            summaryLine("Text goes", boundarySummary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func summaryLine(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).font(.caption).foregroundStyle(.secondary).frame(width: 72, alignment: .leading)
+            Text(value).font(.callout)
+        }
+    }
+
+    private var boundarySummary: String {
+        guard let rewrite = mode.aiRewrite else { return "Stays on this Mac" }
+        let name = connections.first { $0.id == rewrite.connection }?.name ?? "an AI service"
+        let redaction = mode.commands.privacy ? ", best-effort redaction on" : ""
+        return "Cloud rewrite via \(name)\(redaction)"
+    }
+
+    @ViewBuilder private var whenUsedSection: some View {
+        Section("When this mode is used") {
+            Picker("Trigger key", selection: triggerSelection) {
+                Text("No dedicated hotkey").tag("")
+                Text("Fn (Globe)").tag("fn")
+                Text("Right Option").tag("right_option")
+                Text("Right Command").tag("right_command")
+                Text("Hyper").tag("hyper")
+                Text("Custom shortcut…").tag(customTriggerTag)
+            }
+            if showsRecorder {
+                HStack {
+                    Text("Shortcut").foregroundStyle(.secondary)
+                    Spacer()
+                    HotkeyRecorder(key: triggerKey)
+                }
+            }
+            Picker("Press style", selection: pressStyle) {
+                Text("Hold or tap").tag("hold-or-tap")
+                Text("Hold only").tag("hold-only")
+                Text("Tap to toggle").tag("tap-to-toggle")
+            }
+            .disabled(mode.triggerKeys.isEmpty)
+            if let conflict = triggerConflict {
+                Label("Also used by \(conflict.modeName). The other mode wins when both are enabled.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            Text("A mode hotkey starts this mode directly. Without one, it can still be selected by its app rules and spoken routing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DisclosureSection("Advanced routing", isExpanded: $routingExpanded) {
+                Text("App and URL rules")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(mode.constraints.indices, id: \.self) { index in
+                    HStack {
+                        constraintLabel(mode.constraints[index])
+                        Spacer()
+                        Button("Remove", role: .destructive) { removeConstraint(at: index) }
+                    }
+                }
+                HStack {
+                    Menu("Add app rule") {
+                        ForEach(InstalledApps.running()) { app in
+                            Button(app.name) { addAppConstraint(app.bundleId) }
+                        }
+                        Divider()
+                        Button("Choose from Applications…") {
+                            if let app = InstalledApps.chooseFromApplications() { addAppConstraint(app.bundleId) }
+                        }
+                        Button("Enter Bundle ID…") { enteringBundleId = true }
+                    }
+                    .fixedSize()
+                    Spacer()
+                }
+                if enteringBundleId {
+                    HStack {
+                        TextField("Bundle ID, e.g. com.apple.Safari", text: $manualBundleId)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(commitManualBundleId)
+                        Button("Add", action: commitManualBundleId)
+                            .disabled(manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                HStack {
+                    TextField("URL pattern, e.g. github.com", text: $newURLPattern)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitURLConstraint)
+                    Button("Add", action: commitURLConstraint)
+                        .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Text("Spoken routing phrases")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(mode.triggerPhrases, id: \.self) { phrase in
+                    HStack {
+                        Text(phrase).font(.callout)
+                        Spacer()
+                        Button("Remove", role: .destructive) { removePhrase(phrase) }
+                    }
+                }
+                HStack {
+                    TextField("Trailing phrase, e.g. as a note", text: $newPhrase)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitPhrase)
+                    Button("Add", action: commitPhrase)
+                        .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Text("App and URL rules choose a mode before recording. A spoken phrase said at the end can reroute the result after transcription. URL patterns are local routing rules and are never sent to a rewrite provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var dictionarySection: some View {
+        Section("Dictionary") {
+            Toggle("Use global dictionary", isOn: dictionaryBinding(\.includeGlobal))
+            DictionaryRows(
+                words: mode.dictionary.words,
+                onAdd: addWord, onRemove: removeWord,
+                placeholder: "Add a mode-only word, e.g. LaunchDarkly")
+        }
+        Section("Replacements") {
+            Toggle("Use global replacements", isOn: replacementsBinding(\.includeGlobal))
+            ReplacementRows(
+                rules: mode.replacements.rules,
+                onAdd: addReplacementRule, onRemove: removeReplacement(at:))
+            Text("Mode-only words and replacements apply on top of the global lists for this mode.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var improveWithAISection: some View {
+        Section("Improve with AI") {
+            if connections.isEmpty {
+                Text("Add an AI service in Settings before a mode can rewrite the transcript.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                SettingRow(
+                    title: "AI service",
+                    result: aiServiceLabel,
+                    help: "When set, the local transcript is sent to this named BYOK connection to be rewritten before it is inserted. Only an explicit connection can run a rewrite; if it fails, your local transcript is inserted instead — your words are never lost.")
+                {
+                    Picker("", selection: rewriteSelection) {
+                        Text("Don't use AI (on this Mac)").tag("")
+                        ForEach(connections) { connection in
+                            Text(connection.name).tag(connection.id)
+                        }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                if mode.aiRewrite != nil {
+                    PromptEditor(title: "Writing instruction", text: rewritePrompt)
+                }
+            }
+        }
+    }
+
+    private var aiServiceLabel: String {
+        guard let id = mode.aiRewrite?.connection,
+              let name = connections.first(where: { $0.id == id })?.name else {
+            return "Off — on this Mac"
+        }
+        return name
+    }
+
+    // ui_design.md §4.4 / review #7: when a mode rewrites, the user must be able to see exactly what
+    // leaves the Mac. Privacy and context are mutually exclusive; the controls stay visible with the
+    // reason rather than disappearing.
+    @ViewBuilder private var dataSentWithAISection: some View {
+        if mode.aiRewrite != nil {
+            Section("Data sent with AI") {
+                if mode.source == .selection {
+                    Label(
+                        "Selected text shared — the highlighted text is the content sent to the AI service to be rewritten.",
+                        systemImage: "doc.on.doc")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                SettingRow(
+                    title: "Send app & field details",
+                    help: "Shares the frontmost app and focused-field role as untrusted reference, never as commands. The browser URL is never sent — it is only a local routing key.",
+                    dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
+                {
+                    Toggle("", isOn: contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
+                }
+                SettingRow(
+                    title: "Send visible window text",
+                    help: "Shares a capped excerpt of the focused window's visible text as untrusted reference. It can include anything on screen, so leave it off for sensitive windows.",
+                    dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
+                {
+                    Toggle("", isOn: contextBinding(\.visibleText)).labelsHidden().disabled(mode.commands.privacy)
+                }
+                SettingRow(
+                    title: "Hide recognizable sensitive text",
+                    help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the request, then restores them locally. It is pattern matching: it can miss content, it turns all context off, and it does not make cloud use appropriate for every secret.",
+                    dependencyReason: mode.commands.privacy ? "All context is off while this is on." : nil)
+                {
+                    Toggle("", isOn: privacyMode).labelsHidden()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var advancedSection: some View {
+        Section {
+            DisclosureSection("Advanced", isExpanded: $advancedExpanded) {
+                if mode.aiRewrite != nil {
+                    Text("Reusable instructions")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(mode.aiRewrite?.fragments ?? [], id: \.self) { fragment in
+                        HStack {
+                            Text(fragment).font(.callout)
+                            Spacer()
+                            Button { onRevealFragment(fragment) } label: { Image(systemName: "folder") }
+                                .buttonStyle(.borderless)
+                                .help("Reveal this instruction's file in Finder to edit it.")
+                            Button("Remove", role: .destructive) { removeFragment(fragment) }
+                        }
+                    }
+                    HStack {
+                        TextField("New instruction name, e.g. email-style", text: $newFragmentName)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(commitNewFragment)
+                        if !unusedFragmentIds.isEmpty {
+                            Menu("Add existing") {
+                                ForEach(unusedFragmentIds, id: \.self) { id in
+                                    Button(id) { addFragment(id) }
+                                }
+                            }
+                            .fixedSize()
+                        }
+                        Button("Create", action: commitNewFragment)
+                            .disabled(newFragmentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Text("Each instruction is a prompt file appended after the writing instruction, in order. Creating one opens its file so you can write the instruction.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Reusable writing instructions become available once this mode uses an AI service.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func commitNewFragment() {
+        let name = newFragmentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let id = onAddFragmentFile(name) else { return }
+        addFragment(id)
+        newFragmentName = ""
+    }
+
+    private var unusedFragmentIds: [String] {
+        let used = Set(mode.aiRewrite?.fragments ?? [])
+        return fragmentIds.filter { !used.contains($0) }
+    }
+
+    @ViewBuilder private func constraintLabel(_ constraint: Mode.Constraint) -> some View {
+        if let bundle = constraint.bundleId {
+            HStack(spacing: 6) {
+                if let icon = InstalledApps.icon(forBundleId: bundle) {
+                    Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+                }
+                Text(InstalledApps.name(forBundleId: bundle) ?? bundle).font(.callout)
+                Text(bundle).font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let url = constraint.urlPattern {
+            Text("URL: \(url)").font(.callout)
+        }
+    }
+
+    private func addWord(_ word: String) {
+        var updated = mode
+        updated.dictionary.words = DictionarySet(words: mode.dictionary.words).adding(word: word).words
+        onUpdate(updated)
+    }
+
+    private func removeWord(_ word: String) {
+        var updated = mode
+        updated.dictionary.words.removeAll { $0 == word }
+        onUpdate(updated)
+    }
+
+    private func commitPhrase() {
+        let phrase = newPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return }
+        if !mode.triggerPhrases.contains(phrase) {
+            var updated = mode
+            updated.triggerPhrases.append(phrase)
+            onUpdate(updated)
+        }
+        newPhrase = ""
+    }
+
+    private func removePhrase(_ phrase: String) {
+        var updated = mode
+        updated.triggerPhrases.removeAll { $0 == phrase }
+        onUpdate(updated)
+    }
+
+    private func addAppConstraint(_ bundleId: String) {
+        guard !mode.constraints.contains(where: { $0.bundleId == bundleId }) else { return }
+        var updated = mode
+        updated.constraints.append(.init(bundleId: bundleId))
+        onUpdate(updated)
+    }
+
+    private func commitManualBundleId() {
+        let value = manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        addAppConstraint(value)
+        manualBundleId = ""
+        enteringBundleId = false
+    }
+
+    private func commitURLConstraint() {
+        let value = newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        var updated = mode
+        updated.constraints.append(.init(bundleId: nil, urlPattern: value))
+        onUpdate(updated)
+        newURLPattern = ""
+    }
+
+    private func removeConstraint(at index: Int) {
+        guard mode.constraints.indices.contains(index) else { return }
+        var updated = mode
+        updated.constraints.remove(at: index)
+        onUpdate(updated)
+    }
+
+    private func addFragment(_ id: String) {
+        guard var rewrite = mode.aiRewrite, !rewrite.fragments.contains(id) else { return }
+        rewrite.fragments.append(id)
+        var updated = mode
+        updated.aiRewrite = rewrite
+        onUpdate(updated)
+    }
+
+    private func removeFragment(_ fragment: String) {
+        guard var rewrite = mode.aiRewrite else { return }
+        rewrite.fragments.removeAll { $0 == fragment }
+        var updated = mode
+        updated.aiRewrite = rewrite
+        onUpdate(updated)
+    }
+
+    private func addReplacementRule(_ heard: String, _ replace: String, _ regex: Bool) {
+        var set = ReplacementsSet(rules: mode.replacements.rules)
+        if regex {
+            set.rules.append(.init(heard: heard, replace: replace, regex: true))
+        } else {
+            set = set.addingLiteral(heard: heard, replace: replace)
+        }
+        var updated = mode
+        updated.replacements.rules = set.rules
+        onUpdate(updated)
+    }
+
+    private func removeReplacement(at index: Int) {
+        guard mode.replacements.rules.indices.contains(index) else { return }
+        var updated = mode
+        updated.replacements.rules.remove(at: index)
+        onUpdate(updated)
+    }
+
+    private var triggerSelection: Binding<String> {
+        Binding(
+            get: {
+                if customTriggerSelected { return customTriggerTag }
+                let key = mode.triggerKeys.first?.key ?? ""
+                guard !key.isEmpty else { return "" }
+                if let descriptor = try? KeyDescriptor(parsing: key), case .named = descriptor {
+                    return descriptor.canonical
+                }
+                return customTriggerTag
+            },
+            set: { selection in
+                if selection == customTriggerTag {
+                    customTriggerSelected = true
+                } else {
+                    customTriggerSelected = false
+                    triggerKey.wrappedValue = selection
+                }
+            })
+    }
+
+    private var showsRecorder: Bool {
+        if customTriggerSelected { return true }
+        guard let descriptor = try? KeyDescriptor(parsing: mode.triggerKeys.first?.key ?? "") else { return false }
+        if case .chord = descriptor { return true }
+        return false
+    }
+
+    private var triggerConflict: TriggerKeyConflict? {
+        guard let key = mode.triggerKeys.first?.key,
+              let descriptor = try? KeyDescriptor(parsing: key) else { return nil }
+        return TriggerKeyConflicts.conflict(for: descriptor, excludingModeId: mode.id, in: allModes)
+    }
+
+    private var triggerKey: Binding<String> {
+        Binding(
+            get: { mode.triggerKeys.first?.key ?? "" },
+            set: { key in
+                var updated = mode
+                if key.isEmpty {
+                    updated.triggerKeys = []
+                } else {
+                    let existing = mode.triggerKeys.first
+                    updated.triggerKeys = [.init(
+                        key: key,
+                        pressStyle: existing?.pressStyle ?? "hold-or-tap",
+                        tapThresholdMs: existing?.tapThresholdMs ?? 250)]
+                }
+                onUpdate(updated)
+            })
+    }
+
+    private var pressStyle: Binding<String> {
+        Binding(
+            get: { mode.triggerKeys.first?.pressStyle ?? "hold-or-tap" },
+            set: { style in
+                guard let existing = mode.triggerKeys.first else { return }
+                var updated = mode
+                updated.triggerKeys = [.init(
+                    key: existing.key, pressStyle: style, tapThresholdMs: existing.tapThresholdMs)]
+                onUpdate(updated)
+            })
+    }
+
+    private func contextBinding(_ keyPath: WritableKeyPath<Mode.ContextOptIn, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { mode.commands.privacy ? false : (mode.aiRewrite?.context[keyPath: keyPath] ?? false) },
+            set: { value in
+                guard var rewrite = mode.aiRewrite else { return }
+                rewrite.context[keyPath: keyPath] = value
+                var updated = mode
+                updated.aiRewrite = rewrite
+                onUpdate(updated)
+            })
+    }
+
+    private var selectionMode: Binding<Bool> {
+        Binding(
+            get: { mode.source == .selection },
+            set: { enabled in
+                var updated = mode
+                updated.source = enabled ? .selection : .dictation
+                updated.output = enabled ? .replaceSelection : .cursor
+                onUpdate(updated)
+            })
+    }
+
+    private var rewriteSelection: Binding<String> {
+        Binding(
+            get: { mode.aiRewrite?.connection ?? "" },
+            set: { id in
+                if id.isEmpty {
+                    disableRewrite()
+                } else if mode.aiRewrite == nil {
+                    var updated = mode
+                    updated.aiRewrite = .init(
+                        connection: id,
+                        prompt: "Clean up grammar and punctuation. Keep my meaning and wording.")
+                    onUpdate(updated)
+                } else {
+                    updateRewrite { $0.connection = id }
+                }
+            })
+    }
+
+    private var rewritePrompt: Binding<String> {
+        Binding(get: { mode.aiRewrite?.prompt ?? "" }, set: { value in
+            updateRewrite { $0.prompt = value }
+        })
+    }
+
+    private var privacyMode: Binding<Bool> {
+        Binding(get: { mode.commands.privacy }, set: { value in
+            var updated = mode
+            updated.commands.privacy = value
+            onUpdate(updated)
+        })
+    }
+
+    private func disableRewrite() {
+        var updated = mode
+        updated.aiRewrite = nil
+        onUpdate(updated)
+    }
+
+    private func updateRewrite(_ update: (inout Mode.AIRewrite) -> Void) {
+        guard var rewrite = mode.aiRewrite else { return }
+        update(&rewrite)
+        var updated = mode
+        updated.aiRewrite = rewrite
+        onUpdate(updated)
+    }
+
+    private func binding<T>(_ keyPath: WritableKeyPath<Mode, T>) -> Binding<T> {
+        Binding(
+            get: { mode[keyPath: keyPath] },
+            set: { value in
+                var updated = mode
+                updated[keyPath: keyPath] = value
+                onUpdate(updated)
+            })
+    }
+
+    private func commandsBinding(_ keyPath: WritableKeyPath<Mode.Commands, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { mode.commands[keyPath: keyPath] },
+            set: { value in
+                var updated = mode
+                updated.commands[keyPath: keyPath] = value
+                onUpdate(updated)
+            })
+    }
+
+    private func dictionaryBinding(_ keyPath: WritableKeyPath<Mode.ModeDictionary, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { mode.dictionary[keyPath: keyPath] },
+            set: { value in
+                var updated = mode
+                updated.dictionary[keyPath: keyPath] = value
+                onUpdate(updated)
+            })
+    }
+
+    private func replacementsBinding(_ keyPath: WritableKeyPath<Mode.ModeReplacements, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { mode.replacements[keyPath: keyPath] },
+            set: { value in
+                var updated = mode
+                updated.replacements[keyPath: keyPath] = value
+                onUpdate(updated)
+            })
+    }
+
+}
