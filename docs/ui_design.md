@@ -164,12 +164,12 @@ becomes a second destination for configuration.
 | State | Primary content | Secondary content | Available action |
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
-| Recording | Mode name + live input level | Local transcription label | Stop if tap-to-toggle |
-| Transcribing | “Transcribing locally” | Mode name | Cancel when safe |
-| Rewriting | “Polishing with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert local transcript after timeout |
+| Recording | Mode name + live input level | “Listening” | Stop if tap-to-toggle |
+| Transcribing | “Transcribing” | Mode name | Cancel when safe |
+| Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
-| Rewrite fallback | “Inserted local transcript” — or “Copied local transcript instead of inserting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
+| Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | Error | Plain-language failure | Single next action | Retry, open permissions, or dismiss as applicable |
 
 The local-only states — Recording, Transcribing, Complete, Target changed, and Error — are the
@@ -194,8 +194,8 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
   mechanical: rewrite enabled and pending ⇒ no transcript shown. The raw transcript is not the
   expected result and showing it creates false confidence.
 - When the wait passes the **max-wait escape-hatch threshold** (`design.md` §4.1 latency
-  budgets), show **Insert local transcript**. This action is always explicit; the HUD never
-  auto-inserts the local transcript early.
+  budgets), show **Insert without rewriting**. This action is always explicit; the HUD never
+  auto-inserts the un-rewritten transcript early.
 
 ### HUD copy rules
 
@@ -218,7 +218,7 @@ that?
 
 ```
 KeyScribe
-Status: Ready · Local transcription
+Status: Ready · On-device speech
 Next dictation: Automatic — Plain Dictation
 
 Dictate with ▸

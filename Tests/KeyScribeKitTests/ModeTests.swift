@@ -96,6 +96,30 @@ struct ModeTests {
         }
     }
 
+    @Test func seedProvenanceRoundTrips() throws {
+        let toml = "schema_version = 1\nseed_id = \"polished-dictation\"\nseed_version = 2\nname = \"Polished\""
+        let mode = try ModeStore.decode(from: toml, id: "polished-dictation")
+        #expect(mode.seedId == "polished-dictation")
+        #expect(mode.seedVersion == 2)
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "polished-dictation")
+        #expect(again.seedId == "polished-dictation")
+        #expect(again.seedVersion == 2)
+    }
+
+    @Test func userCreatedModeHasNoSeedProvenance() throws {
+        let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Mine\"", id: "mine")
+        #expect(mode.seedId == nil)
+        #expect(mode.seedVersion == nil)
+        #expect(try !ModeStore.encode(mode).contains("seed_id"))
+    }
+
+    @Test func starterModesAreStampedWithSeedProvenance() {
+        for mode in ModeStore.starterModes() {
+            #expect(mode.seedId == mode.id)
+            #expect(mode.seedVersion == 1)
+        }
+    }
+
     @Test func roundTripsThroughEncode() throws {
         let mode = try ModeStore.decode(
             from: "schema_version = 1\nname = \"Email\"\n[commands]\nlive_edits = true", id: "email")
@@ -124,6 +148,8 @@ struct ModeTests {
         m.trailing = .newline
         m.submit = .shiftReturn
         m.excludeFromHistory = true
+        m.seedId = "email"
+        m.seedVersion = 3
 
         let again = try ModeStore.decode(from: ModeStore.encode(m), id: "email")
         #expect(again == m)

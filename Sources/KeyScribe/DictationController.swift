@@ -44,14 +44,20 @@ final class DictationController {
     private var pendingLocalTranscript: String?
     private var pendingHeardTranscript: String?
     private var rewriteEscapeTask: Task<Void, Never>?
+    private var recordingLimitTask: Task<Void, Never>?
 
-    // Per-(mode, config generation) derived artifacts, so a dictation reuses them instead of
-    // re-merging the dictionary three times and rebuilding the pipeline stages every commit. Both are
-    // dropped wholesale whenever the config generation advances (see refreshDerivedCachesIfNeeded).
-    private var derivedGeneration = -1
-    private var textStageCache: [String: [any PipelineStage]] = [:]
-    private var mergedDictionaryCache: [String: [String]] = [:]
-    private static let nilModeKey = "\u{0}nil"
+    // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
+    // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
+    // than spike memory. Far longer than any real hold-to-talk dictation.
+    private static let maxRecordingSeconds: Double = 300
+
+    // The frozen config snapshot for the in-flight dictation, captured at record-start. A config
+    // reload mid-dictation produces a new ResolvedConfig in ConfigCache without mutating this one, so
+    // a single dictation always observes one coherent config. All config-derived reads during a
+    // dictation (modes, merged dictionary, compiled stages, connection, fragments) go through it; the
+    // ResolvedConfig itself owns the cross-dictation memoization that used to live here.
+    private var capturedPlan: ResolvedConfig?
+    private var plan: ResolvedConfig { capturedPlan ?? config.resolved }
 
     // Last HUD level rendered while recording (quantized). The mic level callback fires per audio
     // buffer; forwarding only on a meaningful change keeps the HUD from re-rendering its whole tree at
@@ -177,29 +183,62 @@ final class DictationController {
             return
         }
         capturedSnapshot = snapshot()
+        capturedPlan = config.resolved
         resolveMode(triggerKey: triggerKey)
         warmActiveEngine()
         effects.begin(settings.duringDictation)
         lastRenderedLevel = 0
         hud?.render(.recording(mode: currentModeName, level: 0))
         do {
-            _ = try audio.start { [weak self] level in
+            _ = try audio.start(sampleRate: provider.active.captureSampleRate) { [weak self] level in
                 self?.levelCoalescer.submit(level)
             }
             onRecordingChanged?(true)
+            startRecordingLimit()
         } catch {
             finishError("Could not start the microphone", action: .openMicrophoneSettings)
         }
     }
 
+    private func startRecordingLimit() {
+        recordingLimitTask?.cancel()
+        recordingLimitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.maxRecordingSeconds))
+            guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
+            self.abortRecordingOverLimit()
+        }
+    }
+
+    private func abortRecordingOverLimit() {
+        onRecordingChanged?(false)
+        if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
+        machine.cancel()
+        effects.end(settings.duringDictation, cue: .cancel)
+        hud?.render(.error(message: "Recording stopped after \(Int(Self.maxRecordingSeconds / 60)) min", action: nil))
+        scheduleHide(after: 4)
+        clearRewriteEscapeHatch()
+        releaseCapturedPlan()
+    }
+
+    // Release the frozen config once a dictation reaches a terminal state, so an idle app doesn't pin a
+    // stale ResolvedConfig (fragments + compiled stages) after a config reload until the next recording.
+    // `plan` falls back to the live `config.resolved` while nil, so clearing between dictations is safe.
+    private func releaseCapturedPlan() {
+        recordingLimitTask?.cancel()
+        recordingLimitTask = nil
+        capturedPlan = nil
+    }
+
     func handleCommit() {
         guard machine.state == .recording else { return }
+        recordingLimitTask?.cancel()
         onRecordingChanged?(false)
         machine.beginTranscribing()
         guard let url = audio.stop() else {
             machine.cancel()
             effects.end(settings.duringDictation, cue: .cancel)
             hud?.render(.hidden)
+            releaseCapturedPlan()
             return
         }
         if let f = try? AVAudioFile(forReading: url) {
@@ -214,7 +253,7 @@ final class DictationController {
     // Phase A (design.md §4.3): resolve the mode from app/URL context before recording. A non-nil
     // triggerKey (from a mode's own HotkeyMonitor binding) forces that mode, overriding context.
     private func resolveMode(triggerKey: String?) {
-        let modes = config.modes
+        let modes = plan.modes
         let bundleId = capturedSnapshot?.bundleId
         let url = (ModeResolver.requiresURLContext(modes) ? bundleId : nil)
             .flatMap { ContextProbe.browserURL(forBundleId: $0) }
@@ -235,31 +274,7 @@ final class DictationController {
     // bias ignore these.
     private func recognitionBiasTerms() -> [String] {
         guard provider.active.supportsRecognitionBias else { return [] }
-        return mergedDictionaryWords(for: activeMode)
-            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-    }
-
-    // Global ⊕ mode dictionary, merged once per (mode, config generation). Three call sites need it
-    // each dictation (recognition bias, the rewrite "valid term" hint, fuzzy correction); the merge
-    // (VocabularyMerge dedups in stable order) is pure config, so it is cached, not recomputed.
-    private func mergedDictionaryWords(for mode: Mode?) -> [String] {
-        refreshDerivedCachesIfNeeded()
-        let key = mode?.id ?? Self.nilModeKey
-        if let cached = mergedDictionaryCache[key] { return cached }
-        let words = mode.map { m in
-            VocabularyMerge.words(
-                global: config.dictionary.words,
-                local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
-        } ?? config.dictionary.words
-        mergedDictionaryCache[key] = words
-        return words
-    }
-
-    private func refreshDerivedCachesIfNeeded() {
-        guard config.generation != derivedGeneration else { return }
-        derivedGeneration = config.generation
-        textStageCache.removeAll(keepingCapacity: true)
-        mergedDictionaryCache.removeAll(keepingCapacity: true)
+        return plan.recognitionBiasTerms(for: activeMode)
     }
 
     struct TranscribeTimeout: Error {}
@@ -376,6 +391,7 @@ final class DictationController {
             : .complete(outcome: outcome, mode: currentModeName))
         scheduleHide()
         applyEvictionAfterDictation()
+        releaseCapturedPlan()
         onDictationCompleted?(outcome)
     }
 
@@ -524,7 +540,7 @@ final class DictationController {
 
     private func connection(for mode: Mode) -> Connection? {
         guard let rewrite = mode.aiRewrite, !rewrite.connection.isEmpty else { return nil }
-        guard let connection = config.connections.connection(id: rewrite.connection) else {
+        guard let connection = plan.connection(id: rewrite.connection) else {
             log.error("rewrite connection '\(rewrite.connection, privacy: .public)' not found in connections.toml")
             return nil
         }
@@ -553,68 +569,15 @@ final class DictationController {
             connection: connection.name, redacted: mode.commands.privacy,
             contextCategories: mode.effectiveContextCategories, offerLocalTranscript: false))
 
-        // Give the model output room at least as large as the input (prompt_design.md budget).
-        var sized = connection
-        sized.params.maxTokens = ContextBudget.maxTokens(
-            forSelectionChars: content.count, floor: connection.params.maxTokens)
-
-        // Mode prompt + shared fragments (appended in order).
-        let modePrompt = ([mode.aiRewrite?.prompt ?? ""]
-            + config.fragmentBodies(ids: mode.aiRewrite?.fragments ?? []))
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-
-        // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
-        let effectiveDict = mergedDictionaryWords(for: mode)
-        let validTerms = effectiveDict.filter { content.range(of: $0, options: .caseInsensitive) != nil }
-
-        // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity and
-        // visible-window text are the only context channels; the browser URL is a local routing
-        // key only (design.md §4.3/§4.4) and never goes to the LLM.
-        let ctx = mode.effectiveContext
-        let bundleId = ctx.app ? capturedSnapshot?.bundleId : nil
-        let appName = bundleId.map { ContextProbe.appName(forBundleId: $0) ?? $0 }
-        var contextCategories: [String] = []
-        if ctx.app { contextCategories.append("app") }
-
-        var precedingText: String?
-        if ctx.precedingText {
-            contextCategories.append("preceding text")
-            precedingText = await ContextProbe.precedingText()
-            Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")
-        }
-
-        var visibleWindowText: String?
-        if ctx.visibleText {
-            contextCategories.append("visible text")
-            var captured: String?
-            if let visibleBundleId = capturedSnapshot?.bundleId {
-                captured = await ContextProbe.visibleText(forBundleId: visibleBundleId, maxChars: Self.visibleTextCap * 2)
-            }
-            let mandatoryChars = modePrompt.count + instruction.count + content.count
-            switch ContextBudget.fit(mandatoryChars: mandatoryChars, visibleText: captured,
-                                     budgetChars: Self.contextBudgetChars, visibleCap: Self.visibleTextCap) {
-            case .ok(let fit):
-                visibleWindowText = fit.visibleText
-                Log.context.notice("visible-text: \(String(describing: fit.visibleDisposition), privacy: .public), \(fit.visibleText?.count ?? 0, privacy: .public) chars")
-            case .refuse:
-                Log.context.notice("visible-text dropped: mandatory content over budget")
-            }
-        }
-
-        let inputs = PromptInputs(
-            modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
-            tokens: issuedTokens, validTerms: validTerms, language: "English",
-            modeSystemInstructions: "",
-            appName: appName, bundleId: bundleId, fieldRole: nil,
-            visibleWindowText: visibleWindowText, selectedText: nil, precedingText: precedingText)
-
-        // The exact prompt stored in history (design.md §4.7) — tokens, not their originals.
-        let assembled = PromptAssembler.assemble(inputs)
-        let promptForHistory = "[system]\n\(assembled.system)\n\n[user]\n\(assembled.user)"
+        // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus
+        // the size-bumped connection — the change-prone assembly lives in its own builder.
+        let request = await RewriteRequestBuilder(
+            mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens,
+            capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection,
+            visibleTextCap: Self.visibleTextCap, contextBudgetChars: Self.contextBudgetChars).build()
 
         let outcome = await RewriteService(client: llmClient).rewrite(
-            localText: content, inputs: inputs, connection: sized, issuedTokens: issuedTokens)
+            localText: content, inputs: request.inputs, connection: request.sized, issuedTokens: issuedTokens)
         var restoreCtx = PipelineContext(text: content)
         let fellBack: Bool
         switch outcome {
@@ -625,32 +588,20 @@ final class DictationController {
         let text = restoreCtx.text
         let details = RewriteDetails(
             connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
-            contextCategories: contextCategories, prompt: promptForHistory, fellBack: fellBack)
+            contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack)
         return (text, !fellBack, details)
     }
 
-    // Cached post-STT TEXT stages for the resolved mode: live edits (per-mode opt-in) then
-    // replacements (mode-local merged with global per include_global) then numbers/fuzzy. Pure config,
-    // so compiled once per (mode, config generation) and reused; stages precompute their derived data
-    // in init (fuzzy tables, compiled replacement rules). Verbatim/redaction are NOT cached — they
-    // hold per-dictation tokenizers and are added fresh by dictationPipeline / selectionPipeline.
-    private func cachedTextStages(for mode: Mode?) -> [any PipelineStage] {
-        refreshDerivedCachesIfNeeded()
-        let key = mode?.id ?? Self.nilModeKey
-        if let cached = textStageCache[key] { return cached }
-        let stages = buildStages(for: mode)
-        textStageCache[key] = stages
-        return stages
-    }
-
-    // Full dictation pipeline (design.md §4.2.1): verbatim (if live edits) sorts BEFORE the text
-    // stages so its span is opaque to them; redaction (if privacy AND a cloud rewrite will run) sorts
-    // AFTER them, tokenizing the fully-transformed text just before the LLM. Pipeline sorts by
-    // position/order, so append order does not matter.
+    // Full dictation pipeline (design.md §4.2.1): the frozen plan's compiled text stages (live edits →
+    // replacements → numbers → fuzzy), then verbatim (if live edits) sorts BEFORE them so its span is
+    // opaque to them, and redaction (if privacy AND a cloud rewrite will run) sorts AFTER them,
+    // tokenizing the fully-transformed text just before the LLM. Pipeline sorts by position/order, so
+    // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
+    // fresh here; the text stages are pure config and reused from the plan.
     private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
-        var stages = cachedTextStages(for: mode)
-        if mode?.commands.liveEdits ?? true { stages.append(VerbatimStage(tokenizer: Tokenizer())) }
-        if (mode?.commands.privacy ?? false) && willRewrite { stages.append(RedactionStage(tokenizer: Tokenizer())) }
+        var stages = plan.postSTTTextStages(for: mode)
+        if mode?.commands.liveEdits ?? true { stages.append(TokenizingStage.verbatim()) }
+        if (mode?.commands.privacy ?? false) && willRewrite { stages.append(TokenizingStage.redaction()) }
         return Pipeline(stages)
     }
 
@@ -659,24 +610,9 @@ final class DictationController {
     // calls the LLM).
     private func selectionPipeline(for mode: Mode) -> Pipeline {
         var stages: [any PipelineStage] = []
-        if mode.commands.liveEdits { stages.append(VerbatimStage(tokenizer: Tokenizer())) }
-        if mode.commands.privacy { stages.append(RedactionStage(tokenizer: Tokenizer())) }
+        if mode.commands.liveEdits { stages.append(TokenizingStage.verbatim()) }
+        if mode.commands.privacy { stages.append(TokenizingStage.redaction()) }
         return Pipeline(stages)
-    }
-
-    private func buildStages(for mode: Mode?) -> [any PipelineStage] {
-        var stages: [any PipelineStage] = []
-        if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
-        let rules = VocabularyMerge.rules(
-            global: config.replacements.toRules(),
-            local: mode?.replacements.toRules() ?? [],
-            includeGlobal: mode?.replacements.includeGlobal ?? true)
-        stages.append(ReplacementsStage(rules: rules))
-        if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
-        if mode?.commands.fuzzyCorrection ?? false {
-            stages.append(FuzzyStage(terms: mergedDictionaryWords(for: mode)))
-        }
-        return stages
     }
 
     func pasteLast() {
@@ -703,6 +639,7 @@ final class DictationController {
         effects.end(settings.duringDictation, cue: .cancel)
         hud?.render(.hidden)
         clearRewriteEscapeHatch()
+        releaseCapturedPlan()
     }
 
     func insertLocalTranscriptNow() {
@@ -737,6 +674,7 @@ final class DictationController {
         effects.end(settings.duringDictation, cue: .error)
         hud?.render(.error(message: message, action: action))
         scheduleHide(after: action == nil ? 2 : 8)
+        releaseCapturedPlan()
     }
 
     private func scheduleHide(after seconds: Double = 2) {

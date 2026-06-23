@@ -13,8 +13,4 @@ enum KeyScribePaths {
     static var modesDir: URL {
         supportDir.appendingPathComponent("modes", isDirectory: true)
     }
-
-    static var fragmentsDir: URL {
-        supportDir.appendingPathComponent("fragments", isDirectory: true)
-    }
 }

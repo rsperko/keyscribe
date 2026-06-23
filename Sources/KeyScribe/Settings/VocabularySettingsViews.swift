@@ -89,7 +89,7 @@ struct ReplacementRows: View {
     // rules. Invalid patterns say so rather than throwing.
     private var preview: String {
         guard !heardTrimmed.isEmpty, !sample.isEmpty else { return "—" }
-        guard let regex = try? NSRegularExpression(pattern: heardTrimmed) else { return "Invalid pattern" }
+        guard let regex = RegexCache.regex(heardTrimmed) else { return "Invalid pattern" }
         let range = NSRange(sample.startIndex..., in: sample)
         return regex.stringByReplacingMatches(in: sample, range: range, withTemplate: replace)
     }
@@ -123,7 +123,7 @@ struct VocabularySettingsView: View {
     var body: some View {
         Form {
             Section("Dictionary") {
-                Text("Words KeyScribe should recognize as written — names, product terms, jargon. A best-effort recognition hint whose strength varies by engine, and always a hint to the AI rewrite that these terms are valid spellings when a rewrite is enabled.")
+                Text("Words KeyScribe should recognize as written — names, product terms, jargon. A best-effort recognition hint whose strength varies by model, and always a hint to the AI rewrite that these terms are valid spellings when a rewrite is enabled.")
                     .font(.caption).foregroundStyle(.secondary)
                 DictionaryRows(words: dictionary.words, onAdd: dictionary.add, onRemove: dictionary.remove)
                 if let error = dictionary.error {

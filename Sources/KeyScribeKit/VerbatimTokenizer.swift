@@ -13,20 +13,12 @@ public enum VerbatimTokenizer {
     private static func replacePairs(_ text: String, _ tokenizer: Tokenizer) -> String {
         let pattern = #"(?i)\bbegin verbatim\b\s*(.*?)\s*\bend verbatim\b"#
         guard let re = RegexCache.regex(pattern, options: [.dotMatchesLineSeparators]) else { return text }
-        let matches = re.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        guard !matches.isEmpty else { return text }
-
-        var result = ""
-        var cursor = text.startIndex
-        for m in matches {
-            guard let full = Range(m.range, in: text),
-                  let content = Range(m.range(at: 1), in: text) else { continue }
-            result += text[cursor..<full.lowerBound]
-            result += tokenizer.tokenize(String(text[content]), type: .verbatim)
-            cursor = full.upperBound
+        let spans = re.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
+            m -> (range: Range<String.Index>, value: String)? in
+            guard let full = Range(m.range, in: text), let content = Range(m.range(at: 1), in: text) else { return nil }
+            return (full, String(text[content]))
         }
-        result += text[cursor...]
-        return result
+        return tokenizer.splice(text, spans: spans, type: .verbatim)
     }
 
     private static func replaceUnterminated(_ text: String, _ tokenizer: Tokenizer) -> String {
@@ -37,22 +29,4 @@ public enum VerbatimTokenizer {
         let prefix = text[..<r.lowerBound].trimmingCharacters(in: .whitespaces)
         return prefix.isEmpty ? token : "\(prefix) \(token)"
     }
-}
-
-// Verbatim as a pipeline command. It sorts BEFORE the post-STT text stages (design.md §4.2.1) so a
-// verbatim span is an opaque token before live edits / replacements / numbers / fuzzy run — it is
-// protected from everything except STT. `post` restores it (LIFO, after the LLM). The shared
-// per-dictation Tokenizer is injected so the host can also collect issued tokens for the gate.
-public struct VerbatimStage: PipelineStage, TokenizingStage {
-    public let position = StagePosition.verbatimMark
-    public let order = 0
-    private let tokenizer: Tokenizer
-    public init(tokenizer: Tokenizer = Tokenizer()) { self.tokenizer = tokenizer }
-    public func apply(_ context: inout PipelineContext) {
-        context.text = VerbatimTokenizer.apply(context.text, into: tokenizer)
-    }
-    public func post(_ context: inout PipelineContext) {
-        context.text = tokenizer.restore(context.text)
-    }
-    public var issuedTokens: [String] { tokenizer.issuedTokens }
 }

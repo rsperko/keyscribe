@@ -20,14 +20,14 @@ struct HUDStateTests {
 
     @Test func localFallbackInsertedSaysRewriteFailed() {
         let state = HUDState.localFallback(outcome: .inserted, mode: "Polished Dictation")
-        #expect(state.primaryText == "Inserted local transcript")
+        #expect(state.primaryText == "Inserted without rewriting")
         #expect(state.secondaryText == "Rewrite could not be completed")
         #expect(state.offersPasteLast == false)
     }
 
     @Test func localFallbackCopiedTellsTheTruthAndOffersPaste() {
         let state = HUDState.localFallback(outcome: .copied(.focusChanged), mode: "Polished Dictation")
-        #expect(state.primaryText == "Copied local transcript instead of inserting")
+        #expect(state.primaryText == "Copied without rewriting")
         #expect(state.secondaryText == "Focus changed while KeyScribe was working")
         #expect(state.offersPasteLast)
     }

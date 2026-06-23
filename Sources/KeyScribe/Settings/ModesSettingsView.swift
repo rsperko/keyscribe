@@ -309,6 +309,7 @@ private struct ModeEditorView: View {
     @State private var capturingCustom = false
     @State private var manualBundleId = ""
     @State private var enteringBundleId = false
+    @State private var runningApps: [InstalledApps.Info] = []
 
     var body: some View {
         Form {
@@ -347,7 +348,7 @@ private struct ModeEditorView: View {
                 }
                 if mode.source != .selection {
                     Toggle("Convert spoken numbers to digits", isOn: commandsBinding(\.numbers))
-                    Toggle("Snap misheard words to your dictionary", isOn: commandsBinding(\.fuzzyCorrection))
+                    Toggle("Correct misheard words to your dictionary", isOn: commandsBinding(\.fuzzyCorrection))
                     Text("These tidy the transcript on this Mac, before any AI rewrite.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -505,7 +506,7 @@ private struct ModeEditorView: View {
                 }
                 HStack {
                     Menu("Add app rule") {
-                        ForEach(InstalledApps.running()) { app in
+                        ForEach(runningApps) { app in
                             Button(app.name) { addAppConstraint(app.bundleId) }
                         }
                         Divider()
@@ -515,6 +516,7 @@ private struct ModeEditorView: View {
                         Button("Enter Bundle ID…") { enteringBundleId = true }
                     }
                     .fixedSize()
+                    .onAppear { if runningApps.isEmpty { runningApps = InstalledApps.running() } }
                     Spacer()
                 }
                 if enteringBundleId {
@@ -562,7 +564,7 @@ private struct ModeEditorView: View {
         Section("Dictionary") {
             SettingRow(
                 title: "Use global dictionary",
-                help: "Adds your global dictionary terms to this mode as recognition hints, on top of the mode-only words below. A dictionary term tells the engine a word is valid — it does not force the word to appear, and an AI rewrite may still change it.")
+                help: "Adds your global dictionary terms to this mode as recognition hints, on top of the mode-only words below. A dictionary term tells the model a word is valid — it does not force the word to appear, and an AI rewrite may still change it.")
             {
                 Toggle("", isOn: dictionaryBinding(\.includeGlobal)).labelsHidden()
             }
@@ -595,10 +597,10 @@ private struct ModeEditorView: View {
                 SettingRow(
                     title: "AI service",
                     result: aiServiceLabel,
-                    help: "When set, the local transcript is sent to this named BYOK connection to be rewritten before it is inserted. Only an explicit connection can run a rewrite; if it fails, your local transcript is inserted instead — your words are never lost.")
+                    help: "When set, the transcript is sent to this AI service to be rewritten before it is inserted. Only an explicit AI service can run a rewrite; if it fails, the transcript is inserted without rewriting — your words are never lost.")
                 {
                     Picker("", selection: rewriteSelection) {
-                        Text("Don't use AI (on this Mac)").tag("")
+                        Text("No cloud rewrite").tag("")
                         ForEach(connections) { connection in
                             Text(connection.name).tag(connection.id)
                         }
@@ -617,7 +619,7 @@ private struct ModeEditorView: View {
     private var aiServiceLabel: String {
         guard let id = mode.aiRewrite?.connection,
               let name = connections.first(where: { $0.id == id })?.name else {
-            return "Off — on this Mac"
+            return "No cloud rewrite"
         }
         return name
     }
@@ -657,7 +659,7 @@ private struct ModeEditorView: View {
                 }
                 SettingRow(
                     title: "Hide recognizable sensitive text",
-                    help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the request, then restores them locally. It is pattern matching: it can miss content, it turns all context off, and it does not make cloud use appropriate for every secret.",
+                    help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the request, then restores them on this Mac. It is pattern matching: it can miss content, it turns all context off, and it does not make cloud use appropriate for every secret.",
                     dependencyReason: mode.commands.privacy ? "All context is off while this is on." : nil)
                 {
                     Toggle("", isOn: privacyMode).labelsHidden()

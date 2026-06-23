@@ -41,4 +41,18 @@ struct ChordMatchingTests {
         #expect(!desc("right_option").matchesChord(keyCode: 61, activeModifiers: [.option]))
         #expect(!desc("hyper").matchesChord(keyCode: 55, activeModifiers: [.control, .option, .shift, .command]))
     }
+
+    @Test func maskFormMatchesSetForm() {
+        #expect(desc("option+l").matchesChord(keyCode: lKey, activeModifierMask: [.option]))
+        #expect(!desc("option+l").matchesChord(keyCode: lKey, activeModifierMask: [.option, .shift]))
+        #expect(!desc("control+option+a").matchesChord(keyCode: aKey, activeModifierMask: [.control]))
+        #expect(desc("control+option+shift+command+a")
+            .matchesChord(keyCode: aKey, activeModifierMask: [.control, .option, .shift, .command]))
+    }
+
+    @Test func modifierSetRoundTripsFromSet() {
+        #expect(ModifierSet([.option, .command]) == [.option, .command])
+        #expect(ModifierSet([]) == [])
+        #expect(ModifierSet(Set(Modifier.allCases)) == [.control, .option, .shift, .command])
+    }
 }

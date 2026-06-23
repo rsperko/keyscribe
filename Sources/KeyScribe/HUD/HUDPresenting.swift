@@ -36,12 +36,12 @@ extension HUDState {
         case .recording(let mode, _):
             return mode
         case .transcribing:
-            return "Transcribing locally"
+            return "Transcribing"
         case .rewriting(let connection, _, _, _):
-            return "Polishing with \(connection)"
+            return "Rewriting with \(connection)"
         case .localFallback(let outcome, _):
-            if case .copied = outcome { return "Copied local transcript instead of inserting" }
-            return "Inserted local transcript"
+            if case .copied = outcome { return "Copied without rewriting" }
+            return "Inserted without rewriting"
         case .complete(let outcome, _):
             return Self.completePrimary(outcome)
         case .error(let message, _):
@@ -59,7 +59,7 @@ extension HUDState {
         case .ready:
             return "Next dictation"
         case .recording:
-            return "Listening locally"
+            return "Listening"
         case .transcribing(let mode):
             return mode
         case .rewriting(_, let redacted, let contextCategories, _):

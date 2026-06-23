@@ -173,7 +173,7 @@ struct AIServiceSettingsView: View {
                 } else {
                     ContentUnavailableView(
                         "No AI services", systemImage: "wand.and.stars",
-                        description: Text("Add a named BYOK connection to use cloud rewrite in a mode."))
+                        description: Text("Add a connection to your own AI provider to use cloud rewrite in a mode."))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

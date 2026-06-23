@@ -39,21 +39,22 @@ public struct PipelineContext: Sendable {
 // restores in `post` unwinds LIFO by construction. One-way text stages leave `post` at its default
 // no-op. Verbatim sorts before the text stages (its content is protected from them too); redaction
 // sorts after (it tokenizes the fully-transformed text just before the LLM).
+//
+// `issuedTokens` is part of the contract (default empty): a stage that tokenizes returns its nonces
+// here so the host's post-LLM validation gate sees them. Making it a protocol member, not an
+// optional downcast, means a tokenizing stage cannot silently escape the gate — a dropped redaction
+// token would leak the protected span (AGENTS.md footgun).
 public protocol PipelineStage: Sendable {
     var position: StagePosition { get }
     var order: Int { get }
     func apply(_ context: inout PipelineContext)
     func post(_ context: inout PipelineContext)
+    var issuedTokens: [String] { get }
 }
 
 public extension PipelineStage {
     func post(_ context: inout PipelineContext) {}
-}
-
-// A stage that issues nonce tokens (verbatim / redaction). The host collects these for the
-// post-LLM validation gate.
-public protocol TokenizingStage {
-    var issuedTokens: [String] { get }
+    var issuedTokens: [String] { [] }
 }
 
 public struct Pipeline {
@@ -82,6 +83,6 @@ public struct Pipeline {
 
     // Tokens issued during `forward`, across every tokenizing stage — fed to the validation gate.
     public var issuedTokens: [String] {
-        stages.compactMap { $0 as? any TokenizingStage }.flatMap { $0.issuedTokens }
+        stages.flatMap { $0.issuedTokens }
     }
 }

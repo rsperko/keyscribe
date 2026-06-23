@@ -20,8 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var history: HistoryStore!
     private var historyController: HistoryController!
     private var correctionPanel: CorrectionPanelController!
+    private var configRepository: ConfigRepository!
 
-    private let firstRunKey = "didCompleteFirstRun"
+    private let firstRunKey = ResetTool.firstRunKey
 
     func applicationDidFinishLaunching(_: Notification) {
         loadSettings()
@@ -30,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         provider = resolveProvider(engines: engines)
         ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir)
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
+        configRepository = ConfigRepository(supportDir: KeyScribePaths.supportDir, config: config)
+        configRepository.onChange = { [weak self] in self?.refreshStatus() }
         configWatcher = ConfigWatcher(path: KeyScribePaths.supportDir.path) { [weak self] in
             Task { @MainActor in self?.reloadConfig() }
         }
@@ -45,12 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         historyController = HistoryController(
             store: history,
-            addDictionaryWord: { [weak self] word in self?.addDictionaryWord(word) },
-            addReplacement: { [weak self] heard, replace in self?.addReplacement(heard: heard, replace: replace) },
+            addDictionaryWord: { [weak self] word in _ = self?.configRepository.addDictionaryWord(word) },
+            addReplacement: { [weak self] heard, replace in _ = self?.configRepository.addReplacement(heard: heard, replace: replace) },
             openSettings: { [weak self] in self?.settingsController.present() })
         correctionPanel = CorrectionPanelController(
-            addDictionaryWord: { [weak self] word in self?.addDictionaryWord(word) },
-            addReplacement: { [weak self] heard, replace in self?.addReplacement(heard: heard, replace: replace) })
+            addDictionaryWord: { [weak self] word in _ = self?.configRepository.addDictionaryWord(word) },
+            addReplacement: { [weak self] heard, replace in _ = self?.configRepository.addReplacement(heard: heard, replace: replace) })
 
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
@@ -196,17 +199,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func addDictionaryWord(_ word: String) {
-        let set = DictionaryStore.loadOrDefault(supportDir: KeyScribePaths.supportDir).adding(word: word)
-        try? DictionaryStore.write(set, to: KeyScribePaths.supportDir)
-    }
-
-    private func addReplacement(heard: String, replace: String) {
-        let set = ReplacementsStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
-            .addingLiteral(heard: heard, replace: replace)
-        try? ReplacementsStore.write(set, to: KeyScribePaths.supportDir)
-    }
-
     // Drop the cached config and re-register per-mode key bindings from the fresh modes. Called by
     // the file watcher (external edits) and the Settings reload button.
     func reloadConfig() {
@@ -294,13 +286,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let configError {
             menu.setStatus(configError)
         } else if Permissions.microphoneStatus() != .granted {
-            menu.setStatus("Microphone permission needed")
+            menu.setStatus("Microphone access needed")
         } else if Permissions.inputMonitoringStatus() != .granted {
-            menu.setStatus("Input Monitoring permission needed")
+            menu.setStatus("Input Monitoring access needed")
         } else if Permissions.accessibilityStatus() != .granted {
-            menu.setStatus("Accessibility permission needed")
+            menu.setStatus("Accessibility access needed")
         } else {
-            menu.setStatus("Ready · Local transcription")
+            menu.setStatus("Ready · On-device speech")
         }
     }
 

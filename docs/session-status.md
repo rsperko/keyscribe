@@ -17,6 +17,45 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## CPU/memory optimization + dead-code pass (2026-06-23, uncommitted)
+
+Source review for CPU/memory wins and dead code. **`swift build` clean; full `swift test` = 478
+tests / 59 suites pass.** Pure-logic changes are unit-tested; the OS-edge changes build clean but the
+**audio-capture change still needs a live mic test** (real-time path, not verifiable headless).
+
+**Hot paths**
+- **Hotkey tap (`HotkeyMonitor`) — no per-event allocation.** The CGEventTap callback fires on every
+  keystroke; held modifiers are now an allocation-free `ModifierSet` OptionSet (new in `KeyDescriptor`,
+  mask-based `matchesChord`) instead of a per-event `Set<Modifier>`. `consume`/`handleActions` early-out
+  when no chord/action bindings exist; the `systemUptime` read is deferred until an edge fires.
+- **Capture at the engine's sample rate.** `SpeechEngine.captureSampleRate` (16 kHz default, **24 kHz
+  Qwen3**); `AudioCapture` records mono at that rate via a converter built once at start, so the WAV is
+  right-sized and decode skips a resample. ⚠️ needs live mic verification.
+- **Redaction (`RedactionTokenizer`) gated.** Cheap lowercased-substring prefix guards skip the vendor
+  regexes whose literal is absent (most dictations); the entropy sweep short-circuits when no long token
+  exists; entropy counts over UTF-8 bytes. All redaction tests still pass.
+- **History paging (`HistoryStore.entries`) is now O(page).** Backward byte-scan over the mapped day
+  file decodes only the last `limit` lines instead of splitting the whole file into per-line slices.
+
+**Per-dictation / UI**
+- `ResolvedConfig` memoizes recognition-bias terms; `RewriteRequestBuilder` lowercases content once;
+  `DuringDictationEffects` caches `NSSound`s; `InstalledApps` caches name/icon by bundle id; the mode
+  editor populates the running-apps menu lazily; Settings computes `shadowedHotkeys()` only on the
+  General pane and `SettingsProblemModel.update` is idempotent (the 2 s poll no longer re-renders the
+  split view); History search is debounced; the regex preview reuses `RegexCache`.
+
+**Lifecycle / safety**
+- `DictationController` **releases `capturedPlan`** at every terminal state (success/error/cancel/
+  over-limit), so an idle app stops pinning a stale `ResolvedConfig` after a config reload.
+- **Recording-duration cap** (`maxRecordingSeconds = 300`): a generation-guarded watchdog drops a
+  runaway hold with a plain-language HUD error (the existing Error state, ui_design.md §5) rather than
+  growing an unbounded WAV + PCM buffer.
+
+**Dead code removed:** `KeyScribePaths.fragmentsDir`, `ConfigCache.modeLoadFailures`,
+`ConfigCache.generation`, `ConfigCache.fragmentBodies`/`fragmentCache`, an unused `import AppKit`.
+**Kept (flagged):** `MigrationRunner.migrateFile` — documented (design.md §5.1) seam for the still-unwired
+migration subsystem.
+
 ## Automated end-to-end verification harness (2026-06-22, uncommitted)
 
 `Tests/KeyScribeTests/DictationPipelineWiringTests.swift` drives the **real `DictationController`** with

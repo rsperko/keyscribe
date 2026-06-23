@@ -27,7 +27,7 @@ struct FirstRunView: View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "waveform").font(.system(size: 44)).foregroundStyle(.tint)
             Text("Welcome to KeyScribe").font(.largeTitle.bold())
-            Text("KeyScribe turns your voice into text, entirely on your Mac. Speech recognition never leaves this device.")
+            Text("KeyScribe turns your voice into text, entirely on this Mac. Speech recognition never leaves it.")
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Get Started") { model.step = .model }
@@ -38,7 +38,7 @@ struct FirstRunView: View {
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Choose a speech model").font(.title.bold())
-            Text("Speech recognition runs entirely on your Mac. The recommended model is a good default — you can change it anytime in Settings.")
+            Text("Speech recognition runs entirely on this Mac. The recommended model is a good default — you can change it anytime in Settings.")
                 .foregroundStyle(.secondary)
             modelCard
             DisclosureSection("Choose another model", isExpanded: $modelChoiceExpanded) {
@@ -89,7 +89,7 @@ struct FirstRunView: View {
                     }
                 }
                 Text(modelMeta(info)).font(.caption).foregroundStyle(.secondary)
-                Text("Stays on your Mac. Required before anything can be transcribed.")
+                Text("Stays on this Mac. Required before anything can be transcribed.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

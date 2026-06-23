@@ -122,8 +122,8 @@ downloaded engine is not implicitly selected after install.
 
 **Use for:** HUD and status rows.
 
-**States:** listening, transcribing locally, rewriting locally, rewriting in cloud, inserted,
-copied instead, local fallback, error.
+**States:** listening, transcribing, rewriting, inserted, copied instead, fallback (inserted or
+copied without rewriting), error.
 
 **Rules:**
 
@@ -182,7 +182,7 @@ Do not make empty states marketing surfaces.
 Errors use one sentence that states the failed operation, followed by one next action. Technical
 details are available in a disclosure and can be copied for diagnostics.
 
-Fallback is distinct from error. `Copied instead of inserted` and `Inserted local transcript`
+Fallback is distinct from error. `Copied instead of inserted` and `Inserted without rewriting`
 are valid outcomes that must explain why they occurred and offer the relevant next action.
 
 ### Control dependencies
@@ -198,6 +198,25 @@ When one option changes another, preserve visibility and explain the dependency.
 Never silently reset a dependent user value. Preserve it for restoration when the dependency is
 removed unless retaining it could send data unexpectedly; in that case require explicit choice.
 
+### Copy philosophy
+
+Five rules govern user-facing copy:
+
+1. **Disclose the boundary where there is a real choice; stay silent where there is not.**
+   Recording and transcribing are always on-device with no alternative destination, so they carry
+   no location words — say `Listening` and `Transcribing`, not "Listening locally". Spend the
+   data-boundary signal where data genuinely could leave: the rewrite step, mode summaries, History.
+2. **One concrete phrase per concept.** `On this Mac` is the canonical data-location phrase. Do not
+   mix in "locally", "on your Mac", or "on this device". *Exceptions:* `on-device` in speech-model
+   metadata (a compact capability descriptor) and `local-first` in product positioning.
+3. **Name things by result, in plain words.** The rewrite escape hatch inserts locally-processed
+   text *minus the AI pass* (not the raw recognizer output), so it is `Insert without rewriting`,
+   never "local transcript". Avoid implementation jargon (BYOK, engine, nonce) in user copy.
+4. **One word per concept across surfaces.** Rewrite is "rewrite" everywhere (the HUD says
+   `Rewriting with {name}`, the badge says `Cloud rewrite`, the hatch says `without rewriting` —
+   never "Polishing"). Speech is a "model" everywhere in user copy, never "engine".
+5. **Never overstate privacy.** Best-effort redaction stays "best-effort"; no "secure/safe/private".
+
 ### Copy vocabulary
 
 Use these terms consistently:
@@ -205,11 +224,16 @@ Use these terms consistently:
 | Prefer | Avoid |
 |---|---|
 | `On this Mac` | offline-only, private, secure |
+| `Listening` / `Transcribing` (no location word) | listening locally, transcribing locally |
+| `On-device speech` (idle status) | local transcription |
+| `Rewriting with {name}` | Polishing, processing |
 | `Cloud rewrite` | AI mode, remote magic |
+| `No cloud rewrite` (rewrite off) | off, don't use AI |
 | `Best-effort redaction` | protected, anonymized, safe |
 | `Visible text shared` | context enabled |
-| `Insert local transcript` | bypass, raw fallback |
+| `Insert without rewriting` | local transcript (implies raw STT), bypass, raw fallback |
 | `Copied instead of inserted` | failed paste |
+| `speech model` / `model` | engine (in user copy) |
 | `Work on selection` | edit mode |
 | `Reusable writing instruction` | prompt fragment |
 

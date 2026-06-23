@@ -24,11 +24,21 @@ final class DuringDictationEffects {
     private var hadDisplayAssertion = false
     private var previousMute: UInt32?
     private var generation = 0
+    // Named system sounds are reloaded by NSSound(named:) on each call; keep one instance per cue for
+    // the app's lifetime so begin/end don't re-resolve them every dictation.
+    private var soundCache: [String: NSSound] = [:]
+
+    private func sound(named name: String) -> NSSound? {
+        if let cached = soundCache[name] { return cached }
+        let sound = NSSound(named: name)
+        soundCache[name] = sound
+        return sound
+    }
 
     func begin(_ config: Settings.DuringDictation) {
         generation &+= 1
         if config.keepDisplayAwake { acquireDisplayAssertion() }
-        let startCue = config.sounds ? NSSound(named: "Tink") : nil
+        let startCue = config.sounds ? sound(named: "Tink") : nil
         startCue?.play()
         guard config.muteSystemAudio else { return }
         // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since
@@ -52,7 +62,7 @@ final class DuringDictationEffects {
         generation &+= 1
         releaseDisplayAssertion()
         restoreOutput()
-        if config.sounds { NSSound(named: cue.soundName)?.play() }
+        if config.sounds { sound(named: cue.soundName)?.play() }
     }
 
     private func acquireDisplayAssertion() {

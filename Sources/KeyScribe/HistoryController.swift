@@ -53,7 +53,7 @@ private struct HistoryRow: Identifiable {
 
 @MainActor
 private final class HistoryViewModel: ObservableObject {
-    @Published var query = "" { didSet { recomputeGroups() } }
+    @Published var query = "" { didSet { scheduleRecompute() } }
     @Published var selection: HistoryRow.ID?
     @Published private(set) var groups: [(day: String, rows: [HistoryRow])] = []
     @Published private(set) var isLoading = false
@@ -61,6 +61,7 @@ private final class HistoryViewModel: ObservableObject {
     private static let loadLimit = 1000
     private var rows: [HistoryRow] = []
     private var entryIndex: [HistoryRow.ID: HistoryEntry] = [:]
+    private var recomputeTask: Task<Void, Never>?
 
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Void
@@ -99,6 +100,17 @@ private final class HistoryViewModel: ObservableObject {
             entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
             recomputeGroups()
             isLoading = false
+        }
+    }
+
+    // Debounce search keystrokes: re-filtering and re-grouping up to loadLimit rows on every character
+    // is wasted work while the user is still typing.
+    private func scheduleRecompute() {
+        recomputeTask?.cancel()
+        recomputeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self, !Task.isCancelled else { return }
+            self.recomputeGroups()
         }
     }
 

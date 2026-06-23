@@ -8,7 +8,7 @@ struct SpeechModelsView: View {
         Form {
             Section { activeBanner }
             Section {
-                Text("KeyScribe runs one speech engine at a time, entirely on this Mac, before any AI step. Pick it here.")
+                Text("KeyScribe runs one speech model at a time, entirely on this Mac, before any AI step. Pick it here.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(model.rows) { row in
                     EngineRow(row: row, model: model)
@@ -29,8 +29,8 @@ struct SpeechModelsView: View {
             Button("Cancel", role: .cancel) { model.cancelDelete() }
         } message: {
             Text(model.pendingDeleteLeavesNoEngine
-                ? "This is your only usable engine. Deleting it leaves no engine to dictate with."
-                : "This is the active engine. Deleting it will switch you to another installed engine.")
+                ? "This is your only usable model. Deleting it leaves no model to dictate with."
+                : "This is the active model. Deleting it will switch you to another installed model.")
         }
     }
 
@@ -194,7 +194,7 @@ private struct EngineRow: View {
             }
         } else if row.isUsable {
             if !row.isActive {
-                Button("Use This Engine") { model.select(row.id) }
+                Button("Use This Model") { model.select(row.id) }
             }
             Button("Test") { model.test(row.id) }
                 .help("Runs a quick on-device self-test to confirm this model can transcribe.")

@@ -4,6 +4,8 @@ import TOMLKit
 public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var id: String                 // = filename stem; not stored in the TOML body
     public var schemaVersion: Int
+    public var seedId: String?            // catalog identity if this mode was seeded; nil = user-created
+    public var seedVersion: Int?          // catalog version this mode was seeded from
     public var name: String
     public var enabled: Bool
     public var triggerKeys: [TriggerKey]
@@ -181,6 +183,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
+        case seedId = "seed_id"
+        case seedVersion = "seed_version"
         case name, enabled
         case triggerKeys = "trigger_keys"
         case triggerPhrases = "trigger_phrases"
@@ -193,6 +197,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public init(id: String, name: String, schemaVersion: Int = 1) {
         self.id = id
         self.schemaVersion = schemaVersion
+        seedId = nil
+        seedVersion = nil
         self.name = name
         enabled = true
         triggerKeys = []
@@ -214,6 +220,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = ""
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        seedId = try c.decodeIfPresent(String.self, forKey: .seedId)
+        seedVersion = try c.decodeIfPresent(Int.self, forKey: .seedVersion)
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         triggerKeys = try c.decodeIfPresent([TriggerKey].self, forKey: .triggerKeys) ?? []
@@ -234,6 +242,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encodeIfPresent(seedId, forKey: .seedId)
+        try c.encodeIfPresent(seedVersion, forKey: .seedVersion)
         try c.encode(name, forKey: .name)
         try c.encode(enabled, forKey: .enabled)
         if !triggerKeys.isEmpty { try c.encode(triggerKeys, forKey: .triggerKeys) }
@@ -334,7 +344,12 @@ public enum ModeStore {
             connection: "",
             prompt: "The dictated text describes a shell command. Output a single shell command (or pipeline) that does what I said, ready to paste at a terminal prompt. Convert spoken symbols to their shell characters — for example \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" to >, \"append to\" to >>, \"and and\" to &&, \"tilde\" to ~, \"slash\" to /, \"star\" to *, \"dollar\" to $. Keep file names, paths, flags, branch names, and other identifiers exactly as I said them. Output ONLY the command text — no leading $ prompt, no surrounding code fence or backticks, no explanation, comments, or extra lines. Do NOT run, answer, or describe the command; if I phrase it as a question (\"how do I…\"), output the command that does it, not an answer. If the text does not describe a command, return it unchanged.")
 
-        return [plain, polished, message, email, prompt, selection, markdown, shell]
+        return [plain, polished, message, email, prompt, selection, markdown, shell].map {
+            var mode = $0
+            mode.seedId = mode.id
+            mode.seedVersion = 1
+            return mode
+        }
     }
 
     public struct LoadFailure: Equatable, Sendable {

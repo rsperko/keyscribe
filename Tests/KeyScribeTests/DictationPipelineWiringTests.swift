@@ -24,7 +24,7 @@ struct DictationPipelineWiringTests {
     private final class FakeAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
         init(url: URL) { self.url = url }
-        func start(levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL { url }
+        func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL { url }
         func stop() -> URL? { url }
     }
 

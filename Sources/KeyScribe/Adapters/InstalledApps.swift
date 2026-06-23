@@ -18,7 +18,19 @@ enum InstalledApps {
         return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    // Bundle id → name/icon barely changes while Settings is open, but a constraint row re-resolves
+    // both via LaunchServices + a fresh NSImage on every re-render. Memoize per bundle id.
+    private static var nameCache: [String: String?] = [:]
+    private static var iconCache: [String: NSImage?] = [:]
+
     static func name(forBundleId bundleId: String) -> String? {
+        if let cached = nameCache[bundleId] { return cached }
+        let resolved = resolveName(forBundleId: bundleId)
+        nameCache[bundleId] = resolved
+        return resolved
+    }
+
+    private static func resolveName(forBundleId bundleId: String) -> String? {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
             return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName
         }
@@ -28,8 +40,11 @@ enum InstalledApps {
     }
 
     static func icon(forBundleId bundleId: String) -> NSImage? {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
-        return NSWorkspace.shared.icon(forFile: url.path)
+        if let cached = iconCache[bundleId] { return cached }
+        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        iconCache[bundleId] = icon
+        return icon
     }
 
     static func chooseFromApplications() -> Info? {

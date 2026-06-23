@@ -58,27 +58,42 @@ public struct HistoryStore: Sendable {
 
     // Newest entry first. Reads day files newest-first and stops once `limit` entries are collected,
     // so a paged list never materializes older days. Within a day, lines are appended chronologically,
-    // so we decode from the end backward and stop after `limit` valid entries — a high-volume current
-    // day no longer decodes (and allocates a String for) every line just to discard all but the last
-    // page. Files are memory-mapped; malformed lines (e.g. a future schema) are skipped, not fatal, and
-    // do not consume a page slot.
+    // so we scan the mapped bytes backward for newlines and decode only the last `limit` lines — a
+    // high-volume current day no longer splits the whole file into a per-line slice array just to keep
+    // the last page. Files are memory-mapped; malformed lines (e.g. a future schema) are skipped, not
+    // fatal, and do not consume a page slot.
     public func entries(limit: Int? = nil) -> [HistoryEntry] {
         var all: [HistoryEntry] = []
         for file in dayFiles().reversed() {
             guard let data = try? Data(contentsOf: dir.appendingPathComponent(file), options: .mappedIfSafe)
             else { continue }
-            var day: [HistoryEntry] = []
-            for line in data.split(separator: 0x0A).reversed() where !line.isEmpty {
-                if let entry = try? HistoryEntry(jsonLine: String(decoding: line, as: UTF8.self)) {
-                    day.append(entry)
-                }
-                if let limit, day.count >= limit { break }
-            }
-            day.sort { $0.timestamp > $1.timestamp }
+            let remaining = limit.map { max(0, $0 - all.count) }
+            let day = Self.lastLines(data, limit: remaining).sorted { $0.timestamp > $1.timestamp }
             all.append(contentsOf: day)
             if let limit, all.count >= limit { return Array(all.prefix(limit)) }
         }
         return all
+    }
+
+    // Decode up to `limit` entries from the end of a JSONL day file, newest first, by walking the
+    // mapped bytes backward newline to newline — no whole-file slice array, no String per skipped line.
+    private static func lastLines(_ data: Data, limit: Int?) -> [HistoryEntry] {
+        var entries: [HistoryEntry] = []
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var end = bytes.count
+            while end > 0 {
+                if let limit, entries.count >= limit { return }
+                var start = end
+                while start > 0, bytes[start - 1] != 0x0A { start -= 1 }
+                if end > start,
+                   let entry = try? HistoryEntry(jsonLine: String(decoding: bytes[start..<end], as: UTF8.self)) {
+                    entries.append(entry)
+                }
+                end = start - 1
+            }
+        }
+        return entries
     }
 
     @discardableResult

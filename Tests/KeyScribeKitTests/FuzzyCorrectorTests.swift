@@ -17,6 +17,25 @@ struct FuzzyCorrectorTests {
         #expect(fix("install postgress now", ["Postgres"]) == "install Postgres now")
     }
 
+    // Length-bucketing must not change which term wins: a far-length distractor is never a candidate,
+    // and the correct in-budget term is still chosen.
+    @Test func picksLengthCompatibleTermOverFarLengthDistractor() {
+        let terms = ["Postgres", "PostgresqlReplicationController"]
+        #expect(fix("install postgress now", terms) == "install Postgres now")
+    }
+
+    @Test func stillSnapsCloseLongTerm() {
+        #expect(fix("the kabernetas cluster", ["Kubernetes"]) == "the Kubernetes cluster")
+    }
+
+    @Test func doesNotSnapDistantSoundAlike() {
+        #expect(fix("the kabernatas cluster", ["Kubernetes"]) == "the kabernatas cluster")
+    }
+
+    @Test func tieBreaksToPhoneticMatchNotDeclarationOrder() {
+        #expect(fix("i need a halper now", ["Halter", "Helper"]) == "i need a Helper now")
+    }
+
     @Test func leavesUnrelatedWordsAlone() {
         #expect(fix("the cat sat on the mat", ["ChargeBee", "Kubernetes"]) == "the cat sat on the mat")
     }

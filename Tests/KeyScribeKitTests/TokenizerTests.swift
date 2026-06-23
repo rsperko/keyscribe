@@ -55,4 +55,28 @@ struct TokenizerTests {
         _ = t.tokenize("4111 1111 1111 1111", type: .redact)
         #expect(t.issuedTokens.allSatisfy { $0.hasPrefix("⟦SN:") })
     }
+
+    // A verbatim token allocated first, then a redaction span captured around it: the single-pass
+    // restore must still expand both, even though redaction's original literally embeds the verbatim
+    // token (cross-type nesting, the real pipeline shape).
+    @Test func restoreUnwindsCrossTypeNesting() {
+        let t = Tokenizer()
+        let verb = t.tokenize("keep this", type: .verbatim)      // ⟦SN:VERB:1⟧
+        let red = t.tokenize("a \(verb) b", type: .redact)        // original embeds the verbatim token
+        #expect(t.restore("x \(red) y") == "x a keep this b y")
+    }
+
+    // An unknown token (e.g. one the LLM hallucinated) is left untouched and must not loop forever.
+    @Test func restoreLeavesUnknownTokensAndTerminates() {
+        let t = Tokenizer()
+        let known = t.tokenize("real", type: .redact)
+        #expect(t.restore("\(known) and ⟦SN:REDACT:99⟧") == "real and ⟦SN:REDACT:99⟧")
+    }
+
+    @Test func restoreHandlesManyTokens() {
+        let t = Tokenizer()
+        let tokens = (0..<50).map { t.tokenize("v\($0)", type: .redact) }
+        let restored = t.restore(tokens.joined(separator: " "))
+        #expect(restored == (0..<50).map { "v\($0)" }.joined(separator: " "))
+    }
 }

@@ -29,7 +29,7 @@ private struct NoticesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("KeyScribe").font(.largeTitle.bold())
-                Text("Privacy-first, local-first voice dictation for macOS. Speech recognition always runs on this device.")
+                Text("Privacy-first, local-first voice dictation for macOS. Speech recognition always runs on this Mac.")
                     .foregroundStyle(.secondary)
                 Divider()
                 Text("License").font(.headline)

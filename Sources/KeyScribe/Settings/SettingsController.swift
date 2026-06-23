@@ -60,7 +60,12 @@ enum SettingsProblem: Equatable, CaseIterable {
 @MainActor
 final class SettingsProblemModel: ObservableObject {
     @Published var flaggedPanes: Set<SettingsDestination> = []
-    func update(_ problems: [SettingsProblem]) { flaggedPanes = Set(problems.map(\.pane)) }
+    // The 2s poll calls this on every tick; only republish when the set actually changes so unchanged
+    // ticks don't re-render the whole split view.
+    func update(_ problems: [SettingsProblem]) {
+        let panes = Set(problems.map(\.pane))
+        if panes != flaggedPanes { flaggedPanes = panes }
+    }
 }
 
 @MainActor
@@ -159,8 +164,7 @@ struct SettingsRootView: View {
     }
 
     var body: some View {
-        let shadowed = shadowedHotkeys()
-        return NavigationSplitView {
+        NavigationSplitView {
             List(SettingsDestination.allCases, selection: $destination) { destination in
                 HStack {
                     Label(destination.title, systemImage: destination.symbol)
@@ -186,6 +190,7 @@ struct SettingsRootView: View {
         } detail: {
             switch destination ?? .general {
             case .general:
+                let shadowed = shadowedHotkeys()
                 GeneralSettingsView(
                     model: general,
                     dictionaryShadowed: shadowed.contains(GlobalHotkey.dictionaryId),

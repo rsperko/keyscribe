@@ -4,7 +4,7 @@ import KeyScribeKit
 // Tracks which downloadable engines are installed via a small marker file, decoupled from each SDK's
 // on-disk layout. The active engine and rules live in KeyScribeKit's SpeechModelSet; this is durable
 // install bookkeeping plus best-effort file removal. Per-engine footprint/integrity now lives on the
-// engines themselves (installDirNames / installState), so this stays generic — no hardcoded dir maps.
+// engines themselves (installDirNames / verifyInstalled), so this stays generic — no hardcoded dir maps.
 enum ModelInstallStore {
     private static var markerURL: URL {
         KeyScribePaths.modelsDir.appendingPathComponent(markerFile)
@@ -23,10 +23,10 @@ enum ModelInstallStore {
         for engine in engines {
             guard let info = SpeechModelCatalog.entry(for: engine.id), !info.systemManaged else { continue }
             owned[engine.id] = engine.installDirNames
-            switch engine.installState(in: KeyScribePaths.modelsDir) {
-            case .present: complete.insert(engine.id)
-            case .absent: break
-            case .marker: if marked.contains(engine.id) { complete.insert(engine.id) }
+            switch engine.verifyInstalled(in: KeyScribePaths.modelsDir) {
+            case .some(true): complete.insert(engine.id)
+            case .some(false): break
+            case nil: if marked.contains(engine.id) { complete.insert(engine.id) }
             }
         }
 

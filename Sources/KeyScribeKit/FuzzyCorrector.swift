@@ -3,8 +3,9 @@ import Foundation
 // Repairs proper nouns / identifiers the STT split or mangled, snapping them to a dictionary term
 // ("charge bee" → "ChargeBee"). Opt-in per mode (commands.fuzzyCorrection) and deliberately timid:
 // the dictionary is a *hint*, never authoritative (design.md §4.2), so we only touch distinctive
-// terms (≥4 normalized chars), demand a small edit distance, and require Soundex agreement before
-// allowing the looser distance. A pure casing/spacing fix (same normalized form) is always safe.
+// terms (≥4 normalized chars) and never rewrite across more than 2 edits — Soundex agreement only
+// buys the second edit (and only on short terms, where cap is 1), and breaks ties toward the
+// phonetic match. A pure casing/spacing fix (same normalized form) is always safe.
 // Bias-less engines (Moonshine) benefit most; bias-capable engines rarely need it.
 public enum FuzzyCorrector {
     // Canonicalized dictionary, with each term's Soundex precomputed once. Built when the stage is
@@ -12,11 +13,20 @@ public enum FuzzyCorrector {
     // whole dictionary, and never recomputes a term's Soundex per input token.
     public struct Prepared: Sendable {
         fileprivate let terms: [Term]
+        fileprivate let byNorm: [String: Term]            // O(1) casing/spacing match
+        fileprivate let byLength: [Int: [Int]]            // normalized length → term indices, ascending
         public var isEmpty: Bool { terms.isEmpty }
     }
 
     public static func prepare(_ terms: [String]) -> Prepared {
-        Prepared(terms: canonicalize(terms))
+        let canonical = canonicalize(terms)
+        var byNorm: [String: Term] = [:]
+        var byLength: [Int: [Int]] = [:]
+        for (i, term) in canonical.enumerated() {
+            byNorm[term.norm] = term
+            byLength[term.norm.count, default: []].append(i)
+        }
+        return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength)
     }
 
     public static func apply(_ text: String, terms: [String]) -> String {
@@ -24,8 +34,7 @@ public enum FuzzyCorrector {
     }
 
     public static func apply(_ text: String, prepared: Prepared) -> String {
-        let canonical = prepared.terms
-        guard !canonical.isEmpty else { return text }
+        guard !prepared.isEmpty else { return text }
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
 
         var out: [String] = []
@@ -40,7 +49,7 @@ public enum FuzzyCorrector {
                 // Multi-token windows only snap on an exact normalized match (a split/spacing fix like
                 // "charge bee" → "ChargeBee"); fuzzy distance is single-token only, so a short glue
                 // word ("to kubernetes") can never be merged away.
-                guard let term = bestMatch(norm, in: canonical, allowFuzzy: span == 1),
+                guard let term = bestMatch(norm, in: prepared, allowFuzzy: span == 1),
                       term.norm != norm || term.canonical != core else {
                     continue
                 }
@@ -68,18 +77,34 @@ public enum FuzzyCorrector {
         return result
     }
 
-    private static func bestMatch(_ norm: String, in terms: [Term], allowFuzzy: Bool) -> Term? {
+    private static func bestMatch(_ norm: String, in prepared: Prepared, allowFuzzy: Bool) -> Term? {
+        if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
+        guard allowFuzzy else { return nil }
+        let normSoundex = soundex(norm)
+        let cap = norm.count >= 8 ? 2 : 1
+        // distance ≤ allowed ≤ cap+1 implies the lengths differ by at most cap+1, so only those length
+        // buckets can hold a match — the rest never need a Levenshtein computation. Indices are
+        // gathered ascending so equal-distance, equal-phonetic ties resolve to the earliest-declared term.
+        let maxDelta = cap + 1
+        var candidateIndices: [Int] = []
+        for len in (norm.count - maxDelta)...(norm.count + maxDelta) where len >= 0 {
+            if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }
+        }
+        candidateIndices.sort()
         var best: Term?
         var bestDistance = Int.max
-        let normSoundex = allowFuzzy ? soundex(norm) : ""
-        for term in terms {
-            if term.norm == norm { return term }                                   // casing/spacing only
-            guard allowFuzzy else { continue }
+        var bestSoundexMatch = false
+        for idx in candidateIndices {
+            let term = prepared.terms[idx]
             let distance = levenshtein(norm, term.norm)
-            let cap = norm.count >= 8 ? 2 : 1
-            let allowed = normSoundex == term.soundex ? cap + 1 : cap
-            if distance <= allowed && distance < bestDistance {
+            let soundexMatch = normSoundex == term.soundex
+            let allowed = min(soundexMatch ? cap + 1 : cap, 2)
+            guard distance <= allowed else { continue }
+            let better = distance < bestDistance
+                || (distance == bestDistance && soundexMatch && !bestSoundexMatch)
+            if better {
                 bestDistance = distance
+                bestSoundexMatch = soundexMatch
                 best = term
             }
         }

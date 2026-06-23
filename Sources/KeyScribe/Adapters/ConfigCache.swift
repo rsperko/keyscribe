@@ -14,18 +14,12 @@ final class ConfigCache {
     // Survives invalidate(): the last set of modes that decoded cleanly, so a mid-edit malformed
     // file falls back to its prior good copy instead of disappearing (design discipline §5.1).
     private var lastGoodModes: [Mode] = []
-    private(set) var modeLoadFailures: [ModeStore.LoadFailure] = []
 
     private var modesCache: [Mode]?
     private var replacementsCache: ReplacementsSet?
     private var connectionsCache: ConnectionSet?
     private var dictionaryCache: DictionarySet?
-    private var fragmentCache: [String: String] = [:]
-
-    // Bumped on every invalidate(). Consumers that derive their own expensive per-mode artifacts
-    // (DictationController's compiled pipeline and merged dictionary) key on this so they recompute
-    // only when the config actually changed, not on every dictation.
-    private(set) var generation = 0
+    private var resolvedCache: ResolvedConfig?
 
     init(supportDir: URL) {
         self.supportDir = supportDir
@@ -36,8 +30,27 @@ final class ConfigCache {
         replacementsCache = nil
         connectionsCache = nil
         dictionaryCache = nil
-        fragmentCache = [:]
-        generation += 1
+        resolvedCache = nil
+    }
+
+    // The frozen, derived view of this config generation handed to a dictation at record-start
+    // (DictationController captures it once so a mid-dictation reload can't change what an in-flight
+    // dictation sees). Rebuilt only when the config is invalidated; reused across dictations
+    // otherwise, so the per-mode merged dictionary and compiled stages are computed at most once.
+    var resolved: ResolvedConfig {
+        if let resolvedCache { return resolvedCache }
+        let modes = self.modes
+        let referencedFragmentIds = Set(modes.flatMap { $0.aiRewrite?.fragments ?? [] })
+        let fragmentDir = supportDir.appendingPathComponent("fragments", isDirectory: true)
+        var fragments: [String: String] = [:]
+        for id in referencedFragmentIds {
+            fragments[id] = FragmentStore.load(ids: [id], from: fragmentDir).first ?? ""
+        }
+        let resolved = ResolvedConfig(
+            modes: modes, dictionary: dictionary, replacements: replacements,
+            connections: connections, fragments: fragments)
+        resolvedCache = resolved
+        return resolved
     }
 
     var modes: [Mode] {
@@ -47,7 +60,6 @@ final class ConfigCache {
         for failure in result.failures {
             log.error("mode '\(failure.id, privacy: .public)' failed to load\(failure.usedLastKnownGood ? " (kept last-known-good)" : " (skipped)", privacy: .public): \(failure.message, privacy: .public)")
         }
-        modeLoadFailures = result.failures
         modesCache = result.modes
         lastGoodModes = result.modes
         return result.modes
@@ -72,15 +84,5 @@ final class ConfigCache {
         let loaded = DictionaryStore.loadOrDefault(supportDir: supportDir)
         dictionaryCache = loaded
         return loaded
-    }
-
-    func fragmentBodies(ids: [String]) -> [String] {
-        let dir = supportDir.appendingPathComponent("fragments", isDirectory: true)
-        return ids.compactMap { id in
-            if let cached = fragmentCache[id] { return cached.isEmpty ? nil : cached }
-            let body = FragmentStore.load(ids: [id], from: dir).first ?? ""
-            fragmentCache[id] = body
-            return body.isEmpty ? nil : body
-        }
     }
 }

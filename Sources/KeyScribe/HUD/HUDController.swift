@@ -107,7 +107,7 @@ private struct HUDView: View {
     @ViewBuilder private var actionButtons: some View {
         if model.state.offersLocalTranscript {
             Button { onInsertLocalTranscript() } label: {
-                Label("Insert local transcript", systemImage: "text.insert")
+                Label("Insert without rewriting", systemImage: "text.insert")
             }
         }
         if model.state.offersPasteLast {

@@ -5,4 +5,5 @@ enum Log {
     static let context = Logger(subsystem: "com.keyscribe.app", category: "context")
     static let models = Logger(subsystem: "com.keyscribe.app", category: "models")
     static let insertion = Logger(subsystem: "com.keyscribe.app", category: "insertion")
+    static let config = Logger(subsystem: "com.keyscribe.app", category: "config")
 }

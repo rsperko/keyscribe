@@ -2,6 +2,35 @@ public enum Modifier: String, Sendable, CaseIterable {
     case control, option, shift, command
 }
 
+/// Allocation-free modifier set for the event-tap hot path: every keystroke compares the held
+/// modifiers against a binding's required set, and a heap `Set<Modifier>` per event is wasteful.
+public struct ModifierSet: OptionSet, Sendable, Hashable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+
+    public static let control = ModifierSet(rawValue: 1 << 0)
+    public static let option = ModifierSet(rawValue: 1 << 1)
+    public static let shift = ModifierSet(rawValue: 1 << 2)
+    public static let command = ModifierSet(rawValue: 1 << 3)
+
+    public init(_ modifiers: Set<Modifier>) {
+        var set: ModifierSet = []
+        for m in modifiers { set.insert(m.mask) }
+        self = set
+    }
+}
+
+extension Modifier {
+    var mask: ModifierSet {
+        switch self {
+        case .control: return .control
+        case .option: return .option
+        case .shift: return .shift
+        case .command: return .command
+        }
+    }
+}
+
 public enum NamedKey: String, Sendable {
     case fn, hyper, rightOption, rightCommand
 }
@@ -80,6 +109,16 @@ extension KeyDescriptor {
         }
     }
 
+    public var requiredModifierMask: ModifierSet {
+        switch self {
+        case .named(.hyper): return [.control, .option, .shift, .command]
+        case .named(.rightOption): return [.option]
+        case .named(.rightCommand): return [.command]
+        case .named(.fn): return []
+        case .chord(let mods, _): return ModifierSet(mods)
+        }
+    }
+
     public var triggerKeyCode: Int {
         switch self {
         case .named(.fn): return 63
@@ -94,8 +133,14 @@ extension KeyDescriptor {
     /// exactly — no extras. This is what stops `option+l` from firing under `hyper+l`
     /// (ctrl+option+shift+command+l), where Option is merely a subset of what's held.
     public func matchesChord(keyCode: Int, activeModifiers: Set<Modifier>) -> Bool {
+        matchesChord(keyCode: keyCode, activeModifierMask: ModifierSet(activeModifiers))
+    }
+
+    /// Allocation-free chord match for the event-tap hot path: identical semantics to the
+    /// `Set<Modifier>` form, comparing held modifiers against the required set with a bitmask.
+    public func matchesChord(keyCode: Int, activeModifierMask: ModifierSet) -> Bool {
         guard case .chord = self else { return false }
-        return keyCode == triggerKeyCode && activeModifiers == requiredModifiers
+        return keyCode == triggerKeyCode && activeModifierMask == requiredModifierMask
     }
 
     /// Build a chord from a live-captured key event. Returns nil for an unrecognized key code

@@ -42,14 +42,40 @@ public final class Tokenizer: @unchecked Sendable {
         return order
     }
 
+    // Replace every ⟦SN:…⟧ token with its original in a single linear scan, repeating only while a
+    // round actually restores something — so a restored original that itself contains a token (a
+    // redaction span captured around an earlier verbatim token) still unwinds. order has no cycles
+    // (a token's original predates the token), so the fixpoint converges in passes equal to the
+    // nesting depth (≤2 in practice) rather than the previous one-full-pass-per-token loop.
     public func restore(_ text: String) -> String {
         lock.lock()
         defer { lock.unlock() }
+        guard !originals.isEmpty else { return text }
         var result = text
-        for token in order.reversed() {
-            guard let original = originals[token] else { continue }
-            result = result.replacingOccurrences(of: token, with: original)
+        while result.contains(Self.tokenOpen) {
+            var didRestore = false
+            var out = ""
+            out.reserveCapacity(result.count)
+            var cursor = result.startIndex
+            while let open = result.range(of: Self.tokenOpen, range: cursor..<result.endIndex),
+                  let close = result.range(of: Self.tokenClose, range: open.upperBound..<result.endIndex) {
+                let token = String(result[open.lowerBound..<close.upperBound])
+                out += result[cursor..<open.lowerBound]
+                if let original = originals[token] {
+                    out += original
+                    didRestore = true
+                } else {
+                    out += token
+                }
+                cursor = close.upperBound
+            }
+            out += result[cursor..<result.endIndex]
+            result = out
+            if !didRestore { break }
         }
         return result
     }
+
+    private static let tokenOpen = "⟦SN:"
+    private static let tokenClose = "⟧"
 }

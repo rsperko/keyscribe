@@ -32,6 +32,7 @@ final class HotkeyMonitor {
 
     private var bindings: [Binding]
     private var actionBindings: [ActionBinding]
+    private var hasConsumableBindings: Bool
     private var engagedActions: Set<String> = []
     private var suppressedKeyCodes: Set<Int64> = []
     private var tap: CFMachPort?
@@ -51,6 +52,7 @@ final class HotkeyMonitor {
     ) {
         self.bindings = bindings
         self.actionBindings = actionBindings
+        self.hasConsumableBindings = Self.anyChordBindings(bindings, actionBindings)
         self.onStart = onStart
         self.onCommit = onCommit
         self.onAction = onAction
@@ -61,8 +63,17 @@ final class HotkeyMonitor {
     func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
         self.bindings = bindings
         self.actionBindings = actionBindings
+        hasConsumableBindings = Self.anyChordBindings(bindings, actionBindings)
         engagedActions.removeAll(keepingCapacity: true)
         suppressedKeyCodes.removeAll(keepingCapacity: true)
+    }
+
+    // Most installs bind only modifier-only named triggers (Fn/right-Option), which never consume a
+    // chord. Knowing up front whether any chord/action binding exists lets the per-event `consume`
+    // and `handleActions` skip their per-binding scans entirely on the common path.
+    private static func anyChordBindings(_ bindings: [Binding], _ actionBindings: [ActionBinding]) -> Bool {
+        if !actionBindings.isEmpty { return true }
+        return bindings.contains { if case .chord = $0.descriptor { return true } else { return false } }
     }
 
     // An active (.defaultTap) tap so a *chord* trigger (mode or action) can be swallowed before the
@@ -141,9 +152,11 @@ final class HotkeyMonitor {
         }
         let mods = Self.activeModifiers(flags)
         let consumed = consume(type: type, keyCode: keyCode, mods: mods)
-        let now = ProcessInfo.processInfo.systemUptime
+        var now: TimeInterval = 0
+        var haveNow = false
         for i in bindings.indices {
             guard let edge = edge(binding: i, type: type, keyCode: keyCode, flags: flags, mods: mods) else { continue }
+            if !haveNow { now = ProcessInfo.processInfo.systemUptime; haveNow = true }
             let key = bindings[i].triggerKey
             switch bindings[i].gesture.handle(edge, at: now) {
             case .start: dispatchSideEffect { self.onStart(key) }
@@ -170,11 +183,12 @@ final class HotkeyMonitor {
     // the base keyCode and consume it; we consume the matching key-up only when we consumed its key-down,
     // so later typing the chord's base key *alone* (no modifiers) passes through untouched on both edges —
     // never a half-swallowed key-up that would strand the app in a stuck-key state.
-    private func consume(type: CGEventType, keyCode: Int64, mods: Set<Modifier>) -> Bool {
+    private func consume(type: CGEventType, keyCode: Int64, mods: ModifierSet) -> Bool {
         switch type {
         case .keyDown:
-            let matches = bindings.contains { $0.descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods) }
-                || actionBindings.contains { $0.descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods) }
+            guard hasConsumableBindings else { return false }
+            let matches = bindings.contains { $0.descriptor.matchesChord(keyCode: Int(keyCode), activeModifierMask: mods) }
+                || actionBindings.contains { $0.descriptor.matchesChord(keyCode: Int(keyCode), activeModifierMask: mods) }
             if matches { suppressedKeyCodes.insert(keyCode) }
             return matches
         case .keyUp:
@@ -186,9 +200,10 @@ final class HotkeyMonitor {
 
     // One-shot chord actions. keyDown auto-repeats while a key is held, so an `engaged` set debounces
     // to a single fire per physical press; the key's keyUp clears it so the next press fires again.
-    private func handleActions(type: CGEventType, keyCode: Int64, mods: Set<Modifier>) {
+    private func handleActions(type: CGEventType, keyCode: Int64, mods: ModifierSet) {
+        guard !actionBindings.isEmpty else { return }
         for action in actionBindings {
-            let matches = action.descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods)
+            let matches = action.descriptor.matchesChord(keyCode: Int(keyCode), activeModifierMask: mods)
             if type == .keyDown, matches {
                 if engagedActions.insert(action.id).inserted {
                     let id = action.id
@@ -200,7 +215,7 @@ final class HotkeyMonitor {
         }
     }
 
-    private func edge(binding i: Int, type: CGEventType, keyCode: Int64, flags: CGEventFlags, mods: Set<Modifier>) -> TriggerEdge? {
+    private func edge(binding i: Int, type: CGEventType, keyCode: Int64, flags: CGEventFlags, mods: ModifierSet) -> TriggerEdge? {
         let descriptor = bindings[i].descriptor
         switch descriptor {
         case .named(.hyper):
@@ -225,7 +240,7 @@ final class HotkeyMonitor {
             guard keyCode == Int64(descriptor.triggerKeyCode) else { return nil }
             if type == .keyUp { return .up }
             if type == .keyDown,
-               descriptor.matchesChord(keyCode: Int(keyCode), activeModifiers: mods) {
+               descriptor.matchesChord(keyCode: Int(keyCode), activeModifierMask: mods) {
                 return .down
             }
             return nil
@@ -234,8 +249,8 @@ final class HotkeyMonitor {
 
     private static let escapeKeyCode: Int64 = 53
 
-    private static func activeModifiers(_ flags: CGEventFlags) -> Set<Modifier> {
-        var mods: Set<Modifier> = []
+    private static func activeModifiers(_ flags: CGEventFlags) -> ModifierSet {
+        var mods: ModifierSet = []
         if flags.contains(.maskControl) { mods.insert(.control) }
         if flags.contains(.maskAlternate) { mods.insert(.option) }
         if flags.contains(.maskShift) { mods.insert(.shift) }

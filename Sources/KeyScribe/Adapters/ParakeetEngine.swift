@@ -40,11 +40,11 @@ actor ParakeetEngine: SpeechEngine {
     }
 
     // Parakeet can verify its TDT bundle on disk (the CTC bias model is optional, never gates
-    // "installed"). The other engines have no SDK integrity check and use the default `.marker`.
-    nonisolated func installState(in modelsDir: URL) -> EngineInstallState {
+    // "installed"). The other engines have no SDK integrity check and use the default `nil`.
+    nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? {
         let tdt = modelsDir.appendingPathComponent(
             AsrModels.defaultCacheDirectory(for: version).lastPathComponent, isDirectory: true)
-        return AsrModels.modelsExist(at: tdt, version: version) ? .present : .absent
+        return AsrModels.modelsExist(at: tdt, version: version)
     }
 
     private let modelsDir: URL

@@ -12,12 +12,19 @@ public enum RedactionTokenizer {
         let pattern: String
         let options: NSRegularExpression.Options
         let validate: @Sendable (String) -> Bool
+        // Lowercased literals that MUST appear (any one) in a real match. A cheap substring check over
+        // the lowercased transcript skips the regex engine entirely when none are present — most
+        // dictations contain none of these vendor prefixes, so most of the detector battery is skipped.
+        // Empty = no cheap literal (digit/email patterns); always run.
+        let requires: [String]
         init(
             _ pattern: String, options: NSRegularExpression.Options = [],
+            requires: [String] = [],
             validate: @escaping @Sendable (String) -> Bool = { _ in true }
         ) {
             self.pattern = pattern
             self.options = options
+            self.requires = requires
             self.validate = validate
         }
     }
@@ -26,29 +33,36 @@ public enum RedactionTokenizer {
     // mod-97 for IBANs); the high-entropy sweep below catches novel tokens the named patterns miss.
     // Order is informational only — overlaps resolve by earliest-then-longest at the call site.
     private static let detectors: [Detector] = [
-        Detector(#"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#),                         // email
+        Detector(#"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, requires: ["@"]),         // email
         Detector(#"\b\d{3}-\d{2}-\d{4}\b"#),                                                   // US SSN
         Detector(#"\b(?:\+?1[ -]?)?\(?\d{3}\)?[ -]?\d{3}[ -]?\d{4}\b"#),                       // US phone
         Detector(#"\b(?:\d[ -]?){12,18}\d\b"#, validate: luhnValid),                           // payment card
         Detector(                                                                              // PEM private key
             #"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]+?-----END[A-Z ]*PRIVATE KEY-----"#,
-            options: [.dotMatchesLineSeparators]),
-        Detector(#"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"#),            // JWT
-        Detector(#"\bsk-[A-Za-z0-9_-]{16,}"#),                                                 // OpenAI-style key
-        Detector(#"\b[rsp]k_(?:live|test)_[A-Za-z0-9]{16,}"#),                                 // Stripe key
-        Detector(#"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[0-9A-Z]{16}\b"#),             // AWS access key id
-        Detector(#"\bAIza[0-9A-Za-z_-]{35}\b"#),                                               // Google API key
-        Detector(#"\b[0-9]+-[0-9a-z]{32}\.apps\.googleusercontent\.com\b"#),                   // Google OAuth client id
-        Detector(#"\bya29\.[0-9A-Za-z._-]{20,}"#),                                             // Google OAuth access token
-        Detector(#"\bgh[pousr]_[A-Za-z0-9]{20,}\b"#),                                          // GitHub token
-        Detector(#"\bgithub_pat_[A-Za-z0-9_]{22,}\b"#),                                        // GitHub fine-grained PAT
-        Detector(#"\bglpat-[A-Za-z0-9_-]{20,}"#),                                               // GitLab PAT
-        Detector(#"\bxox[baprs]-[A-Za-z0-9-]{10,}"#),                                          // Slack token
-        Detector(#"\bxapp-[0-9]-[A-Za-z0-9-]{10,}"#),                                          // Slack app-level token
-        Detector(#"\bREDACTED_VENDOR_TOKEN\b"#),                                  // vendor token
-        Detector(#"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*"#),                                 // Authorization: Bearer …
+            options: [.dotMatchesLineSeparators], requires: ["private key"]),
+        Detector(#"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"#,             // JWT
+            requires: ["eyj"]),
+        Detector(#"\bsk-[A-Za-z0-9_-]{16,}"#, requires: ["sk-"]),                              // OpenAI-style key
+        Detector(#"\b[rsp]k_(?:live|test)_[A-Za-z0-9]{16,}"#,                                  // Stripe key
+            requires: ["k_live_", "k_test_"]),
+        Detector(#"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[0-9A-Z]{16}\b"#,              // AWS access key id
+            requires: ["akia", "asia", "agpa", "aida", "aroa", "anpa", "anva", "aipa"]),
+        Detector(#"\bAIza[0-9A-Za-z_-]{35}\b"#, requires: ["aiza"]),                           // Google API key
+        Detector(#"\b[0-9]+-[0-9a-z]{32}\.apps\.googleusercontent\.com\b"#,                    // Google OAuth client id
+            requires: ["googleusercontent"]),
+        Detector(#"\bya29\.[0-9A-Za-z._-]{20,}"#, requires: ["ya29."]),                        // Google OAuth access token
+        Detector(#"\bgh[pousr]_[A-Za-z0-9]{20,}\b"#,                                           // GitHub token
+            requires: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]),
+        Detector(#"\bgithub_pat_[A-Za-z0-9_]{22,}\b"#, requires: ["github_pat_"]),             // GitHub fine-grained PAT
+        Detector(#"\bglpat-[A-Za-z0-9_-]{20,}"#, requires: ["glpat-"]),                         // GitLab PAT
+        Detector(#"\bxox[baprs]-[A-Za-z0-9-]{10,}"#, requires: ["xox"]),                       // Slack token
+        Detector(#"\bxapp-[0-9]-[A-Za-z0-9-]{10,}"#, requires: ["xapp-"]),                     // Slack app-level token
+        Detector(#"\bREDACTED_VENDOR_TOKEN\b"#,                                   // vendor token
+            requires: ["_", "_", "_", "_"]),
+        Detector(#"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*"#, requires: ["bearer"]),           // Authorization: Bearer …
         Detector(                                                                              // KEY = "value" assignment
-            #"(?i)\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|API)[A-Z0-9_]*\s*[=:]\s*["']?[^\s"']{6,}["']?"#),
+            #"(?i)\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|API)[A-Z0-9_]*\s*[=:]\s*["']?[^\s"']{6,}["']?"#,
+            requires: ["key", "token", "secret", "password", "passwd", "pwd", "api"]),
     ]
 
     private struct Span {
@@ -63,8 +77,11 @@ public enum RedactionTokenizer {
     }
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
+        let haystack = text.lowercased()
         var spans: [Span] = []
         for detector in detectors {
+            if !detector.requires.isEmpty,
+               !detector.requires.contains(where: { haystack.contains($0) }) { continue }
             guard let re = RegexCache.regex(detector.pattern, options: detector.options) else { continue }
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                 guard let r = Range(m.range, in: text) else { continue }
@@ -82,23 +99,14 @@ public enum RedactionTokenizer {
                 ? $0.range.lowerBound < $1.range.lowerBound
                 : $0.length > $1.length
         }
-        var kept: [Span] = []
+        var kept: [(range: Range<String.Index>, value: String)] = []
         var lastUpper: String.Index?
         for span in spans {
             if let lu = lastUpper, span.range.lowerBound < lu { continue }
-            kept.append(span)
+            kept.append((span.range, span.value))
             lastUpper = span.range.upperBound
         }
-
-        var result = ""
-        var cursor = text.startIndex
-        for span in kept {
-            result += text[cursor..<span.range.lowerBound]
-            result += tokenizer.tokenize(span.value, type: .redact)
-            cursor = span.range.upperBound
-        }
-        result += text[cursor...]
-        return result
+        return tokenizer.splice(text, spans: kept, type: .redact)
     }
 
     // IBANs allow letters, so a greedy regex over-extends into the following word and the validator
@@ -128,6 +136,7 @@ public enum RedactionTokenizer {
     // digits and carries high Shannon entropy. Tuned to avoid prose; over-matching is harmless here
     // (restored verbatim) so the bar favours catching secrets.
     private static func highEntropySpans(_ text: String) -> [Span] {
+        guard hasLongSecretRun(text) else { return [] }
         guard let re = RegexCache.regex(#"[A-Za-z0-9+/=_-]{24,}"#) else { return [] }
         var spans: [Span] = []
         for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -136,6 +145,22 @@ public enum RedactionTokenizer {
             if isHighEntropySecret(value) { spans.append(Span(range: r, value: value)) }
         }
         return spans
+    }
+
+    // Cheap single utf8 pass: is there a run of ≥minLength chars over the entropy charset? Lets the
+    // entropy regex be skipped entirely on transcripts with no long token (the common case).
+    private static func hasLongSecretRun(_ text: String, minLength: Int = 24) -> Bool {
+        var run = 0
+        for b in text.utf8 {
+            switch b {
+            case 0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2B, 0x2F, 0x3D, 0x5F, 0x2D:
+                run += 1
+                if run >= minLength { return true }
+            default:
+                run = 0
+            }
+        }
+        return false
     }
 
     static func isHighEntropySecret(_ s: String) -> Bool {
@@ -147,14 +172,17 @@ public enum RedactionTokenizer {
     }
 
     static func shannonEntropy(_ s: String) -> Double {
-        guard !s.isEmpty else { return 0 }
-        var counts: [Character: Int] = [:]
-        for c in s { counts[c, default: 0] += 1 }
-        let n = Double(s.count)
-        return counts.values.reduce(0.0) { acc, count in
-            let p = Double(count) / n
-            return acc - p * log2(p)
+        var counts = [Int](repeating: 0, count: 256)
+        var n = 0
+        for b in s.utf8 { counts[Int(b)] += 1; n += 1 }
+        guard n > 0 else { return 0 }
+        let total = Double(n)
+        var acc = 0.0
+        for count in counts where count > 0 {
+            let p = Double(count) / total
+            acc -= p * log2(p)
         }
+        return acc
     }
 
     static let luhnValid: @Sendable (String) -> Bool = { candidate in
@@ -191,22 +219,4 @@ public enum RedactionTokenizer {
         }
         return remainder == 1
     }
-}
-
-// Redaction as a pipeline command. It sorts AFTER the post-STT text stages (design.md §4.2.1) so it
-// tokenizes the fully-transformed text right before the LLM; `post` restores it (LIFO, after the
-// LLM). Include this stage only when privacy is on AND a cloud rewrite will run — with no outbound
-// call there is nothing to withhold. The shared per-dictation Tokenizer is injected.
-public struct RedactionStage: PipelineStage, TokenizingStage {
-    public let position = StagePosition.postSTTMark
-    public let order = 0
-    private let tokenizer: Tokenizer
-    public init(tokenizer: Tokenizer = Tokenizer()) { self.tokenizer = tokenizer }
-    public func apply(_ context: inout PipelineContext) {
-        context.text = RedactionTokenizer.apply(context.text, into: tokenizer)
-    }
-    public func post(_ context: inout PipelineContext) {
-        context.text = tokenizer.restore(context.text)
-    }
-    public var issuedTokens: [String] { tokenizer.issuedTokens }
 }
