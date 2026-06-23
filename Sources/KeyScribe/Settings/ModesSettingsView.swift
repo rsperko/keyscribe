@@ -580,7 +580,7 @@ private struct ModeEditorView: View {
             DictionaryRows(
                 words: mode.dictionary.words,
                 onAdd: addWord, onRemove: removeWord,
-                placeholder: "Add a mode-only word, e.g. LaunchDarkly")
+                placeholder: "Add a mode-only word, e.g. Kubernetes")
         }
         Section("Replacements") {
             SettingRow(

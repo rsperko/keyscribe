@@ -7,7 +7,7 @@ struct DictionaryRows: View {
     let words: [String]
     let onAdd: (String) -> Void
     let onRemove: (String) -> Void
-    var placeholder = "Add a word, e.g. LaunchDarkly"
+    var placeholder = "Add a word, e.g. Kubernetes"
     @State private var newWord = ""
 
     var body: some View {

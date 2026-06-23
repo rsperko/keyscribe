@@ -211,4 +211,33 @@ struct HistoryStoreTests {
         #expect(deleted == ["2026-06-01.jsonl"])
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
     }
+
+    @Test func deleteRemovesOnlyTheMatchingEntry() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let keep = sampleEntry(heard: "keep", at: 0)
+        let drop = sampleEntry(heard: "drop", at: 10)
+        try store.append(keep, today: "2026-06-20")
+        try store.append(drop, today: "2026-06-20")
+        #expect(store.delete(drop) == true)
+        #expect(store.entries().map(\.heard) == ["keep"])
+    }
+
+    @Test func deleteRemovesTheDayFileWhenItBecomesEmpty() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let only = sampleEntry(heard: "only", at: 0)
+        try store.append(only, today: "2026-06-19")
+        try store.append(sampleEntry(heard: "newer", at: 0), today: "2026-06-20")
+        #expect(store.delete(only) == true)
+        #expect(store.dayFiles() == ["2026-06-20.jsonl"])
+    }
+
+    @Test func deleteReturnsFalseWhenNoEntryMatches() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        try store.append(sampleEntry(heard: "present", at: 0), today: "2026-06-20")
+        #expect(store.delete(sampleEntry(heard: "absent", at: 99)) == false)
+        #expect(store.entries().count == 1)
+    }
 }

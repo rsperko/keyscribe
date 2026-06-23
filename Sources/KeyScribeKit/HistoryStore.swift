@@ -96,6 +96,35 @@ public struct HistoryStore: Sendable {
         return entries
     }
 
+    // Remove a single entry by rewriting the one day file that holds it, dropping every line that
+    // decodes to an equal entry (entries carry no id, so full-value equality is the key). Malformed
+    // or future-schema lines never match and are preserved. The day file is deleted outright when it
+    // empties, so `dayFiles()`/`signature()` stay consistent. Returns whether anything was removed.
+    @discardableResult
+    public func delete(_ entry: HistoryEntry) -> Bool {
+        for file in dayFiles() {
+            let url = dir.appendingPathComponent(file)
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            var kept: [String] = []
+            var removed = false
+            for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
+                if let decoded = try? HistoryEntry(jsonLine: line), decoded == entry {
+                    removed = true
+                } else {
+                    kept.append(line)
+                }
+            }
+            guard removed else { continue }
+            if kept.isEmpty {
+                try? FileManager.default.removeItem(at: url)
+            } else {
+                try? Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url)
+            }
+            return true
+        }
+        return false
+    }
+
     @discardableResult
     public func applyRetention(today: String = HistoryStore.todayString(), retentionDays: Int) -> [String] {
         let expired = HistoryRetention.expired(dayFiles: dayFiles(), today: today, retentionDays: retentionDays)

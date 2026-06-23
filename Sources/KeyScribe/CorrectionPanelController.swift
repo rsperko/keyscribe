@@ -89,7 +89,7 @@ private struct CorrectionPanelView: View {
             switch kind {
             case .dictionary:
                 LabeledContent("Word") {
-                    TextField("e.g. LaunchDarkly", text: $term).textFieldStyle(.roundedBorder)
+                    TextField("e.g. Kubernetes", text: $term).textFieldStyle(.roundedBorder)
                 }
             case .replacement:
                 LabeledContent("When you say") {
