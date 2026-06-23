@@ -40,17 +40,22 @@ final class HotkeyMonitor {
     let onStart: (String?) -> Void
     let onCommit: (String?) -> Void
     let onAction: (String) -> Void
+    let onCancel: () -> Void
+    let canCancel: () -> Bool
 
     init(
         bindings: [Binding], actionBindings: [ActionBinding] = [],
         onStart: @escaping (String?) -> Void, onCommit: @escaping (String?) -> Void,
-        onAction: @escaping (String) -> Void = { _ in }
+        onAction: @escaping (String) -> Void = { _ in },
+        onCancel: @escaping () -> Void = {}, canCancel: @escaping () -> Bool = { false }
     ) {
         self.bindings = bindings
         self.actionBindings = actionBindings
         self.onStart = onStart
         self.onCommit = onCommit
         self.onAction = onAction
+        self.onCancel = onCancel
+        self.canCancel = canCancel
     }
 
     func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
@@ -120,6 +125,20 @@ final class HotkeyMonitor {
     @discardableResult
     func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags) -> Bool {
         guard !isSuspended else { return false }
+        // ESC aborts an in-flight dictation (recording or transcribing/rewriting — not the brief
+        // inserting phase, which can't be rolled back). Swallow it only while cancellable so ESC
+        // reaches the focused app at all other times; suppress the matching key-up so we never strand
+        // a half-consumed key. `canCancel` is checked at key-down on the main actor, so it reads the
+        // live dictation state.
+        if keyCode == Self.escapeKeyCode {
+            if type == .keyDown, canCancel() {
+                suppressedKeyCodes.insert(keyCode)
+                dispatchSideEffect { self.onCancel() }
+                return true
+            }
+            if type == .keyUp { return suppressedKeyCodes.remove(keyCode) != nil }
+            return false
+        }
         let mods = Self.activeModifiers(flags)
         let consumed = consume(type: type, keyCode: keyCode, mods: mods)
         let now = ProcessInfo.processInfo.systemUptime
@@ -212,6 +231,8 @@ final class HotkeyMonitor {
             return nil
         }
     }
+
+    private static let escapeKeyCode: Int64 = 53
 
     private static func activeModifiers(_ flags: CGEventFlags) -> Set<Modifier> {
         var mods: Set<Modifier> = []

@@ -65,7 +65,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard count > 0 else { return }
         var rms: Float = 0
         vDSP_rmsqv(channel, 1, &rms, vDSP_Length(count))
-        let level = min(1, max(0, rms * 8))
+        let level = Self.perceptualLevel(rms)
         handler(level)
+    }
+
+    // RMS is linear, so speech-range energy clusters near zero and a linear meter barely moves.
+    // Map to dB and rescale a [floor, ceiling] window to 0...1 so normal speech spans most of the bar.
+    private static func perceptualLevel(_ rms: Float) -> Float {
+        guard rms > 0 else { return 0 }
+        let db = 20 * log10(rms)
+        let floor: Float = -52
+        let ceiling: Float = -12
+        return min(1, max(0, (db - floor) / (ceiling - floor)))
     }
 }

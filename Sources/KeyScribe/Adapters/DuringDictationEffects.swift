@@ -6,20 +6,53 @@ import KeyScribeKit
 
 @MainActor
 final class DuringDictationEffects {
+    enum EndCue {
+        case success
+        case cancel
+        case error
+
+        var soundName: String {
+            switch self {
+            case .success: return "Pop"
+            case .cancel: return "Bottle"
+            case .error: return "Basso"
+            }
+        }
+    }
+
     private var displayAssertion: IOPMAssertionID = 0
     private var hadDisplayAssertion = false
     private var previousMute: UInt32?
+    private var generation = 0
 
     func begin(_ config: Settings.DuringDictation) {
+        generation &+= 1
         if config.keepDisplayAwake { acquireDisplayAssertion() }
-        if config.muteSystemAudio { muteOutput() }
-        if config.sounds { NSSound(named: "Tink")?.play() }
+        let startCue = config.sounds ? NSSound(named: "Tink") : nil
+        startCue?.play()
+        guard config.muteSystemAudio else { return }
+        // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since
+        // the cue routes through that same device. Defer past the cue's length; the generation guard
+        // drops the mute if the dictation already ended (a sub-cue-length press must never leave the
+        // output muted for good).
+        if let startCue {
+            let gen = generation
+            let delay = startCue.duration
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, self.generation == gen else { return }
+                self.muteOutput()
+            }
+        } else {
+            muteOutput()
+        }
     }
 
-    func end(_ config: Settings.DuringDictation) {
+    func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
+        generation &+= 1
         releaseDisplayAssertion()
         restoreOutput()
-        if config.sounds { NSSound(named: "Pop")?.play() }
+        if config.sounds { NSSound(named: cue.soundName)?.play() }
     }
 
     private func acquireDisplayAssertion() {

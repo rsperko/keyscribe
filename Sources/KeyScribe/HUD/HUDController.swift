@@ -71,31 +71,25 @@ private struct HUDView: View {
     let onErrorAction: (HUDErrorAction) -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            icon
-            VStack(alignment: .leading, spacing: 2) {
-                Text(primary).font(.system(size: 13, weight: .semibold))
-                if !model.state.dataBoundaryBadges.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(model.state.dataBoundaryBadges, id: \.self) { DataBoundaryBadge(label: $0) }
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                icon
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(primary).font(.system(size: 13, weight: .semibold))
+                    if !model.state.dataBoundaryBadges.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(model.state.dataBoundaryBadges, id: \.self) { DataBoundaryBadge(label: $0) }
+                        }
+                    } else if let secondary {
+                        Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
-                } else if let secondary {
-                    Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                if model.state.offersLocalTranscript {
-                    Button("Insert local transcript") { onInsertLocalTranscript() }
-                        .controlSize(.small)
-                }
-                if model.state.offersPasteLast {
-                    Button("Paste last dictation") { onPasteLast() }
-                        .controlSize(.small)
-                }
-                if let action = model.state.errorAction {
-                    Button(action.buttonTitle) { onErrorAction(action) }
-                        .controlSize(.small)
-                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            if hasAction {
+                actionButtons
+                    .buttonStyle(HUDActionButtonStyle())
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -108,6 +102,24 @@ private struct HUDView: View {
 
     private var hasAction: Bool {
         model.state.offersLocalTranscript || model.state.offersPasteLast || model.state.errorAction != nil
+    }
+
+    @ViewBuilder private var actionButtons: some View {
+        if model.state.offersLocalTranscript {
+            Button { onInsertLocalTranscript() } label: {
+                Label("Insert local transcript", systemImage: "text.insert")
+            }
+        }
+        if model.state.offersPasteLast {
+            Button { onPasteLast() } label: {
+                Label("Paste last dictation", systemImage: "doc.on.clipboard")
+            }
+        }
+        if let action = model.state.errorAction {
+            Button { onErrorAction(action) } label: {
+                Label(action.buttonTitle, systemImage: "gearshape")
+            }
+        }
     }
 
     @ViewBuilder private var icon: some View {
@@ -146,18 +158,33 @@ private struct HUDView: View {
     }
 }
 
+private struct HUDActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.18)))
+            .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+            .brightness(configuration.isPressed ? -0.08 : 0)
+    }
+}
+
 private struct LevelIndicator: View {
     let level: Float
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let l = CGFloat(min(1, max(0, level)))
         ZStack {
-            Circle().fill(.red.opacity(0.18)).frame(width: 26, height: 26)
+            Circle().fill(.red.opacity(0.14 + l * 0.34))
+                .frame(width: 16 + l * 14, height: 16 + l * 14)
             Circle().fill(.red)
-                .frame(width: 10 + CGFloat(level) * 12, height: 10 + CGFloat(level) * 12)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: level)
+                .frame(width: 7 + l * 17, height: 7 + l * 17)
         }
-        .frame(width: 26, height: 26)
+        .frame(width: 30, height: 30)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)
         .accessibilityLabel("Recording")
     }
 }

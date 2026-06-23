@@ -161,7 +161,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.controller.handleCommit()
                     self?.refreshStatus()
                 },
-                onAction: { [weak self] id in self?.handleHotkeyAction(id) })
+                onAction: { [weak self] id in self?.handleHotkeyAction(id) },
+                onCancel: { [weak self] in
+                    self?.controller.cancel()
+                    self?.refreshStatus()
+                },
+                canCancel: { [weak self] in self?.controller.isCancellable ?? false })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
         }

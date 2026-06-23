@@ -60,6 +60,12 @@ struct DictationPipelineWiringTests {
         func record(_ s: Mode.Submit) { keys.append(s) }
     }
 
+    @MainActor
+    private final class HUDSpy: HUDPresenting {
+        private(set) var states: [HUDState] = []
+        func render(_ state: HUDState) { states.append(state) }
+    }
+
     private struct Result {
         let lastResult: String?
         let outcome: HistoryEntry.Outcome?
@@ -67,11 +73,24 @@ struct DictationPipelineWiringTests {
         let insertionMethod: Mode.Insertion?
         let submits: [Mode.Submit]
         let llm: any LLMClient
+        let historyEntry: HistoryEntry?
+        let lastHUD: HUDState?
     }
 
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
-        llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true
+        llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
+        captureSelection: @escaping () async -> String? = { nil }
+    ) async -> Result {
+        await run(transcript: transcript, modes: [mode], defaultModeId: mode.id,
+                  connection: connection, llm: llm, accessibility: accessibility,
+                  captureSelection: captureSelection)
+    }
+
+    private func run(
+        transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
+        llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
+        captureSelection: @escaping () async -> String? = { nil }
     ) async -> Result {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
@@ -79,7 +98,7 @@ struct DictationPipelineWiringTests {
         try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
 
-        try? ModeStore.write(mode, to: modesDir)
+        for mode in modes { try? ModeStore.write(mode, to: modesDir) }
         if let connection {
             try? ConnectionStore.write(ConnectionSet(connections: [connection]), to: supportDir)
         }
@@ -87,18 +106,20 @@ struct DictationPipelineWiringTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
-        settings.defaultModeId = mode.id
+        settings.defaultModeId = defaultModeId
 
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
         let history = HistoryStore(supportDir: supportDir)
         let insertSpy = InsertSpy()
         let submitSpy = SubmitSpy()
+        let hudSpy = HUDSpy()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: nil,
+            history: history, hud: hudSpy,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, method, text in await insertSpy.record(method, text) },
             submitKey: { await submitSpy.record($0) },
+            captureSelection: captureSelection,
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },
             accessibilityGranted: { accessibility },
@@ -107,25 +128,30 @@ struct DictationPipelineWiringTests {
         controller.handleStart()
         controller.handleCommit()
         await controller.dictationTask?.value
+        let entry = history.entries().first
         return Result(
-            lastResult: controller.lastResult, outcome: history.entries().first?.outcome,
+            lastResult: controller.lastResult, outcome: entry?.outcome,
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
-            submits: await submitSpy.keys, llm: llm)
+            submits: await submitSpy.keys, llm: llm, historyEntry: entry,
+            lastHUD: hudSpy.states.last)
     }
 
     private func mode(
         id: String, liveEdits: Bool = false, privacy: Bool = false,
         replacements: [ReplacementsSet.Rule] = [], connectionId: String? = nil,
         insertion: Mode.Insertion = .paste, trailing: Mode.Trailing = .none, submit: Mode.Submit = .none,
-        prompt: String = "Rewrite it."
+        prompt: String = "Rewrite it.", triggerPhrases: [String] = [],
+        context: Mode.ContextOptIn = .init(), source: Mode.Source = .dictation
     ) -> Mode {
         var m = Mode(id: id, name: id)
+        m.source = source
         m.commands = .init(liveEdits: liveEdits, privacy: privacy)
         m.replacements = .init(includeGlobal: false, rules: replacements)
         m.insertion = insertion
         m.trailing = trailing
         m.submit = submit
-        if let connectionId { m.aiRewrite = .init(connection: connectionId, prompt: prompt) }
+        m.triggerPhrases = triggerPhrases
+        if let connectionId { m.aiRewrite = .init(connection: connectionId, prompt: prompt, context: context) }
         return m
     }
 
@@ -163,6 +189,84 @@ struct DictationPipelineWiringTests {
 
         #expect(out.lastResult == "Mr Smith email alice@example.com")
         #expect(out.outcome == .localFallback)
+    }
+
+    // Privacy mode forces every context channel off, even when the mode explicitly opts into all of
+    // them (design.md §4.4 — the redacted transcript is the only user content that may leave). The
+    // controller must consult effectiveContext, not the raw opt-in: if it used the raw flags the app
+    // child would render (appName falls back to the bundle id) and the categories would be recorded.
+    @Test func privacyModeForcesAllContextOffEvenWhenTheModeRequestsIt() async {
+        let m = mode(id: "secure", privacy: true, connectionId: "c",
+                     context: .init(app: true, visibleText: true, precedingText: true))
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(transcript: "draft the memo", mode: m, connection: conn, llm: EchoLLM())
+
+        let sent = await (out.llm as! EchoLLM).lastUser
+        #expect(!sent.contains("<context>"))
+        #expect(!sent.contains("test.bundle"))
+        #expect(out.historyEntry?.contextCategories == [])
+        #expect(out.historyEntry?.redaction == true)
+    }
+
+    // The persisted history prompt mirrors the cloud payload: it carries the ⟦SN:…⟧ tokens, never the
+    // original redacted span (design.md §4.7). The wiring test proves the LIVE payload is tokenized;
+    // this proves the DURABLE record on disk is too — a regression here writes plaintext secrets to
+    // history.
+    @Test func historyPromptStoresTokensNotTheOriginalRedactedSpan() async {
+        let m = mode(id: "secure", privacy: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(transcript: "email alice@example.com", mode: m, connection: conn, llm: EchoLLM())
+
+        #expect(out.lastResult == "email alice@example.com")
+        #expect(out.historyEntry?.redaction == true)
+        let prompt = out.historyEntry?.prompt ?? ""
+        #expect(prompt.contains("⟦SN:REDACT:1⟧"))
+        #expect(!prompt.contains("alice@example.com"))
+    }
+
+    // Phase B (design.md §4.3): a trailing trigger phrase re-routes to that mode's pipeline AND is
+    // stripped from the transcript. Proven through the real controller: only the routed mode carries a
+    // replacement, so the rule firing proves the route, and the absent phrase proves the strip.
+    @Test func phaseBTriggerPhraseRoutesToThatModeAndStripsThePhrase() async {
+        let plain = mode(id: "plain")
+        let coder = mode(id: "coder",
+                         replacements: [ReplacementsSet.Rule(heard: "function", replace: "func", regex: false)],
+                         triggerPhrases: ["in code mode"])
+        let out = await run(transcript: "define a function in code mode",
+                            modes: [plain, coder], defaultModeId: plain.id)
+        #expect(out.lastResult == "define a func")
+    }
+
+    // ── Edit-in-place (selection mode) ─────────────────────────────────────────────────────────────
+
+    // A selection rewrite that fails the gate (dropped tokens → local fallback) must ABORT and leave the
+    // selection untouched — a destructive op never clobbers the user's text on failure (design.md §4.3).
+    // The redactable span in the selection forces a token to be issued, which DropTokenLLM drops.
+    @Test func selectionRewriteFailureAbortsWithoutTouchingTheSelection() async {
+        let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "make it formal", mode: m, connection: conn, llm: DropTokenLLM(),
+            captureSelection: { "reach me at bob@example.com" })
+
+        #expect(out.insertedText == nil)
+        #expect(out.lastResult == nil)
+        #expect(out.historyEntry == nil)
+        #expect(out.lastHUD == .error(message: "Rewrite failed — selection unchanged", action: nil))
+    }
+
+    // Edit-in-place happy path: the selection is the content, the spoken words are the instruction, and
+    // the rewritten selection is what gets inserted.
+    @Test func selectionRewriteInsertsTheRewrittenSelection() async {
+        let m = mode(id: "edit", connectionId: "c", source: .selection)
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "make it formal", mode: m, connection: conn, llm: EchoLLM(),
+            captureSelection: { "the original text" })
+
+        #expect(out.lastResult == "the original text")
+        #expect(out.insertedText == "the original text")
+        #expect(out.outcome == .inserted)
     }
 
     // ── Insertion-end features: trailing + submit (the just-added work) ────────────────────────────

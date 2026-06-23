@@ -21,6 +21,7 @@ final class DictationController {
     private let audio: AudioCapturing
     private let insert: (InsertionDecision, Mode.Insertion, String) async -> Void
     private let submitKey: (Mode.Submit) async -> Void
+    private let captureSelection: () async -> String?
     private let snapshot: @MainActor () -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
@@ -92,6 +93,7 @@ final class DictationController {
         audio: AudioCapturing = AudioCapture(),
         insert: @escaping (InsertionDecision, Mode.Insertion, String) async -> Void = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
+        captureSelection: @escaping () async -> String? = TextInserter.captureSelection,
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
@@ -105,6 +107,7 @@ final class DictationController {
         self.audio = audio
         self.insert = insert
         self.submitKey = submitKey
+        self.captureSelection = captureSelection
         self.snapshot = snapshot
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
@@ -195,7 +198,7 @@ final class DictationController {
         machine.beginTranscribing()
         guard let url = audio.stop() else {
             machine.cancel()
-            effects.end(settings.duringDictation)
+            effects.end(settings.duringDictation, cue: .cancel)
             hud?.render(.hidden)
             return
         }
@@ -361,7 +364,13 @@ final class DictationController {
             machine.finish(outcome)
         }
         recordHistory(heard: heard, transformed: transformed, result: transcript, insertion: outcome, rewrite: rewrite)
-        effects.end(settings.duringDictation)
+        let endCue: DuringDictationEffects.EndCue
+        switch outcome {
+        case .inserted, .copied: endCue = .success
+        case .noSpeech: endCue = .cancel
+        case .failed: endCue = .error
+        }
+        effects.end(settings.duringDictation, cue: endCue)
         hud?.render(rewrite?.fellBack == true
             ? .localFallback(outcome: outcome, mode: currentModeName)
             : .complete(outcome: outcome, mode: currentModeName))
@@ -496,7 +505,7 @@ final class DictationController {
         guard accessibilityGranted() else {
             return (.abort("Accessibility is off — KeyScribe can't read the selected text.", .openAccessibilitySettings), nil)
         }
-        guard let selection = await TextInserter.captureSelection(), !selection.isEmpty else {
+        guard let selection = await captureSelection(), !selection.isEmpty else {
             return (.abort("Select some text first", nil), nil)
         }
         guard let connection = connection(for: mode) else {
@@ -675,6 +684,12 @@ final class DictationController {
         Task { await TextInserter.insertViaPaste(lastResult) }
     }
 
+    // ESC-cancellable only while recording or transcribing/rewriting — never mid-insert, where the
+    // text is already landing and cancel() would race finishInsertion (conflicting state + double cue).
+    var isCancellable: Bool {
+        machine.state == .recording || machine.state == .transcribing
+    }
+
     func cancel() {
         guard machine.isBusy else { return }
         onRecordingChanged?(false)
@@ -685,7 +700,7 @@ final class DictationController {
         // returns nil). Otherwise every press-then-cancel leaks a temp WAV until the OS reclaims it.
         if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
         machine.cancel()
-        effects.end(settings.duringDictation)
+        effects.end(settings.duringDictation, cue: .cancel)
         hud?.render(.hidden)
         clearRewriteEscapeHatch()
     }
@@ -719,7 +734,7 @@ final class DictationController {
 
     private func finishError(_ message: String, action: HUDErrorAction? = nil) {
         machine.finish(.failed(message))
-        effects.end(settings.duringDictation)
+        effects.end(settings.duringDictation, cue: .error)
         hud?.render(.error(message: message, action: action))
         scheduleHide(after: action == nil ? 2 : 8)
     }

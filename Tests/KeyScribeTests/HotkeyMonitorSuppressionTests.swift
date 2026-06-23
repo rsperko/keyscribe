@@ -56,6 +56,32 @@ struct HotkeyMonitorSuppressionTests {
         #expect(!m.handle(type: .keyUp, keyCode: Self.dKeyCode, flags: Self.none))
     }
 
+    private static let escKeyCode: Int64 = 53
+
+    // ESC fires cancel and is swallowed only while a dictation is cancellable; the matching key-up is
+    // consumed symmetrically so the app never sees a stranded half-key. onCancel is dispatched onto the
+    // main queue, so drain it (FIFO behind the side effect) before asserting it ran.
+    @Test func escCancelsAndIsConsumedOnlyWhileCancellable() async {
+        var cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in }, onCommit: { _ in },
+            onCancel: { cancels += 1 }, canCancel: { true })
+        #expect(m.handle(type: .keyDown, keyCode: Self.escKeyCode, flags: Self.none))
+        #expect(m.handle(type: .keyUp, keyCode: Self.escKeyCode, flags: Self.none))
+        await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
+        #expect(cancels == 1)
+    }
+
+    @Test func escPassesThroughWhenNotCancellable() {
+        var cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in }, onCommit: { _ in },
+            onCancel: { cancels += 1 }, canCancel: { false })
+        #expect(!m.handle(type: .keyDown, keyCode: Self.escKeyCode, flags: Self.none))
+        #expect(!m.handle(type: .keyUp, keyCode: Self.escKeyCode, flags: Self.none))
+        #expect(cancels == 0)
+    }
+
     @Test func consumesActionChord() {
         let desc = try! KeyDescriptor(parsing: "control+option+shift+d")
         let m = HotkeyMonitor(
