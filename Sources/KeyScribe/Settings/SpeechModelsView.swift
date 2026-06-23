@@ -5,17 +5,18 @@ struct SpeechModelsView: View {
     @ObservedObject var model: SpeechModelsModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                activeBanner
+        Form {
+            Section { activeBanner }
+            Section {
                 Text("KeyScribe runs one speech engine at a time, entirely on this Mac, before any AI step. Pick it here.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
                 ForEach(model.rows) { row in
-                    EngineCard(row: row, model: model)
+                    EngineRow(row: row, model: model)
                 }
             }
-            .padding(20)
         }
+        .formStyle(.grouped)
+        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .confirmationDialog(
             "Delete this speech model?",
@@ -43,9 +44,8 @@ struct SpeechModelsView: View {
             }
             Spacer()
         }
-        .padding(12)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
     }
 }
 
@@ -62,7 +62,7 @@ private struct SpeechBadge: View {
     }
 }
 
-private struct EngineCard: View {
+private struct EngineRow: View {
     let row: SpeechModelsModel.Row
     @ObservedObject var model: SpeechModelsModel
 
@@ -131,11 +131,16 @@ private struct EngineCard: View {
                 actions
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(row.isActive ? Color.accentColor : Color.clear, lineWidth: 1.5))
+        .padding(.vertical, 4)
+        .overlay(alignment: .leading) {
+            if row.isActive {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 2)
+                    .offset(x: -8)
+            }
+        }
     }
 
     private var icon: String {

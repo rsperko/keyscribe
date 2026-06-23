@@ -150,6 +150,18 @@ struct DictationCancellationTests {
         #expect(h.history.entries().count == 1)
     }
 
+    @Test func cancellingDuringRecordingDeletesTheCaptureFile() {
+        let h = makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        let captureURL = h.supportDir.appendingPathComponent("capture.wav")
+        FileManager.default.createFile(atPath: captureURL.path, contents: Data("pcm".utf8))
+
+        h.controller.handleStart()      // recording; the capture file is live on disk
+        h.controller.cancel()           // cancel before commit — nothing else will clean it up
+
+        #expect(!FileManager.default.fileExists(atPath: captureURL.path))
+    }
+
     @Test func oneShotModeOverridesTheNextRecordingOnly() {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }

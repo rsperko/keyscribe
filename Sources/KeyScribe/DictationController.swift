@@ -680,7 +680,10 @@ final class DictationController {
         onRecordingChanged?(false)
         dictationTask?.cancel()
         dictationTask = nil
-        _ = audio.stop()
+        // Mid-recording stop() hands back the live capture file; nothing downstream will run, so delete
+        // it here (transcribeAndInsert owns cleanup once a commit has handed the URL off, when stop()
+        // returns nil). Otherwise every press-then-cancel leaks a temp WAV until the OS reclaims it.
+        if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
         machine.cancel()
         effects.end(settings.duringDictation)
         hud?.render(.hidden)

@@ -34,7 +34,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             engine.prepare()
             try engine.start()
         } catch {
-            _ = stop()
+            if let url = stop() { try? FileManager.default.removeItem(at: url) }
             throw error
         }
         return url

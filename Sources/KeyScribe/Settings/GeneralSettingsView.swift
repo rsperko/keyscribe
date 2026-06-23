@@ -64,7 +64,7 @@ struct GeneralSettingsView: View {
                     Text("Trade first-response speed against memory use. Reloading a freed model adds a brief delay.")
                         .font(.caption).foregroundStyle(.secondary)
                     Picker("Model memory", selection: $model.eviction) {
-                        ForEach(SettingsModel.evictions, id: \.id) { Text($0.label).tag($0.id) }
+                        ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
                     }
                 }
             }

@@ -11,12 +11,18 @@ public struct HistoryStore: Sendable {
         dir = supportDir.appendingPathComponent("history", isDirectory: true)
     }
 
-    public static func todayString(date: Date = Date()) -> String {
+    // Configured once and only ever read — DateFormatter is thread-safe for formatting when not
+    // mutated, so a shared instance avoids allocating one per append.
+    private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
+        return f
+    }()
+
+    public static func todayString(date: Date = Date()) -> String {
+        dayFormatter.string(from: date)
     }
 
     public func append(_ entry: HistoryEntry, today: String = HistoryStore.todayString()) throws {
@@ -51,19 +57,22 @@ public struct HistoryStore: Sendable {
     }
 
     // Newest entry first. Reads day files newest-first and stops once `limit` entries are collected,
-    // so a paged list never materializes older days. Files are memory-mapped and parsed line-by-line
-    // (no whole-file String, no all-substrings split) to bound peak memory. Malformed lines (e.g.
-    // written by a future schema) are skipped, not fatal.
+    // so a paged list never materializes older days. Within a day, lines are appended chronologically,
+    // so we decode from the end backward and stop after `limit` valid entries — a high-volume current
+    // day no longer decodes (and allocates a String for) every line just to discard all but the last
+    // page. Files are memory-mapped; malformed lines (e.g. a future schema) are skipped, not fatal, and
+    // do not consume a page slot.
     public func entries(limit: Int? = nil) -> [HistoryEntry] {
         var all: [HistoryEntry] = []
         for file in dayFiles().reversed() {
             guard let data = try? Data(contentsOf: dir.appendingPathComponent(file), options: .mappedIfSafe)
             else { continue }
             var day: [HistoryEntry] = []
-            for line in data.split(separator: 0x0A) where !line.isEmpty {
+            for line in data.split(separator: 0x0A).reversed() where !line.isEmpty {
                 if let entry = try? HistoryEntry(jsonLine: String(decoding: line, as: UTF8.self)) {
                     day.append(entry)
                 }
+                if let limit, day.count >= limit { break }
             }
             day.sort { $0.timestamp > $1.timestamp }
             all.append(contentsOf: day)

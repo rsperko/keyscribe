@@ -14,9 +14,6 @@ final class HotkeyRecordingState: ObservableObject {
 enum GlobalHotkey {
     static let dictionaryId = "global:add_dictionary"
     static let replacementId = "global:add_replacement"
-    static let dictionaryName = "Add to Dictionary"
-    static let replacementName = "Add Replacement"
-    static func isGlobal(_ id: String) -> Bool { id == dictionaryId || id == replacementId }
 }
 
 struct HotkeyRecorder: View {

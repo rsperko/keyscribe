@@ -3,10 +3,11 @@ import KeyScribeKit
 import SwiftUI
 
 @MainActor
-final class FirstRunController {
+final class FirstRunController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: FirstRunModel
     private let onComplete: () -> Void
+    private var finished = false
 
     init(
         initialEngineId: String,
@@ -19,6 +20,7 @@ final class FirstRunController {
         model = FirstRunModel(
             initialEngineId: initialEngineId, download: download,
             selectEngine: selectEngine, onComplete: onComplete)
+        super.init()
         model.onReadyToDictate = onReadyToDictate
     }
 
@@ -33,15 +35,29 @@ final class FirstRunController {
         window.setContentSize(NSSize(width: 460, height: 420))
         window.center()
         window.isReleasedWhenClosed = false
+        window.delegate = self
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         self.window = window
-        model.onComplete = { [weak self] in
-            self?.window?.close()
-            self?.window = nil
-            self?.onComplete()
-        }
+        model.onComplete = { [weak self] in self?.complete() }
     }
+
+    // Single teardown for both the finish-the-flow path and a manual window close: stop the permission
+    // poll (its task strongly retains the model, so without this a window closed on the permissions step
+    // keeps the whole onboarding graph alive doing 1 Hz work for the process lifetime) and run onComplete
+    // once. Idempotent — the normal finish closes the window, which re-enters here via windowWillClose.
+    private func complete() {
+        guard !finished else { return }
+        finished = true
+        model.stopPolling()
+        window?.delegate = nil
+        let closing = window
+        window = nil
+        closing?.close()
+        onComplete()
+    }
+
+    func windowWillClose(_ notification: Notification) { complete() }
 }
 
 @MainActor

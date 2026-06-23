@@ -7,7 +7,7 @@ public enum EvictionDecision: Equatable, Sendable {
 }
 
 public enum EvictionPolicy {
-    public static let defaultIdleSeconds: Double = 120
+    public static let defaultIdleSeconds: Double = 1800
 
     // The Fastest profile keeps the engine resident (afterDictation → .keepLoaded), but nothing
     // preloads it, so the very first press still paid a cold load. Preload at launch for that profile

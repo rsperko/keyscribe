@@ -17,6 +17,30 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## Automated end-to-end verification harness (2026-06-22, uncommitted)
+
+`Tests/KeyScribeTests/DictationPipelineWiringTests.swift` drives the **real `DictationController`** with
+mock OS edges (STT text via a `FixedEngine`, audio, the `insert:`/`submitKey:` closures as spies),
+covering the wiring that isn't unit-testable in isolation — no microphone needed. Verified green:
+- **Pipeline:** verbatim survives the text stages on the **no-LLM path** (the fixed bug), verbatim +
+  redaction are tokenized **before** the LLM (the fake LLM provably never receives "Mr Smith" or the
+  email — only `⟦SN:…⟧`) and restored after, and a token-dropping model → gate → **local fallback**.
+- **Insertion-end (the just-added `trailing`/`submit`):** `trailing` space/newline ride **inside** the
+  insert; `submit` (return/⇧/⌘) fires on a verified `.inserted`; **submit NEVER fires on a clipboard
+  fallback**; insertion method honored; trailing+submit compose; trailing/submit **TOML round-trip**
+  (the harness writes via `ModeStore` and reads via `ConfigCache`).
+- **Real local LLM (opt-in):** `realLocalModelRewriteCompletesThroughTheGate` runs the **real
+  `HTTPLLMClient`** against oMLX (`HTTPLLMClient.keyProvider` injected) — verified live against
+  GLM-4.7-Flash (rewrite → gate pass → insert, ~39s incl. model load). Gate:
+  `RUN_OMLX_TEST=1 OMLX_KEY=… [OMLX_MODEL=… OMLX_BASE=…] swift test --filter realLocalModel…`.
+
+**Still needs a human / the signed app** (TCC blocks a test process from posting cross-app keystrokes,
+and full dictation needs a real mic): the *physical* insertion actuation (real ⌘V / typed keys /
+`submit` Return into a third-party app, single-⌘Z atomicity), edit-in-place selection capture
+(`TextInserter.captureSelection` is not injected), and real spoken-STT accuracy. `verify-live.sh`
+guides those. A dev CLI in the signed app (`--insert-selftest` / `--dictate-file <wav>` over the
+real-voice benchmark corpus) would automate the physical layer too — proposed, not built.
+
 ## Pipeline → pre/post command model + verbatim-first + word-boundary replacements (2026-06-22, uncommitted)
 
 Three related changes to the post-STT pipeline. **`swift build` clean; full `swift test` = 408 tests /

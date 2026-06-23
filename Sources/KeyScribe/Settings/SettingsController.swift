@@ -105,7 +105,6 @@ final class SettingsController {
 
     // Connections whose last user-run Test Connection failed — the authoritative "this AI service is
     // broken" signal that drives the error badge (AppDelegate.currentProblems reads it).
-    var hasFailedConnectionTest: Bool { aiServices.hasFailedTest }
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
 
     func present() {
@@ -276,11 +275,20 @@ final class SettingsModel: ObservableObject {
     @Published var addDictionaryShortcut: String { didSet { persist() } }
     @Published var addReplacementShortcut: String { didSet { persist() } }
 
-    static let evictions: [(id: String, label: String)] = [
-        ("fastest", "Fastest — keep model in memory"),
-        ("balanced", "Balanced — free memory after a pause"),
-        ("frugal", "Frugal — free memory after each dictation"),
-    ]
+    var evictions: [(id: String, label: String)] {
+        [
+            ("fastest", "Fastest — keep model in memory"),
+            ("balanced", "Balanced — free memory after \(Self.idleLabel(settings.stt.evictionIdleSeconds)) idle"),
+            ("frugal", "Frugal — free memory after each dictation"),
+        ]
+    }
+
+    static func idleLabel(_ seconds: Int?) -> String {
+        let s = seconds ?? Int(EvictionPolicy.defaultIdleSeconds)
+        if s % 3600 == 0 { return "\(s / 3600) hr" }
+        if s % 60 == 0 { return "\(s / 60) min" }
+        return "\(s) sec"
+    }
 
     private var settings: Settings
     private let onChange: (Settings) -> Void

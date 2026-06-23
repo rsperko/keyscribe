@@ -166,9 +166,9 @@ single **"Work on selection"** checkbox; the two-field model stays in TOML for f
 
 ## Seeded starter modes
 
-A fresh install ships six example modes. They are ordinary mode files — nothing about them is
-special-cased in source — and the user can edit or delete any of them. This set is the canonical
-one the menu and onboarding refer to (`ui_design.md` §6 menu bar).
+A fresh install ships eight example modes — six enabled, two disabled. They are ordinary mode
+files — nothing about them is special-cased in source — and the user can edit or delete any of
+them. This set is the canonical one the menu and onboarding refer to (`ui_design.md` §6 menu bar).
 
 | id | name | Shape | Rewrite |
 |---|---|---|---|
@@ -178,6 +178,12 @@ one the menu and onboarding refer to (`ui_design.md` §6 menu bar).
 | `email` | Email | `source = dictation`, `output = cursor` | polished professional email with greeting + closing; never invents names/facts. Inert until a connection exists. |
 | `prompt` | AI Prompt | `source = dictation`, `output = cursor` | cleans dictation into a clear instruction for an AI assistant, preserving technical terms; never answers it. Inert until a connection exists. Benefits from a stronger connection (e.g. Sonnet) but is tuned to hold on the Flash floor. |
 | `work-on-selection` | Work on Selection | `source = selection`, `output = replace_selection` | transforms the selection from a spoken instruction; recommends a connection but is not blocked without one (`ui_components.md` control dependencies). |
+| `markdown` | Markdown | `source = dictation`, `output = cursor` | **disabled by default.** Reformats dictation into raw Markdown (headings, bullet/numbered lists, bold, blockquotes, inline/fenced code) without wrapping the output in a code fence. Inert until a connection exists. |
+| `shell` | Shell | `source = dictation`, `output = cursor` | **disabled by default.** Turns a spoken command or description into a single terminal-ready shell command, mapping spoken symbols ("dash dash", "pipe", "tilde slash") to shell syntax; emits only the command, never runs or explains it. Inert until a connection exists. |
+
+The `markdown` and `shell` modes ship **disabled** (`enabled = false`) as discoverable examples
+of more technical presets — the resolver ignores disabled modes (they own no trigger key and never
+auto-start), so the user enables one only after editing it to taste and attaching a connection.
 
 Only `plain-dictation` works with zero configuration. The rewrite modes are seeded so the
 rewrite and edit-in-place capabilities are discoverable, and each states in place what it needs
@@ -243,7 +249,7 @@ default_mode_id = "plain-dictation"
 [stt]
 engine = "parakeet-tdt-ctc-110m"  # the single active engine (default: the compact 110M tier)
 eviction = "frugal"             # "fastest" | "balanced" | "frugal" (default: frugal)
-# eviction_idle_seconds = 120   # used when eviction = "balanced"
+# eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 
 [during_dictation]
 mute_system_audio = true

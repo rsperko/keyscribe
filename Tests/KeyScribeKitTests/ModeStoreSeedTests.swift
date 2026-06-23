@@ -7,7 +7,13 @@ struct ModeStoreSeedTests {
         let starters = ModeStore.starterModes()
         #expect(starters.map(\.id) == [
             "plain-dictation", "polished-dictation", "message", "email", "prompt", "work-on-selection",
+            "markdown", "shell",
         ])
+
+        // Markdown and Shell ship disabled as examples; the resolver ignores them until enabled.
+        #expect(starters.filter { !$0.enabled }.map(\.id) == ["markdown", "shell"])
+        #expect(starters.filter { $0.id == "markdown" || $0.id == "shell" }.allSatisfy { !$0.enabled })
+        #expect(starters.filter { $0.id != "markdown" && $0.id != "shell" }.allSatisfy { $0.enabled })
         let plain = starters[0]
         #expect(plain.commands.liveEdits)                       // plain has live edits
         #expect(plain.aiRewrite == nil)                         // plain is local-only
@@ -37,13 +43,16 @@ struct ModeStoreSeedTests {
         let loaded = ModeStore.loadAll(in: dir)
         #expect(Set(loaded.map(\.id)) == [
             "plain-dictation", "polished-dictation", "message", "email", "prompt", "work-on-selection",
+            "markdown", "shell",
         ])
         #expect(loaded.first { $0.id == "work-on-selection" }?.source == .selection)
         #expect(loaded.first { $0.id == "email" }?.aiRewrite?.prompt.contains("professional email") == true)
+        #expect(loaded.first { $0.id == "shell" }?.enabled == false)
+        #expect(loaded.first { $0.id == "markdown" }?.enabled == false)
 
         // Seeding again is a no-op (does not clobber existing files).
         ModeStore.seedStartersIfEmpty(in: dir)
-        #expect(ModeStore.loadAll(in: dir).count == 6)
+        #expect(ModeStore.loadAll(in: dir).count == 8)
 
         try? FileManager.default.removeItem(at: dir)
     }

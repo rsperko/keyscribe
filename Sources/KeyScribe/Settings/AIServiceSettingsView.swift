@@ -57,8 +57,6 @@ final class AIServiceSettingsModel: ObservableObject {
         })
     }
 
-    var hasFailedTest: Bool { !failedTestIds.isEmpty }
-
     func test(_ connection: Connection) {
         let id = connection.id
         guard testStates[id] != .testing else { return }

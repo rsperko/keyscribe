@@ -179,6 +179,20 @@ struct HistoryStoreTests {
         #expect(store.entries(limit: 2).map(\.heard) == ["c", "b"])
     }
 
+    @Test func entriesLimitFillsThePagePastTrailingMalformedLines() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        try store.append(sampleEntry(heard: "a", at: 0), today: "2026-06-20")
+        try store.append(sampleEntry(heard: "b", at: 10), today: "2026-06-20")
+        try store.append(sampleEntry(heard: "c", at: 20), today: "2026-06-20")
+        let file = store.dir.appendingPathComponent("2026-06-20.jsonl")
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{ broken future-schema line\n".utf8))
+        try handle.close()
+        #expect(store.entries(limit: 2).map(\.heard) == ["c", "b"])
+    }
+
     @Test func entriesLimitStopsBeforeOlderDayFiles() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }

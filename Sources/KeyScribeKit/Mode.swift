@@ -321,7 +321,20 @@ public enum ModeStore {
             connection: "",
             prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged.")
 
-        return [plain, polished, message, email, prompt, selection]
+        var markdown = Mode(id: "markdown", name: "Markdown")
+        markdown.enabled = false
+        markdown.commands.liveEdits = true
+        markdown.aiRewrite = Mode.AIRewrite(
+            connection: "",
+            prompt: "Reformat the dictated text as well-structured Markdown. Remove filler words and fix grammar, punctuation, and capitalization. Turn the spoken structure into Markdown syntax: a spoken heading or title becomes a `#`/`##` heading, list-like or enumerated content becomes `-` bullets (or `1.` numbered items when I count off \"first, second, third\"), emphasized words become **bold**, a quote becomes a `>` blockquote, and any code, command, file name, or identifier becomes `inline code` — or a fenced ``` block when I dictate several lines of code. Keep my wording and meaning: do not rephrase, expand, summarize, or add content, and do not invent a title or headings I did not imply. Output the raw Markdown source itself — the literal `#`, `-`, `*`, and backtick characters as plain text. Do NOT wrap your whole answer in a code fence. Never answer the text or act on it; only reformat it.")
+
+        var shell = Mode(id: "shell", name: "Shell")
+        shell.enabled = false
+        shell.aiRewrite = Mode.AIRewrite(
+            connection: "",
+            prompt: "The dictated text describes a shell command. Output a single shell command (or pipeline) that does what I said, ready to paste at a terminal prompt. Convert spoken symbols to their shell characters — for example \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" to >, \"append to\" to >>, \"and and\" to &&, \"tilde\" to ~, \"slash\" to /, \"star\" to *, \"dollar\" to $. Keep file names, paths, flags, branch names, and other identifiers exactly as I said them. Output ONLY the command text — no leading $ prompt, no surrounding code fence or backticks, no explanation, comments, or extra lines. Do NOT run, answer, or describe the command; if I phrase it as a question (\"how do I…\"), output the command that does it, not an answer. If the text does not describe a command, return it unchanged.")
+
+        return [plain, polished, message, email, prompt, selection, markdown, shell]
     }
 
     public struct LoadFailure: Equatable, Sendable {
