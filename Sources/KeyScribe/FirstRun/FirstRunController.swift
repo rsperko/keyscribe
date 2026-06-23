@@ -14,14 +14,17 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
         onReadyToDictate: @escaping () -> Void,
+        permissionsOnly: Bool = false,
+        onRelaunch: @escaping () -> Void = {},
         onComplete: @escaping () -> Void
     ) {
         self.onComplete = onComplete
         model = FirstRunModel(
             initialEngineId: initialEngineId, download: download,
-            selectEngine: selectEngine, onComplete: onComplete)
+            selectEngine: selectEngine, permissionsOnly: permissionsOnly, onComplete: onComplete)
         super.init()
         model.onReadyToDictate = onReadyToDictate
+        model.onRelaunch = onRelaunch
     }
 
     // Bridges a real dictation outcome from the live pipeline into the trial gate.
@@ -30,7 +33,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     func present() {
         let hosting = NSHostingController(rootView: FirstRunView(model: model))
         let window = NSWindow(contentViewController: hosting)
-        window.title = "Welcome to KeyScribe"
+        window.title = model.permissionsOnly ? "Set Up Permissions" : "Welcome to KeyScribe"
         window.styleMask = [.titled, .closable]
         window.setContentSize(NSSize(width: 460, height: 420))
         window.center()
@@ -79,23 +82,38 @@ final class FirstRunModel: ObservableObject {
     @Published var selectedEngineId: String
 
     let catalog = SpeechModelCatalog.all
+    let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let selectEngine: (String) -> Void
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
+    var onRelaunch: () -> Void = {}
     private var pollTask: Task<Void, Never>?
 
     init(
         initialEngineId: String,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
+        permissionsOnly: Bool = false,
         onComplete: @escaping () -> Void
     ) {
         self.selectedEngineId = initialEngineId
         self.download = download
         self.selectEngine = selectEngine
+        self.permissionsOnly = permissionsOnly
         self.onComplete = onComplete
         refreshStatuses()
+        if permissionsOnly {
+            step = .permissions
+            startPolling()
+        }
+    }
+
+    // Input Monitoring and Accessibility verdicts are cached for the process lifetime, so a fresh
+    // grant only takes effect on relaunch. The nuclear setup flow ends by relaunching into itself.
+    func relaunch() {
+        stopPolling()
+        onRelaunch()
     }
 
     var selectedInfo: SpeechModelInfo? { SpeechModelCatalog.entry(for: selectedEngineId) }

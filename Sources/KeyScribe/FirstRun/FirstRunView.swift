@@ -117,19 +117,31 @@ struct FirstRunView: View {
 
             Spacer()
             if !model.allPermissionsGranted {
-                Text("You can skip and finish setup now, then grant any remaining permissions later in Settings.")
+                Text(model.permissionsOnly
+                    ? "Grant each one (the toggle opens in System Settings), then Quit & Relaunch to Apply — Input Monitoring and Accessibility only take effect after the relaunch."
+                    : "You can skip and finish setup now, then grant any remaining permissions later in Settings.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Button("Skip for now") { model.finish() }
                     .buttonStyle(.link)
                 Spacer()
-                Button("Continue") {
-                    model.onReadyToDictate()
-                    model.step = .tryIt
+                if model.permissionsOnly {
+                    if model.allPermissionsGranted {
+                        Button("Done") { model.finish() }
+                            .keyboardShortcut(.defaultAction).controlSize(.large)
+                    } else {
+                        Button("Quit & Relaunch to Apply") { model.relaunch() }
+                            .keyboardShortcut(.defaultAction).controlSize(.large)
+                    }
+                } else {
+                    Button("Continue") {
+                        model.onReadyToDictate()
+                        model.step = .tryIt
+                    }
+                    .keyboardShortcut(.defaultAction).controlSize(.large)
+                    .disabled(!model.allPermissionsGranted)
                 }
-                .keyboardShortcut(.defaultAction).controlSize(.large)
-                .disabled(!model.allPermissionsGranted)
             }
         }
     }

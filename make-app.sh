@@ -73,8 +73,10 @@ if [ -z "$ID" ]; then
 fi
 find "$APP" -name "*.cstemp" -delete 2>/dev/null || true
 if [ "$ID" = "-" ]; then
-  echo "== AD-HOC signing (no stable cert found; macOS may re-prompt for permissions each rebuild) =="
-  echo "   For TCC grants that survive rebuilds, create a self-signed cert — see BUILD.md." >&2
+  echo "!! AD-HOC signing — no stable cert found. TCC grants (Microphone / Input Monitoring /" >&2
+  echo "!! Accessibility) will NOT survive this rebuild; toggling them on will not stick." >&2
+  echo "!! Fix once: ./scripts/setup-dev-signing.sh  (creates 'KeyScribe Local'), then rebuild." >&2
+  echo "!! Already broken? ./scripts/reset-permissions.sh wipes and re-grants cleanly. See BUILD.md." >&2
 else
   echo "== signing with: $ID =="
 fi

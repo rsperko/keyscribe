@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var configRepository: ConfigRepository!
 
     private let firstRunKey = ResetTool.firstRunKey
+    private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
 
     func applicationDidFinishLaunching(_: Notification) {
         loadSettings()
@@ -109,7 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let permissionsReady = Permissions.microphoneStatus() == .granted
             && Permissions.inputMonitoringStatus() == .granted
             && Permissions.accessibilityStatus() == .granted
-        if UserDefaults.standard.bool(forKey: firstRunKey) || permissionsReady {
+        if forcePermissionsSetup {
+            presentFirstRun(permissionsOnly: true)
+        } else if UserDefaults.standard.bool(forKey: firstRunKey) || permissionsReady {
             // Already set up (or returning) — don't re-show the wizard; record completion.
             UserDefaults.standard.set(true, forKey: firstRunKey)
         } else {
@@ -263,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {}
     }
 
-    private func presentFirstRun() {
+    private func presentFirstRun(permissionsOnly: Bool = false) {
         firstRun = FirstRunController(
             initialEngineId: provider.active.id,
             download: { [weak self] id, progress in
@@ -272,7 +275,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.speechModels?.noteInstalled(id)
             },
             selectEngine: { [weak self] id in self?.setEngine(id) },
-            onReadyToDictate: { [weak self] in self?.startListening() }
+            onReadyToDictate: { [weak self] in self?.startListening() },
+            permissionsOnly: permissionsOnly,
+            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() }
         ) { [weak self] in
             guard let self else { return }
             UserDefaults.standard.set(true, forKey: firstRunKey)
@@ -284,6 +289,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.firstRun?.noteDictation(outcome)
         }
         firstRun?.present()
+    }
+
+    // Relaunch into the guided setup so the new process reads the just-granted Input Monitoring /
+    // Accessibility verdicts fresh (they are cached at launch and won't apply to this process).
+    private func relaunchForPermissionSetup() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        configuration.arguments = ["--setup-permissions"]
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
     }
 
     private func refreshStatus() {
