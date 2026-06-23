@@ -54,7 +54,16 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
                 guard let url = URL(string: "\(Self.baseURL)/\(file.name)") else {
                     throw EngineError.badModelURL(file.name)
                 }
-                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let (tmp, response) = try await URLSession.shared.download(from: url)
+                // download(from:) does not throw on an HTTP error — a 404/5xx/auth body lands in `tmp`.
+                // Promoting that as a .ort/tokenizer file fails opaquely later in Transcriber and, since
+                // the bogus file now exists, blocks any retry. Require a 2xx + non-empty payload first.
+                let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+                let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path))?[.size] as? Int
+                guard ok, (size ?? 0) > 0 else {
+                    try? FileManager.default.removeItem(at: tmp)
+                    throw EngineError.downloadFailed(file.name)
+                }
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.moveItem(at: tmp, to: dest)
             }
@@ -62,7 +71,14 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
             progress?(.init(phase: "Downloading speech model…", fraction: cumulative))
         }
         progress?(.init(phase: "Loading speech model…", fraction: 0.97))
-        transcriber = try Transcriber(modelPath: dir.path, modelArch: .base)
+        do {
+            transcriber = try Transcriber(modelPath: dir.path, modelArch: .base)
+        } catch {
+            // Loading failed against what's on disk (a corrupt/partial artifact from an earlier run).
+            // Remove the model dir so the next attempt re-downloads instead of failing on it forever.
+            try? FileManager.default.removeItem(at: dir)
+            throw error
+        }
         progress?(.init(phase: "Ready", fraction: 1))
     }
 

@@ -69,6 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onAddDictionaryEntry = { [weak self] in self?.correctionPanel.present(.dictionary) }
         menu.onAddReplacement = { [weak self] in self?.correctionPanel.present(.replacement) }
         controller.onRecordingChanged = { [weak self] active in self?.menu.setDictating(active) }
+        controller.onBecameIdle = { [weak self] in
+            guard let self, self.pendingHotkeyRebuild else { return }
+            self.pendingHotkeyRebuild = false
+            self.buildHotkeyMonitor()
+        }
 
         speechModels = SpeechModelsModel(
             activeId: settings.stt.engine,
@@ -199,11 +204,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Set when a config reload arrives mid-dictation: the hotkey rebuild is deferred to the next idle
+    // moment (DictationController.onBecameIdle), so a key held during the reload isn't stranded by a
+    // fresh PressGesture that never saw its key-down.
+    private var pendingHotkeyRebuild = false
+
     // Drop the cached config and re-register per-mode key bindings from the fresh modes. Called by
-    // the file watcher (external edits) and the Settings reload button.
+    // the file watcher (external edits) and the Settings reload button. Rebuilding the hotkey monitor
+    // replaces its bindings and clears gesture state; doing that while a key is held would drop the
+    // pending release edge, so defer the rebuild until the in-flight dictation finishes.
     func reloadConfig() {
         config.invalidate()
-        buildHotkeyMonitor()
+        if controller.isBusy {
+            pendingHotkeyRebuild = true
+        } else {
+            buildHotkeyMonitor()
+        }
         refreshStatus()
     }
 
@@ -227,14 +243,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if updated.stt.engine != settings.stt.engine {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
-                Task { await previous.evict() }
+                controller.evictSwitchedAwayEngine(previous)
             }
         }
         settings = updated
         controller.updateSettings(updated)
         buildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)
-        try? SettingsStore.write(updated, to: KeyScribePaths.supportDir)
+        do { try SettingsStore.write(updated, to: KeyScribePaths.supportDir) }
+        catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
         settingsController.update(settings: updated)
         refreshStatus()
     }

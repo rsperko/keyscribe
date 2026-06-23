@@ -123,21 +123,29 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func applyConnectOffer(_ offer: ConnectModesOffer) {
+        var failed: [String] = []
         for var mode in ModeStore.loadAll(in: KeyScribePaths.modesDir) where offer.modeIds.contains(mode.id) {
             guard var rewrite = mode.aiRewrite else { continue }
             rewrite.connection = offer.connectionId
             mode.aiRewrite = rewrite
-            try? ModeStore.write(mode, to: KeyScribePaths.modesDir)
+            do { try ModeStore.write(mode, to: KeyScribePaths.modesDir) }
+            catch { failed.append(mode.name) }
         }
+        error = failed.isEmpty ? nil
+            : "Could not connect \(failed.joined(separator: ", ")) to \(offer.connectionName)."
     }
 
     func update(_ connection: Connection, apiKey: String?) {
-        if let apiKey, !apiKey.isEmpty {
-            KeychainStore.set(apiKey, for: connection.keyRef)
-            keyedRefs.insert(connection.keyRef)
-        }
         testStates[connection.id] = nil
+        // save() resets `error` on success, so persist the connection first, then let a key-save
+        // failure have the last word on `error`.
         save(connection)
+        guard let apiKey, !apiKey.isEmpty else { return }
+        if KeychainStore.set(apiKey, for: connection.keyRef), KeychainStore.has(connection.keyRef) {
+            keyedRefs.insert(connection.keyRef)
+        } else {
+            error = "Could not save the API key for \(connection.name) to the Keychain."
+        }
     }
 
     func delete(_ connection: Connection) {

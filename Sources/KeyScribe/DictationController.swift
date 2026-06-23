@@ -59,6 +59,18 @@ final class DictationController {
     private var capturedPlan: ResolvedConfig?
     private var plan: ResolvedConfig { capturedPlan ?? config.resolved }
 
+    // The STT engine frozen for the in-flight dictation, captured at record-start alongside the plan.
+    // Reading `provider.active` afresh at transcribe/bias/evict time would let a mid-dictation engine
+    // switch (AppDelegate.applySettings) transcribe the WAV with a different engine, or evict the model
+    // out from under the active call. One capture, used everywhere for this dictation.
+    private var capturedEngine: (any SpeechEngine)?
+    private var activeEngine: any SpeechEngine { capturedEngine ?? provider.active }
+
+    // An engine the user switched away from while a dictation was in flight. Evicting it immediately
+    // would race the in-flight transcribe (the non-actor engines close their transcriber under it), so
+    // we hold it until the dictation reaches a terminal state and evict it then.
+    private var deferredEvictionEngine: (any SpeechEngine)?
+
     // Last HUD level rendered while recording (quantized). The mic level callback fires per audio
     // buffer; forwarding only on a meaningful change keeps the HUD from re-rendering its whole tree at
     // buffer rate (the indicator animates between steps anyway). Reset at the start of each recording.
@@ -87,6 +99,12 @@ final class DictationController {
     // glyph tints red while true (ui_design.md §Dynamic status).
     var onRecordingChanged: ((Bool) -> Void)?
 
+    // Fired whenever the dictation reaches a terminal state (idle). Lets the app apply work that must
+    // wait for a quiet moment — e.g. rebinding hotkeys deferred during a hold so a held key isn't
+    // stranded by a mid-dictation config reload.
+    var onBecameIdle: (() -> Void)?
+
+    var isBusy: Bool { machine.isBusy }
     var hasResult: Bool { lastResult != nil }
     var nextModeOverrideName: String? {
         nextModeOverrideID.flatMap { id in config.modes.first { $0.id == id }?.name }
@@ -142,11 +160,22 @@ final class DictationController {
 
     func updateSettings(_ settings: Settings) { self.settings = settings }
 
+    // The active engine changed (Settings). Evict the one we switched away from — but never while a
+    // dictation is mid-flight on it: the non-actor engines close their transcriber synchronously, so
+    // evicting under a live transcribe is a use-after-close. Defer to the terminal state instead.
+    func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
+        if machine.isBusy {
+            deferredEvictionEngine = engine
+        } else {
+            Task { await engine.evict() }
+        }
+    }
+
     // Warm the active STT engine the instant a press begins, overlapping model load (CoreML/MLX
     // compile, ANE warmup) with the user's speech instead of paying it after key-release. Idempotent
     // — a no-op once loaded — and never blocks recording: failures surface later at transcribe time.
     private func warmActiveEngine() {
-        let active = provider.active
+        let active = activeEngine
         Task { try? await active.loadIfNeeded() }
     }
 
@@ -184,13 +213,14 @@ final class DictationController {
         }
         capturedSnapshot = snapshot()
         capturedPlan = config.resolved
+        capturedEngine = provider.active
         resolveMode(triggerKey: triggerKey)
         warmActiveEngine()
         effects.begin(settings.duringDictation)
         lastRenderedLevel = 0
         hud?.render(.recording(mode: currentModeName, level: 0))
         do {
-            _ = try audio.start(sampleRate: provider.active.captureSampleRate) { [weak self] level in
+            _ = try audio.start(sampleRate: activeEngine.captureSampleRate) { [weak self] level in
                 self?.levelCoalescer.submit(level)
             }
             onRecordingChanged?(true)
@@ -227,6 +257,14 @@ final class DictationController {
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
         capturedPlan = nil
+        capturedEngine = nil
+        // An engine the user switched away from mid-dictation was held back from eviction to avoid
+        // racing the in-flight call; now that we're idle it is safe to free.
+        if let deferred = deferredEvictionEngine {
+            deferredEvictionEngine = nil
+            Task { await deferred.evict() }
+        }
+        onBecameIdle?()
     }
 
     func handleCommit() {
@@ -273,46 +311,42 @@ final class DictationController {
     // stable order; this trims and drops blanks) so engines consume clean terms. Engines without
     // bias ignore these.
     private func recognitionBiasTerms() -> [String] {
-        guard provider.active.supportsRecognitionBias else { return [] }
+        guard activeEngine.supportsRecognitionBias else { return [] }
         return plan.recognitionBiasTerms(for: activeMode)
     }
-
-    struct TranscribeTimeout: Error {}
 
     // Bound the STT call so a wedged CoreML/MLX transcribe can't leave the HUD spinning forever.
     // Batch dictation can't salvage a partial, so this is robustness, not speed — the cap scales with
     // the recording length (20× real-time, ≥30s floor), generous enough to never trip on a legitimately
-    // long or slow transcription while still abandoning a true hang. The losing engine task is
-    // cancelled; if the engine ignores cancellation it finishes in the background, harmlessly discarded.
-    private func transcribeBounded(url: URL, biasTerms: [String]) async throws -> String {
-        let engine = provider.active
+    // long or slow transcription while still abandoning a true hang. `runWithDeadline` runs the engine
+    // as an unstructured task, so even an engine that ignores cancellation is abandoned at the deadline
+    // (a structured task group would wait for it). A late result resolves a no-op and is discarded.
+    private func transcribeBounded(url: URL, biasTerms: [String], engine: any SpeechEngine) async throws -> String {
         let audioSeconds = (try? AVAudioFile(forReading: url))
             .map { Double($0.length) / $0.fileFormat.sampleRate } ?? 0
         let timeout = max(30, audioSeconds * 20)
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { try await engine.transcribe(wavURL: url, biasTerms: biasTerms) }
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
-                throw TranscribeTimeout()
-            }
-            defer { group.cancelAll() }
-            guard let first = try await group.next() else { throw TranscribeTimeout() }
-            return first
+        return try await runWithDeadline(seconds: timeout) {
+            try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
         }
     }
 
     private func transcribeAndInsert(url: URL) async {
+        let engine = activeEngine
         let raw: String
         do {
-            raw = try await transcribeBounded(url: url, biasTerms: recognitionBiasTerms())
-        } catch is TranscribeTimeout {
-            log.error("transcribe timed out (\(self.provider.active.id, privacy: .public))")
+            raw = try await transcribeBounded(url: url, biasTerms: recognitionBiasTerms(), engine: engine)
+        } catch is DeadlineExceeded {
             try? FileManager.default.removeItem(at: url)
+            // A user cancel cancels this task too; cancel() already handled the terminal state, so a
+            // late deadline/error must not stomp the next dictation's HUD/effects/state.
+            if Task.isCancelled { return }
+            log.error("transcribe timed out (\(engine.id, privacy: .public))")
             finishError("Transcription timed out")
             return
         } catch {
-            log.error("transcribe failed (\(self.provider.active.id, privacy: .public)): \(error, privacy: .public)")
             try? FileManager.default.removeItem(at: url)
+            if Task.isCancelled { return }
+            log.error("transcribe failed (\(engine.id, privacy: .public)): \(error, privacy: .public)")
             finishError("Transcription failed")
             return
         }
@@ -338,10 +372,11 @@ final class DictationController {
         case .abort(let message, let action):
             // A selection rewrite that failed (or had nothing to do) leaves the target untouched —
             // a destructive op must never overwrite the user's text on failure.
+            let engineUsed = activeEngine
             log.info("aborted: \(message, privacy: .public)")
             finishError(message, action: action)
             clearRewriteEscapeHatch()
-            applyEvictionAfterDictation()
+            applyEvictionAfterDictation(engine: engineUsed)
 
         case .insert(let transcript):
             await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite)
@@ -390,7 +425,7 @@ final class DictationController {
             ? .localFallback(outcome: outcome, mode: currentModeName)
             : .complete(outcome: outcome, mode: currentModeName))
         scheduleHide()
-        applyEvictionAfterDictation()
+        applyEvictionAfterDictation(engine: activeEngine)
         releaseCapturedPlan()
         onDictationCompleted?(outcome)
     }
@@ -420,31 +455,31 @@ final class DictationController {
         catch { log.error("history append failed: \(error.localizedDescription, privacy: .public)") }
     }
 
-    private func applyEvictionAfterDictation() {
+    // Evicts the engine the dictation actually used (the captured one), not whatever is active now —
+    // a mid-dictation switch leaves provider.active pointing at a different, unloaded engine.
+    private func applyEvictionAfterDictation(engine: any SpeechEngine) {
         lastUsedAt = ProcessInfo.processInfo.systemUptime
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
         switch EvictionPolicy.afterDictation(mode: settings.stt.eviction, idleSeconds: idle) {
         case .keepLoaded: break
         case .evictNow:
-            let active = provider.active
-            Task { await active.evict() }
-        case .scheduleIdleCheck(let after): scheduleIdleEviction(after: after)
+            Task { await engine.evict() }
+        case .scheduleIdleCheck(let after): scheduleIdleEviction(after: after, engine: engine)
         }
     }
 
-    private func scheduleIdleEviction(after: Double) {
+    private func scheduleIdleEviction(after: Double, engine active: any SpeechEngine) {
         idleEvictionTask?.cancel()
         let mode = settings.stt.eviction
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
         let usedAt = lastUsedAt
-        let active = provider.active
         idleEvictionTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(after))
             guard let self, !Task.isCancelled, !self.machine.isBusy else { return }
             let now = ProcessInfo.processInfo.systemUptime
             switch EvictionPolicy.onIdleCheck(mode: mode, lastUsedAt: usedAt, now: now, idleSeconds: idle) {
             case .evictNow: await active.evict()
-            case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again)
+            case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again, engine: active)
             case .keepLoaded: break
             }
         }

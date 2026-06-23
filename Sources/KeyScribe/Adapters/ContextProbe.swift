@@ -67,24 +67,36 @@ enum ContextProbe {
     // only appears for an actual browser, and only once (permission is per source→target pair).
     static func browserURL(forBundleId bundleId: String) -> String? {
         guard handlesHTTPS(bundleId) else { return nil }
+        // The Apple Event is a synchronous cross-process round trip with no per-call timeout
+        // (NSAppleScript uses kAEDefaultTimeout, ~2 min). This runs on the press-start path, so a
+        // beachballing browser would otherwise freeze the main thread there. Run it off-main and wait
+        // out a short bounded window; on timeout the mode resolves without URL context rather than hang.
+        let box = ResultBox()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.set(Self.fetchBrowserURL(bundleId))
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + 0.6) == .success else { return nil }
+        return box.get()
+    }
+
+    private final class ResultBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: String?
+        func set(_ v: String?) { lock.lock(); value = v; lock.unlock() }
+        func get() -> String? { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    nonisolated private static func fetchBrowserURL(_ bundleId: String) -> String? {
         for property in ["URL of active tab of front window", "URL of front document"] {
             let source = "tell application id \"\(bundleId)\" to return \(property)"
-            guard let script = compiledScript(source) else { continue }
+            guard let script = NSAppleScript(source: source) else { continue }
             var error: NSDictionary?
             let result = script.executeAndReturnError(&error)
             if error == nil, let url = result.stringValue, !url.isEmpty { return url }
         }
         return nil
-    }
-
-    // NSAppleScript compiles its source on first execution; reusing the same object across dictations
-    // avoids recompiling the (per-bundle) script every time a URL-constrained mode runs.
-    private static var compiledScripts: [String: NSAppleScript] = [:]
-    private static func compiledScript(_ source: String) -> NSAppleScript? {
-        if let cached = compiledScripts[source] { return cached }
-        guard let script = NSAppleScript(source: source) else { return nil }
-        compiledScripts[source] = script
-        return script
     }
 
     private static func handlesHTTPS(_ bundleId: String) -> Bool {

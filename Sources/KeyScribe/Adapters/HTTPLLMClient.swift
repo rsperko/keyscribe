@@ -22,7 +22,16 @@ enum LLMClientError: Error, CustomStringConvertible {
 // (assemble → gate → retry/fallback) lives in KeyScribeKit.RewriteService; this only does transport.
 // Runtime-unverified without a real key — flagged in docs/session-status.md.
 struct HTTPLLMClient: LLMClient {
-    var session: URLSession = .shared
+    // A bounded session, not URLSession.shared (whose default request timeout is 60s — and the gate's
+    // stricter-retry would double that). A hung BYOK endpoint must fall back to the local transcript
+    // promptly, so cap each attempt; RewriteService turns the thrown timeout into a local fallback.
+    var session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 45
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
     var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
 
     func complete(system: String, user: String, connection: Connection) async throws -> String {

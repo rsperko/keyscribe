@@ -5,6 +5,7 @@ enum EngineError: Error {
     case notInitialized
     case badModelURL(String)
     case audioDecodeFailed
+    case downloadFailed(String)
 }
 
 // The requested engine id isn't constructible in this build (no descriptor / not wired).

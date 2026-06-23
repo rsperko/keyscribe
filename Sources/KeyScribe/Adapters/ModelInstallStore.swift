@@ -91,10 +91,14 @@ enum ModelInstallStore {
     }
 
     private static func write(_ ids: Set<String>) {
-        try? FileManager.default.createDirectory(
-            at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(ids.sorted()) {
-            try? data.write(to: markerURL, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(
+                at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
+            try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
+        } catch {
+            // A lost marker isn't fatal — reconcile re-derives install state from disk next launch — but
+            // it can mean a re-download, so surface it rather than swallow it.
+            Log.models.error("install marker write failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

@@ -17,6 +17,47 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## Resiliency pass (2026-06-23, uncommitted)
+
+Audit of the async dictation lifecycle, engine switching, config reload, model download, and durable
+storage (own review + a GPT-5.5 audit in `agent_notes/gpt_resiliency/`). **`swift build` clean; full
+`swift test` = 488 tests / 60 suites pass** (5 new). Pure-logic + controller-DI changes are unit-tested;
+the AppleScript and URLSession timeout changes are adapter edges (build clean, not headless-verifiable).
+
+- **Cancelled work could corrupt the next dictation.** `transcribeAndInsert`'s catch paths called
+  `finishError` without a cancellation check, so an engine that *throws* on cancel (not returns) tore
+  down the *next* dictation's HUD/effects/state. Added `Task.isCancelled` guards. Test:
+  `cancellingThenAnEngineThatThrowsDoesNotStompTheHUD`.
+- **Transcribe timeout didn't bound a non-cooperative engine.** `withThrowingTaskGroup` awaits all
+  children at scope exit, so a CoreML/MLX call that ignores cancellation kept the HUD spinning past the
+  deadline. New `runWithDeadline` (`KeyScribeKit/Deadline.swift`) runs the engine as an unstructured task
+  and abandons it at the deadline via a one-shot continuation race. Tests in `DeadlineTests`.
+- **Mid-dictation engine switch raced the in-flight engine.** The dictation re-read `provider.active`
+  at transcribe/bias/evict time. Now the engine is **captured at record-start** (`capturedEngine`) and
+  used everywhere; a switched-away engine's eviction is **deferred until idle** (the non-actor engines
+  close their transcriber synchronously → use-after-close). Test:
+  `aMidDictationEngineSwitchStillUsesTheCapturedEngine`.
+- **Config reload could strand a held hotkey.** An FSEvents reload rebuilt bindings immediately,
+  clearing gesture state mid-hold so the release edge was lost. `reloadConfig` now **defers the rebuild
+  while busy** and flushes it via a new `DictationController.onBecameIdle`.
+- **Browser-URL probe could freeze the main thread.** `ContextProbe.browserURL` ran a synchronous
+  AppleScript (no timeout, ~2 min default) on the press-start path. Now runs off-main with a **0.6 s
+  bounded wait**; a wedged browser resolves without URL context instead of hanging.
+- **Rewrite had no timeout.** `HTTPLLMClient` used `URLSession.shared` (60 s default, doubled by the
+  gate retry). Now a configured ephemeral session with a **30 s request timeout** → prompt local fallback.
+- **Moonshine accepted HTTP error bodies as model files.** `download(from:)` doesn't throw on 4xx/5xx;
+  the body was moved in as a `.ort` file and blocked retry. Now requires **2xx + non-empty** before
+  promoting, and removes the model dir on a load failure so a retry recovers. New `EngineError.downloadFailed`.
+- **Silent persistence failures surfaced.** `KeychainStore.set` returns success; the AI Services UI
+  verifies with `has()` before badging a key present and shows an error otherwise; the connect-modes
+  offer reports write failures; settings/install-marker write failures now **log** instead of swallowing.
+
+Deliberately left (not bugs): `EngineRegistry.construct` fatalError (loud dev-time guard, only reachable
+with catalog ids), `ctcUnavailable` session latch (fails soft; avoids re-retrying a slow download),
+`SpeechEngineProvider` `@unchecked Sendable` (no live race — MainActor-only access), tap re-enable not
+resetting gesture state (300 s backstop + the config-reload fix cover the strand; resetting would drop a
+legitimately-held key), silent audio-write failure (degrades to "no speech").
+
 ## Crash fix + Settings UX pass (2026-06-23, uncommitted)
 
 Cross-machine crash + seven Settings/onboarding issues. **`swift build` clean; full `swift test` =

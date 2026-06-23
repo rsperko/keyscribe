@@ -21,7 +21,11 @@ enum KeychainStore {
         ]
     }
 
-    static func set(_ secret: String, for keyRef: String) {
+    // Returns whether the secret was actually stored. The caller must not mark a key "present" on a
+    // false return: a discarded failure would show a saved-key badge while every later rewrite quietly
+    // falls back to local for want of a key.
+    @discardableResult
+    static func set(_ secret: String, for keyRef: String) -> Bool {
         let data = Data(secret.utf8)
         let query = baseQuery(keyRef)
         // Always delete + re-add rather than SecItemUpdate: an update keeps the item's existing ACL, so
@@ -33,7 +37,7 @@ enum KeychainStore {
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        SecItemAdd(add as CFDictionary, nil)
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
     // Existence only: returns attributes, never the secret data, so it does not trigger the Keychain
