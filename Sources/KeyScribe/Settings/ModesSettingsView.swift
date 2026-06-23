@@ -315,7 +315,9 @@ private struct ModeEditorView: View {
             Section { summaryCard }
 
             Section("Basics") {
-                TextField("Name", text: binding(\.name))
+                CommittedTextField("Name", text: mode.name) { value in
+                    var updated = mode; updated.name = value; onUpdate(updated)
+                }
                 Toggle("Enabled", isOn: binding(\.enabled))
                 if isDefault {
                     Label("Used automatically when no app rule or spoken phrase applies",
@@ -345,8 +347,6 @@ private struct ModeEditorView: View {
                 }
                 if mode.source != .selection {
                     Toggle("Convert spoken numbers to digits", isOn: commandsBinding(\.numbers))
-                    Toggle("Expand spoken symbols (\u{201C}open paren\u{201D} \u{2192} \u{201C}(\u{201D})",
-                           isOn: commandsBinding(\.symbols))
                     Toggle("Snap misheard words to your dictionary", isOn: commandsBinding(\.fuzzyCorrection))
                     Text("These tidy the transcript on this Mac, before any AI rewrite.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -375,6 +375,32 @@ private struct ModeEditorView: View {
                 if accessibilityMissingForInsertion {
                     Button("Open Accessibility Settings") { Permissions.openSettings(.accessibility) }
                         .controlSize(.small)
+                }
+                SettingRow(
+                    title: "Add after text",
+                    help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
+                {
+                    Picker("", selection: binding(\.trailing)) {
+                        Text("Nothing").tag(Mode.Trailing.none)
+                        Text("Space").tag(Mode.Trailing.space)
+                        Text("Line break").tag(Mode.Trailing.newline)
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                SettingRow(
+                    title: "Then press",
+                    help: "After inserting, sends a keystroke to submit — Return sends in most chat and prompt boxes, ⇧Return adds a soft line break, ⌘Return sends in Slack and similar. Only fires when the text actually reached the target (never on a clipboard fallback). Leave on \u{201C}Nothing\u{201D} to avoid sending half-finished messages.",
+                    dependencyReason: mode.submit != .none && mode.source == .selection
+                        ? "This mode replaces a selection, so a send keystroke usually isn't what you want here."
+                        : nil)
+                {
+                    Picker("", selection: binding(\.submit)) {
+                        Text("Nothing").tag(Mode.Submit.none)
+                        Text("Return").tag(Mode.Submit.return)
+                        Text("⇧Return").tag(Mode.Submit.shiftReturn)
+                        Text("⌘Return").tag(Mode.Submit.cmdReturn)
+                    }
+                    .labelsHidden().fixedSize()
                 }
                 SettingRow(
                     title: "Exclude from history",
@@ -580,7 +606,9 @@ private struct ModeEditorView: View {
                     .labelsHidden().fixedSize()
                 }
                 if mode.aiRewrite != nil {
-                    PromptEditor(title: "Writing instruction", text: rewritePrompt)
+                    PromptEditor(title: "Writing instruction", text: mode.aiRewrite?.prompt ?? "") { value in
+                        updateRewrite { $0.prompt = value }
+                    }
                 }
             }
         }
@@ -904,12 +932,6 @@ private struct ModeEditorView: View {
                     updateRewrite { $0.connection = id }
                 }
             })
-    }
-
-    private var rewritePrompt: Binding<String> {
-        Binding(get: { mode.aiRewrite?.prompt ?? "" }, set: { value in
-            updateRewrite { $0.prompt = value }
-        })
     }
 
     private var privacyMode: Binding<Bool> {

@@ -98,7 +98,7 @@ The same app serves both via progressive disclosure.
                               │  post-STT pipeline; strip suffix      │  pipeline ◀┘
                               └─────────────────┬───────────────────┘
                                                 ▼
-                          [ post-STT stages ]   live edits · spoken symbols · replacements
+                          [ post-STT stages ]   live edits · replacements
                                                 · numbers (ITN) · fuzzy correction
                           [ stateful stages ]   verbatim-mark · redaction-tokenize
                                                 │  (nonce tokens; local map kept)
@@ -145,19 +145,29 @@ measured (`principles.md` §1):
 A non-inserted **local-transcript preview** in the HUD while cloud rewrite runs is a candidate
 (keeps atomic insertion while cutting the felt wait) — considered, not committed for v1.
 
-A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active):
-- **FluidAudio / Parakeet TDT v3** — **default for English.** Swift/CoreML SDK
-  (FluidInference) running Parakeet on the Neural Engine (~1hr audio in ~19s on M4 Pro,
-  ~2.5% WER), with **pyannote speaker diarization bundled** in the same SDK. 25 languages.
-- **Whisper** (Large v3 / Turbo via whisper.cpp or WhisperKit) — multilingual fallback,
-  99 languages.
-- **Apple SpeechAnalyzer** (macOS Tahoe) — zero-install option, strong on EU languages, no
-  model download.
-- *(Seam left for a 4th engine, e.g. Qwen3.)*
+A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
+v1 ships **7 curated models across 5 engine kinds** (`SpeechModelCatalog.all`); all run live with
+in-app download/install:
+- **FluidAudio / Parakeet TDT-CTC 110M** — **default for English.** Compact (~440MB), fast and
+  accurate. English only.
+- **FluidAudio / Parakeet TDT v3** — larger multilingual Parakeet (25 languages), slightly
+  stronger raw accuracy; **pyannote speaker diarization bundled** in the same SDK.
+- **Whisper** (Large v3 Turbo via WhisperKit) — broad multilingual coverage, 99 languages.
+- **Apple Speech** (SpeechAnalyzer, macOS Tahoe) — zero-install, system-managed, 20 languages.
+- **Qwen3-ASR 0.6B** — compact multilingual (52 languages); the speed/accuracy sweet spot in our
+  benchmarks.
+- **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the benchmark WER winner.
+- **Moonshine Base (English)** — lightweight English model; **no dictionary bias** (bias-exempt,
+  badged in Settings).
+
+Engines are wired through a single **`EngineRegistry`** descriptor list (catalog ↔ constructor) that
+the provider, download path, install reconcile/delete, and the benchmark all derive from — adding an
+engine is one descriptor + one catalog entry.
 
 **Engine bias support.** Recognition bias must be grounded in the acoustics, never a blind post-STT
-find-and-replace (that silently corrupts output). All three engines bias, each via its model's own
-mechanism, and all take dictionary terms through `transcribe(wavURL:biasTerms:)`:
+find-and-replace (that silently corrupts output). Six of the seven models bias, each via its model's
+own mechanism, and all take dictionary terms through `transcribe(wavURL:biasTerms:)` (Moonshine is
+the exception — no on-device bias path):
 - **Whisper** — a decode-time conditioning prompt (`promptTokens`); a soft hint the model may ignore.
 - **Apple** — `AnalysisContext` contextual strings, weighted during the single decode. Requires the
   `DictationTranscriber` module — `SpeechTranscriber` silently ignores `contextualStrings`.
@@ -201,11 +211,10 @@ stages are **stateful within a single dictation** (they hold a token→original 
 | **Dictionary** | pre-STT bias (where supported) + dynamic system-prompt | Bias recognition toward known terms via the active engine's **decode-time** mechanism (§4.1 *Engine bias support* — Whisper/Apple/Parakeet yes; Moonshine no); and always hint to the LLM that those terms are valid/intentional (not misspellings). A hint, not a directive — the LLM may still transform them per the mode. |
 | **Replacements** | post-STT | Heard→Replace, literal or regex with substitutions. The result flows into the LLM normally and may be transformed by it (e.g. a "pig latin" mode). Replacements are not protected from rewrite. A user regex is screened by **`ReplacementSafety`** before it runs: a nested-quantifier ("evil") pattern that could catastrophically backtrack on the dictation hot path is refused, not executed (there is no way to interrupt a synchronous `NSRegularExpression` match). |
 | **Live edits** | post-STT | Spoken commands from a **small documented list** (*new line*, *paragraph*, *scratch that*, *tab*, *begin/end verbatim* — sentence/newline-aware), **opt-in per mode** (one toggle). Custom trigger words and an escape mechanism come later. |
-| **Spoken symbols** | post-STT | Optional per-mode expansion of spoken punctuation/symbol names ("open paren" → `(`) for code/terminal modes (`commands.symbols`). Runs **before replacements** so a replacement still sees the expanded text. |
-| **Numbers (inverse text normalization)** | post-STT | Optional per-mode deterministic spoken-number → digits ("twenty five" → "25"), `commands.numbers`. Conservative by design: a run that does not form one unambiguous cardinal is left exactly as spoken (preserves year idioms like "twenty twenty six"). Wrong number output is worse than none. |
+| **Numbers (inverse text normalization)** | post-STT | Optional per-mode deterministic spoken-number → digits ("twenty five" → "25"), `commands.numbers`. Conservative by design: a run that does not form one unambiguous cardinal is left exactly as spoken (preserves year idioms like "twenty twenty six"). Wrong number output is worse than none. **Tier 1 decorators** fold in the low-ambiguity, locale-light cases around a validated cardinal: sign ("minus five" → "-5", only when not preceded by a number, so subtraction is left alone), decimals ("three point one four" → "3.14"; fractional part is single digits only), percent ("fifty percent" → "50%"), and ordinals ("twenty first" → "21st"). Each decorator only fires on a cardinal that already parses and clears the standalone-small gate; anything ambiguous echoes the spoken words. **Tier 2 (deferred — LLM/mode territory, not this stage):** currency symbols + placement ("$20.50"), thousands grouping ("5,200"), dates, and times are locale/house-style/context-dependent, so they are left to the optional LLM rewrite (and skipped entirely in no-LLM modes) rather than guessed deterministically here. |
 | **Fuzzy correction** | post-STT | Optional per-mode snap of mangled words to dictionary terms ("charge bee" → "ChargeBee"), `commands.fuzzy_correction`. Conservative (Levenshtein + Soundex gated); the dictionary stays a *hint*, not a protected substitution. Bias-less engines (Moonshine) benefit most. |
-| **Verbatim** | post-STT tokenize / restore | A **live edit** (enabled by the live-edits toggle): spans delimited by spoken triggers ("begin verbatim" / "end verbatim") are pulled into a **single nonce token** so the LLM cannot touch them; restored verbatim after. Same machinery as redaction, different intent (protect-from-edit vs withhold-sensitive). |
-| **Privacy / redaction** | post-STT tokenize / restore (+ system-prompt) | **Best-effort pattern matching** of sensitive data (API keys, PII, credit cards, …); matched spans are tokenized out **before** the (possibly cloud) LLM and restored after. Enabled per-mode via a **privacy** toggle. Privacy mode also **forces context off** (§4.4), so the redacted transcript is the only user content that can leave the machine. |
+| **Verbatim** | tokenize **before** the text stages / restore last | A **live edit** (enabled by the live-edits toggle): spans delimited by spoken triggers ("begin verbatim" / "end verbatim") are pulled into a **single nonce token** **before** live edits / replacements / numbers / fuzzy run, so the span is protected from **everything except STT** (the text stages and the LLM all see only the token); restored verbatim after. Same machinery as redaction, different intent and position (protect-from-edit, first vs withhold-sensitive, last). |
+| **Privacy / redaction** | tokenize **after** the text stages / restore (+ system-prompt) | **Best-effort pattern matching** of sensitive data (API keys, PII, credit cards, …); matched spans are tokenized out of the fully-transformed text **before** the (possibly cloud) LLM and restored after. Enabled per-mode via a **privacy** toggle. Privacy mode also **forces context off** (§4.4), so the redacted transcript is the only user content that can leave the machine. |
 
 **Stateful tokenization & restoration (verbatim / redaction).** Verbatim and redaction share
 one mechanism: a span is replaced with a **nonce token carrying a type and an incrementing
@@ -242,35 +251,47 @@ steering the rewrite or dropping tokens (indirect prompt injection). No prompt-i
 classifier in v1 — the deterministic checks are the guardrail that fits the product.
 
 #### 4.2.1 Command pattern & ordering
-Each stage is a **Command object that can hold state** (the token→original maps live here).
-Unless a clearly better pattern emerges, this is the model: a command declares its
-**position** in the flow and an **order index** within that position, and the pipeline runs
-them deterministically. **Ordering is a first-class concern — getting it wrong silently
-corrupts output**, so the canonical order is fixed and explicit:
+Each stage is a **Command object with a forward `apply` and an inverse `post`** (the token→original
+maps live in the tokenizing commands). A command declares its **position** in the flow and an
+**order index** within that position; the host runs every `apply` forward (position/order), then the
+optional LLM + validation gate on the text, then every `post` in **strict reverse** — so a command
+that tokenizes in `apply` and restores in `post` unwinds LIFO *by construction*, not by where a
+restore call happens to sit. One-way text stages leave `post` at its default no-op. **Ordering is a
+first-class concern — getting it wrong silently corrupts output or leaks a span**, so the canonical
+order is fixed and explicit:
 
 ```
 1. pre-STT        dictionary bias / system-prompt vocab seeding
 2. STT            (single global engine, batch)
-3. post-STT text  live edits → spoken symbols → replacements → numbers (ITN) → fuzzy correction
-                  (StageOrder: liveEdits 0 · spokenSymbols 5 · replacements 10 · numbers 20 · fuzzy 30)
-4. post-STT mark  verbatim tokenize  → then redaction tokenize      (produce nonce tokens +
-                                                                      system-prompt constraints)
-5. assemble       dynamic system prompt + user prompt (context blocks)
-6. pre-LLM        final payload assembly
-7. LLM            optional BYOK rewrite
-8. post-LLM       output normalization
-9. validate       HARD gate: every issued token returns exactly once; no stray ⟦SN:…⟧ KeyScribe
+3. verbatim mark  verbatim tokenize        (apply) — BEFORE the text stages, so a verbatim span is
+                                            opaque to them and to the LLM (protected from all but STT)
+4. post-STT text  live edits → replacements → numbers (ITN) → fuzzy correction   (apply)
+                  (StageOrder: liveEdits 0 · replacements 10 · numbers 20 · fuzzy 30)
+5. redaction mark redaction tokenize       (apply) — AFTER the text stages, on the fully-transformed
+                                            text, just before the LLM (produces nonce tokens + prompt
+                                            constraints); only when privacy is on AND a rewrite runs
+6. assemble       dynamic system prompt + user prompt (context blocks)
+7. pre-LLM        final payload assembly
+8. LLM            optional BYOK rewrite
+9. post-LLM       output normalization
+10. validate      HARD gate: every issued token returns exactly once; no stray ⟦SN:…⟧ KeyScribe
                   didn't issue; non-empty. Fail → one stricter retry → else local fallback + HUD.
-10. restore       de-tokenize nonces in REVERSE/LIFO of step 4
-11. insertion     paste (primary) / insert / type — atomic, one ⌘Z
+11. restore       run every command's `post` in STRICT REVERSE of apply — redaction restored first,
+                  verbatim last (LIFO). Runs on EVERY path (rewrite, fallback, and no-LLM).
+12. insertion     paste (primary) / insert / type — atomic, one ⌘Z
 ```
 
 Ordering rules that matter (the footguns):
-- **Replacements before tokenization** — so a replacement can't rewrite a nonce token, and
-  so redaction sees the corrected text.
-- **Tokenization is the last post-STT step** — nothing after it should mutate the tokens
-  until restore.
-- **Restore is strict LIFO of tokenization** — nested/overlapping spans unwind correctly.
+- **Verbatim tokenizes FIRST (before the text stages)** — a verbatim span must be protected from
+  live edits / replacements / numbers / fuzzy *and* the LLM, i.e. everything except STT. Because it
+  is an opaque token before any cloud call, a secret inside a verbatim block is also shielded for free.
+- **Replacements before redaction tokenization** — so redaction sees the corrected text and a
+  replacement can't rewrite a redaction nonce token.
+- **Redaction tokenizes LAST of the post-STT steps** — nothing after it (until restore) should mutate
+  its tokens; it captures secrets in the final outbound text.
+- **Restore is `post` in strict REVERSE of `apply` (LIFO)** — nested/overlapping spans unwind
+  correctly, and it runs on every path including no-LLM (so verbatim markers are always stripped and
+  the span restored even with no rewrite).
 - Within a position, order is **explicit (index), never incidental** (DRY, no hidden
   ordering in code paths).
 
@@ -340,8 +361,9 @@ Each mode also carries:
   the cloud alongside the transcript. Redaction therefore only has to cover the transcript.
 - **Live-edits opt-in** — whether the spoken command list (new line, paragraph, scratch that,
   begin/end verbatim) is active for this mode.
-- **Context opt-in** — checkboxes for what to send to the LLM: **App** and **visible
-  text** (§4.4). (The URL is a routing key only, never sent — §4.3.)
+- **Context opt-in** — checkboxes for what to send to the LLM: **App**, **visible
+  text**, and **preceding text** (bounded text before the caret, native-only/best-effort) (§4.4).
+  (The URL is a routing key only, never sent — §4.3.)
 - **Shared prompt fragments** — named, reusable snippets **appended** to the mode's prompt
   (e.g. a "my voice" fragment shared across email and Slack modes). Appended in order, kept
   simple.
@@ -370,16 +392,17 @@ Mode model (input is selection+voice, output overwrites), but it stays a configu
 an engine fork.
 
 ### 4.4 AI rewrite context
-A mode **opts into** the context it sends to the LLM via checkboxes — **App** and
-**visible text** — plus the current selection when it is an edit-in-place mode. Nothing is
-sent that the mode did not opt into. Optional, BYOK, and only over redacted payloads.
+A mode **opts into** the context it sends to the LLM via checkboxes — **App**,
+**visible text**, and **preceding text** (a bounded amount of text immediately before the caret,
+native-only and best-effort) — plus the current selection when it is an edit-in-place mode. Nothing
+is sent that the mode did not opt into. Optional, BYOK, and only over redacted payloads.
 
 **The URL is never sent to the LLM.** It is a *local* routing key only (`url_pattern`, §4.3):
 matched against a regex on-device to rank modes, never transmitted. As rewrite context it adds
 little over the app identity plus the visible-window text (which already carries what page the
 user is on) while disproportionately widening the cloud payload — URLs routinely embed session
 tokens, record ids, and search queries the user never sees. So URL is scoped to routing; app
-identity and visible text are the only situational context channels.
+identity, visible text, and preceding text are the only situational context channels.
 
 **App detection (spike result):** the frontmost **app/bundle id is always available**. (Browser
 **URL detection** — AppleScript/Apple Events per browser, not AX — is described under routing,

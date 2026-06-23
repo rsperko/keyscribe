@@ -87,8 +87,11 @@ private struct EngineCard: View {
                                 .font(.caption).foregroundStyle(.tint).labelStyle(.titleAndIcon)
                         }
                     }
-                    Text(row.info.summary).font(.callout).foregroundStyle(.secondary)
-                    Text(metadata).font(.caption2).foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(row.info.summary).font(.callout).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Text(languageScope).font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -122,18 +125,8 @@ private struct EngineCard: View {
                 Text(err).font(.caption).foregroundStyle(.red).lineLimit(2)
             }
 
-            if let status = installStatus {
-                Label(status, systemImage: "checkmark.circle.fill")
-                    .font(.caption2).foregroundStyle(.green)
-            }
-            if let path = row.installPath {
-                Text(path)
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-            }
-
             HStack {
-                Text("On this Mac").font(.caption2).foregroundStyle(.secondary)
+                statusFooter
                 Spacer()
                 actions
             }
@@ -157,12 +150,18 @@ private struct EngineCard: View {
         return row.info.approxDownloadBytes <= 500_000_000 ? "Compact" : "Large"
     }
 
-    private var metadata: String {
-        let scope = row.info.languageCount <= 1 ? "English" : "\(row.info.languageCount) languages"
-        let size = row.info.systemManaged
-            ? "system-managed"
-            : "~\(ByteCountFormatter.string(fromByteCount: row.info.approxDownloadBytes, countStyle: .file))"
-        return "\(scope) · \(size) · \(row.info.kind.rawValue)"
+    private var languageScope: String {
+        row.info.languageCount <= 1 ? "English" : "\(row.info.languageCount) languages"
+    }
+
+    @ViewBuilder private var statusFooter: some View {
+        if let status = installStatus {
+            Label(status, systemImage: "checkmark.circle.fill")
+                .font(.caption2).foregroundStyle(.green)
+        } else if !row.info.systemManaged, !row.isUsable, row.downloadFraction == nil {
+            Text("~\(ByteCountFormatter.string(fromByteCount: row.info.approxDownloadBytes, countStyle: .file)) download")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
     }
 
     private var installStatus: String? {
@@ -195,8 +194,6 @@ private struct EngineCard: View {
             Button("Test") { model.test(row.id) }
                 .help("Runs a quick on-device self-test to confirm this model can transcribe.")
             if !row.info.systemManaged {
-                Button { model.reveal(row.id) } label: { Image(systemName: "folder") }
-                    .help("Reveal in Finder")
                 Button("Delete", role: .destructive) { model.requestDelete(row.id) }
             }
         } else {

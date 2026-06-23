@@ -79,6 +79,12 @@ and technical prompt behavior.
 
 **Use for:** the HUD, mode list, History, and connection summaries.
 
+> **Where each surface renders these as a badge vs plain text:** **History** renders the full set,
+> including `On this Mac`, as badges (`HistoryEntry.dataBoundaryLabels`). The **HUD** shows boundary
+> badges **only during a cloud rewrite** — a fully-local dictation shows no boundary badge (it has no
+> Rewriting state). The **mode list / mode summary** states the local-vs-cloud boundary as plain
+> summary text (“Stays on this Mac” / “On this Mac”), not as a capsule badge.
+
 | Badge | Meaning | Required companion text when expanded |
 |---|---|---|
 | `On this Mac` | No cloud rewrite is used for this operation. | “Speech recognition and text processing stay on this Mac.” |

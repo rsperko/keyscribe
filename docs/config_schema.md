@@ -73,6 +73,8 @@ output = "cursor"
 trigger_phrases = ['(?i)\bas an email$']
 
 insertion = "paste"          # "paste" (default) | "insert" | "type"
+trailing = "none"            # "none" (default) | "space" | "newline" — appended INSIDE the atomic insert
+submit = "none"              # "none" (default) | "return" | "shift_return" | "cmd_return" — keystroke AFTER a verified insert
 exclude_from_history = false
 
 # ── When it runs ─────────────────────────────────────────────────────────────
@@ -97,7 +99,6 @@ privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
 numbers    = false          # inverse text normalization: "twenty five" -> "25"
                             #   (leaves year idioms like "twenty twenty six" as words)
-symbols    = false          # spoken-symbol expansion: "open paren" -> "(" (for code/terminal modes)
 fuzzy_correction = false    # snap mangled words to dictionary terms ("charge bee" -> "ChargeBee");
                             #   conservative — the dictionary is a hint, not authoritative
 
@@ -145,13 +146,14 @@ context = { app = true, visible_text = false, preceding_text = false }
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **tab**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
-| `commands.symbols` | bool | Opt-in to spoken-symbol expansion ("open paren" → "("); for code/terminal modes. |
 | `commands.fuzzy_correction` | bool | Opt-in to snapping mangled words to dictionary terms; conservative (the dictionary stays a hint). |
 | `dictionary` | table | `include_global` + `words[]`. |
 | `replacements` | table | `include_global` + `rules[]` of `{heard, replace, regex}`. |
 | `[ai_rewrite]` | table | Absent ⇒ no rewrite. `connection`, `prompt`, `fragments[]`, `context`. |
 | `ai_rewrite.context` | inline table | `{ app, visible_text, preceding_text }` booleans. `preceding_text` sends bounded text before the caret (native-only, best-effort via AX). (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
 | `insertion` | enum | `paste` \| `insert` \| `type`. |
+| `trailing` | enum | `none` (default) \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). |
+| `submit` | enum | `none` (default) \| `return` \| `shift_return` \| `cmd_return`. A keystroke synthesized after a **verified** insert (outside the undo atom). Never fires on a clipboard fallback — the text never reached the target. |
 | `exclude_from_history` | bool | Skip writing this mode's dictations to history. |
 
 The **default mode** is recorded once in `settings.toml` (`default_mode_id`), not as a flag on
@@ -255,9 +257,6 @@ retention_days = 7              # default; delete day-files older than this (or 
 [shortcuts]                     # optional global shortcuts for the standalone correction panel
 add_dictionary_entry = ""       # canonical chord, e.g. "control+option+shift+d"; "" = off
 add_replacement = ""            # canonical chord, e.g. "control+option+shift+r"; "" = off
-
-[hud]
-# persisted HUD position, etc.
 ```
 
 > **`[shortcuts]`** drive the standalone **Add Dictionary Entry…** / **Add Replacement…** panel

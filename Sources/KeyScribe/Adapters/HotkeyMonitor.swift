@@ -141,8 +141,10 @@ final class HotkeyMonitor {
     // audio start, SwiftUI HUD) — keeping that on the callback would stall input and risk a
     // `tapDisabledByTimeout`. Gesture *state* already advanced synchronously above; only the side-effect
     // is deferred, FIFO on the main queue so a start always runs before its commit.
-    private func dispatchSideEffect(_ work: @escaping () -> Void) {
-        DispatchQueue.main.async(execute: work)
+    private func dispatchSideEffect(_ work: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated(work)
+        }
     }
 
     // Swallow only an exact chord match (mode trigger or action chord). On a matching key-down we record

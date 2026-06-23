@@ -3,7 +3,7 @@ import Testing
 
 private func run(_ rules: [ReplacementRule], on text: String) -> String {
     var ctx = PipelineContext(text: text)
-    ReplacementsStage(rules: rules).run(&ctx)
+    ReplacementsStage(rules: rules).apply(&ctx)
     return ctx.text
 }
 
@@ -21,6 +21,31 @@ struct ReplacementsStageTests {
         // Literal replacement consumes exactly the matched span; the preceding space stays.
         #expect(run([ReplacementRule(heard: " at gmail dot com", replace: "@gmail.com", isRegex: false)],
                     on: "email me at gmail dot com") == "email me@gmail.com")
+    }
+
+    // A literal rule matches whole words only — it must never fire inside a longer word.
+    @Test func literalDoesNotMatchInsideWord() {
+        let rule = ReplacementRule(heard: "pipe", replace: "|", isRegex: false)
+        #expect(run([rule], on: "the pipeline is great") == "the pipeline is great")
+        #expect(run([rule], on: "use a pipe here") == "use a | here")
+    }
+
+    // The whole-word constraint is case-insensitive at the boundary too.
+    @Test func literalWholeWordIsCaseInsensitive() {
+        #expect(run([ReplacementRule(heard: "pipe", replace: "|", isRegex: false)], on: "A Pipe and a PIPELINE")
+            == "A | and a PIPELINE")
+    }
+
+    // A literal replacement is inserted verbatim — $ / \\ in the replacement are not template refs.
+    @Test func literalReplacementIsNotATemplate() {
+        #expect(run([ReplacementRule(heard: "money", replace: "$5", isRegex: false)], on: "give me money")
+            == "give me $5")
+    }
+
+    // Regex still controls its own boundaries — substring/partial matches are the user's call.
+    @Test func regexCanMatchInsideWord() {
+        #expect(run([ReplacementRule(heard: "pipe(.*)", replace: "X", isRegex: true)], on: "pipeline")
+            == "X")
     }
 
     @Test func regexWithCaptureGroup() {

@@ -38,3 +38,21 @@ public enum VerbatimTokenizer {
         return prefix.isEmpty ? token : "\(prefix) \(token)"
     }
 }
+
+// Verbatim as a pipeline command. It sorts BEFORE the post-STT text stages (design.md §4.2.1) so a
+// verbatim span is an opaque token before live edits / replacements / numbers / fuzzy run — it is
+// protected from everything except STT. `post` restores it (LIFO, after the LLM). The shared
+// per-dictation Tokenizer is injected so the host can also collect issued tokens for the gate.
+public struct VerbatimStage: PipelineStage, TokenizingStage {
+    public let position = StagePosition.verbatimMark
+    public let order = 0
+    private let tokenizer: Tokenizer
+    public init(tokenizer: Tokenizer = Tokenizer()) { self.tokenizer = tokenizer }
+    public func apply(_ context: inout PipelineContext) {
+        context.text = VerbatimTokenizer.apply(context.text, into: tokenizer)
+    }
+    public func post(_ context: inout PipelineContext) {
+        context.text = tokenizer.restore(context.text)
+    }
+    public var issuedTokens: [String] { tokenizer.issuedTokens }
+}

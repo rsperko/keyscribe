@@ -25,9 +25,10 @@ Proven results, folded into `design.md`:
 Carried forward — **not gates**, handled in the milestone where they belong:
 - Real-voice / noisy / accented STT quality + latency/memory **budgets** → measured in **M1** (real mic).
 - Hold / tap / double-tap **press-style** timing → built in **M1**.
-- **Dictionary recognition bias** per engine → all three via `transcribe(wavURL:biasTerms:)`: Whisper
-  (prompt), Apple (contextual strings / DictationTranscriber), Parakeet (FluidAudio CTC-WS). Verified
-  live in M2.
+- **Dictionary recognition bias** per engine → six of the seven shipped engines via
+  `transcribe(wavURL:biasTerms:)`: Whisper (prompt), Apple (contextual strings / DictationTranscriber),
+  Parakeet (FluidAudio CTC-WS), Qwen3-ASR (native `Qwen3DecodingOptions.context`); Moonshine is
+  bias-exempt. Verified live in M2.
 - Final **Gemini 2.5 Flash** token pass + adversarial cases → **M6**.
 
 ## M1 — Core dictation loop (one engine, end-to-end)
@@ -63,11 +64,12 @@ Carried forward — **not gates**, handled in the milestone where they belong:
 - [x] Global engine selection from the **curated model list** (Parakeet TDT v3 + Parakeet TDT-CTC
       110M + Whisper + Apple + Qwen3-ASR 0.6B + Qwen3-ASR 1.7B + Moonshine Base EN); language follows
       the active engine. (Per-mode engine and custom STTs stay seam-only — `principles.md` YAGNI.)
-- [x] **Engine recognition bias** — all three engines accept dictionary terms via
+- [x] **Engine recognition bias** — the six bias-capable engines accept dictionary terms via
       `transcribe(wavURL:biasTerms:)`, each via its model's own mechanism, **all verified live
       2026-06-21**: Whisper (`promptTokens`), Apple (`contextualStrings`, requires
       `DictationTranscriber` — `SpeechTranscriber` ignores it), Parakeet (FluidAudio **CTC-WS**
-      constrained-CTC keyword spotting on both tiers). Two engines run on small forks (see notes):
+      constrained-CTC keyword spotting on both tiers), Qwen3-ASR (native `Qwen3DecodingOptions.context`);
+      Moonshine is bias-exempt (badged). Two engines run on small forks (see notes):
       WhisperKit for the #372 empty-output fix, FluidAudio for the `enableSpotterRescue` toggle (off on
       the weaker ctc110m, where the acoustic-only rescue false-fired). (An interim `EngineCapabilities`
       flag seam was added then removed — `design.md` §4.1.)
@@ -78,7 +80,7 @@ Carried forward — **not gates**, handled in the milestone where they belong:
       — kept only as reference.
 - [x] **STT model eviction** policy: Fastest / Balanced (idle timer) / Frugal — pure tested
       `EvictionPolicy`, wired into the dictation loop + a General ▸ Advanced control.
-**Exit:** user picks one of 3 engines as the global active engine; models managed in-app.
+**Exit:** user picks one of the 7 curated engines as the global active engine; models managed in-app.
 
 > **Whisper SDK decision (RESOLVED + wired + run live).** Now pinned to our fork
 > **`rsperko/argmax-oss-swift` @ `7cc6ea2`** (upstream **v1.0.0**); the original `0.9.4` pin was
@@ -110,10 +112,14 @@ Carried forward — **not gates**, handled in the milestone where they belong:
 - [x] **Live edits**: documented list — new line, new paragraph, scratch that, tab (sentence/newline
       aware). Applied globally now; per-mode opt-in lands with M4. (Verbatim tokenization is M6.)
 - [x] **Additional post-STT stages** (opt-in per mode, canonical order in `design.md` §4.2.1):
-      **Spoken symbols** (`SymbolsStage` — "open paren" → `(`, before replacements), **Numbers / inverse
-      text normalization** (`NumbersStage`/`InverseTextNormalizer` — "twenty five" → "25", bails on
-      ambiguous/year-like runs), and **Fuzzy correction** (`FuzzyStage`/`FuzzyCorrector` — snap mangled
-      words to dictionary terms, Levenshtein+Soundex gated; helps bias-less engines most). User
+      **Numbers / inverse text normalization** (`NumbersStage`/`InverseTextNormalizer` — "twenty five" → "25", bails on
+      ambiguous/year-like runs; Tier 1 decorators around a validated cardinal: sign "minus five" → "-5",
+      decimals "three point one four" → "3.14", percent "fifty percent" → "50%", ordinals "twenty first" → "21st".
+      Tier 2 — currency/thousands-grouping/dates/times — is deferred to the LLM rewrite, not this deterministic stage),
+      and **Fuzzy correction** (`FuzzyStage`/`FuzzyCorrector` — snap mangled
+      words to dictionary terms, Levenshtein+Soundex gated; helps bias-less engines most). (A spoken-symbol
+      expansion stage was built then removed 2026-06-22 — per-mode replacement rules with word boundaries
+      cover the same need as editable data, no special stage.) User
       replacement regexes are screened by **`ReplacementSafety`** (refuses nested-quantifier "evil"
       patterns before they run on the hot path). All pure-logic, tested.
 - [x] **Dictionary** + Replacements **config models** (TOML, `schema_version`, global+local

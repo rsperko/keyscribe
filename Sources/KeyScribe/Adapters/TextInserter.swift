@@ -7,6 +7,7 @@ import KeyScribeKit
 enum TextInserter {
     private static let vKeyCode: CGKeyCode = 9
     private static let cKeyCode: CGKeyCode = 8
+    private static let returnKeyCode: CGKeyCode = 36
 
     // Capture the target app's current selection via a synthesized ⌘C, then restore the user's
     // clipboard. Universal (spike-verified across native/Electron/Chromium). Returns nil if nothing
@@ -138,6 +139,20 @@ enum TextInserter {
         }
     }
 
+    // A mode's post-insert `submit` keystroke: a synthesized Return (optionally with ⇧ or ⌘) that
+    // submits/sends in the target. The caller only invokes this after a VERIFIED insert — never on a
+    // clipboard fallback — so the keystroke always reaches the app that received the text.
+    static func submit(_ submit: Mode.Submit) async {
+        let flags: CGEventFlags
+        switch submit {
+        case .none: return
+        case .return: flags = []
+        case .shiftReturn: flags = .maskShift
+        case .cmdReturn: flags = .maskCommand
+        }
+        postKey(returnKeyCode, flags: flags)
+    }
+
     static func copyToClipboard(_ text: String) {
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -180,13 +195,17 @@ enum TextInserter {
     }
 
     private static func postCommand(_ keyCode: CGKeyCode) {
+        postKey(keyCode, flags: .maskCommand)
+    }
+
+    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
         let src = CGEventSource(stateID: .combinedSessionState)
         if let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true) {
-            down.flags = .maskCommand
+            down.flags = flags
             down.post(tap: .cghidEventTap)
         }
         if let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
-            up.flags = .maskCommand
+            up.flags = flags
             up.post(tap: .cghidEventTap)
         }
     }

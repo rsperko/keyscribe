@@ -148,7 +148,7 @@ public struct FuzzyStage: PipelineStage {
     public let order = StageOrder.fuzzy
     private let prepared: FuzzyCorrector.Prepared
     public init(terms: [String]) { self.prepared = FuzzyCorrector.prepare(terms) }
-    public func run(_ context: inout PipelineContext) {
+    public func apply(_ context: inout PipelineContext) {
         context.text = FuzzyCorrector.apply(context.text, prepared: prepared)
     }
 }

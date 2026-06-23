@@ -97,20 +97,21 @@ pipeline stages cannot stay purely theoretical until late in the build (cf. `roa
 
 ## B. Underlying STT model families (our pluggable engines)
 
-Our scratch pad specifies pluggable STT: **Whisper / Parakeet / Apple**. Here is the state of each as of 2026. (A 13,000-recording shootout by Dictato also adds **Qwen3** as a rising 4th option.)
+The scratch pad started with **Whisper / Parakeet / Apple**; KeyScribe now ships **7 curated models across 5 engine families** (Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base EN). Here is the state of each family as of 2026. (A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on our own 16-clip real-voice benchmark Qwen3-ASR 1.7B is the WER winner.)
 
 | Engine | Speed (Apple Silicon) | Accuracy (English WER) | Languages | Notes |
 |---|---|---|---|---|
-| **NVIDIA Parakeet** (TDT 0.6B v3) | ~3,333x realtime; ~10x faster than Whisper Large v3 Turbo; latency can hit ~80ms | ~12.0% WER — slightly **better** than Whisper; wins on disfluent speech (tuned to drop fillers, reconstruct sentences) | **25** | Fastest by a wide margin. Built-in diarization (v3). Best default for English live dictation. |
-| **OpenAI Whisper** (Large v3 / Turbo) | ~146x realtime | ~12.6% WER | **99** | The multilingual workhorse. Best when language coverage matters. whisper.cpp / WhisperKit make on-device easy. |
-| **Apple SpeechAnalyzer** (Tahoe) | ~150–400ms latency; ~55% faster than Whisper | Most accurate on clean read-aloud FR/ES/DE/IT; weaker than Parakeet in English; ~Whisper for supported langs | **20** | Zero-install, OS-native, free, on-device. Great latency/accuracy for European languages; session/robustness limits. |
-| **Qwen3 (ASR)** | — | competitive in the Dictato shootout | — | Emerging 4th engine worth tracking; not yet mainstream in shipping apps. |
+| **NVIDIA Parakeet** (TDT 0.6B v3 + TDT-CTC 110M) | ~3,333x realtime; ~10x faster than Whisper Large v3 Turbo; latency can hit ~80ms | ~12.0% WER — slightly **better** than Whisper; wins on disfluent speech (tuned to drop fillers, reconstruct sentences) | **25** (v3) / **1** (110M) | Fastest by a wide margin. Built-in diarization (v3). The compact **110M tier is KeyScribe's English default**; v3 is the larger multilingual tier. |
+| **OpenAI Whisper** (Large v3 Turbo) | ~146x realtime | ~12.6% WER | **99** | The multilingual workhorse. Best when language coverage matters. WhisperKit makes on-device easy. |
+| **Apple Speech** (SpeechAnalyzer, Tahoe) | ~150–400ms latency; ~55% faster than Whisper | Most accurate on clean read-aloud FR/ES/DE/IT; weaker than Parakeet in English; ~Whisper for supported langs | **20** | Zero-install, OS-native, free, on-device, system-managed. Great latency/accuracy for European languages; session/robustness limits. |
+| **Qwen3-ASR** (0.6B + 1.7B) | 0.6B is the speed/accuracy sweet spot in our benchmarks | **WER winner on our real-voice corpus** (1.7B, 0.8% biased); 0.6B close behind (1.5%) | **52** | Two shipping tiers. Native on-device bias (`Qwen3DecodingOptions.context`). |
+| **Moonshine** (Base, English) | Lightweight, fast | competitive English | **1** | Small (~141MB) English model. **No on-device dictionary bias** — bias-exempt, badged in Settings. |
 
-**Implications for KeyScribe's pluggable-STT design:**
-- **Parakeet = sensible English default** (speed + accuracy + diarization), **Whisper = multilingual fallback** (99 langs), **Apple = zero-footprint option** (no download, good EU-language accuracy).
-- Model **download/compile-with-progress + select + delete** (already in the scratch pad) is the right UX — every serious local app does this.
+**Implications for KeyScribe's pluggable-STT design (as shipped):**
+- **Parakeet TDT-CTC 110M = English default** (compact + fast + accurate); **Qwen3-ASR / Whisper = multilingual** (52 / 99 langs); **Apple = zero-footprint** (no download, good EU-language accuracy); **Moonshine = lightweight English** (no bias).
+- Model **download/compile-with-progress + select + delete** is the shipped UX — every serious local app does this; engines are wired through a single `EngineRegistry` descriptor.
 - Diarization is a Parakeet-v3 capability we get largely "for free" and could expose.
-- Worth a 4th-engine seam (Qwen3) so we are not locked to three.
+- **Bias is decisive** in our benchmark (bias-less Moonshine ~15% WER vs <2% for biased Qwen3/Parakeet), so recognition bias is a first-class engine capability, not an add-on. NVIDIA Canary-Qwen was evaluated and deliberately dropped.
 
 ---
 

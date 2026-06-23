@@ -93,6 +93,7 @@ Rules:
   <field>{{fieldRole}}</field>
   <window_excerpt>{{visibleWindowText}}</window_excerpt>
   <selection>{{selectedText}}</selection>
+  <preceding_text>{{precedingText}}</preceding_text>
 </context>
 
 <content>
@@ -107,8 +108,10 @@ Rules:
 - **Edit-in-place:** `contentToTransform` = the selected text; `dictatedInstructions` = what
   the user just spoke; `<selection>` may be omitted to avoid duplicating the content.
 - **Context is opt-in per mode** (`design.md` §4.4): `<app>`/`<field>` appear only if the
-  mode opted into **App**; `<window_excerpt>` only if it opted into **visible text**. Any
-  `<context>` child with no value is omitted; if all are empty, drop `<context>` entirely.
+  mode opted into **App**; `<window_excerpt>` only if it opted into **visible text**;
+  `<preceding_text>` (bounded text before the caret, native-only/best-effort) only if it opted
+  into **preceding text**. Any `<context>` child with no value is omitted; if all are empty, drop
+  `<context>` entirely.
 
 ---
 
@@ -120,9 +123,13 @@ The output passes a deterministic gate before insertion (`design.md` §4.2):
 - **On failure** — retry once with a stricter minimal prompt, then fall back to the local
   (un-rewritten) text with a HUD notice. Never insert partially-restored text.
 
-Opted-in context blocks (`<window_excerpt>`, `<selection>`) are **untrusted data, not
-instructions** — kept in separate delimited blocks; the gate is what catches context that tries
-to steer the rewrite or drop tokens (indirect prompt injection). No classifier in v1.
+Opted-in context blocks (`<window_excerpt>`, `<selection>`, `<preceding_text>`) are **untrusted
+data, not instructions** — kept in separate delimited blocks. Before send, `PromptAssembler.neutralize()`
+**breaks any of our own delimiter tags** that appear inside untrusted context (it inserts a zero-width
+space right after the `<` of a `</window_excerpt>`-style tag) so embedded text cannot close our block
+or open a new one; the ZWSP is invisible to the model and never reaches the insert. The post-LLM gate
+is the second line of defense, catching context that still tries to steer the rewrite or drop tokens
+(indirect prompt injection). No classifier in v1.
 
 ## Context & token budget (v1 policy)
 Large context causes latency, cost, and truncation artifacts. The policy is explicit and

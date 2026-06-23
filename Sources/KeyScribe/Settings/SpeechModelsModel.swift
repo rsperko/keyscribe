@@ -16,7 +16,6 @@ final class SpeechModelsModel: ObservableObject {
         let testPassed: Bool
         let errorText: String?
         let installedBytes: Int64?
-        let installPath: String?
     }
 
     @Published private(set) var rows: [Row] = []
@@ -60,11 +59,6 @@ final class SpeechModelsModel: ObservableObject {
             activeId: activeId)
         refreshSizes()
         rebuild()
-    }
-
-    func reveal(_ id: String) {
-        guard let url = ModelInstallStore.presentInstallURLs(for: id).first else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     // Sizing each installed model recursively enumerates its on-disk bundle (many files); doing it
@@ -253,7 +247,6 @@ final class SpeechModelsModel: ObservableObject {
             verificationFailed: verifyFailed.contains(info.id),
             testPassed: verifiedOk.contains(info.id),
             errorText: errors[info.id],
-            installedBytes: installed ? installedSizes[info.id] : nil,
-            installPath: installed ? ModelInstallStore.presentInstallURLs(for: info.id).first?.path : nil)
+            installedBytes: installed ? installedSizes[info.id] : nil)
     }
 }

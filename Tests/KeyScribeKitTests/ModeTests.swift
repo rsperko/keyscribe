@@ -121,6 +121,8 @@ struct ModeTests {
         m.aiRewrite = .init(connection: "gemini", prompt: "Rewrite.", fragments: ["my-voice"],
                             context: .init(app: true, visibleText: true))
         m.insertion = .type
+        m.trailing = .newline
+        m.submit = .shiftReturn
         m.excludeFromHistory = true
 
         let again = try ModeStore.decode(from: ModeStore.encode(m), id: "email")
@@ -159,5 +161,32 @@ struct ModeTests {
         #expect(mode.effectiveContextCategories == ["app", "visible text"])
         mode.commands.privacy = true
         #expect(mode.effectiveContextCategories.isEmpty)
+    }
+
+    @Test func trailingAndSubmitDefaultToNone() throws {
+        let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
+        #expect(mode.trailing == .none)
+        #expect(mode.submit == .none)
+    }
+
+    @Test func trailingSuffixMapping() {
+        #expect(Mode.Trailing.none.suffix == "")
+        #expect(Mode.Trailing.space.suffix == " ")
+        #expect(Mode.Trailing.newline.suffix == "\n")
+    }
+
+    @Test func trailingAndSubmitDecodeAndRoundTrip() throws {
+        let toml = """
+        schema_version = 1
+        name = "Slack"
+        trailing = "space"
+        submit = "cmd_return"
+        """
+        let mode = try ModeStore.decode(from: toml, id: "slack")
+        #expect(mode.trailing == .space)
+        #expect(mode.submit == .cmdReturn)
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "slack")
+        #expect(again.trailing == .space)
+        #expect(again.submit == .cmdReturn)
     }
 }

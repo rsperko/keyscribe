@@ -17,6 +17,37 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## Pipeline → pre/post command model + verbatim-first + word-boundary replacements (2026-06-22, uncommitted)
+
+Three related changes to the post-STT pipeline. **`swift build` clean; full `swift test` = 408 tests /
+55 suites pass.** Pure-logic; not yet exercised in a live dictation (the round-trip is covered by the
+new unit tests + the existing tokenization/gate suites).
+
+- **Spoken-symbols stage REMOVED.** `SpokenSymbols.swift` + `SymbolsStage` + the `commands.symbols`
+  flag + its UI toggle are gone (design.md / config_schema.md / roadmap.md updated). It was a curated
+  bag of ~40 replacement rules with whole-word matching — the same thing per-mode **replacements**
+  now do as editable data (see word-boundary change below), so the special stage didn't earn its
+  keep (and it had a discoverability gap + a verbatim conflict). Future: optionally seed a "Code"
+  starter mode whose `replacements.rules` are the symbol set.
+- **Literal replacements now match on WORD BOUNDARIES.** `ReplacementsStage` literal rules were a raw
+  `replacingOccurrences` (substring) — "pipe"→"|" corrupted "pipeline". Now literal = `\b…\b`
+  case-insensitive with the replacement inserted verbatim (escaped template); regex rules are
+  unchanged and keep full control of their own boundaries (`pipe(.*)` still matches "pipeline").
+- **Pipeline is now a pre/post command model; verbatim tokenizes FIRST (design.md §4.2.1 rewritten).**
+  `PipelineStage` gained `apply` (was `run`) + a default-no-op `post`; `Pipeline` runs `forward`
+  (apply, position/order) and `reverse` (post, **strict reverse** = structural LIFO). `VerbatimStage`
+  (position `verbatimMark`, before the text stages) and `RedactionStage` (`postSTTMark`, after them)
+  are real `TokenizingStage` commands holding a per-dictation `Tokenizer` (now `@unchecked Sendable`
+  + NSLock); `Pipeline.issuedTokens` feeds the validation gate. `DictationController` was rewired:
+  `produceDictationText` builds the full per-dictation pipeline (cached text stages + fresh
+  verbatim/redaction), runs forward → optional LLM+gate on the tokenized text → reverse, on **every
+  path**. **Fixes two real bugs:** (1) verbatim was only tokenized on the LLM path, so a no-LLM mode
+  inserted the literal "begin verbatim … end verbatim" markers and let the text stages mutate the
+  content; (2) verbatim ran *after* live edits/replacements/numbers/fuzzy, so they transformed the
+  protected span. Now a verbatim span is opaque to everything except STT (and, as a free bonus, a
+  secret inside a verbatim block is shielded from the cloud). New tests:
+  `TokenizingStageTests` + `PipelineTests` forward/reverse/LIFO.
+
 ## Input Monitoring permission: wrong TCC subsystem + stale-grant footgun (2026-06-22, uncommitted)
 
 **Symptom:** Input Monitoring showed orange "Needs attention" while the System Settings toggle was on
@@ -277,16 +308,21 @@ full app target compiles. Ten of eleven items landed; per-engine ASR-confidence 
   reads bounded pre-caret text from the focused field's AX selected range (native-only, best-effort,
   Chromium → nil). Forced off in privacy mode like all context; assembled into a `<preceding_text>` block.
 
-**Deferred — needs an interactive session:** ASR confidence + low-confidence HUD preview. No uniform
+**WON'T DO (decided 2026-06-22):** ASR confidence + low-confidence HUD preview. No uniform
 per-transcript confidence exists across the 7 engines today (logProbs are only in Parakeet's CTC-WS
 spotter path); surfacing it means per-SDK extraction (WhisperKit segment avgLogprob, FluidAudio token
-confidences, Apple/Qwen3; Moonshine has none) + HUD preview UX + threshold tuning against real
-distributions — none verifiable headlessly. Left unbuilt rather than land an unwired seam + untested HUD.
+confidences, Apple/Qwen3; Moonshine has none) + normalizing incomparable scales + HUD preview UX +
+threshold tuning against real distributions — none verifiable headlessly. **Cut, not deferred:** atomic
+insert already makes one ⌘Z undo a bad dictation; biased WER on the recommended engines is 0.8–1.5%
+(garbage is rare); a confirm-before-insert step adds friction to the fast path; and it can't cover
+Moonshine at all. Revisit only if a real user reports garbage inserts in their daily apps — then a
+per-mode opt-in, not a default.
 
 Not yet verified interactively: TextInserter changes (use the clipboard-marker probe), warm-on-press
-latency win, and preceding-text capture across real apps. Settings UI checkboxes for the four new
-toggles (`numbers` / `symbols` / `fuzzy_correction` / `preceding_text`) are not yet wired — the fields
-are functional via TOML and decode/encode round-trip.
+latency win, and preceding-text capture across real apps. **Settings UI checkboxes for the four
+toggles (`numbers` / `symbols` / `fuzzy_correction` / `preceding_text`) are now wired (2026-06-22)** —
+`numbers` / `symbols` / `fuzzy_correction` under Modes ▸ *What it does*, `preceding_text` under
+Modes ▸ *Improve with AI* context — in addition to the TOML path (decode/encode round-trips).
 
 ## Custom hotkey recorder + app picker (2026-06-21, uncommitted working tree)
 
@@ -982,29 +1018,37 @@ The full M1–M6 pipeline runs end-to-end in the real app:
 - **Per-mode insertion method — done** (all 3 methods wired + live-verified 2026-06-21; AX false-success
   data-loss bug fixed); set per mode in Modes ▸ *Result handling* (see "Settings UI — built").
 
-## Settings-editor follow-ups (captured 2026-06-21, not yet built)
+## Settings-editor follow-ups
 
-The new Settings panes (Modes, AI Services, Vocabulary) ship working, but two known
-items are deferred:
+The new Settings panes (Modes, AI Services, Vocabulary) ship working. Two items remained; the plan
+for the first was **revised against the macOS HIG** (2026-06-22) and both are now implemented.
 
-- **Per-keystroke disk writes → move to explicit Save.** Every field edit in the Mode,
-  AI-service, and Replacements editors writes its TOML on each character (binding setter →
-  `*Store.write`). Risks: a crash mid-edit persists a half-typed value; each write trips the
-  `supportDir` FSEvents watcher → `reloadConfig()` (cache invalidate + hotkey rebind + status
-  refresh), so the user churns the config + event tap while typing; and there is no cancel/discard.
-  **Plan:** the detail editor edits a local `@State` draft (`Mode`/`Connection`) seeded from the
-  selected item (reset on selection change via `.id(item.id)`); a footer offers **Save** (enabled
-  when the draft differs and validates) and **Revert**. `create()`/`delete()` stay immediate so the
-  item exists to select; only field edits move behind Save. Dictionary/Replacements add+remove are
-  already discrete and can stay immediate — only the inline rule TextFields need draft+Save (or
-  commit on focus-loss/`onSubmit`). Independently, coalesce the watcher echo so a self-induced write
-  does not rebind the hotkey tap. **Open decision:** per-item Save in the detail (recommended,
-  matches master/detail) vs one Save bar for the whole pane.
+- **Per-keystroke disk writes → commit on END-EDITING (NOT a Save button).** Every field edit in the
+  Mode / AI-service / Replacements editors used to write its TOML on each character (binding setter →
+  `*Store.write`). Risks: a crash mid-edit persisted a half-typed value, and each write tripped the
+  `supportDir` FSEvents watcher → `reloadConfig()` (cache invalidate + hotkey rebind + status refresh),
+  churning the config + event tap while typing. **An earlier plan proposed a Save/Revert footer —
+  that was wrong:** Apple's HIG says a Settings window must be **modeless, with no Save/Apply/Cancel/
+  Done buttons** — changes apply immediately ([HIG: Settings](https://developer.apple.com/design/human-interface-guidelines/settings)).
+  The defect was conflating "immediate apply" with "commit on every keystroke." Native AppKit commits
+  a text field on **end-of-editing** (Return / Tab / focus loss), with **Esc** reverting the in-progress
+  edit to the last committed value (the per-field "cancel" — no button). **Implemented:** discrete
+  controls (Toggle / Picker / Stepper) keep immediate apply; **text fields** commit on end-editing via
+  a reusable `CommittedTextField` and a refactored `PromptEditor` (local `@State` draft, commit on
+  `.onSubmit` + focus-loss, Esc reverts via `.onExitCommand`, re-seeded from the model on external
+  change when not focused). No Save button anywhere. **Watcher suppression turned
+  out unnecessary:** once writes are per-field-commit (not per-keystroke) the typing churn is gone, and
+  the FSEvents watcher → `reloadConfig()` is precisely how the running app picks up a Settings edit (a
+  mode's `trigger_keys` change must rebuild the hotkey tap) — one reload per committed field is correct
+  and cheap, so it was deliberately left in place rather than suppressed (suppressing it would drop
+  edits the app needs to apply). Only Modes (name, prompt) and AI Services (name, model, base URL) had
+  per-keystroke `TextField`s; Vocabulary add-rows + the AI key `SecureField` were already
+  `@State`+`onSubmit`.
 
-- **Deleting the default mode dangles `settings.default_mode_id`.** `ModesSettingsModel.delete`
-  does not guard the mode named by `default_mode_id`; runtime falls back to `modes.first`, so no
-  crash, but the setting points at nothing. Either reassign `default_mode_id` on delete or block
-  deleting the current default.
+- **Deleting the default mode dangles `settings.default_mode_id`.** **Already implemented** (verified
+  2026-06-22): `ModesSettingsModel.delete` checks `wasDefault` and, when the deleted mode was the
+  default, calls `onSetDefault(modes.first.id)` → `SettingsController.setDefaultMode` → persists
+  `default_mode_id`, so it never dangles.
 
 ## Kept-with-rationale (flagged in the DRY/YAGNI pass)
 

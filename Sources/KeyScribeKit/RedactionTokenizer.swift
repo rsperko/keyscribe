@@ -192,3 +192,21 @@ public enum RedactionTokenizer {
         return remainder == 1
     }
 }
+
+// Redaction as a pipeline command. It sorts AFTER the post-STT text stages (design.md §4.2.1) so it
+// tokenizes the fully-transformed text right before the LLM; `post` restores it (LIFO, after the
+// LLM). Include this stage only when privacy is on AND a cloud rewrite will run — with no outbound
+// call there is nothing to withhold. The shared per-dictation Tokenizer is injected.
+public struct RedactionStage: PipelineStage, TokenizingStage {
+    public let position = StagePosition.postSTTMark
+    public let order = 0
+    private let tokenizer: Tokenizer
+    public init(tokenizer: Tokenizer = Tokenizer()) { self.tokenizer = tokenizer }
+    public func apply(_ context: inout PipelineContext) {
+        context.text = RedactionTokenizer.apply(context.text, into: tokenizer)
+    }
+    public func post(_ context: inout PipelineContext) {
+        context.text = tokenizer.restore(context.text)
+    }
+    public var issuedTokens: [String] { tokenizer.issuedTokens }
+}

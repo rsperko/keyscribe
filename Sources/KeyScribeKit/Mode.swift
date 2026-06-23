@@ -16,6 +16,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var replacements: ModeReplacements
     public var aiRewrite: AIRewrite?
     public var insertion: Insertion
+    public var trailing: Trailing
+    public var submit: Submit
     public var excludeFromHistory: Bool
 
     public enum Source: String, Codable, Sendable { case dictation, selection }
@@ -24,6 +26,28 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case replaceSelection = "replace_selection"
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
+
+    // Literal text appended to the transcript, INSIDE the atomic insert (one ⌘Z still undoes it all).
+    public enum Trailing: String, Codable, Sendable {
+        case none, space, newline
+        public var suffix: String {
+            switch self {
+            case .none: return ""
+            case .space: return " "
+            case .newline: return "\n"
+            }
+        }
+    }
+
+    // A keystroke synthesized AFTER a verified insert (outside the undo atom) — Return submits in chat
+    // and prompt boxes; ⇧Return is a soft newline; ⌘Return sends in Slack et al. Never fired on a
+    // clipboard fallback (the text never reached the target).
+    public enum Submit: String, Codable, Sendable {
+        case none
+        case `return` = "return"
+        case shiftReturn = "shift_return"
+        case cmdReturn = "cmd_return"
+    }
 
     public struct TriggerKey: Codable, Equatable, Sendable {
         public var key: String
@@ -60,20 +84,18 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         public var liveEdits: Bool
         public var privacy: Bool
         public var numbers: Bool          // inverse text normalization ("twenty five" → "25")
-        public var symbols: Bool          // spoken-symbol expansion ("open paren" → "(")
         public var fuzzyCorrection: Bool  // snap mangled words to dictionary terms
         enum CodingKeys: String, CodingKey {
             case liveEdits = "live_edits"; case privacy
-            case numbers; case symbols; case fuzzyCorrection = "fuzzy_correction"
+            case numbers; case fuzzyCorrection = "fuzzy_correction"
         }
         public init(
             liveEdits: Bool = false, privacy: Bool = false,
-            numbers: Bool = false, symbols: Bool = false, fuzzyCorrection: Bool = false
+            numbers: Bool = false, fuzzyCorrection: Bool = false
         ) {
             self.liveEdits = liveEdits
             self.privacy = privacy
             self.numbers = numbers
-            self.symbols = symbols
             self.fuzzyCorrection = fuzzyCorrection
         }
         public init(from decoder: Decoder) throws {
@@ -81,7 +103,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             liveEdits = try c.decodeIfPresent(Bool.self, forKey: .liveEdits) ?? false
             privacy = try c.decodeIfPresent(Bool.self, forKey: .privacy) ?? false
             numbers = try c.decodeIfPresent(Bool.self, forKey: .numbers) ?? false
-            symbols = try c.decodeIfPresent(Bool.self, forKey: .symbols) ?? false
             fuzzyCorrection = try c.decodeIfPresent(Bool.self, forKey: .fuzzyCorrection) ?? false
         }
     }
@@ -165,7 +186,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case triggerPhrases = "trigger_phrases"
         case constraints, source, output, commands, dictionary, replacements
         case aiRewrite = "ai_rewrite"
-        case insertion
+        case insertion, trailing, submit
         case excludeFromHistory = "exclude_from_history"
     }
 
@@ -184,6 +205,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         replacements = .init()
         aiRewrite = nil
         insertion = .paste
+        trailing = .none
+        submit = .none
         excludeFromHistory = false
     }
 
@@ -203,6 +226,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         replacements = try c.decodeIfPresent(ModeReplacements.self, forKey: .replacements) ?? .init()
         aiRewrite = try c.decodeIfPresent(AIRewrite.self, forKey: .aiRewrite)
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? .paste
+        trailing = try c.decodeIfPresent(Trailing.self, forKey: .trailing) ?? .none
+        submit = try c.decodeIfPresent(Submit.self, forKey: .submit) ?? .none
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
     }
 
@@ -221,6 +246,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(replacements, forKey: .replacements)
         try c.encodeIfPresent(aiRewrite, forKey: .aiRewrite)
         try c.encode(insertion, forKey: .insertion)
+        if trailing != .none { try c.encode(trailing, forKey: .trailing) }
+        if submit != .none { try c.encode(submit, forKey: .submit) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 

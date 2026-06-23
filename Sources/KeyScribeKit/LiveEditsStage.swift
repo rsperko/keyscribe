@@ -52,7 +52,7 @@ public struct LiveEditsStage: PipelineStage {
     private static let paragraph = "\u{0A}\u{0A}"
     private static let tab = "\u{09}"
 
-    public func run(_ context: inout PipelineContext) {
+    public func apply(_ context: inout PipelineContext) {
         let tokens = context.text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         let lowered = tokens.map { $0.lowercased() }
         var parts: [String] = []

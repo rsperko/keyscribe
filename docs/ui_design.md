@@ -166,10 +166,9 @@ becomes a second destination for configuration.
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
 | Recording | Mode name + live input level | Local transcription label | Stop if tap-to-toggle |
 | Transcribing | “Transcribing locally” | Mode name | Cancel when safe |
-| Rewriting locally | “Polishing on this Mac” | Mode name | Insert local transcript after timeout |
-| Rewriting in cloud | “Polishing with [connection name]” | Boundary badges: `Best-effort redaction` or the exact shared context categories | Insert local transcript after timeout |
+| Rewriting | “Polishing with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert local transcript after timeout |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
-| Target changed | “Copied instead of inserted” | “Focus changed while KeyScribe was working” | Paste last dictation |
+| Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Rewrite fallback | “Inserted local transcript” — or “Copied local transcript instead of inserting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | Error | Plain-language failure | Single next action | Retry, open permissions, or dismiss as applicable |
 
@@ -177,8 +176,10 @@ The local-only states — Recording, Transcribing, Complete, Target changed, and
 whole HUD for a local dictation and are the first to ship. The Ready state is the brief
 acknowledgment shown only when a one-shot mode is chosen from the menu; there is no separate ready
 flash on hotkey invoke, because recording feedback begins on the same run-loop turn as capture
-(§4). Rewriting locally, Rewriting in cloud, and Rewrite fallback appear once AI rewrite exists;
-the cloud and boundary-badge behavior below governs them when they do.
+(§4). Rewriting and Rewrite fallback appear once AI rewrite exists. There is **one** Rewriting
+state: a rewrite is always treated as a cloud data boundary — it names the connection and shows the
+`Cloud rewrite` badge even for a local endpoint — so the boundary-badge behavior below always
+governs it (KeyScribe does not currently distinguish a "polishing on this Mac" sub-state).
 
 ### Rules for cloud and privacy state
 
@@ -229,14 +230,22 @@ Dictate with ▸
   Manage Modes…
 
 Paste Last Dictation
-Open History…
+History…
+
+────────────────
+Add Dictionary Entry…
+Add Replacement…
 
 ────────────────
 Settings…
-Check for Updates…                 (only when applicable)
 About & Notices…
 Quit KeyScribe
 ```
+
+> **`Add Dictionary Entry…` / `Add Replacement…`** open the standalone correction panel; they are
+> always present here and can also be bound to optional global chord shortcuts (General ▸ Shortcuts,
+> `[shortcuts]` in `config_schema.md`). **`Check for Updates…`** is **not yet built** — it lands with
+> the still-pending M7 Sparkle update mechanism (alongside the update badge below).
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows the
 **seeded starter modes** defined in `config_schema.md`. Polished Dictation and any other
@@ -319,6 +328,10 @@ Show only commonly changed behavior initially:
 - Keep display awake while dictating
 - Mute system audio while dictating
 - History enabled and retention
+- **Shortcuts** — optional global chords for **Add Dictionary Entry** and **Add Replacement**
+  (the standalone correction panel; also always in the menu). A chord that collides with a
+  higher-precedence hotkey (a Mode trigger, or Add-to-Dictionary shadowing Add Replacement) shows
+  an inline **shadowed** breadcrumb and will not fire — mode triggers win.
 
 Model eviction moves behind `Advanced model behavior` within General. Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff, not as cache terminology.
@@ -392,19 +405,19 @@ first-launch wall.
 
 ### Advanced
 
-Holds configuration-folder access, diagnostics, migration/config errors, and notices.
+Holds configuration-folder access. (Notices live in the separate **About & Notices** window, not
+here.)
 
 - **Reveal Config in Finder** opens the support folder (`~/Library/Application Support/KeyScribe/`,
   `config_schema.md`) so a user can read, edit, back up, or version the plain-TOML config
   directly. This is the answer to "where does my config live" — the files are hand-editable on
-  purpose, and revealing the folder removes any need to know the hidden `~/Library` path. State
-  that edits are picked up on next load and that a malformed file surfaces a migration/config
-  error rather than being silently dropped.
-- The `models/` weights folder is reachable the same way for users who want to inspect or clear
-  downloads outside the Speech Models lifecycle.
-- *(Parked, not v1:)* an optional `KEYSCRIBE_CONFIG_DIR` override for users who keep config in a
-  dotfiles directory — added only if asked for (`design.md` keeps Application Support the
-  default; YAGNI).
+  purpose, and revealing the folder removes any need to know the hidden `~/Library` path.
+- **Reload Configuration** re-reads the config from disk on demand (edits are also picked up
+  automatically; a malformed file surfaces an error rather than being silently dropped).
+- *(Parked, not v1:)* a dedicated diagnostics/migration-error surface and a separate `models/`
+  weights-folder reveal (the folder is reachable via Reveal Config today); plus an optional
+  `KEYSCRIBE_CONFIG_DIR` override for users who keep config in a dotfiles directory — added only if
+  asked for (`design.md` keeps Application Support the default; YAGNI).
 
 ---
 

@@ -233,14 +233,18 @@ private struct AIServiceEditor: View {
     var body: some View {
         Form {
             Section("Connection") {
-                TextField("Name", text: binding(\.name))
+                CommittedTextField("Name", text: connection.name) { value in
+                    var updated = connection; updated.name = value; onUpdate(updated, nil)
+                }
                 Picker("Provider", selection: binding(\.provider)) {
                     Text("OpenAI").tag(Connection.Provider.openai)
                     Text("Anthropic").tag(Connection.Provider.anthropic)
                     Text("Gemini").tag(Connection.Provider.gemini)
                     Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
                 }
-                TextField("Model", text: binding(\.model))
+                CommittedTextField("Model", text: connection.model) { value in
+                    var updated = connection; updated.model = value; onUpdate(updated, nil)
+                }
             }
             Section("API key") {
                 SecureField(hasKey ? "Replace API key" : "API key", text: $apiKey)
@@ -268,7 +272,11 @@ private struct AIServiceEditor: View {
             }
             DisclosureSection("Advanced connection settings", isExpanded: $advancedExpanded) {
                 if connection.provider == .openaiCompatible {
-                    TextField("Base URL", text: optionalBinding(\.baseUrl))
+                    CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
+                        var updated = connection
+                        updated.baseUrl = value.isEmpty ? nil : value
+                        onUpdate(updated, nil)
+                    }
                 }
                 Text("API parameters are used only after the connection is configured.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -287,14 +295,6 @@ private struct AIServiceEditor: View {
         Binding(get: { connection[keyPath: keyPath] }, set: { value in
             var updated = connection
             updated[keyPath: keyPath] = value
-            onUpdate(updated, nil)
-        })
-    }
-
-    private func optionalBinding(_ keyPath: WritableKeyPath<Connection, String?>) -> Binding<String> {
-        Binding(get: { connection[keyPath: keyPath] ?? "" }, set: { value in
-            var updated = connection
-            updated[keyPath: keyPath] = value.isEmpty ? nil : value
             onUpdate(updated, nil)
         })
     }

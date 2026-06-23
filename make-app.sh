@@ -39,6 +39,7 @@ echo "== assembling $APP =="
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/KeyScribe"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # MLX loads mlx.metallib from next to the executable — place it in MacOS/, beside the binary.
 METALLIB=".build/$CONFIG/mlx.metallib"
 if [ -f "$METALLIB" ]; then

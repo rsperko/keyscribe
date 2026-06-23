@@ -3,7 +3,7 @@ import Testing
 
 private func run(_ text: String) -> String {
     var ctx = PipelineContext(text: text)
-    LiveEditsStage().run(&ctx)
+    LiveEditsStage().apply(&ctx)
     return ctx.text
 }
 
@@ -66,7 +66,7 @@ struct LiveEditsStageTests {
 
     @Test func customCommandPhrases() {
         var ctx = PipelineContext(text: "alpha next line beta")
-        LiveEditsStage(commands: .init(newLine: ["next line"])).run(&ctx)
+        LiveEditsStage(commands: .init(newLine: ["next line"])).apply(&ctx)
         #expect(ctx.text == "alpha\nbeta")
     }
 }

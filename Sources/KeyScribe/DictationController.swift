@@ -20,6 +20,7 @@ final class DictationController {
     private let history: HistoryStore?
     private let audio: AudioCapturing
     private let insert: (InsertionDecision, Mode.Insertion, String) async -> Void
+    private let submitKey: (Mode.Submit) async -> Void
     private let snapshot: @MainActor () -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
@@ -47,7 +48,7 @@ final class DictationController {
     // re-merging the dictionary three times and rebuilding the pipeline stages every commit. Both are
     // dropped wholesale whenever the config generation advances (see refreshDerivedCachesIfNeeded).
     private var derivedGeneration = -1
-    private var pipelineCache: [String: Pipeline] = [:]
+    private var textStageCache: [String: [any PipelineStage]] = [:]
     private var mergedDictionaryCache: [String: [String]] = [:]
     private static let nilModeKey = "\u{0}nil"
 
@@ -90,6 +91,7 @@ final class DictationController {
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
         audio: AudioCapturing = AudioCapture(),
         insert: @escaping (InsertionDecision, Mode.Insertion, String) async -> Void = TextInserter.perform,
+        submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
@@ -102,6 +104,7 @@ final class DictationController {
         self.hud = hud
         self.audio = audio
         self.insert = insert
+        self.submitKey = submitKey
         self.snapshot = snapshot
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
@@ -252,7 +255,7 @@ final class DictationController {
     private func refreshDerivedCachesIfNeeded() {
         guard config.generation != derivedGeneration else { return }
         derivedGeneration = config.generation
-        pipelineCache.removeAll(keepingCapacity: true)
+        textStageCache.removeAll(keepingCapacity: true)
         mergedDictionaryCache.removeAll(keepingCapacity: true)
     }
 
@@ -345,7 +348,14 @@ final class DictationController {
             machine.finish(.noSpeech)
         case .inserted, .copied:
             lastResult = transcript
-            await insert(decision, activeMode?.insertion ?? .paste, transcript)
+            // Trailing text rides inside the atomic insert (still one ⌘Z). The submit keystroke lands
+            // OUTSIDE that atom and only on a verified insert — never .copied, where a synthesized Return
+            // would hit whatever app is now focused instead of the target the text reached.
+            let trailing = activeMode?.trailing ?? .none
+            await insert(decision, activeMode?.insertion ?? .paste, transcript + trailing.suffix)
+            if outcome == .inserted, let submit = activeMode?.submit, submit != .none {
+                await submitKey(submit)
+            }
             machine.finish(outcome)
         case .failed:
             machine.finish(outcome)
@@ -440,21 +450,39 @@ final class DictationController {
             let (final, details) = await rewriteSelection(instruction: routed.transcript, mode: mode)
             return (final, details, nil)
         }
-        let processed = processTranscript(routed.transcript, mode: mode)
-        let (text, details) = await maybeRewrite(processed, mode: mode)
-        // Only record the middle stage when the local pipeline actually changed the transcript;
-        // otherwise Heard already equals it (ui_design.md §8).
-        let transformed = processed != routed.transcript ? processed : nil
-        return (.insert(text), details, transformed)
+        return await produceDictationText(transcript: routed.transcript, mode: mode)
     }
 
-    // Dictation rewrite: on failure we still insert the local (un-rewritten) transcript — you want
-    // your words. Returns the text to insert and (when a rewrite ran) its details for history.
-    private func maybeRewrite(_ text: String, mode: Mode?) async -> (String, RewriteDetails?) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let mode, let connection = connection(for: mode) else { return (text, nil) }
-        let result = await tokenizeRewriteRestore(content: text, instruction: "", mode: mode, connection: connection)
-        return (result.text, result.details)
+    // Dictation path. The full pipeline runs FORWARD (verbatim tokenize → text stages → redaction
+    // tokenize), the optional LLM runs on the tokenized text, then the pipeline runs in REVERSE to
+    // restore (design.md §4.2.1). Verbatim sorts before the text stages, so a verbatim span is opaque
+    // to live edits / replacements / numbers / fuzzy and to the LLM — protected from everything
+    // except STT. On no/failed rewrite we still insert the locally-processed text — you want your words.
+    private func produceDictationText(transcript: String, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
+        let resolved = mode.flatMap { m in connection(for: m).map { (mode: m, connection: $0) } }
+        let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil)
+
+        var ctx = PipelineContext(text: transcript)
+        pipeline.forward(&ctx)
+        let tokenized = ctx.text
+
+        // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
+        // insert when no rewrite runs or it falls back.
+        var localCtx = PipelineContext(text: tokenized)
+        pipeline.reverse(&localCtx)
+        let localProcessed = localCtx.text
+        // Only record the middle stage when local processing actually changed the transcript;
+        // otherwise Heard already equals it (ui_design.md §8).
+        let transformed = localProcessed != transcript ? localProcessed : nil
+
+        guard let resolved,
+              !tokenized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (.insert(localProcessed), nil, transformed)
+        }
+        let result = await rewriteTokenized(
+            pipeline: pipeline, tokenized: tokenized, localProcessed: localProcessed,
+            instruction: "", mode: resolved.mode, connection: resolved.connection)
+        return (.insert(result.text), result.details, transformed)
     }
 
     // Edit-in-place: capture the selection, transform it per the spoken instruction. Any failure —
@@ -474,8 +502,13 @@ final class DictationController {
         guard let connection = connection(for: mode) else {
             return (.abort("Work on Selection needs an AI connection", nil), nil)
         }
-        let result = await tokenizeRewriteRestore(
-            content: selection, instruction: instruction, mode: mode, connection: connection)
+        // The selection IS the content (no post-STT text stages); only the tokenization commands run.
+        let pipeline = selectionPipeline(for: mode)
+        var ctx = PipelineContext(text: selection)
+        pipeline.forward(&ctx)
+        let result = await rewriteTokenized(
+            pipeline: pipeline, tokenized: ctx.text, localProcessed: selection,
+            instruction: instruction, mode: mode, connection: connection)
         let final: FinalText = result.ok ? .insert(result.text) : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
     }
@@ -489,24 +522,22 @@ final class DictationController {
         return connection
     }
 
-    // Tokenize verbatim (if live edits) + redaction (if privacy) BEFORE the LLM so protected spans
-    // never leave, then restore after. Returns (text, ok): ok=false means the model failed and we
-    // restored the local content — dictation inserts it anyway; selection aborts on !ok.
-    private func tokenizeRewriteRestore(
-        content rawContent: String, instruction: String, mode: Mode, connection: Connection
+    // The optional LLM rewrite over an already-FORWARD-passed pipeline (design.md §4.2.1): the
+    // content is tokenized, the model runs on it, then `pipeline.reverse` restores every nonce (LIFO,
+    // structurally). Returns (text, ok): ok=false means the model failed and the locally-processed
+    // text was restored — dictation inserts it anyway; selection aborts on !ok.
+    private func rewriteTokenized(
+        pipeline: Pipeline, tokenized content: String, localProcessed: String,
+        instruction: String, mode: Mode, connection: Connection
     ) async -> (text: String, ok: Bool, details: RewriteDetails) {
-        let tokenizer = Tokenizer()
-        var content = rawContent
-        if mode.commands.liveEdits { content = VerbatimTokenizer.apply(content, into: tokenizer) }
-        if mode.commands.privacy { content = RedactionTokenizer.apply(content, into: tokenizer) }
-
+        let issuedTokens = pipeline.issuedTokens
         if mode.commands.privacy {
-            log.debug("redaction: \(tokenizer.issuedTokens.count, privacy: .public) span(s) tokenized before cloud rewrite")
+            log.debug("redaction: \(issuedTokens.count, privacy: .public) span(s) tokenized before cloud rewrite")
         }
         // Edit-in-place must leave the selection untouched on abandon, so the local-transcript
         // escape hatch is dictation-only — never offer to paste the captured selection back.
         if mode.source != .selection {
-            pendingLocalTranscript = rawContent
+            pendingLocalTranscript = localProcessed
             scheduleRewriteEscapeHatch(connection: connection, mode: mode)
         }
         hud?.render(.rewriting(
@@ -564,7 +595,7 @@ final class DictationController {
 
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
-            tokens: tokenizer.issuedTokens, validTerms: validTerms, language: "English",
+            tokens: issuedTokens, validTerms: validTerms, language: "English",
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
             visibleWindowText: visibleWindowText, selectedText: nil, precedingText: precedingText)
@@ -574,43 +605,59 @@ final class DictationController {
         let promptForHistory = "[system]\n\(assembled.system)\n\n[user]\n\(assembled.user)"
 
         let outcome = await RewriteService(client: llmClient).rewrite(
-            localText: content, inputs: inputs, connection: sized, issuedTokens: tokenizer.issuedTokens)
+            localText: content, inputs: inputs, connection: sized, issuedTokens: issuedTokens)
+        var restoreCtx = PipelineContext(text: content)
         let fellBack: Bool
-        let text: String
         switch outcome {
-        case .rewritten(let out): text = tokenizer.restore(out); fellBack = false
-        case .localFallback(let local): text = tokenizer.restore(local); fellBack = true
+        case .rewritten(let out): restoreCtx.text = out; fellBack = false
+        case .localFallback(let local): restoreCtx.text = local; fellBack = true
         }
+        pipeline.reverse(&restoreCtx)
+        let text = restoreCtx.text
         let details = RewriteDetails(
             connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
             contextCategories: contextCategories, prompt: promptForHistory, fellBack: fellBack)
         return (text, !fellBack, details)
     }
 
-    // Post-STT pipeline for the resolved mode: live edits (per-mode opt-in) then replacements
-    // (mode-local merged with global per include_global). Redaction/verbatim tokenization is M6;
-    // AI rewrite is M5.
-    private func processTranscript(_ raw: String, mode: Mode?) -> String {
-        compiledPipeline(for: mode).run(raw)
-    }
-
-    // The post-STT pipeline is pure config (mode flags + global/mode replacements & dictionary), so it
-    // is compiled once per (mode, config generation) and reused. Stages precompute their own derived
-    // data in init (prepared symbol/fuzzy tables, compiled replacement rules), so caching the pipeline
-    // also keeps that work out of the per-dictation path.
-    private func compiledPipeline(for mode: Mode?) -> Pipeline {
+    // Cached post-STT TEXT stages for the resolved mode: live edits (per-mode opt-in) then
+    // replacements (mode-local merged with global per include_global) then numbers/fuzzy. Pure config,
+    // so compiled once per (mode, config generation) and reused; stages precompute their derived data
+    // in init (fuzzy tables, compiled replacement rules). Verbatim/redaction are NOT cached — they
+    // hold per-dictation tokenizers and are added fresh by dictationPipeline / selectionPipeline.
+    private func cachedTextStages(for mode: Mode?) -> [any PipelineStage] {
         refreshDerivedCachesIfNeeded()
         let key = mode?.id ?? Self.nilModeKey
-        if let cached = pipelineCache[key] { return cached }
-        let pipeline = Pipeline(buildStages(for: mode))
-        pipelineCache[key] = pipeline
-        return pipeline
+        if let cached = textStageCache[key] { return cached }
+        let stages = buildStages(for: mode)
+        textStageCache[key] = stages
+        return stages
+    }
+
+    // Full dictation pipeline (design.md §4.2.1): verbatim (if live edits) sorts BEFORE the text
+    // stages so its span is opaque to them; redaction (if privacy AND a cloud rewrite will run) sorts
+    // AFTER them, tokenizing the fully-transformed text just before the LLM. Pipeline sorts by
+    // position/order, so append order does not matter.
+    private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
+        var stages = cachedTextStages(for: mode)
+        if mode?.commands.liveEdits ?? true { stages.append(VerbatimStage(tokenizer: Tokenizer())) }
+        if (mode?.commands.privacy ?? false) && willRewrite { stages.append(RedactionStage(tokenizer: Tokenizer())) }
+        return Pipeline(stages)
+    }
+
+    // Edit-in-place pipeline: the selection IS the content, so no post-STT text stages run — only the
+    // tokenization commands (verbatim if live edits, redaction if privacy; a selection rewrite always
+    // calls the LLM).
+    private func selectionPipeline(for mode: Mode) -> Pipeline {
+        var stages: [any PipelineStage] = []
+        if mode.commands.liveEdits { stages.append(VerbatimStage(tokenizer: Tokenizer())) }
+        if mode.commands.privacy { stages.append(RedactionStage(tokenizer: Tokenizer())) }
+        return Pipeline(stages)
     }
 
     private func buildStages(for mode: Mode?) -> [any PipelineStage] {
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
-        if mode?.commands.symbols ?? false { stages.append(SymbolsStage()) }
         let rules = VocabularyMerge.rules(
             global: config.replacements.toRules(),
             local: mode?.replacements.toRules() ?? [],

@@ -34,7 +34,7 @@ struct ReplacementSafetyTests {
             ReplacementRule(heard: "hello", replace: "hi", isRegex: false),
         ])
         var ctx = PipelineContext(text: "aaaa hello")
-        stage.run(&ctx)
+        stage.apply(&ctx)
         #expect(ctx.text == "aaaa hi")
     }
 }

@@ -7,6 +7,7 @@
   <key>CFBundleIdentifier</key><string>com.keyscribe.app</string>
   <key>CFBundleName</key><string>KeyScribe</string>
   <key>CFBundleExecutable</key><string>KeyScribe</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>__SHORT_VERSION__</string>
   <key>CFBundleVersion</key><string>__BUILD_VERSION__</string>

@@ -27,9 +27,12 @@ This file is the entry point. Read the design docs before writing code — they 
 
 ## Footguns (read the cited section before touching the area — these silently corrupt or leak)
 
-- **Pipeline order is fixed and load-bearing** (`design.md` §4.2.1): replacements run *before*
-  tokenization, tokenization is the *last* post-STT step, and restore is strict **LIFO**. Wrong
-  order silently corrupts output or leaks a redacted span — never improvise it.
+- **Pipeline order is fixed and load-bearing** (`design.md` §4.2.1): **verbatim tokenizes FIRST**
+  (before the text stages, so a verbatim span is protected from everything except STT), the text
+  stages run, **redaction tokenizes LAST** (just before the LLM), and restore is each command's
+  `post` in strict **reverse/LIFO**, on every path (incl. no-LLM). Stages are commands with
+  `apply`/`post`; one-way text stages leave `post` a no-op. Wrong order silently corrupts output or
+  leaks a redacted span — never improvise it.
 - **Tokenization is safety, not cosmetics.** The token→original map is **in-memory only, never
   logged or written to history**, and the **post-LLM validation gate** (every issued `⟦SN:…⟧`
   returns exactly once; non-empty) is a hard check, not normalization: a dropped redaction token
@@ -209,12 +212,13 @@ hotkey is gone**: each mode owns its `trigger_keys` (with per-key `tap_threshold
 **Dictate with** submenu picks the mode for the next dictation only. The HUD offers an explicit
 **Insert local transcript** escape hatch during a cloud rewrite.
 
-**What remains:** the standalone correction-panel shortcut (the History detail's Add to Dictionary /
-Create Replacement is the current correction surface), the two **Settings-editor follow-ups**
-(per-keystroke writes → explicit Save; default-mode deletion guard — see session-status), and the
-rest of **M7** (notarization + Sparkle updates, progressive-disclosure / accessibility polish; GPLv3
-`LICENSE`, `THIRD-PARTY-NOTICES.md`, and the expanded notices screen are done). See session-status for
-the live frontier.
+**What remains:** the two **Settings-editor follow-ups** (per-keystroke writes → explicit Save;
+default-mode deletion guard — see session-status), and the rest of **M7** (notarization + Sparkle
+updates, progressive-disclosure / accessibility polish; GPLv3 `LICENSE`, `THIRD-PARTY-NOTICES.md`, and
+the expanded notices screen are done). The **standalone correction panel** now ships — `Add Dictionary
+Entry…` / `Add Replacement…` in the menu plus optional global shortcuts (General ▸ Shortcuts) — in
+addition to the History detail's Add to Dictionary / Create Replacement. See session-status for the
+live frontier.
 
 > **Forked / pinned STT deps (2026-06-21):** three forks + one pinned binary dep, each with a tracked
 > upstream-PR TODO in session-status to eventually drop the pin — **deferred to distant future** (the
