@@ -27,6 +27,17 @@ struct ConnectionTester {
     }
 }
 
+// Offered once, when the first AI service is added: the starter modes ship an AI rewrite prompt with no
+// connection, so they can't rewrite until one exists. Rather than make the user open each mode, offer to
+// point them all at the new service.
+struct ConnectModesOffer: Identifiable {
+    let id = UUID()
+    let connectionId: String
+    let connectionName: String
+    let modeIds: [String]
+    let modeNames: [String]
+}
+
 @MainActor
 final class AIServiceSettingsModel: ObservableObject {
     @Published private(set) var connections: [Connection] = []
@@ -34,6 +45,8 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var testStates: [String: ConnectionTestState] = [:]
     @Published private(set) var keyedRefs: Set<String> = []
+    @Published var pendingConnectOffer: ConnectModesOffer?
+    @Published var lastCreatedId: String?
 
     private let supportDir: URL
     private let tester: ConnectionTester
@@ -81,6 +94,7 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func create() {
+        let wasEmpty = connections.isEmpty
         let name = "New AI Service"
         let id = ConnectionStore.newID(for: name, existing: connections.map(\.id))
         let connection = Connection(
@@ -88,6 +102,33 @@ final class AIServiceSettingsModel: ObservableObject {
             keyRef: "keyscribe.llm.\(id)")
         save(connection)
         selectedID = id
+        lastCreatedId = id
+        if wasEmpty {
+            let pending = modesNeedingConnection()
+            if !pending.isEmpty {
+                pendingConnectOffer = ConnectModesOffer(
+                    connectionId: id, connectionName: name,
+                    modeIds: pending.map(\.id), modeNames: pending.map(\.name))
+            }
+        }
+    }
+
+    func consumeCreated() { lastCreatedId = nil }
+
+    private func modesNeedingConnection() -> [Mode] {
+        ModeStore.loadAll(in: KeyScribePaths.modesDir).filter { mode in
+            guard let rewrite = mode.aiRewrite else { return false }
+            return rewrite.connection.isEmpty || !connections.contains { $0.id == rewrite.connection }
+        }
+    }
+
+    func applyConnectOffer(_ offer: ConnectModesOffer) {
+        for var mode in ModeStore.loadAll(in: KeyScribePaths.modesDir) where offer.modeIds.contains(mode.id) {
+            guard var rewrite = mode.aiRewrite else { continue }
+            rewrite.connection = offer.connectionId
+            mode.aiRewrite = rewrite
+            try? ModeStore.write(mode, to: KeyScribePaths.modesDir)
+        }
     }
 
     func update(_ connection: Connection, apiKey: String?) {
@@ -168,8 +209,11 @@ struct AIServiceSettingsView: View {
                     AIServiceEditor(
                         connection: connection, hasKey: model.hasKey(connection),
                         testState: model.testState(for: connection.id),
+                        autofocusName: model.lastCreatedId == connection.id,
                         onUpdate: model.update, onTest: { model.test(connection) },
+                        onConsumeFocus: model.consumeCreated,
                         onDelete: { pendingDelete = connection })
+                        .id(connection.id)
                 } else {
                     ContentUnavailableView(
                         "No AI services", systemImage: "wand.and.stars",
@@ -188,6 +232,25 @@ struct AIServiceSettingsView: View {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
             Text("Its connection settings and API key will be removed. This cannot be undone.")
+        }
+        .confirmationDialog(
+            "Use this service for AI rewrite?",
+            isPresented: Binding(
+                get: { model.pendingConnectOffer != nil },
+                set: { if !$0 { model.pendingConnectOffer = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let offer = model.pendingConnectOffer {
+                Button("Connect \(offer.modeIds.count) Mode\(offer.modeIds.count == 1 ? "" : "s")") {
+                    model.applyConnectOffer(offer)
+                    model.pendingConnectOffer = nil
+                }
+                Button("Not Now", role: .cancel) { model.pendingConnectOffer = nil }
+            }
+        } message: {
+            if let offer = model.pendingConnectOffer {
+                Text("\(offer.modeNames.joined(separator: ", ")) have an AI rewrite but no service yet. Point them at \(offer.connectionName)? You can change any of them later.")
+            }
         }
     }
 
@@ -222,16 +285,17 @@ private struct AIServiceEditor: View {
     let connection: Connection
     let hasKey: Bool
     let testState: ConnectionTestState?
+    var autofocusName = false
     let onUpdate: (Connection, String?) -> Void
     let onTest: () -> Void
+    var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
     @State private var apiKey = ""
-    @State private var advancedExpanded = false
 
     var body: some View {
         Form {
             Section("Connection") {
-                CommittedTextField("Name", text: connection.name) { value in
+                CommittedTextField("Name", text: connection.name, autofocus: autofocusName) { value in
                     var updated = connection; updated.name = value; onUpdate(updated, nil)
                 }
                 Picker("Provider", selection: binding(\.provider)) {
@@ -243,6 +307,15 @@ private struct AIServiceEditor: View {
                 CommittedTextField("Model", text: connection.model) { value in
                     var updated = connection; updated.model = value; onUpdate(updated, nil)
                 }
+                if connection.provider == .openaiCompatible {
+                    CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
+                        var updated = connection
+                        updated.baseUrl = value.isEmpty ? nil : value
+                        onUpdate(updated, nil)
+                    }
+                    Text("Required for an OpenAI-compatible endpoint, e.g. http://127.0.0.1:11234/v1.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("API key") {
                 SecureField(hasKey ? "Replace API key" : "API key", text: $apiKey)
@@ -253,6 +326,8 @@ private struct AIServiceEditor: View {
                     Spacer()
                     Button("Save Key", action: saveKey).disabled(apiKey.isEmpty)
                 }
+                Text("Optional — leave blank for a local or no-auth endpoint.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Connection test") {
                 HStack {
@@ -268,17 +343,6 @@ private struct AIServiceEditor: View {
                 Text("Sends a short test message to confirm the key, model, and base URL respond.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            DisclosureSection("Advanced connection settings", isExpanded: $advancedExpanded) {
-                if connection.provider == .openaiCompatible {
-                    CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
-                        var updated = connection
-                        updated.baseUrl = value.isEmpty ? nil : value
-                        onUpdate(updated, nil)
-                    }
-                }
-                Text("API parameters are used only after the connection is configured.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             Section {
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -287,6 +351,7 @@ private struct AIServiceEditor: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .onAppear { if autofocusName { onConsumeFocus() } }
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<Connection, T>) -> Binding<T> {

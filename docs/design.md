@@ -310,11 +310,14 @@ default-mode key.
 
 **Phase A — known before STT (full pipeline available):**
 - **Trigger key(s):** press styles are **hold-or-tap** (push-to-talk while held *or* fires on
-  a quick tap), **hold-only**, and **tap-to-toggle**. A key **forces its mode** as the initial
-  mode and runs that mode's *entire* pipeline including pre-STT bias — **overriding context**:
-  pressing a mode's key invokes it even where context would not auto-select it (constraints
-  govern *automatic* selection only, never a deliberate key press; otherwise a key could
-  silently do nothing). (The STT *engine* is global — modes do not pick it; see §4.1.) Any key
+  a quick tap), **hold-only**, and **tap-to-toggle**. A key **selects its mode** as the initial
+  mode and runs that mode's *entire* pipeline including pre-STT bias. When a *single* mode owns
+  the key, pressing it invokes that mode even where context would not auto-select it — a
+  deliberate press is never a no-op. When **several modes share the key**, context
+  disambiguates: the bound mode whose app/URL constraints best fit the current context wins
+  (most specific, then declaration order), with an unconstrained bound mode as the fallback —
+  so one key can drive a Slack-only mode in Slack and a plain mode everywhere else. (The STT
+  *engine* is global — modes do not pick it; see §4.1.) Any key
   is **capturable** — the **recommended default is Fn/Globe with hold-or-tap** (the most
   familiar gesture; Wispr and Apple both center on it), bound to the default mode, with
   **right-Option** as a conflict-free alternative (Apple Dictation also double-taps Fn).

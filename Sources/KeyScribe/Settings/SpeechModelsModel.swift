@@ -78,6 +78,16 @@ final class SpeechModelsModel: ObservableObject {
         }
     }
 
+    // The first-run flow downloads through the engine directly (not startDownload), so the install
+    // store and this model never learned the model is present — it kept reading "not installed" until a
+    // redundant re-download in Settings. Mark it installed and refresh so onboarding's download sticks.
+    func noteInstalled(_ id: String) {
+        ModelInstallStore.markInstalled(id)
+        set.markInstalled(id)
+        refreshSizes()
+        rebuild()
+    }
+
     func syncActive(_ id: String) {
         guard set.isUsable(id), set.activeId != id else { return }
         try? set.select(id)

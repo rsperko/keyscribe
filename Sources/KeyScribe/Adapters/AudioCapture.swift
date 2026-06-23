@@ -21,15 +21,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var file: AVAudioFile?
     private var currentURL: URL?
     private var levelHandler: (@Sendable (Float) -> Void)?
+    private var recordFormat: AVAudioFormat?
     // Resamples the mic's native format down to the engine's target rate/mono so the WAV is written at
-    // the rate STT wants — no oversized capture file, no decode-time resample. Nil when the mic already
-    // delivers the target format. Reused across callbacks (one buffer; the tap fires serially).
+    // the rate STT wants — no oversized capture file, no decode-time resample. Built lazily from the
+    // format the tap actually delivers (not a pre-queried one, which can be stale) and rebuilt if the
+    // hardware format changes mid-stream. Reused across callbacks (the tap fires serially).
     private var converter: AVAudioConverter?
+    private var converterInputFormat: AVAudioFormat?
     private var outBuffer: AVAudioPCMBuffer?
 
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL {
         let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
@@ -37,28 +39,20 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             .appendingPathComponent("keyscribe-capture-\(UUID().uuidString).wav")
         let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
 
-        var converter: AVAudioConverter?
-        var outBuffer: AVAudioPCMBuffer?
-        if inputFormat.sampleRate != recordFormat.sampleRate
-            || inputFormat.channelCount != recordFormat.channelCount {
-            guard let c = AVAudioConverter(from: inputFormat, to: recordFormat) else {
-                throw AudioCaptureError.formatUnavailable
-            }
-            let ratio = recordFormat.sampleRate / inputFormat.sampleRate
-            let capacity = AVAudioFrameCount(Double(4096) * ratio) + 1024
-            converter = c
-            outBuffer = AVAudioPCMBuffer(pcmFormat: recordFormat, frameCapacity: capacity)
-        }
-
         lock.lock()
         self.file = file
         self.currentURL = url
         self.levelHandler = levelHandler
-        self.converter = converter
-        self.outBuffer = outBuffer
+        self.recordFormat = recordFormat
+        self.converter = nil
+        self.converterInputFormat = nil
+        self.outBuffer = nil
         lock.unlock()
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // format: nil binds the tap to the input node's live hardware format, so there is no passed
+        // format for AVFoundation to validate and mismatch against (a 48k-cached / 16k-actual mismatch
+        // previously aborted with an uncaught com.apple.coreaudio.avfaudio exception → SIGABRT).
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             self?.handle(buffer)
         }
         do {
@@ -79,7 +73,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         file = nil
         currentURL = nil
         levelHandler = nil
+        recordFormat = nil
         converter = nil
+        converterInputFormat = nil
         outBuffer = nil
         return url
     }
@@ -88,13 +84,34 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lock.lock()
         let file = self.file
         let handler = self.levelHandler
+        guard let recordFormat = self.recordFormat else { lock.unlock(); return }
+
+        let inputFormat = buffer.format
+        if inputFormat.sampleRate == recordFormat.sampleRate
+            && inputFormat.channelCount == recordFormat.channelCount {
+            lock.unlock()
+            try? file?.write(from: buffer)
+            emitLevel(buffer, to: handler)
+            return
+        }
+
+        if converter == nil
+            || converterInputFormat?.sampleRate != inputFormat.sampleRate
+            || converterInputFormat?.channelCount != inputFormat.channelCount {
+            converter = AVAudioConverter(from: inputFormat, to: recordFormat)
+            converterInputFormat = inputFormat
+            outBuffer = nil
+        }
+        let ratio = recordFormat.sampleRate / inputFormat.sampleRate
+        let needed = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
+        if outBuffer == nil || outBuffer!.frameCapacity < needed {
+            outBuffer = AVAudioPCMBuffer(pcmFormat: recordFormat, frameCapacity: needed)
+        }
         let converter = self.converter
         let outBuffer = self.outBuffer
         lock.unlock()
 
         guard let converter, let outBuffer else {
-            try? file?.write(from: buffer)
-            emitLevel(buffer, to: handler)
             return
         }
         outBuffer.frameLength = 0

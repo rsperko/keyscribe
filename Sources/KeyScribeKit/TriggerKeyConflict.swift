@@ -5,18 +5,38 @@ public struct TriggerKeyConflict: Equatable, Sendable {
 }
 
 public enum TriggerKeyConflicts {
-    public static func conflict(
-        for descriptor: KeyDescriptor, excludingModeId: String, in modes: [Mode]
-    ) -> TriggerKeyConflict? {
-        for mode in modes where mode.id != excludingModeId && mode.enabled {
-            for trigger in mode.triggerKeys {
-                guard let other = try? KeyDescriptor(parsing: trigger.key) else { continue }
-                if other.collides(with: descriptor) {
-                    return TriggerKeyConflict(modeId: mode.id, modeName: mode.name, key: trigger.key)
-                }
+    // A shared trigger key is only a real conflict when two modes could *contend* for the same press —
+    // i.e. some app/URL context selects either with no clear winner. With constraint-aware key routing
+    // (ModeResolver.resolvePhaseA) a constrained mode and an unconstrained one never collide: the
+    // constrained one wins in its app, the other wins everywhere else, and both stay reachable. So the
+    // warning fires only when `canContend` holds, matching what routing actually does.
+    public static func conflict(for mode: Mode, in modes: [Mode]) -> TriggerKeyConflict? {
+        guard let key = mode.triggerKeys.first?.key,
+              let descriptor = try? KeyDescriptor(parsing: key) else { return nil }
+        for other in modes where other.id != mode.id && other.enabled {
+            for trigger in other.triggerKeys {
+                guard let otherDescriptor = try? KeyDescriptor(parsing: trigger.key),
+                      otherDescriptor.collides(with: descriptor),
+                      canContend(mode, other) else { continue }
+                return TriggerKeyConflict(modeId: other.id, modeName: other.name, key: trigger.key)
             }
         }
         return nil
+    }
+
+    // True when no app/URL context cleanly separates the two modes. Both unconstrained → they collide
+    // everywhere. One unconstrained, one constrained → never (each is reachable). Both constrained →
+    // they contend only if a shared app bundle, or both gate on a URL (whose patterns can't be proven
+    // disjoint here, so we warn conservatively).
+    static func canContend(_ a: Mode, _ b: Mode) -> Bool {
+        if a.constraints.isEmpty && b.constraints.isEmpty { return true }
+        if a.constraints.isEmpty || b.constraints.isEmpty { return false }
+        let aBundles = Set(a.constraints.compactMap(\.bundleId))
+        let bBundles = Set(b.constraints.compactMap(\.bundleId))
+        if !aBundles.isDisjoint(with: bBundles) { return true }
+        let aHasURL = a.constraints.contains { $0.urlPattern != nil }
+        let bHasURL = b.constraints.contains { $0.urlPattern != nil }
+        return aHasURL && bHasURL
     }
 }
 

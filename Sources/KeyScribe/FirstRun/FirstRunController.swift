@@ -36,6 +36,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = self
+        AppActivationPolicy.pushRegular()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         self.window = window
@@ -54,6 +55,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         let closing = window
         window = nil
         closing?.close()
+        AppActivationPolicy.popRegular()
         onComplete()
     }
 

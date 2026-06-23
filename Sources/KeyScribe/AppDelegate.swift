@@ -252,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             download: { [weak self] id, progress in
                 guard let engine = self?.provider.engine(id) else { throw EngineUnavailable.notWired(id) }
                 try await engine.load(progress: progress)
+                self?.speechModels?.noteInstalled(id)
             },
             selectEngine: { [weak self] id in self?.setEngine(id) },
             onReadyToDictate: { [weak self] in self?.startListening() }

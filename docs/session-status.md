@@ -17,6 +17,33 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## Crash fix + Settings UX pass (2026-06-23, uncommitted)
+
+Cross-machine crash + seven Settings/onboarding issues. **`swift build` clean; full `swift test` =
+483 tests / 59 suites pass.** UI changes build clean but want a live click-through.
+
+- **AVAudioEngine input-tap crash (other machine, SIGABRT).** `AudioCapture.start` passed a
+  pre-queried `inputNode.outputFormat` to `installTap`; on a 16 kHz BT/HFP mic that disagreed with the
+  cached 48 kHz client format → uncaught `com.apple.coreaudio.avfaudio` "Failed to create tap due to
+  format mismatch". Now installs the tap with **`format: nil`** (binds to the node's live format, nothing
+  to mismatch) and builds the down-converter **lazily from each buffer's real `buffer.format`**, rebuilt
+  if the hardware format changes mid-stream. ⚠️ needs live mic verification on a 16 kHz device.
+- **#6 Constraint-aware key routing.** A shared trigger key used to always fire the first-declared mode
+  (constraints ignored). `ModeResolver.resolvePhaseA` now disambiguates a shared key by context (most
+  specific bound mode, then declaration order; unconstrained = fallback), and the editor's
+  `TriggerKeyConflicts.conflict` only warns when constraints can actually contend — so a Slack-only +
+  Obsidian-only pair on one key no longer shows a false conflict. design.md §4.3 updated.
+- **#5 First-run model showed an error until re-downloaded.** Onboarding downloads via `engine.load`
+  directly and never told the install store / Speech Models pane; added `SpeechModelsModel.noteInstalled`
+  called after the first-run download (marks installed + refreshes).
+- **#2/#4 AI Service editor.** Base URL moved out of the Advanced disclosure into the Connection section
+  for OpenAI-compatible (it's required); API key labelled optional for local/no-auth endpoints.
+- **#3 Connect-modes offer.** Adding the *first* AI service offers to point every mode that has an AI
+  rewrite but no connection (the starter modes) at it.
+- **#1 Focus on create.** New Mode / new AI Service focus the Name field (`CommittedTextField` autofocus).
+- **#7 Window ordering.** New `AppActivationPolicy` ref-counts a temporary `.regular` activation policy
+  (Dock icon) while a Settings/onboarding window is open, reverting to `.accessory` on close.
+
 ## CPU/memory optimization + dead-code pass (2026-06-23, uncommitted)
 
 Source review for CPU/memory wins and dead code. **`swift build` clean; full `swift test` = 478

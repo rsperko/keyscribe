@@ -8,6 +8,7 @@ final class ModesSettingsModel: ObservableObject {
     @Published private(set) var connections: [Connection] = []
     @Published private(set) var fragmentIds: [String] = []
     @Published var selectedID: String?
+    @Published var lastCreatedId: String?
     @Published private(set) var error: String?
     @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
 
@@ -52,7 +53,10 @@ final class ModesSettingsModel: ObservableObject {
         let mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
         save(mode)
         selectedID = mode.id
+        lastCreatedId = mode.id
     }
+
+    func consumeCreated() { lastCreatedId = nil }
 
     func update(_ mode: Mode) {
         save(mode)
@@ -163,10 +167,12 @@ struct ModesSettingsView: View {
                         mode: mode, allModes: model.modes,
                         connections: model.connections, fragmentIds: model.fragmentIds,
                         isDefault: model.isDefault(mode),
+                        autofocusName: model.lastCreatedId == mode.id,
                         onUpdate: model.update,
                         onMakeDefault: { model.makeDefault(mode) },
                         onAddFragmentFile: model.addFragmentFile(named:),
                         onRevealFragment: model.revealFragment,
+                        onConsumeFocus: model.consumeCreated,
                         onDelete: { modePendingDelete = mode })
                         .id(mode.id)
                 } else {
@@ -296,10 +302,12 @@ private struct ModeEditorView: View {
     let connections: [Connection]
     let fragmentIds: [String]
     let isDefault: Bool
+    var autofocusName = false
     let onUpdate: (Mode) -> Void
     let onMakeDefault: () -> Void
     let onAddFragmentFile: (String) -> String?
     let onRevealFragment: (String) -> Void
+    var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
     @State private var routingExpanded = false
     @State private var advancedExpanded = false
@@ -316,7 +324,7 @@ private struct ModeEditorView: View {
             Section { summaryCard }
 
             Section("Basics") {
-                CommittedTextField("Name", text: mode.name) { value in
+                CommittedTextField("Name", text: mode.name, autofocus: autofocusName) { value in
                     var updated = mode; updated.name = value; onUpdate(updated)
                 }
                 Toggle("Enabled", isOn: binding(\.enabled))
@@ -419,6 +427,7 @@ private struct ModeEditorView: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .onAppear { if autofocusName { onConsumeFocus() } }
     }
 
     private var accessibilityMissingForInsertion: Bool {
@@ -487,7 +496,7 @@ private struct ModeEditorView: View {
             }
             .disabled(mode.triggerKeys.isEmpty)
             if let conflict = triggerConflict {
-                Label("Also used by \(conflict.modeName). The other mode wins when both are enabled.",
+                Label("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
@@ -859,9 +868,7 @@ private struct ModeEditorView: View {
     }
 
     private var triggerConflict: TriggerKeyConflict? {
-        guard let key = mode.triggerKeys.first?.key,
-              let descriptor = try? KeyDescriptor(parsing: key) else { return nil }
-        return TriggerKeyConflicts.conflict(for: descriptor, excludingModeId: mode.id, in: allModes)
+        TriggerKeyConflicts.conflict(for: mode, in: allModes)
     }
 
     private var triggerKey: Binding<String> {

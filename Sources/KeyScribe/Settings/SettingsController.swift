@@ -69,7 +69,7 @@ final class SettingsProblemModel: ObservableObject {
 }
 
 @MainActor
-final class SettingsController {
+final class SettingsController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: SettingsModel
     private let speechModels: SpeechModelsModel
@@ -99,6 +99,7 @@ final class SettingsController {
             defaultModeId: { general.currentDefaultModeId },
             onSetDefault: { general.setDefaultMode($0) })
         aiServices = AIServiceSettingsModel(supportDir: KeyScribePaths.supportDir)
+        super.init()
     }
 
     func update(settings: Settings) {
@@ -115,6 +116,7 @@ final class SettingsController {
     func present() {
         refreshProblems()
         if let window {
+            if !window.isVisible { AppActivationPolicy.pushRegular() }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
@@ -132,9 +134,15 @@ final class SettingsController {
         window.minSize = NSSize(width: 760, height: 520)
         window.center()
         window.isReleasedWhenClosed = false
+        window.delegate = self
+        AppActivationPolicy.pushRegular()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         self.window = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        AppActivationPolicy.popRegular()
     }
 }
 

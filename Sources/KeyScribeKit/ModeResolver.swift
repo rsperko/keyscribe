@@ -31,12 +31,16 @@ public enum ModeResolver {
         let enabled = modes.filter(\.enabled)
         let eligible = enabled.filter { isEligible($0, context) }
 
-        // 1. Explicit key binding forces its mode, overriding context (constraints gate only
-        //    automatic selection, never a deliberate key press — design.md §4.3).
+        // 1. Explicit key binding selects its mode. When several enabled modes share the pressed key,
+        //    the one whose app/URL constraints best fit the current context wins (ties → declaration
+        //    order); an unconstrained mode is the fallback. A deliberate press still fires even where
+        //    no constraint matches — it falls back to the first mode bound to the key.
         if let key = triggerKey {
             let wanted = normalizeKey(key)
-            if let m = enabled.first(where: { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }) {
-                return m
+            let bound = enabled.filter { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
+            if !bound.isEmpty {
+                if let m = mostSpecific(bound.filter { isEligible($0, context) }, context) { return m }
+                return bound.first
             }
         }
         // 2. Context auto-start: the most specific eligible *constrained* mode (ties → declaration

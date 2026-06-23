@@ -78,6 +78,34 @@ struct ModeResolverTests {
         #expect(m?.id == "email")
     }
 
+    @Test func sharedKeyRoutesByAppContext() {
+        let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
+        let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
+        let modes = [slack, obsidian]
+        let inSlack = ModeResolver.resolvePhaseA(
+            modes: modes, defaultModeId: "slack",
+            context: .init(bundleId: "com.tinyspeck.slackmacgap"), triggerKey: "right_option")
+        let inObsidian = ModeResolver.resolvePhaseA(
+            modes: modes, defaultModeId: "slack",
+            context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
+        #expect(inSlack?.id == "slack")
+        #expect(inObsidian?.id == "obsidian")
+    }
+
+    @Test func sharedKeyConstrainedBeatsUnconstrainedInItsApp() {
+        let plain = mode("plain", keys: ["right_option"])
+        let markdown = mode("markdown", keys: ["right_option"], bundles: ["md.obsidian"])
+        let modes = [plain, markdown]
+        let inObsidian = ModeResolver.resolvePhaseA(
+            modes: modes, defaultModeId: "plain",
+            context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
+        let elsewhere = ModeResolver.resolvePhaseA(
+            modes: modes, defaultModeId: "plain",
+            context: .init(bundleId: "com.apple.Notes"), triggerKey: "right_option")
+        #expect(inObsidian?.id == "markdown")
+        #expect(elsewhere?.id == "plain")
+    }
+
     @Test func phaseAPrefersMostSpecificConstraintOverDeclarationOrder() {
         let app = mode("app", bundles: ["com.google.Chrome"])                                  // score 1
         let appUrl = mode("appurl", bundles: ["com.google.Chrome"], urlPattern: #"github\.com"#) // score 3
