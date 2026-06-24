@@ -1,7 +1,6 @@
 import Foundation
 import FluidAudio
 import KeyScribeKit
-import os
 
 // Per-model identity + bias tuning, bundled so adding a Parakeet model is adding a profile constant,
 // not editing the engine. Each TDT model pairs with the same-tier CTC model; `spotterRescue` gates

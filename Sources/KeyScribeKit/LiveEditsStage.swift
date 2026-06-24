@@ -17,9 +17,9 @@ public struct LiveEditsStage: PipelineStage {
         public var scratchThat: [String]
         public var tab: [String]
         public init(
-            newLine: [String] = ["new line"],
+            newLine: [String] = ["new line", "line break"],
             newParagraph: [String] = ["new paragraph"],
-            scratchThat: [String] = ["scratch that"],
+            scratchThat: [String] = ["scratch that", "strike that"],
             tab: [String] = ["tab key", "insert tab"]
         ) {
             self.newLine = newLine

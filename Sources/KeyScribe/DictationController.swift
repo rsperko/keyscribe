@@ -71,6 +71,13 @@ final class DictationController {
     // we hold it until the dictation reaches a terminal state and evict it then.
     private var deferredEvictionEngine: (any SpeechEngine)?
 
+    // Settings model delete/reinstall must evict an engine and then delete its files; doing either while
+    // a dictation is using that engine is a use-after-free (engines tear their model down synchronously,
+    // or across an actor await). These callers suspend here until the dictation reaches its terminal
+    // state, drained in releaseCapturedPlan, so the eviction AND the caller's subsequent file delete run
+    // while idle. See evictEngineForSettings.
+    private var idleEvictionWaiters: [(engine: any SpeechEngine, resume: @Sendable () -> Void)] = []
+
     // Last HUD level rendered while recording (quantized). The mic level callback fires per audio
     // buffer; forwarding only on a meaningful change keeps the HUD from re-rendering its whole tree at
     // buffer rate (the indicator animates between steps anyway). Reset at the start of each recording.
@@ -171,6 +178,21 @@ final class DictationController {
         }
     }
 
+    // Evict an engine on behalf of a Settings delete/reinstall, then return so the caller can delete its
+    // files. Only the in-flight dictation's own engine is unsafe to tear down — any other engine, or
+    // when idle, evicts immediately. When it is the captured engine, suspend until the dictation is done
+    // (drained in releaseCapturedPlan) so neither the evict nor the caller's file delete races the live
+    // transcribe.
+    func evictEngineForSettings(_ engine: any SpeechEngine) async {
+        if !machine.isBusy || capturedEngine?.id != engine.id {
+            await engine.evict()
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            idleEvictionWaiters.append((engine, { continuation.resume() }))
+        }
+    }
+
     // Warm the active STT engine the instant a press begins, overlapping model load (CoreML/MLX
     // compile, ANE warmup) with the user's speech instead of paying it after key-release. Idempotent
     // — a no-op once loaded — and never blocks recording: failures surface later at transcribe time.
@@ -263,6 +285,16 @@ final class DictationController {
         if let deferred = deferredEvictionEngine {
             deferredEvictionEngine = nil
             Task { await deferred.evict() }
+        }
+        if !idleEvictionWaiters.isEmpty {
+            let waiters = idleEvictionWaiters
+            idleEvictionWaiters.removeAll()
+            Task {
+                for waiter in waiters {
+                    await waiter.engine.evict()
+                    waiter.resume()
+                }
+            }
         }
         onBecameIdle?()
     }

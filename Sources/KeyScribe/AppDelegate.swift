@@ -87,7 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return await ModelSelfTestRunner.verify(engine)
             },
             evictEngine: { [weak self] id in
-                if let e = self?.provider.engine(id) { await e.evict() }
+                guard let self, let engine = self.provider.engine(id) else { return }
+                await self.controller.evictEngineForSettings(engine)
             },
             onActiveChange: { [weak self] id in self?.setEngine(id) })
 

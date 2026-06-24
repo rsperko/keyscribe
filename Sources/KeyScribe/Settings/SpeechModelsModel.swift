@@ -35,6 +35,7 @@ final class SpeechModelsModel: ObservableObject {
     private var verifiedOk: Set<String> = []
     private var errors: [String: String] = [:]
     private var installedSizes: [String: Int64] = [:]
+    private var sizeRefreshGeneration = 0
 
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let verify: (String) async -> Bool?
@@ -64,6 +65,8 @@ final class SpeechModelsModel: ObservableObject {
     // synchronously here would block the main actor, including at launch where this model is built.
     // Snapshot the usable ids on the main actor, compute bytes on a utility task, then publish back.
     private func refreshSizes() {
+        sizeRefreshGeneration &+= 1
+        let generation = sizeRefreshGeneration
         let ids = SpeechModelCatalog.all
             .filter { !$0.systemManaged && set.isUsable($0.id) }
             .map(\.id)
@@ -71,7 +74,7 @@ final class SpeechModelsModel: ObservableObject {
             var sizes: [String: Int64] = [:]
             for id in ids { sizes[id] = ModelInstallStore.installedBytes(for: id) }
             await MainActor.run {
-                guard let self else { return }
+                guard let self, generation == self.sizeRefreshGeneration else { return }
                 self.installedSizes = sizes
                 self.rebuild()
             }

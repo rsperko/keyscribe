@@ -40,6 +40,10 @@ The live dictation loop can only be verified by a human:
 > alongside KeyScribe. Set it to "Do Nothing" in System Settings ▸ Keyboard, or pick **Right Option**
 > in KeyScribe ▸ Settings as the conflict-free alternative.
 
+> **Background audio while dictating.** With *Settings ▸ General ▸ Mute system audio while dictating*
+> on, playback is muted for the duration. If start/end sounds are also on, the mute begins after the
+> start sound (so the cue is not swallowed); **turn the start sound off for an instant mute**.
+
 ## Layout
 
 - `Sources/KeyScribeKit/` — pure, OS-free logic (unit-tested).

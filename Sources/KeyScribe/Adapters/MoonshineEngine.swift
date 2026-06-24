@@ -1,7 +1,6 @@
 import Foundation
 import MoonshineVoice
 import KeyScribeKit
-import os
 
 // Moonshine (Useful Sensors) — ONNX Runtime backend shipped as a prebuilt xcframework. Ultra-low
 // latency English ASR. The .ort model files download directly from download.moonshine.ai into

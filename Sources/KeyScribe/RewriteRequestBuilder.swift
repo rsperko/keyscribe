@@ -57,7 +57,11 @@ struct RewriteRequestBuilder {
         // Both context probes are independent AX walks that run off the main actor; start them together
         // so a mode opting into both pays the longer wait, not the sum (each is individually bounded).
         let visibleBundleId = ctx.visibleText ? capturedBundleId : nil
-        async let precedingProbe: String? = ctx.precedingText ? await ContextProbe.precedingText() : nil
+        let precedingBundleId = ctx.precedingText ? capturedBundleId : nil
+        async let precedingProbe: String? = await {
+            guard let precedingBundleId else { return nil }
+            return await ContextProbe.precedingText(forBundleId: precedingBundleId)
+        }()
         async let visibleProbe: String? = await {
             guard let visibleBundleId else { return nil }
             return await ContextProbe.visibleText(forBundleId: visibleBundleId, maxChars: visibleTextCap * 2)

@@ -29,17 +29,25 @@ enum ContextProbe {
     // via AX — precise and native-only: Chromium/Electron expose no caret range, so this returns nil
     // there (best-effort, like visible text). Privacy mode forces the opt-in off upstream
     // (Mode.effectiveContext), so this is never called when redaction is active.
-    static func precedingText(maxChars: Int = 600) async -> String? {
-        await Task.detached { precedingTextSync(maxChars: maxChars) }.value
+    static func precedingText(forBundleId bundleId: String, maxChars: Int = 600) async -> String? {
+        // Scope to the captured app, like visibleText. precedingText is read at rewrite time — after STT
+        // and partway into the LLM round trip — so resolving the live system-wide focused element would
+        // read whatever the user has since switched to, feeding the wrong field's (possibly sensitive)
+        // text to the LLM. Read only when the captured app is still frontmost, via that app's own focused
+        // element, so a switch away yields nil rather than another app's text.
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId,
+              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+                  .first?.processIdentifier else { return nil }
+        return await Task.detached { precedingTextSync(pid: pid, maxChars: maxChars) }.value
     }
 
     // Synchronous AX walk, run off the main actor (each AXUIElementCopy… is cross-process IPC; a slow
     // target must never stall the dictation flow on the main thread). A per-element messaging timeout
     // bounds a wedged AX server.
-    nonisolated private static func precedingTextSync(maxChars: Int) -> String? {
-        let system = AXUIElementCreateSystemWide()
+    nonisolated private static func precedingTextSync(pid: pid_t, maxChars: Int) -> String? {
+        let app = AXUIElementCreateApplication(pid)
         var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focusedRef else { return nil }
         let element = focusedRef as! AXUIElement
         AXUIElementSetMessagingTimeout(element, 0.3)

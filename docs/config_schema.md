@@ -252,7 +252,7 @@ eviction = "frugal"             # "fastest" | "balanced" | "frugal" (default: fr
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 
 [during_dictation]
-mute_system_audio = true
+mute_system_audio = true        # mute lands after the start sound (else it is swallowed); instant when sounds = false
 keep_display_awake = true
 sounds = true                   # start/end sounds
 

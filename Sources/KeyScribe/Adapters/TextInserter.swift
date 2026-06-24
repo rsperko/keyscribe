@@ -16,12 +16,15 @@ enum TextInserter {
     // The full pasteboard (every item type — images, RTF, file URLs, not just plain text) is snapshot
     // and restored, so a dictation never destroys a non-text clipboard. The ⌘C settle is polled on
     // the changeCount instead of a blind sleep (the M0 survey hit a settle race that dropped a leading
-    // character), and the restore is gated on changeCount so we never clobber something written after us.
+    // character). We only restore once our ⌘C has actually overwritten the clipboard — if nothing was
+    // copied (no selection) the clipboard is untouched, so an unconditional restore would be a redundant
+    // rewrite that could clobber whatever another app wrote during the settle window.
     static func captureSelection() async -> String? {
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
         postCommand(cKeyCode)
-        let copied = await waitForChange(since: snapshot.changeCount) ? pb.string(forType: .string) : nil
+        guard await waitForChange(since: snapshot.changeCount) else { return nil }
+        let copied = pb.string(forType: .string)
         snapshot.restore()
         return copied
     }
@@ -44,7 +47,10 @@ enum TextInserter {
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
         writeScratch(text)
-        try? await Task.sleep(for: .milliseconds(30))
+        // clearContents()/writeObjects() bump changeCount synchronously, so the scratch write is already
+        // reflected here — stamp it now. The old fixed 30ms sleep added latency and risked stamping a
+        // pre-write count (then scratchSurvived misreads our own write as a foreign one and skips the
+        // restore, leaving the dictated text on the clipboard).
         let stamp = pb.changeCount
         postCommand(vKeyCode)
         // Give the target time to consume ⌘V before we touch the clipboard again — restoring too early

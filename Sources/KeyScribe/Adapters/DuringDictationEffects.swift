@@ -23,6 +23,7 @@ final class DuringDictationEffects {
     private var displayAssertion: IOPMAssertionID = 0
     private var hadDisplayAssertion = false
     private var previousMute: UInt32?
+    private var mutedDevice: AudioDeviceID?
     private var generation = 0
     // Named system sounds are reloaded by NSSound(named:) on each call; keep one instance per cue for
     // the app's lifetime so begin/end don't re-resolve them every dictation.
@@ -41,10 +42,10 @@ final class DuringDictationEffects {
         let startCue = config.sounds ? sound(named: "Tink") : nil
         startCue?.play()
         guard config.muteSystemAudio else { return }
-        // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since
-        // the cue routes through that same device. Defer past the cue's length; the generation guard
-        // drops the mute if the dictation already ended (a sub-cue-length press must never leave the
-        // output muted for good).
+        // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since the
+        // cue routes through that same device. So with the cue OFF there is nothing to wait for and the
+        // mute is instant; with the cue ON we defer past its length. The generation guard drops the mute
+        // if the dictation already ended (a sub-cue-length press must never leave the output muted).
         if let startCue {
             let gen = generation
             let delay = startCue.duration
@@ -108,16 +109,21 @@ final class DuringDictationEffects {
         var size = UInt32(MemoryLayout<UInt32>.size)
         guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &current) == noErr else { return }
         previousMute = current
+        mutedDevice = device
         var muted: UInt32 = 1
         _ = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &muted)
     }
 
     private func restoreOutput() {
-        guard let previousMute, let device = defaultOutputDevice() else { return }
+        // Restore the exact device we muted, not the current default. If the output device changed
+        // mid-dictation (e.g. headphones unplugged), re-resolving the default would leave the device we
+        // muted stuck muted forever and wrongly write our saved state onto the new default device.
+        guard let previousMute, let device = mutedDevice else { return }
         var addr = muteAddress()
         var value = previousMute
         let size = UInt32(MemoryLayout<UInt32>.size)
         _ = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &value)
         self.previousMute = nil
+        self.mutedDevice = nil
     }
 }

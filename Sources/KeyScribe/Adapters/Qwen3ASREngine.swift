@@ -2,7 +2,6 @@ import AudioCommon
 import Foundation
 import Qwen3ASR
 import KeyScribeKit
-import os
 
 // Per-model identity bundled so adding a Qwen3-ASR variant is adding a profile constant, not editing
 // the engine. `modelId` is the HuggingFace MLX bundle; `subdir` roots its weights under modelsDir so

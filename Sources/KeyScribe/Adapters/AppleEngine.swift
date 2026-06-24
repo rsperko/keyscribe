@@ -2,7 +2,6 @@ import AVFoundation
 import Foundation
 import Speech
 import KeyScribeKit
-import os
 
 actor AppleEngine: SpeechEngine {
     nonisolated let id = "apple"

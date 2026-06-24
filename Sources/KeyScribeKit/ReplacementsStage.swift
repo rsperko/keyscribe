@@ -24,23 +24,31 @@ public struct ReplacementsStage: PipelineStage {
     public let order = StageOrder.replacements
     public let rules: [ReplacementRule]
 
-    public init(rules: [ReplacementRule]) { self.rules = rules }
+    // Each rule's regex and substitution template resolved once at construction (the stage is built
+    // per config generation and cached in ResolvedConfig), so the per-dictation path is just the match.
+    // Pattern escaping, word-boundary wrapping, safety screening and compilation no longer run per
+    // dictation per rule. Rules that resolve to nothing (empty literal, unsafe/invalid regex) are
+    // dropped here exactly as the old per-call guards skipped them.
+    private let prepared: [(regex: NSRegularExpression, template: String)]
 
-    public func apply(_ context: inout PipelineContext) {
-        for rule in rules { context.text = applyRule(rule, to: context.text) }
+    public init(rules: [ReplacementRule]) {
+        self.rules = rules
+        self.prepared = rules.compactMap { rule in
+            if rule.isRegex {
+                guard ReplacementSafety.isSafe(rule.heard), let re = RegexCache.regex(rule.heard) else { return nil }
+                return (re, rule.replace)
+            }
+            guard !rule.heard.isEmpty else { return nil }
+            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: rule.heard))\\b"
+            guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
+            return (re, NSRegularExpression.escapedTemplate(for: rule.replace))
+        }
     }
 
-    private func applyRule(_ rule: ReplacementRule, to text: String) -> String {
-        if rule.isRegex {
-            guard ReplacementSafety.isSafe(rule.heard), let re = RegexCache.regex(rule.heard) else { return text }
-            let range = NSRange(text.startIndex..., in: text)
-            return re.stringByReplacingMatches(in: text, range: range, withTemplate: rule.replace)
+    public func apply(_ context: inout PipelineContext) {
+        for rule in prepared {
+            let range = NSRange(context.text.startIndex..., in: context.text)
+            context.text = rule.regex.stringByReplacingMatches(in: context.text, range: range, withTemplate: rule.template)
         }
-        guard !rule.heard.isEmpty else { return text }
-        let pattern = "\\b\(NSRegularExpression.escapedPattern(for: rule.heard))\\b"
-        guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        let template = NSRegularExpression.escapedTemplate(for: rule.replace)
-        return re.stringByReplacingMatches(in: text, range: range, withTemplate: template)
     }
 }

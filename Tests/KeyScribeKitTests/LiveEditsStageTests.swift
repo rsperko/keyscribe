@@ -64,6 +64,14 @@ struct LiveEditsStageTests {
         #expect(run("press the tab to indent") == "press the tab to indent")
     }
 
+    @Test func newLineAliases() {
+        #expect(run("alpha line break beta") == "alpha\nbeta")
+    }
+
+    @Test func scratchThatAliases() {
+        #expect(run("I like dogs strike that I like fish") == "I like fish")
+    }
+
     @Test func customCommandPhrases() {
         var ctx = PipelineContext(text: "alpha next line beta")
         LiveEditsStage(commands: .init(newLine: ["next line"])).apply(&ctx)

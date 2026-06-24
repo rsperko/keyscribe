@@ -58,6 +58,60 @@ with catalog ids), `ctcUnavailable` session latch (fails soft; avoids re-retryin
 resetting gesture state (300 s backstop + the config-reload fix cover the strand; resetting would drop a
 legitimately-held key), silent audio-write failure (degrades to "no speech").
 
+## Stale OS-resource pass (2026-06-23, uncommitted)
+
+Triggered by a live report: unplugging a Bluetooth headset made dictation fail with "Could not start the
+microphone" even though permission was granted and other mics were present. Root cause was a *class* of
+bug — caching a handle to an OS resource that changes underneath the code without re-resolving — so the
+audit swept the other OS-edge adapters (audio output, AX context, engine teardown, clipboard) for siblings.
+**`swift build` clean; full `swift test` = 495 tests / 60 suites pass.** All changes are OS-edge adapters
+(build + suite are the automated bar); the device/focus/clipboard behaviors need a live person to confirm.
+
+- **A disconnected input device wedged the mic.** `AudioCapture` held one app-lifetime `AVAudioEngine`;
+  its `inputNode` caches the input-device binding on first touch and never re-resolves. The device is
+  pulled while the engine is idle (so no `AVAudioEngineConfigurationChange` fires — it only posts while
+  running), and the next `start()` throws on the stale binding instead of falling through to the new
+  default. Fix: keep the long-lived engine for the fast path (re-arm ≈ 0.04 ms) but **rebuild-and-retry
+  once on a `start()` throw** (`arm()`), which rebinds to the current default. Measured: input-unit
+  realization ≈ 165 ms is paid once per engine, so a fresh-engine-per-dictation alternative would add
+  that to *every* dictation — rejected; the retry pays it only on the post-disconnect dictation.
+- **Output device left stuck-muted after a mid-dictation device change.** `DuringDictationEffects`
+  muted the *current* default and `restoreOutput()` re-resolved the default *again* at end, so unplugging
+  headphones mid-dictation (with mute-system-audio on) muted device A but restored onto device B — A stayed
+  muted forever. Fix: record the `AudioDeviceID` actually muted and restore **that** device. (Mute timing
+  unchanged and deliberate: with the start sound on the mute lands after it so the cue is not swallowed;
+  with the sound off the mute is instant — see ui_design.md §Motion and sound.)
+- **The wrong field's text could be sent to the LLM.** `ContextProbe.precedingText` read the **live
+  system-wide focused element** at rewrite time (after STT, partway into the LLM round trip), unscoped —
+  a focus change to another field/app during that window fed that field's (possibly sensitive) text to the
+  rewrite. Fix: scoped to the captured app like `visibleText` — read only while that app is still frontmost,
+  via the app's own focused element, so a switch-away yields nil. Residual (left): a focus change to a
+  *different field within the same frontmost app* still reads the app's current field; closing it reliably
+  needs AX work on the record-start hot path, which fights the instant-start goal.
+- **A model delete/reinstall could tear an engine down under a live transcribe.** `SpeechModelsModel`
+  `reinstall`/`performDelete` evicted the shared engine **and** deleted its files with no busy guard —
+  racing an in-flight transcribe on that engine (actor reentrancy for Parakeet/Apple, `nonisolated(unsafe)`
+  teardown for the others) → use-after-free. The "evict only between dictations" invariant was enforced on
+  the `DictationController` paths but not the Settings path. Fix: new `evictEngineForSettings` — evicts
+  immediately for any idle/non-active engine, else **suspends until the terminal state** (drained in
+  `releaseCapturedPlan`) so neither the evict nor the file delete races the call.
+- **`captureSelection` could clobber the clipboard.** Its doc comment claimed a changeCount-gated restore,
+  but `snapshot.restore()` ran **unconditionally** — including when no selection existed (a redundant
+  rewrite that could overwrite a concurrent clipboard-manager write). Fix: restore only after the ⌘C
+  actually changed the pasteboard.
+- **Paste insert left dictated text on the clipboard (and was slower).** `insertViaPaste` slept a fixed
+  30 ms before stamping `changeCount`; `clearContents()`/`writeObjects()` bump it **synchronously**, so the
+  sleep only added latency and risked stamping a pre-write count (then `scratchSurvived` misreads our own
+  late write as a foreign one and skips the restore). Fix: stamp immediately after the scratch write — drops
+  the race and shaves 30 ms off every paste.
+
+Checked and **clean** (looked at, no sibling bug): the hotkey `CGEventTap` (re-enables on
+`tapDisabledByTimeout/UserInput`), the FSEvents config watcher (watches the parent dir → immune to
+atomic-rename inode swaps; plus a watcher-independent `invalidate()` on every write), `KeychainStore`
+(stateless), `ModelInstallStore` (re-reads disk), the engine *switch* path and active-engine caching
+(deliberately pinned via `capturedEngine`), per-call `TdtDecoderState`, and AX insert (verifies the
+write-back, never trusts `.success`).
+
 ## Crash fix + Settings UX pass (2026-06-23, uncommitted)
 
 Cross-machine crash + seven Settings/onboarding issues. **`swift build` clean; full `swift test` =

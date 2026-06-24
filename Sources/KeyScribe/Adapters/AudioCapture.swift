@@ -16,7 +16,7 @@ private final class FeedOnce: @unchecked Sendable {
 }
 
 final class AudioCapture: AudioCapturing, @unchecked Sendable {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let lock = NSLock()
     private var file: AVAudioFile?
     private var currentURL: URL?
@@ -31,7 +31,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var outBuffer: AVAudioPCMBuffer?
 
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL {
-        let input = engine.inputNode
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
@@ -49,20 +48,40 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         self.outBuffer = nil
         lock.unlock()
 
+        do {
+            try arm()
+        } catch {
+            // The engine caches its input-device binding and never re-resolves it, so if that device
+            // disconnected while idle (no ConfigurationChange fires while stopped) start() throws. Rebuild
+            // the engine once to bind the current default input and retry — the costly input-unit
+            // realization is paid only on a device change, not on every dictation.
+            engine = AVAudioEngine()
+            do {
+                try arm()
+            } catch {
+                if let url = stop() { try? FileManager.default.removeItem(at: url) }
+                throw error
+            }
+        }
+        return url
+    }
+
+    private func arm() throws {
+        let input = engine.inputNode
         // format: nil binds the tap to the input node's live hardware format, so there is no passed
         // format for AVFoundation to validate and mismatch against (a 48k-cached / 16k-actual mismatch
         // previously aborted with an uncaught com.apple.coreaudio.avfaudio exception → SIGABRT).
         input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             self?.handle(buffer)
         }
+        engine.prepare()
         do {
-            engine.prepare()
             try engine.start()
         } catch {
-            if let url = stop() { try? FileManager.default.removeItem(at: url) }
+            engine.stop()
+            input.removeTap(onBus: 0)
             throw error
         }
-        return url
     }
 
     func stop() -> URL? {

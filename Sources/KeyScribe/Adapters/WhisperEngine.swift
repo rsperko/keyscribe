@@ -1,7 +1,6 @@
 import Foundation
 import KeyScribeKit
 import WhisperKit
-import os
 
 // WhisperKit (now the Argmax OSS SDK monorepo, argmax-oss-swift, pinned 1.0.0 — the WhisperKit
 // product only; Vapor/openapi stay out of resolution, gated behind the SDK's BUILD_ALL flag).

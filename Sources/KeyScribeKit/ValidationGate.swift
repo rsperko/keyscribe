@@ -27,15 +27,23 @@ public enum ValidationGate {
     public static func check(output: String, issuedTokens: [String], allowDeletion: Bool = false) -> GateVerdict {
         if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .fail(.empty) }
 
+        // One regex pass finds every sentinel-shaped span (issued tokens are sentinel-shaped too), so a
+        // count map answers the per-token presence/duplication check without a separate full scan per
+        // issued token. The stray check still iterates the matches in document order, so the same token
+        // is reported on multi-failure inputs as before.
+        let found = sentinels(in: output)
+        var counts: [String: Int] = [:]
+        for sentinel in found { counts[sentinel, default: 0] += 1 }
+
         for token in issuedTokens {
-            let count = occurrences(of: token, in: output)
+            let count = counts[token] ?? 0
             if count > 1 { return .fail(.duplicatedToken(token)) }
             if count == 0 && !allowDeletion { return .fail(.missingToken(token)) }
         }
 
         let issued = Set(issuedTokens)
-        for found in sentinels(in: output) where !issued.contains(found) {
-            return .fail(.strayToken(found))
+        for sentinel in found where !issued.contains(sentinel) {
+            return .fail(.strayToken(sentinel))
         }
         return .pass
     }
@@ -44,17 +52,6 @@ public enum ValidationGate {
     // partially-restored text).
     public static func recovery(attempt: Int) -> GateRecovery {
         attempt == 0 ? .retryStricter : .localFallback
-    }
-
-    private static func occurrences(of token: String, in text: String) -> Int {
-        guard !token.isEmpty else { return 0 }
-        var count = 0
-        var from = text.startIndex
-        while let r = text.range(of: token, range: from..<text.endIndex) {
-            count += 1
-            from = r.upperBound
-        }
-        return count
     }
 
     private static func sentinels(in text: String) -> [String] {
