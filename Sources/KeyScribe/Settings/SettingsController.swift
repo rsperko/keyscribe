@@ -57,6 +57,13 @@ enum SettingsProblem: Equatable, CaseIterable {
     }
 }
 
+// The selected pane, lifted out of the view so the controller can drive it — opening Settings deep
+// to a pane (e.g. History's "Manage Vocabulary…") just sets this before the window shows.
+@MainActor
+final class SettingsNavigationModel: ObservableObject {
+    @Published var destination: SettingsDestination? = .general
+}
+
 @MainActor
 final class SettingsProblemModel: ObservableObject {
     @Published var flaggedPanes: Set<SettingsDestination> = []
@@ -78,6 +85,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let modes: ModesSettingsModel
     private let aiServices: AIServiceSettingsModel
     private let problems = SettingsProblemModel()
+    private let navigation = SettingsNavigationModel()
     private let detectProblems: () -> [SettingsProblem]
     // Shared with the recorders (via the environment) and the app, which suspends the global hotkey
     // monitor while a recorder is capturing so the chord can't fire an existing shortcut.
@@ -113,8 +121,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     // broken" signal that drives the error badge (AppDelegate.currentProblems reads it).
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
 
-    func present() {
+    func present(_ destination: SettingsDestination? = nil) {
         refreshProblems()
+        if let destination { navigation.destination = destination }
         if let window {
             if !window.isVisible { AppActivationPolicy.pushRegular() }
             NSApp.activate(ignoringOtherApps: true)
@@ -124,7 +133,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         let root = SettingsRootView(
             general: model, speechModels: speechModels, dictionary: dictionary,
             replacements: replacements, aiServices: aiServices, modes: modes,
-            problems: problems, recordingState: recordingState,
+            problems: problems, navigation: navigation, recordingState: recordingState,
             refresh: { [weak self] in self?.refreshProblems() })
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
@@ -155,9 +164,9 @@ struct SettingsRootView: View {
     @ObservedObject var aiServices: AIServiceSettingsModel
     @ObservedObject var modes: ModesSettingsModel
     @ObservedObject var problems: SettingsProblemModel
+    @ObservedObject var navigation: SettingsNavigationModel
     @ObservedObject var recordingState: HotkeyRecordingState
     let refresh: () -> Void
-    @State private var destination: SettingsDestination? = .general
 
     // Precedence order for the app-wide hotkey namespace: Modes (routing order) then the two globals.
     // The losers of any chord collision are "shadowed" — flagged with a red dot, and suppressed at
@@ -174,7 +183,7 @@ struct SettingsRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsDestination.allCases, selection: $destination) { destination in
+            List(SettingsDestination.allCases, selection: $navigation.destination) { destination in
                 HStack {
                     Label(destination.title, systemImage: destination.symbol)
                     Spacer()
@@ -197,7 +206,7 @@ struct SettingsRootView: View {
                 }
             }
         } detail: {
-            switch destination ?? .general {
+            switch navigation.destination ?? .general {
             case .general:
                 let shadowed = shadowedHotkeys()
                 GeneralSettingsView(
@@ -295,6 +304,16 @@ final class SettingsModel: ObservableObject {
             ("balanced", "Balanced — free memory after \(Self.idleLabel(settings.stt.evictionIdleSeconds)) idle"),
             ("frugal", "Frugal — free memory after each dictation"),
         ]
+    }
+
+    var evictionFooter: String {
+        let info = SpeechModelCatalog.entry(for: settings.stt.engine)
+        return EvictionCopy.footer(
+            policy: Eviction(rawValue: eviction) ?? .fastest,
+            modelName: info?.displayName ?? "the active model",
+            bytes: info?.approxDownloadBytes ?? 0,
+            systemManaged: info?.systemManaged ?? false,
+            idleLabel: Self.idleLabel(settings.stt.evictionIdleSeconds))
     }
 
     static func idleLabel(_ seconds: Int?) -> String {

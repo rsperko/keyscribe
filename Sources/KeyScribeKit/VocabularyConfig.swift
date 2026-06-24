@@ -107,7 +107,13 @@ public enum VocabularyMerge {
     public static func rules(
         global: [ReplacementRule], local: [ReplacementRule], includeGlobal: Bool
     ) -> [ReplacementRule] {
-        includeGlobal ? global + local : local
+        guard includeGlobal else { return local }
+        let overridden = Set(local.map(key))
+        return global.filter { !overridden.contains(key($0)) } + local
+    }
+
+    private static func key(_ rule: ReplacementRule) -> String {
+        rule.isRegex ? "r:\(rule.heard)" : "l:\(rule.heard.lowercased())"
     }
 }
 

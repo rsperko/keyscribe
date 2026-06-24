@@ -64,6 +64,41 @@ struct VocabularyConfigTests {
         #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: false) == l)
     }
 
+    @Test func mergeRulesLocalOverridesGlobalSameHeard() {
+        let g = [ReplacementRule(heard: "k8s", replace: "Kubernetes", isRegex: false)]
+        let l = [ReplacementRule(heard: "k8s", replace: "k8s cluster", isRegex: false)]
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == l)
+    }
+
+    @Test func mergeRulesLocalOverridesGlobalCaseInsensitivelyForLiterals() {
+        let g = [ReplacementRule(heard: "K8S", replace: "Kubernetes", isRegex: false)]
+        let l = [ReplacementRule(heard: "k8s", replace: "k8s cluster", isRegex: false)]
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == l)
+    }
+
+    @Test func mergeRulesOverrideKeepsUnrelatedGlobalsInOrder() {
+        let g = [
+            ReplacementRule(heard: "a", replace: "1", isRegex: false),
+            ReplacementRule(heard: "b", replace: "2", isRegex: false),
+        ]
+        let l = [ReplacementRule(heard: "B", replace: "two", isRegex: false)]
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true)
+            == [ReplacementRule(heard: "a", replace: "1", isRegex: false),
+                ReplacementRule(heard: "B", replace: "two", isRegex: false)])
+    }
+
+    @Test func mergeRulesLiteralAndRegexSameHeardAreDistinctKeys() {
+        let g = [ReplacementRule(heard: "foo", replace: "global", isRegex: false)]
+        let l = [ReplacementRule(heard: "foo", replace: "local", isRegex: true)]
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == g + l)
+    }
+
+    @Test func mergeRulesRegexOverrideIsCaseSensitive() {
+        let g = [ReplacementRule(heard: "Foo(.*)", replace: "global", isRegex: true)]
+        let l = [ReplacementRule(heard: "foo(.*)", replace: "local", isRegex: true)]
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == g + l)
+    }
+
     @Test func removingDictionaryWordMatchesCaseInsensitively() {
         let set = DictionarySet(words: ["KeyScribe", "Parakeet"])
         #expect(set.removing(word: "keyscribe").words == ["Parakeet"])

@@ -65,7 +65,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Performance")
             } footer: {
-                Text("Trade first-response speed against memory use. Reloading a freed model adds a brief delay.")
+                Text(model.evictionFooter)
                     .font(.caption).foregroundStyle(.secondary)
             }
 

@@ -42,29 +42,57 @@ struct EvictionPolicyTests {
         #expect(EvictionPolicy.afterDictation(mode: .balanced, idleSeconds: nil)
             == .scheduleIdleCheck(afterSeconds: EvictionPolicy.defaultIdleSeconds))
     }
+}
 
-    // A large model on Fastest would pin its whole footprint resident forever; cap it at Balanced so it
-    // idle-evicts. Small models keep Fastest's instant residency; Balanced/Frugal are user choices and
-    // pass through unchanged for any size.
-    @Test func fastestDowngradesToBalancedForLargeModel() {
-        #expect(EvictionPolicy.effective(.fastest, modelBytes: 2_000_000_000) == .balanced)
+struct EvictionCopyTests {
+    @Test func fastestStatesResidentFootprint() {
+        let s = EvictionCopy.footer(
+            policy: .fastest, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
+            systemManaged: false, idleLabel: "30 min")
+        #expect(s.contains("Keeps Qwen3-ASR 1.7B loaded"))
+        #expect(s.contains("on disk, similar in memory"))
+        #expect(s.contains("1.8 GB"))
     }
 
-    @Test func fastestHonoredForSmallModel() {
-        #expect(EvictionPolicy.effective(.fastest, modelBytes: 141_000_000) == .fastest)
+    @Test func balancedUsesIdleLabel() {
+        let s = EvictionCopy.footer(
+            policy: .balanced, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
+            systemManaged: false, idleLabel: "30 min")
+        #expect(s.contains("frees it after 30 min idle"))
+        #expect(s.contains("1.8 GB"))
     }
 
-    @Test func fastestHonoredExactlyBelowThreshold() {
-        #expect(EvictionPolicy.effective(.fastest, modelBytes: EvictionPolicy.largeModelByteThreshold - 1) == .fastest)
+    @Test func frugalLeadsWithFreeing() {
+        let s = EvictionCopy.footer(
+            policy: .frugal, modelName: "Whisper Large v3 Turbo", bytes: 1_500_000_000,
+            systemManaged: false, idleLabel: "30 min")
+        #expect(s.contains("Frees Whisper Large v3 Turbo"))
+        #expect(s.contains("after each dictation"))
     }
 
-    @Test func fastestDowngradesExactlyAtThreshold() {
-        #expect(EvictionPolicy.effective(.fastest, modelBytes: EvictionPolicy.largeModelByteThreshold) == .balanced)
+    // A model under the small threshold collapses to the "costs you little" line regardless of policy.
+    @Test func smallModelSoftenerReplacesPolicyCopy() {
+        for policy: Eviction in [.fastest, .balanced, .frugal] {
+            let s = EvictionCopy.footer(
+                policy: policy, modelName: "Moonshine Base (English)", bytes: 141_000_000,
+                systemManaged: false, idleLabel: "30 min")
+            #expect(s.contains("is small"))
+            #expect(s.contains("cost you little"))
+        }
     }
 
-    @Test func balancedAndFrugalPassThroughRegardlessOfSize() {
-        #expect(EvictionPolicy.effective(.balanced, modelBytes: 2_000_000_000) == .balanced)
-        #expect(EvictionPolicy.effective(.frugal, modelBytes: 2_000_000_000) == .frugal)
-        #expect(EvictionPolicy.effective(.frugal, modelBytes: 0) == .frugal)
+    @Test func atThresholdIsNotSmall() {
+        let s = EvictionCopy.footer(
+            policy: .fastest, modelName: "Big", bytes: EvictionCopy.smallModelBytes,
+            systemManaged: false, idleLabel: "30 min")
+        #expect(!s.contains("is small"))
+    }
+
+    @Test func systemManagedHasNoFootprintCopy() {
+        let s = EvictionCopy.footer(
+            policy: .fastest, modelName: "Apple Speech", bytes: 0,
+            systemManaged: true, idleLabel: "30 min")
+        #expect(s.contains("managed by macOS"))
+        #expect(!s.contains("loaded ("))
     }
 }

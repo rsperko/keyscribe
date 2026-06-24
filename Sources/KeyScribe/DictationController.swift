@@ -565,7 +565,7 @@ final class DictationController {
     private func applyEvictionAfterDictation(engine: any SpeechEngine) {
         lastUsedAt = ProcessInfo.processInfo.systemUptime
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
-        switch EvictionPolicy.afterDictation(mode: evictionMode(for: engine), idleSeconds: idle) {
+        switch EvictionPolicy.afterDictation(mode: settings.stt.eviction, idleSeconds: idle) {
         case .keepLoaded: break
         case .evictNow:
             Task { await engine.evict() }
@@ -573,16 +573,9 @@ final class DictationController {
         }
     }
 
-    // The user's eviction setting, capped at Balanced for a large active model so Fastest never pins a
-    // multi-GB engine resident forever (EvictionPolicy.effective). Download size proxies the footprint.
-    private func evictionMode(for engine: any SpeechEngine) -> Eviction {
-        let bytes = SpeechModelCatalog.entry(for: engine.id)?.approxDownloadBytes ?? 0
-        return EvictionPolicy.effective(settings.stt.eviction, modelBytes: bytes)
-    }
-
     private func scheduleIdleEviction(after: Double, engine active: any SpeechEngine) {
         idleEvictionTask?.cancel()
-        let mode = evictionMode(for: active)
+        let mode = settings.stt.eviction
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
         let usedAt = lastUsedAt
         idleEvictionTask = Task { @MainActor [weak self] in

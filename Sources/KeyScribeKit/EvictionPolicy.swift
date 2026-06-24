@@ -9,17 +9,6 @@ public enum EvictionDecision: Equatable, Sendable {
 public enum EvictionPolicy {
     public static let defaultIdleSeconds: Double = 1800
 
-    // Models at/above this download size are treated as "large" and never kept permanently resident:
-    // Fastest pins a model forever, which is fine for the small default engine but would hold ~1.5–2 GB
-    // for a Whisper/Qwen tier. The download size is a free, monotonic proxy for resident footprint — no
-    // live memory probing. Balanced/Frugal are explicit user choices and pass through unchanged.
-    public static let largeModelByteThreshold: Int64 = 1_000_000_000
-
-    public static func effective(_ mode: Eviction, modelBytes: Int64) -> Eviction {
-        if mode == .fastest && modelBytes >= largeModelByteThreshold { return .balanced }
-        return mode
-    }
-
     public static func afterDictation(mode: Eviction, idleSeconds: Double?) -> EvictionDecision {
         switch mode {
         case .fastest: return .keepLoaded
@@ -40,5 +29,37 @@ public enum EvictionPolicy {
             if idle >= limit { return .evictNow }
             return .scheduleIdleCheck(afterSeconds: limit - idle)
         }
+    }
+}
+
+public enum EvictionCopy {
+    // Below this footprint, reloading is fast enough that the policy choice barely matters, so the
+    // footer says so instead of weighing memory against speed. Moonshine (~141 MB) lands here.
+    public static let smallModelBytes: Int64 = 200_000_000
+
+    public static func footer(
+        policy: Eviction, modelName: String, bytes: Int64, systemManaged: Bool, idleLabel: String
+    ) -> String {
+        if systemManaged {
+            return "\(modelName) is managed by macOS, so this setting does not change its memory use."
+        }
+        let size = formatBytes(bytes)
+        if bytes > 0 && bytes < smallModelBytes {
+            return "\(modelName) is small (~\(size)) and reloads almost instantly — Balanced and Frugal cost you little here."
+        }
+        switch policy {
+        case .fastest:
+            return "Keeps \(modelName) loaded (~\(size) on disk, similar in memory). Every dictation starts instantly."
+        case .balanced:
+            return "Keeps \(modelName) loaded (~\(size)), then frees it after \(idleLabel) idle. The next dictation reloads it with a brief delay."
+        case .frugal:
+            return "Frees \(modelName)’s ~\(size) after each dictation and reloads it next time — lowest memory use, with a brief delay before each."
+        }
+    }
+
+    static func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 }

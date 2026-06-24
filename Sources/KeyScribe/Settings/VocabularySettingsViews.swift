@@ -127,9 +127,7 @@ struct VocabularySettingsView: View {
     var body: some View {
         Form {
             Section("Dictionary") {
-                Text("Words KeyScribe should recognize as written — names, product terms, jargon. A best-effort recognition hint whose strength varies by model, and always a hint to the AI rewrite that these terms are valid spellings when a rewrite is enabled.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("Keep it short. Add a word only when KeyScribe keeps getting it wrong. A long dictionary can pull recognition toward words you rarely say. When a phrase is always misheard the same way, a replacement fixes it exactly — add one below instead.")
+                Text("Add names, product terms, and jargon that KeyScribe repeatedly gets wrong. Keep this list short: too many terms can reduce recognition accuracy.")
                     .font(.caption).foregroundStyle(.secondary)
                 DictionaryRows(words: dictionary.words, onAdd: dictionary.add, onRemove: dictionary.remove)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
@@ -142,7 +140,7 @@ struct VocabularySettingsView: View {
                 }
             }
             Section("Replacements") {
-                Text("Automatically swap a heard phrase for your text. Runs before any AI rewrite. Pattern matching is under Advanced replacements.")
+                Text("Replace a consistently misheard phrase with the text you want. Runs before any AI rewrite. Pattern matching is under Advanced Replacements.")
                     .font(.caption).foregroundStyle(.secondary)
                 ReplacementRows(
                     rules: replacements.rules,

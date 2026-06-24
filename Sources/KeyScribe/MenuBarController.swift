@@ -35,6 +35,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusLine = NSMenuItem(title: "Status: starting…", action: nil, keyEquivalent: "")
     private let nextModeLine = NSMenuItem(title: "Next dictation: Automatic", action: nil, keyEquivalent: "")
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
+    private let addDictionaryItem = NSMenuItem(title: "Add Dictionary Entry…", action: nil, keyEquivalent: "")
+    private let addReplacementItem = NSMenuItem(title: "Add Replacement…", action: nil, keyEquivalent: "")
     private let modesMenu = NSMenu()
 
     private let badgeDot: NSView = {
@@ -90,12 +92,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(history)
 
         menu.addItem(.separator())
-        let addDictionary = NSMenuItem(title: "Add Dictionary Entry…", action: #selector(addDictionaryEntry), keyEquivalent: "")
-        addDictionary.target = self
-        menu.addItem(addDictionary)
-        let addReplacement = NSMenuItem(title: "Add Replacement…", action: #selector(addReplacementEntry), keyEquivalent: "")
-        addReplacement.target = self
-        menu.addItem(addReplacement)
+        addDictionaryItem.target = self
+        addDictionaryItem.action = #selector(addDictionaryEntry)
+        menu.addItem(addDictionaryItem)
+        addReplacementItem.target = self
+        addReplacementItem.action = #selector(addReplacementEntry)
+        menu.addItem(addReplacementItem)
 
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -116,6 +118,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func setStatus(_ text: String) { statusLine.title = "Status: \(text)" }
     func setHasResult(_ hasResult: Bool) { pasteLastItem.isEnabled = hasResult }
+
+    // Mirror the active (non-shadowed, chord-only) global shortcuts onto the menu items as a
+    // right-aligned glyph. Nil clears it — unset or shadowed shouldn't advertise a shortcut.
+    func setActionShortcuts(addDictionary: KeyDescriptor?, addReplacement: KeyDescriptor?) {
+        apply(addDictionary, to: addDictionaryItem)
+        apply(addReplacement, to: addReplacementItem)
+    }
+
+    private func apply(_ descriptor: KeyDescriptor?, to item: NSMenuItem) {
+        if let (key, modifiers) = descriptor?.menuItemKeyEquivalent {
+            item.keyEquivalent = key
+            item.keyEquivalentModifierMask = modifiers
+        } else {
+            item.keyEquivalent = ""
+            item.keyEquivalentModifierMask = []
+        }
+    }
 
     // Tint the whole glyph red while capture is active (ui_design.md §Dynamic status — recording
     // reflects that capture is active); reverts on commit. The template image takes the tint.

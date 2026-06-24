@@ -15,7 +15,7 @@ final class HistoryController {
         store: HistoryStore,
         addDictionaryWord: @escaping (String) -> Void,
         addReplacement: @escaping (String, String) -> Void,
-        openSettings: @escaping () -> Void
+        openSettings: @escaping (SettingsDestination) -> Void
     ) {
         model = HistoryViewModel(
             store: store, addDictionaryWord: addDictionaryWord,
@@ -95,7 +95,7 @@ private final class HistoryViewModel: ObservableObject {
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Void
     let addReplacement: (String, String) -> Void
-    let openSettings: () -> Void
+    let openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
 
@@ -110,7 +110,7 @@ private final class HistoryViewModel: ObservableObject {
         store: HistoryStore,
         addDictionaryWord: @escaping (String) -> Void,
         addReplacement: @escaping (String, String) -> Void,
-        openSettings: @escaping () -> Void
+        openSettings: @escaping (SettingsDestination) -> Void
     ) {
         self.store = store
         self.addDictionaryWord = addDictionaryWord
@@ -217,7 +217,7 @@ private struct HistoryView: View {
                     } description: {
                         Text("Future dictations appear here when history is enabled.")
                     } actions: {
-                        Button("Open History Settings") { model.openSettings() }
+                        Button("Open History Settings") { model.openSettings(.general) }
                     }
                 } else if model.groups.isEmpty {
                     ContentUnavailableView(
@@ -412,7 +412,15 @@ private struct HistoryDetailView: View {
 
     private var corrections: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Corrections").font(.headline)
+            HStack {
+                Text("Corrections").font(.headline)
+                Spacer()
+                Button { model.openSettings(.vocabulary) } label: {
+                    Label("Manage Vocabulary…", systemImage: "text.book.closed")
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
             HStack {
                 Button("Create Replacement…") { showReplacementSheet = true }
                 Button("Add to Dictionary…") { showDictionarySheet = true }

@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: history,
             addDictionaryWord: { [weak self] word in _ = self?.configRepository.addDictionaryWord(word) },
             addReplacement: { [weak self] heard, replace in _ = self?.configRepository.addReplacement(heard: heard, replace: replace) },
-            openSettings: { [weak self] in self?.settingsController.present() })
+            openSettings: { [weak self] destination in self?.settingsController.present(destination) })
         correctionPanel = CorrectionPanelController(
             addDictionaryWord: { [weak self] word in _ = self?.configRepository.addDictionaryWord(word) },
             addReplacement: { [weak self] heard, replace in _ = self?.configRepository.addReplacement(heard: heard, replace: replace) })
@@ -175,6 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let actionBindings = self.actionBindings(shadowed: shadowed)
+
+        let actionDescriptors = Dictionary(uniqueKeysWithValues: actionBindings.map { ($0.id, $0.descriptor) })
+        menu.setActionShortcuts(
+            addDictionary: actionDescriptors[GlobalHotkey.dictionaryId],
+            addReplacement: actionDescriptors[GlobalHotkey.replacementId])
 
         if hotkey == nil {
             hotkey = HotkeyMonitor(

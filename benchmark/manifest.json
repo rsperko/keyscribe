@@ -1,20 +1,1213 @@
 {
   "entries": [
-    { "id": "01", "text": "The quarterly report is due on Friday afternoon.", "biasTerms": [] },
-    { "id": "02", "text": "Can you move our meeting to three o'clock tomorrow?", "biasTerms": [] },
-    { "id": "03", "text": "I think we should rewrite this paragraph to be more concise.", "biasTerms": [] },
-    { "id": "04", "text": "Let's deploy the service to Kubernetes before the demo.", "biasTerms": ["Kubernetes"] },
-    { "id": "05", "text": "I love using KeyScribe for dictation every single day.", "biasTerms": ["KeyScribe"] },
-    { "id": "06", "text": "The Postgres query is slow, so check the Grafana dashboard.", "biasTerms": ["Postgres", "Grafana"] },
-    { "id": "07", "text": "Ask Anthropic whether Claude supports tool use.", "biasTerms": ["Anthropic", "Claude"] },
-    { "id": "08", "text": "We pinned the WhisperKit and FluidAudio forks in the package.", "biasTerms": ["WhisperKit", "FluidAudio"] },
-    { "id": "09", "text": "Run the model through oMLX and Parakeet for comparison.", "biasTerms": ["oMLX", "Parakeet"] },
-    { "id": "10", "text": "The patient presented with tachycardia and mild dyspnea.", "biasTerms": ["tachycardia", "dyspnea"] },
-    { "id": "11", "text": "Configure OAuth and rotate the JWT signing key.", "biasTerms": ["OAuth", "JWT"] },
-    { "id": "12", "text": "Send the subpoena to opposing counsel by end of day.", "biasTerms": ["subpoena"] },
-    { "id": "13", "text": "Our GraphQL endpoint needs a new resolver for invoices.", "biasTerms": ["GraphQL"] },
-    { "id": "14", "text": "Schedule a sync with Rajesh and Anya next Tuesday.", "biasTerms": ["Rajesh", "Anya"] },
-    { "id": "15", "text": "The Nginx config proxies requests to the Redis cache layer.", "biasTerms": ["Nginx", "Redis"] },
-    { "id": "16", "text": "When I dictate long passages I want the engine to keep up without dropping words, handle natural pauses, and still get domain terms like Kubernetes and Prometheus right.", "biasTerms": ["Kubernetes", "Prometheus"] }
+    {
+      "id": "01",
+      "text": "The quarterly report is due on Friday afternoon.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "02",
+      "text": "Can you move our meeting to three o'clock tomorrow?",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "03",
+      "text": "I think we should rewrite this paragraph to be more concise.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "04",
+      "text": "Let's deploy the service to Kubernetes before the demo.",
+      "biasTerms": [
+        "Kubernetes"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "05",
+      "text": "I love using KeyScribe for dictation every single day.",
+      "biasTerms": [
+        "KeyScribe"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "06",
+      "text": "The Postgres query is slow, so check the Grafana dashboard.",
+      "biasTerms": [
+        "Postgres",
+        "Grafana"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "07",
+      "text": "Ask Anthropic whether Claude supports tool use.",
+      "biasTerms": [
+        "Anthropic",
+        "Claude"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "08",
+      "text": "We pinned the WhisperKit and FluidAudio forks in the package.",
+      "biasTerms": [
+        "WhisperKit",
+        "FluidAudio"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "09",
+      "text": "Run the model through oMLX and Parakeet for comparison.",
+      "biasTerms": [
+        "oMLX",
+        "Parakeet"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "10",
+      "text": "The patient presented with tachycardia and mild dyspnea.",
+      "biasTerms": [
+        "tachycardia",
+        "dyspnea"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "11",
+      "text": "Configure OAuth and rotate the JWT signing key.",
+      "biasTerms": [
+        "OAuth",
+        "JWT"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "12",
+      "text": "Send the subpoena to opposing counsel by end of day.",
+      "biasTerms": [
+        "subpoena"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "13",
+      "text": "Our GraphQL endpoint needs a new resolver for invoices.",
+      "biasTerms": [
+        "GraphQL"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "14",
+      "text": "Schedule a sync with Rajesh and Anya next Tuesday.",
+      "biasTerms": [
+        "Rajesh",
+        "Anya"
+      ],
+      "tier": "T1",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "15",
+      "text": "The Nginx config proxies requests to the Redis cache layer.",
+      "biasTerms": [
+        "Nginx",
+        "Redis"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "16",
+      "text": "When I dictate long passages I want the engine to keep up without dropping words, handle natural pauses, and still get domain terms like Kubernetes and Prometheus right.",
+      "biasTerms": [
+        "Kubernetes",
+        "Prometheus"
+      ],
+      "tier": "T1",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c01",
+      "text": "all good. yes.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c02",
+      "text": "yep, will do.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c03",
+      "text": "gotcha, thanks.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c04",
+      "text": "that one is done.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c05",
+      "text": "good catch, fixed.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c06",
+      "text": "let me push mine first.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c07",
+      "text": "came into a full disk this morning, so i am doing some clean up before i push.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c08",
+      "text": "my machine is stuck again, still pushing mine, but i can pair whenever you are free.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c09",
+      "text": "i found a much smaller model that seems to be working well for me so far.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c10",
+      "text": "i am leaving some robots digging on it overnight and i will see what they find.",
+      "biasTerms": [
+        "robots"
+      ],
+      "tier": "T1",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c11",
+      "text": "git is not letting me push, naturally, the one time i am in a hurry.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c12",
+      "text": "We had a solid meeting where we identified the gap and closed it before end of day.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c13",
+      "text": "I am cranking out the pull requests now, and I am pushing for reviews so we can ship this week.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c14",
+      "text": "That was my miss. I did not communicate the urgency clearly, and I should have flagged it sooner.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c15",
+      "text": "I am probably wrong about this, but I think we can remove that step entirely.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c16",
+      "text": "The rebase failed with merge conflicts, so I will resolve them by hand and push again.",
+      "biasTerms": [
+        "rebase"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c17",
+      "text": "Rebaking the primary key means touching every row, so we probably do not want that.",
+      "biasTerms": [
+        "primary key"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c18",
+      "text": "The Postgres query is slow, so check the Grafana dashboard before we deploy.",
+      "biasTerms": [
+        "Postgres",
+        "Grafana"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c19",
+      "text": "Add the label to the pull request to put it in the merge queue.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c20",
+      "text": "Configure OAuth and rotate the signing key before this goes to production.",
+      "biasTerms": [
+        "OAuth"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c21",
+      "text": "The CI run is flaky, so I retried it twice and it is green now.",
+      "biasTerms": [
+        "CI"
+      ],
+      "tier": "T1",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c22",
+      "text": "I had to fork three projects to get word bias working across the different STT engines.",
+      "biasTerms": [
+        "STT"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c23",
+      "text": "It should say FluidAudio, not fluid audio, so the dictionary bias has to catch it.",
+      "biasTerms": [
+        "FluidAudio"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c24",
+      "text": "Run the clip through Parakeet and WhisperKit and compare the word error rate.",
+      "biasTerms": [
+        "Parakeet",
+        "WhisperKit"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c25",
+      "text": "The Qwen model is the speed and accuracy sweet spot, but the larger one wins on recall.",
+      "biasTerms": [
+        "Qwen"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c26",
+      "text": "I have found Gemini Flash to be good enough for the rewrite pass once the secrets are tokenized out.",
+      "biasTerms": [
+        "Gemini Flash"
+      ],
+      "tier": "T1",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c27",
+      "text": "Can you move our sync with Priya and Marcus to three o'clock tomorrow?",
+      "biasTerms": [
+        "Priya",
+        "Marcus"
+      ],
+      "tier": "T1",
+      "tags": [
+        "names",
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c28",
+      "text": "I will email Eleanor the notes and loop in Thiago before the review.",
+      "biasTerms": [
+        "Eleanor",
+        "Thiago"
+      ],
+      "tier": "T1",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c29",
+      "text": "Invoice 4072 is due on Friday the 13th, total is $1,284.50.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c30",
+      "text": "Meet me at 9:45 a.m. on June 24th, room 218, bring the laptop.",
+      "biasTerms": [],
+      "tier": "T1",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c31",
+      "text": "i did a spike yesterday that i want to chat about, it is rough but the idea is there.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c32",
+      "text": "sorry, had to deal with a personal thing, i can meet whenever works for you.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c33",
+      "text": "once i push mine and compare the two, i should be ready to pair on it.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c34",
+      "text": "i really do not have much on my plate today, just a personal project i am focused on.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c35",
+      "text": "the robots are giving me really high estimates, so i want to vet that before i share.",
+      "biasTerms": [
+        "robots"
+      ],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c36",
+      "text": "i cannot ship code to save my life today, third failed build in a row.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c37",
+      "text": "i started burning my own tokens on this over the weekend and i like where it landed.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c38",
+      "text": "still pressing the numbers, i feel like that estimate is high, or something like that.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c39",
+      "text": "i think so, let me double check and get back to you in a few minutes.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c40",
+      "text": "it broke my computer during the build, but i still love being able to distill a long thread.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c41",
+      "text": "I am going to let them dig a bit more before I lock them down on timelines.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c42",
+      "text": "I worked in the evening because I am fixated on the dictation project, not because anyone asked.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c43",
+      "text": "You are good, I did not double check the numbers, so the mistake is on me.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c44",
+      "text": "Is it worse to not remember that, or to start the whole thing over again?",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c45",
+      "text": "I am obviously relying heavily on the robots, and I am verifying the status as I go.",
+      "biasTerms": [
+        "robots"
+      ],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c46",
+      "text": "I would like to get this change in the queue as soon as possible, I would appreciate some eyes on it.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c47",
+      "text": "I do not love that approach, because it pushes the complexity onto every caller.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c48",
+      "text": "We do have to give some sense of timelines, even if the later steps are still fuzzy.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c49",
+      "text": "I am starting on the pull requests to catch this back up, that delay was my fault.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c50",
+      "text": "Any reason this does not guard the early return? I might be missing something obvious.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c51",
+      "text": "The migration is reversible, but it locks the table, so we should run it off hours.",
+      "biasTerms": [
+        "migration"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c52",
+      "text": "Back up the data first, then run the backfill in batches so we do not saturate the database.",
+      "biasTerms": [
+        "backfill"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c53",
+      "text": "The webhook fans out to multiple topics from a single change, which is what we wanted.",
+      "biasTerms": [
+        "webhook"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c54",
+      "text": "Deploy the service to Kubernetes and watch the latency before the demo.",
+      "biasTerms": [
+        "Kubernetes"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c55",
+      "text": "The GraphQL endpoint needs a new resolver, and the depth-first path already exists.",
+      "biasTerms": [
+        "GraphQL"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c56",
+      "text": "The Nginx config proxies the request to the Redis cache layer before it hits the app.",
+      "biasTerms": [
+        "Nginx",
+        "Redis"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c57",
+      "text": "Check whether the flag is at one hundred percent before you remove the legacy branch.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c58",
+      "text": "I think we need to remove the translations, they are not used anywhere anymore.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c59",
+      "text": "The selective tests went flaky three times, so I escalated it instead of burning the retry budget.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c60",
+      "text": "Pin the dependency to the commit, the latest release has the empty output bug.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c61",
+      "text": "Run EXPLAIN on the query and see if it is doing a sequential scan on that column.",
+      "biasTerms": [
+        "EXPLAIN"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c62",
+      "text": "The index is missing on the foreign key, that is why the join is slow.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c63",
+      "text": "The token to original map stays in memory only, it is never logged or written to history.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c64",
+      "text": "Verbatim spans get tokenized first, and redaction tokens get added last, just before the rewrite.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c65",
+      "text": "Moonshine has no on-device bias path, so I badged it as no dictionary bias.",
+      "biasTerms": [
+        "Moonshine"
+      ],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c66",
+      "text": "The MLX metallib is a hard runtime requirement, Qwen crashes without it.",
+      "biasTerms": [
+        "MLX",
+        "Qwen"
+      ],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c67",
+      "text": "Paste is the primary insertion path, it lands across Electron and native apps and undoes in one keystroke.",
+      "biasTerms": [
+        "Electron"
+      ],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c68",
+      "text": "The Globe key and right Option are both capturable and distinguishable through the event tap.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c69",
+      "text": "Parakeet bias is constrained CTC keyword spotting, not a blind post-processing rescorer.",
+      "biasTerms": [
+        "Parakeet",
+        "CTC"
+      ],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c70",
+      "text": "Whisper bias breaks in every stock release because of the prompt token bug.",
+      "biasTerms": [
+        "Whisper"
+      ],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c71",
+      "text": "When the privacy toggle is on, the context checkboxes are forced off and locked.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c72",
+      "text": "The post rewrite gate checks that every redaction token came back exactly once, or it falls back locally.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c73",
+      "text": "Schedule a sync with Rajesh and Anya next Tuesday and send the agenda ahead of time.",
+      "biasTerms": [
+        "Rajesh",
+        "Anya"
+      ],
+      "tier": "T2",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c74",
+      "text": "Ask Sofia whether the design review can slip to Thursday morning.",
+      "biasTerms": [
+        "Sofia"
+      ],
+      "tier": "T2",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c75",
+      "text": "Loop in Dmitri and Yuki on the thread, they own that part of the system.",
+      "biasTerms": [
+        "Dmitri",
+        "Yuki"
+      ],
+      "tier": "T2",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c76",
+      "text": "I will introduce you to Hassan, he has the most context on the older code.",
+      "biasTerms": [
+        "Hassan"
+      ],
+      "tier": "T2",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c77",
+      "text": "The build finished in 4 minutes and 32 seconds, down from 11 minutes yesterday.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c78",
+      "text": "Resident memory sits around 38 megabytes, and the transcribe call is roughly 80 milliseconds.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c79",
+      "text": "Open parenthesis, see the footnote, close parenthesis, then continue the sentence.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c80",
+      "text": "Reschedule to 2026-06-30 at 4 p.m., and cancel the 10:15 if it conflicts.",
+      "biasTerms": [],
+      "tier": "T2",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c81",
+      "text": "The patient presented with tachycardia and mild dyspnea overnight.",
+      "biasTerms": [
+        "tachycardia",
+        "dyspnea"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c82",
+      "text": "Send the subpoena to opposing counsel by end of day.",
+      "biasTerms": [
+        "subpoena"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c83",
+      "text": "The espresso machine needs a new portafilter gasket and a backflush.",
+      "biasTerms": [
+        "portafilter"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c84",
+      "text": "We tuned the carburetor and replaced the alternator on the old wagon.",
+      "biasTerms": [
+        "carburetor",
+        "alternator"
+      ],
+      "tier": "T2",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c85",
+      "text": "When I dictate a long passage I want the engine to keep up without dropping words, handle the natural pauses where I stop to think, and still get the domain terms right, things like Kubernetes and Postgres and FluidAudio, even when I am talking quickly and running sentences together the way I actually do when I am heads down on a problem.",
+      "biasTerms": [
+        "Kubernetes",
+        "Postgres",
+        "FluidAudio"
+      ],
+      "tier": "T3",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c86",
+      "text": "Here is where I landed after the weekend. I found a much smaller model that is memory efficient, I got word bias working across every engine, and I wired the whole pipeline together so a dictation goes from speech, to the text stages, to an optional rewrite, and inserts atomically. It still takes a moment when there is a rewrite in the loop, but it is good enough that I have been using it every single day.",
+      "biasTerms": [],
+      "tier": "T3",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c87",
+      "text": "The plan is straightforward even if it is tedious. I am going to land the early pull requests first, get reviews while the later steps are still being figured out, and give a rough sense of timelines without pretending the hard part is solved. I do not know exactly how long the last step will take, so I would rather say that out loud than guess and be wrong later.",
+      "biasTerms": [],
+      "tier": "T3",
+      "tags": [
+        "long",
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c88",
+      "text": "I am going to walk through my reasoning so you can poke holes in it. We could rebake the primary key, but that touches every row and it is a large table, so the cost is real. The alternative avoids the extra hop entirely, which is why I am leaning that way, but I am not attached to it, and if you see a problem I am missing I would genuinely rather hear it now than after we ship.",
+      "biasTerms": [
+        "primary key"
+      ],
+      "tier": "T3",
+      "tags": [
+        "long",
+        "status"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c89",
+      "text": "Recording for a benchmark is more work than people expect. You read each line exactly as written, save it as its own clip, keep your normal microphone and your normal pace, and then you re-record a handful of them in a slightly noisy room so you have something to measure robustness against. It is an afternoon of talking plus the time to verify every transcript, which is why I am building it up in tiers instead of all at once.",
+      "biasTerms": [],
+      "tier": "T3",
+      "tags": [
+        "long"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c90",
+      "text": "The privacy story is the part I care about most. Speech recognition is always on device, there is no cloud transcription ever, and the only thing that can leave the machine is an optional rewrite that I key myself. Before that call goes out, anything sensitive is tokenized into a nonce, the rewrite happens over the redacted text, and the original is restored locally afterward. There is no telemetry and no analytics, none of it is collected.",
+      "biasTerms": [],
+      "tier": "T3",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal"
+    },
+    {
+      "id": "c91",
+      "text": "Let me give you the full picture in one go, because I keep explaining it in pieces and it comes out scattered. The product is a local first dictation tool for the Mac. You hold a key, you talk, you let go, and the text is inserted into whatever app you are in, all in a single undoable action. Recognition runs entirely on device, so your voice never leaves the machine. There are several engines you can choose from, Parakeet, Whisper, Qwen, Moonshine and a couple of others, and each one supports a dictionary so that when I say FluidAudio or WhisperKit or Kubernetes it comes out spelled correctly instead of as three lowercase words. On top of recognition there is an optional rewrite step that uses a language model, but that is the only thing that ever touches the network, and only after the sensitive parts of the transcript have been swapped out for placeholder tokens. The rewrite happens over that redacted text, the model never sees the real values, and the placeholders are filled back in locally once it returns. If a single placeholder does not come back exactly once, the whole thing falls back to the local transcript and tells me, because a dropped token would either leak something I redacted or corrupt the part I wanted left alone. That gate is a hard check, not a nice to have. The rest is configuration. A mode is just a named bag of settings that a generic pipeline runs, so adding a new one is data, never code, and I can route to different prompts based on a trigger phrase at the end of what I say. It is the kind of thing I would never have finished without leaning hard on the robots, and honestly it is the most fun I have had building something in a long time.",
+      "biasTerms": [
+        "Parakeet",
+        "Whisper",
+        "Qwen",
+        "Moonshine",
+        "FluidAudio",
+        "WhisperKit",
+        "Kubernetes",
+        "robots"
+      ],
+      "tier": "T3",
+      "tags": [
+        "stress",
+        "proj"
+      ],
+      "condition": "normal"
+    }
   ]
 }
