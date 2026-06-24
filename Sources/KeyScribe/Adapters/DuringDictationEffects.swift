@@ -36,27 +36,46 @@ final class DuringDictationEffects {
         return sound
     }
 
-    func begin(_ config: Settings.DuringDictation) {
+    // First-party ~110ms cue bundled in Resources/ (NOT a system sound): short so gating capture on it
+    // costs little, and original so the GPLv3 bundle ships no redistributed Apple audio. Loaded eagerly
+    // (byReference: false) and cached so play() never touches disk. Absent (unbundled dev run) → no cue.
+    private func startCueSound() -> NSSound? {
+        if let cached = soundCache[Self.startCueKey] { return cached }
+        guard let url = Bundle.main.url(forResource: "start-cue", withExtension: "wav"),
+              let sound = NSSound(contentsOf: url, byReference: false) else { return nil }
+        soundCache[Self.startCueKey] = sound
+        return sound
+    }
+
+    private static let startCueKey = "__start-cue"
+
+    // Returns how long the caller should defer capture so the start cue stays out of the recording
+    // (Option A cue gating): the cue's duration when one plays, else 0 (sounds off / cue absent → no
+    // gating). The output mute follows the same deferral so muting never swallows the cue.
+    @discardableResult
+    func begin(_ config: Settings.DuringDictation) -> TimeInterval {
         generation &+= 1
         if config.keepDisplayAwake { acquireDisplayAssertion() }
-        let startCue = config.sounds ? sound(named: "Tink") : nil
+        let startCue = config.sounds ? startCueSound() : nil
         startCue?.play()
-        guard config.muteSystemAudio else { return }
-        // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since the
-        // cue routes through that same device. So with the cue OFF there is nothing to wait for and the
-        // mute is instant; with the cue ON we defer past its length. The generation guard drops the mute
-        // if the dictation already ended (a sub-cue-length press must never leave the output muted).
-        if let startCue {
-            let gen = generation
-            let delay = startCue.duration
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(delay))
-                guard let self, self.generation == gen else { return }
-                self.muteOutput()
+        if config.muteSystemAudio {
+            // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since
+            // the cue routes through that same device. With the cue OFF the mute is instant; with the cue
+            // ON we defer past its length. The generation guard drops the mute if the dictation already
+            // ended (a sub-cue-length press must never leave the output muted).
+            if let startCue {
+                let gen = generation
+                let delay = startCue.duration
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard let self, self.generation == gen else { return }
+                    self.muteOutput()
+                }
+            } else {
+                muteOutput()
             }
-        } else {
-            muteOutput()
         }
+        return startCue?.duration ?? 0
     }
 
     func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {

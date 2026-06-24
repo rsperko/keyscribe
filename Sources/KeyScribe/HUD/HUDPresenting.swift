@@ -18,7 +18,7 @@ enum HUDErrorAction: Equatable {
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
-    case recording(mode: String, level: Float)
+    case recording(mode: String?, level: Float)
     case transcribing(mode: String)
     case rewriting(connection: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)

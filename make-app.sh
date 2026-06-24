@@ -49,6 +49,8 @@ else
 fi
 # Bundled model self-test clip (loaded via Bundle.main at runtime).
 cp Resources/model-selftest.wav "$APP/Contents/Resources/model-selftest.wav"
+# First-party "now listening" start cue (loaded via Bundle.main at runtime).
+cp Resources/start-cue.wav "$APP/Contents/Resources/start-cue.wav"
 # Info.plist is a tracked source file (Resources/Info.plist); stamp the git-derived version into it.
 echo "== Info.plist: $SHORT_VERSION (build $BUILD_VERSION) =="
 sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \

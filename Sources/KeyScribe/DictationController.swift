@@ -45,6 +45,12 @@ final class DictationController {
     private var pendingHeardTranscript: String?
     private var rewriteEscapeTask: Task<Void, Never>?
     private var recordingLimitTask: Task<Void, Never>?
+    // Phase-A mode resolution runs async only when a URL probe is needed; transcribeAndInsert awaits it
+    // before reading the mode. captureStartTask defers capture+HUD past the start cue (Option A gating);
+    // captureStarted gates the async mode re-render so it never shows the HUD before the mic is live.
+    private var modeResolveTask: Task<Void, Never>?
+    private var captureStartTask: Task<Void, Never>?
+    private var captureStarted = false
 
     // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
     // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
@@ -95,7 +101,7 @@ final class DictationController {
         let quantized = (level * 20).rounded() / 20
         guard quantized != lastRenderedLevel else { return }
         lastRenderedLevel = quantized
-        hud?.render(.recording(mode: currentModeName, level: quantized))
+        hud?.render(.recording(mode: activeMode?.name, level: quantized))
     }
 
     // Fired after every terminal insertion outcome. First run uses it to require one real successful
@@ -236,17 +242,57 @@ final class DictationController {
         capturedSnapshot = snapshot()
         capturedPlan = config.resolved
         capturedEngine = provider.active
-        resolveMode(triggerKey: triggerKey)
+        captureStarted = false
+        activeMode = nil
+        eligibleModes = []
+        routingContext = RoutingContext()
+
+        // Resolve the Phase-A mode. The only slow step is the browser-URL probe (a synchronous AppleScript
+        // round trip) for URL-routed modes; with no URL-constrained mode we resolve inline so the mode is
+        // known before capture. When a probe IS needed we resolve off the main thread so it never blocks
+        // the cue, capture, or HUD — the mode is only needed at commit (transcribeAndInsert awaits this),
+        // and the HUD fills its mode in once the probe returns.
+        if ModeResolver.requiresURLContext(plan.modes) {
+            modeResolveTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.resolveModeProbing(triggerKey: triggerKey)
+                if self.machine.state == .recording, self.captureStarted {
+                    self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel)))
+                }
+            }
+        } else {
+            modeResolveTask = nil
+            applyResolvedMode(triggerKey: triggerKey, url: nil)
+        }
+
         warmActiveEngine()
-        effects.begin(settings.duringDictation)
+
+        // Option A cue gating: the start cue plays now and capture + HUD come up only after it finishes,
+        // so the cue never lands in the recording. No cue (sounds off / unbundled) → zero delay → capture
+        // and HUD fire immediately. The cue is itself the "starting" signal during the gap, so the HUD is
+        // never shown claiming to listen before the mic is live.
+        let cueDelay = effects.begin(settings.duringDictation)
+        if cueDelay > 0 {
+            captureStartTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(cueDelay))
+                guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
+                self.beginCapture()
+            }
+        } else {
+            beginCapture()
+        }
+    }
+
+    private func beginCapture() {
         lastRenderedLevel = 0
-        hud?.render(.recording(mode: currentModeName, level: 0))
         do {
             _ = try audio.start(sampleRate: activeEngine.captureSampleRate) { [weak self] level in
                 self?.levelCoalescer.submit(level)
             }
+            captureStarted = true
             onRecordingChanged?(true)
             startRecordingLimit()
+            hud?.render(.recording(mode: activeMode?.name, level: 0))
         } catch {
             finishError("Could not start the microphone", action: .openMicrophoneSettings)
         }
@@ -278,6 +324,11 @@ final class DictationController {
     private func releaseCapturedPlan() {
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
+        modeResolveTask?.cancel()
+        modeResolveTask = nil
+        captureStartTask?.cancel()
+        captureStartTask = nil
+        captureStarted = false
         capturedPlan = nil
         capturedEngine = nil
         // An engine the user switched away from mid-dictation was held back from eviction to avoid
@@ -321,13 +372,12 @@ final class DictationController {
     }
 
     // Phase A (design.md §4.3): resolve the mode from app/URL context before recording. A non-nil
-    // triggerKey (from a mode's own HotkeyMonitor binding) forces that mode, overriding context.
-    private func resolveMode(triggerKey: String?) {
+    // triggerKey (from a mode's own HotkeyMonitor binding) forces that mode, overriding context. The
+    // browser URL is fetched only when a URL-constrained mode exists (resolveModeProbing); otherwise
+    // url is nil here.
+    private func applyResolvedMode(triggerKey: String?, url: String?) {
         let modes = plan.modes
-        let bundleId = capturedSnapshot?.bundleId
-        let url = (ModeResolver.requiresURLContext(modes) ? bundleId : nil)
-            .flatMap { ContextProbe.browserURL(forBundleId: $0) }
-        let context = RoutingContext(bundleId: bundleId, url: url)
+        let context = RoutingContext(bundleId: capturedSnapshot?.bundleId, url: url)
         routingContext = context
         eligibleModes = ModeResolver.eligibleModes(modes, context: context)
         let automaticMode = ModeResolver.resolvePhaseA(
@@ -335,6 +385,14 @@ final class DictationController {
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
         activeMode = override ?? automaticMode
+    }
+
+    private func resolveModeProbing(triggerKey: String?) async {
+        var url: String?
+        if let bundleId = capturedSnapshot?.bundleId {
+            url = await ContextProbe.browserURLAsync(forBundleId: bundleId)
+        }
+        applyResolvedMode(triggerKey: triggerKey, url: url)
     }
 
     // Dictionary terms fed to the engine's recognition bias before STT. Only the Phase-A mode's
@@ -363,6 +421,7 @@ final class DictationController {
     }
 
     private func transcribeAndInsert(url: URL) async {
+        await modeResolveTask?.value
         let engine = activeEngine
         let raw: String
         do {

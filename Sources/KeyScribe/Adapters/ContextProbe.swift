@@ -73,27 +73,30 @@ enum ContextProbe {
     // dialects (WebKit document- vs Chromium tab-based); we try both against the same app rather
     // than map which one it speaks. A non-browser sends no Apple event, so the Automation prompt
     // only appears for an actual browser, and only once (permission is per source→target pair).
-    static func browserURL(forBundleId bundleId: String) -> String? {
+    //
+    // The Apple Event is a synchronous cross-process round trip with no per-call timeout (NSAppleScript
+    // uses kAEDefaultTimeout, ~2 min), so it suspends rather than parking the main thread — the dictation
+    // flow (cue, capture, HUD) is never blocked while a URL-routed mode resolves. The AppleScript runs on
+    // a global queue (not the cooperative pool, which a 2-min beachball would starve); whichever of the
+    // fetch or the 0.6s timeout fires first wins, and a late fetch result is dropped.
+    static func browserURLAsync(forBundleId bundleId: String) async -> String? {
         guard handlesHTTPS(bundleId) else { return nil }
-        // The Apple Event is a synchronous cross-process round trip with no per-call timeout
-        // (NSAppleScript uses kAEDefaultTimeout, ~2 min). This runs on the press-start path, so a
-        // beachballing browser would otherwise freeze the main thread there. Run it off-main and wait
-        // out a short bounded window; on timeout the mode resolves without URL context rather than hang.
-        let box = ResultBox()
-        let done = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async {
-            box.set(Self.fetchBrowserURL(bundleId))
-            done.signal()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            let once = OnceResume()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let url = fetchBrowserURL(bundleId)
+                if once.claim() { continuation.resume(returning: url) }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.6) {
+                if once.claim() { continuation.resume(returning: nil) }
+            }
         }
-        guard done.wait(timeout: .now() + 0.6) == .success else { return nil }
-        return box.get()
     }
 
-    private final class ResultBox: @unchecked Sendable {
+    private final class OnceResume: @unchecked Sendable {
         private let lock = NSLock()
-        private var value: String?
-        func set(_ v: String?) { lock.lock(); value = v; lock.unlock() }
-        func get() -> String? { lock.lock(); defer { lock.unlock() }; return value }
+        private var fired = false
+        func claim() -> Bool { lock.lock(); defer { lock.unlock() }; if fired { return false }; fired = true; return true }
     }
 
     nonisolated private static func fetchBrowserURL(_ bundleId: String) -> String? {
