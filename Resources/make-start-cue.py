@@ -1,39 +1,39 @@
 #!/usr/bin/env python3
 # Generates start-cue.wav, KeyScribe's "now listening" cue. Original first-party synthesis — no
 # system or third-party audio is sampled — so the GPLv3 bundle ships only assets we can license.
-# A short (~110 ms) rising two-tone blip with a fast attack and exponential decay. Re-run from
-# Resources/ to regenerate: `python3 make-start-cue.py`.
+# A short (~95 ms) low percussive "woodblock": a 420 Hz tone with one inharmonic partial and a very
+# fast decay, normalized to a fixed peak. Kept brief so gating capture on it costs little.
+# Re-run from Resources/ to regenerate: `python3 make-start-cue.py`.
 import math
 import struct
 import wave
 
 SAMPLE_RATE = 44_100
-DURATION = 0.11
-ATTACK = 0.004
-DECAY_TAU = 0.028
+DURATION = 0.095
+ATTACK = 0.005
+DECAY_TAU = 0.018
 TAIL = 0.012
-PEAK = 0.45
-
-
-def envelope(t):
-    if t < ATTACK:
-        return t / ATTACK
-    return math.exp(-(t - ATTACK) / DECAY_TAU)
+PEAK = 0.5
+FREQ = 420.0
+PARTIALS = ((1.0, 1.0), (2.76, 0.25))
 
 
 def sample(t):
-    freq = 1180 + 220 * (t / DURATION)
-    tone = math.sin(2 * math.pi * freq * t) + 0.35 * math.sin(2 * math.pi * 2 * freq * t)
-    value = tone * envelope(t) * PEAK
+    if t < ATTACK:
+        env = 0.5 * (1 - math.cos(math.pi * t / ATTACK))
+    else:
+        env = math.exp(-(t - ATTACK) / DECAY_TAU)
+    tone = sum(amp * math.sin(2 * math.pi * FREQ * mult * t) for mult, amp in PARTIALS)
+    value = env * tone
     if t > DURATION - TAIL:
         value *= (DURATION - t) / TAIL
-    return max(-1.0, min(1.0, value))
+    return value
 
 
 frame_count = int(SAMPLE_RATE * DURATION)
-frames = b"".join(
-    struct.pack("<h", int(sample(i / SAMPLE_RATE) * 32_767)) for i in range(frame_count)
-)
+raw = [sample(i / SAMPLE_RATE) for i in range(frame_count)]
+gain = PEAK / max(1e-9, max(abs(v) for v in raw))
+frames = b"".join(struct.pack("<h", int(max(-1.0, min(1.0, v * gain)) * 32_767)) for v in raw)
 
 with wave.open("start-cue.wav", "w") as out:
     out.setnchannels(1)

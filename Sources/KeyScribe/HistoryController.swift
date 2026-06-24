@@ -288,9 +288,9 @@ private struct HistoryDetailView: View {
     let entry: HistoryEntry
     @ObservedObject var model: HistoryViewModel
     @State private var stage: DetailStage = .result
-    @State private var dictionaryTerm = ""
-    @State private var heard = ""
-    @State private var replace = ""
+    @State private var selectedText = ""
+    @State private var showReplacementSheet = false
+    @State private var showDictionarySheet = false
 
     // Transformed is a distinct stage only when local edits actually changed the transcript; otherwise
     // Heard already equals Result and the segment would be noise (ui_design.md §8).
@@ -315,50 +315,61 @@ private struct HistoryDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     stageContent
-                    Divider()
-                    corrections
+                    if stage != .details {
+                        Divider()
+                        corrections
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(24)
-        .onAppear { syncFields() }
         .onChange(of: entry.timestamp) {
-            syncFields()
+            selectedText = ""
             if !stages.contains(stage) { stage = .result }
+        }
+        .onChange(of: stage) { selectedText = "" }
+        .sheet(isPresented: $showReplacementSheet) {
+            CreateReplacementSheet(initialSource: replacementSource) { heard, replace in
+                model.addReplacement(heard, replace)
+                model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : replace)\u{201D}.")
+            }
+        }
+        .sheet(isPresented: $showDictionarySheet) {
+            AddToDictionarySheet(initialTerm: dictionarySource) { term in
+                model.addDictionaryWord(term)
+                model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
+            }
         }
     }
 
     @ViewBuilder private var stageContent: some View {
         switch stage {
-        case .result: stageText(entry.result)
-        case .heard: stageText(entry.heard)
-        case .transformed: stageText(entry.transformed ?? entry.result)
+        case .result: selectable(entry.result)
+        case .heard: selectable(entry.heard)
+        case .transformed: selectable(entry.transformed ?? entry.result)
         case .details: details
         }
     }
 
-    private func stageText(_ value: String) -> some View {
-        Text(value.isEmpty ? "(empty)" : value)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func selectable(_ value: String) -> some View {
+        SelectableText(text: value) { selectedText = $0 }
+            .frame(minHeight: 80, maxHeight: 280)
     }
 
-    private func syncFields() {
-        let trimmedResult = entry.result.trimmingCharacters(in: .whitespacesAndNewlines)
-        dictionaryTerm = trimmedResult.contains(where: \.isWhitespace) ? "" : trimmedResult
-        heard = entry.heard
-        replace = entry.result
+    // The replacement trigger is the misheard fragment, so it comes from the selection (or stays empty
+    // for a deliberate shortcut). It is never prefilled from the whole result: a global rule built from a
+    // paragraph would mangle every dictation containing it.
+    private var replacementSource: String {
+        selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var heardPreview: String {
-        let t = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? "the heard text" : t
-    }
-
-    private var replacePreview: String {
-        let t = replace.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? "(nothing)" : t
+    // A dictionary term is a single word. Prefer the selection; otherwise offer a one-word result.
+    private var dictionarySource: String {
+        let selected = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !selected.isEmpty { return selected }
+        let result = entry.result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.contains(where: \.isWhitespace) ? "" : result
     }
 
     private var header: some View {
@@ -394,32 +405,21 @@ private struct HistoryDetailView: View {
     }
 
     private var corrections: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Corrections").font(.headline)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    TextField("Add a term to the dictionary", text: $dictionaryTerm)
-                    Button("Add to Dictionary") {
-                        model.addDictionaryWord(dictionaryTerm)
-                        dictionaryTerm = ""
-                    }
-                    .disabled(dictionaryTerm.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                Text("Adds to your global dictionary — a recognition hint for every mode that uses it.")
-                    .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Create Replacement…") { showReplacementSheet = true }
+                Button("Add to Dictionary…") { showDictionarySheet = true }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    TextField("Heard", text: $heard)
-                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    TextField("Replace with", text: $replace)
-                    Button("Create Replacement") { model.addReplacement(heard, replace) }
-                        .disabled(heard.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                Text("Adds a global replacement — every mode that uses replacements turns \u{201C}\(heardPreview)\u{201D} into \u{201C}\(replacePreview)\u{201D}.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Text(correctionHint)
+                .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private var correctionHint: String {
+        selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Select the misheard words above first, so the correction targets just that phrase."
+            : "Using your selection \u{201C}\(replacementSource)\u{201D}."
     }
 
     private var details: some View {
@@ -464,6 +464,158 @@ private struct HistoryDetailView: View {
             .font(.caption2)
             .padding(.horizontal, 7).padding(.vertical, 2)
             .background(.quaternary, in: Capsule())
+    }
+}
+
+// A read-only, selectable text area that reports the user's current selection. SwiftUI's
+// `.textSelection` cannot hand back the selected range, and the correction flow needs the exact
+// misheard fragment, so the Heard/Result stages use this AppKit-backed view instead.
+private struct SelectableText: NSViewRepresentable {
+    let text: String
+    let onSelect: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.delegate = context.coordinator
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.textContainerInset = NSSize(width: 0, height: 2)
+        textView.string = text.isEmpty ? "(empty)" : text
+        let scroll = NSScrollView()
+        scroll.documentView = textView
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.onSelect = onSelect
+        guard let textView = scroll.documentView as? NSTextView else { return }
+        let display = text.isEmpty ? "(empty)" : text
+        if textView.string != display {
+            textView.string = display
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var onSelect: (String) -> Void
+        init(onSelect: @escaping (String) -> Void) { self.onSelect = onSelect }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            onSelect((textView.string as NSString).substring(with: textView.selectedRange()))
+        }
+    }
+}
+
+private struct CreateReplacementSheet: View {
+    let initialSource: String
+    let onSave: (String, String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var source: String
+    @State private var replace = ""
+    @FocusState private var focus: Field?
+
+    private enum Field { case source, replace }
+
+    init(initialSource: String, onSave: @escaping (String, String) -> Void) {
+        self.initialSource = initialSource
+        self.onSave = onSave
+        _source = State(initialValue: initialSource)
+    }
+
+    private var sourceTrimmed: String { source.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var replaceTrimmed: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isNoop: Bool {
+        !sourceTrimmed.isEmpty && sourceTrimmed.caseInsensitiveCompare(replaceTrimmed) == .orderedSame
+    }
+    private var canSave: Bool { !sourceTrimmed.isEmpty && !isNoop }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Create Replacement").font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("When KeyScribe hears").font(.caption).foregroundStyle(.secondary)
+                TextField("The misheard words", text: $source)
+                    .textFieldStyle(.roundedBorder).focused($focus, equals: .source).onSubmit { save() }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Replace with").font(.caption).foregroundStyle(.secondary)
+                TextField("What it should say", text: $replace)
+                    .textFieldStyle(.roundedBorder).focused($focus, equals: .replace).onSubmit { save() }
+            }
+            if isNoop {
+                Text("That is the same as what was heard, so it would do nothing.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Applies to future dictations in every mode that uses replacements.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Create Replacement") { save() }
+                    .keyboardShortcut(.defaultAction).disabled(!canSave)
+            }
+        }
+        .padding(20).frame(width: 400)
+        .onAppear { focus = sourceTrimmed.isEmpty ? .source : .replace }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        onSave(sourceTrimmed, replaceTrimmed)
+        dismiss()
+    }
+}
+
+private struct AddToDictionarySheet: View {
+    let initialTerm: String
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var term: String
+    @FocusState private var termFocused: Bool
+
+    init(initialTerm: String, onSave: @escaping (String) -> Void) {
+        self.initialTerm = initialTerm
+        self.onSave = onSave
+        _term = State(initialValue: initialTerm)
+    }
+
+    private var trimmed: String { term.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add to Dictionary").font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Word or term").font(.caption).foregroundStyle(.secondary)
+                TextField("A name, product term, or jargon", text: $term)
+                    .textFieldStyle(.roundedBorder).focused($termFocused)
+                    .onSubmit { save() }
+            }
+            Text("A best-effort recognition hint for future dictations; its strength varies by model. When a phrase is always misheard the same way, a replacement fixes it exactly.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add to Dictionary") { save() }
+                    .keyboardShortcut(.defaultAction).disabled(trimmed.isEmpty)
+            }
+        }
+        .padding(20).frame(width: 400)
+        .onAppear { termFocused = true }
+    }
+
+    private func save() {
+        guard !trimmed.isEmpty else { return }
+        onSave(trimmed)
+        dismiss()
     }
 }
 

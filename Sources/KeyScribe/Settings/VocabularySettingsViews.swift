@@ -117,6 +117,10 @@ private struct RemoveButton: View {
 }
 
 struct VocabularySettingsView: View {
+    // Placeholder until BiasBenchmark measures where added entries start to raise WER on the
+    // real-voice corpus; the nudge threshold should be set from that, not a borrowed number.
+    static let dictionaryAdviceThreshold = 60
+
     @ObservedObject var dictionary: DictionarySettingsModel
     @ObservedObject var replacements: ReplacementsSettingsModel
 
@@ -125,7 +129,13 @@ struct VocabularySettingsView: View {
             Section("Dictionary") {
                 Text("Words KeyScribe should recognize as written — names, product terms, jargon. A best-effort recognition hint whose strength varies by model, and always a hint to the AI rewrite that these terms are valid spellings when a rewrite is enabled.")
                     .font(.caption).foregroundStyle(.secondary)
+                Text("Keep it short. Add a word only when KeyScribe keeps getting it wrong. A long dictionary can pull recognition toward words you rarely say. When a phrase is always misheard the same way, a replacement fixes it exactly — add one below instead.")
+                    .font(.caption).foregroundStyle(.secondary)
                 DictionaryRows(words: dictionary.words, onAdd: dictionary.add, onRemove: dictionary.remove)
+                if dictionary.words.count >= Self.dictionaryAdviceThreshold {
+                    Label("You have \(dictionary.words.count) entries. Large dictionaries can make recognition less accurate, not more. Remove words KeyScribe now gets right, or move always-misheard phrases to Replacements.", systemImage: "info.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if let error = dictionary.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)

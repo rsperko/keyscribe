@@ -119,6 +119,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             presentFirstRun()
         }
+
+        // Warm the HUD window, audio input unit, and resolved config just after launch settles so the
+        // FIRST dictation feels instant — the HUD appears, the mic is ready, and the frozen plan is
+        // built without paying their one-time realization on the hot path (handleStart reads
+        // config.resolved synchronously before the mic starts). Deferred a tick so it never adds to
+        // launch itself.
+        Task { @MainActor [weak self] in
+            self?.hud.prewarm()
+            self?.controller.prewarmCapture()
+            _ = self?.config.resolved
+        }
     }
 
     private func loadSettings() {
@@ -276,7 +287,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.speechModels?.noteInstalled(id)
             },
             selectEngine: { [weak self] id in self?.setEngine(id) },
-            onReadyToDictate: { [weak self] in self?.startListening() },
+            onReadyToDictate: { [weak self] in
+                self?.startListening()
+                self?.controller.prewarmCapture()
+            },
             permissionsOnly: permissionsOnly,
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() }
         ) { [weak self] in
@@ -285,6 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.controller.onDictationCompleted = nil
             self.firstRun = nil
             self.startListening()
+            self.controller.prewarmCapture()
         }
         controller.onDictationCompleted = { [weak self] outcome in
             self?.firstRun?.noteDictation(outcome)

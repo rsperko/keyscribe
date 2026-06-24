@@ -22,6 +22,9 @@ Same name, different identity per machine; that is expected and fine.
 ## Prerequisites
 
 - **macOS 26+ on Apple silicon.**
+- **Swift 6.0+** (declared floor — `swift build` refuses an older toolchain). Last verified on
+  **Swift 6.3** with current Xcode. `make-app.sh` prints the detected vs. verified toolchain and, if
+  yours is older, hints to update Xcode should a compiler error appear — it never blocks the build.
 - **Xcode installed and selected** (the Command Line Tools alone are not enough — the build needs
   the full Xcode for Metal and signing):
 

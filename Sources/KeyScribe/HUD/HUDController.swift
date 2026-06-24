@@ -25,6 +25,14 @@ final class HUDController: HUDPresenting {
         }
     }
 
+    // Build the panel and host view ahead of the first dictation so the first `.recording` render
+    // shows instantly instead of paying NSHostingView + window realization on the hot path. Never
+    // orders the panel on screen — render() does that once state leaves .hidden.
+    func prewarm() {
+        showPanelIfNeeded()
+        panel?.layoutIfNeeded()
+    }
+
     private func showPanelIfNeeded() {
         guard panel == nil else { return }
         let hosting = NSHostingView(rootView: HUDView(

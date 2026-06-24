@@ -10,6 +10,44 @@ APP="KeyScribe.app"
 BIN=".build/release/KeyScribe"
 CONFIG="${1:-release}"
 
+# Preflight: catch the failure modes a fresh clone hits — wrong arch, missing or Command-Line-Tools-
+# only Xcode, absent Metal Toolchain — up front with an actionable message, instead of a cryptic
+# error minutes into the build. Only a non-arm64 / non-macOS host is fatal; everything else (which
+# only affects the optional MLX-based Qwen3-ASR engine) warns and continues. Full guide: BUILD.md.
+echo "== preflight =="
+if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+  echo "!! KeyScribe builds only on Apple-silicon macOS (arm64). Host is $(uname -s)/$(uname -m)." >&2
+  echo "!! The speech engines (FluidAudio / MLX / CoreML) have no x86_64 or non-macOS build." >&2
+  exit 1
+fi
+DEVDIR="$(xcode-select -p 2>/dev/null || true)"
+if [ -z "$DEVDIR" ]; then
+  echo "!! No Xcode toolchain selected. Install Xcode, then: sudo xcode-select -s /Applications/Xcode.app" >&2
+  exit 1
+fi
+case "$DEVDIR" in
+  *CommandLineTools*)
+    echo "warning: xcode-select points at the Command Line Tools ($DEVDIR), not full Xcode." >&2
+    echo "         Select Xcode for Metal/Qwen3-ASR: sudo xcode-select -s /Applications/Xcode.app" >&2
+    ;;
+esac
+if ! xcrun -f metal >/dev/null 2>&1; then
+  echo "warning: Metal Toolchain not installed — Qwen3-ASR will be unavailable (other engines work)." >&2
+  echo "         Install it once with: xcodebuild -downloadComponent MetalToolchain" >&2
+fi
+# Swift floor is enforced by Package.swift's swift-tools-version (swift build refuses an older
+# toolchain on its own) — we don't re-gate it here. This is only an informational breadcrumb: print
+# the verified-good toolchain next to what's installed, so if a toolchain-specific compiler bug ever
+# breaks the build, the next person has the clue to update Xcode. Never blocks.
+SWIFT_TESTED="6.3"
+SWIFT_VER="$(swift --version 2>/dev/null | grep -oE 'Swift version [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
+if [ -n "$SWIFT_VER" ]; then
+  echo "Swift $SWIFT_VER detected (build verified on $SWIFT_TESTED)."
+  if [ "$(printf '%s\n%s\n' "$SWIFT_TESTED" "$SWIFT_VER" | sort -V | head -1)" != "$SWIFT_TESTED" ]; then
+    echo "note: older than the verified toolchain — if the build fails with a compiler error, update Xcode." >&2
+  fi
+fi
+
 # Version stamped into Info.plist: marketing version from the latest git tag (else 0.1), build
 # number from the monotonic commit count (else 1). Both fall back when built from a non-git tarball.
 SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
@@ -82,10 +120,6 @@ if [ "$ID" = "-" ]; then
 else
   echo "== signing with: $ID =="
 fi
-# mlx.metallib sits in MacOS/ (next to the binary, where MLX looks for it) so codesign treats it as
-# a nested code object — it must be signed before the main executable and bundle, or bundle signing
-# fails with "code object is not signed at all".
-#
 # mlx.metallib sits in MacOS/ (next to the binary, where MLX looks for it) so codesign treats it as
 # a nested code object — it must be signed before the main executable and bundle, or bundle signing
 # fails with "code object is not signed at all".

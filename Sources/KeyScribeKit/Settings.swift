@@ -149,7 +149,7 @@ public struct Settings: Codable, Equatable, Sendable {
         schemaVersion: 1,
         loadOnLogin: false,
         defaultModeId: "plain-dictation",
-        stt: STT(engine: "parakeet-tdt-ctc-110m", eviction: .frugal),
+        stt: STT(engine: "parakeet-tdt-ctc-110m", eviction: .fastest),
         duringDictation: DuringDictation(muteSystemAudio: true, keepDisplayAwake: true, sounds: true),
         history: History(enabled: true, retentionDays: 7),
         shortcuts: Shortcuts()

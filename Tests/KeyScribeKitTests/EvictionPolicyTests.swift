@@ -43,9 +43,28 @@ struct EvictionPolicyTests {
             == .scheduleIdleCheck(afterSeconds: EvictionPolicy.defaultIdleSeconds))
     }
 
-    @Test func onlyFastestPreloadsAtLaunch() {
-        #expect(EvictionPolicy.preloadAtLaunch(mode: .fastest))
-        #expect(!EvictionPolicy.preloadAtLaunch(mode: .balanced))
-        #expect(!EvictionPolicy.preloadAtLaunch(mode: .frugal))
+    // A large model on Fastest would pin its whole footprint resident forever; cap it at Balanced so it
+    // idle-evicts. Small models keep Fastest's instant residency; Balanced/Frugal are user choices and
+    // pass through unchanged for any size.
+    @Test func fastestDowngradesToBalancedForLargeModel() {
+        #expect(EvictionPolicy.effective(.fastest, modelBytes: 2_000_000_000) == .balanced)
+    }
+
+    @Test func fastestHonoredForSmallModel() {
+        #expect(EvictionPolicy.effective(.fastest, modelBytes: 141_000_000) == .fastest)
+    }
+
+    @Test func fastestHonoredExactlyBelowThreshold() {
+        #expect(EvictionPolicy.effective(.fastest, modelBytes: EvictionPolicy.largeModelByteThreshold - 1) == .fastest)
+    }
+
+    @Test func fastestDowngradesExactlyAtThreshold() {
+        #expect(EvictionPolicy.effective(.fastest, modelBytes: EvictionPolicy.largeModelByteThreshold) == .balanced)
+    }
+
+    @Test func balancedAndFrugalPassThroughRegardlessOfSize() {
+        #expect(EvictionPolicy.effective(.balanced, modelBytes: 2_000_000_000) == .balanced)
+        #expect(EvictionPolicy.effective(.frugal, modelBytes: 2_000_000_000) == .frugal)
+        #expect(EvictionPolicy.effective(.frugal, modelBytes: 0) == .frugal)
     }
 }

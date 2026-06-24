@@ -207,11 +207,23 @@ final class DictationController {
         Task { try? await active.loadIfNeeded() }
     }
 
-    // Launch-time preload for the Fastest eviction profile, so the first dictation isn't a cold load
-    // (design: EvictionPolicy.preloadAtLaunch). Other profiles stay lazy.
+    // Launch-time warm so the first dictation isn't a cold model load — independent of the eviction
+    // profile, which only governs post-dictation residency (readiness ≠ residency). Only when the model
+    // is already on disk (or system-managed, e.g. Apple): warming an uninstalled engine would DOWNLOAD
+    // it at launch, racing the first-run wizard's own download. Fresh installs stay lazy until installed.
     func preloadActiveEngineIfNeeded() {
-        guard EvictionPolicy.preloadAtLaunch(mode: settings.stt.eviction) else { return }
+        let id = activeEngine.id
+        let systemManaged = SpeechModelCatalog.entry(for: id)?.systemManaged ?? false
+        guard systemManaged || ModelInstallStore.installedIds().contains(id) else { return }
         warmActiveEngine()
+    }
+
+    // Realize the audio input unit ahead of the first press so the first dictation's capture starts
+    // instantly (the one-time HAL realization is otherwise paid on the hot path). Only when the mic is
+    // granted — we never touch the input subsystem unauthorized, and no capture stream is opened.
+    func prewarmCapture() {
+        guard micStatus() == .granted else { return }
+        audio.prewarm()
     }
 
     func setNextModeOverride(id: String?) {
@@ -267,12 +279,14 @@ final class DictationController {
 
         warmActiveEngine()
 
-        // Option A cue gating: the start cue plays now and capture + HUD come up only after it finishes,
-        // so the cue never lands in the recording. No cue (sounds off / unbundled) → zero delay → capture
-        // and HUD fire immediately. The cue is itself the "starting" signal during the gap, so the HUD is
-        // never shown claiming to listen before the mic is live.
+        // Option A cue gating: the start cue plays now and CAPTURE comes up only after it finishes, so the
+        // cue never lands in the recording. The HUD, however, shows instantly — the truthful `.ready`
+        // state (not `.recording`) during the gap, so the window appears with no perceptible delay without
+        // claiming to listen before the mic is live; beginCapture flips it to `.recording` when the mic
+        // goes live. No cue (sounds off / unbundled) → zero delay → capture and HUD fire together.
         let cueDelay = effects.begin(settings.duringDictation)
         if cueDelay > 0 {
+            hud?.render(.ready(mode: currentModeName))
             captureStartTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(cueDelay))
                 guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
@@ -551,7 +565,7 @@ final class DictationController {
     private func applyEvictionAfterDictation(engine: any SpeechEngine) {
         lastUsedAt = ProcessInfo.processInfo.systemUptime
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
-        switch EvictionPolicy.afterDictation(mode: settings.stt.eviction, idleSeconds: idle) {
+        switch EvictionPolicy.afterDictation(mode: evictionMode(for: engine), idleSeconds: idle) {
         case .keepLoaded: break
         case .evictNow:
             Task { await engine.evict() }
@@ -559,9 +573,16 @@ final class DictationController {
         }
     }
 
+    // The user's eviction setting, capped at Balanced for a large active model so Fastest never pins a
+    // multi-GB engine resident forever (EvictionPolicy.effective). Download size proxies the footprint.
+    private func evictionMode(for engine: any SpeechEngine) -> Eviction {
+        let bytes = SpeechModelCatalog.entry(for: engine.id)?.approxDownloadBytes ?? 0
+        return EvictionPolicy.effective(settings.stt.eviction, modelBytes: bytes)
+    }
+
     private func scheduleIdleEviction(after: Double, engine active: any SpeechEngine) {
         idleEvictionTask?.cancel()
-        let mode = settings.stt.eviction
+        let mode = evictionMode(for: active)
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
         let usedAt = lastUsedAt
         idleEvictionTask = Task { @MainActor [weak self] in

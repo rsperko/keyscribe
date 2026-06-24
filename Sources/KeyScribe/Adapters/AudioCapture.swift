@@ -5,6 +5,11 @@ import Foundation
 protocol AudioCapturing: AnyObject {
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL
     func stop() -> URL?
+    func prewarm()
+}
+
+extension AudioCapturing {
+    func prewarm() {}
 }
 
 enum AudioCaptureError: Error { case formatUnavailable }
@@ -64,6 +69,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             }
         }
         return url
+    }
+
+    // Realize the input HAL unit before the first dictation so capture starts without the one-time
+    // ~165 ms unit-realization cost on the hot path. Accessing the input node and its format
+    // instantiates the unit and prepare() preallocates its render resources; neither opens a capture
+    // stream, so the mic indicator never lights. The caller gates this on a granted mic.
+    func prewarm() {
+        let input = engine.inputNode
+        _ = input.outputFormat(forBus: 0)
+        engine.prepare()
     }
 
     private func arm() throws {

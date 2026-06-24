@@ -129,7 +129,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "KeyScribe Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.styleMask = [.titled, .closable, .resizable]
+        window.collectionBehavior = .fullScreenNone
         window.setContentSize(NSSize(width: 940, height: 640))
         window.minSize = NSSize(width: 760, height: 520)
         window.center()

@@ -17,6 +17,68 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## First-dictation warm pass (2026-06-24, uncommitted)
+
+Make the **first** dictation of a process feel instant — the HUD appears immediately, the mic is ready,
+and the first complete dictation isn't a cold model load. Informed by a GPT review
+(`agent_notes/gpt_first_dictate/README.md`). **`swift build` clean; full `swift test` = 494 tests / 60
+suites pass.** Adapter edges (AppKit window, AVAudioEngine) — build clean, not headless-verifiable;
+needs a live click-through.
+
+- **HUD panel was built lazily on first show.** `HUDController.showPanelIfNeeded` created the
+  `NSPanel` + `NSHostingView` on the first `.recording` render, so the very first HUD paid SwiftUI host
+  bootstrap + window realization on the hot path. New `HUDController.prewarm()` builds and lays out the
+  panel at launch (off-screen — `render` still orders it on only when state leaves `.hidden`).
+- **Start cue gated the HUD too.** Option A cue gating (`ede5f7b`) deferred *both* capture and the HUD
+  past the ~110 ms start cue, so the HUD appeared ~110 ms after the press. Capture must stay gated (keeps
+  the cue out of the WAV) but the HUD need not: `handleStart` now renders the truthful **`.ready`** state
+  instantly during the gap (not `.recording` — never claims to listen before the mic is live), and
+  `beginCapture` flips it to `.recording` when the mic goes live.
+- **AVAudioEngine input unit realized on first `start()` (~165 ms).** New `AudioCapture.prewarm()`
+  realizes the input HAL unit (access `inputNode` + query its format + `engine.prepare()`) ahead of the
+  first press. No capture stream is opened, so the mic indicator never lights; `DictationController.prewarmCapture()`
+  gates it on a **granted mic** so we never touch the input subsystem unauthorized (no-op during first-run
+  onboarding). `prewarm()` is a protocol method with a default no-op so the `FakeAudio` test mocks are unaffected.
+- **`config.resolved` was resolved synchronously on the start path.** `handleStart` reads it before the
+  mic starts; a cold cache parses dictionary/replacements/connections/fragments on the main actor. Now
+  warmed once at launch. (Not re-warmed on every config invalidation — that would re-introduce I/O on
+  each FSEvents tick, fighting `ConfigCache`'s deliberate laziness.)
+- **Cold first model load decoupled from the eviction profile.** Default eviction changed
+  **`.frugal` → `.fastest`** (`Settings.defaults`), and the launch warm no longer keys off the profile:
+  `preloadActiveEngineIfNeeded` now warms the active model at launch **whenever it is installed**
+  (or system-managed, e.g. Apple) — readiness ≠ residency, so every profile gets a snappy *first*
+  dictation and the profile only governs post-dictation residency. Gated on installed so launch never
+  triggers a download that would race the first-run wizard. `EvictionPolicy.preloadAtLaunch` (and its
+  test) removed as now-dead. The **Model memory** picker was promoted out of the collapsed "Advanced
+  model behavior" disclosure to a visible General section.
+- **Wiring:** `AppDelegate.applicationDidFinishLaunching` schedules the HUD/audio/config warms in a
+  deferred `Task { @MainActor }` so they run just after launch settles (well before any user trigger)
+  and never add to launch itself; `preloadActiveEngineIfNeeded` is called inline at launch as before.
+
+### Follow-ups (2026-06-24, uncommitted)
+
+Review pass (`agent_notes/gpt_first_dictation_concerns/README.md` + a parallel local review) on the warm
+pass above. Findings checked live: the `prewarm()` mic indicator stays dark (verified), and a default-input
+device switch between launch and first dictation still records from the **current** default (the engine
+re-resolves the input at `start()`; realizing the unit early does not lock the binding).
+
+- **Mic warmup was skipped for fresh installs (GPT P2).** `prewarmCapture()` ran only in the launch
+  `Task`, which bails unless the mic is already `.granted`. A new user grants the mic *during* first-run —
+  after that Task — so the first dictation still paid the ~165 ms unit realization. `AppDelegate` now also
+  calls `controller.prewarmCapture()` from both first-run ready paths (the `onReadyToDictate` closure and
+  the wizard-completion closure), keeping the `.granted` guard inside `prewarmCapture` as the backstop.
+  (Not folded into `startListening()` — that runs synchronously at launch and would re-add the realization
+  cost to launch itself, defeating the deferred warm.)
+- **Large models no longer pin memory forever on Fastest.** With the default now `.fastest`, a heavy engine
+  (Whisper/Qwen, 1.5–2 GB) would stay resident permanently. New pure `EvictionPolicy.effective(_:modelBytes:)`
+  caps `.fastest` at `.balanced` once the active model's `approxDownloadBytes` ≥ 1 GB
+  (`largeModelByteThreshold`) — the small default engine keeps instant residency; large models idle-evict
+  after 30 min. `.balanced`/`.frugal` pass through unchanged at any size. Download size is a free, monotonic
+  proxy for footprint (no live memory probing). `DictationController.evictionMode(for:)` applies it at both
+  eviction sites (`applyEvictionAfterDictation`, `scheduleIdleEviction`). Unit-tested in `EvictionPolicyTests`.
+- **Model memory section got a heading.** Promoting the picker out of the "Advanced model behavior"
+  disclosure left it headerless under History; it now sits under a **Performance** section header in General.
+
 ## Resiliency pass (2026-06-23, uncommitted)
 
 Audit of the async dictation lifecycle, engine switching, config reload, model download, and durable

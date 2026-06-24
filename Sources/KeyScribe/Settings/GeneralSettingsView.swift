@@ -4,7 +4,6 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var dictionaryShadowed = false
     var replacementShadowed = false
-    @State private var modelBehaviorExpanded = false
 
     var body: some View {
         Form {
@@ -60,13 +59,14 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                DisclosureSection("Advanced model behavior", isExpanded: $modelBehaviorExpanded) {
-                    Text("Trade first-response speed against memory use. Reloading a freed model adds a brief delay.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Picker("Model memory", selection: $model.eviction) {
-                        ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
-                    }
+                Picker("Model memory", selection: $model.eviction) {
+                    ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
                 }
+            } header: {
+                Text("Performance")
+            } footer: {
+                Text("Trade first-response speed against memory use. Reloading a freed model adds a brief delay.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
         }
