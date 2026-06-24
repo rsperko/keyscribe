@@ -45,8 +45,15 @@ private final class DeadlineContinuation<T: Sendable>: @unchecked Sendable {
 // return immediately, abandoning the task to finish in the background, its result discarded. Parent
 // cancellation propagates through onCancel. The losing timer is cancelled on the happy path so no
 // long timer lingers after a fast success.
+//
+// `onSettled` fires when the operation TRULY finishes (returns or throws) — which on a wedged op is
+// long after the deadline already threw. It is the only honest signal that the operation's resources
+// (engine/model/decoded PCM) are actually released; callers that must not start concurrent work use
+// it to gate, since a returned `DeadlineExceeded` does NOT mean the work stopped (see SingleFlightDeadline).
 public func runWithDeadline<T: Sendable>(
-    seconds: Double, operation: @escaping @Sendable () async throws -> T
+    seconds: Double,
+    operation: @escaping @Sendable () async throws -> T,
+    onSettled: (@Sendable () -> Void)? = nil
 ) async throws -> T {
     let work = Task<T, Error> { try await operation() }
     let gate = DeadlineContinuation<T>()
@@ -64,10 +71,34 @@ public func runWithDeadline<T: Sendable>(
                 catch { result = .failure(error) }
                 timeout.cancel()
                 gate.resume(result)
+                onSettled?()
             }
         }
     } onCancel: {
         work.cancel()
         gate.resume(.failure(CancellationError()))
+    }
+}
+
+// Single-flight wrapper over runWithDeadline: at most one operation runs at a time. A deadline only
+// abandons the in-flight operation (it may keep running on a wedged engine), so the gate stays closed
+// until the operation TRULY settles — a second call while one is abandoned-but-alive throws `Busy`
+// instead of starting a concurrent transcribe that would double the engine/model/PCM footprint.
+public actor SingleFlightDeadline {
+    public struct Busy: Error, Sendable {}
+    private var inFlight = false
+
+    public init() {}
+
+    private func release() { inFlight = false }
+
+    public func run<T: Sendable>(
+        seconds: Double, operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        if inFlight { throw Busy() }
+        inFlight = true
+        return try await runWithDeadline(seconds: seconds, operation: operation) {
+            Task { await self.release() }
+        }
     }
 }

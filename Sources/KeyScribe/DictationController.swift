@@ -27,6 +27,9 @@ final class DictationController {
     private let accessibilityGranted: @MainActor () -> Bool
     private let llmClient: any LLMClient
     private let effects = DuringDictationEffects()
+    // Serialises the STT call: a deadline only abandons a wedged transcribe, so this keeps a second
+    // dictation from starting a concurrent transcribe on the same engine until the first truly settles.
+    private let transcribeGate = SingleFlightDeadline()
     private weak var hud: HUDPresenting?
 
     private var machine = DictationMachine()
@@ -422,14 +425,16 @@ final class DictationController {
     // Bound the STT call so a wedged CoreML/MLX transcribe can't leave the HUD spinning forever.
     // Batch dictation can't salvage a partial, so this is robustness, not speed — the cap scales with
     // the recording length (20× real-time, ≥30s floor), generous enough to never trip on a legitimately
-    // long or slow transcription while still abandoning a true hang. `runWithDeadline` runs the engine
-    // as an unstructured task, so even an engine that ignores cancellation is abandoned at the deadline
+    // long or slow transcription while still abandoning a true hang. The gate runs the engine as an
+    // unstructured task, so even an engine that ignores cancellation is abandoned at the deadline
     // (a structured task group would wait for it). A late result resolves a no-op and is discarded.
+    // Because an abandoned transcribe may still be running, the gate refuses a second concurrent call
+    // (throws `Busy`) until the wedged one truly settles, so two transcribes never run at once.
     private func transcribeBounded(url: URL, biasTerms: [String], engine: any SpeechEngine) async throws -> String {
         let audioSeconds = (try? AVAudioFile(forReading: url))
             .map { Double($0.length) / $0.fileFormat.sampleRate } ?? 0
         let timeout = max(30, audioSeconds * 20)
-        return try await runWithDeadline(seconds: timeout) {
+        return try await transcribeGate.run(seconds: timeout) {
             try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
         }
     }
@@ -440,6 +445,12 @@ final class DictationController {
         let raw: String
         do {
             raw = try await transcribeBounded(url: url, biasTerms: recognitionBiasTerms(), engine: engine)
+        } catch is SingleFlightDeadline.Busy {
+            try? FileManager.default.removeItem(at: url)
+            if Task.isCancelled { return }
+            log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
+            finishError("Still finishing the previous dictation")
+            return
         } catch is DeadlineExceeded {
             try? FileManager.default.removeItem(at: url)
             // A user cancel cancels this task too; cancel() already handled the terminal state, so a

@@ -48,9 +48,12 @@ if [ -n "$SWIFT_VER" ]; then
   fi
 fi
 
-# Version stamped into Info.plist: marketing version from the latest git tag (else 0.1), build
-# number from the monotonic commit count (else 1). Both fall back when built from a non-git tarball.
-SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+# Version stamped into Info.plist: marketing version from git tags, build number from the
+# monotonic commit count (Sparkle orders updates by build number, not the marketing string).
+# A build cut exactly on a tag reads clean ("0.1.0"); an untagged dev build gets the full describe
+# ("0.1.0-2-gc1dc4af", "-dirty" when the tree has uncommitted changes) so it can never be mistaken
+# for the release. Both fall back when built from a non-git tarball.
+SHORT_VERSION="$(git describe --tags --dirty 2>/dev/null | sed 's/^v//' || true)"
 [ -z "$SHORT_VERSION" ] && SHORT_VERSION="0.1"
 BUILD_VERSION="$(git rev-list --count HEAD 2>/dev/null || true)"
 [ -z "$BUILD_VERSION" ] && BUILD_VERSION="1"

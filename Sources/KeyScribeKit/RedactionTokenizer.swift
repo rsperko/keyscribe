@@ -113,6 +113,7 @@ public enum RedactionTokenizer {
     // then rejects the over-long string. Match generously, then trim trailing space-separated groups
     // until mod-97 validates, tokenizing only the valid prefix (a prefix, so the range is exact).
     private static func ibanSpans(_ text: String) -> [Span] {
+        guard hasIBANPrefix(text) else { return [] }
         guard let re = RegexCache.regex(#"\b[A-Z]{2}\d{2}(?:[ ]?[A-Za-z0-9]){11,40}"#) else { return [] }
         var spans: [Span] = []
         for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -158,6 +159,32 @@ public enum RedactionTokenizer {
                 if run >= minLength { return true }
             default:
                 run = 0
+            }
+        }
+        return false
+    }
+
+    // Cheap single utf8 pass: two ASCII uppercase letters immediately followed by two ASCII digits —
+    // the mandatory IBAN prefix (`[A-Z]{2}\d{2}`). A necessary condition for the IBAN regex to match,
+    // so the regex can be skipped on ordinary prose, which almost never carries this shape.
+    private static func hasIBANPrefix(_ text: String) -> Bool {
+        var upperRun = 0
+        var digitRun = 0
+        for b in text.utf8 {
+            switch b {
+            case 0x41...0x5A:
+                upperRun += 1
+                digitRun = 0
+            case 0x30...0x39:
+                if upperRun >= 2 {
+                    digitRun += 1
+                    if digitRun >= 2 { return true }
+                } else {
+                    digitRun = 0
+                }
+            default:
+                upperRun = 0
+                digitRun = 0
             }
         }
         return false

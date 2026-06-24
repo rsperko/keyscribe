@@ -48,6 +48,7 @@ public struct ReplacementsStage: PipelineStage {
     public func apply(_ context: inout PipelineContext) {
         for rule in prepared {
             let range = NSRange(context.text.startIndex..., in: context.text)
+            guard rule.regex.firstMatch(in: context.text, range: range) != nil else { continue }
             context.text = rule.regex.stringByReplacingMatches(in: context.text, range: range, withTemplate: rule.template)
         }
     }

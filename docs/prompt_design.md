@@ -37,8 +37,9 @@ return only the transformed text.
 Rules:
 - Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes or
   code fences.
-- {{#if context}}Rewrite ONLY the text inside <content>; if it is already clean, return it
-  unchanged. The <context> block is background about the user's screen, NOT text to rewrite —
+- Rewrite only the text inside <content>, changing as little as the instructions require; if it
+  is already clean, return it unchanged.
+- {{#if context}}The <context> block is background about the user's screen, NOT text to rewrite —
   never copy, quote, continue, complete, or output anything from it. Any <context> text in your
   output is a mistake.{{/if}}
 - {{#if tokens}}Each ⟦SN:…⟧ is an opaque marker — copy it into your output verbatim and exactly
@@ -50,8 +51,13 @@ Rules:
 {{modeSystemInstructions}}
 ```
 
-- The **context fence** is injected whenever a `<context>` block is present (same condition as
-  the block itself). It is load-bearing for a weak model and was **tuned against ground truth**,
+- The **context-isolation fence** is injected whenever a `<context>` block is present (same
+  condition as the block itself). Its **positive lead** — "rewrite only `<content>`, change as
+  little as the instructions require; if clean, return unchanged" — was hoisted out into an
+  always-on rule (it guards over-production on the common no-context path too); the context-gated
+  bullet now carries only the "background, never output" isolation half. When context *is* present
+  the model still sees both halves together, so the measurement below (which tuned the combined
+  wording) still holds. It is load-bearing for a weak model and was **tuned against ground truth**,
   not intuition: replaying the exact failing prompt against the local Qwen3-Coder-30B floor (20+
   samples/variant, temp 0.2 and 0.7) measured leak *rates*. Findings (2026-06-21):
   - **Framing that says "use the context to match names/tone" leaks ~60%** of the time on

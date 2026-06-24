@@ -74,6 +74,12 @@ and technical prompt behavior.
   `Regex configuration` unless regex is the only capability.
 - Show a one-line consequence before expansion when the setting affects output or data flow.
 - Expansion does not alter values or enable functionality by itself.
+- **The entire header row is the toggle target** — clicking anywhere on the label, not only the
+  chevron, expands and collapses it. The hit area spans the full row width (`contentShape`), and
+  the chevron sits at the trailing edge. Never ship a disclosure whose label text is inert while
+  only the triangle responds. Every disclosure uses the shared `DisclosureSection` (it owns this
+  behavior); the platform's bare `DisclosureGroup(_:)` does not satisfy this rule and must not be
+  used.
 
 ### Data boundary badge
 

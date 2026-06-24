@@ -96,13 +96,13 @@ public struct LiveEditsStage: PipelineStage {
 
     private func join(_ parts: [String]) -> String {
         var out = ""
+        out.reserveCapacity(parts.reduce(0) { $0 + $1.count + 1 })
+        var endsWithBreak = true
         for part in parts {
-            if part == Self.newline || part == Self.paragraph || part == Self.tab {
-                out += part
-            } else {
-                if !out.isEmpty && !out.hasSuffix("\n") && !out.hasSuffix("\t") { out += " " }
-                out += part
-            }
+            let isControl = part == Self.newline || part == Self.paragraph || part == Self.tab
+            if !isControl && !endsWithBreak { out += " " }
+            out += part
+            if let last = part.last { endsWithBreak = last == "\n" || last == "\t" }
         }
         return out
     }

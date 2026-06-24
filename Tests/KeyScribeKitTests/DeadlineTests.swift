@@ -32,4 +32,67 @@ struct DeadlineTests {
             try await runWithDeadline(seconds: 5) { throw Boom() }
         }
     }
+
+    // onSettled fires when the operation TRULY finishes, even on a wedged op that the deadline already
+    // abandoned — so it lands after the DeadlineExceeded throw, not at the deadline.
+    @Test func onSettledFiresAfterAbandonedOperationTrulyFinishes() async {
+        let settled = Counter()
+        await #expect(throws: DeadlineExceeded.self) {
+            try await runWithDeadline(seconds: 0.1) {
+                nonCooperativeBlock(seconds: 0.5)
+                return "late"
+            } onSettled: {
+                Task { await settled.bump() }
+            }
+        }
+        #expect(await settled.value == 0)
+        try? await Task.sleep(for: .seconds(1))
+        #expect(await settled.value == 1)
+    }
+}
+
+private actor Counter {
+    private(set) var value = 0
+    func bump() { value += 1 }
+}
+
+struct SingleFlightDeadlineTests {
+    @Test func runsAndReturns() async throws {
+        let gate = SingleFlightDeadline()
+        let value = try await gate.run(seconds: 5) { "done" }
+        #expect(value == "done")
+    }
+
+    // While a non-cooperative op is abandoned-but-alive (deadline fired, work still running), a second
+    // run is rejected with Busy rather than starting a concurrent transcribe.
+    @Test func secondRunWhileFirstIsWedgedThrowsBusy() async {
+        let gate = SingleFlightDeadline()
+        let concurrent = Counter()
+        async let first: Void = {
+            try? await gate.run(seconds: 0.1) {
+                await concurrent.bump()
+                nonCooperativeBlock(seconds: 0.6)
+            }
+        }()
+        try? await Task.sleep(for: .seconds(0.2))
+        await #expect(throws: SingleFlightDeadline.Busy.self) {
+            try await gate.run(seconds: 0.1) {
+                await concurrent.bump()
+                return "second"
+            }
+        }
+        _ = await first
+        #expect(await concurrent.value == 1)
+    }
+
+    // Once the wedged op truly settles the gate reopens and the next run proceeds normally.
+    @Test func gateReopensAfterOperationSettles() async throws {
+        let gate = SingleFlightDeadline()
+        await #expect(throws: DeadlineExceeded.self) {
+            try await gate.run(seconds: 0.1) { nonCooperativeBlock(seconds: 0.4) }
+        }
+        try await Task.sleep(for: .seconds(0.6))
+        let value = try await gate.run(seconds: 5) { "ok" }
+        #expect(value == "ok")
+    }
 }

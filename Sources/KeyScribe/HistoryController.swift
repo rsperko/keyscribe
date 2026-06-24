@@ -297,6 +297,7 @@ private struct HistoryDetailView: View {
     @State private var selectedText = ""
     @State private var showReplacementSheet = false
     @State private var showDictionarySheet = false
+    @State private var promptExpanded = false
 
     // Transformed is a distinct stage only when local edits actually changed the transcript; otherwise
     // Heard already equals Result and the segment would be noise (ui_design.md §8).
@@ -446,7 +447,7 @@ private struct HistoryDetailView: View {
                 detailRow("Context sent", entry.contextLabels.isEmpty ? "None" : entry.contextLabels.joined(separator: ", "))
             }
             if let prompt = entry.prompt {
-                DisclosureGroup("Show exactly what was sent") {
+                DisclosureSection("Show exactly what was sent", isExpanded: $promptExpanded) {
                     Text(prompt)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)

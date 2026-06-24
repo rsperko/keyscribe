@@ -29,10 +29,6 @@ public enum FuzzyCorrector {
         return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength)
     }
 
-    public static func apply(_ text: String, terms: [String]) -> String {
-        apply(text, prepared: prepare(terms))
-    }
-
     public static func apply(_ text: String, prepared: Prepared) -> String {
         guard !prepared.isEmpty else { return text }
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)

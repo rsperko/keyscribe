@@ -97,15 +97,19 @@ struct HistorySearchTests {
         sampleEntry(heard: "meeting notes", result: "Meeting notes", mode: "Plain Dictation"),
     ]
 
+    func filter(_ query: String) -> [HistoryEntry] {
+        entries.filter { HistorySearch.matches($0, query: query) }
+    }
+
     @Test func emptyQueryReturnsAll() {
-        #expect(HistorySearch.filter(entries, query: "  ").count == 2)
+        #expect(filter("  ").count == 2)
     }
 
     @Test func matchesHeardResultAndModeCaseInsensitively() {
-        #expect(HistorySearch.filter(entries, query: "REPORT").count == 1)
-        #expect(HistorySearch.filter(entries, query: "plain").count == 1)
-        #expect(HistorySearch.filter(entries, query: "Meeting notes").count == 1)
-        #expect(HistorySearch.filter(entries, query: "absent").isEmpty)
+        #expect(filter("REPORT").count == 1)
+        #expect(filter("plain").count == 1)
+        #expect(filter("Meeting notes").count == 1)
+        #expect(filter("absent").isEmpty)
     }
 }
 

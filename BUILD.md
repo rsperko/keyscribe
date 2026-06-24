@@ -56,6 +56,29 @@ open ./KeyScribe.app
 Qwen3-ASR), and code-signs it. With no signing identity configured it uses an **ad-hoc** signature,
 which is enough to launch and use the app.
 
+## Versioning & releases
+
+Git tags are the single source of truth for the version. `make-app.sh` stamps two keys into
+`Resources/Info.plist` at build time — never hand-edit them:
+
+- **`CFBundleShortVersionString`** (marketing version) ← `git describe --tags --dirty`, `v` stripped.
+  A build cut exactly on a tag reads clean (`0.1.0`); an untagged dev build gets the full describe
+  (`0.1.0-2-gc1dc4af`, with `-dirty` when the tree has uncommitted changes) so it can never be
+  mistaken for the release. The About window (**menu ▸ About & Notices…**) shows this at runtime.
+- **`CFBundleVersion`** (build number) ← `git rev-list --count HEAD`, the monotonic commit count.
+  Sparkle (the M7 updater) orders updates by this number, **not** the marketing string, so it must
+  only ever increase. This holds on linear history — avoid rebasing/squashing across a released tag.
+
+Both fall back (`0.1` / `1`) when built from a non-git tarball.
+
+Cutting a release:
+
+1. `git tag -a vX.Y.Z -m "…"` — SemVer. Pre-1.0, bump `Y` for features, `Z` for fixes; reserve
+   `1.0.0` for the first build you would hand to a stranger.
+2. `./make-app.sh` — reads the tag, stamps the clean version into the bundle.
+3. (M7) notarize + staple, then add the build to the Sparkle appcast (EdDSA-signed, ordered by
+   `CFBundleVersion`).
+
 ## Signing: getting permissions that survive rebuilds
 
 KeyScribe needs three TCC permissions (**Microphone**, **Input Monitoring**, **Accessibility**).

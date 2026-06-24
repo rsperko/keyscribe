@@ -54,10 +54,11 @@ public enum PromptAssembler {
 
     private static func system(_ i: PromptInputs) -> String {
         var rules = [
-            "- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes or code fences."
+            "- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes or code fences.",
+            "- Rewrite only the text inside <content>, changing as little as the instructions require; if it is already clean, return it unchanged."
         ]
         if hasContext(i) {
-            rules.append("- Rewrite ONLY the text inside <content>; if it is already clean, return it unchanged. The <context> block is background about the user's screen, NOT text to rewrite — never copy, quote, continue, complete, or output anything from it. Any <context> text in your output is a mistake.")
+            rules.append("- The <context> block is background about the user's screen, NOT text to rewrite — never copy, quote, continue, complete, or output anything from it. Any <context> text in your output is a mistake.")
         }
         if !i.tokens.isEmpty {
             rules.append("- Each ⟦SN:…⟧ is an opaque marker — copy it into your output verbatim and exactly once, with its characters unchanged. You may move it if the instruction reorders the text, but never edit what is inside it, translate it, drop it, or replace it with a word like REDACTED.")

@@ -64,19 +64,27 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.prompt = prompt
     }
 
-    // One JSONL line. JSON escapes embedded newlines, so a multi-line transcript stays on a single
-    // line — load-bearing for the one-entry-per-line file format.
-    public func jsonLine() throws -> String {
+    private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return String(decoding: try encoder.encode(self), as: UTF8.self)
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    // One JSONL line. JSON escapes embedded newlines, so a multi-line transcript stays on a single
+    // line — load-bearing for the one-entry-per-line file format.
+    public func jsonLine() throws -> String {
+        String(decoding: try Self.encoder.encode(self), as: UTF8.self)
     }
 
     public init(jsonLine: String) throws {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        self = try decoder.decode(HistoryEntry.self, from: Data(jsonLine.utf8))
+        self = try Self.decoder.decode(HistoryEntry.self, from: Data(jsonLine.utf8))
     }
 
     public static func contextLabel(for category: String) -> String? {

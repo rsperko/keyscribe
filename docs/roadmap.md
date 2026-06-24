@@ -321,3 +321,13 @@ restored after; verbatim spans never mutate — proven in logic + the round-trip
 - 4th STT engine (Qwen3).
 - Cross-platform (Windows).
 - Pricing/business-model decision (open-source vs closed, freemium surface).
+- **Per-mode few-shot examples** (structured `You say → It should produce` pairs on a mode's AI
+  rewrite, à la Superwhisper's "Examples of correct behavior"). **Consider, do not assume.** Measured
+  2026-06-24 (weak local 7B + Gemini 2.5 Flash floor, A/B): on the ship floor the benefit is **modest
+  — consistency/output-only polish for formatting-heavy modes (Markdown), not correctness rescue**;
+  Shell gains nothing; bad examples hurt weak/cheap models but not the floor. Likely scope if revived:
+  the **invisible engine** (additive `[[ai_rewrite.examples]]` schema + `<examples>` block + a
+  conditional system rule + an over-production eval harness) seeding **Markdown only**, *not* a
+  user-facing authoring UI. Full analysis + the throwaway probe: `agent_notes/examples_in_mode/`
+  (`plan.md`, `experiment_results.md`). The always-on **minimal-change scaffold rule** that came out
+  of the same investigation already shipped — it was the bigger, universal lever.

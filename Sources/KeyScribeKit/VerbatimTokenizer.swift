@@ -10,6 +10,7 @@ public enum VerbatimTokenizer {
     private static let endTrigger = #"\b(?:end|stop) verbatim\b"#
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
+        guard text.range(of: "verbatim", options: .caseInsensitive) != nil else { return text }
         let afterPairs = replacePairs(text, tokenizer)
         return replaceUnterminated(afterPairs, tokenizer)
     }

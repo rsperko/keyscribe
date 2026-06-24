@@ -35,14 +35,13 @@ extension DisclosureSection where Label == Text {
 }
 
 // ui_components.md "Setting row with help": label + one-line result, the control, an inline
-// Learn more disclosure carrying benefit/limit/prerequisite (and an optional example), plus a
+// Learn more disclosure carrying benefit/limit/prerequisite, plus a
 // persistent dependency reason when the control is gated. No hover-only tooltips for anything
 // that affects data, privacy, or output (ui_design.md §3).
 struct SettingRow<Control: View>: View {
     let title: String
     var result: String? = nil
     let help: String
-    var example: String? = nil
     var dependencyReason: String? = nil
     @ViewBuilder var control: () -> Control
     @State private var expanded = false
@@ -72,11 +71,6 @@ struct SettingRow<Control: View>: View {
             .foregroundStyle(.secondary)
             if expanded {
                 Text(help).font(.caption).foregroundStyle(.secondary)
-                if let example {
-                    Text(example)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
             }
             if let dependencyReason {
                 Label(dependencyReason, systemImage: "info.circle")

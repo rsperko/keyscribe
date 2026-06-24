@@ -1,7 +1,9 @@
 import Testing
 @testable import KeyScribeKit
 
-private func fix(_ s: String, _ terms: [String]) -> String { FuzzyCorrector.apply(s, terms: terms) }
+private func fix(_ s: String, _ terms: [String]) -> String {
+    FuzzyCorrector.apply(s, prepared: FuzzyCorrector.prepare(terms))
+}
 
 struct FuzzyCorrectorTests {
     @Test func snapsSplitProperNoun() {

@@ -27,6 +27,15 @@ struct PromptAssemblerTests {
         #expect(p.system.contains("Write in English."))
     }
 
+    @Test func minimalChangeRuleAlwaysPresent() {
+        // The over-production guard is always on, not gated on context — most dictations carry
+        // no context, and that path previously had no "if already clean, return unchanged" rule.
+        let p = PromptAssembler.assemble(inputs())
+        #expect(p.system.contains("changing as little as the instructions require"))
+        #expect(p.system.contains("if it is already clean, return it unchanged"))
+        #expect(!p.system.contains("background about the user's screen"))
+    }
+
     @Test func tokenDirectiveOnlyWhenTokensPresent() {
         #expect(!PromptAssembler.assemble(inputs()).system.contains("⟦SN"))
         let p = PromptAssembler.assemble(inputs(tokens: ["⟦SN:REDACT:1⟧"]))
@@ -49,13 +58,12 @@ struct PromptAssemblerTests {
     }
 
     @Test func contextFenceRuleOnlyWhenContextPresent() {
-        // No context → no fence rule (the weak model isn't warned about a block that isn't there).
+        // No context → no isolation rule (the model isn't warned about a block that isn't there).
         #expect(!PromptAssembler.assemble(inputs()).system.contains("background about the user's screen"))
 
-        // Any context child → the fence rule appears, mirroring when the <context> block appears.
+        // Any context child → the isolation rule appears, mirroring when the <context> block appears.
         let withApp = PromptAssembler.assemble(inputs(appName: "Slack", bundleId: "com.slack"))
         #expect(withApp.user.contains("<context>"))
-        #expect(withApp.system.contains("Rewrite ONLY the text inside <content>"))
         #expect(withApp.system.contains("background about the user's screen"))
     }
 

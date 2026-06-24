@@ -72,7 +72,6 @@ final class FirstRunModel: ObservableObject {
     @Published var step: Step = .intro
     @Published var downloading = false
     @Published var downloadProgress: Double = 0
-    @Published var modelReady = false
     @Published var downloadError: String?
     @Published var micStatus: PermissionStatus = .notDetermined
     @Published var inputStatus: PermissionStatus = .notDetermined
@@ -128,7 +127,6 @@ final class FirstRunModel: ObservableObject {
                     Task { @MainActor in self.downloadProgress = progress.fraction }
                 }
                 selectEngine(id)
-                modelReady = true
                 downloading = false
                 step = .permissions
             } catch {

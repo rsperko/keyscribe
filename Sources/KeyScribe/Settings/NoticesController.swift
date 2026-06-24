@@ -25,10 +25,21 @@ final class NoticesController {
 }
 
 private struct NoticesView: View {
+    private var versionLine: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "Version \(short) (build \(build))"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("KeyScribe").font(.largeTitle.bold())
+                Text(versionLine)
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                 Text("Privacy-first, local-first voice dictation for macOS. Speech recognition always runs on this Mac.")
                     .foregroundStyle(.secondary)
                 Divider()
