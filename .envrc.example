@@ -1,0 +1,7 @@
+# Copy to .envrc and fill in, then run: direnv allow
+# These configure release.sh. Neither value below is secret (the Team ID is public, the notary
+# profile is just a local keychain profile name) — but keep the real .envrc gitignored so a notary
+# API key (NOTARY_KEY_P8) added later can never be committed.
+
+export KEYSCRIBE_SIGN_ID="Developer ID Application: Your Name (TEAMID)"
+export NOTARY_PROFILE="keyscribe-notary"

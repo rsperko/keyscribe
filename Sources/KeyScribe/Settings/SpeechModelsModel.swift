@@ -73,12 +73,14 @@ final class SpeechModelsModel: ObservableObject {
         Task.detached(priority: .utility) { [weak self] in
             var sizes: [String: Int64] = [:]
             for id in ids { sizes[id] = ModelInstallStore.installedBytes(for: id) }
-            await MainActor.run {
-                guard let self, generation == self.sizeRefreshGeneration else { return }
-                self.installedSizes = sizes
-                self.rebuild()
-            }
+            await self?.applySizes(sizes, generation: generation)
         }
+    }
+
+    private func applySizes(_ sizes: [String: Int64], generation: Int) {
+        guard generation == sizeRefreshGeneration else { return }
+        installedSizes = sizes
+        rebuild()
     }
 
     // The first-run flow downloads through the engine directly (not startDownload), so the install

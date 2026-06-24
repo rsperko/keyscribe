@@ -90,6 +90,7 @@ private final class HistoryViewModel: ObservableObject {
     private var recomputeTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
+    private var reloadTask: Task<Void, Never>?
 
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Void
@@ -123,14 +124,19 @@ private final class HistoryViewModel: ObservableObject {
         isLoading = true
         let store = self.store
         let limit = Self.loadLimit
-        Task { @MainActor [weak self] in
-            let loaded = await Task.detached { store.entries(limit: limit) }.value
-            guard let self else { return }
-            rows = loaded.map { HistoryRow(entry: $0, day: dayFormatter.string(from: $0.timestamp)) }
-            entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
-            recomputeGroups()
-            isLoading = false
+        reloadTask?.cancel()
+        reloadTask = Task.detached { [weak self] in
+            let loaded = store.entries(limit: limit)
+            if Task.isCancelled { return }
+            await self?.applyLoaded(loaded)
         }
+    }
+
+    private func applyLoaded(_ loaded: [HistoryEntry]) {
+        rows = loaded.map { HistoryRow(entry: $0, day: dayFormatter.string(from: $0.timestamp)) }
+        entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
+        recomputeGroups()
+        isLoading = false
     }
 
     // Debounce search keystrokes: re-filtering and re-grouping up to loadLimit rows on every character

@@ -20,3 +20,6 @@ models/
 benchmark/*.wav
 benchmark/results.json
 
+
+# direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead
+.envrc

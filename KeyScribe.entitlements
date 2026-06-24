@@ -1,15 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Hardened-runtime entitlements for KeyScribe. DORMANT until M7: make-app.sh does not yet pass
-     this file (local dev signs without hardened runtime). At M7, sign with a Developer ID cert and
-     `codesign --options runtime --entitlements KeyScribe.entitlements ...`, then notarize + staple.
-     KeyScribe is NOT App-Sandboxed — it needs event taps / Accessibility, which the sandbox forbids.
-     Candidate additions if notarization flags them: com.apple.security.cs.disable-library-validation
-     (bundled third-party frameworks signed by another team, e.g. Moonshine's ONNX Runtime).
-     NOTE: keychain-access-groups / the data-protection keychain were tried for BYOK secrets and do
-     NOT work under local self-signed signing — a teamless cert can't authorize that restricted
-     entitlement (AMFI SIGKILLs the app at launch), and without it SecItem returns errSecMissingEntitlement.
-     BYOK keys stay in the legacy login keychain (KeychainStore); existence checks avoid the ACL prompt. -->
+<!-- Hardened-runtime entitlements, passed by release.sh (Developer ID + notarization). KeyScribe is
+     NOT App-Sandboxed (it needs event taps / Accessibility, which the sandbox forbids). Full rationale
+     and the data-protection-keychain plan live in docs/session-status.md and agent_notes/distribution_plan.
+     Keep XML comments free of double hyphens: AMFI parses this file strictly and rejects them. -->
 <plist version="1.0">
 <dict>
   <key>com.apple.security.device.audio-input</key><true/>
