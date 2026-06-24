@@ -19,7 +19,7 @@ enum BenchmarkRunner {
         var recallBiased = 0.0
     }
 
-    static func run(dir: URL, only: Set<String>? = nil) async {
+    static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false) async {
         let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {
@@ -27,6 +27,10 @@ enum BenchmarkRunner {
             return
         }
         let engines = makeEngines().filter { only == nil || only!.contains($0.id) }
+        if raw {
+            await runRaw(dir: dir, manifest: manifest, engines: engines)
+            return
+        }
         print("Benchmark: \(manifest.entries.count) clips × \(engines.count) engines\n")
 
         var results: [String: EngineResult] = [:]
@@ -81,6 +85,27 @@ enum BenchmarkRunner {
         }
         printTable(results, engineOrder: engines.map(\.id))
         writeJSON(results, to: dir.appendingPathComponent("results.json"))
+    }
+
+    private static func runRaw(dir: URL, manifest: BenchmarkManifest, engines: [any SpeechEngine]) async {
+        FileHandle.standardError.write("raw dump: \(manifest.entries.count) clips × \(engines.count) engines\n".data(using: .utf8)!)
+        for engine in engines {
+            do {
+                try await engine.loadIfNeeded()
+            } catch {
+                FileHandle.standardError.write("· \(engine.id): not installed / load failed\n".data(using: .utf8)!)
+                continue
+            }
+            for entry in manifest.entries {
+                let wav = dir.appendingPathComponent("\(entry.id).wav")
+                guard FileManager.default.fileExists(atPath: wav.path) else { continue }
+                let hyp = (try? await engine.transcribe(wavURL: wav, biasTerms: [])) ?? "<error>"
+                let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
+                print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
+            }
+            await engine.evict()
+            FileHandle.standardError.write("· \(engine.id): done\n".data(using: .utf8)!)
+        }
     }
 
     private static func makeEngines() -> [any SpeechEngine] {

@@ -16,9 +16,15 @@ spikes/
 models/
 
 # Benchmark corpus — personal voice recordings + run output stay local. The kit (manifest.json,
-# record.sh, README.md) IS committed so the benchmark is reproducible against your own voice.
+# record.sh, README.md, and the voices/ generator + analysis scripts) IS committed so the benchmark
+# is reproducible against your own voice.
 benchmark/*.wav
 benchmark/results.json
+# voices/ "scratch that" regression corpus: generated clips + generated manifest + local TTS venv
+benchmark/voices/*.wav
+benchmark/voices/manifest.json
+benchmark/voices/.ttsenv
+benchmark/voices/.tmpwav
 
 
 # direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead

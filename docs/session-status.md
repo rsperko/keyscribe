@@ -17,6 +17,31 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## "Scratch that" clause-boundary rule + voice-corpus regression gate (2026-06-24, uncommitted)
+
+`LiveEditsStage` previously fired **scratch that** on a bare token match *anywhere*, so literal usage
+("scratch that lottery ticket") deleted the preceding words, and an STT-attached terminator
+("scratch that.") *defeated* the match entirely. Now scratch-that fires **only at a clause boundary** —
+its phrase ends with a terminator (`.`/`!`/`?`) or comma, or ends the utterance — and a continuing word
+after it is left as literal text. Matching is now punctuation-tolerant (strips a trailing
+terminator/comma). The gate is **scratch-only**; newline/paragraph/tab still fire inline. `swift test`
+= **515 pass** (`LiveEditsStageTests` 17 → 20). The rule lives in the `LiveEditsStage.swift` header
+comment.
+
+Decided **empirically**, not by guess. New multi-voice STT probe under `benchmark/voices/` (committed
+kit: `gen-corpus.sh` / `gen_corpus.py` / `kokoro_launch.py` / `record-human.sh` / `analyze.py` /
+`README.md`; clips, generated `manifest.json`, and the `.ttsenv` venv are gitignored): **Kokoro**
+(neural, `mlx-audio`) US/UK voices + macOS **`say`** accents + optional **human takes**, run through a
+new headless **`--benchmark <dir> --raw`** mode (`BenchmarkRunner`) that dumps verbatim transcripts;
+`analyze.py` classifies what follows "scratch that" (TERM/COMMA/END/CONT/ABSENT). Findings across all
+7 engines: **correctly-recognized literals are never falsely terminated** (rule is safe); **Qwen
+0.6/1.7 terminate corrections reliably even run-on**; **Whisper/Parakeet** do when punctuated (often a
+*comma* — why comma counts); **Apple never punctuates "scratch that" → under-fires (safe no-op)** — the
+concrete "future model" risk; **Moonshine** can't transcribe the phrase. Residual risk: a
+*mis-recognized* literal can still get a spurious boundary (one Whisper case). Re-run this gate when a
+new STT engine is added. **User-facing docs intentionally unchanged** — the punctuation mechanism is
+invisible to users; `design.md` §4.2 (Live edits row) carries the contract.
+
 ## First-dictation warm pass (2026-06-24, uncommitted)
 
 Make the **first** dictation of a process feel instant — the HUD appears immediately, the mic is ready,

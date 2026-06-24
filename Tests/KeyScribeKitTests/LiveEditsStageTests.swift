@@ -21,13 +21,13 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatRemovesCurrentSentence() {
-        #expect(run("I like cats. I like dogs scratch that I like fish")
+        #expect(run("I like cats. I like dogs, scratch that. I like fish")
             == "I like cats. I like fish")
     }
 
     @Test func scratchThatBackToNewline() {
         // a newline command also bounds a segment
-        #expect(run("keep this new line drop this scratch that final")
+        #expect(run("keep this new line drop this scratch that. final")
             == "keep this\nfinal")
     }
 
@@ -40,12 +40,38 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatAtStartIsNoOp() {
-        #expect(run("scratch that hello") == "hello")
+        #expect(run("scratch that. hello") == "hello")
     }
 
     @Test func scratchThatDoesNotEatThePreviousSentence() {
         // the segment after a sentence boundary is empty, so "scratch that" removes nothing
-        #expect(run("done. scratch that more") == "done. more")
+        #expect(run("done. scratch that. more") == "done. more")
+    }
+
+    @Test func scratchThatFollowedByWordIsLiteral() {
+        // a continuing word means it is not a clause boundary — leave it as text
+        #expect(run("I told her to scratch that lottery ticket and see if we won")
+            == "I told her to scratch that lottery ticket and see if we won")
+    }
+
+    @Test func scratchThatRunOnWithoutBoundaryIsLiteral() {
+        // no terminator and not end-of-utterance: the command does not fire (safe failure)
+        #expect(run("I like dogs scratch that I like fish")
+            == "I like dogs scratch that I like fish")
+    }
+
+    @Test func scratchThatTrailingPeriodFires() {
+        #expect(run("we went up the hill, scratch that. we went down the hill")
+            == "we went down the hill")
+    }
+
+    @Test func scratchThatTrailingCommaFires() {
+        #expect(run("we went up the hill, scratch that, we went down the hill")
+            == "we went down the hill")
+    }
+
+    @Test func scratchThatAtEndOfUtteranceFires() {
+        #expect(run("keep this. drop this scratch that") == "keep this.")
     }
 
     @Test func stageRunsBeforeReplacements() {
@@ -69,7 +95,7 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatAliases() {
-        #expect(run("I like dogs strike that I like fish") == "I like fish")
+        #expect(run("I like dogs, strike that. I like fish") == "I like fish")
     }
 
     @Test func customCommandPhrases() {

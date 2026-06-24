@@ -3,10 +3,16 @@ import Foundation
 // Post-STT text stage, runs before replacements (design.md §4.2.1). Handles spoken editing
 // commands: insert a newline / paragraph break / tab, and "scratch that" (deletes the current
 // segment — the words since the last sentence terminator or newline command). Sentence/newline
-// aware. The trigger phrases are configurable per command (LiveEditsStage.Commands) with sensible
-// defaults; phrases match longest-first, so a multi-word command can never be shadowed by a shorter
-// one. Bare single words like "tab" or "paragraph" are intentionally NOT defaults (too easily
-// spoken literally). Verbatim tokenization happens later in the rewrite path (design.md §4.2).
+// aware. "scratch that" only fires when it sits at a clause boundary — its phrase ends with a
+// terminator (. ! ?) or comma, or it ends the utterance — so literal usage like "scratch that
+// lottery ticket" (a continuing word follows) is left as text. This relies on the STT punctuating
+// a spoken correction; engines that do not (e.g. Apple) will under-fire rather than corrupt. The
+// other (additive) commands fire inline regardless of boundary. The trigger phrases are
+// configurable per command (LiveEditsStage.Commands) with sensible defaults; phrases match
+// longest-first, so a multi-word command can never be shadowed by a shorter one. Bare single words
+// like "tab" or "paragraph" are intentionally NOT defaults (too easily spoken literally). Matching
+// tolerates a trailing terminator/comma on the phrase. Verbatim tokenization happens later in the
+// rewrite path (design.md §4.2).
 public struct LiveEditsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.liveEdits
@@ -63,6 +69,15 @@ public struct LiveEditsStage: PipelineStage {
 
         while i < tokens.count {
             if let (action, length) = match(lowered, at: i) {
+                if action == .scratch {
+                    let atUtteranceEnd = i + length >= tokens.count
+                    let endsClause = Self.hasBoundaryPunct(tokens[i + length - 1])
+                    guard atUtteranceEnd || endsClause else {
+                        parts.append(tokens[i])
+                        i += 1
+                        continue
+                    }
+                }
                 switch action {
                 case .newline: parts.append(Self.newline); resetSegment()
                 case .paragraph: parts.append(Self.paragraph); resetSegment()
@@ -87,11 +102,28 @@ public struct LiveEditsStage: PipelineStage {
         for phrase in phrases {
             let length = phrase.words.count
             guard i + length <= lowered.count else { continue }
-            if (0..<length).allSatisfy({ lowered[i + $0] == phrase.words[$0] }) {
-                return (phrase.action, length)
+            let matches = (0..<length).allSatisfy { k in
+                let candidate = k == length - 1 ? Self.stripBoundaryPunct(lowered[i + k]) : lowered[i + k]
+                return candidate == phrase.words[k]
             }
+            if matches { return (phrase.action, length) }
         }
         return nil
+    }
+
+    private static func isBoundaryPunct(_ c: Character) -> Bool {
+        c == "." || c == "!" || c == "?" || c == ","
+    }
+
+    private static func hasBoundaryPunct(_ word: String) -> Bool {
+        guard let last = word.last else { return false }
+        return isBoundaryPunct(last)
+    }
+
+    private static func stripBoundaryPunct(_ word: String) -> String {
+        var word = word
+        while let last = word.last, isBoundaryPunct(last) { word.removeLast() }
+        return word
     }
 
     private func join(_ parts: [String]) -> String {

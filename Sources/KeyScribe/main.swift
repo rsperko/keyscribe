@@ -36,9 +36,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
     if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
         only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
     }
+    let raw = CommandLine.arguments.contains("--raw")
     let done = DispatchSemaphore(value: 0)
     Task.detached {
-        await BenchmarkRunner.run(dir: dir, only: only)
+        await BenchmarkRunner.run(dir: dir, only: only, raw: raw)
         done.signal()
     }
     done.wait()

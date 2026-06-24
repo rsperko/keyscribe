@@ -1,0 +1,68 @@
+# Voice corpus — "scratch that" punctuation regression gate
+
+A small, multi-voice corpus for one specific question: **does each STT engine punctuate a spoken
+"scratch that" correction** (so `LiveEditsStage` can treat a terminator/comma/end-of-utterance as the
+signal that it's a command, not literal text)? This is the empirical check behind that rule, and a
+standing gate to re-run whenever a new STT engine is added — a non-punctuating engine (e.g. Apple)
+will *under-fire* the command, which is the "future model" risk to watch.
+
+This is separate from the main `../` accuracy corpus (WER/recall): here we care about **raw
+punctuation**, which WER normalizes away.
+
+## What's committed vs. generated
+
+Committed (the reproducible kit): `gen-corpus.sh`, `gen_corpus.py`, `kokoro_launch.py`,
+`record-human.sh`, `analyze.py`, this README. Generated locally and **gitignored**: the `*.wav`
+clips, `manifest.json`, the `.ttsenv` venv, and `.tmpwav`.
+
+## The phrases
+
+Six, spanning the discriminating cases (see `gen_corpus.py`): commands with a pause, run-on (no
+pause), a full-stop boundary, and end-of-utterance; plus two literals (`scratch that lottery ticket`,
+`scratch that itch`) that must **not** be treated as commands.
+
+## Voices
+
+- **Kokoro** (neural, via `mlx-audio`): US/UK male+female — natural prosody (`af_heart`, `af_bella`,
+  `am_michael`, `am_adam`, `bf_emma`, `bm_george`).
+- **macOS `say`**: extra accents Kokoro lacks (GB/AU/IE/IN/ZA: Daniel, Karen, Moira, Rishi, Tessa,
+  plus Samantha). Note: Apple's Siri voices are walled off from `say`/AVSpeechSynthesizer and cannot
+  be used here.
+
+## Generate the synthetic clips
+
+```bash
+bash benchmark/voices/gen-corpus.sh
+```
+
+Idempotent. It installs Homebrew `espeak-ng` (Kokoro's G2P needs it), creates a venv at
+`benchmark/voices/.ttsenv` (override with `KEYSCRIBE_TTS_VENV`), installs `mlx-audio misaki[en]
+num2words`, then writes the 16 kHz mono clips + `manifest.json`. A few Kokoro clips occasionally fail
+on an intermittent MLX vocoder shape bug and are skipped (reported at the end).
+
+> Why `kokoro_launch.py`: `misaki`'s `espeakng_loader` wheel hard-codes a non-existent build path for
+> the espeak-ng data; the launcher redirects it to the Homebrew install before synthesis.
+
+## Add your own voice (optional but valuable)
+
+Synthetic run-on has no real pause; a human correction does. Record the same phrases:
+
+```bash
+bash benchmark/voices/record-human.sh          # records all six, skips ones already done
+bash benchmark/voices/record-human.sh cmd_runon  # (re)record one id
+```
+
+Clips are saved as `<id>__human.wav` and added to `manifest.json` (re-running `gen-corpus.sh`
+preserves them).
+
+## Run + analyze
+
+```bash
+./make-app.sh release   # once, bundles the MLX metallib Qwen needs
+.build/release/KeyScribe --benchmark benchmark/voices --raw > /tmp/raw.txt 2>/dev/null
+benchmark/voices/.ttsenv/bin/python benchmark/voices/analyze.py /tmp/raw.txt
+```
+
+`--raw` prints one verbatim transcript per `engine × clip` (`RAW\t<engine>\t<id>\t<hypothesis>`);
+`analyze.py` classifies what follows "scratch that" (TERM / COMMA / END / CONT / ABSENT) and tabulates
+command-capture vs. literal-safety per engine.
