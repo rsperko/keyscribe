@@ -44,10 +44,20 @@ enum TextInserter {
     }
 
     static func insertViaPaste(_ text: String) async {
+        guard !text.isEmpty else { return }
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
-        writeScratch(text)
-        // clearContents()/writeObjects() bump changeCount synchronously, so the scratch write is already
+        // Confirm the dictated text is actually the pasteboard's string before synthesizing ⌘V. Without
+        // this, a failed or raced write (writeObjects returning false, or a clipboard manager re-owning the
+        // board) left the user's PREVIOUS clipboard in place and ⌘V pasted that instead of the dictation.
+        // If we cannot verify the write, restore the user's clipboard and fire nothing — never paste stale
+        // data. The dictation is still recoverable via "Paste last dictation".
+        guard writeScratchVerified(text) else {
+            snapshot.restore()
+            Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
+            return
+        }
+        // clearContents()/writeObjects() bump changeCount synchronously, so the verified write is already
         // reflected here — stamp it now. The old fixed 30ms sleep added latency and risked stamping a
         // pre-write count (then scratchSurvived misreads our own write as a foreign one and skips the
         // restore, leaving the dictated text on the clipboard).
@@ -71,16 +81,21 @@ enum TextInserter {
         return pb.changeCount == stamp
     }
 
-    // Our temporary clipboard write for the paste. Marked transient + concealed so clipboard managers
-    // do not capture the dictated text (it can contain just-redacted-then-restored sensitive spans).
-    private static func writeScratch(_ text: String) {
+    // Our temporary clipboard write for the paste, read-back verified. Marked transient + concealed so
+    // clipboard managers do not capture the dictated text (it can contain just-redacted-then-restored
+    // sensitive spans). Returns false if, after a few attempts, the pasteboard's string is not the
+    // dictated text — so the caller refuses to ⌘V rather than paste whatever stale content is there.
+    private static func writeScratchVerified(_ text: String, attempts: Int = 3) -> Bool {
         let pb = NSPasteboard.general
-        let item = NSPasteboardItem()
-        item.setString(text, forType: .string)
-        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
-        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-        pb.clearContents()
-        pb.writeObjects([item])
+        for _ in 0..<attempts {
+            let item = NSPasteboardItem()
+            item.setString(text, forType: .string)
+            item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+            item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            pb.clearContents()
+            if pb.writeObjects([item]) && pb.string(forType: .string) == text { return true }
+        }
+        return false
     }
 
     // Polls the general pasteboard's changeCount until it bumps past `since`, up to ~500ms. A

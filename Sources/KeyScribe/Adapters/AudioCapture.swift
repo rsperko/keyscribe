@@ -130,6 +130,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // a stuck queue.
     func prewarm() {
         rebuildEngineIfNeeded()
+        // Realizing the input HAL unit binds and HOLDS the default input device for the app's lifetime. On
+        // a Bluetooth headset that pins it to HFP (mono call mode) and mutes the user's music even while
+        // idle — the reported bug. Skip the idle realization there and pay the one-time unit cost on the
+        // next dictation instead. Wired/built-in inputs have no A2DP/HFP penalty, so they keep fast prewarm.
+        guard !Self.currentInputIsBluetooth() else { return }
         let queue = currentQueue()
         let generation = currentGeneration()
         Task.detached { [self] in
@@ -222,7 +227,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // the release instant, then tear down. A 300 ms backstop bounds the wait if the clock never crosses.
     func finishDraining() async -> URL? {
         await drainTail()
-        return await teardownAndFinalize()
+        let url = await teardownAndFinalize()
+        releaseEngineIfBluetooth()
+        return url
+    }
+
+    // After a dictation the engine's input unit stays realized (engine.stop() does not deallocate it),
+    // which keeps a Bluetooth headset pinned to HFP and the user's music muted while idle. Drop the engine
+    // so the unit deallocates and the headset renegotiates A2DP; the next dictation rebuilds on demand. No
+    // effect on wired/built-in inputs (they keep the prewarmed engine resident, no per-dictation rebuild).
+    private func releaseEngineIfBluetooth() {
+        guard Self.currentInputIsBluetooth() else { return }
+        markRebuild()
+        rebuildEngineIfNeeded()
     }
 
     private func drainTail() async {
@@ -298,6 +315,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             box.engine.stop()
             box.engine.inputNode.removeTap(onBus: 0)
         }
+        releaseEngineIfBluetooth()
         return url
     }
 
@@ -415,6 +433,28 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
+    }
+
+    // True when the system default input is a Bluetooth headset. Holding such a device open forces it from
+    // A2DP (stereo music) to HFP (mono call mode), muting the user's audio — so we avoid holding it while
+    // idle and drop the engine after each dictation. A fast, non-blocking CoreAudio property read.
+    private static func currentInputIsBluetooth() -> Bool {
+        var deviceID = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var addr = defaultInputAddress
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID) == noErr,
+              deviceID != 0 else { return false }
+        var transport: UInt32 = 0
+        var transportSize = UInt32(MemoryLayout<UInt32>.size)
+        var transportAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(
+            deviceID, &transportAddr, 0, nil, &transportSize, &transport) == noErr else { return false }
+        return transport == kAudioDeviceTransportTypeBluetooth
+            || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
     private func registerDefaultInputListener() {

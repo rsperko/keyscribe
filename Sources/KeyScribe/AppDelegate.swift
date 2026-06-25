@@ -189,8 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let actionDescriptors = Dictionary(uniqueKeysWithValues: actionBindings.map { ($0.id, $0.descriptor) })
         menu.setActionShortcuts(
-            addDictionary: actionDescriptors[GlobalHotkey.dictionaryId],
-            addReplacement: actionDescriptors[GlobalHotkey.replacementId])
+            addDictionary: actionDescriptors[HotkeyAction.addDictionary.rawValue],
+            addReplacement: actionDescriptors[HotkeyAction.addReplacement.rawValue])
 
         if hotkey == nil {
             hotkey = HotkeyMonitor(

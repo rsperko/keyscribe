@@ -91,7 +91,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         switch category {
         case "app": "App shared"
         case "visible text": "Visible text shared"
-        case "selected text": "Selected text shared"
+        case "preceding text": "Preceding text shared"
         default: nil
         }
     }

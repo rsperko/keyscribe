@@ -69,6 +69,14 @@ struct HistoryEntryCodecTests {
         #expect(entry.dataBoundaryLabels == ["Cloud rewrite", "Best-effort redaction", "App shared"])
         #expect(entry.contextLabels == ["App shared"])
     }
+
+    @Test func contextLabelsCoverEveryCategoryProducersEmit() {
+        let entry = HistoryEntry(
+            timestamp: Date(), modeName: "Email", heard: "hello", result: "Hello.", outcome: .inserted,
+            cloudInvolved: true, redaction: false,
+            contextCategories: ["app", "visible text", "preceding text"])
+        #expect(entry.contextLabels == ["App shared", "Visible text shared", "Preceding text shared"])
+    }
 }
 
 struct HistoryRetentionTests {

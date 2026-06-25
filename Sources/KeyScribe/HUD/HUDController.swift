@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 import KeyScribeKit
 
@@ -23,11 +24,16 @@ final class HUDController: HUDPresenting {
 
     func render(_ state: HUDState) {
         guard model.state != state else { return }
+        let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
         model.state = state
         if case .hidden = state {
             panel?.orderOut(nil)
         } else {
             showPanelIfNeeded()
+            // Each dictation can target a window on a different display, so move the HUD to the screen
+            // holding the focused window — it should appear where the user is dictating, not where it last
+            // sat. Only on the hidden→visible edge so per-frame level updates during recording do not hop it.
+            if wasHidden, let panel { reposition(panel, to: focusedWindowScreen()) }
             // HUD holds key focus across the cancellable states so ESC-to-cancel reaches it as a local
             // keystroke; the controller relinquishes momentarily around the synthetic ⌘C/⌘V.
             if state.holdsKeyFocus {
@@ -94,10 +100,11 @@ final class HUDController: HUDPresenting {
         }
     }
 
-    // Restore the parked anchor on the panel's current screen. Anchors are resolution-independent —
-    // recomputed from visibleFrame each time — so a saved spot lands correctly on any display.
-    private func reposition(_ panel: NSPanel) {
-        guard let screen = panel.screen ?? NSScreen.main else { return }
+    // Restore the parked anchor on `screen` (defaults to the panel's current screen). Anchors are
+    // resolution-independent — recomputed from visibleFrame each time — so a saved spot lands correctly on
+    // any display; only the screen changes when the HUD follows the focused window across monitors.
+    private func reposition(_ panel: NSPanel, to screen: NSScreen? = nil) {
+        guard let screen = screen ?? panel.screen ?? NSScreen.main else { return }
         let origin = anchor.origin(in: screen.visibleFrame, size: panel.frame.size)
         // Our own setFrameOrigin posts didMove; guard so it isn't mistaken for a user drag. The flag is
         // cleared a runloop tick later because the queued notification fires asynchronously.
@@ -142,6 +149,41 @@ final class HUDController: HUDPresenting {
         HUDAnchorStore.save(.default)
         if let panel { reposition(panel) }
     }
+
+    // The screen holding the frontmost app's focused window, so the HUD shows on the display being
+    // dictated into. Reads window geometry from the window server (CGWindowList), NOT the target app's AX
+    // tree, so it can never block on an unresponsive app. nil ⇒ caller keeps the panel's current screen.
+    private func focusedWindowScreen() -> NSScreen? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let pid = app.processIdentifier
+        guard let infos = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        // Front-to-back order: the first normal (layer 0) window owned by the frontmost app is its key window.
+        for info in infos {
+            guard let owner = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, owner == pid,
+                  ((info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0) == 0,
+                  let boundsDict = info[kCGWindowBounds as String] else { continue }
+            var quartz = CGRect.zero
+            guard CGRectMakeWithDictionaryRepresentation(boundsDict as! CFDictionary, &quartz) else { continue }
+            return Self.screen(forQuartzRect: quartz)
+        }
+        return nil
+    }
+
+    // CGWindowList rects are top-left-origin global (Quartz); flip to AppKit's bottom-left space against the
+    // primary screen, then pick the NSScreen with the largest overlap (falling back to the one under center).
+    private static func screen(forQuartzRect quartz: CGRect) -> NSScreen? {
+        let primaryHeight = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+            ?? NSScreen.main?.frame.height ?? quartz.maxY
+        let cocoa = CGRect(x: quartz.origin.x, y: primaryHeight - quartz.origin.y - quartz.height,
+                           width: quartz.width, height: quartz.height)
+        let overlap = NSScreen.screens.max { area($0.frame.intersection(cocoa)) < area($1.frame.intersection(cocoa)) }
+        if let overlap, area(overlap.frame.intersection(cocoa)) > 0 { return overlap }
+        let center = CGPoint(x: cocoa.midX, y: cocoa.midY)
+        return NSScreen.screens.first { $0.frame.contains(center) }
+    }
+
+    private static func area(_ r: CGRect) -> CGFloat { r.isNull ? 0 : r.width * r.height }
 }
 
 private final class KeyablePanel: NSPanel {
