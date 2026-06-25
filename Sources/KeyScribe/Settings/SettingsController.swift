@@ -317,6 +317,31 @@ final class SettingsModel: ObservableObject {
     @Published var eviction: String { didSet { persist() } }
     @Published var addDictionaryShortcut: String { didSet { persist() } }
     @Published var addReplacementShortcut: String { didSet { persist() } }
+    // Empty string = follow the system default input; any other value is a CoreAudio device UID.
+    @Published var inputDeviceUID: String { didSet { persist() } }
+    // The friendly name last seen for `inputDeviceUID`, so a disconnected preferred device still reads as
+    // itself in the picker. Refreshed from the live device whenever one is connected (here and at startup).
+    private var storedInputDeviceName: String?
+
+    struct InputDeviceOption: Identifiable, Equatable {
+        let id: String
+        let label: String
+        let connected: Bool
+    }
+
+    // Picker rows: "System Default" first, then every connected input device. If the saved preference
+    // points at a device that is not currently connected, append a trailing disabled row (labeled with the
+    // last-seen name) so the picker can still render the current selection instead of silently snapping.
+    var inputDeviceOptions: [InputDeviceOption] {
+        var options = [InputDeviceOption(id: "", label: "System Default", connected: true)]
+        let live = AudioInputDevices.available()
+        options += live.map { InputDeviceOption(id: $0.uid, label: $0.name, connected: true) }
+        if !inputDeviceUID.isEmpty, !live.contains(where: { $0.uid == inputDeviceUID }) {
+            let name = storedInputDeviceName ?? "Preferred device"
+            options.append(InputDeviceOption(id: inputDeviceUID, label: "\(name) (not connected)", connected: false))
+        }
+        return options
+    }
 
     var evictions: [(id: String, label: String)] {
         [
@@ -366,6 +391,8 @@ final class SettingsModel: ObservableObject {
         eviction = settings.stt.eviction.rawValue
         addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
         addReplacementShortcut = settings.shortcuts.addReplacement
+        inputDeviceUID = settings.audio.inputDeviceUID ?? ""
+        storedInputDeviceName = settings.audio.inputDeviceName
     }
 
     func apply(_ settings: Settings) {
@@ -380,6 +407,8 @@ final class SettingsModel: ObservableObject {
         eviction = settings.stt.eviction.rawValue
         addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
         addReplacementShortcut = settings.shortcuts.addReplacement
+        inputDeviceUID = settings.audio.inputDeviceUID ?? ""
+        storedInputDeviceName = settings.audio.inputDeviceName
         loading = false
     }
 
@@ -410,6 +439,14 @@ final class SettingsModel: ObservableObject {
             evictionIdleSeconds: settings.stt.evictionIdleSeconds)
         settings.shortcuts = .init(
             addDictionaryEntry: addDictionaryShortcut, addReplacement: addReplacementShortcut)
+        if inputDeviceUID.isEmpty {
+            storedInputDeviceName = nil
+        } else if let live = AudioInputDevices.available().first(where: { $0.uid == inputDeviceUID }) {
+            storedInputDeviceName = live.name
+        }
+        settings.audio = .init(
+            inputDeviceUID: inputDeviceUID.isEmpty ? nil : inputDeviceUID,
+            inputDeviceName: inputDeviceUID.isEmpty ? nil : storedInputDeviceName)
         onChange(settings)
     }
 }

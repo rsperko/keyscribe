@@ -64,7 +64,8 @@ struct SettingsTests {
             schemaVersion: 1, loadOnLogin: true, defaultModeId: "email",
             stt: .init(engine: "whisper", eviction: .fastest, evictionIdleSeconds: 45),
             duringDictation: .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false),
-            history: .init(enabled: false, retentionDays: 30))
+            history: .init(enabled: false, retentionDays: 30),
+            audio: .init(inputDeviceUID: "BuiltInMicrophoneDevice", inputDeviceName: "Built-in Microphone"))
         #expect(try SettingsStore.decode(from: SettingsStore.encode(s)) == s)
     }
 
@@ -93,6 +94,36 @@ struct SettingsTests {
         let s = try SettingsStore.decode(from: "schema_version = 1\n[shortcuts]\nadd_dictionary_entry = \"\"")
         #expect(s.shortcuts.addDictionaryEntry.isEmpty)
         #expect(s.shortcuts.addReplacement == "control+option+shift+r")
+    }
+
+    @Test func audioInputDeviceRoundTrips() throws {
+        var s = Settings.defaults
+        s.audio = .init(inputDeviceUID: "AppleUSBAudioEngine:Shure:MV7:1", inputDeviceName: "Shure MV7")
+        let decoded = try SettingsStore.decode(from: SettingsStore.encode(s))
+        #expect(decoded.audio.inputDeviceUID == "AppleUSBAudioEngine:Shure:MV7:1")
+        #expect(decoded.audio.inputDeviceName == "Shure MV7")
+        #expect(decoded == s)
+    }
+
+    @Test func absentAudioFallsBackToSystemDefault() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(s.audio.inputDeviceUID == nil)
+        #expect(s.audio.inputDeviceName == nil)
+    }
+
+    @Test func explicitAudioSectionDecodes() throws {
+        let s = try SettingsStore.decode(
+            from: "schema_version = 1\n[audio]\ninput_device_uid = \"BuiltInMic\"\ninput_device_name = \"MacBook Pro Microphone\"")
+        #expect(s.audio.inputDeviceUID == "BuiltInMic")
+        #expect(s.audio.inputDeviceName == "MacBook Pro Microphone")
+    }
+
+    // A name may be absent even when the UID is set (an older config, or a device that was disconnected
+    // when first saved) — the picker just falls back to a generic label until the next startup refresh.
+    @Test func audioUIDWithoutNameDecodes() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[audio]\ninput_device_uid = \"BuiltInMic\"")
+        #expect(s.audio.inputDeviceUID == "BuiltInMic")
+        #expect(s.audio.inputDeviceName == nil)
     }
 
     @Test func negativeRetentionIsRejected() {

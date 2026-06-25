@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }
+        refreshPreferredDeviceName()
 
         buildHotkeyMonitor()
         applyLoginItem(settings.loadOnLogin)
@@ -281,6 +282,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
         settingsController.update(settings: updated)
         refreshStatus()
+    }
+
+    // Keep the stored friendly name for the preferred input device fresh: if it is connected now and its
+    // name has drifted (renamed device, or a name we never captured), update and persist. A disconnected
+    // preferred device keeps its last-seen name so the picker still reads as itself.
+    private func refreshPreferredDeviceName() {
+        guard let uid = settings.audio.inputDeviceUID,
+              let device = AudioInputDevices.available().first(where: { $0.uid == uid }),
+              settings.audio.inputDeviceName != device.name else { return }
+        settings.audio = .init(inputDeviceUID: uid, inputDeviceName: device.name)
+        do { try SettingsStore.write(settings, to: KeyScribePaths.supportDir) }
+        catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
+        settingsController.update(settings: settings)
     }
 
     private func applyLoginItem(_ enabled: Bool) {

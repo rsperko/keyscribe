@@ -159,6 +159,7 @@ final class DictationController {
         self.accessibilityGranted = accessibilityGranted
         self.llmClient = llmClient
         levelCoalescer.onLevel = { [weak self] level in self?.renderLevel(level) }
+        audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
     }
 
@@ -180,7 +181,10 @@ final class DictationController {
         memoryPressureSource = source
     }
 
-    func updateSettings(_ settings: Settings) { self.settings = settings }
+    func updateSettings(_ settings: Settings) {
+        self.settings = settings
+        audio.setPreferredInputUID(settings.audio.inputDeviceUID)
+    }
 
     // The active engine changed (Settings). Evict the one we switched away from — but never while a
     // dictation is mid-flight on it: the non-actor engines close their transcriber synchronously, so

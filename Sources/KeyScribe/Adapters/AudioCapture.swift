@@ -11,11 +11,15 @@ protocol AudioCapturing: AnyObject, Sendable {
     // the engine down, so the tail is not clipped. Falls back to an immediate stop for test fakes.
     func finishDraining() async -> URL?
     func prewarm()
+    // The user's preferred capture device UID (empty/nil = follow the system default). The adapter holds
+    // it standing — the idle device listener consults it independently of any start()/prewarm() call.
+    func setPreferredInputUID(_ uid: String?)
 }
 
 extension AudioCapturing {
     func prewarm() {}
     func finishDraining() async -> URL? { stop() }
+    func setPreferredInputUID(_ uid: String?) {}
 }
 
 enum AudioCaptureError: Error {
@@ -57,6 +61,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var mustRebuild = false
 
     private let lock = NSLock()
+    // The user's preferred capture device UID (nil/empty = follow system default). Resolved live each
+    // bring-up: preferred device if present, else system default — so an absent preferred device follows
+    // the default, and the device-list listener re-prewarms when it returns.
+    private var preferredInputUID: String?
     private var file: AVAudioFile?
     private var currentURL: URL?
     private var levelHandler: (@Sendable (Float) -> Void)?
@@ -78,22 +86,47 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // abandon. Set generously so a slow-but-real device is not falsely failed.
     private static let bringUpTimeout: Double = 2.0
 
-    // Layer 5: a listener on the default *input* device. While idle the prewarmed engine caches a device
-    // binding that no AVAudioEngineConfigurationChange refreshes (none fires while stopped), so a device
-    // switch would otherwise leave the hot path bound to a gone/stale device. On a change we flag a
-    // rebuild and re-prewarm off-main, keeping the prewarmed engine valid without per-dictation cost.
+    // Layer 5: two listeners on the system's input topology. While idle the prewarmed engine caches a
+    // device binding that no AVAudioEngineConfigurationChange refreshes (none fires while stopped), so a
+    // device switch would otherwise leave the hot path bound to a gone/stale device. We watch BOTH the
+    // default-input selector (covers "follow the system default" when no preferred device is set or it is
+    // absent) AND the device list (covers a preferred device appearing/disappearing). Either change, while
+    // idle, flags a rebuild and re-prewarms off-main so the next bring-up resolves the current effective
+    // device — preferred if present, else default — without per-dictation cost.
     private let deviceListenerQueue = DispatchQueue(label: "com.keyscribe.audio.device-listener")
-    private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
+    private var defaultInputListenerBlock: AudioObjectPropertyListenerBlock?
+    private var deviceListListenerBlock: AudioObjectPropertyListenerBlock?
 
     init() {
-        registerDefaultInputListener()
+        registerInputListeners()
     }
 
     deinit {
-        guard let deviceListenerBlock else { return }
-        var address = Self.defaultInputAddress
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &address, deviceListenerQueue, deviceListenerBlock)
+        if let defaultInputListenerBlock {
+            var address = Self.defaultInputAddress
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, deviceListenerQueue, defaultInputListenerBlock)
+        }
+        if let deviceListListenerBlock {
+            var address = Self.deviceListAddress
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, deviceListenerQueue, deviceListListenerBlock)
+        }
+    }
+
+    func setPreferredInputUID(_ uid: String?) {
+        let normalized = (uid?.isEmpty == true) ? nil : uid
+        let changed = lock.withLock {
+            guard preferredInputUID != normalized else { return false }
+            preferredInputUID = normalized
+            return true
+        }
+        guard changed else { return }
+        // A new preference re-resolves the effective device. Treat it like a device-topology change:
+        // rebuild so the prewarmed engine rebinds, and re-prewarm while idle.
+        let recording = lock.withLock { currentURL != nil }
+        markRebuild()
+        if !recording { prewarm() }
     }
 
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
@@ -134,7 +167,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // a Bluetooth headset that pins it to HFP (mono call mode) and mutes the user's music even while
         // idle — the reported bug. Skip the idle realization there and pay the one-time unit cost on the
         // next dictation instead. Wired/built-in inputs have no A2DP/HFP penalty, so they keep fast prewarm.
-        guard !Self.currentInputIsBluetooth() else { return }
+        guard !effectiveInputIsBluetooth() else { return }
         let queue = currentQueue()
         let generation = currentGeneration()
         Task.detached { [self] in
@@ -143,9 +176,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                         queue.async { [self] in
                             if isGeneration(generation) {
-                                let input = engineSnapshot().inputNode
-                                _ = input.outputFormat(forBus: 0)
-                                engineSnapshot().prepare()
+                                let engine = engineSnapshot()
+                                applyPreferredDevice(to: engine)
+                                _ = engine.inputNode.outputFormat(forBus: 0)
+                                engine.prepare()
                             }
                             cont.resume()
                         }
@@ -199,6 +233,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private func arm() throws {
         let engine = engineSnapshot()
         let generation = currentGeneration()
+        // Pin the preferred device (if present) before the tap is installed, so the tap binds to its live
+        // format. No-op when no preferred device is set or it is absent — the engine then follows the
+        // system default, which is exactly the fallback policy.
+        applyPreferredDevice(to: engine)
         let input = engine.inputNode
         // format: nil binds the tap to the input node's live hardware format, so there is no passed
         // format for AVFoundation to validate and mismatch against (a 48k-cached / 16k-actual mismatch
@@ -237,7 +275,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // so the unit deallocates and the headset renegotiates A2DP; the next dictation rebuilds on demand. No
     // effect on wired/built-in inputs (they keep the prewarmed engine resident, no per-dictation rebuild).
     private func releaseEngineIfBluetooth() {
-        guard Self.currentInputIsBluetooth() else { return }
+        guard effectiveInputIsBluetooth() else { return }
         markRebuild()
         rebuildEngineIfNeeded()
     }
@@ -426,7 +464,38 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         controlQueue = DispatchQueue(label: "com.keyscribe.audio.\(engineGeneration)")
     }
 
-    // MARK: - Default input device listener (Layer 5)
+    // MARK: - Preferred-device resolution
+
+    // The device a bring-up should bind: the preferred device if currently connected, else the system
+    // default. nil only if even the default can't be read (no input at all).
+    private func effectiveDeviceID() -> AudioDeviceID? {
+        let uid = lock.withLock { preferredInputUID }
+        if let uid, let id = AudioInputDevices.deviceID(forUID: uid) { return id }
+        return AudioInputDevices.systemDefaultInputID()
+    }
+
+    // Pin the preferred device on the engine's input AUHAL, if it is connected. When no preferred device
+    // is set or it is absent, leave the unit on the system default — the engine follows the default, which
+    // is the fallback policy. Runs on the control queue (caller: arm/prewarm).
+    private func applyPreferredDevice(to engine: AVAudioEngine) {
+        let uid = lock.withLock { preferredInputUID }
+        guard let uid, let deviceID = AudioInputDevices.deviceID(forUID: uid),
+              let audioUnit = engine.inputNode.audioUnit else { return }
+        var device = deviceID
+        AudioUnitSetProperty(
+            audioUnit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+            &device, UInt32(MemoryLayout<AudioDeviceID>.size))
+    }
+
+    // True when the *effective* input (preferred-if-present, else default) is a Bluetooth headset. Holding
+    // such a device open forces it from A2DP (stereo music) to HFP (mono call mode), muting the user's
+    // audio — so we avoid holding it while idle and drop the engine after each dictation.
+    private func effectiveInputIsBluetooth() -> Bool {
+        guard let id = effectiveDeviceID() else { return false }
+        return AudioInputDevices.isBluetooth(id)
+    }
+
+    // MARK: - Input topology listeners (Layer 5)
 
     private static var defaultInputAddress: AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(
@@ -435,40 +504,30 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             mElement: kAudioObjectPropertyElementMain)
     }
 
-    // True when the system default input is a Bluetooth headset. Holding such a device open forces it from
-    // A2DP (stereo music) to HFP (mono call mode), muting the user's audio — so we avoid holding it while
-    // idle and drop the engine after each dictation. A fast, non-blocking CoreAudio property read.
-    private static func currentInputIsBluetooth() -> Bool {
-        var deviceID = AudioObjectID(0)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var addr = defaultInputAddress
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID) == noErr,
-              deviceID != 0 else { return false }
-        var transport: UInt32 = 0
-        var transportSize = UInt32(MemoryLayout<UInt32>.size)
-        var transportAddr = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyTransportType,
+    private static var deviceListAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
-        guard AudioObjectGetPropertyData(
-            deviceID, &transportAddr, 0, nil, &transportSize, &transport) == noErr else { return false }
-        return transport == kAudioDeviceTransportTypeBluetooth
-            || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
-    private func registerDefaultInputListener() {
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.handleDefaultInputChanged() }
-        deviceListenerBlock = block
-        var address = Self.defaultInputAddress
+    private func registerInputListeners() {
+        let handler: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.handleInputTopologyChanged() }
+        defaultInputListenerBlock = handler
+        deviceListListenerBlock = handler
+        var defaultAddr = Self.defaultInputAddress
         AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &address, deviceListenerQueue, block)
+            AudioObjectID(kAudioObjectSystemObject), &defaultAddr, deviceListenerQueue, handler)
+        var listAddr = Self.deviceListAddress
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &listAddr, deviceListenerQueue, handler)
     }
 
-    private func handleDefaultInputChanged() {
+    private func handleInputTopologyChanged() {
         // Only act while idle: a change mid-recording is the running engine's own ConfigurationChange to
         // handle. While idle (stopped) that notification never fires, so proactively flag a rebuild and
-        // re-prewarm against the new default input — the hot path then finds a fresh, valid engine.
+        // re-prewarm against the new effective device (preferred-if-present, else default) — the hot path
+        // then finds a fresh, valid engine.
         let recording = lock.withLock { currentURL != nil }
         guard !recording else { return }
         markRebuild()

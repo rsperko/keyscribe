@@ -13,6 +13,19 @@ struct GeneralSettingsView: View {
                 Toggle("Mute system audio", isOn: $model.muteSystemAudio)
             }
 
+            Section {
+                Picker("Preferred input device", selection: $model.inputDeviceUID) {
+                    ForEach(model.inputDeviceOptions) { option in
+                        Text(option.label).tag(option.id)
+                    }
+                }
+            } header: {
+                Text("Microphone")
+            } footer: {
+                Text("KeyScribe captures from this device. If it is unavailable it falls back to the system default and switches back when the device returns.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Startup") {
                 Toggle("Start KeyScribe at login", isOn: $model.loadOnLogin)
             }

@@ -13,6 +13,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var duringDictation: DuringDictation
     public var history: History
     public var shortcuts: Shortcuts
+    public var audio: Audio
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -22,6 +23,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case duringDictation = "during_dictation"
         case history
         case shortcuts
+        case audio
     }
 
     public init(from decoder: Decoder) throws {
@@ -33,12 +35,13 @@ public struct Settings: Codable, Equatable, Sendable {
         duringDictation = try c.decodeIfPresent(DuringDictation.self, forKey: .duringDictation) ?? Settings.defaults.duringDictation
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? Settings.defaults.history
         shortcuts = try c.decodeIfPresent(Shortcuts.self, forKey: .shortcuts) ?? Settings.defaults.shortcuts
+        audio = try c.decodeIfPresent(Audio.self, forKey: .audio) ?? Settings.defaults.audio
     }
 
     public init(
         schemaVersion: Int, loadOnLogin: Bool, defaultModeId: String,
         stt: STT, duringDictation: DuringDictation, history: History,
-        shortcuts: Shortcuts = Shortcuts()
+        shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -47,6 +50,7 @@ public struct Settings: Codable, Equatable, Sendable {
         self.duringDictation = duringDictation
         self.history = history
         self.shortcuts = shortcuts
+        self.audio = audio
     }
 
     public struct STT: Codable, Equatable, Sendable {
@@ -153,6 +157,33 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
+    // Preferred capture device. `inputDeviceUID` is a CoreAudio device UID (stable across reconnect,
+    // unlike the ephemeral AudioDeviceID); nil means "follow the system default input." The capture
+    // adapter resolves it live each bring-up: preferred device if present, else the system default —
+    // and switches back when the preferred device returns. `inputDeviceName` is the human-friendly label
+    // captured when the device was last seen; it may be stale (the host refreshes it at startup whenever
+    // the device is connected) and is shown only so a disconnected preferred device still reads as itself.
+    public struct Audio: Codable, Equatable, Sendable {
+        public var inputDeviceUID: String?
+        public var inputDeviceName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case inputDeviceUID = "input_device_uid"
+            case inputDeviceName = "input_device_name"
+        }
+
+        public init(inputDeviceUID: String? = nil, inputDeviceName: String? = nil) {
+            self.inputDeviceUID = inputDeviceUID
+            self.inputDeviceName = inputDeviceName
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            inputDeviceUID = try c.decodeIfPresent(String.self, forKey: .inputDeviceUID)
+            inputDeviceName = try c.decodeIfPresent(String.self, forKey: .inputDeviceName)
+        }
+    }
+
     public static let defaults = Settings(
         schemaVersion: 1,
         loadOnLogin: false,
@@ -160,7 +191,8 @@ public struct Settings: Codable, Equatable, Sendable {
         stt: STT(engine: "parakeet-tdt-ctc-110m", eviction: .fastest),
         duringDictation: DuringDictation(muteSystemAudio: true, keepDisplayAwake: true, sounds: true),
         history: History(enabled: true, retentionDays: 7),
-        shortcuts: Shortcuts()
+        shortcuts: Shortcuts(),
+        audio: Audio()
     )
 
     func validate() throws {
