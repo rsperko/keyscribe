@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let firstRunKey = ResetTool.firstRunKey
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
+    private let forceFirstRun = CommandLine.arguments.contains("--first-run")
 
     func applicationDidFinishLaunching(_: Notification) {
         loadSettings()
@@ -116,7 +117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startListening()
         let permissionsReady = Permissions.microphoneStatus() == .granted
             && Permissions.accessibilityStatus() == .granted
-        if forcePermissionsSetup {
+        if forceFirstRun {
+            // Dev flag: replay the full wizard regardless of the completion flag or permission state.
+            presentFirstRun()
+        } else if forcePermissionsSetup {
             presentFirstRun(permissionsOnly: true)
         } else if UserDefaults.standard.bool(forKey: firstRunKey) || permissionsReady {
             // Already set up (or returning) — don't re-show the wizard; record completion.

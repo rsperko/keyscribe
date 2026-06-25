@@ -1,6 +1,13 @@
 import AppKit
 import Foundation
 
+// Dev flag: `--config-dir <path>` points config/modes/history at a throwaway directory (downloaded
+// models stay shared). Parsed first so every path below — including --reset — honors it. Pair with
+// --first-run to replay onboarding against a clean sandbox without touching the real configuration.
+if let i = CommandLine.arguments.firstIndex(of: "--config-dir"), i + 1 < CommandLine.arguments.count {
+    KeyScribePaths.configDirOverride = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+}
+
 // Headless dev mode: `KeyScribe --reset <onboarding|modes|config|all>` clears local state and exits.
 if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     let arg = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : ""
