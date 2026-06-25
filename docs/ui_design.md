@@ -39,7 +39,7 @@ or insertion methods. Those capabilities remain available and understandable in 
 ## 2. First run
 
 A cold install cannot perform the one-gesture loop yet: there is no on-device speech model, and
-Microphone, Input Monitoring, and Accessibility are not granted. First run is the **single
+Microphone and Accessibility are not granted. First run is the **single
 sequenced experience KeyScribe allows itself** — not a settings tour, not a feature wall, and not a
 request for every permission at once. Its only goal is to reach the first successful dictation.
 
@@ -49,10 +49,10 @@ The sequence is short, and each step states its purpose in plain language:
 2. **Choose and download one on-device speech model.** Show its size and that it stays on the
    Mac; recommend the default English engine. Downloading is required — nothing can be
    transcribed without it. Progress attaches to the choice, not a separate screen.
-3. **Grant Microphone, then Input Monitoring, then Accessibility — in that order, each explained
-   beside its request and asked just before it is first needed:** Microphone to hear you, Input
-   Monitoring for the hotkey, Accessibility to place text. State what still works if one is
-   declined.
+3. **Grant Microphone, then Accessibility — in that order, each explained beside its request and
+   asked just before it is first needed:** Microphone to hear you, Accessibility to detect a
+   modifier-key trigger and place text. State what still works if one is declined. (A key+modifier
+   trigger registers as a system hotkey and needs no permission; Input Monitoring is never requested.)
 4. **Try it now.** Land the user on a focused text field with the hotkey shown and let them
    produce one real dictation; completion unlocks only after one succeeds. A low-prominence
    **Skip for now** stays available so a hardware or permission snag never traps the user —

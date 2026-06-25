@@ -18,7 +18,6 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     for line in actions { print(line) }
     if target != .modes {
         let granted = Permissions.microphoneStatus() == .granted
-            && Permissions.inputMonitoringStatus() == .granted
             && Permissions.accessibilityStatus() == .granted
         if granted {
             print("Note: TCC permissions are all granted, so the first-run wizard will be skipped. "

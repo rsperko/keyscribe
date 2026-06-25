@@ -13,6 +13,9 @@ final class HUDController: HUDPresenting {
     private var panel: NSPanel?
     var onInsertLocalTranscript: (() -> Void)?
     var onPasteLast: (() -> Void)?
+    var onEscapeCancel: (() -> Void)?
+    var canCancel: (() -> Bool)?
+    private var localKeyMonitor: Any?
 
     func render(_ state: HUDState) {
         guard model.state != state else { return }
@@ -21,7 +24,15 @@ final class HUDController: HUDPresenting {
             panel?.orderOut(nil)
         } else {
             showPanelIfNeeded()
-            panel?.orderFrontRegardless()
+            // HUD holds key focus across the cancellable states so ESC-to-cancel reaches it as a local
+            // keystroke; the controller relinquishes momentarily around the synthetic ⌘C/⌘V.
+            if state.holdsKeyFocus {
+                panel?.makeKeyAndOrderFront(nil)
+            } else if panel?.isKeyWindow == true {
+                relinquishKeyFocus()
+            } else {
+                panel?.orderFrontRegardless()
+            }
         }
     }
 
@@ -45,7 +56,7 @@ final class HUDController: HUDPresenting {
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
                 }
             }))
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 280, height: 92),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered, defer: false)
@@ -60,6 +71,22 @@ final class HUDController: HUDPresenting {
         panel.contentView = hosting
         positionAtBottomCenter(panel)
         self.panel = panel
+        installLocalKeyMonitor()
+    }
+
+    func relinquishKeyFocus() {
+        guard let panel, panel.isKeyWindow else { return }
+        panel.orderOut(nil)
+        panel.orderFrontRegardless()
+    }
+
+    private func installLocalKeyMonitor() {
+        guard localKeyMonitor == nil else { return }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.keyCode == 53, self.canCancel?() == true else { return event }
+            self.onEscapeCancel?()
+            return nil
+        }
     }
 
     private func positionAtBottomCenter(_ panel: NSPanel) {
@@ -70,6 +97,10 @@ final class HUDController: HUDPresenting {
             x: frame.midX - size.width / 2,
             y: frame.minY + 80))
     }
+}
+
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
 
 private struct HUDView: View {

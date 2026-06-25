@@ -31,7 +31,7 @@ if [ ! -d "$SUPPORT" ]; then
   fail "No config dir at $SUPPORT — launch KeyScribe at least once first."
 fi
 info "Build + launch:  ./make-app.sh && open KeyScribe.app"
-info "Grant Microphone, Input Monitoring, and Accessibility when prompted."
+info "Grant Microphone and Accessibility when prompted."
 pause "KeyScribe is running and permissions are granted — press Enter."
 
 # ── 1. Cross-app insertion + atomic undo (the M0 clipboard-marker probe) ──────────────────────────

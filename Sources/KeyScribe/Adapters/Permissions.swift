@@ -1,7 +1,6 @@
 import AVFoundation
 import AppKit
 import ApplicationServices
-import CoreGraphics
 
 enum PermissionStatus: Equatable {
     case granted, denied, notDetermined
@@ -20,15 +19,6 @@ enum Permissions {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    static func inputMonitoringStatus() -> PermissionStatus {
-        CGPreflightListenEventAccess() ? .granted : .denied
-    }
-
-    @discardableResult
-    static func requestInputMonitoring() -> Bool {
-        CGRequestListenEventAccess()
-    }
-
     static func accessibilityStatus(prompt: Bool = false) -> PermissionStatus {
         let opts = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
         return AXIsProcessTrustedWithOptions(opts) ? .granted : .notDetermined
@@ -41,13 +31,12 @@ enum Permissions {
     }
 
     enum SettingsPane {
-        case microphone, inputMonitoring, accessibility
+        case microphone, accessibility
 
         var urlString: String {
             let base = "x-apple.systempreferences:com.apple.preference.security?"
             switch self {
             case .microphone: return base + "Privacy_Microphone"
-            case .inputMonitoring: return base + "Privacy_ListenEvent"
             case .accessibility: return base + "Privacy_Accessibility"
             }
         }

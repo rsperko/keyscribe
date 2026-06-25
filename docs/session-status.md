@@ -17,6 +17,72 @@ replaced by per-mode trigger keys, and a menu **Dictate with** submenu + HUD **I
 escape hatch landed. Remaining: the standalone correction-panel shortcut, two Settings-editor
 follow-ups, and the rest of M7.
 
+## Input Monitoring permission removed — chords via RegisterEventHotKey, ESC via HUD (2026-06-24, uncommitted)
+
+KeyScribe no longer requests **Input Monitoring**; default permissions are now **Microphone +
+Accessibility** (+ Automation only for browser-URL modes), matching Superwhisper/MacWhisper. It was
+never actually required — a stale holdover from when `HotkeyMonitor`'s tap was `.listenOnly`. Verified
+live on this machine with Input Monitoring **explicitly denied** + Accessibility granted:
+
+- The active `.defaultTap` `CGEventTap` is created and delivers `flagsChanged`, so **modifier-only
+  triggers (Fn / right-Option / right-Command / Hyper) run on Accessibility alone**.
+- That tap is **deaf to `keyDown`** without Input Monitoring — both `CGEventTap` *and*
+  `NSEvent.addGlobalMonitorForEvents` delivered **zero** key events (typed letters + ESC never arrived).
+  So the two key-reading jobs moved off the tap:
+  - **Chord triggers + the two action shortcuts** → **`RegisterEventHotKey`** (new `CarbonHotKeys`).
+    Zero permission; the OS dispatches the chord and suppresses it from the focused app. Verified live:
+    ⌃⌥E (edit-in-place) and ⌃⌥⇧⌘D/R (Add Dictionary/Replacement) all fire with Input Monitoring off.
+  - **ESC-to-cancel** → the recording HUD (`KeyablePanel`) is made the **key** window only while
+    recording and handles ESC via a **local** `NSEvent` monitor (no permission). Verified: ESC cancels
+    and the browser dropdown stays open (handled locally, no global observation).
+
+**Load-bearing focus invariant: HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the *key
+window*, so the HUD must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
+`HUDController.relinquishKeyFocus()` runs at the top of `transcribeAndInsert`, in `finishInsertion`, in
+`pasteLast`, and on every non-recording `render`. This was a real bug: edit-in-place's ⌘C and normal
+paste both initially landed on the HUD ("Select some text first" / nothing inserted) until the HUD
+relinquished first. `CorrectionPanelController`/`HistoryController` already handle the same class
+(capture `previousApp` + selection first, then orderOut → activate → wait → paste) and were untouched.
+
+**Removed:** `Permissions.inputMonitoringStatus`/`requestInputMonitoring` + the `.inputMonitoring` pane;
+the Input Monitoring gates in `AppDelegate`/`main.swift`; the `SettingsProblem.inputMonitoringPermission`
+case; the `PermissionsSettingsView` row; the FirstRun step; the dead `.listenOnly` tap fallback;
+`HotkeyMonitor`'s tap-side chord-consume / ESC / action handling + `onCancel`/`canCancel`; the obsolete
+`HotkeyMonitorSuppressionTests`; and all temporary diagnostics. `swift build` + `swift test` green.
+**This supersedes the two older notes below** — "Input Monitoring permission: wrong TCC
+subsystem…" and "Chord triggers are now suppressed (2026-06-22)" — whose tap-based mechanisms no longer
+exist.
+
+**Review follow-ups (GPT + Opus, 2026-06-24).** Both reviewed the diff; addressed:
+- **Chord triggers no longer depend on Accessibility.** `startListening()` previously gated the whole
+  `start()` (which registers the Carbon chords via `defer`) on Accessibility, so chords only worked
+  after a settings edit re-ran `rebuildCarbon()`. Now `start()` is called unconditionally — it
+  registers Carbon regardless and creates the modifier-only tap only when Accessibility is granted.
+- **Carbon registration failure: log only, no UI surfacing.** A first pass surfaced
+  `RegisterEventHotKey` failures as a `hotkeyConflict` problem, but on inspection that's a false signal:
+  the API returns an error only for an *exclusive-lock* collision; the case users actually hit — a
+  system-reserved combo like ⌘Space — registers with `noErr` and simply never fires. So the surfacing
+  caught almost nothing while implying conflicts were handled; it was reverted. `CarbonHotKeys` still
+  logs the rare explicit failure (debug only). Reliable conflict detection would have to be config-level
+  (duplicate chord across modes via `KeyDescriptor.collides`) or a maintained system-shortcut denylist —
+  a separate, deliberately-deferred piece, not part of this migration.
+- **Coverage:** `CarbonHotKeys` sits behind a `ChordRegistering` seam; `HotkeyMonitorChordTests` covers
+  chord press/release driving the gesture, recorder suspend/resume re-registration, and the
+  `HUDState.holdsKeyFocus` ⟺ cancellable invariant. **Exact-modifier matching is now an OS contract:**
+  `RegisterEventHotKey` registers each chord against an exact modifier mask, so `⌥L` fires only the
+  `option+l` hotkey and never `hyper+l` (⌃⌥⇧⌘L) — the guarantee the deleted `ChordMatchingTests`/
+  `HotkeyMonitorSuppressionTests` enforced now lives in the OS, so it's a live-verification item, not a
+  unit test (the tap-side `matchesChord` it tested is gone).
+
+**Known user-visible tradeoffs (release-note material, not bugs):**
+- **Typing during the transcribe/rewrite window is swallowed.** The HUD holds key focus across the
+  cancellable states so ESC can cancel a slow cloud rewrite; while it does, keystrokes route to it and
+  are dropped. Bounded to release→insertion-start; sub-second for local STT, a few seconds for a BYOK
+  rewrite. Inherent to catching ESC without Input Monitoring.
+- **Existing users keep a stale Input Monitoring grant.** macOS doesn't revoke a grant when an app
+  stops requesting it; the toggle lingers (harmless). Changelog line: "KeyScribe no longer needs Input
+  Monitoring — you can turn it off."
+
 ## "Scratch that" clause-boundary rule + voice-corpus regression gate (2026-06-24, uncommitted)
 
 `LiveEditsStage` previously fired **scratch that** on a bare token match *anywhere*, so literal usage
@@ -234,9 +300,11 @@ tests / 59 suites pass.** Pure-logic changes are unit-tested; the OS-edge change
 
 **Hot paths**
 - **Hotkey tap (`HotkeyMonitor`) — no per-event allocation.** The CGEventTap callback fires on every
-  keystroke; held modifiers are now an allocation-free `ModifierSet` OptionSet (new in `KeyDescriptor`,
-  mask-based `matchesChord`) instead of a per-event `Set<Modifier>`. `consume`/`handleActions` early-out
-  when no chord/action bindings exist; the `systemUptime` read is deferred until an edge fires.
+  keystroke; held modifiers are an allocation-free `ModifierSet` OptionSet (new in `KeyDescriptor`,
+  mask-based `matchesChord`) instead of a per-event `Set<Modifier>`; the `systemUptime` read is deferred
+  until an edge fires. _(Updated 2026-06-24: the tap now watches **only `.flagsChanged`** for
+  modifier-only triggers — chords moved to `RegisterEventHotKey`, so `consume`/`handleActions` no longer
+  exist; the per-keystroke cost is now near-zero.)_
 - **Capture at the engine's sample rate.** `SpeechEngine.captureSampleRate` (16 kHz default, **24 kHz
   Qwen3**); `AudioCapture` records mono at that rate via a converter built once at start, so the WAV is
   right-sized and decode skips a resample. ⚠️ needs live mic verification.
@@ -322,6 +390,9 @@ new unit tests + the existing tokenization/gate suites).
 
 ## Input Monitoring permission: wrong TCC subsystem + stale-grant footgun (2026-06-22, uncommitted)
 
+> **SUPERSEDED 2026-06-24** — Input Monitoring is gone entirely (see the top entry). The app no longer
+> uses a `.listenOnly` tap or the CG ListenEvent APIs, so this footgun no longer applies. Kept for history.
+
 **Symptom:** Input Monitoring showed orange "Needs attention" while the System Settings toggle was on
 and the hotkey actually worked. Verified live fixed (all permission rows green, hotkey starts dictation).
 
@@ -390,7 +461,10 @@ red glyph while recording, red dot on a problem state).
   fire `onAction(id)` once per press (an `engaged` set debounces keyDown auto-repeat, cleared on
   keyUp). `AppDelegate.buildHotkeyMonitor` builds them from settings and skips unparseable / non-chord
   strings.
-- **Chord triggers are now suppressed (2026-06-22).** `HotkeyMonitor`'s tap is **active**
+- **Chord triggers are now suppressed (2026-06-22).** _**SUPERSEDED 2026-06-24** — chord triggers now
+  go through `RegisterEventHotKey` (`CarbonHotKeys`), not the tap; the tap no longer consumes anything and
+  ESC moved to the HUD. The tap-suppression mechanism below no longer exists. See the top entry._
+  `HotkeyMonitor`'s tap is **active**
   (`.defaultTap`, falling back to `.listenOnly` when an active tap can't be created without
   Accessibility). `handle` returns a consume flag and `consume(type:keyCode:flags:)` swallows an exact
   chord match — mode trigger or action chord — on key-down, tracks the base keyCode in

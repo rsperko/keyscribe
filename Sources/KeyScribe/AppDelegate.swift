@@ -46,6 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
+        hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
+        hud.onEscapeCancel = { [weak self] in
+            self?.controller.cancel()
+            self?.refreshStatus()
+        }
 
         historyController = HistoryController(
             store: history,
@@ -109,7 +114,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // onboarding has been completed.
         startListening()
         let permissionsReady = Permissions.microphoneStatus() == .granted
-            && Permissions.inputMonitoringStatus() == .granted
             && Permissions.accessibilityStatus() == .granted
         if forcePermissionsSetup {
             presentFirstRun(permissionsOnly: true)
@@ -189,12 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.controller.handleCommit()
                     self?.refreshStatus()
                 },
-                onAction: { [weak self] id in self?.handleHotkeyAction(id) },
-                onCancel: { [weak self] in
-                    self?.controller.cancel()
-                    self?.refreshStatus()
-                },
-                canCancel: { [weak self] in self?.controller.isCancellable ?? false })
+                onAction: { [weak self] id in self?.handleHotkeyAction(id) })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
         }
@@ -244,9 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startListening() {
-        if Permissions.inputMonitoringStatus() == .granted {
-            _ = hotkey.start()
-        }
+        // start() registers the Carbon chord hotkeys (no permission needed) regardless of the tap, and
+        // creates the modifier-only event tap only if Accessibility is granted (it returns false, leaving
+        // chords working, otherwise). So chord triggers do not depend on Accessibility.
+        _ = hotkey.start()
         refreshStatus()
     }
 
@@ -312,8 +312,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         firstRun?.present()
     }
 
-    // Relaunch into the guided setup so the new process reads the just-granted Input Monitoring /
-    // Accessibility verdicts fresh (they are cached at launch and won't apply to this process).
+    // Relaunch into the guided setup so the new process reads the just-granted Accessibility verdict
+    // fresh (it is cached at launch and won't apply to this process).
     private func relaunchForPermissionSetup() {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
@@ -342,8 +342,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.setStatus(configError)
         } else if Permissions.microphoneStatus() != .granted {
             menu.setStatus("Microphone access needed")
-        } else if Permissions.inputMonitoringStatus() != .granted {
-            menu.setStatus("Input Monitoring access needed")
         } else if Permissions.accessibilityStatus() != .granted {
             menu.setStatus("Accessibility access needed")
         } else {
@@ -357,7 +355,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return SettingsProblem.detect(
             hasConfigError: configError != nil,
             microphoneGranted: Permissions.microphoneStatus() == .granted,
-            inputMonitoringGranted: Permissions.inputMonitoringStatus() == .granted,
             accessibilityGranted: Permissions.accessibilityStatus() == .granted,
             activeEngineUsable: speechModels?.activeEngineUsable ?? true,
             aiConnectionMissing: modes.contains { connectionDangling(for: $0) },

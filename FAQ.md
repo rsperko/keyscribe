@@ -47,11 +47,14 @@ or delete any of it. Removing that folder resets KeyScribe.
 
 ### Which permissions does KeyScribe need, and why?
 
-Three, granted in **System Settings ▸ Privacy & Security**:
+Two, granted in **System Settings ▸ Privacy & Security**:
 
 - **Microphone** — on-device speech recognition.
-- **Input Monitoring** — the global hold-to-talk hotkey.
-- **Accessibility** — inserting transcribed text into the focused app.
+- **Accessibility** — detecting a modifier-key trigger (Fn / right-⌥ / right-⌘) and inserting
+  transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E is registered as a system
+  hotkey and needs no permission.)
+
+KeyScribe does **not** request Input Monitoring.
 
 ### I toggled a permission on, but KeyScribe still says it's missing.
 

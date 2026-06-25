@@ -438,10 +438,14 @@ clipboard). It only takes the AX path when it can read the field value back and 
 else **falls back to paste** — so `insert` uses AX on native fields and paste on web/Electron and
 never loses text. Type posts Unicode key events with no success signal, so it is best-effort with
 no fallback. The focus-race clipboard fallback (below) overrides whichever method the mode picks.
-- **Permission reality (spike-confirmed):** **three** TCC categories — **Accessibility** (post
-  ⌘V/⌘C and AX reads; `kTCCServicePostEvent` for posting, `kTCCServiceAccessibility` for AX,
-  both shown under "Accessibility"), **Input Monitoring** (the global-hotkey event tap), and
-  **Automation/Apple Events** (browser URL via AppleScript, per browser).
+- **Permission reality (spike-confirmed; revised 2026-06-24):** **two** TCC categories —
+  **Accessibility** (post ⌘V/⌘C and AX reads; `kTCCServicePostEvent` for posting,
+  `kTCCServiceAccessibility` for AX, both shown under "Accessibility") **and** the modifier-only
+  trigger event tap (an active `.defaultTap` watching `flagsChanged` is authorized by Accessibility
+  alone) — plus **Automation/Apple Events** (browser URL via AppleScript, per browser).
+  **Input Monitoring is NOT used:** key+modifier chord triggers register via `RegisterEventHotKey`
+  (no permission, OS-suppressed) and ESC-to-cancel is a local keystroke on the recording HUD. A
+  CGEventTap is deaf to `keyDown` without Input Monitoring, so it only ever watches modifiers.
 - **Principle:** minimize the permission surface. Prefer paste; do **not** require AX-insert if
   it is the *only* reason to ask for a permission. Request **Automation** only when a mode
   constrains by URL (`url_pattern` routing, §4.3). (TCC services and Electron behavior now validated by spike.)

@@ -14,7 +14,7 @@ Same name, different identity per machine; that is expected and fine.
 2. **Create the `KeyScribe Local` signing cert** (one-time) so permissions survive rebuilds. Run the
    headless block in **Signing ▸ One-time: create a self-signed signing certificate** (or use the
    Keychain Access GUI steps there). Skip this and the build falls back to ad-hoc — it still works,
-   but macOS re-prompts for Mic / Input Monitoring / Accessibility on every rebuild.
+   but macOS re-prompts for Mic / Accessibility on every rebuild.
 3. **Build and run** — `./make-app.sh && open ./KeyScribe.app`. It auto-detects the cert by name.
 4. **Re-enter your BYOK API keys** in **Settings ▸ AI Services**. Keys live in this machine's
    keychain, never in the repo.
@@ -81,9 +81,9 @@ Cutting a release:
 
 ## Signing: getting permissions that survive rebuilds
 
-KeyScribe needs three TCC permissions (**Microphone**, **Input Monitoring**, **Accessibility**).
+KeyScribe needs two TCC permissions (**Microphone**, **Accessibility**).
 macOS ties those grants to the app's code signature. An **ad-hoc** signature changes on every
-rebuild, so macOS treats each rebuild as a new app and **re-prompts for all three permissions**.
+rebuild, so macOS treats each rebuild as a new app and **re-prompts for both permissions**.
 
 macOS does not require an Apple-issued certificate here — it only needs a signature that is *valid
 and stable*. A **self-signed certificate** satisfies that, so your grants persist across rebuilds.
@@ -146,11 +146,12 @@ The first signed build prompts once for keychain access — click **Always Allow
 
 ## First launch — grant permissions
 
-On first launch, grant the three permissions in **System Settings ▸ Privacy & Security**:
+On first launch, grant the two permissions in **System Settings ▸ Privacy & Security**:
 
 - **Microphone** — on-device speech recognition.
-- **Input Monitoring** — the global push-to-talk hotkey (the event tap).
-- **Accessibility** — inserting transcribed text into the focused app.
+- **Accessibility** — detecting a modifier-key trigger (the event tap watches modifier flags only) and
+  inserting transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E registers as a
+  system hotkey via `RegisterEventHotKey` and needs no permission.)
 
 KeyScribe is a menu-bar app (`LSUIElement`) — look for the waveform glyph in the menu bar, not a
 Dock icon or window.
@@ -164,7 +165,7 @@ Dock icon or window.
 - **`Failed to load the default metallib` when selecting Qwen3-ASR** — the Metal Toolchain wasn't
   installed at build time. Run `xcodebuild -downloadComponent MetalToolchain`, then rebuild with
   `./make-app.sh`.
-- **macOS re-prompts for Microphone/Input Monitoring/Accessibility after every rebuild** — you are
+- **macOS re-prompts for Microphone/Accessibility after every rebuild** — you are
   building ad-hoc. Create the `KeyScribe Local` self-signed cert above so the signature is stable.
 - **`xcode-select` points at the Command Line Tools** — run
   `sudo xcode-select -s /Applications/Xcode.app`; the build needs full Xcode.

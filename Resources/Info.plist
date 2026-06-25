@@ -16,8 +16,6 @@
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>KeyScribe transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
-  <key>NSInputMonitoringUsageDescription</key>
-  <string>KeyScribe watches for your dictation hotkey so you can start dictation from any app. Keystrokes are never recorded or sent anywhere.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>KeyScribe reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
 </dict>

@@ -149,8 +149,8 @@ mode-local scope. Do not make the user reconstruct a dictation from scratch.
 
 ### Permission row
 
-**Use for:** microphone, input monitoring/hotkey, paste/post-event, and Accessibility-dependent
-features.
+**Use for:** microphone, and Accessibility-dependent features (modifier-key trigger detection +
+paste/post-event).
 
 **Contents:** capability name, current authorization state, why KeyScribe needs it, what still
 works without it, and `Open System Settings`.

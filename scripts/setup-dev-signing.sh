@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Create a stable, self-signed code-signing identity ("KeyScribe Local") in the login keychain so
-# macOS TCC grants (Microphone / Input Monitoring / Accessibility) survive rebuilds. Ad-hoc signing
+# macOS TCC grants (Microphone / Accessibility) survive rebuilds. Ad-hoc signing
 # pins the TCC requirement to the binary's cdhash, which changes every build — so grants silently
 # drop. A fixed certificate pins the requirement to the cert leaf instead, so grants persist.
 # Idempotent: re-running is a no-op once the identity exists.

@@ -3,7 +3,6 @@ import SwiftUI
 
 struct PermissionsSettingsView: View {
     @State private var microphoneStatus = Permissions.microphoneStatus()
-    @State private var inputMonitoringStatus = Permissions.inputMonitoringStatus()
     @State private var accessibilityStatus = Permissions.accessibilityStatus()
 
     var body: some View {
@@ -24,19 +23,9 @@ struct PermissionsSettingsView: View {
                     },
                     openSettings: { Permissions.openSettings(.microphone) })
                 PermissionRow(
-                    title: "Input Monitoring", status: inputMonitoringStatus,
-                    purpose: "Lets a mode's shortcut start dictation from any app.",
-                    unavailable: "You can still open KeyScribe, but mode shortcuts cannot listen.",
-                    requestableWhenDenied: true,
-                    request: {
-                        NSApp.activate(ignoringOtherApps: true)
-                        Permissions.requestInputMonitoring()
-                    },
-                    openSettings: { Permissions.openSettings(.inputMonitoring) })
-                PermissionRow(
                     title: "Accessibility", status: accessibilityStatus,
-                    purpose: "Lets KeyScribe paste finished text into the focused field.",
-                    unavailable: "Dictation can be transcribed, but KeyScribe copies it instead of inserting it.",
+                    purpose: "Lets KeyScribe detect a modifier-key trigger and paste finished text into the focused field.",
+                    unavailable: "Modifier-key triggers won't start dictation, and finished text is copied instead of inserted.",
                     request: {
                         _ = Permissions.accessibilityStatus(prompt: true)
                         Permissions.openSettings(.accessibility)
@@ -47,9 +36,9 @@ struct PermissionsSettingsView: View {
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Permission grants land out-of-process: Microphone/Input Monitoring are toggled in System
-        // Settings (re-checked when the app reactivates), while Accessibility is granted in another app
-        // that never reactivates us — so there is no event to hook. TCC exposes no "permission changed"
+        // Permission grants land out-of-process: Microphone is toggled in System Settings (re-checked
+        // when the app reactivates), while Accessibility is granted in another app that never
+        // reactivates us — so there is no event to hook. TCC exposes no "permission changed"
         // callback, so we poll, but only while this pane is on screen (.task is cancelled on disappear).
         .task {
             while !Task.isCancelled {
@@ -64,7 +53,6 @@ struct PermissionsSettingsView: View {
 
     private func refreshPermissions() {
         microphoneStatus = Permissions.microphoneStatus()
-        inputMonitoringStatus = Permissions.inputMonitoringStatus()
         accessibilityStatus = Permissions.accessibilityStatus()
     }
 }

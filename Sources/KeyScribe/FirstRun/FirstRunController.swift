@@ -74,7 +74,6 @@ final class FirstRunModel: ObservableObject {
     @Published var downloadProgress: Double = 0
     @Published var downloadError: String?
     @Published var micStatus: PermissionStatus = .notDetermined
-    @Published var inputStatus: PermissionStatus = .notDetermined
     @Published var axStatus: PermissionStatus = .notDetermined
     @Published var trialText = ""
     @Published var trialSucceeded = false
@@ -108,8 +107,8 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // Input Monitoring and Accessibility verdicts are cached for the process lifetime, so a fresh
-    // grant only takes effect on relaunch. The nuclear setup flow ends by relaunching into itself.
+    // Accessibility verdicts are cached for the process lifetime, so a fresh grant only takes effect
+    // on relaunch. The nuclear setup flow ends by relaunching into itself.
     func relaunch() {
         stopPolling()
         onRelaunch()
@@ -148,12 +147,6 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    func requestInputMonitoring() {
-        NSApp.activate(ignoringOtherApps: true)
-        Permissions.requestInputMonitoring()
-        refreshStatuses()
-    }
-
     func requestAccessibility() {
         _ = Permissions.accessibilityStatus(prompt: true)
         Permissions.openSettings(.accessibility)
@@ -162,7 +155,6 @@ final class FirstRunModel: ObservableObject {
 
     func refreshStatuses() {
         micStatus = Permissions.microphoneStatus()
-        inputStatus = Permissions.inputMonitoringStatus()
         axStatus = Permissions.accessibilityStatus()
     }
 
@@ -179,12 +171,11 @@ final class FirstRunModel: ObservableObject {
     func stopPolling() { pollTask?.cancel(); pollTask = nil }
 
     var allPermissionsGranted: Bool {
-        micStatus == .granted && inputStatus == .granted && axStatus == .granted
+        micStatus == .granted && axStatus == .granted
     }
 
     var nextPermission: Permission {
         if micStatus != .granted { return .microphone }
-        if inputStatus != .granted { return .inputMonitoring }
         return .accessibility
     }
 
@@ -196,6 +187,5 @@ final class FirstRunModel: ObservableObject {
 
 enum Permission {
     case microphone
-    case inputMonitoring
     case accessibility
 }

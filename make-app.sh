@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build KeyScribe into a signed KeyScribe.app (LSUIElement menu-bar app) so TCC permissions
-# (Microphone / Input Monitoring / Accessibility) attach to a stable signed identity and
+# (Microphone / Accessibility) attach to a stable signed identity and
 # survive rebuilds. Signs with a stable cert if one is found, else ad-hoc (TCC may reset).
 # Full from-source build / signing guide: BUILD.md.
 set -euo pipefail
@@ -97,7 +97,7 @@ echo "== Info.plist: $SHORT_VERSION (build $BUILD_VERSION) =="
 sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \
   Resources/Info.plist > "$APP/Contents/Info.plist"
 
-# Stable-identity signing keeps TCC grants (Mic / Input Monitoring / Accessibility) across rebuilds.
+# Stable-identity signing keeps TCC grants (Mic / Accessibility) across rebuilds.
 # macOS TCC only needs a *valid, stable* signature — a self-signed cert works; no Apple account is
 # required. See BUILD.md for the one-time "create a self-signed cert named KeyScribe Local" steps.
 # Identity precedence: KEYSCRIBE_SIGN_ID, then CODESIGN_IDENTITY (conventional name), then auto-detect
@@ -116,7 +116,7 @@ if [ -z "$ID" ]; then
 fi
 find "$APP" -name "*.cstemp" -delete 2>/dev/null || true
 if [ "$ID" = "-" ]; then
-  echo "!! AD-HOC signing — no stable cert found. TCC grants (Microphone / Input Monitoring /" >&2
+  echo "!! AD-HOC signing — no stable cert found. TCC grants (Microphone /" >&2
   echo "!! Accessibility) will NOT survive this rebuild; toggling them on will not stick." >&2
   echo "!! Fix once: ./scripts/setup-dev-signing.sh  (creates 'KeyScribe Local'), then rebuild." >&2
   echo "!! Already broken? ./scripts/reset-permissions.sh wipes and re-grants cleanly. See BUILD.md." >&2

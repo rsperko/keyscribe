@@ -504,6 +504,7 @@ final class DictationController {
     ) async {
         clearRewriteEscapeHatch()
         machine.beginInserting()
+        hud?.relinquishKeyFocus()
         let current = snapshot()
         let targetDecision = decideInsertion(
             captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: current)
@@ -672,6 +673,9 @@ final class DictationController {
         guard accessibilityGranted() else {
             return (.abort("Accessibility is off — KeyScribe can't read the selected text.", .openAccessibilitySettings), nil)
         }
+        // The selection-capture ⌘C must reach the target, so drop key focus held for ESC-cancel; the
+        // subsequent .rewriting render re-takes it so ESC still cancels the rewrite.
+        hud?.relinquishKeyFocus()
         guard let selection = await captureSelection(), !selection.isEmpty else {
             return (.abort("Select some text first", nil), nil)
         }
@@ -768,6 +772,7 @@ final class DictationController {
 
     func pasteLast() {
         guard let lastResult else { return }
+        hud?.relinquishKeyFocus()
         Task { await TextInserter.insertViaPaste(lastResult) }
     }
 

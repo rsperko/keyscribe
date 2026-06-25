@@ -66,7 +66,7 @@ Prerequisites and signing options (so permissions survive rebuilds) are in [BUIL
 
 1. Launch KeyScribe. The first-run window appears.
 2. **Download** an on-device speech model (progress shown). It stays on your Mac.
-3. **Grant** Microphone, then Input Monitoring, then Accessibility when prompted.
+3. **Grant** Microphone, then Accessibility when prompted.
 4. Focus any text field, **hold Fn (Globe)**, say a sentence, **release**.
 5. The text is inserted where you're typing — and a single **⌘Z** undoes the whole dictation.
 

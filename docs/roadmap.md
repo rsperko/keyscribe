@@ -16,7 +16,8 @@ Proven results, folded into `design.md`:
   resident **~27–38MB** · perfect on synth speech · Apache-2.0/CC-BY licenses cleared.
 - **Insertion:** paste lands across Electron/Chromium/native + **single ⌘Z**; AX-insert/type
   unreliable → paste-primary.
-- **Permissions:** **3 TCC categories** — Accessibility, Input Monitoring, Automation (browser URL).
+- **Permissions:** **2 TCC categories** — Accessibility (modifier-trigger tap + insertion), Automation
+  (browser URL). Chord triggers use `RegisterEventHotKey` and need none; Input Monitoring is not used.
 - **Hotkey:** Fn/Globe and right-Option both capturable & distinguishable.
 - **Context:** bundle id always; **⌘C selection universal**; **URL via AppleScript** (not AX).
 - **Token-fencing:** survives LLM rewrite (local proxy); sentinel choice de-risked.
@@ -44,8 +45,8 @@ Carried forward — **not gates**, handled in the milestone where they belong:
 - [x] **Target capture at trigger** (app/focus/selection snapshot) + best-effort verify at
       insert → **clipboard fallback** on mismatch; **Paste last dictation** command;
       **serialized dictations**.
-- [x] Minimal first-run: download model (progress) → grant Mic/Input-Monitoring/Accessibility
-      just-in-time → pick hotkey → talk. Full sequence is normative in `ui_design.md` §2.
+- [x] Minimal first-run: download model (progress) → grant Mic/Accessibility just-in-time → pick
+      hotkey → talk. Full sequence is normative in `ui_design.md` §2.
 - [x] **Floating HUD** (small, clear, movable; live voice indicator) + **start/end sounds**;
       keep-display-awake; mute-system-audio. (Cloud-involved indicator lands with M5.)
 **Exit:** ship-quality basic dictation, on-device, no settings required.

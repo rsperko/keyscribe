@@ -113,6 +113,15 @@ extension HUDState {
         return false
     }
 
+    // The cancellable states (mirrors DictationController.isCancellable, which keeps machine.state at
+    // .transcribing through the cloud rewrite). The HUD takes key focus in these so ESC cancels locally.
+    var holdsKeyFocus: Bool {
+        switch self {
+        case .recording, .transcribing, .rewriting: return true
+        default: return false
+        }
+    }
+
     private static func completePrimary(_ outcome: DictationOutcome) -> String {
         switch outcome {
         case .inserted: return "Inserted"
@@ -126,4 +135,9 @@ extension HUDState {
 @MainActor
 protocol HUDPresenting: AnyObject {
     func render(_ state: HUDState)
+    func relinquishKeyFocus()
+}
+
+extension HUDPresenting {
+    func relinquishKeyFocus() {}
 }

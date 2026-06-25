@@ -10,7 +10,6 @@ typealias Settings = KeyScribeKit.Settings
 enum SettingsProblem: Equatable, CaseIterable {
     case malformedConfig
     case microphonePermission
-    case inputMonitoringPermission
     case accessibilityPermission
     case activeEngineUnavailable
     case aiConnectionMissing
@@ -22,7 +21,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     var pane: SettingsDestination {
         switch self {
         case .malformedConfig: .advanced
-        case .microphonePermission, .inputMonitoringPermission, .accessibilityPermission: .permissions
+        case .microphonePermission, .accessibilityPermission: .permissions
         case .activeEngineUnavailable: .speechModels
         case .aiConnectionMissing, .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
         case .modeUsesFailedConnection: .modes
@@ -36,7 +35,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     // `aiConnectionMisconfigured` is the structural check (no model / no base URL) that needs no call.
     static func detect(
         hasConfigError: Bool, microphoneGranted: Bool,
-        inputMonitoringGranted: Bool, accessibilityGranted: Bool,
+        accessibilityGranted: Bool,
         activeEngineUsable: Bool = true,
         aiConnectionMissing: Bool = false, aiConnectionTestFailed: Bool = false,
         aiConnectionMisconfigured: Bool = false, modeUsesFailedConnection: Bool = false,
@@ -45,7 +44,6 @@ enum SettingsProblem: Equatable, CaseIterable {
         var problems: [SettingsProblem] = []
         if hasConfigError { problems.append(.malformedConfig) }
         if !microphoneGranted { problems.append(.microphonePermission) }
-        if !inputMonitoringGranted { problems.append(.inputMonitoringPermission) }
         if !accessibilityGranted { problems.append(.accessibilityPermission) }
         if !activeEngineUsable { problems.append(.activeEngineUnavailable) }
         if aiConnectionMissing { problems.append(.aiConnectionMissing) }

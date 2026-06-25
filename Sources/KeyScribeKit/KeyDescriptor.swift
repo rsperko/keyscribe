@@ -129,20 +129,6 @@ extension KeyDescriptor {
         }
     }
 
-    /// Exact chord match: the base key matches AND the active modifiers equal the required set
-    /// exactly — no extras. This is what stops `option+l` from firing under `hyper+l`
-    /// (ctrl+option+shift+command+l), where Option is merely a subset of what's held.
-    public func matchesChord(keyCode: Int, activeModifiers: Set<Modifier>) -> Bool {
-        matchesChord(keyCode: keyCode, activeModifierMask: ModifierSet(activeModifiers))
-    }
-
-    /// Allocation-free chord match for the event-tap hot path: identical semantics to the
-    /// `Set<Modifier>` form, comparing held modifiers against the required set with a bitmask.
-    public func matchesChord(keyCode: Int, activeModifierMask: ModifierSet) -> Bool {
-        guard case .chord = self else { return false }
-        return keyCode == triggerKeyCode && activeModifierMask == requiredModifierMask
-    }
-
     /// Build a chord from a live-captured key event. Returns nil for an unrecognized key code
     /// or a bare non-function key (no modifier) — the cases a recorder must reject.
     public init?(eventKeyCode: Int, modifiers: Set<Modifier>) {

@@ -118,7 +118,7 @@ struct FirstRunView: View {
             Spacer()
             if !model.allPermissionsGranted {
                 Text(model.permissionsOnly
-                    ? "Grant each one (the toggle opens in System Settings), then Quit & Relaunch to Apply — Input Monitoring and Accessibility only take effect after the relaunch."
+                    ? "Grant each one (the toggle opens in System Settings), then Quit & Relaunch to Apply — Accessibility only takes effect after the relaunch."
                     : "You can skip and finish setup now, then grant any remaining permissions later in Settings.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -151,11 +151,6 @@ struct FirstRunView: View {
         case .microphone:
             permissionRow("Microphone", "So KeyScribe can hear you.",
                           "Dictation cannot start without it.", model.micStatus) { model.requestMicrophone() }
-        case .inputMonitoring:
-            permissionRow("Input Monitoring", "So the shortcut can start dictation from any app.",
-                          "You can still open KeyScribe, but the shortcut cannot listen.", model.inputStatus) {
-                model.requestInputMonitoring()
-            }
         case .accessibility:
             permissionRow("Accessibility", "So finished text can be pasted into the focused field.",
                           "Dictation can be transcribed, but it will be copied instead of inserted.", model.axStatus) {
