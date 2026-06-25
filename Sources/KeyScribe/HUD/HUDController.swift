@@ -16,6 +16,10 @@ final class HUDController: HUDPresenting {
     var onEscapeCancel: (() -> Void)?
     var canCancel: (() -> Bool)?
     private var localKeyMonitor: Any?
+    private var anchor: HUDAnchor = HUDAnchorStore.load()
+    private var moveObserver: NSObjectProtocol?
+    private var snapWorkItem: DispatchWorkItem?
+    private var isRepositioning = false
 
     func render(_ state: HUDState) {
         guard model.state != state else { return }
@@ -69,8 +73,9 @@ final class HUDController: HUDPresenting {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = hosting
-        positionAtBottomCenter(panel)
         self.panel = panel
+        observeMoves(panel)
+        reposition(panel)
         installLocalKeyMonitor()
     }
 
@@ -89,13 +94,53 @@ final class HUDController: HUDPresenting {
         }
     }
 
-    private func positionAtBottomCenter(_ panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
-        let frame = screen.visibleFrame
-        let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(
-            x: frame.midX - size.width / 2,
-            y: frame.minY + 80))
+    // Restore the parked anchor on the panel's current screen. Anchors are resolution-independent —
+    // recomputed from visibleFrame each time — so a saved spot lands correctly on any display.
+    private func reposition(_ panel: NSPanel) {
+        guard let screen = panel.screen ?? NSScreen.main else { return }
+        let origin = anchor.origin(in: screen.visibleFrame, size: panel.frame.size)
+        // Our own setFrameOrigin posts didMove; guard so it isn't mistaken for a user drag. The flag is
+        // cleared a runloop tick later because the queued notification fires asynchronously.
+        isRepositioning = true
+        panel.setFrameOrigin(origin)
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.isRepositioning = false }
+        }
+    }
+
+    // The panel is draggable by its background; on each move, debounce until the drag settles, then snap
+    // to the nearest of the eight anchors and persist it.
+    private func observeMoves(_ panel: NSPanel) {
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleDidMove() }
+        }
+    }
+
+    private func handleDidMove() {
+        guard !isRepositioning else { return }
+        snapWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.snapToNearestAnchor() }
+        }
+        snapWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
+    }
+
+    private func snapToNearestAnchor() {
+        guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let frame = panel.frame
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        anchor = HUDAnchor.nearest(toCenter: center, in: screen.visibleFrame, size: frame.size)
+        HUDAnchorStore.save(anchor)
+        reposition(panel)
+    }
+
+    func resetAnchor() {
+        anchor = .default
+        HUDAnchorStore.save(.default)
+        if let panel { reposition(panel) }
     }
 }
 

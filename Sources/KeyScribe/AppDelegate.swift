@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: settings, speechModels: speechModels,
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
+            onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
             detectProblems: { [weak self] in self?.currentProblems() ?? [] })
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording

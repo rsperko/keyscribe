@@ -20,7 +20,7 @@ These are the products a user would choose *instead of* KeyScribe. Grouped by po
 - **Context awareness:** reads text around the cursor and adapts output to fit.
 - **Other:** 100+ languages, 30+ stackable "personas" (default assistant "Iris"), a "Slate" collaborative human-AI writing surface (beta), rewrite-by-voice commands.
 - **Privacy:** dictation STT + text correction run on-device; no audio leaves the machine for dictation.
-- **Why it matters to us:** our scratch-pad architecture (pluggable STT + command pipeline + modes + BYOK) is essentially a more principled take on Superwhisper. This is the product to beat on feature depth.
+- **Why it matters to us:** KeyScribe's architecture (pluggable STT + command pipeline + modes + BYOK) is a more principled take on Superwhisper. This is the product to beat on feature depth.
 
 #### Wispr Flow — the cross-platform incumbent / market leader
 - **Posture:** the only major one on **Mac + Windows + iOS + Android** (+ Chrome/Edge) simultaneously (as of Apr 2026). Cloud-first.
@@ -97,7 +97,7 @@ pipeline stages cannot stay purely theoretical until late in the build (cf. `roa
 
 ## B. Underlying STT model families (our pluggable engines)
 
-The scratch pad started with **Whisper / Parakeet / Apple**; KeyScribe now ships **7 curated models across 5 engine families** (Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base EN). Here is the state of each family as of 2026. (A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on our own 16-clip real-voice benchmark Qwen3-ASR 1.7B is the WER winner.)
+KeyScribe ships **7 curated models across 5 engine families** (Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base EN). Here is the state of each family as of 2026. (A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on our own 16-clip real-voice benchmark Qwen3-ASR 1.7B is the WER winner.)
 
 | Engine | Speed (Apple Silicon) | Accuracy (English WER) | Languages | Notes |
 |---|---|---|---|---|
@@ -117,12 +117,12 @@ The scratch pad started with **Whisper / Parakeet / Apple**; KeyScribe now ships
 
 ## C. Feature patterns worth stealing / matching
 
-Cross-cutting capabilities that show up repeatedly and map onto our scratch-pad architecture:
+Cross-cutting capabilities that show up repeatedly and map onto KeyScribe's architecture:
 
 1. **Per-context Modes / Power Mode** (Superwhisper, VoiceInk, Wispr) — auto-switch config by active app/URL. → our **Modes + bundle constraints + trigger keys/phrases**.
 2. **LLM rewrite with BYOK / model choice** (Superwhisper, Aqua, Wispr) → our **AI Service BYOK + per-mode AI rewrite + prompt + context**.
 3. **Context injection from the active window** (Superwhisper, Aqua) → our **Context: visible window text / app & field details**.
-4. **Voice editing commands on selected text** ("make concise," "translate") — Wispr Command Mode, Aqua → *not yet in our scratch pad; a gap to consider.*
+4. **Voice editing commands on selected text** ("make concise," "translate") — Wispr Command Mode, Aqua → our **edit-in-place** (Work on Selection).
 5. **Filler-word removal + self-correction / "scratch that"** (Wispr, Parakeet-native) → our **Live edits: scratch that / new line / paragraph**.
 6. **Custom dictionary + regex replacements** (Aqua, Willow, all) → our **Dictionary & Replacements (heard/replace/regex)**.
 7. **Wake word / hands-free** ("Hey Flow") → *not in scope yet; future.*
@@ -130,12 +130,11 @@ Cross-cutting capabilities that show up repeatedly and map onto our scratch-pad 
 9. **Compliance (SOC2/HIPAA)** (Wispr) → enterprise-only concern; note for later.
 10. **Speaker diarization + rich export** (MacWhisper) → adjacent; relevant if we add file transcription.
 
-### Where KeyScribe's scratch pad is already differentiated
+### Where KeyScribe is differentiated
 - **First-class command pipeline** with explicit pre/post-STT and pre/post-LLM stages — most competitors bolt rewrite on as one opaque step. Our **Verbatim** and **Privacy/redaction** token stages (operating across STT→LLM boundaries) are a genuinely novel, privacy-forward angle.
 - **Insertion method control** (paste / accessibility insert / type) — a power-user reliability lever Apple Dictation's flakiness makes valuable.
 
 ### Gaps to consider adding
-- Voice-driven editing of **already-selected** text (Wispr/Aqua have it; we don't).
 - Speaker diarization + file/batch transcription (MacWhisper's turf).
 - Cross-platform reach (everyone but us; Wispr leads). Likely out of scope for v1.
 

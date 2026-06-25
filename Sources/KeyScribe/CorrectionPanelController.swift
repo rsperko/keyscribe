@@ -142,6 +142,9 @@ private struct CorrectionPanelView: View {
 
     @State private var term: String
     @State private var replace: String
+    @FocusState private var focus: Field?
+
+    private enum Field { case term, replace }
 
     init(
         kind: CorrectionPanelController.Kind, prefill: String, canCorrect: Bool,
@@ -170,13 +173,16 @@ private struct CorrectionPanelView: View {
             case .dictionary:
                 LabeledContent("Word") {
                     TextField("e.g. Kubernetes", text: $term).textFieldStyle(.roundedBorder)
+                        .focused($focus, equals: .term)
                 }
             case .replacement:
                 LabeledContent("When you say") {
                     TextField("e.g. my email", text: $term).textFieldStyle(.roundedBorder)
+                        .focused($focus, equals: .term)
                 }
                 LabeledContent("Insert") {
                     TextField("e.g. me@example.com", text: $replace).textFieldStyle(.roundedBorder)
+                        .focused($focus, equals: .replace)
                 }
             }
 
@@ -203,6 +209,16 @@ private struct CorrectionPanelView: View {
         }
         .padding(20)
         .frame(width: 400)
+        .onAppear {
+            Task {
+                try? await Task.sleep(for: .milliseconds(50))
+                focus = trimmedTerm.isEmpty ? .term : initialFocusWhenPrefilled
+            }
+        }
+    }
+
+    private var initialFocusWhenPrefilled: Field {
+        kind == .replacement ? .replace : .term
     }
 
     private var explanation: String {

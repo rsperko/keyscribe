@@ -177,11 +177,11 @@ becomes a second destination for configuration.
 | Error | Plain-language failure | Single next action | Retry, open permissions, or dismiss as applicable |
 
 The local-only states — Recording, Transcribing, Complete, Target changed, and Error — are the
-whole HUD for a local dictation and are the first to ship. The Ready state is the brief
-acknowledgment shown only when a one-shot mode is chosen from the menu; there is no separate ready
-flash on hotkey invoke, because recording feedback begins on the same run-loop turn as capture
-(§4). Rewriting and Rewrite fallback appear once AI rewrite exists. There is **one** Rewriting
-state: a rewrite is always treated as a cloud data boundary — it names the connection and shows the
+whole HUD for a local dictation. The Ready state is the brief acknowledgment shown only when a
+one-shot mode is chosen from the menu; there is no separate ready flash on hotkey invoke, because
+recording feedback begins on the same run-loop turn as capture (§4). Rewriting and Rewrite fallback
+appear when AI rewrite is enabled for the dictation. There is **one** Rewriting state: a rewrite is
+always treated as a cloud data boundary — it names the connection and shows the
 `Cloud rewrite` badge even for a local endpoint — so the boundary-badge behavior below always
 governs it (KeyScribe does not currently distinguish a "polishing on this Mac" sub-state).
 
@@ -248,8 +248,8 @@ Quit KeyScribe
 
 > **`Add Dictionary Entry…` / `Add Replacement…`** open the standalone correction panel; they are
 > always present here and can also be bound to optional global chord shortcuts (General ▸ Shortcuts,
-> `[shortcuts]` in `config_schema.md`). **`Check for Updates…`** is **not yet built** — it lands with
-> the still-pending M7 Sparkle update mechanism (alongside the update badge below).
+> `[shortcuts]` in `config_schema.md`). A **`Check for Updates…`** item is planned alongside the
+> Sparkle update mechanism and the update badge below (not yet built).
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows the
 **seeded starter modes** defined in `config_schema.md`. Polished Dictation and any other
@@ -282,8 +282,7 @@ spoken routing can choose a different remaining pipeline after transcription.
 Two small corner badges on the menu-bar glyph, distinct by position and color so they read at a
 glance and can show simultaneously:
 
-- **Error badge — small red dot, top-left. Built.** Shown when there is a configuration or model
-  problem (e.g. a missing/failed model, a malformed config file, a required permission not granted).
+- **Error badge — small red dot, top-left.** Shown when there is a configuration or model problem.
   *Wired to:* a malformed config, any missing required permission, an **unusable active STT model**
   (deleted out from under us), and the AI checks — a **dangling connection** (a mode names a deleted
   connection), a **structurally misconfigured connection** (no model, or OpenAI-compatible with no
@@ -293,12 +292,11 @@ glance and can show simultaneously:
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. The sidebar polls
   while open and clears the flag the moment it's fixed. **A missing key is not an error** — it is
   legitimate for a local/no-auth endpoint. **KeyScribe never passively probes the provider** (privacy
-  invariant); the only live AI signal is the **user-initiated** Test Connection. *Still to broaden:* a
-  cached **self-test-failed** model flag (needs persisted state). Clears when resolved.
-  (Drawn as a separate colored layer so it survives both the template glyph's appearance adaptation
-  and the red recording tint.)
-- **Update badge — small blue dot, top-right. Not yet built.** Will show when an app update is
-  available. (Pairs with the still-pending M7 Sparkle update mechanism.)
+  invariant); the only live AI signal is the **user-initiated** Test Connection. (Drawn as a separate
+  colored layer so it survives both the template glyph's appearance adaptation and the red recording
+  tint.)
+- **Update badge — small blue dot, top-right.** Shows when an app update is available. Planned
+  alongside the Sparkle update mechanism (not yet built).
 
 Both are non-modal, dismiss themselves when their condition clears, and never block dictation. Keep
 them subtle — they hint, they don't alarm.
@@ -319,9 +317,8 @@ capabilities. The sidebar order is fixed:
 6. **Permissions** — review and repair macOS access.
 7. **Advanced** — configuration folder, diagnostics, migration/config errors, and notices.
 
-General, Speech Models, Vocabulary, and Advanced stand on the local-only product and ship first.
-AI Services, and the rewrite-related parts of Modes, appear with the AI
-rewrite milestones; until then a mode's editor stops at its local behavior.
+General, Speech Models, Vocabulary, and Advanced stand on the local-only product. AI Services, and
+the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
 ### General
 

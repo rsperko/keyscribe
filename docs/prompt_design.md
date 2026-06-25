@@ -1,9 +1,8 @@
-# KeyScribe — Prompt & System-Prompt Structure (draft)
+# KeyScribe — Prompt & System-Prompt Structure
 
 > Companion to `design.md` §4.2/§4.4. Defines how the optional LLM rewrite step is prompted.
 > **LLM floor: Gemini 2.5 Flash** — structure is tuned to be reliable on a fast/cheap model:
 > explicit, concise, consistently delimited, not reliant on top-tier instruction-following.
-> Status: draft for iteration.
 
 ---
 
@@ -51,33 +50,22 @@ Rules:
 {{modeSystemInstructions}}
 ```
 
-- The **context-isolation fence** is injected whenever a `<context>` block is present (same
-  condition as the block itself). Its **positive lead** — "rewrite only `<content>`, change as
-  little as the instructions require; if clean, return unchanged" — was hoisted out into an
-  always-on rule (it guards over-production on the common no-context path too); the context-gated
-  bullet now carries only the "background, never output" isolation half. When context *is* present
-  the model still sees both halves together, so the measurement below (which tuned the combined
-  wording) still holds. It is load-bearing for a weak model and was **tuned against ground truth**,
-  not intuition: replaying the exact failing prompt against the local Qwen3-Coder-30B floor (20+
-  samples/variant, temp 0.2 and 0.7) measured leak *rates*. Findings (2026-06-21):
-  - **Framing that says "use the context to match names/tone" leaks ~60%** of the time on
-    instruction-like content ("Enter this text" → a Chrome news headline / a repeated dump), and
-    — worse — **bleeds even on legitimate rewrites**: a "make this professional" rewrite with a
-    Slack window in context invented `Hi Maria,` / `Best regards,` by lifting a name from the
-    screen. The intended *benefit* of context (terminology/name matching) is inseparable from the
-    bleed on a weak model.
-  - **The reframe used here measured 0/20 (temp 0.2) and 0/15 (temp 0.7)** and left legitimate
-    rewrites clean. It leads with the **positive task** ("rewrite ONLY `<content>`; if clean,
-    return unchanged"), frames context as pure **background, never to be output**, and labels any
-    context in the output "a mistake." It deliberately drops the "use it to match names/tone"
-    purpose.
+- The **context-isolation fence** is injected whenever a `<context>` block is present. Its
+  **positive lead** — "rewrite only `<content>`, change as little as the instructions require; if
+  clean, return unchanged" — is an always-on rule (it also guards over-production on the no-context
+  path); the context-gated bullet carries the "background, never output" isolation half. It is
+  load-bearing for a weak model: framing that invites the model to "use the context to match
+  names/tone" causes it to lift screen text into the output (inventing a `Hi Maria,` greeting from a
+  name visible on screen, echoing an instruction-like headline). The fence therefore leads with the
+  **positive task**, frames context as pure **background, never to be output**, labels any context in
+  the output "a mistake," and **deliberately drops** the "use it to match names/tone" purpose.
   - **Design consequence:** controlled terminology/name matching belongs in the **`validTerms`**
-    channel (the Dictionary), which is safe; raw visible-text context is for *situational
-    grounding only*, fenced from output.
-  - This is a **quality** failure, not a privacy one: the output is inserted **locally** (the
+    channel (the Dictionary), which is safe; raw visible-text context is for *situational grounding
+    only*, fenced from output.
+  - This is a **quality** failure mode, not a privacy one: the output is inserted **locally** (the
     user's own screen content returning to their screen); the cloud already received the opted-in
-    context and the redaction wedge still protects secrets. The floor target is Gemini 2.5 Flash;
-    the rule is written for the weaker end. It does **not** appear when there is no context.
+    context and the redaction wedge still protects secrets. The rule does not appear when there is no
+    context.
 - The **tokens** block is a directive (the marker must survive verbatim). It permits **reordering**
   on purpose: restore is position-independent (matches by token string, not position), so a
   "reverse"/"sort" instruction is free to move the marker — the gate only requires it return
@@ -121,7 +109,7 @@ Rules:
 
 ---
 
-## Post-LLM validation (committed)
+## Post-LLM validation
 The output passes a deterministic gate before insertion (`design.md` §4.2):
 - **Token integrity** — every token KeyScribe issued returns exactly once (unless the mode allows
   deletion); no stray `⟦SN:…⟧`-style tokens the app did not issue.
@@ -137,7 +125,7 @@ or open a new one; the ZWSP is invisible to the model and never reaches the inse
 is the second line of defense, catching context that still tries to steer the rewrite or drop tokens
 (indirect prompt injection). No classifier in v1.
 
-## Context & token budget (v1 policy)
+## Context & token budget
 Large context causes latency, cost, and truncation artifacts. The policy is explicit and
 **never silently truncates user content**:
 - **Instructions and mode prompt are never truncated** — they define the task.
@@ -150,31 +138,19 @@ Large context causes latency, cost, and truncation artifacts. The policy is expl
   length; the connection default (`config_schema.md`, 2048) is a floor, raised per request when
   the content demands it.
 
-Concrete cap values are a **measured default** set in M5/M6 against the Gemini 2.5 Flash floor.
-
-## v1 scope vs later
-- **v1:** the structure above is **fixed**. Context chunks are appended in this stable order.
-- **Later (deferred — footgun):** user-defined **prompt templating** that places chunks at
-  arbitrary points (`design.md` §4.4). Not in v1 (YAGNI).
-
-## Open questions
-- **Context in system vs user?** Current call: stable rules in system, situational context in
-  user. Validate on Flash.
-- **Window-excerpt cap value.** Policy is fixed above; the concrete cap is a measured default
-  (cost + latency on Flash) set in M5/M6.
-- **Token sentinel robustness — RESOLVED (2026-06-21), `⟦SN:…⟧` kept.** Probed live against the
-  Gemini 2.5 Flash floor through the real production path (`PromptAssembler` → `HTTPLLMClient` →
-  `ValidationGate`) over 8 rewrite shapes incl. the token-killers (translate-to-Spanish, summarize)
-  and edge cases (multi-token, adjacent, boundaries, verbatim edit-in-place): **24/24 survived** at
-  temp 0.2. A bake-off varying only the sentinel characters (`⟦SN⟧` vs ASCII `[[ ]]` vs `{{ }}` vs
-  PUA) also went **24/24 each** — on a modern model the characters are not the differentiator, so
-  the pick turns on the *other* axis: low stray/collision risk in dictated prose. `⟦`/`⟧`
-  (U+27E6/27E7) essentially never appear in normal text, so the gate's stray-token regex won't
-  false-fire; ASCII brackets/braces collide with code & templating, PUA chars are invisible/fragile.
-  `⟦SN:…⟧` wins on both axes. Harness: opt-in `SentinelSurvivalProbeTests`
-  (`RUN_SENTINEL_PROBE=1 GEMINI_API_KEY=… swift test --filter sentinelSurvival`). (Runtime handling
-  of failures was never open — see the post-LLM validation gate above.)
-- **Few-shot?** Prefer zero-shot for speed/cost; add per-mode examples only if a task needs it.
+## Structure scope
+- The structure above is **fixed**: context chunks are appended in this stable order. User-defined
+  **prompt templating** that places chunks at arbitrary points is a footgun and out of scope
+  (`design.md` §4.4, YAGNI).
+- **Context placement:** stable rules in the system message, situational context in the user message.
+- **Token sentinel:** `⟦SN:…⟧` is the chosen sentinel. It survives the Gemini 2.5 Flash floor (24/24
+  across hard rewrite shapes incl. translate/summarize, multi-token, adjacent, boundaries, and
+  edit-in-place). The characters matter less than the *other* axis on a modern model — low
+  stray/collision risk in dictated prose: `⟦`/`⟧` (U+27E6/27E7) essentially never appear in normal
+  text, so the gate's stray-token regex won't false-fire, whereas ASCII brackets/braces collide with
+  code and PUA chars are invisible/fragile. Opt-in survival harness: `SentinelSurvivalProbeTests`
+  (`RUN_SENTINEL_PROBE=1 GEMINI_API_KEY=… swift test --filter sentinelSurvival`).
+- **Few-shot:** zero-shot by default for speed/cost; per-mode examples only if a task needs it.
 
 ## Sources
 - [Prompt design strategies — Gemini API](https://ai.google.dev/gemini-api/docs/prompting-strategies)

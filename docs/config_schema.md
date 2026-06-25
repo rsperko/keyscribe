@@ -1,9 +1,8 @@
-# KeyScribe — Mode & Config TOML Schema (draft)
+# KeyScribe — Mode & Config TOML Schema
 
 > Companion to `design.md` (§4.3 modes, §4.6 settings, §5 storage, §5.1 versioning).
 > Defines the on-disk config: one TOML file per mode plus the shared config files modes
 > reference. Every file carries `schema_version` and migrates forward (`design.md` §5.1).
-> Status: draft for iteration.
 
 ---
 
@@ -204,10 +203,10 @@ schema_version = 1
 [[connection]]
 id = "gemini-flash"             # referenced by modes
 name = "Gemini 2.5 Flash"
-provider = "gemini"             # "openai" | "anthropic" | "gemini" (+ "openai_compatible" later)
+provider = "gemini"             # "openai" | "anthropic" | "gemini" | "openai_compatible"
 model = "gemini-2.5-flash"
 key_ref = "keyscribe.llm.gemini-flash"   # Keychain item id — the key itself never lives in TOML
-# base_url = "https://..."      # for openai-compatible endpoints (later)
+# base_url = "https://..."      # for openai_compatible endpoints
 [connection.params]
 temperature = 0.2
 max_tokens = 2048   # floor; raised per request for long edit-in-place selections (prompt_design.md budget policy)
@@ -273,7 +272,7 @@ add_replacement = ""            # canonical chord, e.g. "control+option+shift+r"
 > The tap falls back to listen-only when an active tap can't be created (Accessibility not yet granted),
 > in which case the chord passes through until Accessibility is granted. Set in Settings ▸ General.
 
-> **M1 note:** `load_on_login` defaults to **false** in code (KeyScribe does not install a login item
+> **Note:** `load_on_login` defaults to **false** in code (KeyScribe does not install a login item
 > unless the user opts in via General settings / first-run), even though the example above shows `true`.
 
 ---
@@ -293,6 +292,6 @@ add_replacement = ""            # canonical chord, e.g. "control+option+shift+r"
   `right_command`, `hyper`, `f5`). Examples: `"fn"`, `"right_option"`, `"control+option+a"`.
   **Recommended default for new modes: `fn`/Globe with `hold-or-tap`** (most familiar — Wispr
   and Apple both center on it), with **`right_option`** offered as the conflict-free
-  alternative (Apple Dictation also double-taps Fn). Finalize edge cases in M1.
+  alternative (Apple Dictation also double-taps Fn).
 - **Per-mode language** — out of scope (language follows the active engine, `design.md` §4.1);
-  no `language` field in v1.
+  no `language` field.

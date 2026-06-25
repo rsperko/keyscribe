@@ -44,6 +44,7 @@ struct ResetTool {
         }
         actions.append("Wiped config under \(supportDir.path) (kept \(kept)/).")
         actions += clearOnboarding()
+        actions += clearHUDPosition()
         return actions
     }
 
@@ -51,6 +52,12 @@ struct ResetTool {
         try? fileManager.removeItem(at: supportDir)
         var actions = ["Removed \(supportDir.path) entirely (including downloaded models)."]
         actions += clearOnboarding()
+        actions += clearHUDPosition()
         return actions
+    }
+
+    private func clearHUDPosition() -> [String] {
+        HUDAnchorStore.clear(defaults)
+        return ["Reset HUD position to the default."]
     }
 }

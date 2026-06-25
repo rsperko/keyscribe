@@ -92,10 +92,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
     init(
         settings: Settings, speechModels: SpeechModelsModel,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
+        onResetHUDPosition: @escaping () -> Void,
         detectProblems: @escaping () -> [SettingsProblem]
     ) {
         self.detectProblems = detectProblems
-        model = SettingsModel(settings: settings, onChange: onChange, onReload: onReload)
+        model = SettingsModel(
+            settings: settings, onChange: onChange, onReload: onReload,
+            onResetHUDPosition: onResetHUDPosition)
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(supportDir: KeyScribePaths.supportDir)
         replacements = ReplacementsSettingsModel(supportDir: KeyScribePaths.supportDir)
@@ -278,6 +281,12 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Dictation HUD") {
+                Button("Reset HUD Position") { model.resetHUDPosition() }
+                Text("Drag the HUD to flick it to any edge or corner; it stays there. Reset returns it to the bottom center.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(16)
@@ -324,12 +333,17 @@ final class SettingsModel: ObservableObject {
     private var settings: Settings
     private let onChange: (Settings) -> Void
     private let onReload: () -> Void
+    private let onResetHUDPosition: () -> Void
     private var loading = false
 
-    init(settings: Settings, onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void) {
+    init(
+        settings: Settings, onChange: @escaping (Settings) -> Void,
+        onReload: @escaping () -> Void, onResetHUDPosition: @escaping () -> Void
+    ) {
         self.settings = settings
         self.onChange = onChange
         self.onReload = onReload
+        self.onResetHUDPosition = onResetHUDPosition
         sounds = settings.duringDictation.sounds
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
         muteSystemAudio = settings.duringDictation.muteSystemAudio
@@ -369,6 +383,8 @@ final class SettingsModel: ObservableObject {
     }
 
     func reload() { onReload() }
+
+    func resetHUDPosition() { onResetHUDPosition() }
 
     private func persist() {
         guard !loading else { return }
