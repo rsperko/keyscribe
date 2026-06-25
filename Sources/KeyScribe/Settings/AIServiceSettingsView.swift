@@ -98,7 +98,7 @@ final class AIServiceSettingsModel: ObservableObject {
         let name = "New AI Service"
         let id = ConnectionStore.newID(for: name, existing: connections.map(\.id))
         let connection = Connection(
-            id: id, name: name, provider: .openai, model: "gpt-4.1-mini",
+            id: id, name: name, provider: .openai, model: Connection.Provider.openai.defaultModel,
             keyRef: "keyscribe.llm.\(id)")
         save(connection)
         selectedID = id
@@ -306,7 +306,7 @@ private struct AIServiceEditor: View {
                 CommittedTextField("Name", text: connection.name, autofocus: autofocusName) { value in
                     var updated = connection; updated.name = value; onUpdate(updated, nil)
                 }
-                Picker("Provider", selection: binding(\.provider)) {
+                Picker("Provider", selection: providerBinding) {
                     Text("OpenAI").tag(Connection.Provider.openai)
                     Text("Anthropic").tag(Connection.Provider.anthropic)
                     Text("Gemini").tag(Connection.Provider.gemini)
@@ -360,6 +360,19 @@ private struct AIServiceEditor: View {
         .formStyle(.grouped)
         .padding(16)
         .onAppear { if autofocusName { onConsumeFocus() } }
+    }
+
+    // Switching provider resets the model to the new provider's default, matching first-run onboarding —
+    // otherwise the model field silently keeps the prior provider's id.
+    private var providerBinding: Binding<Connection.Provider> {
+        Binding(
+            get: { connection.provider },
+            set: { value in
+                var updated = connection
+                updated.provider = value
+                updated.model = value.defaultModel
+                onUpdate(updated, nil)
+            })
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<Connection, T>) -> Binding<T> {

@@ -13,6 +13,24 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     public enum Provider: String, Codable, Sendable {
         case openai, anthropic, gemini
         case openaiCompatible = "openai_compatible"
+
+        public var defaultModel: String {
+            switch self {
+            case .openai: "gpt-5.4-mini"
+            case .anthropic: "claude-haiku-4-5"
+            case .gemini: "gemini-2.5-flash"
+            case .openaiCompatible: ""
+            }
+        }
+
+        public var defaultName: String {
+            switch self {
+            case .openai: "OpenAI"
+            case .anthropic: "Anthropic"
+            case .gemini: "Gemini"
+            case .openaiCompatible: "Custom AI"
+            }
+        }
     }
 
     public struct Params: Codable, Equatable, Sendable {

@@ -13,10 +13,11 @@ struct FirstRunView: View {
             case .model: modelStep
             case .permissions: permissions
             case .tryIt: tryIt
+            case .aiService: aiService
             }
         }
         .padding(28)
-        .frame(width: 460, height: 420, alignment: .topLeading)
+        .frame(width: 480, height: 500, alignment: .topLeading)
         .onChange(of: model.step) { _, step in
             if step == .permissions { model.startPolling() } else { model.stopPolling() }
             if step == .tryIt { trialFieldFocused = true }
@@ -197,7 +198,7 @@ struct FirstRunView: View {
                 Label("Dictation worked — you're set up.", systemImage: "checkmark.circle.fill")
                     .font(.callout).foregroundStyle(.green)
             } else {
-                Label("Finish unlocks after one successful dictation lands here.", systemImage: "mic")
+                Label("Continue unlocks after one successful dictation lands here.", systemImage: "mic")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -205,10 +206,82 @@ struct FirstRunView: View {
                 Button("Skip for now") { model.finish() }
                     .buttonStyle(.link)
                 Spacer()
-                Button("Finish") { model.finish() }
+                Button("Continue") { model.step = .aiService }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
                     .disabled(!model.trialSucceeded)
             }
+        }
+    }
+
+    private var aiService: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Optional text cleanup").font(.title.bold())
+            Text("Connect your own AI service if you want KeyScribe to clean up dictation, draft messages, or work on selected text. Speech recognition still stays on this Mac.")
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Only modes that use AI rewrite send text to this provider.", systemImage: "cloud")
+                Label("Your API key is stored in Keychain.", systemImage: "key")
+                if !model.aiModeNames.isEmpty {
+                    Label("KeyScribe will connect \(formattedModeNames(model.aiModeNames)) to this service.", systemImage: "wand.and.stars")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Form {
+                TextField("Name", text: $model.aiServiceName)
+                Picker("Provider", selection: $model.aiProvider) {
+                    Text("OpenAI").tag(Connection.Provider.openai)
+                    Text("Anthropic").tag(Connection.Provider.anthropic)
+                    Text("Gemini").tag(Connection.Provider.gemini)
+                    Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
+                }
+                TextField("Model", text: $model.aiModel)
+                if model.aiProvider == .openaiCompatible {
+                    TextField("Base URL", text: $model.aiBaseURL)
+                }
+                SecureField(model.aiProvider == .openaiCompatible ? "API key (optional)" : "API key", text: $model.aiAPIKey)
+            }
+            .formStyle(.grouped)
+
+            if let error = model.aiSetupError {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+
+            Spacer()
+            HStack {
+                Button("Set Up Later") { model.finish() }
+                    .buttonStyle(.link)
+                    .disabled(model.aiTesting)
+                Spacer()
+                if model.aiTesting { ProgressView().controlSize(.small) }
+                Button(model.aiTesting ? "Testing…" : "Connect AI Service") {
+                    Task { await model.createAIService() }
+                }
+                    .keyboardShortcut(.defaultAction).controlSize(.large)
+                    .disabled(!model.aiCanConnect || model.aiTesting)
+            }
+        }
+        .onChange(of: model.aiProvider) { oldProvider, provider in
+            // Only re-default the name while the user hasn't typed their own.
+            if model.aiServiceName == oldProvider.defaultName {
+                model.aiServiceName = provider.defaultName
+            }
+            model.aiModel = provider.defaultModel
+        }
+    }
+
+    private func formattedModeNames(_ names: [String]) -> String {
+        switch names.count {
+        case 0:
+            return "the starter rewrite modes"
+        case 1:
+            return names[0]
+        case 2:
+            return "\(names[0]) and \(names[1])"
+        default:
+            return names.dropLast().joined(separator: ", ") + ", and \(names.last ?? "")"
         }
     }
 }

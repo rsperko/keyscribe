@@ -115,4 +115,21 @@ struct ConnectionsTests {
         #expect(ConnectionStore.newID(for: "My Local AI", existing: []) == "my-local-ai")
         #expect(ConnectionStore.newID(for: "My Local AI", existing: ["my-local-ai"]) == "my-local-ai-2")
     }
+
+    @Test func keyedProvidersDefaultToCurrentModels() {
+        #expect(Connection.Provider.openai.defaultModel == "gpt-5.4-mini")
+        #expect(Connection.Provider.anthropic.defaultModel == "claude-haiku-4-5")
+        #expect(Connection.Provider.gemini.defaultModel == "gemini-2.5-flash")
+    }
+
+    @Test func openAICompatibleHasNoDefaultModel() {
+        #expect(Connection.Provider.openaiCompatible.defaultModel.isEmpty)
+    }
+
+    @Test func providersHaveDefaultNames() {
+        #expect(Connection.Provider.openai.defaultName == "OpenAI")
+        #expect(Connection.Provider.anthropic.defaultName == "Anthropic")
+        #expect(Connection.Provider.gemini.defaultName == "Gemini")
+        #expect(Connection.Provider.openaiCompatible.defaultName == "Custom AI")
+    }
 }

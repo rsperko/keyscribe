@@ -15,13 +15,19 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         selectEngine: @escaping (String) -> Void,
         onReadyToDictate: @escaping () -> Void,
         permissionsOnly: Bool = false,
+        supportDir: URL = KeyScribePaths.supportDir,
+        modesDir: URL = KeyScribePaths.modesDir,
+        saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
+        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         onRelaunch: @escaping () -> Void = {},
         onComplete: @escaping () -> Void
     ) {
         self.onComplete = onComplete
         model = FirstRunModel(
             initialEngineId: initialEngineId, download: download,
-            selectEngine: selectEngine, permissionsOnly: permissionsOnly, onComplete: onComplete)
+            selectEngine: selectEngine, permissionsOnly: permissionsOnly,
+            supportDir: supportDir, modesDir: modesDir, saveAPIKey: saveAPIKey,
+            testConnection: testConnection, onComplete: onComplete)
         super.init()
         model.onReadyToDictate = onReadyToDictate
         model.onRelaunch = onRelaunch
@@ -35,7 +41,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = model.permissionsOnly ? "Set Up Permissions" : "Welcome to KeyScribe"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 460, height: 420))
+        window.setContentSize(NSSize(width: 480, height: 500))
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -67,7 +73,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
 
 @MainActor
 final class FirstRunModel: ObservableObject {
-    enum Step { case intro, model, permissions, tryIt }
+    enum Step { case intro, model, permissions, tryIt, aiService }
 
     @Published var step: Step = .intro
     @Published var downloading = false
@@ -78,11 +84,23 @@ final class FirstRunModel: ObservableObject {
     @Published var trialText = ""
     @Published var trialSucceeded = false
     @Published var selectedEngineId: String
+    @Published var aiServiceName = Connection.Provider.openai.defaultName
+    @Published var aiProvider: Connection.Provider = .openai
+    @Published var aiModel = Connection.Provider.openai.defaultModel
+    @Published var aiBaseURL = ""
+    @Published var aiAPIKey = ""
+    @Published private(set) var aiSetupError: String?
+    @Published private(set) var aiTesting = false
 
     let catalog = SpeechModelCatalog.all
     let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let selectEngine: (String) -> Void
+    private let supportDir: URL
+    private let modesDir: URL
+    private let saveAPIKey: (String, String) -> Bool
+    private let testConnection: (Connection) async -> ConnectionTestState
+    private var pendingConnectionId: String?
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
     var onRelaunch: () -> Void = {}
@@ -93,12 +111,20 @@ final class FirstRunModel: ObservableObject {
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
         permissionsOnly: Bool = false,
+        supportDir: URL = KeyScribePaths.supportDir,
+        modesDir: URL = KeyScribePaths.modesDir,
+        saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
+        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         onComplete: @escaping () -> Void
     ) {
         self.selectedEngineId = initialEngineId
         self.download = download
         self.selectEngine = selectEngine
         self.permissionsOnly = permissionsOnly
+        self.supportDir = supportDir
+        self.modesDir = modesDir
+        self.saveAPIKey = saveAPIKey
+        self.testConnection = testConnection
         self.onComplete = onComplete
         refreshStatuses()
         if permissionsOnly {
@@ -182,6 +208,81 @@ final class FirstRunModel: ObservableObject {
     func finish() {
         stopPolling()
         onComplete()
+    }
+
+    var aiModeNames: [String] {
+        modesToConnect().map(\.name)
+    }
+
+    var aiCanConnect: Bool {
+        let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty || model.isEmpty { return false }
+        if aiProvider == .openaiCompatible { return !base.isEmpty }
+        return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func createAIService() async {
+        aiSetupError = nil
+        let existing = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+        let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Reuse the id across retries so a failure after the connection is written doesn't accumulate
+        // duplicate connections on the next attempt.
+        let id = pendingConnectionId ?? ConnectionStore.newID(for: name, existing: existing.map(\.id))
+        pendingConnectionId = id
+        let keyRef = "keyscribe.llm.\(id)"
+        var connection = Connection(
+            id: id, name: name, provider: aiProvider,
+            model: aiModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            keyRef: keyRef)
+        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if aiProvider == .openaiCompatible { connection.baseUrl = base }
+        let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty, !saveAPIKey(keyRef, key) {
+            aiSetupError = "Could not save the API key to the Keychain."
+            return
+        }
+        aiTesting = true
+        let result = await testConnection(connection)
+        aiTesting = false
+        if case .failed(let message) = result {
+            aiSetupError = "Connection test failed: \(message)"
+            return
+        }
+        do {
+            let others = existing.filter { $0.id != id }
+            try ConnectionStore.write(ConnectionSet(connections: others + [connection]), to: supportDir)
+        } catch {
+            aiSetupError = "Could not save the AI service: \(error.localizedDescription)"
+            return
+        }
+        let unlinked = connectStarterModes(to: id)
+        if !unlinked.isEmpty {
+            aiSetupError = "Connected \(name), but could not link \(unlinked.joined(separator: ", ")). You can link them in Settings."
+            return
+        }
+        finish()
+    }
+
+    private func modesToConnect() -> [Mode] {
+        let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+        return ModeStore.loadAll(in: modesDir).filter { mode in
+            guard mode.seedId != nil, let rewrite = mode.aiRewrite else { return false }
+            return rewrite.connection.isEmpty || !connections.contains { $0.id == rewrite.connection }
+        }
+    }
+
+    private func connectStarterModes(to connectionId: String) -> [String] {
+        var failed: [String] = []
+        for var mode in modesToConnect() {
+            guard var rewrite = mode.aiRewrite else { continue }
+            rewrite.connection = connectionId
+            mode.aiRewrite = rewrite
+            do { try ModeStore.write(mode, to: modesDir) }
+            catch { failed.append(mode.name) }
+        }
+        return failed
     }
 }
 

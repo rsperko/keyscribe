@@ -342,21 +342,21 @@ private struct ModeEditorView: View {
             whenUsedSection
             Section("What it does") {
                 SettingRow(
-                    title: "Work on selection",
+                    title: "Rewrite selected text",
                     result: mode.source == .selection ? "Rewrites the highlighted text" : "Dictates at the cursor",
                     help: "When on, this mode edits the currently selected text using your spoken instruction instead of inserting new text at the cursor — for \u{201C}make this more formal\u{201D} style edits. The selection is captured with ⌘C, so there must be something selected for it to act on.")
                 {
                     Toggle("", isOn: selectionMode).labelsHidden()
                 }
                 SettingRow(
-                    title: "Recognize spoken edits",
+                    title: "Turn spoken commands into edits",
                     help: "Interprets spoken commands like \u{201C}delete that\u{201D} or \u{201C}new line\u{201D} as edits to the text instead of typing them literally. Turn it off if you dictate prose that uses those words verbatim.")
                 {
                     Toggle("", isOn: commandsBinding(\.liveEdits)).labelsHidden()
                 }
                 if mode.source != .selection {
-                    Toggle("Convert spoken numbers to digits", isOn: commandsBinding(\.numbers))
-                    Toggle("Correct misheard words to your dictionary", isOn: commandsBinding(\.fuzzyCorrection))
+                    Toggle("Write numbers as digits", isOn: commandsBinding(\.numbers))
+                    Toggle("Prefer dictionary words", isOn: commandsBinding(\.fuzzyCorrection))
                     Text("These tidy the transcript on this Mac, before any AI rewrite.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -367,7 +367,7 @@ private struct ModeEditorView: View {
 
             Section("Result handling") {
                 SettingRow(
-                    title: "Insertion method",
+                    title: "How text is inserted",
                     result: insertionLabel,
                     help: "Paste is recommended: it inserts the finished dictation atomically (one ⌘Z undoes it) and works in the widest range of apps. Insert and Type place text key-by-key and need Accessibility permission; some apps reject them.",
                     dependencyReason: accessibilityMissingForInsertion
@@ -386,7 +386,7 @@ private struct ModeEditorView: View {
                         .controlSize(.small)
                 }
                 SettingRow(
-                    title: "Add after text",
+                    title: "End with",
                     help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
                 {
                     Picker("", selection: binding(\.trailing)) {
@@ -397,7 +397,7 @@ private struct ModeEditorView: View {
                     .labelsHidden().fixedSize()
                 }
                 SettingRow(
-                    title: "Then press",
+                    title: "Send after inserting",
                     help: "After inserting, sends a keystroke to submit — Return sends in most chat and prompt boxes, ⇧Return adds a soft line break, ⌘Return sends in Slack and similar. Only fires when the text actually reached the target (never on a clipboard fallback). Leave on \u{201C}Nothing\u{201D} to avoid sending half-finished messages.",
                     dependencyReason: mode.submit != .none && mode.source == .selection
                         ? "This mode replaces a selection, so a send keystroke usually isn't what you want here."
@@ -412,7 +412,7 @@ private struct ModeEditorView: View {
                     .labelsHidden().fixedSize()
                 }
                 SettingRow(
-                    title: "Exclude from history",
+                    title: "Do not save this mode in history",
                     help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
                 {
                     Toggle("", isOn: binding(\.excludeFromHistory)).labelsHidden()
@@ -470,18 +470,18 @@ private struct ModeEditorView: View {
 
     @ViewBuilder private var whenUsedSection: some View {
         Section("When this mode is used") {
-            // The Trigger key row holds either the menu or, for a custom chord, the recorder itself —
+            // The Mode shortcut row holds either the menu or, for a custom chord, the recorder itself —
             // no separate "Shortcut" row. Choosing "Custom shortcut…" arms it in place immediately;
             // Esc or clearing reverts to the menu. (autostart only when freshly entering custom.)
             if isCustom {
-                LabeledContent("Trigger key") {
+                LabeledContent("Mode shortcut") {
                     HotkeyRecorder(
                         key: triggerKey, autostart: capturingCustom,
                         onCancel: { capturingCustom = false })
                 }
             } else {
-                Picker("Trigger key", selection: triggerSelection) {
-                    Text("No dedicated shortcut").tag("")
+                Picker("Mode shortcut", selection: triggerSelection) {
+                    Text("No mode shortcut").tag("")
                     Text("Fn (Globe)").tag("fn")
                     Text("Right Option").tag("right_option")
                     Text("Right Command").tag("right_command")
@@ -489,7 +489,7 @@ private struct ModeEditorView: View {
                     Text("Custom shortcut…").tag(customTriggerTag)
                 }
             }
-            Picker("Press style", selection: pressStyle) {
+            Picker("How the shortcut works", selection: pressStyle) {
                 Text("Hold or tap").tag("hold-or-tap")
                 Text("Hold only").tag("hold-only")
                 Text("Tap to toggle").tag("tap-to-toggle")
@@ -504,7 +504,7 @@ private struct ModeEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DisclosureSection("Advanced routing", isExpanded: $routingExpanded) {
-                Text("App and URL rules")
+                Text("Limit to apps or websites")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(mode.constraints.indices, id: \.self) { index in
                     HStack {
@@ -545,7 +545,7 @@ private struct ModeEditorView: View {
                         .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                Text("Spoken routing phrases")
+                Text("Choose by spoken phrase")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(mode.triggerPhrases, id: \.self) { phrase in
                     HStack {
@@ -562,7 +562,7 @@ private struct ModeEditorView: View {
                         .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                Text("App and URL rules choose a mode before recording. A spoken phrase said at the end can reroute the result after transcription. URL patterns are local routing rules and are never sent to a rewrite provider.")
+                Text("App and website limits choose a mode before recording. A spoken phrase said at the end can reroute the result after transcription. URL patterns are local routing rules and are never sent to a rewrite provider.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -681,7 +681,7 @@ private struct ModeEditorView: View {
         Section {
             DisclosureSection("Advanced", isExpanded: $advancedExpanded) {
                 if mode.aiRewrite != nil {
-                    Text("Reusable instructions")
+                    Text("Reusable writing instructions")
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(mode.aiRewrite?.fragments ?? [], id: \.self) { fragment in
                         HStack {

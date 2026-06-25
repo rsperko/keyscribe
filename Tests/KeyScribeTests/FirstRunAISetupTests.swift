@@ -1,0 +1,117 @@
+import Foundation
+import Testing
+@testable import KeyScribe
+@testable import KeyScribeKit
+
+@MainActor
+struct FirstRunAISetupTests {
+    private func makeModel(
+        supportDir: URL,
+        modesDir: URL,
+        saveAPIKey: @escaping (String, String) -> Bool = { _, _ in true },
+        testConnection: @escaping (Connection) async -> ConnectionTestState = { _ in .passed },
+        onComplete: @escaping () -> Void = {}
+    ) -> FirstRunModel {
+        FirstRunModel(
+            initialEngineId: SpeechModelCatalog.defaultEnglishId,
+            download: { _, _ in },
+            selectEngine: { _ in },
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: saveAPIKey,
+            testConnection: testConnection,
+            onComplete: onComplete)
+    }
+
+    @Test func creatingAIServiceConnectsSeededRewriteModesThatNeedAConnection() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var custom = Mode(id: "custom", name: "Custom")
+        custom.aiRewrite = .init(connection: "", prompt: "Custom prompt")
+        try ModeStore.write(custom, to: modesDir)
+        var completed = 0
+        var savedKeyRef: String?
+        var savedKey: String?
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: { ref, key in
+                savedKeyRef = ref
+                savedKey = key
+                return true
+            },
+            onComplete: { completed += 1 })
+
+        model.aiServiceName = "Gemini Flash"
+        model.aiProvider = .gemini
+        model.aiModel = "gemini-2.5-flash"
+        model.aiAPIKey = "secret"
+        await model.createAIService()
+
+        let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+        let connection = try #require(connections.first)
+        #expect(connection.id == "gemini-flash")
+        #expect(connection.provider == .gemini)
+        #expect(connection.model == "gemini-2.5-flash")
+        #expect(savedKeyRef == connection.keyRef)
+        #expect(savedKey == "secret")
+        #expect(completed == 1)
+
+        let modes = ModeStore.loadAll(in: modesDir)
+        let seededRewriteModes = modes.filter { $0.seedId != nil && $0.aiRewrite != nil }
+        #expect(!seededRewriteModes.isEmpty)
+        #expect(seededRewriteModes.allSatisfy { $0.aiRewrite?.connection == connection.id })
+        #expect(try #require(modes.first { $0.id == "custom" }).aiRewrite?.connection == "")
+    }
+
+    @Test func failedKeySaveDoesNotConnectModesOrFinish() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var completed = 0
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: { _, _ in false },
+            onComplete: { completed += 1 })
+
+        model.aiAPIKey = "secret"
+        await model.createAIService()
+
+        #expect(completed == 0)
+        #expect(model.aiSetupError == "Could not save the API key to the Keychain.")
+        #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
+        let modes = ModeStore.loadAll(in: modesDir)
+        #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
+    }
+
+    @Test func failedConnectionTestDoesNotPersistOrFinish() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var completed = 0
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            testConnection: { _ in .failed("401 Unauthorized") },
+            onComplete: { completed += 1 })
+
+        model.aiProvider = .gemini
+        model.aiModel = "gemini-2.5-flash"
+        model.aiAPIKey = "bad-key"
+        await model.createAIService()
+
+        #expect(completed == 0)
+        #expect(model.aiSetupError == "Connection test failed: 401 Unauthorized")
+        #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
+        let modes = ModeStore.loadAll(in: modesDir)
+        #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
+    }
+}
