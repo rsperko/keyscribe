@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release test setup reset-permissions verify icon clean
+.PHONY: help build run release test setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -14,8 +14,15 @@ build: ## Build the dev app (KeyScribeDev.app, self-signed; isolated from a prod
 run: build ## Build then launch the dev app
 	open ./KeyScribeDev.app
 
-release: ## Notarized release build + DMG. Pass a bump: make release BUMP=patch|minor|major|vX.Y.Z
+# Bump can be positional (make release patch) or an explicit version (make release BUMP=vX.Y.Z).
+# When positional, it shows up as a goal in MAKECMDGOALS; pluck it out and feed it to release.sh.
+BUMP ?= $(filter patch minor major,$(MAKECMDGOALS))
+release: ## Cut a release: make release patch | minor | major   (or BUMP=vX.Y.Z; bare = re-run current tag)
 	./release.sh $(BUMP)
+
+# No-op stubs so `make release patch` treats 'patch' as the bump arg, not an unknown target to build.
+patch minor major:
+	@:
 
 test: ## Run the full test suite
 	swift test

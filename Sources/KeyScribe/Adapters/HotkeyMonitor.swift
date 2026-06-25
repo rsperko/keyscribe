@@ -63,18 +63,27 @@ final class HotkeyMonitor {
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
     // An active `.defaultTap` session tap that only observes modifiers is authorized by Accessibility
     // alone (no Input Monitoring). Chords → `CarbonHotKeys`; ESC-to-cancel → the recording HUD.
+    // True once the modifier-only `.flagsChanged` tap exists. `false` while Accessibility reads granted
+    // means `tapCreate` saw a launch-cached denied verdict — the process needs a relaunch (the readiness
+    // signal AppDelegate/Settings surface, since the live `AXIsProcessTrusted` would otherwise say "Ready").
+    var isTapActive: Bool { tap != nil }
+
     @discardableResult
     func start() -> Bool {
         defer { rebuildCarbon() }
         if tap != nil { return true }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
-        guard let tap = makeTap(mask: mask, options: .defaultTap) else { return false }
+        guard let tap = makeTap(mask: mask, options: .defaultTap) else {
+            hotkeyLog.error("modifier-key event tap not created; Accessibility verdict is likely cached as denied from launch — relaunch needed")
+            return false
+        }
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         self.tap = tap
         self.runLoopSource = source
         activeHotkeyMonitor = self
+        hotkeyLog.info("modifier-key event tap active")
         return true
     }
 

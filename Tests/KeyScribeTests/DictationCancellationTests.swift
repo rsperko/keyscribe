@@ -90,6 +90,21 @@ private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     func stop() -> URL? { url }
 }
 
+// Records whether the commit path drained the tail (finishDraining) or tore down immediately (stop).
+private final class DrainTrackingAudio: AudioCapturing, @unchecked Sendable {
+    private let url: URL
+    private let lock = NSLock()
+    private var _drained = false
+    private var _immediateStops = 0
+    var drained: Bool { lock.lock(); defer { lock.unlock() }; return _drained }
+    var immediateStops: Int { lock.lock(); defer { lock.unlock() }; return _immediateStops }
+    init(url: URL) { self.url = url }
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL { url }
+    func stop() -> URL? { lock.lock(); _immediateStops += 1; lock.unlock(); return url }
+    func finishDraining() async -> URL? { markDrained(); return url }
+    private func markDrained() { lock.lock(); _drained = true; lock.unlock() }
+}
+
 private actor InsertSpy {
     private(set) var calls = 0
     func record() { calls += 1 }
@@ -146,6 +161,39 @@ struct DictationCancellationTests {
         return Harness(
             controller: controller, history: history, insertSpy: insertSpy,
             started: started, release: release, supportDir: supportDir, hud: hud)
+    }
+
+    @Test func commitDrainsTheTailInsteadOfStoppingImmediately() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let started = Signal(), release = Signal()
+        let engine = GatedEngine(started: started, release: release, text: "hello world")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "gated")
+        let insertSpy = InsertSpy()
+        let audio = DrainTrackingAudio(url: supportDir.appendingPathComponent("capture.wav"))
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "gated", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), audio: audio,
+            insert: { _, _, _ in await insertSpy.record() },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        controller.handleStart()
+        controller.handleCommit()
+        await started.wait()
+        release.fire()
+        await controller.dictationTask?.value
+
+        #expect(audio.drained)
+        #expect(audio.immediateStops == 0)
+        #expect(await insertSpy.calls == 1)
     }
 
     @Test func cancellingDuringTranscriptionInsertsNothingAndWritesNoHistory() async {

@@ -83,10 +83,16 @@ struct SettingsTests {
         #expect(decoded == s)
     }
 
-    @Test func absentShortcutsDefaultToEmpty() throws {
+    @Test func absentShortcutsFallBackToDefaults() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(s.shortcuts.addDictionaryEntry == "control+option+shift+d")
+        #expect(s.shortcuts.addReplacement == "control+option+shift+r")
+    }
+
+    @Test func explicitlyEmptyShortcutStaysOff() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[shortcuts]\nadd_dictionary_entry = \"\"")
         #expect(s.shortcuts.addDictionaryEntry.isEmpty)
-        #expect(s.shortcuts.addReplacement.isEmpty)
+        #expect(s.shortcuts.addReplacement == "control+option+shift+r")
     }
 
     @Test func negativeRetentionIsRejected() {

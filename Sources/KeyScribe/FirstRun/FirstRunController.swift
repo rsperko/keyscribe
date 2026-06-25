@@ -20,6 +20,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         onRelaunch: @escaping () -> Void = {},
+        tapActive: @escaping () -> Bool = { true },
         onComplete: @escaping () -> Void
     ) {
         self.onComplete = onComplete
@@ -31,6 +32,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         super.init()
         model.onReadyToDictate = onReadyToDictate
         model.onRelaunch = onRelaunch
+        model.tapActive = tapActive
     }
 
     // Bridges a real dictation outcome from the live pipeline into the trial gate.
@@ -108,6 +110,8 @@ final class FirstRunModel: ObservableObject {
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
     var onRelaunch: () -> Void = {}
+    var tapActive: () -> Bool = { true }
+    @Published var needsRelaunch = false
     private var pollTask: Task<Void, Never>?
 
     init(
@@ -213,6 +217,18 @@ final class FirstRunModel: ObservableObject {
 
     var allPermissionsGranted: Bool {
         micStatus == .granted && axStatus == .granted
+    }
+
+    // Leaving the permissions step. `onReadyToDictate` retries the modifier-key tap in this process; if
+    // the just-granted Accessibility verdict was cached as denied at launch the tap stays dead, so the
+    // trial step (its only trigger is that tap) can't be completed — funnel to a relaunch instead.
+    func continueFromPermissions() {
+        onReadyToDictate()
+        if tapActive() {
+            step = .tryIt
+        } else {
+            needsRelaunch = true
+        }
     }
 
     var nextPermission: Permission {

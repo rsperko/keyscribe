@@ -2,8 +2,11 @@ import AppKit
 import SwiftUI
 
 struct PermissionsSettingsView: View {
+    var accessibilityTapActive: () -> Bool = { true }
+    var onRelaunch: () -> Void = {}
     @State private var microphoneStatus = Permissions.microphoneStatus()
     @State private var accessibilityStatus = Permissions.accessibilityStatus()
+    @State private var tapActive = true
 
     var body: some View {
         Form {
@@ -31,6 +34,17 @@ struct PermissionsSettingsView: View {
                         Permissions.openSettings(.accessibility)
                     },
                     openSettings: { Permissions.openSettings(.accessibility) })
+                if accessibilityStatus == .granted && !tapActive {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(
+                            "Accessibility is granted, but it only takes effect after a relaunch. Until then, modifier-key triggers won't start dictation.",
+                            systemImage: "arrow.clockwise.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Button("Quit & Relaunch to Apply", action: onRelaunch)
+                    }
+                    .padding(.vertical, 4)
+                }
             }
         }
         .formStyle(.grouped)
@@ -54,6 +68,7 @@ struct PermissionsSettingsView: View {
     private func refreshPermissions() {
         microphoneStatus = Permissions.microphoneStatus()
         accessibilityStatus = Permissions.accessibilityStatus()
+        tapActive = accessibilityTapActive()
     }
 }
 

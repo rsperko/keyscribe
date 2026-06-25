@@ -1,15 +1,20 @@
 import Accelerate
 import AVFoundation
 import Foundation
+import KeyScribeKit
 
-protocol AudioCapturing: AnyObject {
+protocol AudioCapturing: AnyObject, Sendable {
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL
     func stop() -> URL?
+    // Commit-on-release stop: let the tap deliver the buffer that holds the final word before tearing
+    // the engine down, so the tail is not clipped. Falls back to an immediate stop for test fakes.
+    func finishDraining() async -> URL?
     func prewarm()
 }
 
 extension AudioCapturing {
     func prewarm() {}
+    func finishDraining() async -> URL? { stop() }
 }
 
 enum AudioCaptureError: Error { case formatUnavailable }
@@ -34,6 +39,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var outBuffer: AVAudioPCMBuffer?
+    // Set while a commit-on-release drain is in flight: each delivered buffer feeds the gate, and the
+    // continuation is resumed once a buffer covers the release instant (or a backstop timeout fires).
+    private var drainGate: TailDrainGate?
+    private var drainContinuation: CheckedContinuation<Void, Never>?
 
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL {
         guard let recordFormat = AVAudioFormat(
@@ -86,8 +95,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // format: nil binds the tap to the input node's live hardware format, so there is no passed
         // format for AVFoundation to validate and mismatch against (a 48k-cached / 16k-actual mismatch
         // previously aborted with an uncaught com.apple.coreaudio.avfaudio exception → SIGABRT).
-        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
-            self?.handle(buffer)
+        // bufferSize 1024 keeps the tap's accumulation window small (~64 ms @16k) so the worst-case
+        // undelivered tail at release is short; finishDraining() then flushes it before stopping.
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, when in
+            guard let self else { return }
+            self.handle(buffer)
+            self.feedDrainGate(when)
         }
         engine.prepare()
         do {
@@ -99,7 +112,50 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
+    // Best-in-class commit-on-release stop (cf. Handy's drain-until-EndOfStream, VoiceInk's
+    // drain-ring-before-close): keep the engine running until the tap delivers the buffer that holds
+    // the release instant, then tear down. A 300 ms backstop bounds the wait if the clock never crosses.
+    func finishDraining() async -> URL? {
+        await drainTail()
+        return stop()
+    }
+
+    private func drainTail() async {
+        let releaseHostTime = mach_absolute_time()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            drainGate = TailDrainGate(releaseHostTime: releaseHostTime)
+            drainContinuation = cont
+            lock.unlock()
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(300))
+                self?.resumeDrain()
+            }
+        }
+    }
+
+    private func feedDrainGate(_ when: AVAudioTime) {
+        lock.lock()
+        guard var gate = drainGate else { lock.unlock(); return }
+        let start: UInt64? = when.isHostTimeValid ? when.hostTime : nil
+        let outcome = gate.observe(bufferStartHostTime: start)
+        drainGate = gate
+        lock.unlock()
+        if outcome == .stop { resumeDrain() }
+    }
+
+    private func resumeDrain() {
+        lock.lock()
+        let cont = drainContinuation
+        drainContinuation = nil
+        drainGate = nil
+        lock.unlock()
+        cont?.resume()
+    }
+
     func stop() -> URL? {
+        // Free any drain awaiter first so a direct stop (cancel / over-limit abort) never strands it.
+        resumeDrain()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         lock.lock(); defer { lock.unlock() }

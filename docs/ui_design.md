@@ -247,8 +247,8 @@ Quit KeyScribe
 ```
 
 > **`Add Dictionary Entry…` / `Add Replacement…`** open the standalone correction panel; they are
-> always present here and can also be bound to optional global chord shortcuts (General ▸ Shortcuts,
-> `[shortcuts]` in `config_schema.md`). A **`Check for Updates…`** item is planned alongside the
+> always present here and are also bound to global chord shortcuts (default ⌃⌥⇧D / ⌃⌥⇧R, rebindable
+> in General ▸ Shortcuts; `[shortcuts]` in `config_schema.md`). A **`Check for Updates…`** item is planned alongside the
 > Sparkle update mechanism and the update badge below (not yet built).
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows the
@@ -329,8 +329,9 @@ Show only commonly changed behavior initially:
 - Keep display awake while dictating
 - Mute system audio while dictating
 - History enabled and retention
-- **Shortcuts** — optional global chords for **Add Dictionary Entry** and **Add Replacement**
-  (the standalone correction panel; also always in the menu). A chord that collides with a
+- **Shortcuts** — global chords for **Add Dictionary Entry** and **Add Replacement** (the standalone
+  correction panel; also always in the menu). Default on to **⌃⌥⇧D** / **⌃⌥⇧R**, rebindable or
+  clearable. A chord that collides with a
   higher-precedence hotkey (a Mode trigger, or Add-to-Dictionary shadowing Add Replacement) shows
   an inline **shadowed** breadcrumb and will not fire — mode triggers win.
 

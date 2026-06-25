@@ -259,13 +259,16 @@ sounds = true                   # start/end sounds
 enabled = true
 retention_days = 7              # default; delete day-files older than this (or retention_entries)
 
-[shortcuts]                     # optional global shortcuts for the standalone correction panel
-add_dictionary_entry = ""       # canonical chord, e.g. "control+option+shift+d"; "" = off
-add_replacement = ""            # canonical chord, e.g. "control+option+shift+r"; "" = off
+[shortcuts]                                 # global shortcuts for the standalone correction panel
+add_dictionary_entry = "control+option+shift+d"  # canonical chord; "" = off
+add_replacement = "control+option+shift+r"       # canonical chord; "" = off
 ```
 
 > **`[shortcuts]`** drive the standalone **Add Dictionary Entry…** / **Add Replacement…** panel
-> (also always available in the menu bar). Empty = off; only **chord** descriptors are honored (a
+> (also always available in the menu bar). They **default on** to `⌃⌥⇧D` / `⌃⌥⇧R` — the
+> triple-modifier zone the system never reserves, so the global grab is least likely to collide with
+> an app. An **absent** key falls back to that default; an explicit `""` means the user turned it
+> off. Only **chord** descriptors are honored (a
 > bare modifier key already drives dictation). The event tap is **active** (`.defaultTap`), so a
 > registered chord — for these shortcuts and for mode triggers — is **swallowed** before the focused
 > app sees it (otherwise e.g. ⌃⌥E reaches the app as the Option-E dead key and replaces the selection).

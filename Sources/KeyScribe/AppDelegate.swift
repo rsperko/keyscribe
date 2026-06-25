@@ -103,7 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
-            detectProblems: { [weak self] in self?.currentProblems() ?? [] })
+            detectProblems: { [weak self] in self?.currentProblems() ?? [] },
+            accessibilityTapActive: { [weak self] in self?.hotkey?.isTapActive ?? false },
+            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() })
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }
@@ -302,7 +304,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.controller.prewarmCapture()
             },
             permissionsOnly: permissionsOnly,
-            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() }
+            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
+            tapActive: { [weak self] in self?.hotkey?.isTapActive ?? false }
         ) { [weak self] in
             guard let self else { return }
             UserDefaults.standard.set(true, forKey: firstRunKey)
@@ -349,6 +352,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.setStatus("Microphone access needed")
         } else if Permissions.accessibilityStatus() != .granted {
             menu.setStatus("Accessibility access needed")
+        } else if !(hotkey?.isTapActive ?? true) {
+            menu.setStatus("Relaunch to finish setup")
         } else {
             menu.setStatus("Ready · On-device speech")
         }
@@ -361,6 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasConfigError: configError != nil,
             microphoneGranted: Permissions.microphoneStatus() == .granted,
             accessibilityGranted: Permissions.accessibilityStatus() == .granted,
+            accessibilityTapActive: hotkey?.isTapActive ?? true,
             activeEngineUsable: speechModels?.activeEngineUsable ?? true,
             aiConnectionMissing: modes.contains { connectionDangling(for: $0) },
             aiConnectionTestFailed: failedConnectionIds.isEmpty == false,

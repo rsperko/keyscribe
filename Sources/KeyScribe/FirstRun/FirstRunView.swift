@@ -134,7 +134,10 @@ struct FirstRunView: View {
             permissionStep
 
             Spacer()
-            if !model.allPermissionsGranted {
+            if model.needsRelaunch {
+                Text("Accessibility is granted, but it only takes effect after a relaunch. Quit & Relaunch to finish setup.")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if !model.allPermissionsGranted {
                 Text(model.permissionsOnly
                     ? "Grant each one (the toggle opens in System Settings), then Quit & Relaunch to Apply — Accessibility only takes effect after the relaunch."
                     : "You can skip and finish setup now, then grant any remaining permissions later in Settings.")
@@ -152,13 +155,13 @@ struct FirstRunView: View {
                         Button("Quit & Relaunch to Apply") { model.relaunch() }
                             .keyboardShortcut(.defaultAction).controlSize(.large)
                     }
+                } else if model.needsRelaunch {
+                    Button("Quit & Relaunch to Apply") { model.relaunch() }
+                        .keyboardShortcut(.defaultAction).controlSize(.large)
                 } else {
-                    Button("Continue") {
-                        model.onReadyToDictate()
-                        model.step = .tryIt
-                    }
-                    .keyboardShortcut(.defaultAction).controlSize(.large)
-                    .disabled(!model.allPermissionsGranted)
+                    Button("Continue") { model.continueFromPermissions() }
+                        .keyboardShortcut(.defaultAction).controlSize(.large)
+                        .disabled(!model.allPermissionsGranted)
                 }
             }
         }

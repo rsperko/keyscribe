@@ -49,6 +49,18 @@ This file is the entry point. Read the design docs before writing code — they 
 - **Edit-in-place is a capability, not a special mode** — any mode can be `source=selection` /
   `output=replace_selection`; ⌘C→pasteboard is the selection capture, AX is a native-only bonus
   (`design.md` §4.3).
+- **Commit-on-release drains the tail before stopping — do not revert to an immediate stop.** The
+  AVAudioEngine tap accumulates `bufferSize` frames before each callback, so at release the buffer
+  holding the final word is still filling and undelivered; tearing the engine down right then clips
+  it. `handleCommit` flips the HUD to *transcribing* and then `await`s
+  `AudioCapture.finishDraining()`, which keeps the engine running until a delivered buffer's host
+  time covers the release instant (`TailDrainGate`, with a buffer-count fallback for invalid
+  timestamps and a 300 ms backstop), and only then runs `stop()`. **`stop()` is the immediate,
+  audio-discarding teardown** — keep it for `cancel()`/over-limit abort only; the commit path must
+  use `finishDraining()`. `stop()` also force-resumes any pending drain so a direct stop never
+  strands the awaiter. `bufferSize` is 1024 (~64 ms @16k) to keep the worst-case undelivered tail
+  short. The `wav … drain=Xms` debug log reports the actual flush time (≈300 ms means the backstop
+  fired). Don't reorder the HUD flip after the await — the drain latency must stay invisible.
 - **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs at the top of `transcribeAndInsert`, in

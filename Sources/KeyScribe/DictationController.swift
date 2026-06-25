@@ -372,20 +372,27 @@ final class DictationController {
         recordingLimitTask?.cancel()
         onRecordingChanged?(false)
         machine.beginTranscribing()
-        guard let url = audio.stop() else {
-            machine.cancel()
-            effects.end(settings.duringDictation, cue: .cancel)
-            hud?.render(.hidden)
-            releaseCapturedPlan()
-            return
-        }
-        if let f = try? AVAudioFile(forReading: url) {
-            log.debug("wav \(f.length) frames @ \(f.fileFormat.sampleRate, privacy: .public)Hz ch=\(f.fileFormat.channelCount, privacy: .public)")
-        } else {
-            log.error("wav unreadable at \(url.path, privacy: .public)")
-        }
+        // Flip the HUD to transcribing now so the tail-drain (commit-on-release flush, ~one buffer) is
+        // invisible; finishDraining keeps the engine running just long enough to capture the final word.
         hud?.render(.transcribing(mode: currentModeName))
-        dictationTask = Task { await transcribeAndInsert(url: url) }
+        let drainStart = DispatchTime.now()
+        dictationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let url = await self.audio.finishDraining() else {
+                self.machine.cancel()
+                self.effects.end(self.settings.duringDictation, cue: .cancel)
+                self.hud?.render(.hidden)
+                self.releaseCapturedPlan()
+                return
+            }
+            let drainMs = Double(DispatchTime.now().uptimeNanoseconds - drainStart.uptimeNanoseconds) / 1e6
+            if let f = try? AVAudioFile(forReading: url) {
+                self.log.debug("wav \(f.length) frames @ \(f.fileFormat.sampleRate, privacy: .public)Hz ch=\(f.fileFormat.channelCount, privacy: .public) drain=\(drainMs, privacy: .public)ms")
+            } else {
+                self.log.error("wav unreadable at \(url.path, privacy: .public)")
+            }
+            await self.transcribeAndInsert(url: url)
+        }
     }
 
     // Phase A (design.md §4.3): resolve the mode from app/URL context before recording. A non-nil

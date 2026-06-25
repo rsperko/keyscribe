@@ -125,6 +125,9 @@ public struct Settings: Codable, Equatable, Sendable {
     // Optional global shortcuts for the standalone correction surfaces (design.md §4.7). An empty
     // string means the shortcut is off; only chord descriptors are honored at registration.
     public struct Shortcuts: Codable, Equatable, Sendable {
+        public static let defaultAddDictionaryEntry = "control+option+shift+d"
+        public static let defaultAddReplacement = "control+option+shift+r"
+
         public var addDictionaryEntry: String
         public var addReplacement: String
 
@@ -133,15 +136,20 @@ public struct Settings: Codable, Equatable, Sendable {
             case addReplacement = "add_replacement"
         }
 
-        public init(addDictionaryEntry: String = "", addReplacement: String = "") {
+        public init(
+            addDictionaryEntry: String = defaultAddDictionaryEntry,
+            addReplacement: String = defaultAddReplacement
+        ) {
             self.addDictionaryEntry = addDictionaryEntry
             self.addReplacement = addReplacement
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            addDictionaryEntry = try c.decodeIfPresent(String.self, forKey: .addDictionaryEntry) ?? ""
-            addReplacement = try c.decodeIfPresent(String.self, forKey: .addReplacement) ?? ""
+            addDictionaryEntry = try c.decodeIfPresent(String.self, forKey: .addDictionaryEntry)
+                ?? Self.defaultAddDictionaryEntry
+            addReplacement = try c.decodeIfPresent(String.self, forKey: .addReplacement)
+                ?? Self.defaultAddReplacement
         }
     }
 

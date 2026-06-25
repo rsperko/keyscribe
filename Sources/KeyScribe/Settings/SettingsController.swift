@@ -11,6 +11,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     case malformedConfig
     case microphonePermission
     case accessibilityPermission
+    case accessibilityNeedsRelaunch
     case activeEngineUnavailable
     case aiConnectionMissing
     case aiConnectionTestFailed
@@ -21,7 +22,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     var pane: SettingsDestination {
         switch self {
         case .malformedConfig: .advanced
-        case .microphonePermission, .accessibilityPermission: .permissions
+        case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
         case .activeEngineUnavailable: .speechModels
         case .aiConnectionMissing, .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
         case .modeUsesFailedConnection: .modes
@@ -36,6 +37,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     static func detect(
         hasConfigError: Bool, microphoneGranted: Bool,
         accessibilityGranted: Bool,
+        accessibilityTapActive: Bool = true,
         activeEngineUsable: Bool = true,
         aiConnectionMissing: Bool = false, aiConnectionTestFailed: Bool = false,
         aiConnectionMisconfigured: Bool = false, modeUsesFailedConnection: Bool = false,
@@ -45,6 +47,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         if hasConfigError { problems.append(.malformedConfig) }
         if !microphoneGranted { problems.append(.microphonePermission) }
         if !accessibilityGranted { problems.append(.accessibilityPermission) }
+        else if !accessibilityTapActive { problems.append(.accessibilityNeedsRelaunch) }
         if !activeEngineUsable { problems.append(.activeEngineUnavailable) }
         if aiConnectionMissing { problems.append(.aiConnectionMissing) }
         if aiConnectionTestFailed { problems.append(.aiConnectionTestFailed) }
@@ -85,6 +88,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let problems = SettingsProblemModel()
     private let navigation = SettingsNavigationModel()
     private let detectProblems: () -> [SettingsProblem]
+    private let accessibilityTapActive: () -> Bool
+    private let onRelaunch: () -> Void
     // Shared with the recorders (via the environment) and the app, which suspends the global hotkey
     // monitor while a recorder is capturing so the chord can't fire an existing shortcut.
     let recordingState = HotkeyRecordingState()
@@ -93,9 +98,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         settings: Settings, speechModels: SpeechModelsModel,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
-        detectProblems: @escaping () -> [SettingsProblem]
+        detectProblems: @escaping () -> [SettingsProblem],
+        accessibilityTapActive: @escaping () -> Bool = { true },
+        onRelaunch: @escaping () -> Void = {}
     ) {
         self.detectProblems = detectProblems
+        self.accessibilityTapActive = accessibilityTapActive
+        self.onRelaunch = onRelaunch
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
             onResetHUDPosition: onResetHUDPosition)
@@ -135,7 +144,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
             general: model, speechModels: speechModels, dictionary: dictionary,
             replacements: replacements, aiServices: aiServices, modes: modes,
             problems: problems, navigation: navigation, recordingState: recordingState,
-            refresh: { [weak self] in self?.refreshProblems() })
+            refresh: { [weak self] in self?.refreshProblems() },
+            accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "KeyScribe Settings"
@@ -168,6 +178,8 @@ struct SettingsRootView: View {
     @ObservedObject var navigation: SettingsNavigationModel
     @ObservedObject var recordingState: HotkeyRecordingState
     let refresh: () -> Void
+    var accessibilityTapActive: () -> Bool = { true }
+    var onRelaunch: () -> Void = {}
 
     // Precedence order for the app-wide hotkey namespace: Modes (routing order) then the two globals.
     // The losers of any chord collision are "shadowed" — flagged with a red dot, and suppressed at
@@ -223,7 +235,8 @@ struct SettingsRootView: View {
             case .modes:
                 ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds)
             case .permissions:
-                PermissionsSettingsView()
+                PermissionsSettingsView(
+                    accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
             case .advanced:
                 AdvancedSettingsView(model: general)
             }

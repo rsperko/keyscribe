@@ -14,6 +14,7 @@
 # (a release must be built from committed code).
 #
 # Required:
+#   create-dmg          packaging tool — `brew install create-dmg` (icon + drag-to-Applications DMG).
 #   KEYSCRIBE_SIGN_ID   "Developer ID Application: Your Name (TEAMID)" — NOT ad-hoc; a release must
 #                       carry a real Developer ID signature or notarization rejects it.
 #
@@ -39,6 +40,15 @@ if [ -z "$ID" ] || [ "$ID" = "-" ]; then
   exit 1
 fi
 
+# Preflight create-dmg here (not at the DMG step) so a missing tool fails in seconds instead of after
+# the multi-minute build + notarization. It is required, not optional: the release DMG's icon and
+# drag-to-Applications layout come from create-dmg, and silently shipping a plain hdiutil image would
+# be a quality downgrade you would not notice until after publishing.
+if ! command -v create-dmg >/dev/null 2>&1; then
+  echo "error: create-dmg is required for the release DMG — install it once: brew install create-dmg" >&2
+  exit 1
+fi
+
 # Optional first arg bumps (or sets) the version and creates the tag before building. A bump requires
 # a clean tree so the tag — and the version stamped into the DMG — reflect committed code, not
 # uncommitted edits. The tag is created locally only; pushing it is one of the printed publish steps.
@@ -50,19 +60,27 @@ if [ -n "$BUMP" ]; then
     exit 1
   fi
   LATEST="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
-  [ -z "$LATEST" ] && LATEST="0.0.0"
-  IFS=. read -r MAJ MIN PAT <<<"$LATEST"
   case "$BUMP" in
-    major) NEW_TAG="v$((MAJ+1)).0.0" ;;
-    minor) NEW_TAG="v${MAJ}.$((MIN+1)).0" ;;
-    patch) NEW_TAG="v${MAJ}.${MIN}.$((PAT+1))" ;;
-    v[0-9]*.[0-9]*.[0-9]*) NEW_TAG="$BUMP" ;;
+    v[0-9]*.[0-9]*.[0-9]*)            # explicit version — works with or without a prior tag
+      NEW_TAG="$BUMP" ;;
+    major|minor|patch)                # relative bump needs a baseline to bump FROM
+      if [ -z "$LATEST" ]; then
+        echo "error: no existing tag to bump from — patch/minor/major needs a baseline." >&2
+        echo "       for the first release, pass an explicit version: ./release.sh v0.1.0" >&2
+        exit 1
+      fi
+      IFS=. read -r MAJ MIN PAT <<<"$LATEST"
+      case "$BUMP" in
+        major) NEW_TAG="v$((MAJ+1)).0.0" ;;
+        minor) NEW_TAG="v${MAJ}.$((MIN+1)).0" ;;
+        patch) NEW_TAG="v${MAJ}.${MIN}.$((PAT+1))" ;;
+      esac ;;
     *) echo "error: first arg must be patch | minor | major | vX.Y.Z (got '$BUMP')." >&2; exit 1 ;;
   esac
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     echo "error: tag $NEW_TAG already exists." >&2; exit 1
   fi
-  echo "== tagging $NEW_TAG (was v$LATEST) =="
+  echo "== tagging $NEW_TAG${LATEST:+ (was v$LATEST)} =="
   git tag "$NEW_TAG"
 fi
 
@@ -126,21 +144,34 @@ fi
 
 echo "== build dmg: $DMG =="
 rm -f "$DMG"
-if command -v create-dmg >/dev/null 2>&1; then
-  # create-dmg occasionally exits non-zero on success (AppleScript layout step) — verify the output
-  # exists rather than trusting the exit code. --volicon gives the mounted volume the app icon.
-  create-dmg --volname "KeyScribe" --volicon "Resources/AppIcon.icns" \
-    --app-drop-link 450 150 --icon "$APP" 150 150 "$DMG" "$APP" || true
-else
-  echo "note: create-dmg not found (brew install create-dmg) — using hdiutil (no drag-to-Applications layout)." >&2
-  hdiutil create -volname "KeyScribe" -srcfolder "$APP" -ov -format UDZO "$DMG"
-fi
-[ -f "$DMG" ] || { echo "error: failed to produce $DMG" >&2; exit 1; }
+# create-dmg (preflighted at the top) occasionally exits non-zero on success (its AppleScript layout
+# step), so verify the output exists rather than trusting the exit code. --volicon gives the volume
+# the app icon.
+create-dmg --volname "KeyScribe" --volicon "Resources/AppIcon.icns" \
+  --app-drop-link 450 150 --icon "$APP" 150 150 "$DMG" "$APP" || true
+[ -f "$DMG" ] || { echo "error: create-dmg failed to produce $DMG" >&2; exit 1; }
 
 if [ ${#NOTARY_ARGS[@]} -gt 0 ]; then
   echo "== notarize + staple dmg =="
   xcrun notarytool submit "$DMG" "${NOTARY_ARGS[@]}" --wait
   xcrun stapler staple "$DMG"
+
+  # Self-verify the artifact before handing it off: the DMG's ticket validates, and the app *inside*
+  # is accepted by Gatekeeper as Notarized Developer ID and is itself stapled. Always detach the mount
+  # (even on failure) so a verify never leaves a stray /Volumes entry. Fail loudly — a bad DMG must not
+  # reach the publish step.
+  echo "== verify stapled dmg =="
+  xcrun stapler validate "$DMG"
+  ATTACH="$(hdiutil attach "$DMG" -nobrowse -readonly)"
+  DEV="$(printf '%s\n' "$ATTACH" | grep -oE '^/dev/disk[0-9]+' | head -1)"
+  MP="$(printf '%s\n' "$ATTACH" | grep -o '/Volumes/.*' | tail -1)"
+  if spctl -a -t exec -vv "$MP/$APP" 2>&1 | grep -q "source=Notarized Developer ID" \
+     && xcrun stapler validate "$MP/$APP" >/dev/null 2>&1; then VERIFY_OK=1; else VERIFY_OK=0; fi
+  # Detach by device with -force: the volume is briefly busy right after spctl/stapler read it, so a
+  # plain detach-by-path silently fails under `|| true` and strands the mount. Force, then retry once.
+  hdiutil detach "$DEV" -force >/dev/null 2>&1 || { sleep 1; hdiutil detach "$DEV" -force >/dev/null 2>&1; } || true
+  [ "$VERIFY_OK" = 1 ] || { echo "error: $DMG failed Gatekeeper/staple verification — do NOT publish it." >&2; exit 1; }
+  echo "verified: app inside is accepted as Notarized Developer ID, and stapled."
 else
   echo "note: notarization skipped (set NOTARY_PROFILE or NOTARY_KEY_P8/_ID/ISSUER_ID). Notarize manually:" >&2
   echo "  xcrun notarytool submit $DMG --keychain-profile keyscribe-notary --wait && xcrun stapler staple $DMG" >&2

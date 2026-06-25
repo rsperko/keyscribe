@@ -17,6 +17,21 @@ struct SettingsProblemTests {
         #expect(problems.first?.pane == .permissions)
     }
 
+    @Test func accessibilityGrantedButTapInactiveNeedsRelaunch() {
+        let problems = SettingsProblem.detect(
+            hasConfigError: false, microphoneGranted: true,
+            accessibilityGranted: true, accessibilityTapActive: false)
+        #expect(problems == [.accessibilityNeedsRelaunch])
+        #expect(problems.first?.pane == .permissions)
+    }
+
+    @Test func ungrantedAccessibilityOutranksRelaunch() {
+        let problems = SettingsProblem.detect(
+            hasConfigError: false, microphoneGranted: true,
+            accessibilityGranted: false, accessibilityTapActive: false)
+        #expect(problems == [.accessibilityPermission])
+    }
+
     @Test func malformedConfigFlagsTheAdvancedPane() {
         let problems = SettingsProblem.detect(
             hasConfigError: true, microphoneGranted: true,
