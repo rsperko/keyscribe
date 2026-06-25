@@ -388,6 +388,14 @@ private final class ThrowingStartAudio: AudioCapturing, @unchecked Sendable {
     func stop() -> URL? { nil }
 }
 
+// Bring-up failing with formatUnavailable (no usable input stream).
+private final class NoInputDeviceAudio: AudioCapturing, @unchecked Sendable {
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        throw AudioCaptureError.formatUnavailable
+    }
+    func stop() -> URL? { nil }
+}
+
 // Bring-up that blocks until released — models a commit arriving while the mic is still coming up.
 private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
@@ -434,6 +442,21 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy == false)
         #expect(hud.states.last == .error(
             message: "Could not start the microphone", action: .openMicrophoneSettings))
+    }
+
+    @Test func noUsableInputSurfacesADistinctErrorWithoutAMicSettingsAction() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let hud = HUDSpy()
+        let controller = makeController(
+            audio: NoInputDeviceAudio(), hud: hud, insertSpy: InsertSpy(), supportDir: supportDir)
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+
+        #expect(controller.isBusy == false)
+        #expect(hud.states.last == .error(message: "No microphone is available", action: nil))
     }
 
     @Test func commitDuringBringUpIsHonoredOnceCaptureStarts() async {

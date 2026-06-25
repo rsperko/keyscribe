@@ -34,7 +34,9 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+// Serialized: these tests share the global StubURLProtocol.handler, so they can't run concurrently.
 @MainActor
+@Suite(.serialized)
 struct ConnectionTesterTests {
     private let connection = Connection(
         id: "c", name: "C", provider: .openai, model: "m", keyRef: "k")

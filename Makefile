@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release cask test setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,6 +23,12 @@ release: ## Cut a release: make release patch | minor | major   (or BUMP=vX.Y.Z;
 # No-op stubs so `make release patch` treats 'patch' as the bump arg, not an unknown target to build.
 patch minor major:
 	@:
+
+publish: ## Publish the built+verified release: push tag + GitHub release (auto-notes) + cask + tap
+	./scripts/publish.sh
+
+ship: ## Build+verify then publish in one go: make ship patch|minor|major (or BUMP=vX.Y.Z)
+	$(MAKE) release BUMP="$(BUMP)" && $(MAKE) publish
 
 cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then commit+push the tap)
 	./scripts/update-cask.sh

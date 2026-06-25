@@ -178,8 +178,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                             if isGeneration(generation) {
                                 let engine = engineSnapshot()
                                 applyPreferredDevice(to: engine)
-                                _ = engine.inputNode.outputFormat(forBus: 0)
-                                engine.prepare()
+                                // Don't realize the unit on a degenerate format; arm() guards and recovers.
+                                let format = engine.inputNode.outputFormat(forBus: 0)
+                                if Self.isUsableInputFormat(
+                                    sampleRate: format.sampleRate, channelCount: format.channelCount) {
+                                    engine.prepare()
+                                }
                             }
                             cont.resume()
                         }
@@ -230,6 +234,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return url
     }
 
+    // AUHAL reports 0 ch / 0 Hz for an output-only device; tapping that format aborts the process (arm()).
+    static func isUsableInputFormat(sampleRate: Double, channelCount: AVAudioChannelCount) -> Bool {
+        sampleRate > 0 && channelCount > 0
+    }
+
     private func arm() throws {
         let engine = engineSnapshot()
         let generation = currentGeneration()
@@ -238,17 +247,27 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // system default, which is exactly the fallback policy.
         applyPreferredDevice(to: engine)
         let input = engine.inputNode
+        // installTap on a degenerate format (0 ch / 0 Hz, an output-only/mid-churn default) raises an ObjC
+        // NSException Swift can't catch (→ SIGABRT). Throw instead so armSync rebuilds and retries.
+        let inputFormat = input.outputFormat(forBus: 0)
+        guard Self.isUsableInputFormat(
+            sampleRate: inputFormat.sampleRate, channelCount: inputFormat.channelCount) else {
+            throw AudioCaptureError.formatUnavailable
+        }
         // format: nil binds the tap to the input node's live hardware format, so there is no passed
         // format for AVFoundation to validate and mismatch against (a 48k-cached / 16k-actual mismatch
         // previously aborted with an uncaught com.apple.coreaudio.avfaudio exception → SIGABRT).
         // bufferSize 1024 keeps the tap's accumulation window small (~64 ms @16k) so the worst-case
         // undelivered tail at release is short; finishDraining() then flushes it before stopping.
         // The generation guard drops a buffer from an engine that has since been rebuilt out (a wedged
-        // engine that finally unblocks must not write into a newer recording).
-        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, when in
-            guard let self, self.isGeneration(generation) else { return }
-            self.handle(buffer)
-            self.feedDrainGate(when)
+        // engine that finally unblocks must not write into a newer recording). The shim catches an
+        // installTap raise (valid-looking but bad format) as a Swift error instead of aborting.
+        try ObjCException.catching {
+            input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, when in
+                guard let self, self.isGeneration(generation) else { return }
+                self.handle(buffer)
+                self.feedDrainGate(when)
+            }
         }
         engine.prepare()
         do {
@@ -325,8 +344,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try await runWithDeadline(seconds: Self.bringUpTimeout) {
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     queue.async {
-                        box.engine.stop()
-                        box.engine.inputNode.removeTap(onBus: 0)
+                        Self.teardownEngine(box.engine)
                         cont.resume()
                     }
                 }
@@ -350,11 +368,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let url = lock.withLock { currentURL }
         finalizeCapture()
         queue.async {
-            box.engine.stop()
-            box.engine.inputNode.removeTap(onBus: 0)
+            Self.teardownEngine(box.engine)
         }
         releaseEngineIfBluetooth()
         return url
+    }
+
+    // stop()/removeTap can RAISE under device churn, not just block; an abort on the control queue kills
+    // the process, so catch it — the WAV is already on disk and this engine is being discarded.
+    private static func teardownEngine(_ engine: AVAudioEngine) {
+        try? ObjCException.catching {
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+        }
     }
 
     private func finalizeCapture() {
@@ -392,10 +418,18 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             return
         }
 
+        // A mid-stream device transition can deliver a degenerate buffer; drop it. AVAudioConverter's init
+        // can RAISE on a bad conversion (uncatchable on the tap thread) — the shim is the backstop.
+        guard Self.isUsableInputFormat(
+            sampleRate: inputFormat.sampleRate, channelCount: inputFormat.channelCount) else {
+            lock.unlock(); return
+        }
         if converter == nil
             || converterInputFormat?.sampleRate != inputFormat.sampleRate
             || converterInputFormat?.channelCount != inputFormat.channelCount {
-            converter = AVAudioConverter(from: inputFormat, to: recordFormat)
+            var built: AVAudioConverter?
+            try? ObjCException.catching { built = AVAudioConverter(from: inputFormat, to: recordFormat) }
+            converter = built
             converterInputFormat = inputFormat
             outBuffer = nil
         }
@@ -474,14 +508,36 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return AudioInputDevices.systemDefaultInputID()
     }
 
-    // Pin the preferred device on the engine's input AUHAL, if it is connected. When no preferred device
-    // is set or it is absent, leave the unit on the system default — the engine follows the default, which
-    // is the fallback policy. Runs on the control queue (caller: arm/prewarm).
+    enum PinDecision: Equatable { case skip, pin(AudioDeviceID) }
+
+    // Pinning the input AUHAL's CurrentDevice — even to the device in use, or re-pinning an initialized
+    // unit across prewarm→arm — breaks engine.start() with -10868 (FormatNotSupported). So pin only when
+    // the preferred device differs from both the system default and what is already pinned.
+    static func pinDecision(
+        preferred: AudioDeviceID?, systemDefault: AudioDeviceID?, currentlyPinned: AudioDeviceID?
+    ) -> PinDecision {
+        guard let preferred else { return .skip }
+        if preferred == systemDefault { return .skip }
+        if preferred == currentlyPinned { return .skip }
+        return .pin(preferred)
+    }
+
+    // Pin the preferred device on the input AUHAL only when pinDecision says to; otherwise follow the
+    // system default. Runs on the control queue (arm/prewarm).
     private func applyPreferredDevice(to engine: AVAudioEngine) {
         let uid = lock.withLock { preferredInputUID }
         guard let uid, let deviceID = AudioInputDevices.deviceID(forUID: uid),
               let audioUnit = engine.inputNode.audioUnit else { return }
-        var device = deviceID
+        var current = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let pinned: AudioDeviceID? = AudioUnitGetProperty(
+            audioUnit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+            &current, &size) == noErr ? current : nil
+        guard case let .pin(deviceToSet) = Self.pinDecision(
+            preferred: deviceID,
+            systemDefault: AudioInputDevices.systemDefaultInputID(),
+            currentlyPinned: pinned) else { return }
+        var device = deviceToSet
         AudioUnitSetProperty(
             audioUnit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
             &device, UInt32(MemoryLayout<AudioDeviceID>.size))

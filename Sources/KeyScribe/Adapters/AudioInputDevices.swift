@@ -26,13 +26,15 @@ enum AudioInputDevices {
         available().first { $0.uid == uid }?.id
     }
 
+    // The system default *input* device, or nil if it has no input stream (CoreAudio can name an
+    // output-only default during route churn — device 106 in the crash log).
     static func systemDefaultInputID() -> AudioDeviceID? {
         var deviceID = AudioObjectID(0)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         var addr = address(kAudioHardwarePropertyDefaultInputDevice)
         guard AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID) == noErr,
-              deviceID != 0 else { return nil }
+              deviceID != 0, hasInputStreams(deviceID) else { return nil }
         return deviceID
     }
 

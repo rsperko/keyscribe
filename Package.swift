@@ -16,10 +16,12 @@ let package = Package(
             name: "KeyScribeKit",
             dependencies: [.product(name: "TOMLKit", package: "TOMLKit")]
         ),
+        .target(name: "ObjCSupport"),
         .executableTarget(
             name: "KeyScribe",
             dependencies: [
                 "KeyScribeKit",
+                "ObjCSupport",
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Qwen3ASR", package: "speech-swift"),

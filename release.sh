@@ -184,9 +184,5 @@ echo
 echo "Done: $DMG"
 echo "sha256: $SHA"
 echo
-echo "Publish (run these — release.sh stops before anything public):"
-echo "  git push origin $TAG"
-echo "  gh release create $TAG $DMG$PRERELEASE \\"
-echo "    --title \"KeyScribe $SHORT_VERSION\" --notes \"…\""
-echo "  make cask    # writes ../homebrew-tap/Casks/keyscribe.rb ($SHORT_VERSION / $SHA)"
-echo "  # then in ../homebrew-tap: git add Casks/keyscribe.rb && git commit -m \"keyscribe $SHORT_VERSION\" && git push"
+echo "Publish (stops before anything public — run when ready):"
+echo "  make publish    # push tag + GitHub release (auto-notes) + cask + tap, for $TAG"

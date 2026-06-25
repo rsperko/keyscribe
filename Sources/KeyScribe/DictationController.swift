@@ -324,7 +324,13 @@ final class DictationController {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still trying to record.
                 if Task.isCancelled || self.machine.state != .recording { return }
-                self.finishError("Could not start the microphone", action: .openMicrophoneSettings)
+                self.log.error("bring-up failed: \(String(describing: error), privacy: .public)")
+                if case AudioCaptureError.formatUnavailable = error {
+                    // No usable input stream, not a permission issue — so no settings action.
+                    self.finishError("No microphone is available")
+                } else {
+                    self.finishError("Could not start the microphone", action: .openMicrophoneSettings)
+                }
                 return
             }
             // Released or cancelled while the mic was coming up: nothing to record, so tear the capture
