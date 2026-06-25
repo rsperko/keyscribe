@@ -55,12 +55,27 @@ This file is the entry point. Read the design docs before writing code — they 
   it. `handleCommit` flips the HUD to *transcribing* and then `await`s
   `AudioCapture.finishDraining()`, which keeps the engine running until a delivered buffer's host
   time covers the release instant (`TailDrainGate`, with a buffer-count fallback for invalid
-  timestamps and a 300 ms backstop), and only then runs `stop()`. **`stop()` is the immediate,
-  audio-discarding teardown** — keep it for `cancel()`/over-limit abort only; the commit path must
-  use `finishDraining()`. `stop()` also force-resumes any pending drain so a direct stop never
+  timestamps and a 300 ms backstop), and only then tears the engine down (`teardownAndFinalize`, which
+  closes the WAV only after the tap is removed so no in-flight write races the finalize). **`stop()` is
+  the immediate, audio-discarding teardown** — keep it for `cancel()`/over-limit abort only; the commit
+  path must use `finishDraining()`. `stop()` also force-resumes any pending drain so a direct stop never
   strands the awaiter. `bufferSize` is 1024 (~64 ms @16k) to keep the worst-case undelivered tail
   short. The `wav … drain=Xms` debug log reports the actual flush time (≈300 ms means the backstop
   fired). Don't reorder the HUD flip after the await — the drain latency must stay invisible.
+- **AVAudioEngine bring-up/teardown run off the main thread on a serial queue, watchdogged — never move
+  them back onto `@MainActor`.** `engine.start()`/`stop()`/`installTap`/`removeTap` can block for a long
+  time (or indefinitely) on a transitioning device — classically a Bluetooth headset forced from A2DP
+  into HFP the moment capture opens an input stream — and doing that on the main thread froze the whole
+  app *and* (via the event tap) global input. `AudioCapture` confines every engine control call to a
+  private serial `controlQueue`; `start()` is `async` and bounded by a ~2 s watchdog (`runWithDeadline`).
+  On a timeout it marks the engine *suspect*, abandons the wedged call on its (now-orphaned) queue, and
+  the next dictation rebuilds a fresh engine + queue — so the healthy path keeps reusing the prewarmed
+  engine (no fresh build per dictation) and a wedge degrades to a graceful "Could not start the
+  microphone" instead of a hang. A tap buffer carries the engine `generation` so a wedged engine that
+  finally unblocks can't write into a newer recording. Because bring-up is async, `handleCommit` **defers
+  the release** (`pendingCommit`) until `captureStarted` flips true, rather than transcribing an empty
+  file. A `kAudioHardwarePropertyDefaultInputDevice` listener re-prewarms on a device change while idle
+  (no `AVAudioEngineConfigurationChange` fires while stopped), keeping the prewarmed engine's binding fresh.
 - **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs at the top of `transcribeAndInsert`, in
@@ -153,9 +168,12 @@ keyscribe/
   Microphone is capture.
   - **The hotkey mechanism is split by trigger type, and no path needs Input Monitoring**
     (`HotkeyMonitor` + `CarbonHotKeys`):
-    - **Modifier-only triggers** (Fn / right-Option / right-Command / Hyper) → an active
-      `.defaultTap` `CGEventTap` watching **only `.flagsChanged`**. A session tap observing
-      *modifiers* is authorized by **Accessibility alone**; it never consumes a keystroke.
+    - **Modifier-only triggers** (Fn / right-Option / right-Command / Hyper) → a `.listenOnly`
+      `CGEventTap` watching **only `.flagsChanged`**. A session tap observing *modifiers* is authorized
+      by **Accessibility alone**; it never consumes a keystroke. `.listenOnly` (not `.defaultTap`)
+      because we never modify/consume the event: a listen-only tap is delivered async, so the window
+      server does NOT block the system input stream on our callback — a busy/wedged main thread can never
+      hold global input hostage, it only delays our own observation.
       Footgun: that tap is **deaf to `keyDown`** without Input Monitoring — both `CGEventTap` and
       `NSEvent.addGlobalMonitorForEvents` deliver zero key events on Accessibility alone. So chords
       and ESC can NOT ride the tap.

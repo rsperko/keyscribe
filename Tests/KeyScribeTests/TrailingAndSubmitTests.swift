@@ -23,7 +23,7 @@ struct TrailingAndSubmitTests {
     private final class FakeAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
         init(url: URL) { self.url = url }
-        func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL { url }
+        func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { url }
         func stop() -> URL? { url }
     }
 
@@ -66,6 +66,7 @@ struct TrailingAndSubmitTests {
 
         controller.handleStart()
         controller.handleCommit()
+        await controller.captureBringUpTask?.value   // mic bring-up is async; commit is deferred until it lands
         await controller.dictationTask?.value
         return captured
     }

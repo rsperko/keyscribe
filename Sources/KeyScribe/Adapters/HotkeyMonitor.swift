@@ -61,8 +61,11 @@ final class HotkeyMonitor {
     }
 
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
-    // An active `.defaultTap` session tap that only observes modifiers is authorized by Accessibility
-    // alone (no Input Monitoring). Chords → `CarbonHotKeys`; ESC-to-cancel → the recording HUD.
+    // A `.listenOnly` session tap that only observes modifiers is authorized by Accessibility alone (no
+    // Input Monitoring). `.listenOnly` (not `.defaultTap`): we never consume or modify an event, and a
+    // listen-only tap is delivered asynchronously — the window server does NOT block the system input
+    // stream waiting on our callback, so a busy/wedged main thread can never hold global input hostage
+    // (it would only delay our own observation). Chords → `CarbonHotKeys`; ESC-to-cancel → the recording HUD.
     // True once the modifier-only `.flagsChanged` tap exists. `false` while Accessibility reads granted
     // means `tapCreate` saw a launch-cached denied verdict — the process needs a relaunch (the readiness
     // signal AppDelegate/Settings surface, since the live `AXIsProcessTrusted` would otherwise say "Ready").
@@ -73,7 +76,7 @@ final class HotkeyMonitor {
         defer { rebuildCarbon() }
         if tap != nil { return true }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
-        guard let tap = makeTap(mask: mask, options: .defaultTap) else {
+        guard let tap = makeTap(mask: mask, options: .listenOnly) else {
             hotkeyLog.error("modifier-key event tap not created; Accessibility verdict is likely cached as denied from launch — relaunch needed")
             return false
         }
@@ -171,11 +174,11 @@ final class HotkeyMonitor {
         }
     }
 
-    // Run a gesture/action callback off the event-tap callback. An active (.defaultTap) tap holds the
-    // event until the callback returns, and `onStart`/`onCommit`/`onAction` do real work (engine resolve,
-    // audio start, SwiftUI HUD) — keeping that on the callback would stall input and risk a
-    // `tapDisabledByTimeout`. Gesture *state* already advanced synchronously above; only the side-effect
-    // is deferred, FIFO on the main queue so a start always runs before its commit.
+    // Run a gesture/action callback off the event-tap callback. `onStart`/`onCommit`/`onAction` do real
+    // work (engine resolve, audio start, SwiftUI HUD); even on a listen-only tap, doing that inline would
+    // run it on the tap's delivery context and risk a `tapDisabledByTimeout`. Gesture *state* already
+    // advanced synchronously above; only the side-effect is deferred, FIFO on the main queue so a start
+    // always runs before its commit.
     private func dispatchSideEffect(_ work: @escaping @MainActor () -> Void) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated(work)

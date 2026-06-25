@@ -86,7 +86,7 @@ private final class InstantEngine: SpeechEngine, @unchecked Sendable {
 private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     init(url: URL) { self.url = url }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL { url }
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { url }
     func stop() -> URL? { url }
 }
 
@@ -99,7 +99,7 @@ private final class DrainTrackingAudio: AudioCapturing, @unchecked Sendable {
     var drained: Bool { lock.lock(); defer { lock.unlock() }; return _drained }
     var immediateStops: Int { lock.lock(); defer { lock.unlock() }; return _immediateStops }
     init(url: URL) { self.url = url }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL { url }
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { url }
     func stop() -> URL? { lock.lock(); _immediateStops += 1; lock.unlock(); return url }
     func finishDraining() async -> URL? { markDrained(); return url }
     private func markDrained() { lock.lock(); _drained = true; lock.unlock() }
@@ -313,12 +313,13 @@ struct DictationCancellationTests {
         #expect(!FileManager.default.fileExists(atPath: captureURL.path))
     }
 
-    @Test func oneShotModeOverridesTheNextRecordingOnly() {
+    @Test func oneShotModeOverridesTheNextRecordingOnly() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
 
         h.controller.setNextModeOverride(id: "work-on-selection")
         h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value   // the .recording HUD lands once the mic is live
 
         #expect(h.hud.states.last == .recording(mode: "Work on Selection", level: 0))
         #expect(h.controller.nextModeOverrideName == nil)
@@ -377,5 +378,81 @@ struct DictationCancellationTests {
             connection: "Gemini", redacted: false, contextCategories: ["app", "visible text"],
             offerLocalTranscript: false)
         #expect(state.secondaryText == "App shared · Visible text shared")
+    }
+}
+
+// Bring-up that never succeeds — stands in for a wedged/failed device whose watchdog fired.
+private final class ThrowingStartAudio: AudioCapturing, @unchecked Sendable {
+    struct Boom: Error {}
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { throw Boom() }
+    func stop() -> URL? { nil }
+}
+
+// Bring-up that blocks until released — models a commit arriving while the mic is still coming up.
+private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
+    private let url: URL
+    private let gate: Signal
+    init(url: URL, gate: Signal) { self.url = url; self.gate = gate }
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        await gate.wait()
+        return url
+    }
+    func stop() -> URL? { url }
+}
+
+@MainActor
+struct DictationCaptureStartTests {
+    private func makeController(
+        audio: AudioCapturing, hud: HUDPresenting, insertSpy: InsertSpy, supportDir: URL
+    ) -> DictationController {
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        let provider = try! SpeechEngineProvider(
+            engines: [InstantEngine(id: "instant", text: "hello world")], activeId: "instant")
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "instant", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        return DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            insert: { _, _, _ in await insertSpy.record() },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+    }
+
+    @Test func bringUpFailureSurfacesAsMicErrorAndStaysResponsive() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let hud = HUDSpy()
+        let controller = makeController(
+            audio: ThrowingStartAudio(), hud: hud, insertSpy: InsertSpy(), supportDir: supportDir)
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+
+        #expect(controller.isBusy == false)
+        #expect(hud.states.last == .error(
+            message: "Could not start the microphone", action: .openMicrophoneSettings))
+    }
+
+    @Test func commitDuringBringUpIsHonoredOnceCaptureStarts() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let gate = Signal()
+        let insertSpy = InsertSpy()
+        let audio = GatedStartAudio(url: supportDir.appendingPathComponent("capture.wav"), gate: gate)
+        let controller = makeController(
+            audio: audio, hud: HUDSpy(), insertSpy: insertSpy, supportDir: supportDir)
+
+        controller.handleStart()
+        controller.handleCommit()   // mic not up yet → deferred, not transcribed against an empty file
+        gate.fire()                 // bring-up completes → the deferred commit must now run
+        await controller.captureBringUpTask?.value
+        await controller.dictationTask?.value
+
+        #expect(await insertSpy.calls == 1)
+        #expect(controller.lastResult == "hello world")
     }
 }

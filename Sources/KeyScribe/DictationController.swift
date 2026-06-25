@@ -53,7 +53,13 @@ final class DictationController {
     // captureStarted gates the async mode re-render so it never shows the HUD before the mic is live.
     private var modeResolveTask: Task<Void, Never>?
     private var captureStartTask: Task<Void, Never>?
+    // Engine bring-up now runs async (off the main thread, watchdogged) so a wedging device can never
+    // freeze the app. captureStarted flips true only once the mic is actually live; pendingCommit holds a
+    // release that arrived during bring-up (or the cue-gap) so it is honored the instant capture comes up
+    // rather than transcribing an empty file.
+    private(set) var captureBringUpTask: Task<Void, Never>?
     private var captureStarted = false
+    private var pendingCommit = false
 
     // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
     // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
@@ -258,6 +264,7 @@ final class DictationController {
         capturedPlan = config.resolved
         capturedEngine = provider.active
         captureStarted = false
+        pendingCommit = false
         activeMode = nil
         eligibleModes = []
         routingContext = RoutingContext()
@@ -302,16 +309,34 @@ final class DictationController {
 
     private func beginCapture() {
         lastRenderedLevel = 0
-        do {
-            _ = try audio.start(sampleRate: activeEngine.captureSampleRate) { [weak self] level in
-                self?.levelCoalescer.submit(level)
+        let sampleRate = activeEngine.captureSampleRate
+        captureBringUpTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.audio.start(sampleRate: sampleRate) { [weak self] level in
+                    self?.levelCoalescer.submit(level)
+                }
+            } catch {
+                // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
+                // already moved us on — only report the mic error if we are still trying to record.
+                if Task.isCancelled || self.machine.state != .recording { return }
+                self.finishError("Could not start the microphone", action: .openMicrophoneSettings)
+                return
             }
-            captureStarted = true
-            onRecordingChanged?(true)
-            startRecordingLimit()
-            hud?.render(.recording(mode: activeMode?.name, level: 0))
-        } catch {
-            finishError("Could not start the microphone", action: .openMicrophoneSettings)
+            // Released or cancelled while the mic was coming up: nothing to record, so tear the capture
+            // back down and bail (a pendingCommit is dropped — there is no audio to transcribe).
+            guard !Task.isCancelled, self.machine.state == .recording else {
+                if let url = self.audio.stop() { try? FileManager.default.removeItem(at: url) }
+                return
+            }
+            self.captureStarted = true
+            self.onRecordingChanged?(true)
+            self.startRecordingLimit()
+            self.hud?.render(.recording(mode: self.activeMode?.name, level: 0))
+            if self.pendingCommit {
+                self.pendingCommit = false
+                self.handleCommit()
+            }
         }
     }
 
@@ -345,7 +370,10 @@ final class DictationController {
         modeResolveTask = nil
         captureStartTask?.cancel()
         captureStartTask = nil
+        captureBringUpTask?.cancel()
+        captureBringUpTask = nil
         captureStarted = false
+        pendingCommit = false
         capturedPlan = nil
         capturedEngine = nil
         // An engine the user switched away from mid-dictation was held back from eviction to avoid
@@ -369,6 +397,10 @@ final class DictationController {
 
     func handleCommit() {
         guard machine.state == .recording else { return }
+        // The mic may still be coming up (cue-gap, or a slow async bring-up). Defer the release until
+        // capture is live so beginCapture honors it the instant the engine starts — transcribing now
+        // would drain an empty file.
+        guard captureStarted else { pendingCommit = true; return }
         recordingLimitTask?.cancel()
         onRecordingChanged?(false)
         machine.beginTranscribing()
