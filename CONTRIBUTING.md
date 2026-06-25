@@ -25,11 +25,13 @@ declined:
 ```bash
 git clone https://github.com/rsperko/keyscribe.git
 cd keyscribe
-./make-app.sh && open ./KeyScribe.app
+./make-app.sh && open ./KeyScribeDev.app   # dev variant — runs alongside an installed KeyScribe
 ```
 
-Prerequisites (macOS 26+ on Apple silicon, full Xcode, the Metal Toolchain for the Qwen3-ASR engine)
-and a one-time self-signed cert so TCC permissions survive rebuilds are covered in [BUILD.md](BUILD.md).
+`make-app.sh` builds the **dev** variant (`KeyScribeDev.app`) so it never collides with a production
+install; `make help` lists the other tasks. Prerequisites (macOS 26+ on Apple silicon, full Xcode, the
+Metal Toolchain for the Qwen3-ASR engine), the build variants, and a one-time self-signed cert so TCC
+permissions survive rebuilds are covered in [BUILD.md](BUILD.md).
 
 ## Project conventions
 

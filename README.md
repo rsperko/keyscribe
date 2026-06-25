@@ -1,38 +1,39 @@
 # KeyScribe
 
-**Privacy-first voice dictation for macOS. Your voice never leaves your Mac.**
+**Local-first voice dictation for macOS. Your voice never leaves your Mac.**
 
-KeyScribe turns speech into text wherever you type — a hold-to-talk key, a sentence, a release, and
-the words land in the app you're already in. Speech recognition runs **100% on-device**. The only
-thing that can ever leave your Mac is an optional, you-keyed LLM cleanup — and only over a payload
-you control. Open source, GPLv3. No account, no subscription, no telemetry.
+KeyScribe turns speech into text wherever you type: hold a key, say the thought, release, and the
+words land in the app you're already using. It feels like system dictation grew power-user muscle:
+mode routing, correction shortcuts, edit-in-place, local history, and optional cleanup that uses
+your provider and your key.
 
-A local-first alternative to Superwhisper / MacWhisper.
+Speech recognition runs **100% on-device**. There is no cloud STT, no account, no subscription, and
+no telemetry. The only thing that can ever leave your Mac is optional BYOK LLM cleanup, over a
+payload you control.
 
-<!-- Screenshots and a demo GIF land in a later pass. -->
+KeyScribe is early, open source, and built for people who want a local-first alternative to
+Superwhisper, Wispr Flow, Aqua, and MacWhisper without giving up serious workflow control.
 
 ---
 
-## Why KeyScribe
+## Why it feels different
 
-- **Speech recognition is always on-device.** There is no cloud speech-to-text, ever.
-- **No telemetry, no analytics.** Speech, transcripts, and usage are never collected or sent.
-- **The only outbound call is an optional BYOK LLM cleanup** — using *your* provider and *your* key,
-  over a redacted payload. Turn it off and KeyScribe never touches the network after model download.
-- **Best-effort redaction wedge:** sensitive spans are tokenized out *before* any LLM call and
-  restored locally afterward, so the model never sees them.
-- **Your API keys live in the macOS Keychain**, never in plaintext config.
-- **Plain files, no hidden database.** Config and history live under
-  `~/Library/Application Support/KeyScribe/` — easy to read, back up, or delete.
+- **Your voice stays local.** Speech recognition is always on-device. Turn off optional cleanup and
+  KeyScribe never touches the network after model download.
+- **Dictation fits the work.** One mode can write a terse Slack update, another can draft email,
+  another can format Markdown, and another can rewrite a selected paragraph in place.
+- **Corrections do not break your flow.** Fix a misheard name, command, or acronym from the current
+  app or a history item, and future dictations learn it through dictionary bias or replacements.
+- **Insertion behaves like a good Mac citizen.** Dictations insert atomically, undo in one **⌘Z**,
+  preserve your clipboard when safe, and avoid inserting into the wrong app if focus changes.
+- **The files are yours.** Config, modes, replacements, prompt fragments, and history are plain files
+  under `~/Library/Application Support/KeyScribe/`; secrets live in macOS Keychain.
 
-Full details in [PRIVACY.md](PRIVACY.md).
+Full privacy details are in [PRIVACY.md](PRIVACY.md).
 
 ---
 
 ## Install
-
-> **First release packaging is on the way.** The notarized DMG and Homebrew tap below ship with the
-> first tagged release — until then, [build from source](#build-from-source) (it's one command).
 
 ### Homebrew
 
@@ -42,7 +43,7 @@ brew install rsperko/tap/keyscribe
 
 ### Direct download
 
-Grab the latest notarized `KeyScribe.dmg` from the [Releases](https://github.com/rsperko/keyscribe/releases)
+Grab the latest notarized `KeyScribe-<version>.dmg` from the [Releases](https://github.com/rsperko/keyscribe/releases)
 page, open it, and drag **KeyScribe** to Applications.
 
 KeyScribe is a menu-bar app — after launching, look for the waveform glyph in the menu bar (no Dock
@@ -55,7 +56,7 @@ No Apple Developer account or paid certificate required — just the Swift toolc
 ```bash
 git clone https://github.com/rsperko/keyscribe.git
 cd keyscribe
-./make-app.sh && open ./KeyScribe.app
+KEYSCRIBE_VARIANT=release ./make-app.sh && open ./KeyScribe.app
 ```
 
 Prerequisites and signing options (so permissions survive rebuilds) are in [BUILD.md](BUILD.md).
@@ -78,35 +79,35 @@ Prerequisites and signing options (so permissions survive rebuilds) are in [BUIL
 
 ## Features
 
-**Dictation that works everywhere.** Hold-to-talk insertion into native, Electron/Chromium, and web
-apps. The whole dictation inserts atomically — one ⌘Z removes it. Change focus mid-dictation and the
-result is safely copied to the clipboard with a HUD notice instead of going to the wrong place.
-Per-mode trigger keys (Fn/Globe, Right Option) with configurable tap-vs-hold timing.
+**Dictate anywhere on the Mac.** Hold-to-talk insertion works in native, Electron/Chromium, and web
+apps. The whole dictation lands as one undoable insert, and focus-race protection copies the result
+to the clipboard instead of pasting into the wrong place.
 
-**Pick your on-device engine.** Seven speech engines, all fully local, downloaded and installed
-in-app — Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and
-Moonshine Base (EN). Trade accuracy against speed against footprint. **Dictionary bias** teaches the
-engine your names, jargon, and acronyms so they transcribe correctly (6 of 7 engines support it; the
-one that doesn't is clearly badged).
+**Route by mode, app, URL, or voice.** Modes are reusable pipeline presets, not hardcoded app hacks.
+Use one trigger key across multiple contexts, pick a one-shot mode from the menu bar, or end a
+dictation with a phrase like "as an email" to route the text through another mode before insertion.
 
-**Modes — configurable, not app-specific.** A Mode is a named, reusable bag of config that a single
-generic pipeline executes (no per-app hacks). Modes can activate automatically from context or by a
-spoken trigger phrase, or you can pick one for the next dictation from the menu bar. Each mode owns
-its trigger keys, cleanup behavior, context sharing, privacy toggle, and prompt.
+**Edit while speaking.** Say "new line", "new paragraph", "scratch that", or "begin verbatim ... end
+verbatim" and KeyScribe applies those instructions before the text lands.
 
-**Optional text cleanup.** A BYOK LLM rewrite can strip filler, fix grammar, and reformat — using
-your own OpenAI-compatible provider and key. **Replacements** auto-substitute text as you dictate.
+**Fix it once, and it sticks.** Add a dictionary entry or replacement from a global shortcut, a
+selection, or a history item. Dictionary entries bias supported engines; replacements auto-substitute
+from then on.
 
-**Fix it once, and it sticks.** When KeyScribe mishears a name or term, a global shortcut lets you
-add a dictionary entry or replacement on the spot — no opening Settings, no breaking flow. Dictionary
-entries bias future recognition; replacements auto-substitute from then on. Add corrections from a
-standalone panel, a global shortcut, or straight from a history item.
+**Rewrite selected text in place.** Select a paragraph, trigger an edit mode, and say "make this
+shorter", "turn this into bullets", or "make this warmer." KeyScribe replaces the selection in the
+app you're already using.
 
-**Edit-in-place.** Select text, speak an instruction, and KeyScribe rewrites the selection in place.
-Any mode can be an edit-in-place mode.
+**Choose the local engine.** Seven on-device speech engines are available in-app: Parakeet TDT v3,
+Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base (EN).
+Trade accuracy, speed, and footprint without sending audio to a server.
 
-**Local history.** Browse and reuse past dictations, stored as plain JSONL files on your Mac — never
-uploaded.
+**Optional cleanup on your terms.** BYOK LLM cleanup can strip filler, fix grammar, or reformat text
+using your OpenAI-compatible provider and key. Best-effort redaction tokenizes recognizable sensitive
+spans before rewrite and restores them locally afterward.
+
+**Inspectable history.** Browse and reuse past dictations stored as local JSONL, with processing
+details that show what was heard, transformed, rewritten, or kept local.
 
 ---
 
