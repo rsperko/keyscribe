@@ -41,6 +41,9 @@ Full privacy details are in [PRIVACY.md](PRIVACY.md).
 brew install rsperko/tap/keyscribe
 ```
 
+> Homebrew 6+ guards third-party taps, so the first install asks you to trust this one — confirm when
+> prompted, or run `brew tap rsperko/tap && brew trust rsperko/tap` beforehand.
+
 ### Direct download
 
 Grab the latest notarized `KeyScribe-<version>.dmg` from the [Releases](https://github.com/rsperko/keyscribe/releases)
