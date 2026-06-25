@@ -8,9 +8,17 @@ final class HUDModel: ObservableObject {
     @Published var state: HUDState = .hidden
 }
 
+// The recording level updates every audio buffer; kept on its own object so only `LevelIndicator`
+// (which observes it) rebuilds per tick, not the whole HUD card. See render().
+@MainActor
+final class HUDLevel: ObservableObject {
+    @Published var level: Float = 0
+}
+
 @MainActor
 final class HUDController: HUDPresenting {
     private let model = HUDModel()
+    private let levelModel = HUDLevel()
     private var panel: NSPanel?
     var onInsertLocalTranscript: (() -> Void)?
     var onPasteLast: (() -> Void)?
@@ -23,8 +31,16 @@ final class HUDController: HUDPresenting {
     private var isRepositioning = false
 
     func render(_ state: HUDState) {
+        // Pure per-buffer level update while already recording the same mode: push only the level so the
+        // card chrome (material, badges, text, action buttons) is not rebuilt on every audio tick.
+        if case .recording(let mode, let level) = state,
+           case .recording(let currentMode, _) = model.state, mode == currentMode {
+            levelModel.level = level
+            return
+        }
         guard model.state != state else { return }
         let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
+        if case .recording(_, let level) = state { levelModel.level = level }
         model.state = state
         if case .hidden = state {
             panel?.orderOut(nil)
@@ -58,6 +74,7 @@ final class HUDController: HUDPresenting {
         guard panel == nil else { return }
         let hosting = NSHostingView(rootView: HUDView(
             model: model,
+            level: levelModel,
             onInsertLocalTranscript: { [weak self] in self?.onInsertLocalTranscript?() },
             onPasteLast: { [weak self] in self?.onPasteLast?() },
             onErrorAction: { action in
@@ -192,6 +209,9 @@ private final class KeyablePanel: NSPanel {
 
 private struct HUDView: View {
     @ObservedObject var model: HUDModel
+    // Held, not observed: only the nested RecordingIcon observes it, so a level tick rebuilds that
+    // subview alone and leaves the rest of `body` untouched.
+    let level: HUDLevel
     let onInsertLocalTranscript: () -> Void
     let onPasteLast: () -> Void
     let onErrorAction: (HUDErrorAction) -> Void
@@ -252,8 +272,8 @@ private struct HUDView: View {
         switch model.state {
         case .ready:
             Image(systemName: "mic").foregroundStyle(.secondary)
-        case .recording(_, let level):
-            LevelIndicator(level: level)
+        case .recording:
+            RecordingIcon(level: level)
         case .transcribing, .rewriting:
             ProgressView().controlSize(.small)
         case .complete(let outcome, _):
@@ -295,6 +315,11 @@ private struct HUDActionButtonStyle: ButtonStyle {
             .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
             .brightness(configuration.isPressed ? -0.08 : 0)
     }
+}
+
+private struct RecordingIcon: View {
+    @ObservedObject var level: HUDLevel
+    var body: some View { LevelIndicator(level: level.level) }
 }
 
 private struct LevelIndicator: View {

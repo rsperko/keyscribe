@@ -47,7 +47,7 @@ struct ConnectionTesterTests {
     }
 
     @Test func failureCarriesTheProviderMessage() async {
-        let tester = ConnectionTester(client: FakeClient(result: .failure(LLMClientError.http(401, "nope"))))
+        let tester = ConnectionTester(client: FakeClient(result: .failure(LLMClientError.http(401))))
         #expect(await tester.test(connection) == .failed("The model service returned an error (401)."))
     }
 

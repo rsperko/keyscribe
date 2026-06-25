@@ -77,7 +77,6 @@ private struct PermissionRow: View {
     let status: PermissionStatus
     let purpose: String
     let unavailable: String
-    var requestableWhenDenied: Bool = false
     let request: () -> Void
     let openSettings: () -> Void
 
@@ -93,7 +92,7 @@ private struct PermissionRow: View {
             if status != .granted {
                 Text(unavailable).font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    if status == .notDetermined || (requestableWhenDenied && status == .denied) {
+                    if status == .notDetermined {
                         Button("Allow", action: request)
                     }
                     Button("Open System Settings", action: openSettings)

@@ -51,30 +51,31 @@ struct PerfBenchmarkTests {
         print("  (realistic spoken dictation ≈ first row; edit-in-place a large selection ≈ rows 3-4)")
     }
 
-    // #3 — RegexCache re-compiles INVALID patterns every call (valid ones are cached). Cost only
-    // shows if a user keeps an invalid regex rule that is hit every dictation.
+    // #3 — Regression check (already fixed): RegexCache memoizes BOTH valid and invalid patterns, so a
+    // persistently-invalid rule is parsed once, not per call. Both figures below should be cache-hit cheap.
     private func regexCacheInvalid() {
-        print("\n[#3] RegexCache — valid (cached) vs invalid (recompiled every call)")
+        print("\n[#3] RegexCache — valid vs invalid (both memoized; regression check)")
         let reps = 50_000
         let validMs = time { for _ in 0..<reps { _ = RegexCache.regex(#"\bfoo\b"#) } }
         let invalidMs = time { for _ in 0..<reps { _ = RegexCache.regex("(unterminated[") } }
         print("  valid (cache hit):   " + us(validMs / Double(reps)) + " /call")
-        print("  invalid (recompile): " + us(invalidMs / Double(reps)) + " /call")
-        print("  per-dictation cost of one persistently-invalid rule ≈ the invalid figure, once.")
+        print("  invalid (cache hit): " + us(invalidMs / Double(reps)) + " /call")
+        print("  a persistently-invalid rule is parsed once, not per dictation.")
     }
 
-    // #4 — HistoryStore.todayString builds a DateFormatter per call (one per dictation append).
+    // #4 — Regression check (already fixed): HistoryStore.todayString uses a shared static DateFormatter,
+    // so the per-call cost should match a hand-reused formatter rather than a fresh allocation.
     private func dateFormatter() {
-        print("\n[#4] HistoryStore.todayString — fresh DateFormatter vs reused")
+        print("\n[#4] HistoryStore.todayString — shared formatter vs hand-reused (regression check)")
         let reps = 50_000
         let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let freshMs = time { for _ in 0..<reps { _ = HistoryStore.todayString(date: date) } }
+        let sharedMs = time { for _ in 0..<reps { _ = HistoryStore.todayString(date: date) } }
         let reused = DateFormatter()
         reused.locale = Locale(identifier: "en_US_POSIX")
         reused.dateFormat = "yyyy-MM-dd"
         let reusedMs = time { for _ in 0..<reps { _ = reused.string(from: date) } }
-        print("  fresh formatter: " + us(freshMs / Double(reps)) + " /call (current)")
-        print("  reused formatter:" + us(reusedMs / Double(reps)) + " /call")
+        print("  shared formatter: " + us(sharedMs / Double(reps)) + " /call (current)")
+        print("  reused formatter: " + us(reusedMs / Double(reps)) + " /call")
         print("  called once per dictation append.")
     }
 

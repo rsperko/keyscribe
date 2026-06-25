@@ -31,10 +31,12 @@ enum AudioCaptureError: Error {
     case bringUpTimedOut
 }
 
+// Boxes the (non-Sendable) live buffer + a one-shot flag for AVAudioConverter's @Sendable input block.
+// Reused across buffers (the tap delivers serially, like the shared outBuffer it sits beside) so the
+// resampling path does not heap-allocate on every delivered buffer.
 private final class FeedOnce: @unchecked Sendable {
-    let buffer: AVAudioPCMBuffer
+    var buffer: AVAudioPCMBuffer?
     var consumed = false
-    init(_ buffer: AVAudioPCMBuffer) { self.buffer = buffer }
 }
 
 // Carries a specific engine instance into the control queue's @Sendable teardown closure. The instance
@@ -76,6 +78,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var outBuffer: AVAudioPCMBuffer?
+    private let feed = FeedOnce()
     // Set while a commit-on-release drain is in flight: each delivered buffer feeds the gate, and the
     // continuation is resumed once a buffer covers the release instant (or a backstop timeout fires).
     private var drainGate: TailDrainGate?
@@ -447,9 +450,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         outBuffer.frameLength = 0
         var convError: NSError?
-        // AVAudioConverter's input block is @Sendable; box the (non-Sendable) live buffer + one-shot
-        // flag so it can be fed exactly once. convert() consumes it synchronously before returning.
-        let feed = FeedOnce(buffer)
+        // Reuse the shared one-shot feed box (reset per call); convert() consumes it synchronously
+        // before returning, and tap delivery is serial, so the same box is safe across buffers.
+        let feed = self.feed
+        feed.buffer = buffer
+        feed.consumed = false
         _ = converter.convert(to: outBuffer, error: &convError) { _, status in
             if feed.consumed { status.pointee = .noDataNow; return nil }
             feed.consumed = true

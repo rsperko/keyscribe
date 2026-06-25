@@ -102,27 +102,36 @@ public struct HistoryStore: Sendable {
     // empties, so `dayFiles()`/`signature()` stay consistent. Returns whether anything was removed.
     @discardableResult
     public func delete(_ entry: HistoryEntry) -> Bool {
-        for file in dayFiles() {
-            let url = dir.appendingPathComponent(file)
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            var kept: [String] = []
-            var removed = false
-            for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
-                if let decoded = try? HistoryEntry(jsonLine: line), decoded == entry {
-                    removed = true
-                } else {
-                    kept.append(line)
-                }
-            }
-            guard removed else { continue }
-            if kept.isEmpty {
-                try? FileManager.default.removeItem(at: url)
-            } else {
-                try? Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url)
-            }
-            return true
+        // Entries land in the day file named for their local day, so try that one file first instead of
+        // reading every day file. Fall back to a full scan only for the rare day-boundary skew (an entry
+        // spoken just before midnight but appended just after).
+        let derived = "\(HistoryStore.todayString(date: entry.timestamp)).jsonl"
+        if deleteEntry(entry, fromFile: derived) { return true }
+        for file in dayFiles() where file != derived {
+            if deleteEntry(entry, fromFile: file) { return true }
         }
         return false
+    }
+
+    private func deleteEntry(_ entry: HistoryEntry, fromFile file: String) -> Bool {
+        let url = dir.appendingPathComponent(file)
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        var kept: [String] = []
+        var removed = false
+        for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
+            if let decoded = try? HistoryEntry(jsonLine: line), decoded == entry {
+                removed = true
+            } else {
+                kept.append(line)
+            }
+        }
+        guard removed else { return false }
+        if kept.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            try? Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url)
+        }
+        return true
     }
 
     @discardableResult

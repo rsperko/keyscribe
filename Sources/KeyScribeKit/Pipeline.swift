@@ -57,7 +57,7 @@ public extension PipelineStage {
     var issuedTokens: [String] { [] }
 }
 
-public struct Pipeline {
+public struct Pipeline: Sendable {
     private let stages: [any PipelineStage]
 
     public init(_ stages: [any PipelineStage]) {
@@ -72,13 +72,6 @@ public struct Pipeline {
 
     public func reverse(_ context: inout PipelineContext) {
         for stage in stages.reversed() { stage.post(&context) }
-    }
-
-    // Forward-only convenience for a pipeline with no tokenization (apply all, no LLM bracket).
-    public func run(_ text: String) -> String {
-        var context = PipelineContext(text: text)
-        forward(&context)
-        return context.text
     }
 
     // Tokens issued during `forward`, across every tokenizing stage — fed to the validation gate.

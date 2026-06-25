@@ -21,6 +21,14 @@ private struct WrapStage: PipelineStage {
     }
 }
 
+private extension Pipeline {
+    func applied(_ text: String) -> String {
+        var ctx = PipelineContext(text: text)
+        forward(&ctx)
+        return ctx.text
+    }
+}
+
 struct PipelineTests {
     @Test func runsStagesInCanonicalPositionOrder() {
         // Added out of order; must run preSTT → postSTTText → insertion regardless.
@@ -29,7 +37,7 @@ struct PipelineTests {
             AppendStage(position: .preSTT, order: 0, mark: "A"),
             AppendStage(position: .postSTTText, order: 0, mark: "B"),
         ])
-        #expect(p.run("") == "ABC")
+        #expect(p.applied("") == "ABC")
     }
 
     @Test func orderIndexBreaksTiesWithinPosition() {
@@ -38,7 +46,7 @@ struct PipelineTests {
             AppendStage(position: .postSTTText, order: 1, mark: "Y"),
             AppendStage(position: .postSTTText, order: 0, mark: "X"),
         ])
-        #expect(p.run("") == "XYZ")
+        #expect(p.applied("") == "XYZ")
     }
 
     @Test func liveEditsRunBeforeReplacements() {
@@ -48,7 +56,7 @@ struct PipelineTests {
     }
 
     @Test func emptyPipelineIsIdentity() {
-        #expect(Pipeline([]).run("hello") == "hello")
+        #expect(Pipeline([]).applied("hello") == "hello")
     }
 
     @Test func positionsAreCanonicallyOrdered() {

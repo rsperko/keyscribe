@@ -469,14 +469,6 @@ private struct AIServiceEditor: View {
         return hasKey || !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func binding<T>(_ keyPath: WritableKeyPath<Connection, T>) -> Binding<T> {
-        Binding(get: { connection[keyPath: keyPath] }, set: { value in
-            var updated = connection
-            updated[keyPath: keyPath] = value
-            onUpdate(updated, nil)
-        })
-    }
-
     @ViewBuilder private var testStatus: some View {
         switch testState {
         case .testing:

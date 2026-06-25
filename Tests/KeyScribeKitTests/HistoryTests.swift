@@ -245,6 +245,19 @@ struct HistoryStoreTests {
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
     }
 
+    // Production appends an entry to the day file named for its own timestamp, so delete resolves that
+    // file directly without scanning the others. A decoy in an unrelated day file must be left alone.
+    @Test func deleteFindsTheEntryInItsTimestampDayFile() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let entry = sampleEntry(heard: "target", at: 0)
+        try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
+        try store.append(sampleEntry(heard: "other-day", at: 0), today: "2099-01-01")
+        #expect(store.delete(entry) == true)
+        #expect(store.entries().map(\.heard) == ["other-day"])
+        #expect(store.dayFiles() == ["2099-01-01.jsonl"])
+    }
+
     @Test func deleteReturnsFalseWhenNoEntryMatches() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }

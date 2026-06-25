@@ -732,11 +732,16 @@ final class DictationController {
             return (.abort("Work on Selection needs an AI connection", nil), nil)
         }
         // The selection IS the content (no post-STT text stages); only the tokenization commands run.
+        // A selection can be large (whole documents), and tokenization is pure CPU — run the forward
+        // pass off the main actor so a big selection cannot stutter the HUD.
         let pipeline = selectionPipeline(for: mode)
-        var ctx = PipelineContext(text: selection)
-        pipeline.forward(&ctx)
+        let tokenized = await Task.detached(priority: .userInitiated) {
+            var ctx = PipelineContext(text: selection)
+            pipeline.forward(&ctx)
+            return ctx.text
+        }.value
         let result = await rewriteTokenized(
-            pipeline: pipeline, tokenized: ctx.text, localProcessed: selection,
+            pipeline: pipeline, tokenized: tokenized, localProcessed: selection,
             instruction: instruction, mode: mode, connection: connection)
         let final: FinalText = result.ok ? .insert(result.text) : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)

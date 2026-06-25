@@ -3,14 +3,14 @@ import KeyScribeKit
 
 enum LLMClientError: Error, CustomStringConvertible {
     case missingKey(String)
-    case http(Int, String)
+    case http(Int)
     case badResponse
     case missingBaseURL
 
     var description: String {
         switch self {
         case .missingKey(let ref): return "No API key stored for \(ref)."
-        case .http(let code, _): return "The model service returned an error (\(code))."
+        case .http(let code): return "The model service returned an error (\(code))."
         case .badResponse: return "The model service returned an unexpected response."
         case .missingBaseURL: return "This connection needs a base URL."
         }
@@ -43,7 +43,7 @@ struct HTTPLLMClient: LLMClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw LLMClientError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
-            throw LLMClientError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+            throw LLMClientError.http(http.statusCode)
         }
         return try parse(data, provider: connection.provider)
     }
