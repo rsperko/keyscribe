@@ -14,6 +14,7 @@ struct FirstRunView: View {
             case .permissions: permissions
             case .tryIt: tryIt
             case .aiService: aiService
+            case .aiServiceComplete: aiServiceComplete
             }
         }
         .padding(28)
@@ -38,14 +39,16 @@ struct FirstRunView: View {
 
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Choose a speech model").font(.title.bold())
-            Text("Speech recognition runs entirely on this Mac. The recommended model is a good default — you can change it anytime in Settings.")
+            Text("Download speech recognition").font(.title.bold())
+            Text("KeyScribe needs one on-device recognizer before it can turn speech into text. Start with the recommended option; it is a good balance of accuracy, speed, and size.")
                 .foregroundStyle(.secondary)
             modelCard
-            DisclosureSection("Choose another model", isExpanded: $modelChoiceExpanded) {
+            DisclosureSection("Advanced: choose a different recognizer", isExpanded: $modelChoiceExpanded) {
+                Text("Different recognizers trade accuracy, language support, download size, and startup time. You can change this later in Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Model", selection: $model.selectedEngineId) {
-                    ForEach(model.catalog) { info in
-                        Text(info.displayName + (info.isDefaultEnglish ? " (recommended)" : "")).tag(info.id)
+                    ForEach(downloadableModels) { info in
+                        Text(modelChoiceLabel(info)).tag(info.id)
                     }
                 }
                 .labelsHidden()
@@ -60,17 +63,17 @@ struct FirstRunView: View {
             }
             Spacer()
             HStack {
-                Button("Skip for now") { model.finish() }
+                Button("Use Apple Speech") { model.skipModelDownload() }
                     .buttonStyle(.link)
                     .disabled(model.downloading)
                 Spacer()
-                Button(model.downloading ? "Downloading…" : "Download \(model.selectedInfo?.displayName ?? "model")") {
+                Button(model.downloading ? "Downloading…" : modelDownloadButtonTitle) {
                     model.beginDownload()
                 }
                 .keyboardShortcut(.defaultAction).controlSize(.large)
                 .disabled(model.downloading)
             }
-            Text("Skipping finishes setup without a model — dictation can't transcribe until you download one in Settings.")
+            Text("Apple Speech is built into macOS and needs no download. It works as a fallback, but the recommended recognizer is usually more accurate.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -90,7 +93,7 @@ struct FirstRunView: View {
                     }
                 }
                 Text(modelMeta(info)).font(.caption).foregroundStyle(.secondary)
-                Text("Stays on this Mac. Required before anything can be transcribed.")
+                Text("Downloaded once and used locally for every dictation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -99,13 +102,27 @@ struct FirstRunView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
     }
 
+    private var modelDownloadButtonTitle: String {
+        guard let info = model.selectedInfo else { return "Download Recognizer" }
+        return info.isDefaultEnglish ? "Download Recommended Recognizer" : "Download \(info.displayName)"
+    }
+
+    private var downloadableModels: [SpeechModelInfo] {
+        model.catalog.filter { !$0.systemManaged }
+    }
+
+    private func modelChoiceLabel(_ info: SpeechModelInfo) -> String {
+        let prefix = info.isDefaultEnglish ? "Recommended: " : ""
+        return "\(prefix)\(info.displayName) — \(info.summary)"
+    }
+
     private func modelMeta(_ info: SpeechModelInfo?) -> String {
         guard let info else { return "" }
         let lang = info.languageCount <= 1 ? "English" : "\(info.languageCount) languages"
         let size = info.systemManaged
             ? "system-managed"
             : "~\(ByteCountFormatter.string(fromByteCount: info.approxDownloadBytes, countStyle: .file))"
-        return "\(lang) · \(size) · on-device"
+        return "\(lang) · \(size) · stays on this Mac"
     }
 
     private var permissions: some View {
@@ -216,12 +233,12 @@ struct FirstRunView: View {
     private var aiService: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Optional text cleanup").font(.title.bold())
-            Text("Connect your own AI service if you want KeyScribe to clean up dictation, draft messages, or work on selected text. Speech recognition still stays on this Mac.")
+            Text("Connect an AI service if you want KeyScribe to clean up dictation, draft messages, or work on selected text. Speech recognition still stays on this Mac.")
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
                 Label("Only modes that use AI rewrite send text to this provider.", systemImage: "cloud")
-                Label("Your API key is stored in Keychain.", systemImage: "key")
+                Label("Hosted providers need an API key. Local OpenAI-compatible endpoints can be keyless.", systemImage: "key")
                 if !model.aiModeNames.isEmpty {
                     Label("KeyScribe will connect \(formattedModeNames(model.aiModeNames)) to this service.", systemImage: "wand.and.stars")
                 }
@@ -237,14 +254,36 @@ struct FirstRunView: View {
                     Text("Gemini").tag(Connection.Provider.gemini)
                     Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
                 }
-                TextField("Model", text: $model.aiModel)
                 if model.aiProvider == .openaiCompatible {
                     TextField("Base URL", text: $model.aiBaseURL)
                 }
-                SecureField(model.aiProvider == .openaiCompatible ? "API key (optional)" : "API key", text: $model.aiAPIKey)
+                SecureField("API key (optional for local endpoints)", text: $model.aiAPIKey)
+                HStack {
+                    TextField("Model", text: $model.aiModel)
+                    if !model.aiAvailableModels.isEmpty {
+                        Menu {
+                            ForEach(model.aiAvailableModels, id: \.self) { id in
+                                Button(id) { model.aiModel = id }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down.circle")
+                        }
+                        .menuStyle(.borderlessButton)
+                    }
+                    Button(model.aiFetchingModels ? "Fetching…" : "Fetch Models") {
+                        Task { await model.fetchAIModels() }
+                    }
+                    .disabled(model.aiFetchingModels || !model.aiCanFetchModels)
+                    if model.aiFetchingModels { ProgressView().controlSize(.small) }
+                }
+                Text("Fetch models to choose from the provider list, or type a model id manually.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
 
+            if let error = model.aiModelDiscoveryError {
+                Text(error).font(.callout).foregroundStyle(.orange)
+            }
             if let error = model.aiSetupError {
                 Text(error).font(.callout).foregroundStyle(.red)
             }
@@ -269,6 +308,33 @@ struct FirstRunView: View {
                 model.aiServiceName = provider.defaultName
             }
             model.aiModel = provider.defaultModel
+            model.resetAIModelDiscovery()
+        }
+    }
+
+    private var aiServiceComplete: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.green)
+            Text("AI cleanup is connected").font(.title.bold())
+            Text("\(model.aiServiceName) is ready to clean up dictation, draft messages, and work on selected text in rewrite modes.")
+                .foregroundStyle(.secondary)
+            if model.aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label("No API key was stored for this service.", systemImage: "key")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label("Your API key is stored in Keychain.", systemImage: "key")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack {
+                Spacer()
+                Button("Done") { model.finish() }
+                    .keyboardShortcut(.defaultAction).controlSize(.large)
+            }
         }
     }
 

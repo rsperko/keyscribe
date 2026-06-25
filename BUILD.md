@@ -15,7 +15,8 @@ Same name, different identity per machine; that is expected and fine.
    headless block in **Signing ▸ One-time: create a self-signed signing certificate** (or use the
    Keychain Access GUI steps there). Skip this and the build falls back to ad-hoc — it still works,
    but macOS re-prompts for Mic / Accessibility on every rebuild.
-3. **Build and run** — `./make-app.sh && open ./KeyScribe.app`. It auto-detects the cert by name.
+3. **Build and run** — `./make-app.sh && open ./KeyScribeDev.app`. It auto-detects the cert by name.
+   (`make-app.sh` defaults to the **dev** variant — see **Build variants** below.)
 4. **Re-enter your BYOK API keys** in **Settings ▸ AI Services**. Keys live in this machine's
    keychain, never in the repo.
 
@@ -48,9 +49,28 @@ Same name, different identity per machine; that is expected and fine.
 ```bash
 git clone https://github.com/rsperko/keyscribe.git
 cd keyscribe
-./make-app.sh        # builds + assembles KeyScribe.app (ad-hoc signed by default)
-open ./KeyScribe.app
+./make-app.sh        # builds + assembles KeyScribeDev.app (dev variant; ad-hoc signed by default)
+open ./KeyScribeDev.app
 ```
+
+Common tasks are also exposed through **`make`** — run `make help` to list them (`make build`, `make
+run`, `make release BUMP=patch`, `make test`, `make setup`, `make reset-permissions`, `make verify`,
+`make icon`, `make clean`). It's a thin front door over the same scripts documented here.
+
+## Build variants
+
+`make-app.sh` builds a **dev** variant by default so a local build can run alongside an installed
+production KeyScribe without colliding over macOS state (TCC permissions, config, Keychain):
+
+| Variant | Command | Bundle | Identity / storage |
+| --- | --- | --- | --- |
+| **dev** (default) | `./make-app.sh` | `KeyScribeDev.app` | `com.keyscribe.app.dev`, config under `~/Library/Application Support/KeyScribeDev/`, own TCC grants + Keychain (orange menu-bar tint) |
+| **production** | `KEYSCRIBE_VARIANT=release ./make-app.sh` | `KeyScribe.app` | `com.keyscribe.app`, config under `…/KeyScribe/` |
+
+Downloaded STT models are a **shared cache** under `…/KeyScribe/models/` for both variants — the dev
+build never re-downloads gigabytes. The dev-facing helpers (`scripts/reset-permissions.sh`,
+`scripts/verify-live.sh`) take the same `KEYSCRIBE_VARIANT` and default to dev. `release.sh` always
+forces the production variant. If you only want one normal build, use `KEYSCRIBE_VARIANT=release`.
 
 `make-app.sh` compiles a release build, assembles the `.app` bundle (including `mlx.metallib` for
 Qwen3-ASR), and code-signs it. With no signing identity configured it uses an **ad-hoc** signature,
@@ -134,13 +154,10 @@ rm -f /tmp/kc-cert.cnf /tmp/kc-key.pem /tmp/kc-cert.pem /tmp/kc.p12
 ./make-app.sh        # now signs with "KeyScribe Local" automatically
 ```
 
-To use a differently named cert, pass it explicitly (either variable works):
-
-```bash
-CODESIGN_IDENTITY="My Cert Name" ./make-app.sh
-# or
-KEYSCRIBE_SIGN_ID="My Cert Name" ./make-app.sh
-```
+The dev build auto-detects a self-signed cert named **`KeyScribe Local`**; else it falls back to ad-hoc. It deliberately **ignores** `KEYSCRIBE_SIGN_ID` and `CODESIGN_IDENTITY` — those
+are the *release* (Developer ID) identity used by `release.sh`, so an `.envrc` exporting
+`KEYSCRIBE_SIGN_ID` won't Developer-ID-sign your dev build. If you want a differently-named dev cert,
+name it `KeyScribe Local`.
 
 The first signed build prompts once for keychain access — click **Always Allow**.
 

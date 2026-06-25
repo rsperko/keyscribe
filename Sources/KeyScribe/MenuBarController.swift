@@ -58,10 +58,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onAddDictionaryEntry: (() -> Void)?
     var onAddReplacement: (() -> Void)?
 
+    private let variant = AppVariant(bundleID: Bundle.main.bundleIdentifier)
+    private static let devTint = NSColor.systemOrange
+
     func install() {
         if let button = statusItem.button {
             button.image = Self.statusIcon
-            button.image?.accessibilityDescription = "KeyScribe"
+            button.image?.accessibilityDescription = variant.displayName
+            if variant.isDev { button.contentTintColor = Self.devTint }
             button.addSubview(badgeDot)
             NSLayoutConstraint.activate([
                 badgeDot.widthAnchor.constraint(equalToConstant: 6),
@@ -139,7 +143,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // Tint the whole glyph red while capture is active (ui_design.md §Dynamic status — recording
     // reflects that capture is active); reverts on commit. The template image takes the tint.
     func setDictating(_ active: Bool) {
-        statusItem.button?.contentTintColor = active ? .systemRed : nil
+        statusItem.button?.contentTintColor = active ? .systemRed : (variant.isDev ? Self.devTint : nil)
     }
 
     // The error badge — a small red dot, top-left (ui_design.md §6) — for a configuration, model, or

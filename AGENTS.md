@@ -86,7 +86,11 @@ keyscribe/
     KeyScribe/           # the menu-bar app: adapters + SwiftUI/AppKit + main
   Tests/KeyScribeKitTests/ # pure-logic unit tests
   Tests/KeyScribeTests/    # app-target tests (@testable import KeyScribe) — OS-edge orchestration via DI seams
-  make-app.sh          # → KeyScribe.app (LSUIElement; stable-cert or ad-hoc signed — see BUILD.md)
+  Makefile             # task front door — `make help` lists build/run/release/test/setup/…
+  make-app.sh          # → KeyScribeDev.app (dev variant, default; self-signed — see BUILD.md)
+  release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major)
+  scripts/             # dev helpers: setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
+                       #   render_app_icon.swift (all reachable via make targets)
   docs/                # the design docs (tracked product spec)
   benchmark/           # STT benchmark kit: manifest.json + record.sh + README (committed);
                        #   *.wav recordings + results.json are gitignored (your own voice).
@@ -208,18 +212,29 @@ speech-swift checkout's kernels and bundles+signs it into the `.app`; the **Meta
 Top-level SwiftPM (`Package.swift`): `Sources/KeyScribeKit` (pure) + `Sources/KeyScribe` (app) +
 `Tests/KeyScribeKitTests` (pure-logic) + `Tests/KeyScribeTests` (app-target via
 `@testable import KeyScribe`, for OS-edge regression through DI seams). Bundled into an LSUIElement
-`.app` by `./make-app.sh` — it signs with a stable self-signed cert for persistent TCC if one is
-present (contributors create a **`KeyScribe Local`** cert; the maintainer's **`SnagShot Dev`** also
-auto-detects; else ad-hoc; identity override: `CODESIGN_IDENTITY` / `KEYSCRIBE_SIGN_ID`). Full
-from-source build, prerequisites, and signing live in **`BUILD.md`**.
+`.app` by `./make-app.sh` — the **dev** variant signs with a stable self-signed cert (**`KeyScribe
+Local`**) for persistent TCC, else ad-hoc; it **ignores** `KEYSCRIBE_SIGN_ID` /
+`CODESIGN_IDENTITY` (those are the release Developer ID identity, so an `.envrc` for `release.sh`
+never leaks into dev). Full from-source build, prerequisites, and signing live in **`BUILD.md`**.
 
-`KeyScribe.entitlements` is the tracked hardened-runtime entitlements file, **dormant** until
-notarization — `make-app.sh` doesn't pass it yet. The bundle's `Info.plist` is a tracked source file
-at `Resources/Info.plist`; `make-app.sh` stamps `CFBundleShortVersionString` from the latest git tag
-and `CFBundleVersion` from the commit count, so don't hand-edit version keys.
+**Two build variants** (`KEYSCRIBE_VARIANT`, default `dev`): `./make-app.sh` builds the isolated
+**KeyScribeDev.app** (`com.keyscribe.app.dev` — its own config dir, TCC grants, and Keychain service;
+orange menu-bar tint) so it runs alongside an installed production app; `./release.sh` forces the
+production **KeyScribe.app** (`com.keyscribe.app`, Developer ID, hardened runtime, notarized + stapled
+DMG). `./release.sh patch|minor|major` bumps the tag, builds, notarizes, and prints the publish steps —
+it stops before pushing anything public. Variant plumbing: `AppVariant` (KeyScribeKit) resolved through
+`KeyScribePaths`/`KeychainStore`; **downloaded models are shared** (pinned to `KeyScribe/models`, never
+per-variant — the easy-to-miss part). Full detail in `agent_notes/distribution_plan` + `dev_variant`.
 
-Config lives under `~/Library/Application Support/KeyScribe/`, loaded once into `ConfigCache` and
-invalidated by an FSEvents watcher (no per-dictation I/O). File-based storage, **no SQLite**: config
+`KeyScribe.entitlements` (hardened-runtime) is passed by **`release.sh`** for the notarized build;
+`make-app.sh`'s dev signing omits it (a teamless self-signed cert can't authorize it). Keep its XML
+comments free of `--` — AMFI's strict parser rejects them. The bundle's `Info.plist` is a tracked
+source at `Resources/Info.plist`; the build scripts stamp `CFBundleShortVersionString` (git tag),
+`CFBundleVersion` (commit count), and the variant's bundle id/name — don't hand-edit those keys.
+
+Config lives under `~/Library/Application Support/<KeyScribe|KeyScribeDev>/` (per variant; the
+`models/` weights cache is shared), loaded once into `ConfigCache` and invalidated by an FSEvents
+watcher (no per-dictation I/O). File-based storage, **no SQLite**: config
 as TOML (modes/connections/dictionary/replacements), fragments as markdown+YAML, history as
 JSONL-per-day, downloaded STT weights consolidated in `models/` (`config_schema.md`). Every persisted
 *config* file carries `schema_version` and migrates forward (`design.md` §5.1); `models/` is

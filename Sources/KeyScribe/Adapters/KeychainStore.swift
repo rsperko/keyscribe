@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import KeyScribeKit
 
 // BYOK secrets live in the Keychain; TOML stores only the `key_ref` (design.md §4.6,
 // config_schema.md). A connection's key_ref is the Keychain account under one service.
@@ -11,7 +12,9 @@ import Security
 // fires solely when the *secret data* is decrypted (`get`). Existence checks (`has`) ask for
 // attributes only, never the data, so they never prompt — that is what the Settings UI uses.
 enum KeychainStore {
-    private static let service = "com.keyscribe.llm"
+    // Per-variant service so the KeyScribeDev build keeps its BYOK keys separate and never fights the
+    // production app over a shared item's ACL.
+    private static let service = AppVariant(bundleID: Bundle.main.bundleIdentifier).keychainService
 
     private static func baseQuery(_ keyRef: String) -> [String: Any] {
         [

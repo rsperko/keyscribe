@@ -7,6 +7,12 @@ enum ConnectionTestState: Equatable {
     case failed(String)
 }
 
+enum ModelDiscoveryState: Equatable {
+    case loading
+    case loaded
+    case failed(String)
+}
+
 // Sends one trivial round-trip through the BYOK client to confirm the key, model, and base URL
 // actually answer. Transport lives in HTTPLLMClient; this only interprets the result.
 struct ConnectionTester {
@@ -44,21 +50,33 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published var selectedID: String?
     @Published private(set) var error: String?
     @Published private(set) var testStates: [String: ConnectionTestState] = [:]
+    @Published private(set) var modelSuggestionsByConnection: [String: [String]] = [:]
+    @Published private(set) var modelDiscoveryStates: [String: ModelDiscoveryState] = [:]
     @Published private(set) var keyedRefs: Set<String> = []
     @Published var pendingConnectOffer: ConnectModesOffer?
     @Published var lastCreatedId: String?
 
     private let supportDir: URL
     private let tester: ConnectionTester
+    private let listModels: (Connection, String?) async throws -> [String]
     private(set) var testTask: Task<Void, Never>?
 
-    init(supportDir: URL, tester: ConnectionTester = ConnectionTester()) {
+    init(
+        supportDir: URL,
+        tester: ConnectionTester = ConnectionTester(),
+        listModels: @escaping (Connection, String?) async throws -> [String] = {
+            try await HTTPModelLister().listModels(for: $0, apiKey: $1)
+        }
+    ) {
         self.supportDir = supportDir
         self.tester = tester
+        self.listModels = listModels
         reload()
     }
 
     func testState(for id: String) -> ConnectionTestState? { testStates[id] }
+    func modelSuggestions(for id: String) -> [String] { modelSuggestionsByConnection[id] ?? [] }
+    func modelDiscoveryState(for id: String) -> ModelDiscoveryState? { modelDiscoveryStates[id] }
 
     // Connections (still present) whose last Test Connection failed. Drives the error badge and the
     // per-mode "uses a broken AI service" flag.
@@ -77,6 +95,28 @@ final class AIServiceSettingsModel: ObservableObject {
         testTask = Task {
             let result = await tester.test(connection)
             testStates[id] = result
+        }
+    }
+
+    func fetchModels(for connection: Connection, apiKey: String?) async {
+        let id = connection.id
+        modelDiscoveryStates[id] = .loading
+        do {
+            let models = try await listModels(connection, apiKey)
+            modelSuggestionsByConnection[id] = models
+            modelDiscoveryStates[id] = .loaded
+            // Re-read the live connection by id before writing: a text field's focus-loss commit can
+            // land between the snapshot and here, and saving the snapshot would clobber that edit.
+            if !models.isEmpty, var latest = connections.first(where: { $0.id == id }) {
+                let current = latest.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !models.contains(current) {
+                    latest.model = models[0]
+                    save(latest)
+                }
+            }
+        } catch {
+            let message = (error as? ModelListError)?.description ?? error.localizedDescription
+            modelDiscoveryStates[id] = .failed(message)
         }
     }
 
@@ -156,6 +196,8 @@ final class AIServiceSettingsModel: ObservableObject {
             KeychainStore.delete(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
+            modelDiscoveryStates[connection.id] = nil
+            modelSuggestionsByConnection[connection.id] = nil
             connections = updated
             selectedID = updated.first?.id
             error = nil
@@ -217,8 +259,14 @@ struct AIServiceSettingsView: View {
                     AIServiceEditor(
                         connection: connection, hasKey: model.hasKey(connection),
                         testState: model.testState(for: connection.id),
+                        modelSuggestions: model.modelSuggestions(for: connection.id),
+                        modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
                         autofocusName: model.lastCreatedId == connection.id,
-                        onUpdate: model.update, onTest: { model.test(connection) },
+                        onUpdate: model.update,
+                        onFetchModels: { apiKey in
+                            Task { await model.fetchModels(for: connection, apiKey: apiKey) }
+                        },
+                        onTest: { model.test(connection) },
                         onConsumeFocus: model.consumeCreated,
                         onDelete: { pendingDelete = connection })
                         .id(connection.id)
@@ -293,8 +341,11 @@ private struct AIServiceEditor: View {
     let connection: Connection
     let hasKey: Bool
     let testState: ConnectionTestState?
+    let modelSuggestions: [String]
+    let modelDiscoveryState: ModelDiscoveryState?
     var autofocusName = false
     let onUpdate: (Connection, String?) -> Void
+    let onFetchModels: (String?) -> Void
     let onTest: () -> Void
     var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
@@ -312,9 +363,6 @@ private struct AIServiceEditor: View {
                     Text("Gemini").tag(Connection.Provider.gemini)
                     Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
                 }
-                CommittedTextField("Model", text: connection.model) { value in
-                    var updated = connection; updated.model = value; onUpdate(updated, nil)
-                }
                 if connection.provider == .openaiCompatible {
                     CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
                         var updated = connection
@@ -324,9 +372,10 @@ private struct AIServiceEditor: View {
                     Text("Required for an OpenAI-compatible endpoint, e.g. http://127.0.0.1:11234/v1.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                modelField
             }
             Section("API key") {
-                SecureField(hasKey ? "Replace API key" : "API key", text: $apiKey)
+                SecureField(hasKey ? "Replace API key" : "API key (optional for local endpoints)", text: $apiKey)
                     .onSubmit(saveKey)
                 HStack {
                     Text(hasKey ? "Key stored in Keychain" : "No key stored")
@@ -334,7 +383,7 @@ private struct AIServiceEditor: View {
                     Spacer()
                     Button("Save Key", action: saveKey).disabled(apiKey.isEmpty)
                 }
-                Text("Optional — leave blank for a local or no-auth endpoint.")
+                Text("Hosted providers need an API key. Local OpenAI-compatible endpoints can be keyless.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Connection test") {
@@ -373,6 +422,51 @@ private struct AIServiceEditor: View {
                 updated.model = value.defaultModel
                 onUpdate(updated, nil)
             })
+    }
+
+    private var modelField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                CommittedTextField("Model", text: connection.model) { value in
+                    var updated = connection; updated.model = value; onUpdate(updated, nil)
+                }
+                if !modelSuggestions.isEmpty {
+                    Menu {
+                        ForEach(modelSuggestions, id: \.self) { model in
+                            Button(model) {
+                                var updated = connection
+                                updated.model = model
+                                onUpdate(updated, nil)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+                Button("Fetch Models") { onFetchModels(apiKey.isEmpty ? nil : apiKey) }
+                    .disabled(modelDiscoveryState == .loading || !canFetchModels)
+                if modelDiscoveryState == .loading { ProgressView().controlSize(.small) }
+            }
+            switch modelDiscoveryState {
+            case .loaded where !modelSuggestions.isEmpty:
+                Text("Found \(modelSuggestions.count) model\(modelSuggestions.count == 1 ? "" : "s").")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .failed(let message):
+                Text("Could not fetch models: \(message)")
+                    .font(.caption).foregroundStyle(.orange)
+            default:
+                Text("Fetch models to choose from the provider list, or type a model id manually.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var canFetchModels: Bool {
+        if connection.provider == .openaiCompatible {
+            return !(connection.baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return hasKey || !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<Connection, T>) -> Binding<T> {

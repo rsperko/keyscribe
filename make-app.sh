@@ -6,7 +6,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP="KeyScribe.app"
+# Build variant (KEYSCRIBE_VARIANT): `dev` (default) builds KeyScribeDev.app / com.keyscribe.app.dev —
+# fully isolated from an installed production KeyScribe (its own TCC grants, config dir, and Keychain
+# service; downloaded models are shared). `release` (set by release.sh) builds the production
+# KeyScribe.app / com.keyscribe.app. The executable inside is named "KeyScribe" for both.
+VARIANT="${KEYSCRIBE_VARIANT:-dev}"
+case "$VARIANT" in
+  release|prod|production) APP="KeyScribe.app";    BUNDLE_ID="com.keyscribe.app";     BUNDLE_NAME="KeyScribe" ;;
+  dev|*)                   APP="KeyScribeDev.app"; BUNDLE_ID="com.keyscribe.app.dev"; BUNDLE_NAME="KeyScribeDev" ;;
+esac
 BIN=".build/release/KeyScribe"
 CONFIG="${1:-release}"
 
@@ -93,27 +101,33 @@ cp Resources/model-selftest.wav "$APP/Contents/Resources/model-selftest.wav"
 # First-party "now listening" start cue (loaded via Bundle.main at runtime).
 cp Resources/start-cue.wav "$APP/Contents/Resources/start-cue.wav"
 # Info.plist is a tracked source file (Resources/Info.plist); stamp the git-derived version into it.
-echo "== Info.plist: $SHORT_VERSION (build $BUILD_VERSION) =="
+echo "== Info.plist: $BUNDLE_NAME $SHORT_VERSION (build $BUILD_VERSION), id $BUNDLE_ID =="
 sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \
+    -e "s/__BUNDLE_ID__/$BUNDLE_ID/" -e "s/__BUNDLE_NAME__/$BUNDLE_NAME/" \
   Resources/Info.plist > "$APP/Contents/Info.plist"
 
-# Stable-identity signing keeps TCC grants (Mic / Accessibility) across rebuilds.
-# macOS TCC only needs a *valid, stable* signature — a self-signed cert works; no Apple account is
-# required. See BUILD.md for the one-time "create a self-signed cert named KeyScribe Local" steps.
-# Identity precedence: KEYSCRIBE_SIGN_ID, then CODESIGN_IDENTITY (conventional name), then auto-detect
-# the project cert "KeyScribe Local" (BUILD.md has create-it steps), else ad-hoc ("-", which works but
-# may reset TCC each rebuild). For any other cert, pass it via KEYSCRIBE_SIGN_ID/CODESIGN_IDENTITY.
-# Signing with a real cert prompts once for keychain access — run from your terminal and click "Always
-# Allow". Sign inner Mach-O then the bundle (no --deep: Swift linker-signs the binary and --deep
-# mishandles it).
-ID="${KEYSCRIBE_SIGN_ID:-${CODESIGN_IDENTITY:-}}"
-if [ -z "$ID" ]; then
-  if security find-identity -v -p codesigning 2>/dev/null | grep -q "KeyScribe Local"; then
-    ID="KeyScribe Local"
-  else
-    ID="-"
-  fi
-fi
+# Signing identity is variant-aware (macOS TCC only needs a *valid, stable* signature — no Apple
+# account required for dev). Sign inner Mach-O then the bundle (no --deep: the Swift linker-signs the
+# binary and --deep mishandles it). A real cert prompts once for keychain access — click "Always Allow".
+#
+#  - dev: a stable *self-signed* cert ("KeyScribe Local") so the dev app's TCC grants persist across
+#    rebuilds, separate from production. KEYSCRIBE_SIGN_ID / CODESIGN_IDENTITY are *release* identities
+#    and are deliberately ignored here — an .envrc that exports KEYSCRIBE_SIGN_ID for release.sh must
+#    not Developer-ID-sign the dev build. Falls back to ad-hoc if the cert is not found.
+#  - release: the Developer ID identity from KEYSCRIBE_SIGN_ID, then CODESIGN_IDENTITY (release.sh sets
+#    it); else ad-hoc. release.sh additionally adds --options runtime + --entitlements and notarizes.
+case "$VARIANT" in
+  release|prod|production)
+    ID="${KEYSCRIBE_SIGN_ID:-${CODESIGN_IDENTITY:-}}"
+    ;;
+  *)
+    ID=""
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "KeyScribe Local"; then
+      ID="KeyScribe Local"
+    fi
+    ;;
+esac
+[ -z "$ID" ] && ID="-"
 find "$APP" -name "*.cstemp" -delete 2>/dev/null || true
 if [ "$ID" = "-" ]; then
   echo "!! AD-HOC signing — no stable cert found. TCC grants (Microphone /" >&2

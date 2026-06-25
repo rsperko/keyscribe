@@ -50,15 +50,60 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
-    @Test func allWipesEntireSupportDirIncludingModels() throws {
+    // Production layout: models are nested inside the support dir, so `all` wipes config but keeps them.
+    @Test func allWipesConfigButKeepsNestedSharedModels() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let defaults = ephemeralDefaults()
+        let fm = FileManager.default
 
-        ResetTool(supportDir: dir, defaults: defaults).run(.all)
+        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        tool.run(.all)
 
-        #expect(!FileManager.default.fileExists(atPath: dir.path))
+        #expect(fm.fileExists(atPath: dir.appendingPathComponent("models/parakeet/weights.bin").path))
+        #expect(!fm.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
+        #expect(!fm.fileExists(atPath: dir.appendingPathComponent("modes/custom-junk.toml").path))
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
+    }
+
+    // Dev layout: models live outside the support dir, so `all` removes the whole support dir and the
+    // shared cache (elsewhere) is untouched.
+    @Test func allRemovesSupportDirWhenModelsLiveOutsideIt() throws {
+        let dir = try makeSupportDir()
+        let modelsDir = try makeSupportDir()
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: modelsDir) }
+        let defaults = ephemeralDefaults()
+        let fm = FileManager.default
+
+        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        tool.modelsDir = modelsDir.appendingPathComponent("models", isDirectory: true)
+        tool.run(.all)
+
+        #expect(!fm.fileExists(atPath: dir.path))
+        #expect(fm.fileExists(atPath: modelsDir.appendingPathComponent("models/parakeet/weights.bin").path))
+        #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
+    }
+
+    @Test func permissionsResetsEachTCCServiceWithoutTouchingFilesOrFlag() throws {
+        let dir = try makeSupportDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let defaults = ephemeralDefaults()
+        var calls: [String] = []
+
+        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        tool.bundleID = "com.keyscribe.app"
+        tool.resetTCCService = { service, bundleID in
+            calls.append("\(service):\(bundleID)")
+            return "Reset \(service)"
+        }
+        let actions = tool.run(.permissions)
+
+        #expect(calls == ["Microphone:com.keyscribe.app", "Accessibility:com.keyscribe.app", "AppleEvents:com.keyscribe.app"])
+        #expect(actions.contains { $0.contains("Relaunch") })
+        // A permissions reset is TCC-only: config files and the first-run flag are untouched.
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
+        #expect(defaults.bool(forKey: ResetTool.firstRunKey) == true)
     }
 
     @Test func modesWipesAndReseedsStarters() throws {

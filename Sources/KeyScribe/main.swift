@@ -1,6 +1,37 @@
 import AppKit
 import Foundation
 
+// `--help` / `-h`: print the CLI surface and exit. Run with no arguments to launch the menu-bar app;
+// the flags below are dev/admin tools meant to be run from a terminal.
+if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
+    print("""
+    KeyScribe — privacy-first, on-device voice dictation for macOS.
+
+    Usage: KeyScribe [flags]
+      Run with no flags to launch the menu-bar app. The flags below are for
+      development and administration; run the binary directly from a terminal:
+        KeyScribe.app/Contents/MacOS/KeyScribe [flags]
+
+    Flags:
+      -h, --help              Show this help and exit.
+      --reset <target>        Clear local state and exit. <target> is one of:
+                                onboarding   Clear the first-run flag.
+                                modes        Re-seed the starter modes (discards edits to defaults).
+                                config       Wipe config/modes/fragments (keeps models) + first-run flag.
+                                permissions  Remove TCC grants (Mic/Accessibility/Automation) so macOS re-prompts.
+                                all          Wipe the whole support dir + first-run flag (shared models kept).
+      --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
+        --engines <a,b,...>     Limit the benchmark run to these engine ids.
+        --raw                   Emit raw per-clip benchmark output.
+      --config-dir <path>     Use <path> for config/modes/history instead of Application Support
+                              (downloaded models stay shared). Pair with --first-run to test
+                              onboarding without touching your real configuration.
+      --first-run             Replay the full onboarding wizard, ignoring the completion flag.
+      --setup-permissions     Present the permissions-only setup flow.
+    """)
+    exit(0)
+}
+
 // Dev flag: `--config-dir <path>` points config/modes/history at a throwaway directory (downloaded
 // models stay shared). Parsed first so every path below — including --reset — honors it. Pair with
 // --first-run to replay onboarding against a clean sandbox without touching the real configuration.
@@ -14,16 +45,17 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     guard let target = ResetTarget(rawValue: arg) else {
         FileHandle.standardError.write(Data("""
         Usage: KeyScribe --reset <target>
-          onboarding  Clear the first-run flag (replays the wizard only if a TCC permission is missing).
-          modes       Re-seed the starter modes (discards edits to default modes).
-          config      Wipe config/modes/fragments but keep downloaded models, and clear the first-run flag.
-          all         Remove the whole support dir (including models) and clear the first-run flag.\n
+          onboarding   Clear the first-run flag (replays the wizard only if a TCC permission is missing).
+          modes        Re-seed the starter modes (discards edits to default modes).
+          config       Wipe config/modes/fragments but keep downloaded models, and clear the first-run flag.
+          permissions  Remove the app's TCC grants (Microphone, Accessibility, Automation) so macOS re-prompts.
+          all          Wipe the whole support dir and clear the first-run flag (shared models are kept).\n
         """.utf8))
         exit(2)
     }
     let actions = ResetTool(supportDir: KeyScribePaths.supportDir, defaults: .standard).run(target)
     for line in actions { print(line) }
-    if target != .modes {
+    if target != .modes && target != .permissions {
         let granted = Permissions.microphoneStatus() == .granted
             && Permissions.accessibilityStatus() == .granted
         if granted {

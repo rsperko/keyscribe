@@ -9,11 +9,17 @@
 # history JSONL, mode TOML); you perform the speak/click action when prompted. Nothing here writes to
 # the repo or the config — it only reads.
 #
-# Run from anywhere:  ./verify-live.sh
+# Run from anywhere:  ./scripts/verify-live.sh
 
 set -uo pipefail
 
-SUPPORT="$HOME/Library/Application Support/KeyScribe"
+# Verifies the dev build by default (KEYSCRIBE_VARIANT=release to verify the production install). The
+# config/history/modes live under a per-variant support dir; downloaded models are shared.
+case "${KEYSCRIBE_VARIANT:-dev}" in
+  release|prod|production) APP_NAME="KeyScribe";    SUPPORT_NAME="KeyScribe" ;;
+  dev|*)                   APP_NAME="KeyScribeDev"; SUPPORT_NAME="KeyScribeDev" ;;
+esac
+SUPPORT="$HOME/Library/Application Support/$SUPPORT_NAME"
 HIST="$SUPPORT/history"
 MODES="$SUPPORT/modes"
 
@@ -30,7 +36,7 @@ section "0. Prerequisites"
 if [ ! -d "$SUPPORT" ]; then
   fail "No config dir at $SUPPORT — launch KeyScribe at least once first."
 fi
-info "Build + launch:  ./make-app.sh && open KeyScribe.app"
+info "Build + launch:  ./make-app.sh && open ${APP_NAME}.app"
 info "Grant Microphone and Accessibility when prompted."
 pause "KeyScribe is running and permissions are granted — press Enter."
 

@@ -73,7 +73,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
 
 @MainActor
 final class FirstRunModel: ObservableObject {
-    enum Step { case intro, model, permissions, tryIt, aiService }
+    enum Step { case intro, model, permissions, tryIt, aiService, aiServiceComplete }
 
     @Published var step: Step = .intro
     @Published var downloading = false
@@ -89,6 +89,9 @@ final class FirstRunModel: ObservableObject {
     @Published var aiModel = Connection.Provider.openai.defaultModel
     @Published var aiBaseURL = ""
     @Published var aiAPIKey = ""
+    @Published private(set) var aiAvailableModels: [String] = []
+    @Published private(set) var aiModelDiscoveryError: String?
+    @Published private(set) var aiFetchingModels = false
     @Published private(set) var aiSetupError: String?
     @Published private(set) var aiTesting = false
 
@@ -100,6 +103,7 @@ final class FirstRunModel: ObservableObject {
     private let modesDir: URL
     private let saveAPIKey: (String, String) -> Bool
     private let testConnection: (Connection) async -> ConnectionTestState
+    private let listModels: (Connection, String?) async throws -> [String]
     private var pendingConnectionId: String?
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
@@ -115,6 +119,9 @@ final class FirstRunModel: ObservableObject {
         modesDir: URL = KeyScribePaths.modesDir,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
+        listModels: @escaping (Connection, String?) async throws -> [String] = {
+            try await HTTPModelLister().listModels(for: $0, apiKey: $1)
+        },
         onComplete: @escaping () -> Void
     ) {
         self.selectedEngineId = initialEngineId
@@ -125,6 +132,7 @@ final class FirstRunModel: ObservableObject {
         self.modesDir = modesDir
         self.saveAPIKey = saveAPIKey
         self.testConnection = testConnection
+        self.listModels = listModels
         self.onComplete = onComplete
         refreshStatuses()
         if permissionsOnly {
@@ -141,6 +149,13 @@ final class FirstRunModel: ObservableObject {
     }
 
     var selectedInfo: SpeechModelInfo? { SpeechModelCatalog.entry(for: selectedEngineId) }
+
+    func skipModelDownload() {
+        if catalog.contains(where: { $0.id == "apple" && $0.systemManaged }) {
+            selectEngine("apple")
+        }
+        step = .permissions
+    }
 
     func beginDownload() {
         downloading = true
@@ -223,6 +238,33 @@ final class FirstRunModel: ObservableObject {
         return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var aiCanFetchModels: Bool {
+        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if aiProvider == .openaiCompatible { return !base.isEmpty }
+        return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func fetchAIModels() async {
+        aiModelDiscoveryError = nil
+        aiFetchingModels = true
+        defer { aiFetchingModels = false }
+        do {
+            let models = try await listModels(aiDraftConnection(), aiAPIKey)
+            aiAvailableModels = models
+            if !models.isEmpty && !models.contains(aiModel.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                aiModel = models[0]
+            }
+        } catch {
+            let message = (error as? ModelListError)?.description ?? error.localizedDescription
+            aiModelDiscoveryError = "Could not fetch models: \(message)"
+        }
+    }
+
+    func resetAIModelDiscovery() {
+        aiAvailableModels = []
+        aiModelDiscoveryError = nil
+    }
+
     func createAIService() async {
         aiSetupError = nil
         let existing = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
@@ -262,7 +304,21 @@ final class FirstRunModel: ObservableObject {
             aiSetupError = "Connected \(name), but could not link \(unlinked.joined(separator: ", ")). You can link them in Settings."
             return
         }
-        finish()
+        step = .aiServiceComplete
+    }
+
+    private func aiDraftConnection() -> Connection {
+        let id = pendingConnectionId ?? "new-ai-service"
+        var connection = Connection(
+            id: id,
+            name: aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines),
+            provider: aiProvider,
+            model: aiModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            keyRef: "keyscribe.llm.\(id)")
+        if aiProvider == .openaiCompatible {
+            connection.baseUrl = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return connection
     }
 
     private func modesToConnect() -> [Mode] {

@@ -3,17 +3,23 @@
 # into a guided, one-at-a-time re-grant. Use after a botched/ad-hoc rebuild left stale grants that
 # show as "on" in System Settings but read as denied (and silently suppress each other's prompts).
 #
-# Optional first arg: path to KeyScribe.app (defaults to the repo's built bundle).
+# Targets the dev build by default (KEYSCRIBE_VARIANT=release to target the production install).
+# Optional first arg: explicit path to the .app bundle (overrides the variant default).
 set -euo pipefail
 
-BUNDLE_ID="com.keyscribe.app"
-APP_NAME="KeyScribe"
+# Variant selects which install's grants to wipe. Default dev — this is dev tooling. The executable
+# inside the bundle is named "KeyScribe" for both variants; only the bundle/name/id differ.
+case "${KEYSCRIBE_VARIANT:-dev}" in
+  release|prod|production) APP_NAME="KeyScribe";    BUNDLE_ID="com.keyscribe.app" ;;
+  dev|*)                   APP_NAME="KeyScribeDev"; BUNDLE_ID="com.keyscribe.app.dev" ;;
+esac
+EXECUTABLE="KeyScribe"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="${1:-${SCRIPT_DIR}/../${APP_NAME}.app}"
 
 echo "== Quitting ${APP_NAME} (so it re-reads permissions on next launch) =="
 osascript -e "quit app \"${APP_NAME}\"" >/dev/null 2>&1 || true
-pkill -f "${APP_NAME}.app/Contents/MacOS/${APP_NAME}" 2>/dev/null || true
+pkill -f "${APP_NAME}.app/Contents/MacOS/${EXECUTABLE}" 2>/dev/null || true
 sleep 1
 
 echo "== Wiping TCC grants for ${BUNDLE_ID} =="

@@ -35,7 +35,8 @@ struct HTTPLLMClient: LLMClient {
     var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
 
     func complete(system: String, user: String, connection: Connection) async throws -> String {
-        guard let key = keyProvider(connection.keyRef), !key.isEmpty else {
+        let key = keyProvider(connection.keyRef)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if connection.provider != .openaiCompatible, key?.isEmpty != false {
             throw LLMClientError.missingKey(connection.keyRef)
         }
         let request = try buildRequest(system: system, user: user, connection: connection, key: key)
@@ -47,7 +48,7 @@ struct HTTPLLMClient: LLMClient {
         return try parse(data, provider: connection.provider)
     }
 
-    private func buildRequest(system: String, user: String, connection: Connection, key: String) throws -> URLRequest {
+    private func buildRequest(system: String, user: String, connection: Connection, key: String?) throws -> URLRequest {
         let temp = connection.params.temperature
         let maxTokens = connection.params.maxTokens
 
@@ -56,7 +57,9 @@ struct HTTPLLMClient: LLMClient {
             let base = connection.baseUrl ?? (connection.provider == .openai ? "https://api.openai.com/v1" : nil)
             guard let base, let url = URL(string: base + "/chat/completions") else { throw LLMClientError.missingBaseURL }
             var req = jsonRequest(url)
-            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            if let key, !key.isEmpty {
+                req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
             req.httpBody = try body([
                 "model": connection.model,
                 "temperature": temp,
@@ -84,7 +87,7 @@ struct HTTPLLMClient: LLMClient {
 
         case .gemini:
             let base = "https://generativelanguage.googleapis.com/v1beta/models"
-            guard let url = URL(string: "\(base)/\(connection.model):generateContent?key=\(key)") else {
+            guard let key, let url = URL(string: "\(base)/\(connection.model):generateContent?key=\(key)") else {
                 throw LLMClientError.badResponse
             }
             var req = jsonRequest(url)

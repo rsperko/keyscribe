@@ -29,3 +29,7 @@ benchmark/voices/.tmpwav
 
 # direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead
 .envrc
+
+
+# release DMG build artifact (uploaded to GitHub Releases, never committed)
+KeyScribe-*.dmg
