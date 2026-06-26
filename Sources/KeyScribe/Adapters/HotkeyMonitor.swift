@@ -35,6 +35,7 @@ final class HotkeyMonitor {
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private let carbon: ChordRegistering
+    private let mouseTap: MouseTapping
 
     let onStart: (String?) -> Void
     let onCommit: (String?) -> Void
@@ -44,7 +45,8 @@ final class HotkeyMonitor {
         bindings: [Binding], actionBindings: [ActionBinding] = [],
         onStart: @escaping (String?) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
-        carbon: ChordRegistering = CarbonHotKeys()
+        carbon: ChordRegistering = CarbonHotKeys(),
+        mouseTap: MouseTapping = MouseEventTap()
     ) {
         self.bindings = bindings
         self.actionBindings = actionBindings
@@ -52,12 +54,15 @@ final class HotkeyMonitor {
         self.onCommit = onCommit
         self.onAction = onAction
         self.carbon = carbon
+        self.mouseTap = mouseTap
+        self.mouseTap.onEdge = { [weak self] button, edge in self?.fireMouse(button: button, edge: edge) }
     }
 
     func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
         self.bindings = bindings
         self.actionBindings = actionBindings
         rebuildCarbon()
+        rebuildMouse()
     }
 
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
@@ -73,7 +78,7 @@ final class HotkeyMonitor {
 
     @discardableResult
     func start() -> Bool {
-        defer { rebuildCarbon() }
+        defer { rebuildCarbon(); rebuildMouse() }
         if tap != nil { return true }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         guard let tap = makeTap(mask: mask, options: .listenOnly) else {
@@ -102,6 +107,7 @@ final class HotkeyMonitor {
         tap = nil
         runLoopSource = nil
         carbon.stop()
+        mouseTap.stop()
         activeHotkeyMonitor = nil
     }
 
@@ -121,6 +127,7 @@ final class HotkeyMonitor {
         didSet {
             guard isSuspended != oldValue else { return }
             if isSuspended { carbon.update([]) } else { rebuildCarbon() }
+            rebuildMouse()
         }
     }
 
@@ -165,6 +172,26 @@ final class HotkeyMonitor {
         fire(index: index, edge: edge, now: ProcessInfo.processInfo.systemUptime)
     }
 
+    // Mouse-button triggers ride a separate consuming tap (`MouseEventTap`), not the modifier tap or
+    // Carbon — a mouse button is neither a `keyDown` chord nor a bare modifier. Empty set while
+    // suspended so a recorder capturing a mouse button sees the raw click.
+    private func rebuildMouse() {
+        guard !isSuspended else { mouseTap.setConsumedButtons([]); return }
+        var buttons: Set<Int> = []
+        for binding in bindings {
+            if case .mouseButton(let n) = binding.descriptor { buttons.insert(n) }
+        }
+        mouseTap.setConsumedButtons(buttons)
+    }
+
+    private func fireMouse(button: Int, edge: TriggerEdge) {
+        guard let index = bindings.firstIndex(where: {
+            if case .mouseButton(let n) = $0.descriptor { return n == button }
+            return false
+        }) else { return }
+        fire(index: index, edge: edge, now: ProcessInfo.processInfo.systemUptime)
+    }
+
     private func fire(index: Int, edge: TriggerEdge, now: TimeInterval) {
         let key = bindings[index].triggerKey
         switch bindings[index].gesture.handle(edge, at: now) {
@@ -206,7 +233,7 @@ final class HotkeyMonitor {
             }
             return flags.contains(bit) ? .down : .up
 
-        case .chord:
+        case .chord, .mouseButton:
             return nil
         }
     }

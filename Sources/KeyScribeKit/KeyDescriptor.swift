@@ -44,6 +44,7 @@ public enum BaseKey: Equatable, Sendable {
 public enum KeyDescriptor: Equatable, Sendable {
     case named(NamedKey)
     case chord(modifiers: Set<Modifier>, key: BaseKey)
+    case mouseButton(Int)
 }
 
 public enum TriggerKeyError: Error, Equatable {
@@ -67,6 +68,11 @@ extension KeyDescriptor {
 
         if tokens.count == 1, let named = NamedKey(token: first) {
             self = .named(named)
+            return
+        }
+
+        if tokens.count == 1, let button = KeyDescriptor.mouseButtonNumber(token: first) {
+            self = .mouseButton(button)
             return
         }
 
@@ -96,7 +102,13 @@ extension KeyDescriptor {
         case .chord(let mods, let key):
             let ordered = Modifier.allCases.filter { mods.contains($0) }.map(\.rawValue)
             return (ordered + [key.canonicalToken]).joined(separator: "+")
+        case .mouseButton(let n): return "mouse\(n)"
         }
+    }
+
+    static func mouseButtonNumber(token: String) -> Int? {
+        guard token.hasPrefix("mouse"), let n = Int(token.dropFirst(5)), n >= 2 else { return nil }
+        return n
     }
 
     public var requiredModifiers: Set<Modifier> {
@@ -106,6 +118,7 @@ extension KeyDescriptor {
         case .named(.rightCommand): return [.command]
         case .named(.fn): return []
         case .chord(let mods, _): return mods
+        case .mouseButton: return []
         }
     }
 
@@ -116,6 +129,7 @@ extension KeyDescriptor {
         case .named(.rightCommand): return [.command]
         case .named(.fn): return []
         case .chord(let mods, _): return ModifierSet(mods)
+        case .mouseButton: return []
         }
     }
 
@@ -126,6 +140,7 @@ extension KeyDescriptor {
         case .named(.rightCommand): return 54
         case .named(.hyper): return 55
         case .chord(_, let key): return key.keyCode
+        case .mouseButton(let n): return n
         }
     }
 
@@ -137,9 +152,21 @@ extension KeyDescriptor {
         self = .chord(modifiers: modifiers, key: base)
     }
 
-    /// Two descriptors collide when they would fire on the same physical event.
+    /// Build a mouse trigger from a live-captured mouse event. Rejects the primary buttons
+    /// (left = 0, right = 1) so a trigger can never hijack a normal click.
+    public init?(eventButtonNumber: Int) {
+        guard eventButtonNumber >= 2 else { return nil }
+        self = .mouseButton(eventButtonNumber)
+    }
+
+    /// Two descriptors collide when they would fire on the same physical event. Mouse buttons live in
+    /// a separate input space from keys, so they only ever collide with the same mouse button.
     public func collides(with other: KeyDescriptor) -> Bool {
-        triggerKeyCode == other.triggerKeyCode && requiredModifiers == other.requiredModifiers
+        switch (self, other) {
+        case let (.mouseButton(a), .mouseButton(b)): return a == b
+        case (.mouseButton, _), (_, .mouseButton): return false
+        default: return triggerKeyCode == other.triggerKeyCode && requiredModifiers == other.requiredModifiers
+        }
     }
 
     public var displayString: String {
@@ -151,6 +178,7 @@ extension KeyDescriptor {
         case .chord(let mods, let key):
             let glyphs = Modifier.allCases.filter { mods.contains($0) }.map(\.glyph).joined()
             return glyphs + key.displayString
+        case .mouseButton(let n): return "Mouse Button \(n)"
         }
     }
 }

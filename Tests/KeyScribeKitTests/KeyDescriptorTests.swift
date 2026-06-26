@@ -101,4 +101,44 @@ struct KeyDescriptorTests {
         #expect(try !a.collides(with: KeyDescriptor(parsing: "control+option+b")))
         #expect(!KeyDescriptor.named(.fn).collides(with: .named(.rightOption)))
     }
+
+    @Test func parsesMouseButtons() throws {
+        #expect(try KeyDescriptor(parsing: "mouse2") == .mouseButton(2))
+        #expect(try KeyDescriptor(parsing: "mouse3") == .mouseButton(3))
+        #expect(try KeyDescriptor(parsing: "mouse4") == .mouseButton(4))
+    }
+
+    @Test func primaryMouseButtonsAreRejected() {
+        #expect(throws: TriggerKeyError.unknownToken("mouse0")) { try KeyDescriptor(parsing: "mouse0") }
+        #expect(throws: TriggerKeyError.unknownToken("mouse1")) { try KeyDescriptor(parsing: "mouse1") }
+    }
+
+    @Test func mouseButtonCanonicalRoundTrips() throws {
+        for s in ["mouse2", "mouse3", "mouse4", "mouse10"] {
+            #expect(try KeyDescriptor(parsing: s).canonical == s)
+        }
+    }
+
+    @Test func mouseButtonDisplayString() throws {
+        #expect(try KeyDescriptor(parsing: "mouse3").displayString == "Mouse Button 3")
+    }
+
+    @Test func mouseButtonHasNoModifiers() throws {
+        #expect(try KeyDescriptor(parsing: "mouse4").requiredModifiers.isEmpty)
+        #expect(try KeyDescriptor(parsing: "mouse4").requiredModifierMask.isEmpty)
+    }
+
+    @Test func buildsMouseButtonFromCapturedEvent() {
+        #expect(KeyDescriptor(eventButtonNumber: 3) == .mouseButton(3))
+        #expect(KeyDescriptor(eventButtonNumber: 1) == nil)
+        #expect(KeyDescriptor(eventButtonNumber: 0) == nil)
+    }
+
+    @Test func mouseButtonsCollideOnlyWithSameButton() throws {
+        let m3 = try KeyDescriptor(parsing: "mouse3")
+        #expect(try m3.collides(with: KeyDescriptor(parsing: "mouse3")))
+        #expect(try !m3.collides(with: KeyDescriptor(parsing: "mouse4")))
+        #expect(!m3.collides(with: .named(.fn)))
+        #expect(try !m3.collides(with: KeyDescriptor(parsing: "control+option+c")))
+    }
 }

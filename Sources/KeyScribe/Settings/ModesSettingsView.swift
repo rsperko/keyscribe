@@ -475,18 +475,17 @@ private struct ModeEditorView: View {
             // no separate "Shortcut" row. Choosing "Custom shortcut…" arms it in place immediately;
             // Esc or clearing reverts to the menu. (autostart only when freshly entering custom.)
             if isCustom {
-                LabeledContent("Mode shortcut") {
+                LabeledContent("Start this mode with") {
                     HotkeyRecorder(
                         key: triggerKey, autostart: capturingCustom,
                         onCancel: { capturingCustom = false })
                 }
             } else {
-                Picker("Mode shortcut", selection: triggerSelection) {
+                Picker("Start this mode with", selection: triggerSelection) {
                     Text("No mode shortcut").tag("")
                     Text("Fn (Globe)").tag("fn")
                     Text("Right Option").tag("right_option")
                     Text("Right Command").tag("right_command")
-                    Text("Hyper").tag("hyper")
                     Text("Custom shortcut…").tag(customTriggerTag)
                 }
             }
@@ -501,7 +500,7 @@ private struct ModeEditorView: View {
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
-            Text("A mode shortcut starts this mode directly. Without one, it can still be selected by routing rules and spoken routing.")
+            Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by KeyScribe while it runs, so they won’t also go Back or Forward in other apps.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DisclosureSection("Advanced routing", isExpanded: $routingExpanded) {
@@ -894,6 +893,7 @@ private struct ModeEditorView: View {
         if capturingCustom { return true }
         guard let descriptor = try? KeyDescriptor(parsing: mode.triggerKeys.first?.key ?? "") else { return false }
         if case .chord = descriptor { return true }
+        if case .mouseButton = descriptor { return true }
         return false
     }
 

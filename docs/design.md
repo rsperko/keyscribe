@@ -50,6 +50,10 @@ sensitive content is tokenized out before it leaves the machine and restored aft
 - Cross-platform (macOS-only native Swift).
 - **Cloud STT** or required accounts.
 - Wake-word / always-listening.
+- **Silence-based auto-stop (VAD endpointing).** Evaluated and declined — few valuable use cases,
+  only a saved keystroke over the existing tap-to-toggle, the premium category deliberately avoids
+  it, and its natural use (long-form) fights our batch/paste model. Revisit only as an accessibility
+  feature.
 - File/batch transcription as a primary surface (diarization capability exists via the STT
   library, but the product is live dictation first).
 

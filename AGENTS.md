@@ -182,6 +182,20 @@ keyscribe/
       dispatches the chord and suppresses it from the focused app. Delivers
       `kEventHotKeyPressed`/`Released`, so hold/tap gestures work. Cannot register a bare
       modifier-less key (needs ≥1 modifier).
+    - **Mouse-button triggers** (`mouseN`, button ≥ 2 — middle / thumb buttons) → a **`.defaultTap`**
+      `CGEventTap` watching `.otherMouseDown`/`.otherMouseUp` (`MouseEventTap`). Mouse-button events,
+      unlike `keyDown`, are delivered under **Accessibility alone** — no Input Monitoring (verified
+      against VoiceInk/OpenWhispr, both Accessibility-only). It is **active/consuming** (returns `nil`
+      for a bound button) so the button does not also fire its normal action; the bound button is
+      therefore swallowed globally while the app runs, the same trade Wispr/Superwhisper make.
+      **Footgun: this is the ONE consuming tap, and it must NEVER run on the main run loop.** An active
+      tap is synchronous (the window server blocks on the callback); the original freeze was a
+      `.defaultTap` on the *main* thread held hostage by a wedged main thread (Bluetooth A2DP→HFP audio
+      bring-up). `MouseEventTap` runs the tap on a **dedicated run-loop thread**; its callback only reads
+      a lock-guarded `Set<Int>` and hands the edge to main async — it touches no audio/AX/SwiftUI, so a
+      wedged main thread (a different thread) can never block it. The button set is emptied while a
+      `HotkeyRecorder` is capturing, so a mouse button can be recorded as the raw click. Mouse cannot ride
+      Carbon (keyboard-only) or the modifier tap (listen-only can't consume).
     - **ESC-to-cancel** → handled as a **local** keystroke by the recording HUD, made key only while
       recording (see the HUD-is-key footgun above). A local `NSEvent` monitor needs no permission.
 - **Context:** frontmost bundle id always available; **⌘C→pasteboard is the universal selection

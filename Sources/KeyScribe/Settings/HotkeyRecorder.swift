@@ -128,9 +128,12 @@ final class RecorderButtonView: NSButton {
         // The load-bearing fix: a local monitor sees the keystroke before SwiftUI's List type-select
         // (which runs ahead of performKeyEquivalent and ignores first responder). Returning nil here
         // swallows the event, so recording a shortcut never navigates the mode/sidebar list.
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged, .otherMouseDown]
+        ) { [weak self] event in
             guard let self, self.recording, event.window === self.window else { return event }
             if event.type == .keyDown { _ = self.capture(event) }
+            else if event.type == .otherMouseDown { _ = self.captureMouse(event) }
             return nil
         }
         refreshTitle()
@@ -180,12 +183,23 @@ final class RecorderButtonView: NSButton {
         return true
     }
 
+    private func captureMouse(_ event: NSEvent) -> Bool {
+        guard recording else { return false }
+        if let descriptor = KeyDescriptor(eventButtonNumber: event.buttonNumber) {
+            captured = true
+            currentKey = descriptor.canonical
+            onCapture?(descriptor.canonical)
+            window?.makeFirstResponder(nil)
+        }
+        return true
+    }
+
     private func refreshTitle() {
         title = label
     }
 
     private var label: String {
-        if recording { return "Press a shortcut…  (Esc to cancel)" }
+        if recording { return "Press keys or a mouse button…  Esc cancels" }
         if let descriptor = try? KeyDescriptor(parsing: currentKey) { return descriptor.displayString }
         return "Set Shortcut"
     }

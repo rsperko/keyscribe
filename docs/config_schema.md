@@ -299,9 +299,15 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 - **`include_global` is per-set** — dictionary and replacements each carry their own flag.
 - **Key descriptor format** — lowercase tokens joined by `+`: modifiers (`control` `option`
   `command` `shift`) plus a key, or a named single key (`fn`/`globe`, `right_option`,
-  `right_command`, `hyper`, `f5`). Examples: `"fn"`, `"right_option"`, `"control+option+a"`.
-  **Recommended default for new modes: `fn`/Globe with `hold-or-tap`** (most familiar — Wispr
-  and Apple both center on it), with **`right_option`** offered as the conflict-free
+  `right_command`, `hyper`, `f5`), or a non-primary mouse button `mouseN` where `N` is the
+  macOS button number ≥ 2 (`mouse2` = middle, `mouse3`/`mouse4` = the back/forward thumb
+  buttons; left = 0 and right = 1 are rejected so a trigger can never hijack a normal click).
+  Examples: `"fn"`, `"right_option"`, `"control+option+a"`, `"mouse4"`. A bound mouse button is
+  **consumed globally** while KeyScribe runs — it no longer performs its normal action (e.g.
+  browser back) — which is the same trade other dictation apps (Wispr, Superwhisper) make.
+  Mouse buttons are observed under Accessibility alone (no Input Monitoring), like the modifier
+  triggers. **Recommended default for new modes: `fn`/Globe with `hold-or-tap`** (most familiar —
+  Wispr and Apple both center on it), with **`right_option`** offered as the conflict-free
   alternative (Apple Dictation also double-taps Fn).
 - **Per-mode language** — out of scope (language follows the active engine, `design.md` §4.1);
   no `language` field.
