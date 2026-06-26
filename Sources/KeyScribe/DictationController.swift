@@ -87,6 +87,17 @@ final class DictationController {
     private var capturedEngine: (any SpeechEngine)?
     private var activeEngine: any SpeechEngine { capturedEngine ?? provider.active }
 
+    // The in-flight (or completed) model load for `warmEngineId`, so the press-time warm and the
+    // commit-time wait share ONE load instead of racing two concurrent compiles of a multi-hundred-MB
+    // model. Invalidated whenever that engine is evicted (its model goes back to nil).
+    private var warmTask: Task<Void, Error>?
+    private var warmEngineId: String?
+    // Backstop for a wedged model load. Real cold loads are slow (a 632 MB CoreML model measured ~140 s
+    // to load even from a compiled cache), so this only fires on a genuine hang — far above any real
+    // load — and, because loading runs OUTSIDE the transcribe single-flight gate, a load that trips it
+    // surfaces an error without wedging the next dictation.
+    private static let modelLoadDeadlineSeconds: Double = 300
+
     // An engine the user switched away from while a dictation was in flight. Evicting it immediately
     // would race the in-flight transcribe (the non-actor engines close their transcriber under it), so
     // we hold it until the dictation reaches a terminal state and evict it then.
@@ -196,6 +207,7 @@ final class DictationController {
     // dictation is mid-flight on it: the non-actor engines close their transcriber synchronously, so
     // evicting under a live transcribe is a use-after-close. Defer to the terminal state instead.
     func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
+        invalidateWarm(engine.id)
         if machine.isBusy {
             deferredEvictionEngine = engine
         } else {
@@ -209,6 +221,7 @@ final class DictationController {
     // (drained in releaseCapturedPlan) so neither the evict nor the caller's file delete races the live
     // transcribe.
     func evictEngineForSettings(_ engine: any SpeechEngine) async {
+        invalidateWarm(engine.id)
         if !machine.isBusy || capturedEngine?.id != engine.id {
             await engine.evict()
             return
@@ -222,8 +235,44 @@ final class DictationController {
     // compile, ANE warmup) with the user's speech instead of paying it after key-release. Idempotent
     // — a no-op once loaded — and never blocks recording: failures surface later at transcribe time.
     private func warmActiveEngine() {
-        let active = activeEngine
-        Task { try? await active.loadIfNeeded() }
+        _ = warm(activeEngine)
+    }
+
+    // Start (or reuse) the single load for `engine`. Idempotent per engine: a launch preload, the
+    // press-time warm, and the commit-time wait all resolve to the same Task, so the model compiles
+    // once. Cleared by `invalidateWarm` on eviction so the next press reloads.
+    @discardableResult
+    private func warm(_ engine: any SpeechEngine) -> Task<Void, Error> {
+        if warmEngineId == engine.id, let task = warmTask { return task }
+        let clip = Self.warmupClipURL
+        // Warm with the user's actual global dictionary, not []. For bias-capable engines this also compiles
+        // the bias path — notably Parakeet, whose CTC-WS bias model is NOT loaded by loadIfNeeded() and would
+        // otherwise compile mid-dictation on the first biased transcribe. Empty dictionary ⇒ [] ⇒ Parakeet
+        // keeps skipping the CTC load entirely, preserving that optimization for users who never bias.
+        let biasTerms = plan.recognitionBiasTerms(for: nil)
+        let task = Task {
+            try await engine.loadIfNeeded()
+            // Warm the inference graph on a throwaway clip so the user's first real dictation isn't the one
+            // that pays the one-time first-predict compile (MLX kernel JIT / CoreML graph specialization) —
+            // Qwen's first transcribe measured ~3 s cold vs ~50 ms warm. Started at launch/press, it overlaps
+            // the user's speech, so the cost is usually invisible. Best-effort: a warmup failure (e.g. the
+            // clip is absent under `swift run`) must never fail the load. The commit-time await of this same
+            // task serializes warmup before the real transcribe, so the non-actor engines are never reentered.
+            if let clip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
+        }
+        warmEngineId = engine.id
+        warmTask = task
+        return task
+    }
+
+    // Throwaway clip used to warm the inference graph (the bundled self-test recording). Absent under
+    // `swift run`/tests, where warmup is simply skipped.
+    private static let warmupClipURL = Bundle.main.url(forResource: "model-selftest", withExtension: "wav")
+
+    private func invalidateWarm(_ engineId: String) {
+        guard warmEngineId == engineId else { return }
+        warmTask = nil
+        warmEngineId = nil
     }
 
     // Launch-time warm so the first dictation isn't a cold model load — independent of the eviction
@@ -520,6 +569,27 @@ final class DictationController {
         let engine = activeEngine
         building.audioSeconds = (try? AVAudioFile(forReading: url))
             .map { Double($0.length) / $0.fileFormat.sampleRate }
+
+        // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a legitimate one-time
+        // cost — a 632 MB model measured ~140 s to load even from a compiled cache — so counting it
+        // against the per-utterance transcribe deadline (≥30 s) both false-times-out a healthy load and,
+        // because the abandoned load keeps running, leaves the single-flight gate `Busy` so every later
+        // dictation reports "Still finishing…" until it settles. Awaiting the single warm load (started at
+        // press, overlapping speech) here keeps the deadline on inference, where it belongs.
+        do {
+            try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = warm(engine)] in
+                try await task.value
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            if Task.isCancelled { return }
+            invalidateWarm(engine.id)
+            let timedOut = error is DeadlineExceeded
+            log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+            finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
+            return
+        }
+
         let transcribeStart = DispatchTime.now()
         let raw: String
         do {
@@ -678,6 +748,7 @@ final class DictationController {
         switch EvictionPolicy.afterDictation(mode: settings.stt.eviction, idleSeconds: idle) {
         case .keepLoaded: break
         case .evictNow:
+            invalidateWarm(engine.id)
             Task { await engine.evict() }
         case .scheduleIdleCheck(let after): scheduleIdleEviction(after: after, engine: engine)
         }
@@ -693,7 +764,9 @@ final class DictationController {
             guard let self, !Task.isCancelled, !self.machine.isBusy else { return }
             let now = ProcessInfo.processInfo.systemUptime
             switch EvictionPolicy.onIdleCheck(mode: mode, lastUsedAt: usedAt, now: now, idleSeconds: idle) {
-            case .evictNow: await active.evict()
+            case .evictNow:
+                self.invalidateWarm(active.id)
+                await active.evict()
             case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again, engine: active)
             case .keepLoaded: break
             }

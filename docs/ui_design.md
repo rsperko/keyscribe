@@ -222,8 +222,13 @@ that?
 
 ```
 KeyScribe
-Status: Ready · On-device speech
-Next dictation: Automatic — Plain Dictation
+Plain Dictation · Parakeet TDT-CTC 110M
+
+Speech Model ▸
+  Parakeet TDT-CTC 110M ✓
+  Apple Speech
+  ─────────────
+  Manage Speech Models…
 
 Dictate with ▸
   Automatic — Plain Dictation ✓
@@ -244,6 +249,18 @@ Settings…
 About & Notices…
 Quit KeyScribe
 ```
+
+The first row is a single status line that answers "ready?", "what mode?", and "which model?" at once.
+When ready it reads **`<next mode> · <model>`** — the mode being the pending **one-shot override** if one
+is set, otherwise the mode that Automatic resolves to (never the literal word "Automatic"); the model
+is the active STT engine. When something needs attention it is **replaced** by the problem text
+(config error, a missing permission, or `Relaunch to finish setup`), in that precedence. There is no
+separate "Next dictation" row — selecting a one-shot mode is reflected here, in the `Dictate with`
+checkmark, and in the HUD acknowledgement.
+
+`Speech Model ▸` lists the **usable** (installed or system-managed) engines with the active one
+checkmarked; selecting one switches the active STT engine (and starts loading + warming it). `Manage
+Speech Models…` opens the full Speech Models settings pane for installs, deletes, and self-tests.
 
 > **`Add to Vocabulary…`** opens the standalone vocabulary panel; it is
 > always present here and is also bound to a global chord shortcut (default ⌃⌥⇧V, rebindable

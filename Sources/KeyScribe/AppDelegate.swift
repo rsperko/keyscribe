@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
         menu.onOpenHistory = { [weak self] in self?.historyController.present() }
         menu.onOpenSettings = { [weak self] in self?.settingsController.present() }
+        menu.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         menu.onOpenNotices = { [weak self] in self?.notices.present() }
         menu.onMenuWillOpen = { [weak self] in self?.refreshStatus() }
         menu.onSelectNextMode = { [weak self] id in
@@ -73,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.acknowledgeNextMode()
             self?.refreshStatus()
         }
+        menu.onSelectSpeechModel = { [weak self] id in self?.speechModels.select(id) }
         menu.onAddVocabulary = { [weak self] in self?.correctionPanel.present() }
         controller.onRecordingChanged = { [weak self] active in self?.menu.setDictating(active) }
         controller.onBecameIdle = { [weak self] in
@@ -271,6 +273,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
                 controller.evictSwitchedAwayEngine(previous)
+                // Selecting an engine is intent to use it — start loading + warming it now (if installed) so
+                // the first dictation isn't the one that pays a cold load. Without this the newly-selected
+                // model stayed cold until first press (a big model like Whisper made that very visible).
+                controller.preloadActiveEngineIfNeeded()
             }
         }
         settings = updated
@@ -355,6 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.setModes(
             modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideName,
             inertReasons: inertReasons)
+        menu.setSpeechModels(speechModels.rows)
         let problems = currentProblems()
         menu.setErrorBadge(!problems.isEmpty)
         settingsController?.refreshProblems()
@@ -368,7 +375,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !(hotkey?.isTapActive ?? true) {
             menu.setStatus("Relaunch to finish setup")
         } else {
-            menu.setStatus("Ready · On-device speech")
+            // Collapse the old "Next dictation:" row into the status line: the mode portion names the mode
+            // the next dictation will use — a one-shot override if one is pending, otherwise the default
+            // mode that Automatic resolves to. Falls back to just the model when no mode is configured.
+            let nextMode = controller.nextModeOverrideName ?? automatic?.name
+            let model = speechModels.activeName
+            menu.setStatus(nextMode.map { "\($0) · \(model)" } ?? model)
         }
     }
 

@@ -43,8 +43,17 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
                 progress?(.init(phase: "Downloading speech model…", fraction: p.fractionCompleted * downloadShare))
             })
         progress?(.init(phase: "Compiling speech model…", fraction: downloadShare))
+        // Run on the GPU, not the Neural Engine. WhisperKit defaults the audio encoder and text decoder to
+        // .cpuAndNeuralEngine, whose first-load ANE device-compile of this 632 MB model takes ~140 s — and
+        // here it failed to cache, paying that cost on EVERY load. .cpuAndGPU compiles Metal shaders once
+        // (~24 s first ever, ~2 s from cache thereafter, persisted across launches) at the cost of a slightly
+        // higher RTF (~0.12, still 8× faster than real time). For an intermittently-used dictation model the
+        // load saving dominates; bias (promptTokens) is unaffected.
+        let compute = ModelComputeOptions(
+            melCompute: .cpuAndGPU, audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndGPU)
         let config = WhisperKitConfig(
-            modelFolder: folder.path, verbose: false, prewarm: false, load: true, download: false)
+            modelFolder: folder.path, computeOptions: compute,
+            verbose: false, prewarm: false, load: true, download: false)
         pipe = try await WhisperKit(config)
         progress?(.init(phase: "Ready", fraction: 1))
     }

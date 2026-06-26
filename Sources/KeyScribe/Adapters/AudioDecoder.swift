@@ -45,9 +45,19 @@ enum AudioDecoder {
         let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames)!
         var out: [Float] = []
         out.reserveCapacity(Int(file.length))
+        // AVAudioFile.read(into:) throws (a bare `nilError`) at end-of-stream instead of returning a
+        // zero-length read, so a throw after at least one successful read is a normal EOF — break on it
+        // rather than failing the whole decode. (ChunkReader.feed swallows the same throw on the resampling
+        // path; the fast path must too, else every same-rate clip fails to decode.) A throw on the very
+        // first read is a real error and propagates.
+        var read = 0
         while true {
-            try file.read(into: chunk)
+            do { try file.read(into: chunk) } catch {
+                if read == 0 { throw error }
+                break
+            }
             if chunk.frameLength == 0 { break }
+            read += 1
             append(chunk, to: &out)
         }
         return out

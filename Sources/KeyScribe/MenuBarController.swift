@@ -37,10 +37,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     static let statusIcon: NSImage = glyph(color: nil)
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let statusLine = NSMenuItem(title: "Status: starting…", action: nil, keyEquivalent: "")
-    private let nextModeLine = NSMenuItem(title: "Next dictation: Automatic", action: nil, keyEquivalent: "")
+    private let statusLine = NSMenuItem(title: "starting…", action: nil, keyEquivalent: "")
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
     private let addVocabularyItem = NSMenuItem(title: "Add to Vocabulary…", action: nil, keyEquivalent: "")
+    private let speechModelsMenu = NSMenu()
     private let modesMenu = NSMenu()
 
     private let badgeDot: NSView = {
@@ -56,9 +56,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onPasteLast: (() -> Void)?
     var onOpenHistory: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onOpenSpeechModels: (() -> Void)?
     var onOpenNotices: (() -> Void)?
     var onMenuWillOpen: (() -> Void)?
     var onSelectNextMode: ((String?) -> Void)?
+    var onSelectSpeechModel: ((String) -> Void)?
     var onAddVocabulary: (() -> Void)?
 
     private let variant = AppVariant(bundleID: Bundle.main.bundleIdentifier)
@@ -84,8 +86,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusLine.isEnabled = false
         menu.addItem(statusLine)
 
-        nextModeLine.isEnabled = false
-        menu.addItem(nextModeLine)
+        let speechModel = NSMenuItem(title: "Speech Model", action: nil, keyEquivalent: "")
+        speechModel.submenu = speechModelsMenu
+        menu.addItem(speechModel)
 
         let dictateWith = NSMenuItem(title: "Dictate with", action: nil, keyEquivalent: "")
         dictateWith.submenu = modesMenu
@@ -123,8 +126,28 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
 
-    func setStatus(_ text: String) { statusLine.title = "Status: \(text)" }
+    func setStatus(_ text: String) { statusLine.title = text }
     func setHasResult(_ hasResult: Bool) { pasteLastItem.isEnabled = hasResult }
+
+    func setSpeechModels(_ rows: [SpeechModelsModel.Row]) {
+        speechModelsMenu.removeAllItems()
+        for row in rows where row.isUsable {
+            let item = NSMenuItem(title: row.info.displayName, action: #selector(selectSpeechModel), keyEquivalent: "")
+            item.target = self
+            item.representedObject = row.id
+            item.state = row.isActive ? .on : .off
+            speechModelsMenu.addItem(item)
+        }
+        if speechModelsMenu.items.isEmpty {
+            let empty = NSMenuItem(title: "No usable speech models", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            speechModelsMenu.addItem(empty)
+        }
+        speechModelsMenu.addItem(.separator())
+        let manage = NSMenuItem(title: "Manage Speech Models…", action: #selector(openSpeechModels), keyEquivalent: "")
+        manage.target = self
+        speechModelsMenu.addItem(manage)
+    }
 
     // Mirror the active (non-shadowed, chord-only) global shortcuts onto the menu items as a
     // right-aligned glyph. Nil clears it — unset or shadowed shouldn't advertise a shortcut.
@@ -160,8 +183,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         _ modes: [Mode], automaticName: String?, overrideName: String?,
         inertReasons: [String: String] = [:]
     ) {
-        nextModeLine.title = overrideName.map { "Next dictation: \($0)" }
-            ?? "Next dictation: Automatic\(automaticName.map { " — \($0)" } ?? "")"
         modesMenu.removeAllItems()
         let automatic = NSMenuItem(title: "Automatic\(automaticName.map { " — \($0)" } ?? "")", action: #selector(selectAutomatic), keyEquivalent: "")
         automatic.target = self
@@ -193,8 +214,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func pasteLast() { onPasteLast?() }
     @objc private func openHistory() { onOpenHistory?() }
     @objc private func openSettings() { onOpenSettings?() }
+    @objc private func openSpeechModels() { onOpenSpeechModels?() }
     @objc private func openNotices() { onOpenNotices?() }
     @objc private func selectAutomatic() { onSelectNextMode?(nil) }
     @objc private func selectMode(_ sender: NSMenuItem) { onSelectNextMode?(sender.representedObject as? String) }
+    @objc private func selectSpeechModel(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onSelectSpeechModel?(id)
+    }
     @objc private func addVocabulary() { onAddVocabulary?() }
 }
