@@ -367,11 +367,13 @@ the active engine or leaves no usable engine.
 
 Both screens prioritize fast correction over configuration theory.
 
-- Add to Vocabulary: one row, `Word or heard phrase → Use instead (optional)`. Leaving **Use instead**
-  empty adds a dictionary word; filling it in creates a replacement. The first field keeps focus after
-  adding so repeated entries are fast. A **Match heard phrase as a regular expression** checkbox stays
-  in this add row; when checked, the first label becomes **Heard pattern**, **Use instead** is required,
-  and the row can create only a replacement.
+- Add to Vocabulary: one compact composer with stacked fields, **Word or heard phrase** and
+  **Use instead (optional)**, so labels stay readable in global settings, mode settings, and the
+  standalone panel. Leaving **Use instead** empty adds a dictionary word; filling it in creates a
+  replacement. The first field keeps focus after adding so repeated entries are fast. A **Match heard
+  phrase as a regular expression** checkbox stays in this composer; when checked, the first label
+  becomes **Heard pattern**, **Use instead** is required, and the composer can create only a
+  replacement.
 - Dictionary: edit/remove saved words, import/export later only if needed.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on

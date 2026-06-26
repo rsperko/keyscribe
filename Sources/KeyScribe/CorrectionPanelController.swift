@@ -159,26 +159,26 @@ private struct CorrectionPanelView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(regex ? "Heard pattern" : "Word or heard phrase")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField(regex ? "Regex pattern" : "e.g. Kubernetes", text: $term)
+                    TextField(regex ? "Regular expression" : "e.g. Kubernetes", text: $term)
                         .textFieldStyle(.roundedBorder)
                         .focused($focus, equals: .term)
                         .onSubmit(commitSave)
+                        .frame(maxWidth: .infinity)
                 }
-                Image(systemName: "arrow.right")
-                    .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(regex ? "Use instead" : "Use instead (optional)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField(regex ? "Required for regex" : "Leave empty to add a word", text: $replace)
+                    TextField(regex ? "Replacement text" : "Optional correction", text: $replace)
                         .textFieldStyle(.roundedBorder)
                         .focused($focus, equals: .replace)
                         .onSubmit(commitSave)
+                        .frame(maxWidth: .infinity)
                 }
             }
 
@@ -257,9 +257,9 @@ private struct CorrectionPanelView: View {
 
     private var helpText: String {
         if regex {
-            return "Regex creates a replacement, so Use instead is required. Use captures like $1. Replacements run before any AI rewrite."
+            return "Regex always creates a replacement, so Use instead is required. Use captures like $1. Replacements run before any AI rewrite."
         }
-        return "Leave Use instead empty to add a word. Fill it in to create a replacement. Dictionary entries are hints; replacements run before any AI rewrite."
+        return "Leave Use instead empty to add a word. Fill it in to create an automatic replacement. Dictionary entries are hints; replacements run before any AI rewrite."
     }
 
     private func commitSave() {

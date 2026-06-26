@@ -46,30 +46,26 @@ struct VocabularyComposer: View {
     private enum Field { case heard, replace }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(regex ? "Heard pattern" : "Word or heard phrase")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField(regex ? "Regex pattern" : "Add a word or heard phrase", text: $heard)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($focus, equals: .heard)
-                        .onSubmit(commit)
-                }
-                Image(systemName: "arrow.right")
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(regex ? "Heard pattern" : "Word or heard phrase")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(regex ? "Use instead" : "Use instead (optional)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField(regex ? "Required for regex" : "Leave empty to add a word", text: $replace)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($focus, equals: .replace)
-                        .onSubmit(commit)
-                }
-                Button("Add", action: commit)
-                    .disabled(!canAdd)
+                TextField(regex ? "Regular expression" : "Add a word or heard phrase", text: $heard)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focus, equals: .heard)
+                    .onSubmit(commit)
+                    .frame(maxWidth: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(regex ? "Use instead" : "Use instead (optional)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField(regex ? "Replacement text" : "Optional correction", text: $replace)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focus, equals: .replace)
+                    .onSubmit(commit)
+                    .frame(maxWidth: .infinity)
             }
             Toggle("Match heard phrase as a regular expression", isOn: $regex)
                 .toggleStyle(.checkbox)
@@ -81,6 +77,11 @@ struct VocabularyComposer: View {
                 Label("That is not a valid regular expression.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Add", action: commit)
+                    .disabled(!canAdd)
             }
         }
         .onAppear { focus = .heard }
@@ -95,9 +96,9 @@ struct VocabularyComposer: View {
 
     private var helpText: String {
         if regex {
-            return "Regex creates a replacement, so Use instead is required. Use captures like $1."
+            return "Regex always creates a replacement, so Use instead is required. Use captures like $1."
         }
-        return "Leave Use instead empty to add a word. Fill it in to create a replacement."
+        return "Leave Use instead empty to add a word. Fill it in to create an automatic replacement."
     }
 
     private func commit() {
