@@ -63,9 +63,11 @@ struct FirstRunView: View {
             }
             Spacer()
             HStack {
-                Button("Use Apple Speech") { model.skipModelDownload() }
-                    .buttonStyle(.link)
-                    .disabled(model.downloading)
+                if model.appleSpeechAvailable {
+                    Button("Use Apple Speech") { model.skipModelDownload() }
+                        .buttonStyle(.link)
+                        .disabled(model.downloading)
+                }
                 Spacer()
                 Button(model.downloading ? "Downloading…" : modelDownloadButtonTitle) {
                     model.beginDownload()

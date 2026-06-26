@@ -37,12 +37,14 @@ struct BiasBenchmarkTests {
         print(pad("engine", 16) + padL("load(cold)", 11) + padL("bias med", 12) + padL("bias min", 11)
             + padL("plain med", 12) + padL("RTF(bias)", 11))
 
-        let engines: [(String, @Sendable () -> any SpeechEngine)] = [
+        var engines: [(String, @Sendable () -> any SpeechEngine)] = [
             ("Parakeet v3", { ParakeetEngine(profile: .tdtV3, modelsDir: dir) }),
             ("Parakeet 110M", { ParakeetEngine(profile: .tdtCtc110m, modelsDir: dir) }),
             ("Whisper", { WhisperEngine(modelsDir: dir) }),
-            ("Apple", { AppleEngine() }),
         ]
+        if #available(macOS 26, *) {
+            engines.append(("Apple", { AppleEngine() }))
+        }
 
         for (name, make) in engines {
             let engine = make()

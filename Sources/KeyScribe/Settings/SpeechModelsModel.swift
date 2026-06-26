@@ -54,7 +54,7 @@ final class SpeechModelsModel: ObservableObject {
         self.evictEngine = evictEngine
         self.onActiveChange = onActiveChange
         set = SpeechModelSet(
-            catalog: SpeechModelCatalog.all,
+            catalog: EngineRegistry.availableCatalog,
             installed: ModelInstallStore.installedIds(),
             activeId: activeId)
         refreshSizes()
@@ -67,7 +67,7 @@ final class SpeechModelsModel: ObservableObject {
     private func refreshSizes() {
         sizeRefreshGeneration &+= 1
         let generation = sizeRefreshGeneration
-        let ids = SpeechModelCatalog.all
+        let ids = EngineRegistry.availableCatalog
             .filter { !$0.systemManaged && set.isUsable($0.id) }
             .map(\.id)
         Task.detached(priority: .utility) { [weak self] in
@@ -237,7 +237,7 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     private func rebuild() {
-        rows = SpeechModelCatalog.all.map(makeRow)
+        rows = EngineRegistry.availableCatalog.map(makeRow)
     }
 
     // Rebuild only the one row whose state changed (e.g. a download-progress tick) — fires many times

@@ -10,8 +10,25 @@ struct EngineDescriptor {
 }
 
 enum EngineRegistry {
-    static let descriptors: [EngineDescriptor] = SpeechModelCatalog.all.map { info in
-        EngineDescriptor(info: info, make: { dir in construct(info.id, dir) })
+    static let descriptors: [EngineDescriptor] = SpeechModelCatalog.all
+        .filter { isAvailable($0.id) }
+        .map { info in
+            EngineDescriptor(info: info, make: { dir in construct(info.id, dir) })
+        }
+
+    // Catalog entries available on this OS — the single list the model pickers (first run, Settings)
+    // derive from, so an engine that cannot run here is never offered, not just unconstructable.
+    static var availableCatalog: [SpeechModelInfo] {
+        SpeechModelCatalog.all.filter { isAvailable($0.id) }
+    }
+
+    // The Apple Speech engine is built on SpeechAnalyzer/DictationTranscriber, which exist only on
+    // macOS 26+. On older systems it is absent from the catalog the UI and download path derive from.
+    static func isAvailable(_ id: String) -> Bool {
+        if id == "apple" {
+            if #available(macOS 26, *) { return true } else { return false }
+        }
+        return true
     }
 
     static func makeAll(modelsDir: URL) -> [any SpeechEngine] {
@@ -29,7 +46,9 @@ enum EngineRegistry {
         case "parakeet": return ParakeetEngine(profile: .tdtV3, modelsDir: modelsDir)
         case "parakeet-tdt-ctc-110m": return ParakeetEngine(profile: .tdtCtc110m, modelsDir: modelsDir)
         case "whisper": return WhisperEngine(modelsDir: modelsDir)
-        case "apple": return AppleEngine()
+        case "apple":
+            if #available(macOS 26, *) { return AppleEngine() }
+            fatalError("EngineRegistry: Apple Speech engine requires macOS 26")
         case "qwen3-asr-0.6b": return Qwen3ASREngine(profile: .small, modelsDir: modelsDir)
         case "qwen3-asr-1.7b": return Qwen3ASREngine(profile: .large, modelsDir: modelsDir)
         case "moonshine-base-en": return MoonshineEngine(modelsDir: modelsDir)

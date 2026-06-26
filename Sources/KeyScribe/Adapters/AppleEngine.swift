@@ -3,6 +3,7 @@ import Foundation
 import Speech
 import KeyScribeKit
 
+@available(macOS 26, *)
 actor AppleEngine: SpeechEngine {
     nonisolated let id = "apple"
     nonisolated let displayName = "Apple Speech"

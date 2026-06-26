@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "KeyScribe",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("15.0")],
     dependencies: [
         .package(url: "https://github.com/rsperko/FluidAudio.git", revision: "b70367711966c4974905dc79b5f2c82b2209d072"),
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),

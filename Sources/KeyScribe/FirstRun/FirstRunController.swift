@@ -97,7 +97,8 @@ final class FirstRunModel: ObservableObject {
     @Published private(set) var aiSetupError: String?
     @Published private(set) var aiTesting = false
 
-    let catalog = SpeechModelCatalog.all
+    let catalog = EngineRegistry.availableCatalog
+    var appleSpeechAvailable: Bool { catalog.contains { $0.id == "apple" } }
     let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let selectEngine: (String) -> Void
