@@ -35,8 +35,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusLine = NSMenuItem(title: "Status: starting…", action: nil, keyEquivalent: "")
     private let nextModeLine = NSMenuItem(title: "Next dictation: Automatic", action: nil, keyEquivalent: "")
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
-    private let addDictionaryItem = NSMenuItem(title: "Add Dictionary Entry…", action: nil, keyEquivalent: "")
-    private let addReplacementItem = NSMenuItem(title: "Add Replacement…", action: nil, keyEquivalent: "")
+    private let addVocabularyItem = NSMenuItem(title: "Add to Vocabulary…", action: nil, keyEquivalent: "")
     private let modesMenu = NSMenu()
 
     private let badgeDot: NSView = {
@@ -55,8 +54,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onOpenNotices: (() -> Void)?
     var onMenuWillOpen: (() -> Void)?
     var onSelectNextMode: ((String?) -> Void)?
-    var onAddDictionaryEntry: (() -> Void)?
-    var onAddReplacement: (() -> Void)?
+    var onAddVocabulary: (() -> Void)?
 
     private let variant = AppVariant(bundleID: Bundle.main.bundleIdentifier)
     private static let devTint = NSColor.systemOrange
@@ -96,12 +94,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(history)
 
         menu.addItem(.separator())
-        addDictionaryItem.target = self
-        addDictionaryItem.action = #selector(addDictionaryEntry)
-        menu.addItem(addDictionaryItem)
-        addReplacementItem.target = self
-        addReplacementItem.action = #selector(addReplacementEntry)
-        menu.addItem(addReplacementItem)
+        addVocabularyItem.target = self
+        addVocabularyItem.action = #selector(addVocabulary)
+        menu.addItem(addVocabularyItem)
 
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -125,9 +120,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // Mirror the active (non-shadowed, chord-only) global shortcuts onto the menu items as a
     // right-aligned glyph. Nil clears it — unset or shadowed shouldn't advertise a shortcut.
-    func setActionShortcuts(addDictionary: KeyDescriptor?, addReplacement: KeyDescriptor?, pasteLast: KeyDescriptor?) {
-        apply(addDictionary, to: addDictionaryItem)
-        apply(addReplacement, to: addReplacementItem)
+    func setActionShortcuts(addVocabulary: KeyDescriptor?, pasteLast: KeyDescriptor?) {
+        apply(addVocabulary, to: addVocabularyItem)
         apply(pasteLast, to: pasteLastItem)
     }
 
@@ -191,6 +185,5 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openNotices() { onOpenNotices?() }
     @objc private func selectAutomatic() { onSelectNextMode?(nil) }
     @objc private func selectMode(_ sender: NSMenuItem) { onSelectNextMode?(sender.representedObject as? String) }
-    @objc private func addDictionaryEntry() { onAddDictionaryEntry?() }
-    @objc private func addReplacementEntry() { onAddReplacement?() }
+    @objc private func addVocabulary() { onAddVocabulary?() }
 }

@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] destination in self?.settingsController.present(destination) })
         correctionPanel = CorrectionPanelController(
             addDictionaryWord: { [weak self] word in _ = self?.configRepository.addDictionaryWord(word) },
-            addReplacement: { [weak self] heard, replace in _ = self?.configRepository.addReplacement(heard: heard, replace: replace) })
+            addReplacement: { [weak self] heard, replace, regex in _ = self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex) })
 
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
@@ -73,8 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.acknowledgeNextMode()
             self?.refreshStatus()
         }
-        menu.onAddDictionaryEntry = { [weak self] in self?.correctionPanel.present(.dictionary) }
-        menu.onAddReplacement = { [weak self] in self?.correctionPanel.present(.replacement) }
+        menu.onAddVocabulary = { [weak self] in self?.correctionPanel.present() }
         controller.onRecordingChanged = { [weak self] active in self?.menu.setDictating(active) }
         controller.onBecameIdle = { [weak self] in
             guard let self, self.pendingHotkeyRebuild else { return }
@@ -168,8 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ordered.append(.init(id: "\(mode.id)#\(tk.key)", key: tk.key))
             }
         }
-        ordered.append(.init(id: GlobalHotkey.dictionaryId, key: settings.shortcuts.addDictionaryEntry))
-        ordered.append(.init(id: GlobalHotkey.replacementId, key: settings.shortcuts.addReplacement))
+        ordered.append(.init(id: GlobalHotkey.vocabularyId, key: settings.shortcuts.addVocabulary))
         ordered.append(.init(id: GlobalHotkey.pasteLastId, key: settings.shortcuts.pasteLastDictation))
         return HotkeyConflicts.shadowed(ordered)
     }
@@ -191,8 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let actionDescriptors = Dictionary(uniqueKeysWithValues: actionBindings.map { ($0.id, $0.descriptor) })
         menu.setActionShortcuts(
-            addDictionary: actionDescriptors[HotkeyAction.addDictionary.rawValue],
-            addReplacement: actionDescriptors[HotkeyAction.addReplacement.rawValue],
+            addVocabulary: actionDescriptors[HotkeyAction.addVocabulary.rawValue],
             pasteLast: actionDescriptors[HotkeyAction.pasteLast.rawValue])
 
         if hotkey == nil {
@@ -209,14 +206,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private enum HotkeyAction: String { case addDictionary, addReplacement, pasteLast }
+    private enum HotkeyAction: String { case addVocabulary, pasteLast }
 
     // Only chord descriptors are honored — a modifier-only named key would also drive dictation and
     // makes no sense as a discrete action. An unparseable or non-chord string is silently skipped.
     private func actionBindings(shadowed: Set<String>) -> [HotkeyMonitor.ActionBinding] {
         let entries: [(HotkeyAction, String, String)] = [
-            (.addDictionary, settings.shortcuts.addDictionaryEntry, GlobalHotkey.dictionaryId),
-            (.addReplacement, settings.shortcuts.addReplacement, GlobalHotkey.replacementId),
+            (.addVocabulary, settings.shortcuts.addVocabulary, GlobalHotkey.vocabularyId),
             (.pasteLast, settings.shortcuts.pasteLastDictation, GlobalHotkey.pasteLastId),
         ]
         return entries.compactMap { action, key, globalId in
@@ -228,8 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleHotkeyAction(_ id: String) {
         switch HotkeyAction(rawValue: id) {
-        case .addDictionary: correctionPanel.present(.dictionary)
-        case .addReplacement: correctionPanel.present(.replacement)
+        case .addVocabulary: correctionPanel.present()
         case .pasteLast: controller.pasteLast()
         case nil: break
         }
@@ -391,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
             modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
             hotkeyConflict: shadowedHotkeyIds().contains {
-                $0 == GlobalHotkey.dictionaryId || $0 == GlobalHotkey.replacementId
+                $0 == GlobalHotkey.vocabularyId
             })
     }
 

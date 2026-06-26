@@ -22,16 +22,9 @@ struct HotkeyConflictsTests {
 
     @Test func globalShadowedByMode() {
         let shadowed = HotkeyConflicts.shadowed([
-            reg("mode", "control+option+e"), reg("global:dict", "control+option+e"),
+            reg("mode", "control+option+e"), reg("global:vocab", "control+option+e"),
         ])
-        #expect(shadowed == ["global:dict"])
-    }
-
-    @Test func replacementShadowedByDictionary() {
-        let shadowed = HotkeyConflicts.shadowed([
-            reg("global:dict", "control+option+e"), reg("global:repl", "control+option+e"),
-        ])
-        #expect(shadowed == ["global:repl"])
+        #expect(shadowed == ["global:vocab"])
     }
 
     @Test func threeWayCollisionShadowsAllButFirst() {
@@ -44,7 +37,7 @@ struct HotkeyConflictsTests {
     @Test func disabledRegistrantDoesNotClaim() {
         let shadowed = HotkeyConflicts.shadowed([
             reg("mode", "control+option+e", enabled: false),
-            reg("global:dict", "control+option+e"),
+            reg("global:vocab", "control+option+e"),
         ])
         #expect(shadowed.isEmpty)
     }
@@ -52,7 +45,7 @@ struct HotkeyConflictsTests {
     @Test func disabledRegistrantIsNotShadowed() {
         let shadowed = HotkeyConflicts.shadowed([
             reg("mode", "control+option+e"),
-            reg("global:dict", "control+option+e", enabled: false),
+            reg("global:vocab", "control+option+e", enabled: false),
         ])
         #expect(shadowed.isEmpty)
     }

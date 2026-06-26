@@ -237,8 +237,7 @@ Paste Last Dictation
 History…
 
 ────────────────
-Add Dictionary Entry…
-Add Replacement…
+Add to Vocabulary…
 
 ────────────────
 Settings…
@@ -246,8 +245,8 @@ About & Notices…
 Quit KeyScribe
 ```
 
-> **`Add Dictionary Entry…` / `Add Replacement…`** open the standalone correction panel; they are
-> always present here and are also bound to global chord shortcuts (default ⌃⌥⇧D / ⌃⌥⇧R, rebindable
+> **`Add to Vocabulary…`** opens the standalone vocabulary panel; it is
+> always present here and is also bound to a global chord shortcut (default ⌃⌥⇧V, rebindable
 > in General ▸ Shortcuts; `[shortcuts]` in `config_schema.md`). A **`Check for Updates…`** item is planned alongside the
 > Sparkle update mechanism and the update badge below (not yet built).
 
@@ -329,10 +328,10 @@ Show only commonly changed behavior initially:
 - Keep display awake while dictating
 - Mute system audio while dictating
 - History enabled and retention
-- **Shortcuts** — global chords for **Add Dictionary Entry** and **Add Replacement** (the standalone
-  correction panel; also always in the menu). Default on to **⌃⌥⇧D** / **⌃⌥⇧R**, rebindable or
-  clearable. A chord that collides with a
-  higher-precedence hotkey (a Mode trigger, or Add-to-Dictionary shadowing Add Replacement) shows
+- **Shortcuts** — global chords for **Add to Vocabulary** and **Paste Last Dictation** (both also
+  always in the menu). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste Last Dictation defaults off.
+  Both are rebindable or clearable. A chord that collides with a
+  higher-precedence hotkey, such as a Mode trigger, shows
   an inline **shadowed** breadcrumb and will not fire — mode triggers win.
 
 Model eviction moves behind `Advanced model behavior` within General. Explain Fastest,
@@ -351,7 +350,12 @@ the active engine or leaves no usable engine.
 
 Both screens prioritize fast correction over configuration theory.
 
-- Dictionary: add a word, edit it, remove it, import/export later only if needed.
+- Add to Vocabulary: one row, `Word or heard phrase → Use instead (optional)`. Leaving **Use instead**
+  empty adds a dictionary word; filling it in creates a replacement. The first field keeps focus after
+  adding so repeated entries are fast. A **Match heard phrase as a regular expression** checkbox stays
+  in this add row; when checked, the first label becomes **Heard pattern**, **Use instead** is required,
+  and the row can create only a replacement.
+- Dictionary: edit/remove saved words, import/export later only if needed.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
   Apple; a soft nudge on Whisper/Parakeet), and dictionary terms always help the optional rewrite
@@ -359,9 +363,7 @@ Both screens prioritize fast correction over configuration theory.
   pass over the audio — on the order of **a second on a long dictation, negligible on short ones**
   (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
   recognition or a noticeable wait for normal use.
-- Replacements: a clear `Heard` → `Use instead` pair; each row can show a worked example.
-- Regular expression mode is an `Advanced` control per rule. Switching it on reveals syntax
-  help and a live non-destructive example area.
+- Replacements: a clear `Heard` → `Use instead` pair. Regex rows keep a `Regex` badge.
 
 ### AI Services
 

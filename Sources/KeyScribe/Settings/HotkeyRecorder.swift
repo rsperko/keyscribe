@@ -12,8 +12,7 @@ final class HotkeyRecordingState: ObservableObject {
 
 // Stable identities for the two global shortcuts in the app-wide hotkey namespace (alongside Mode ids).
 enum GlobalHotkey {
-    static let dictionaryId = "global:add_dictionary"
-    static let replacementId = "global:add_replacement"
+    static let vocabularyId = "global:add_vocabulary"
     static let pasteLastId = "global:paste_last"
 }
 

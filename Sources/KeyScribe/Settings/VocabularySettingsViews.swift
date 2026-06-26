@@ -1,14 +1,9 @@
 import SwiftUI
 import KeyScribeKit
 
-// Shared add/remove editors used identically by the global Vocabulary pane and a mode's own
-// vocabulary. Both are designed to sit inside a Form Section.
 struct DictionaryRows: View {
     let words: [String]
-    let onAdd: (String) -> Void
     let onRemove: (String) -> Void
-    var placeholder = "Add a word, e.g. Kubernetes"
-    @State private var newWord = ""
 
     var body: some View {
         ForEach(words, id: \.self) { word in
@@ -18,32 +13,12 @@ struct DictionaryRows: View {
                 RemoveButton { onRemove(word) }
             }
         }
-        HStack {
-            TextField(placeholder, text: $newWord)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(commit)
-            Button("Add", action: commit).disabled(trimmed.isEmpty)
-        }
-    }
-
-    private var trimmed: String { newWord.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    private func commit() {
-        guard !trimmed.isEmpty else { return }
-        onAdd(trimmed)
-        newWord = ""
     }
 }
 
 struct ReplacementRows: View {
     let rules: [ReplacementsSet.Rule]
-    let onAdd: (String, String, Bool) -> Void
     let onRemove: (Int) -> Void
-    @State private var heard = ""
-    @State private var replace = ""
-    @State private var regex = false
-    @State private var advancedExpanded = false
-    @State private var sample = ""
 
     var body: some View {
         ForEach(rules.indices, id: \.self) { index in
@@ -57,50 +32,89 @@ struct ReplacementRows: View {
                 RemoveButton { onRemove(index) }
             }
         }
-        HStack {
-            TextField("Heard", text: $heard)
-                .textFieldStyle(.roundedBorder)
-            Image(systemName: "arrow.right").foregroundStyle(.secondary)
-            TextField("Use instead", text: $replace)
-                .textFieldStyle(.roundedBorder)
-            Button("Add", action: commit).disabled(heardTrimmed.isEmpty)
-        }
-        DisclosureSection("Advanced replacements", isExpanded: $advancedExpanded) {
-            Toggle("Match with a regular expression", isOn: $regex).toggleStyle(.checkbox)
-            if regex {
-                Text("Heard is treated as a pattern and Use instead as a template ($1 inserts the first capture group). Matching is case-sensitive.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    TextField("Try sample text", text: $sample)
+    }
+}
+
+struct VocabularyComposer: View {
+    let onAddWord: (String) -> Void
+    let onAddReplacement: (String, String, Bool) -> Void
+    @State private var heard = ""
+    @State private var replace = ""
+    @State private var regex = false
+    @FocusState private var focus: Field?
+
+    private enum Field { case heard, replace }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(regex ? "Heard pattern" : "Word or heard phrase")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField(regex ? "Regex pattern" : "Add a word or heard phrase", text: $heard)
                         .textFieldStyle(.roundedBorder)
-                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    Text(preview).foregroundStyle(.secondary).font(.callout)
+                        .focused($focus, equals: .heard)
+                        .onSubmit(commit)
                 }
-            } else {
-                Text("A plain replacement swaps the exact heard phrase for your text, before any AI rewrite.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(regex ? "Use instead" : "Use instead (optional)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField(regex ? "Required for regex" : "Leave empty to add a word", text: $replace)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focus, equals: .replace)
+                        .onSubmit(commit)
+                }
+                Button("Add", action: commit)
+                    .disabled(!canAdd)
+            }
+            Toggle("Match heard phrase as a regular expression", isOn: $regex)
+                .toggleStyle(.checkbox)
+            Text(helpText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if regexInvalid {
+                Label("That is not a valid regular expression.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
+        .onAppear { focus = .heard }
     }
 
     private var heardTrimmed: String { heard.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var replaceTrimmed: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var regexInvalid: Bool {
+        regex && !heardTrimmed.isEmpty && RegexCache.regex(heardTrimmed) == nil
+    }
+    private var canAdd: Bool { !heardTrimmed.isEmpty && (!regex || !replaceTrimmed.isEmpty) && !regexInvalid }
 
-    // Non-destructive preview of what the regex rule would do to the sample, without touching saved
-    // rules. Invalid patterns say so rather than throwing.
-    private var preview: String {
-        guard !heardTrimmed.isEmpty, !sample.isEmpty else { return "—" }
-        guard let regex = RegexCache.regex(heardTrimmed) else { return "Invalid pattern" }
-        let range = NSRange(sample.startIndex..., in: sample)
-        return regex.stringByReplacingMatches(in: sample, range: range, withTemplate: replace)
+    private var helpText: String {
+        if regex {
+            return "Regex creates a replacement, so Use instead is required. Use captures like $1."
+        }
+        return "Leave Use instead empty to add a word. Fill it in to create a replacement."
     }
 
     private func commit() {
-        guard !heardTrimmed.isEmpty else { return }
-        onAdd(heardTrimmed, replace, regex)
+        guard canAdd else { return }
+        if !regex && replaceTrimmed.isEmpty {
+            onAddWord(heardTrimmed)
+        } else {
+            onAddReplacement(heardTrimmed, replaceTrimmed, regex)
+        }
+        reset()
+    }
+
+    private func reset() {
         heard = ""
         replace = ""
         regex = false
-        sample = ""
+        focus = .heard
     }
 }
 
@@ -126,10 +140,15 @@ struct VocabularySettingsView: View {
 
     var body: some View {
         Form {
-            Section("Dictionary") {
-                Text("Add names, product terms, and jargon that KeyScribe repeatedly gets wrong. Keep this list short: too many terms can reduce recognition accuracy.")
+            Section("Add to Vocabulary") {
+                VocabularyComposer(
+                    onAddWord: dictionary.add,
+                    onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) })
+            }
+            Section("Words to Recognize") {
+                Text("Names, product terms, and jargon KeyScribe should recognize as written. Keep this list short; too many terms can reduce recognition accuracy.")
                     .font(.caption).foregroundStyle(.secondary)
-                DictionaryRows(words: dictionary.words, onAdd: dictionary.add, onRemove: dictionary.remove)
+                DictionaryRows(words: dictionary.words, onRemove: dictionary.remove)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
                     Label("You have \(dictionary.words.count) entries. Large dictionaries can make recognition less accurate, not more. Remove words KeyScribe now gets right, or move always-misheard phrases to Replacements.", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
@@ -139,12 +158,11 @@ struct VocabularySettingsView: View {
                         .font(.caption).foregroundStyle(.red)
                 }
             }
-            Section("Replacements") {
-                Text("Replace a consistently misheard phrase with the text you want. Runs before any AI rewrite. Pattern matching is under Advanced Replacements.")
+            Section("Automatic Replacements") {
+                Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
                     .font(.caption).foregroundStyle(.secondary)
                 ReplacementRows(
                     rules: replacements.rules,
-                    onAdd: { replacements.add(heard: $0, replace: $1, regex: $2) },
                     onRemove: replacements.remove(at:))
                 if let error = replacements.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")

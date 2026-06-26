@@ -78,26 +78,58 @@ struct SettingsTests {
     @Test func shortcutsRoundTrip() throws {
         var s = Settings.defaults
         s.shortcuts = .init(
-            addDictionaryEntry: "control+option+shift+d", addReplacement: "control+option+shift+r",
+            addVocabulary: "control+option+shift+d",
             pasteLastDictation: "control+option+shift+v")
         let decoded = try SettingsStore.decode(from: SettingsStore.encode(s))
-        #expect(decoded.shortcuts.addDictionaryEntry == "control+option+shift+d")
-        #expect(decoded.shortcuts.addReplacement == "control+option+shift+r")
+        #expect(decoded.shortcuts.addVocabulary == "control+option+shift+d")
         #expect(decoded.shortcuts.pasteLastDictation == "control+option+shift+v")
         #expect(decoded == s)
     }
 
     @Test func absentShortcutsFallBackToDefaults() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1")
-        #expect(s.shortcuts.addDictionaryEntry == "control+option+shift+d")
-        #expect(s.shortcuts.addReplacement == "control+option+shift+r")
+        #expect(s.shortcuts.addVocabulary == "control+option+shift+v")
         #expect(s.shortcuts.pasteLastDictation.isEmpty)
     }
 
     @Test func explicitlyEmptyShortcutStaysOff() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[shortcuts]\nadd_vocabulary = \"\"")
+        #expect(s.shortcuts.addVocabulary.isEmpty)
+    }
+
+    @Test func legacyDictionaryShortcutMigratesToAddVocabulary() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[shortcuts]\nadd_dictionary_entry = \"control+option+shift+f\"")
+        #expect(s.shortcuts.addVocabulary == "control+option+shift+f")
+    }
+
+    @Test func explicitLegacyDictionaryShortcutEmptyStaysOff() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1\n[shortcuts]\nadd_dictionary_entry = \"\"")
-        #expect(s.shortcuts.addDictionaryEntry.isEmpty)
-        #expect(s.shortcuts.addReplacement == "control+option+shift+r")
+        #expect(s.shortcuts.addVocabulary.isEmpty)
+    }
+
+    @Test func addVocabularyWinsOverLegacyDictionaryShortcut() throws {
+        let toml = """
+        schema_version = 1
+        [shortcuts]
+        add_vocabulary = "control+option+shift+v"
+        add_dictionary_entry = "control+option+shift+d"
+        """
+        let s = try SettingsStore.decode(from: toml)
+        #expect(s.shortcuts.addVocabulary == "control+option+shift+v")
+    }
+
+    @Test func legacyReplacementShortcutIsIgnored() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[shortcuts]\nadd_replacement = \"control+option+shift+r\"")
+        #expect(s.shortcuts.addVocabulary == "control+option+shift+v")
+    }
+
+    @Test func encodedShortcutsUseAddVocabularyKey() throws {
+        var s = Settings.defaults
+        s.shortcuts = .init(addVocabulary: "control+option+shift+v")
+        let encoded = try SettingsStore.encode(s)
+        #expect(encoded.contains("add_vocabulary"))
+        #expect(!encoded.contains("add_dictionary_entry"))
+        #expect(!encoded.contains("add_replacement"))
     }
 
     @Test func audioInputDeviceRoundTrips() throws {

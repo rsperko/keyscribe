@@ -126,41 +126,41 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
-    // Optional global shortcuts for the standalone correction surfaces (design.md §4.7). An empty
-    // string means the shortcut is off; only chord descriptors are honored at registration.
     public struct Shortcuts: Codable, Equatable, Sendable {
-        public static let defaultAddDictionaryEntry = "control+option+shift+d"
-        public static let defaultAddReplacement = "control+option+shift+r"
+        public static let defaultAddVocabulary = "control+option+shift+v"
         public static let defaultPasteLastDictation = ""
 
-        public var addDictionaryEntry: String
-        public var addReplacement: String
+        public var addVocabulary: String
         public var pasteLastDictation: String
 
         enum CodingKeys: String, CodingKey {
-            case addDictionaryEntry = "add_dictionary_entry"
+            case addVocabulary = "add_vocabulary"
+            case legacyAddDictionaryEntry = "add_dictionary_entry"
             case addReplacement = "add_replacement"
             case pasteLastDictation = "paste_last_dictation"
         }
 
         public init(
-            addDictionaryEntry: String = defaultAddDictionaryEntry,
-            addReplacement: String = defaultAddReplacement,
+            addVocabulary: String = defaultAddVocabulary,
             pasteLastDictation: String = defaultPasteLastDictation
         ) {
-            self.addDictionaryEntry = addDictionaryEntry
-            self.addReplacement = addReplacement
+            self.addVocabulary = addVocabulary
             self.pasteLastDictation = pasteLastDictation
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            addDictionaryEntry = try c.decodeIfPresent(String.self, forKey: .addDictionaryEntry)
-                ?? Self.defaultAddDictionaryEntry
-            addReplacement = try c.decodeIfPresent(String.self, forKey: .addReplacement)
-                ?? Self.defaultAddReplacement
+            addVocabulary = try c.decodeIfPresent(String.self, forKey: .addVocabulary)
+                ?? c.decodeIfPresent(String.self, forKey: .legacyAddDictionaryEntry)
+                ?? Self.defaultAddVocabulary
             pasteLastDictation = try c.decodeIfPresent(String.self, forKey: .pasteLastDictation)
                 ?? Self.defaultPasteLastDictation
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(addVocabulary, forKey: .addVocabulary)
+            try c.encode(pasteLastDictation, forKey: .pasteLastDictation)
         }
     }
 

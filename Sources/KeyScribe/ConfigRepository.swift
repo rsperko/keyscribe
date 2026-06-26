@@ -26,9 +26,13 @@ final class ConfigRepository {
     }
 
     @discardableResult
-    func addReplacement(heard: String, replace: String) -> Bool {
-        let set = ReplacementsStore.loadOrDefault(supportDir: supportDir)
-            .addingLiteral(heard: heard, replace: replace)
+    func addReplacement(heard: String, replace: String, regex: Bool = false) -> Bool {
+        var set = ReplacementsStore.loadOrDefault(supportDir: supportDir)
+        if regex {
+            set.rules.append(.init(heard: heard.trimmingCharacters(in: .whitespacesAndNewlines), replace: replace, regex: true))
+        } else {
+            set = set.addingLiteral(heard: heard, replace: replace)
+        }
         return persist("replacement") { try ReplacementsStore.write(set, to: supportDir) }
     }
 

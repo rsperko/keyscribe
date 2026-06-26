@@ -14,20 +14,16 @@ import SwiftUI
 // unchanged.
 @MainActor
 final class CorrectionPanelController {
-    enum Kind { case dictionary, replacement }
-
     private var window: NSWindow?
     private let addDictionaryWord: (String) -> Void
-    private let addReplacement: (String, String) -> Void
+    private let addReplacement: (String, String, Bool) -> Void
     private let captureSelection: () async -> String?
-    // The app that was frontmost when the panel opened — the target "Add & Correct" pastes into, since
-    // the panel itself becomes key once shown.
     private var previousApp: NSRunningApplication?
     private let status = CorrectionPanelStatus()
 
     init(
         addDictionaryWord: @escaping (String) -> Void,
-        addReplacement: @escaping (String, String) -> Void,
+        addReplacement: @escaping (String, String, Bool) -> Void,
         captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection() }
     ) {
         self.addDictionaryWord = addDictionaryWord
@@ -35,11 +31,11 @@ final class CorrectionPanelController {
         self.captureSelection = captureSelection
     }
 
-    func present(_ kind: Kind) {
+    func present() {
         previousApp = NSWorkspace.shared.frontmostApplication
         Task { @MainActor in
             let selection = (await captureSelection())?.trimmingCharacters(in: .whitespacesAndNewlines)
-            show(kind, prefill: selection?.isEmpty == false ? selection : nil)
+            show(prefill: selection?.isEmpty == false ? selection : nil)
         }
     }
 
@@ -48,21 +44,21 @@ final class CorrectionPanelController {
         return app.bundleIdentifier != Bundle.main.bundleIdentifier
     }
 
-    private func show(_ kind: Kind, prefill: String?) {
+    private func show(prefill: String?) {
         window?.close()
         status.message = nil
         let view = CorrectionPanelView(
-            kind: kind, prefill: prefill ?? "",
+            prefill: prefill ?? "",
             canCorrect: prefill != nil && hasPasteTarget,
             status: status,
             onSave: { [weak self] result in
                 self?.apply(result)
                 self?.window?.close()
             },
-            onCorrect: { [weak self] result in self?.applyAndCorrect(result) },
+            onCorrect: { [weak self] result, pasteText in self?.applyAndCorrect(result, pasteText: pasteText) },
             onCancel: { [weak self] in self?.window?.close() })
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-        window.title = kind == .dictionary ? "Add Dictionary Entry" : "Add Replacement"
+        window.title = "Add to Vocabulary"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.center()
@@ -74,14 +70,13 @@ final class CorrectionPanelController {
     private func apply(_ result: CorrectionPanelView.SaveResult) {
         switch result {
         case .dictionary(let word): addDictionaryWord(word)
-        case .replacement(let heard, let replace): addReplacement(heard, replace)
+        case .replacement(let heard, let replace, let regex): addReplacement(heard, replace, regex)
         }
     }
 
-    private func applyAndCorrect(_ result: CorrectionPanelView.SaveResult) {
+    private func applyAndCorrect(_ result: CorrectionPanelView.SaveResult, pasteText: String) {
         apply(result)
         status.message = nil
-        let pasteText = result.correctedValue
         guard hasPasteTarget, let target = previousApp, !pasteText.isEmpty else {
             window?.close()
             return
@@ -95,7 +90,6 @@ final class CorrectionPanelController {
                 window?.makeKeyAndOrderFront(nil)
                 return
             }
-            // Let the reactivated field settle (and keep its selection live) before the replacing paste.
             try? await Task.sleep(for: .milliseconds(120))
             await TextInserter.insertViaPaste(pasteText)
             window?.close()
@@ -123,36 +117,32 @@ final class CorrectionPanelStatus: ObservableObject {
 private struct CorrectionPanelView: View {
     enum SaveResult {
         case dictionary(word: String)
-        case replacement(heard: String, replace: String)
-
-        var correctedValue: String {
-            switch self {
-            case .dictionary(let word): return word
-            case .replacement(_, let replace): return replace
-            }
-        }
+        case replacement(heard: String, replace: String, regex: Bool)
     }
 
-    let kind: CorrectionPanelController.Kind
+    // The selection captured when the panel opened. "Add & Replace Selection" pastes the rule's effect
+    // on *this* text, so a regex is applied to the original selection — not to the pattern field.
+    let originalSelection: String
     let canCorrect: Bool
     let onSave: (SaveResult) -> Void
-    let onCorrect: (SaveResult) -> Void
+    let onCorrect: (SaveResult, String) -> Void
     let onCancel: () -> Void
     @ObservedObject var status: CorrectionPanelStatus
 
     @State private var term: String
     @State private var replace: String
+    @State private var regex = false
     @FocusState private var focus: Field?
 
     private enum Field { case term, replace }
 
     init(
-        kind: CorrectionPanelController.Kind, prefill: String, canCorrect: Bool,
+        prefill: String, canCorrect: Bool,
         status: CorrectionPanelStatus,
-        onSave: @escaping (SaveResult) -> Void, onCorrect: @escaping (SaveResult) -> Void,
+        onSave: @escaping (SaveResult) -> Void, onCorrect: @escaping (SaveResult, String) -> Void,
         onCancel: @escaping () -> Void
     ) {
-        self.kind = kind
+        self.originalSelection = prefill
         self.canCorrect = canCorrect
         self.status = status
         self.onSave = onSave
@@ -164,26 +154,46 @@ private struct CorrectionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(explanation)
+            Text("Add a word KeyScribe should recognize, or fill in Use instead to replace a phrase KeyScribe keeps hearing wrong.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            switch kind {
-            case .dictionary:
-                LabeledContent("Word") {
-                    TextField("e.g. Kubernetes", text: $term).textFieldStyle(.roundedBorder)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(regex ? "Heard pattern" : "Word or heard phrase")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField(regex ? "Regex pattern" : "e.g. Kubernetes", text: $term)
+                        .textFieldStyle(.roundedBorder)
                         .focused($focus, equals: .term)
+                        .onSubmit(commitSave)
                 }
-            case .replacement:
-                LabeledContent("When you say") {
-                    TextField("e.g. my email", text: $term).textFieldStyle(.roundedBorder)
-                        .focused($focus, equals: .term)
-                }
-                LabeledContent("Insert") {
-                    TextField("e.g. me@example.com", text: $replace).textFieldStyle(.roundedBorder)
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(regex ? "Use instead" : "Use instead (optional)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField(regex ? "Required for regex" : "Leave empty to add a word", text: $replace)
+                        .textFieldStyle(.roundedBorder)
                         .focused($focus, equals: .replace)
+                        .onSubmit(commitSave)
                 }
+            }
+
+            Toggle("Match heard phrase as a regular expression", isOn: $regex)
+                .toggleStyle(.checkbox)
+
+            Text(helpText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if regexInvalid {
+                Label("That is not a valid regular expression.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
 
             Text("Saved to your global vocabulary. Nothing leaves this Mac.")
@@ -200,56 +210,67 @@ private struct CorrectionPanelView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-                if canCorrect {
-                    Button(correctTitle) { onCorrect(buildResult()) }.disabled(!canCorrectNow)
+                if canCorrect && hasReplacementValue {
+                    Button("Add & Replace Selection") { onCorrect(buildResult(), correctionPasteText()) }.disabled(!canCorrectNow)
                 }
-                Button("Add") { onSave(buildResult()) }
+                Button("Add", action: commitSave)
                     .keyboardShortcut(.defaultAction).disabled(!canSave)
             }
         }
         .padding(20)
-        .frame(width: 400)
+        .frame(width: 560)
         .onAppear {
             Task {
                 try? await Task.sleep(for: .milliseconds(50))
-                focus = trimmedTerm.isEmpty ? .term : initialFocusWhenPrefilled
+                focus = .term
             }
         }
     }
 
-    private var initialFocusWhenPrefilled: Field {
-        kind == .replacement ? .replace : .term
-    }
-
-    private var explanation: String {
-        switch kind {
-        case .dictionary:
-            return "Teach KeyScribe a word so it is recognized and not changed as a misspelling."
-        case .replacement:
-            return "When you speak the first phrase, KeyScribe inserts the second instead."
-        }
-    }
-
-    private var correctTitle: String {
-        kind == .dictionary ? "Add & Correct" : "Add & Insert"
-    }
-
     private var trimmedTerm: String { term.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedReplace: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var correctedValue: String {
-        switch kind {
-        case .dictionary: return trimmedTerm
-        case .replacement: return replace.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        trimmedReplace.isEmpty ? trimmedTerm : trimmedReplace
     }
 
-    private var canSave: Bool { !trimmedTerm.isEmpty }
-    private var canCorrectNow: Bool { canSave && !correctedValue.isEmpty }
+    private var regexInvalid: Bool {
+        regex && !trimmedTerm.isEmpty && RegexCache.regex(trimmedTerm) == nil
+    }
+
+    private var canSave: Bool {
+        !trimmedTerm.isEmpty && (!regex || !trimmedReplace.isEmpty) && !regexInvalid
+    }
+
+    private var hasReplacementValue: Bool { !trimmedReplace.isEmpty }
+
+    private var canCorrectNow: Bool { canSave && hasReplacementValue && !correctedValue.isEmpty }
+
+    // What "Add & Replace Selection" pastes over the captured selection: the replacement text, or — for a
+    // regex rule — the rule applied to the original selection (not to the pattern in the heard field).
+    private func correctionPasteText() -> String {
+        guard regex else { return correctedValue }
+        guard let re = RegexCache.regex(trimmedTerm) else { return originalSelection }
+        let range = NSRange(originalSelection.startIndex..., in: originalSelection)
+        return re.stringByReplacingMatches(in: originalSelection, range: range, withTemplate: trimmedReplace)
+    }
+
+    private var helpText: String {
+        if regex {
+            return "Regex creates a replacement, so Use instead is required. Use captures like $1. Replacements run before any AI rewrite."
+        }
+        return "Leave Use instead empty to add a word. Fill it in to create a replacement. Dictionary entries are hints; replacements run before any AI rewrite."
+    }
+
+    private func commitSave() {
+        guard canSave else { return }
+        onSave(buildResult())
+    }
 
     private func buildResult() -> SaveResult {
-        switch kind {
-        case .dictionary: return .dictionary(word: trimmedTerm)
-        case .replacement: return .replacement(heard: trimmedTerm, replace: replace)
+        if !regex && trimmedReplace.isEmpty {
+            return .dictionary(word: trimmedTerm)
         }
+        return .replacement(heard: trimmedTerm, replace: trimmedReplace, regex: regex)
     }
 }

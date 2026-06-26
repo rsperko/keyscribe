@@ -2,8 +2,7 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
-    var dictionaryShadowed = false
-    var replacementShadowed = false
+    var vocabularyShadowed = false
     var pasteLastShadowed = false
 
     var body: some View {
@@ -33,23 +32,13 @@ struct GeneralSettingsView: View {
 
             Section {
                 SettingRow(
-                    title: "Add Dictionary Entry",
-                    result: "Opens a panel to teach KeyScribe a word.",
-                    help: "Optional global shortcut. With text selected when you press it, the word is pre-filled. Leave unset to use the menu instead.")
+                    title: "Add to Vocabulary",
+                    result: "Opens a panel to add a word or replacement.",
+                    help: "Optional global shortcut. With text selected when you press it, the word or heard phrase is pre-filled. Leave unset to use the menu instead.")
                 {
                     VStack(alignment: .trailing, spacing: 4) {
-                        HotkeyRecorder(key: $model.addDictionaryShortcut)
-                        if dictionaryShadowed { ShadowedHotkeyNote() }
-                    }
-                }
-                SettingRow(
-                    title: "Add Replacement",
-                    result: "Opens a panel to add a heard→insert rule.",
-                    help: "Optional global shortcut. With text selected when you press it, the “When you say” field is pre-filled. Leave unset to use the menu instead.")
-                {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        HotkeyRecorder(key: $model.addReplacementShortcut)
-                        if replacementShadowed { ShadowedHotkeyNote() }
+                        HotkeyRecorder(key: $model.addVocabularyShortcut)
+                        if vocabularyShadowed { ShadowedHotkeyNote() }
                     }
                 }
                 SettingRow(
@@ -65,7 +54,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Shortcuts")
             } footer: {
-                Text("These are also in the menu bar menu. Use a modifier combo (e.g. ⌃⌥⇧D) to avoid clashing with apps.")
+                Text("These are also in the menu bar menu. Use a modifier combo (e.g. ⌃⌥⇧V) to avoid clashing with apps.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -100,8 +89,6 @@ struct GeneralSettingsView: View {
     }
 }
 
-// Non-blocking breadcrumb: this shortcut collides with a higher-precedence hotkey (a Mode, or — for
-// Add Replacement — Add to Dictionary), so it is shadowed and will not fire. Mode triggers win.
 struct ShadowedHotkeyNote: View {
     var body: some View {
         HStack(spacing: 5) {

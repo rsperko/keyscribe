@@ -181,16 +181,12 @@ struct SettingsRootView: View {
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
 
-    // Precedence order for the app-wide hotkey namespace: Modes (routing order) then the two globals.
-    // The losers of any chord collision are "shadowed" — flagged with a red dot, and suppressed at
-    // dispatch so the higher-precedence owner fires. No rejection; first match in this order wins.
     private func shadowedHotkeys() -> Set<String> {
         var ordered = modes.modes.map {
             HotkeyConflicts.Registrant(
                 id: $0.id, key: $0.triggerKeys.first?.key ?? "", enabled: $0.enabled)
         }
-        ordered.append(.init(id: GlobalHotkey.dictionaryId, key: general.addDictionaryShortcut))
-        ordered.append(.init(id: GlobalHotkey.replacementId, key: general.addReplacementShortcut))
+        ordered.append(.init(id: GlobalHotkey.vocabularyId, key: general.addVocabularyShortcut))
         ordered.append(.init(id: GlobalHotkey.pasteLastId, key: general.pasteLastShortcut))
         return HotkeyConflicts.shadowed(ordered)
     }
@@ -225,8 +221,7 @@ struct SettingsRootView: View {
                 let shadowed = shadowedHotkeys()
                 GeneralSettingsView(
                     model: general,
-                    dictionaryShadowed: shadowed.contains(GlobalHotkey.dictionaryId),
-                    replacementShadowed: shadowed.contains(GlobalHotkey.replacementId),
+                    vocabularyShadowed: shadowed.contains(GlobalHotkey.vocabularyId),
                     pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId))
             case .speechModels:
                 SpeechModelsView(model: speechModels)
@@ -317,8 +312,7 @@ final class SettingsModel: ObservableObject {
     @Published var historyEnabled: Bool { didSet { persist() } }
     @Published var retentionDays: Int { didSet { persist() } }
     @Published var eviction: String { didSet { persist() } }
-    @Published var addDictionaryShortcut: String { didSet { persist() } }
-    @Published var addReplacementShortcut: String { didSet { persist() } }
+    @Published var addVocabularyShortcut: String { didSet { persist() } }
     @Published var pasteLastShortcut: String { didSet { persist() } }
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
     @Published var inputDeviceUID: String { didSet { persist() } }
@@ -392,8 +386,7 @@ final class SettingsModel: ObservableObject {
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
         eviction = settings.stt.eviction.rawValue
-        addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
-        addReplacementShortcut = settings.shortcuts.addReplacement
+        addVocabularyShortcut = settings.shortcuts.addVocabulary
         pasteLastShortcut = settings.shortcuts.pasteLastDictation
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
@@ -409,8 +402,7 @@ final class SettingsModel: ObservableObject {
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
         eviction = settings.stt.eviction.rawValue
-        addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
-        addReplacementShortcut = settings.shortcuts.addReplacement
+        addVocabularyShortcut = settings.shortcuts.addVocabulary
         pasteLastShortcut = settings.shortcuts.pasteLastDictation
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
@@ -443,7 +435,7 @@ final class SettingsModel: ObservableObject {
             eviction: Eviction(rawValue: eviction) ?? .balanced,
             evictionIdleSeconds: settings.stt.evictionIdleSeconds)
         settings.shortcuts = .init(
-            addDictionaryEntry: addDictionaryShortcut, addReplacement: addReplacementShortcut,
+            addVocabulary: addVocabularyShortcut,
             pasteLastDictation: pasteLastShortcut)
         if inputDeviceUID.isEmpty {
             storedInputDeviceName = nil

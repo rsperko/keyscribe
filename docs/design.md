@@ -474,9 +474,13 @@ that app/mode (per-mode "exclude from history").
 never again" loop.
 
 A **standalone correction panel** also covers this fast loop outside History: a global shortcut (or
-the menu's **Add Dictionary Entry…** / **Add Replacement…**) opens a small "add correction" panel —
-**Heard → Replace** (a global replacement) or **add as a dictionary term** — with the **Heard** field
-**pre-filled from the current selection** when text is selected in the target app.
+the menu's **Add to Vocabulary…**) opens a small vocabulary panel —
+**Word or heard phrase → Use instead (optional)**. Leaving **Use instead** empty saves a dictionary
+term; filling it in saves a global replacement. Turning on regex makes this replacement-only and
+requires **Use instead**, avoiding an ambiguous empty replacement. The first field is **pre-filled
+from the current selection** when text is selected in the target app. Once a replacement value is
+entered, the panel offers **Add & Replace Selection** so the saved correction can also fix the
+currently selected text.
 
 ### 4.8 Dictation feedback
 - **Sound** on dictation start and end.

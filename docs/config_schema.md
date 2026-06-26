@@ -264,14 +264,13 @@ enabled = true
 retention_days = 7              # default; delete day-files older than this (or retention_entries)
 
 [shortcuts]                                 # global shortcuts for menu-bar actions
-add_dictionary_entry = "control+option+shift+d"  # canonical chord; "" = off
-add_replacement = "control+option+shift+r"       # canonical chord; "" = off
+add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
 paste_last_dictation = ""                        # canonical chord; "" = off (default)
 ```
 
-> **`[shortcuts]`** drive the standalone **Add Dictionary Entry…** / **Add Replacement…** panel and
-> the **Paste Last Dictation** action (all also always available in the menu bar). Add Dictionary /
-> Add Replacement **default on** to `⌃⌥⇧D` / `⌃⌥⇧R` — the
+> **`[shortcuts]`** drive the standalone **Add to Vocabulary…** panel and
+> the **Paste Last Dictation** action (both also always available in the menu bar). Add to Vocabulary
+> **defaults on** to `⌃⌥⇧V` — the
 > triple-modifier zone the system never reserves, so the global grab is least likely to collide with
 > an app; **Paste Last Dictation defaults off** (`""`). An **absent** key falls back to that field's
 > default; an explicit `""` means the user turned it

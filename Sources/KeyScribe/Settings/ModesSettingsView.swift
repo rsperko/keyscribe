@@ -577,30 +577,38 @@ private struct ModeEditorView: View {
     }
 
     @ViewBuilder private var dictionarySection: some View {
-        Section("Dictionary") {
+        Section("Add to Vocabulary") {
+            VocabularyComposer(
+                onAddWord: addWord,
+                onAddReplacement: addReplacementRule)
+            Text("Mode-only words and replacements apply on top of the global lists for this mode.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Words to Recognize") {
             SettingRow(
                 title: "Use global dictionary",
                 help: "Adds your global dictionary terms to this mode as recognition hints, on top of the mode-only words below. A dictionary term tells the model a word is valid — it does not force the word to appear, and an AI rewrite may still change it.")
             {
                 Toggle("", isOn: dictionaryBinding(\.includeGlobal)).labelsHidden()
             }
+            Text("Mode-only names, product terms, and jargon KeyScribe should recognize as written in this mode.")
+                .font(.caption).foregroundStyle(.secondary)
             DictionaryRows(
                 words: mode.dictionary.words,
-                onAdd: addWord, onRemove: removeWord,
-                placeholder: "Add a mode-only word, e.g. Kubernetes")
+                onRemove: removeWord)
         }
-        Section("Replacements") {
+        Section("Automatic Replacements") {
             SettingRow(
                 title: "Use global replacements",
                 help: "Applies your global replacement rules in this mode, on top of the mode-only rules below. Replacements run on this Mac before any AI rewrite, so a rewrite can still change the replaced text.")
             {
                 Toggle("", isOn: replacementsBinding(\.includeGlobal)).labelsHidden()
             }
+            Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
+                .font(.caption).foregroundStyle(.secondary)
             ReplacementRows(
                 rules: mode.replacements.rules,
-                onAdd: addReplacementRule, onRemove: removeReplacement(at:))
-            Text("Mode-only words and replacements apply on top of the global lists for this mode.")
-                .font(.caption).foregroundStyle(.secondary)
+                onRemove: removeReplacement(at:))
         }
     }
 

@@ -70,8 +70,8 @@ and technical prompt behavior.
 **Behavior:**
 
 - Collapsed by default.
-- Its label names the capability, not its implementation: `Advanced replacements`, not
-  `Regex configuration` unless regex is the only capability.
+- Its label names the capability, not its implementation: `Advanced model behavior`, not
+  `Eviction configuration` unless eviction is the only capability.
 - Show a one-line consequence before expansion when the setting affects output or data flow.
 - Expansion does not alter values or enable functionality by itself.
 - **The entire header row is the toggle target** — clicking anywhere on the label, not only the
