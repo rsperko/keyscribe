@@ -3,9 +3,12 @@ import KeyScribeKit
 
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
-    static let statusIcon: NSImage = {
+    // contentTintColor on a status-bar button renders black since Big Sur
+    // (developer.apple.com/forums/thread/666539), so tinted states use a pre-colored, non-template
+    // glyph instead. The template variant (color nil) keeps adaptive black/white for production idle.
+    static func glyph(color: NSColor?) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            NSColor.black.setStroke()
+            (color ?? .black).setStroke()
 
             for (x, lower, upper) in [(2.5, 7.5, 10.5), (5, 5.5, 12.5), (7.5, 3, 15)] {
                 let pulse = NSBezierPath()
@@ -27,9 +30,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = color == nil
         return image
-    }()
+    }
+
+    static let statusIcon: NSImage = glyph(color: nil)
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLine = NSMenuItem(title: "Status: starting…", action: nil, keyEquivalent: "")
@@ -58,12 +63,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private let variant = AppVariant(bundleID: Bundle.main.bundleIdentifier)
     private static let devTint = NSColor.systemOrange
+    private static let recordingIcon = glyph(color: .systemRed)
+    private static let devIcon = glyph(color: devTint)
+
+    private var idleIcon: NSImage { variant.isDev ? Self.devIcon : Self.statusIcon }
 
     func install() {
         if let button = statusItem.button {
-            button.image = Self.statusIcon
+            button.image = idleIcon
             button.image?.accessibilityDescription = variant.displayName
-            if variant.isDev { button.contentTintColor = Self.devTint }
             button.addSubview(badgeDot)
             NSLayoutConstraint.activate([
                 badgeDot.widthAnchor.constraint(equalToConstant: 6),
@@ -135,10 +143,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    // Tint the whole glyph red while capture is active (ui_design.md §Dynamic status — recording
-    // reflects that capture is active); reverts on commit. The template image takes the tint.
+    // Swap to the red glyph while capture is active (ui_design.md §Dynamic status — recording
+    // reflects that capture is active); reverts to the idle glyph on commit. A swapped non-template
+    // image is used rather than contentTintColor, which renders black on a status-bar button.
     func setDictating(_ active: Bool) {
-        statusItem.button?.contentTintColor = active ? .systemRed : (variant.isDev ? Self.devTint : nil)
+        let image = active ? Self.recordingIcon : idleIcon
+        image.accessibilityDescription = variant.displayName
+        statusItem.button?.image = image
     }
 
     // The error badge — a small red dot, top-left (ui_design.md §6) — for a configuration, model, or
