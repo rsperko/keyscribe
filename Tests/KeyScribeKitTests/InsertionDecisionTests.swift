@@ -13,20 +13,20 @@ struct InsertionDecisionTests {
         #expect(decideInsertion(captured: mail, current: slack) == .clipboardFallback(reason: .appChanged))
     }
 
-    @Test func sameAppSameFieldInserts() {
-        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedElementId: "field-1")
+    @Test func sameAppSameWindowInserts() {
+        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedWindowId: "window-1")
         #expect(decideInsertion(captured: a, current: a) == .insert)
     }
 
-    @Test func sameAppDifferentFieldFallsBack() {
-        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedElementId: "field-1")
-        let b = TargetSnapshot(bundleId: "com.apple.mail", focusedElementId: "field-2")
+    @Test func sameAppDifferentWindowFallsBack() {
+        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedWindowId: "window-1")
+        let b = TargetSnapshot(bundleId: "com.apple.mail", focusedWindowId: "window-2")
         #expect(decideInsertion(captured: a, current: b) == .clipboardFallback(reason: .focusChanged))
     }
 
-    @Test func sameAppFieldInfoLostInsertsBestEffort() {
-        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedElementId: "field-1")
-        let b = TargetSnapshot(bundleId: "com.apple.mail", focusedElementId: nil)
+    @Test func sameAppWindowInfoLostInsertsBestEffort() {
+        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedWindowId: "window-1")
+        let b = TargetSnapshot(bundleId: "com.apple.mail", focusedWindowId: nil)
         #expect(decideInsertion(captured: a, current: b) == .insert)
     }
 
@@ -38,6 +38,27 @@ struct InsertionDecisionTests {
     @Test func unverifiableCurrentTargetFallsBack() {
         #expect(decideInsertion(captured: mail, current: TargetSnapshot(bundleId: nil))
             == .clipboardFallback(reason: .appChanged))
+    }
+
+    @Test func currentSecureFieldFallsBack() {
+        let secure = TargetSnapshot(bundleId: "com.apple.mail", isSecureField: true)
+        #expect(decideInsertion(captured: mail, current: secure) == .clipboardFallback(reason: .secureField))
+    }
+
+    @Test func capturedSecureFieldFallsBack() {
+        let secure = TargetSnapshot(bundleId: "com.apple.mail", isSecureField: true)
+        #expect(decideInsertion(captured: secure, current: mail) == .clipboardFallback(reason: .secureField))
+    }
+
+    @Test func secureFieldBeatsMatchingAppAndWindow() {
+        let a = TargetSnapshot(bundleId: "com.apple.mail", focusedWindowId: "window-1", isSecureField: true)
+        #expect(decideInsertion(captured: a, current: a) == .clipboardFallback(reason: .secureField))
+    }
+
+    @Test func secureFieldClipboardOverridesEveryMethod() {
+        for method in [Mode.Insertion.paste, .insert, .type] {
+            #expect(insertionAction(decision: .clipboardFallback(reason: .secureField), method: method) == .clipboard)
+        }
     }
 
     @Test func insertActionHonorsPreferredMethod() {

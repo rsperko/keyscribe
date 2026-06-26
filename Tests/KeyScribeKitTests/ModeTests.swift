@@ -84,6 +84,21 @@ struct ModeTests {
         #expect(mode.effectiveContext == Mode.ContextOptIn(app: false, visibleText: false))
     }
 
+    @Test func localOnlyForSecureFieldStripsCloudAndContext() {
+        var mode = Mode(id: "polished", name: "Polished")
+        mode.aiRewrite = Mode.AIRewrite(
+            connection: "gemini", prompt: "Clean it up.",
+            context: .init(app: true, visibleText: true, precedingText: true))
+        let secured = mode.localOnlyForSecureField()
+        #expect(secured.aiRewrite == nil)
+        #expect(secured.commands.privacy)
+        #expect(secured.effectiveContext == Mode.ContextOptIn())
+        #expect(secured.effectiveContextCategories.isEmpty)
+        // Identity and name are preserved so the HUD still shows the resolved mode.
+        #expect(secured.id == "polished")
+        #expect(secured.name == "Polished")
+    }
+
     @Test func missingSchemaVersionThrows() {
         #expect(throws: ConfigError.missingSchemaVersion) {
             try ModeStore.decode(from: "name = \"X\"", id: "x")

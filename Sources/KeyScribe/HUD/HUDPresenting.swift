@@ -103,6 +103,8 @@ extension HUDState {
         switch reason {
         case .accessibilityDenied:
             return "Accessibility is off — copied to the clipboard. Paste with ⌘V."
+        case .secureField:
+            return "Password field — kept local and copied to the clipboard. Paste with ⌘V."
         case .appChanged, .focusChanged, .unknownTarget:
             return "Focus changed while KeyScribe was working"
         }

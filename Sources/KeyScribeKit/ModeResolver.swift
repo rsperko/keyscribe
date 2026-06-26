@@ -3,9 +3,11 @@ import Foundation
 public struct RoutingContext: Equatable, Sendable {
     public var bundleId: String?
     public var url: String?
-    public init(bundleId: String? = nil, url: String? = nil) {
+    public var windowTitle: String?
+    public init(bundleId: String? = nil, url: String? = nil, windowTitle: String? = nil) {
         self.bundleId = bundleId
         self.url = url
+        self.windowTitle = windowTitle
     }
 }
 
@@ -18,7 +20,7 @@ public struct PhaseBResult: Equatable, Sendable {
     }
 }
 
-// Two-phase routing (design.md §4.3). Phase A runs before STT from key + app/URL context;
+// Two-phase routing (design.md §4.3). Phase A runs before STT from key + routing context;
 // Phase B runs after STT from trigger-phrase suffixes, constrained to Phase A's eligible set.
 public enum ModeResolver {
     public static func eligibleModes(_ modes: [Mode], context: RoutingContext) -> [Mode] {
@@ -32,7 +34,7 @@ public enum ModeResolver {
         let eligible = enabled.filter { isEligible($0, context) }
 
         // 1. Explicit key binding selects its mode. When several enabled modes share the pressed key,
-        //    the one whose app/URL constraints best fit the current context wins (ties → declaration
+        //    the one whose routing constraints best fit the current context wins (ties → declaration
         //    order); an unconstrained mode is the fallback. A deliberate press still fires even where
         //    no constraint matches — it falls back to the first mode bound to the key.
         if let key = triggerKey {
@@ -81,20 +83,28 @@ public enum ModeResolver {
         modes.contains { $0.enabled && $0.constraints.contains { $0.urlPattern != nil } }
     }
 
+    // Whether any enabled mode could match on the window title — the gate for reading the focused
+    // window's title at all (an extra AX round trip, so it is read only when a mode actually needs it).
+    public static func requiresWindowTitleContext(_ modes: [Mode]) -> Bool {
+        modes.contains { $0.enabled && $0.constraints.contains { $0.windowTitle != nil } }
+    }
+
     private static func isEligible(_ mode: Mode, _ context: RoutingContext) -> Bool {
         if mode.constraints.isEmpty { return true }
         return mode.constraints.contains { matches($0, context) }
     }
 
-    // Specificity of a mode in this context: the most specific *matching* constraint wins. URL is
-    // narrower than app, so app=1 + URL=2 sums to app+URL=3 > URL=2 > app=1 > unconstrained=0
-    // (design.md §4.3).
+    // Specificity of a mode in this context: the most specific *matching* constraint wins. A constraint
+    // ANDs all of its fields, and the score sums the narrowness of each present field — narrowest first:
+    // url_pattern=4 > window_title=3 > bundle_id=2 > bundle_prefix=1 > unconstrained=0. Fields combine, so
+    // bundle_id+url_pattern (6) beats url_pattern alone (4) (design.md §4.3).
     private static func specificity(_ mode: Mode, _ context: RoutingContext) -> Int {
         mode.constraints.filter { matches($0, context) }.map(constraintScore).max() ?? 0
     }
 
     private static func constraintScore(_ c: Mode.Constraint) -> Int {
-        (c.bundleId != nil ? 1 : 0) + (c.urlPattern != nil ? 2 : 0)
+        (c.bundlePrefix != nil ? 1 : 0) + (c.bundleId != nil ? 2 : 0)
+            + (c.windowTitle != nil ? 3 : 0) + (c.urlPattern != nil ? 4 : 0)
     }
 
     private static func mostSpecific(_ modes: [Mode], _ context: RoutingContext) -> Mode? {
@@ -109,8 +119,15 @@ public enum ModeResolver {
 
     private static func matches(_ constraint: Mode.Constraint, _ context: RoutingContext) -> Bool {
         if let bundle = constraint.bundleId, bundle != context.bundleId { return false }
+        if let prefix = constraint.bundlePrefix {
+            guard let bundle = context.bundleId,
+                  bundle.lowercased().hasPrefix(prefix.lowercased()) else { return false }
+        }
         if let pattern = constraint.urlPattern {
             guard let url = context.url, regexFound(pattern, in: url) else { return false }
+        }
+        if let pattern = constraint.windowTitle {
+            guard let title = context.windowTitle, regexFound(pattern, in: title) else { return false }
         }
         return true
     }

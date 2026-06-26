@@ -1,6 +1,7 @@
 import AppKit
 import KeyScribeKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class HistoryController {
@@ -83,6 +84,7 @@ private final class HistoryViewModel: ObservableObject {
     @Published private(set) var groups: [(day: String, rows: [HistoryRow])] = []
     @Published private(set) var isLoading = false
     @Published private(set) var statusMessage: String?
+    @Published private(set) var statsLine: String?
 
     private static let loadLimit = 1000
     private var rows: [HistoryRow] = []
@@ -135,8 +137,57 @@ private final class HistoryViewModel: ObservableObject {
     private func applyLoaded(_ loaded: [HistoryEntry]) {
         rows = loaded.map { HistoryRow(entry: $0, day: dayFormatter.string(from: $0.timestamp)) }
         entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
+        statsLine = Self.statsSummary(HistoryStats.compute(from: loaded))
         recomputeGroups()
         isLoading = false
+    }
+
+    private static func statsSummary(_ s: HistoryStats) -> String? {
+        guard s.total > 0 else { return nil }
+        var parts = [
+            "\(s.total) dictation\(s.total == 1 ? "" : "s")",
+            "\(s.wordsDictated) word\(s.wordsDictated == 1 ? "" : "s")",
+        ]
+        if s.cloudCount > 0 { parts.append("\(Int((Double(s.cloudCount) / Double(s.total) * 100).rounded()))% cloud") }
+        if s.redactionCount > 0 { parts.append("\(Int((s.redactionRate * 100).rounded()))% redacted") }
+        return parts.joined(separator: " · ")
+    }
+
+    // Export the CURRENT search/filter selection, reading the FULL store (not the capped in-memory
+    // rows) off-main, then a save panel on main — the panel is the consent. Writes only where the user
+    // points it; never includes audio (KeyScribe never stores audio) or anything not already on disk.
+    func export(format: HistoryExport.Format) {
+        let store = self.store
+        let query = self.query
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let payload = await Task.detached { () -> String in
+                let all = store.entries(limit: nil)
+                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let filtered = trimmed.isEmpty ? all : all.filter { HistorySearch.matches($0, query: trimmed) }
+                let dayF = DateFormatter(); dayF.dateStyle = .full; dayF.timeStyle = .none
+                let timeF = DateFormatter(); timeF.dateStyle = .none; timeF.timeStyle = .short
+                let formatting = HistoryExport.Formatting(
+                    day: { dayF.string(from: $0) }, time: { timeF.string(from: $0) })
+                return HistoryExport.export(filtered, format: format, formatting: formatting)
+            }.value
+            self.presentSavePanel(payload: payload, format: format)
+        }
+    }
+
+    private func presentSavePanel(payload: String, format: HistoryExport.Format) {
+        guard !payload.isEmpty else { flash("Nothing to export."); return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "keyscribe-history.\(format.fileExtension)"
+        panel.canCreateDirectories = true
+        if let type = UTType(filenameExtension: format.fileExtension) { panel.allowedContentTypes = [type] }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try payload.write(to: url, atomically: true, encoding: .utf8)
+            flash("Exported \u{201C}\(url.lastPathComponent)\u{201D}.")
+        } catch {
+            flash("Export failed: \(error.localizedDescription)")
+        }
     }
 
     // Debounce search keystrokes: re-filtering and re-grouping up to loadLimit rows on every character
@@ -237,7 +288,7 @@ private struct HistoryView: View {
             }
             .searchable(text: $model.query, placement: .sidebar, prompt: "Search history")
             .frame(minWidth: 280)
-            .safeAreaInset(edge: .bottom) { storageTruth }
+            .safeAreaInset(edge: .bottom) { footer }
         } detail: {
             if let entry = model.selected {
                 HistoryDetailView(entry: entry, model: model)
@@ -249,13 +300,39 @@ private struct HistoryView: View {
         }
     }
 
+    private var footer: some View {
+        VStack(spacing: 0) {
+            if model.hasEntries {
+                HStack(spacing: 8) {
+                    if let line = model.statsLine {
+                        Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Menu {
+                        Button("Markdown (.md)") { model.export(format: .markdown) }
+                        Button("Plain text (.txt)") { model.export(format: .text) }
+                        Button("JSON (.jsonl)") { model.export(format: .json) }
+                    } label: {
+                        Label("Export Results…", systemImage: "square.and.arrow.up")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                Divider()
+            }
+            storageTruth
+        }
+        .background(.thinMaterial)
+    }
+
     private var storageTruth: some View {
-        Text("History stays on this Mac. Audio is never saved. Stored transcripts and final text can still contain sensitive information.")
+        Text("History stays on this Mac. Audio and password-field dictations are never saved. Stored transcripts and final text can still contain sensitive information.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial)
     }
 }
 

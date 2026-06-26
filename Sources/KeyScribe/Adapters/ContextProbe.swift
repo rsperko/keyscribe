@@ -2,15 +2,111 @@ import AppKit
 import ApplicationServices
 import KeyScribeKit
 
+// Private AX SPI: the CGWindowID backing an AXUIElement window, stable for the window's lifetime.
+// Used to tell two windows of the same app apart so a focus move during an LLM round-trip diverts to
+// the clipboard instead of pasting blind into the wrong window (design.md §4.5 focus race).
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
+
 @MainActor
 enum ContextProbe {
     static func snapshot() -> TargetSnapshot {
         let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        return TargetSnapshot(bundleId: bundleId, focusedElementId: nil)
+        return TargetSnapshot(
+            bundleId: bundleId,
+            focusedWindowId: bundleId.flatMap(focusedWindowId(bundleId:)),
+            isSecureField: focusedIsSecure())
+    }
+
+    // Whether the system-wide focused element is a secure (password) text field. Used to force a
+    // dictation fully local and divert its insert to a concealed clipboard copy (design.md §4.4).
+    // Best-effort and fail-open: any AX failure/timeout returns false (treated as a normal field), and
+    // some Chromium/Electron password inputs do not expose the AXSecureTextField subrole, so this is a
+    // best-effort guard, not a guarantee. A tight messaging timeout bounds a wedged AX server.
+    static func focusedIsSecure() -> Bool {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.1)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return false }
+        let element = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.1)
+        var subroleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subroleRef) == .success,
+              let subrole = subroleRef as? String else { return false }
+        return subrole == (kAXSecureTextFieldSubrole as String)
+    }
+
+    // A stable id for the frontmost app's focused window, so decideInsertion can catch a same-app
+    // window switch between capture and insertion (the realistic way dictated text lands in the wrong
+    // window during an LLM round-trip). Best-effort and fail-open: any failure/timeout returns nil, and
+    // a nil id never blocks insertion — decideInsertion only diverts to the clipboard when BOTH the
+    // captured and current ids are known and differ.
+    //
+    // Synchronous on purpose: snapshot() is read on the hot key-down path (handleStart) and again at
+    // insertion, both @MainActor, so it cannot await. A tight per-element messaging timeout (mirrors
+    // precedingTextSync, ContextProbe.swift) bounds a wedged AX server so it never stalls the dictation
+    // flow. Preferred id is the CGWindowID via the _AXUIElementGetWindow SPI; falls back to a
+    // title+position+size composite when the SPI is unavailable.
+    static func focusedWindowId(bundleId: String) -> String? {
+        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .first?.processIdentifier else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
+              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return nil }
+        let window = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(window, 0.1)
+
+        var windowID = CGWindowID(0)
+        if _AXUIElementGetWindow(window, &windowID) == .success, windowID != 0 {
+            return "cg:\(windowID)"
+        }
+
+        var components: [String] = []
+        var titleRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+           let title = titleRef as? String { components.append("t:\(title)") }
+        var posRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &posRef) == .success,
+           let posRef, CFGetTypeID(posRef) == AXValueGetTypeID() {
+            var pt = CGPoint.zero
+            AXValueGetValue((posRef as! AXValue), .cgPoint, &pt)
+            components.append("p:\(Int(pt.x)),\(Int(pt.y))")
+        }
+        var sizeRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
+           let sizeRef, CFGetTypeID(sizeRef) == AXValueGetTypeID() {
+            var sz = CGSize.zero
+            AXValueGetValue((sizeRef as! AXValue), .cgSize, &sz)
+            components.append("s:\(Int(sz.width)),\(Int(sz.height))")
+        }
+        return components.isEmpty ? nil : components.joined(separator: "|")
     }
 
     static func appName(forBundleId bundleId: String) -> String? {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName
+    }
+
+    // The focused window's title for a window-title-constrained mode (design.md §4.3). Synchronous AX
+    // read with a tight messaging timeout (like focusedWindowId), called only when a mode actually uses a
+    // window_title constraint (ModeResolver.requiresWindowTitleContext). Best-effort: nil if AX exposes
+    // no title.
+    static func focusedWindowTitle(bundleId: String) -> String? {
+        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .first?.processIdentifier else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
+              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return nil }
+        let window = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(window, 0.1)
+        var titleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+              let title = titleRef as? String, !title.isEmpty else { return nil }
+        return title
     }
 
     // Visible on-screen text for a mode that opted into visible-text context (design.md §4.4).

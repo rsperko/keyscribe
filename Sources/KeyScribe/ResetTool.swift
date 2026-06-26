@@ -40,6 +40,8 @@ struct ResetTool {
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         try? fileManager.removeItem(at: modesDir)
         try? fileManager.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        // Drop the disk-backed last-known-good too, so a re-seed can never resurrect a pre-reset mode.
+        try? fileManager.removeItem(at: supportDir.appendingPathComponent("lkg", isDirectory: true))
         ModeStore.seedStartersIfEmpty(in: modesDir)
         return ["Re-seeded \(ModeStore.starterModes().count) starter modes in \(modesDir.path)."]
     }

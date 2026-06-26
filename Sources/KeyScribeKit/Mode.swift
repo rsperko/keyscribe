@@ -71,14 +71,23 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public struct Constraint: Codable, Equatable, Sendable {
         public var bundleId: String?
+        public var bundlePrefix: String?     // case-insensitive bundle-id prefix, e.g. "com.jetbrains."
         public var urlPattern: String?
+        public var windowTitle: String?      // regex matched against the focused window's title
         enum CodingKeys: String, CodingKey {
             case bundleId = "bundle_id"
+            case bundlePrefix = "bundle_prefix"
             case urlPattern = "url_pattern"
+            case windowTitle = "window_title"
         }
-        public init(bundleId: String?, urlPattern: String? = nil) {
+        public init(
+            bundleId: String? = nil, bundlePrefix: String? = nil,
+            urlPattern: String? = nil, windowTitle: String? = nil
+        ) {
             self.bundleId = bundleId
+            self.bundlePrefix = bundlePrefix
             self.urlPattern = urlPattern
+            self.windowTitle = windowTitle
         }
     }
 
@@ -261,6 +270,19 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
+    // A copy of this mode forced fully local for a secure (password) field: no cloud rewrite and no
+    // captured context, whatever the mode normally does. The dictated text into a secure field is itself
+    // a secret, so even a redacted cloud payload is wrong — the whole transcript is the secret, and
+    // redaction protects spans, not the entire input (design.md §4.4). Dropping aiRewrite removes both
+    // the LLM call and context capture (context is only gathered when a rewrite runs); privacy is set so
+    // any surface reading effectiveContext also reports nothing.
+    public func localOnlyForSecureField() -> Mode {
+        var mode = self
+        mode.aiRewrite = nil
+        mode.commands.privacy = true
+        return mode
+    }
+
     // Context the mode may actually send: privacy mode forces everything off (design.md §4.4).
     public var effectiveContext: ContextOptIn {
         if commands.privacy { return ContextOptIn() }
@@ -369,10 +391,16 @@ public enum ModeStore {
 
     // Lenient load: a single malformed mode file must not vanish silently (it would change routing
     // with no signal). Each file is decoded independently; on failure we fall back to the
-    // last-known-good copy from `previous` (so an in-progress hand edit keeps the prior mode live)
-    // and record a LoadFailure the caller can surface. A file that never decoded is reported and
+    // last-known-good copy — first the in-memory `previous` (an in-progress hand edit keeps the prior
+    // mode live), then, when memory has nothing (the file was already malformed AT LAUNCH), the
+    // disk-backed copy under `lkgDir`. A file that never decoded and has no LKG is reported and
     // skipped — never substituted with a guess.
-    public static func load(in dir: URL, previous: [Mode]) -> LoadResult {
+    //
+    // `lkgDir` is the recovery store: on every clean decode the raw TOML is copied there (only when it
+    // changed, so the file system watcher sees at most one redundant reload per genuine edit). It must
+    // live OUTSIDE the `dir` being read so a copy is never mistaken for a real mode. Pass nil to disable
+    // disk LKG (e.g. one-shot reads).
+    public static func load(in dir: URL, previous: [Mode], lkgDir: URL? = nil) -> LoadResult {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
             return LoadResult(modes: [], failures: [])
@@ -384,10 +412,15 @@ public enum ModeStore {
             let id = url.deletingPathExtension().lastPathComponent
             do {
                 let toml = try String(contentsOf: url, encoding: .utf8)
-                modes.append(try decode(from: toml, id: id))
+                let mode = try decode(from: toml, id: id)
+                modes.append(mode)
+                if let lkgDir { saveLKG(toml, id: id, in: lkgDir) }
             } catch {
                 if let lastGood = prior[id] {
                     modes.append(lastGood)
+                    failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: true))
+                } else if let lkgDir, let recovered = loadLKG(id: id, in: lkgDir) {
+                    modes.append(recovered)
                     failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: true))
                 } else {
                     failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: false))
@@ -395,6 +428,23 @@ public enum ModeStore {
             }
         }
         return LoadResult(modes: modes, failures: failures)
+    }
+
+    // Copy a cleanly-decoded mode's raw TOML into the recovery store, skipping the write when the stored
+    // copy already matches — so a steady config does no disk churn and the watcher does not see a write.
+    private static func saveLKG(_ toml: String, id: String, in lkgDir: URL) {
+        let url = lkgDir.appendingPathComponent("\(id).toml")
+        if let existing = try? String(contentsOf: url, encoding: .utf8), existing == toml { return }
+        try? FileManager.default.createDirectory(at: lkgDir, withIntermediateDirectories: true)
+        try? toml.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // The disk-backed last-known-good for `id`, decoded — nil if there is none or it too fails to decode.
+    private static func loadLKG(id: String, in lkgDir: URL) -> Mode? {
+        let url = lkgDir.appendingPathComponent("\(id).toml")
+        guard let toml = try? String(contentsOf: url, encoding: .utf8),
+              let mode = try? decode(from: toml, id: id) else { return nil }
+        return mode
     }
 
     public static func write(_ mode: Mode, to dir: URL) throws {

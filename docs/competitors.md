@@ -119,7 +119,7 @@ KeyScribe ships **7 curated models across 5 engine families** (Parakeet TDT v3, 
 
 Cross-cutting capabilities that show up repeatedly and map onto KeyScribe's architecture:
 
-1. **Per-context Modes / Power Mode** (Superwhisper, VoiceInk, Wispr) — auto-switch config by active app/URL. → our **Modes + bundle constraints + trigger keys/phrases**.
+1. **Per-context Modes / Power Mode** (Superwhisper, VoiceInk, Wispr) — auto-switch config by active app/URL. → our **Modes + routing constraints + trigger keys/phrases**.
 2. **LLM rewrite with BYOK / model choice** (Superwhisper, Aqua, Wispr) → our **AI Service BYOK + per-mode AI rewrite + prompt + context**.
 3. **Context injection from the active window** (Superwhisper, Aqua) → our **Context: visible window text / app & field details**.
 4. **Voice editing commands on selected text** ("make concise," "translate") — Wispr Command Mode, Aqua → our **edit-in-place** (Work on Selection).

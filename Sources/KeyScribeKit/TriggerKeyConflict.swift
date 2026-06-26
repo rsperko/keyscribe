@@ -6,7 +6,7 @@ public struct TriggerKeyConflict: Equatable, Sendable {
 
 public enum TriggerKeyConflicts {
     // A shared trigger key is only a real conflict when two modes could *contend* for the same press —
-    // i.e. some app/URL context selects either with no clear winner. With constraint-aware key routing
+    // i.e. some routing context selects either with no clear winner. With constraint-aware key routing
     // (ModeResolver.resolvePhaseA) a constrained mode and an unconstrained one never collide: the
     // constrained one wins in its app, the other wins everywhere else, and both stay reachable. So the
     // warning fires only when `canContend` holds, matching what routing actually does.
@@ -24,7 +24,7 @@ public enum TriggerKeyConflicts {
         return nil
     }
 
-    // True when no app/URL context cleanly separates the two modes. Both unconstrained → they collide
+    // True when no routing context cleanly separates the two modes. Both unconstrained → they collide
     // everywhere. One unconstrained, one constrained → never (each is reachable). Both constrained →
     // they contend only if a shared app bundle, or both gate on a URL (whose patterns can't be proven
     // disjoint here, so we warn conservatively).

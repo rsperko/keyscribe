@@ -53,10 +53,19 @@ final class ConfigCache {
         return resolved
     }
 
+    // Disk-backed last-known-good for modes, OUTSIDE the watched modes/ dir so a recovery copy is never
+    // read as a real mode and the launch case (a file already malformed before any in-memory good exists)
+    // is still recoverable.
+    private var lkgModesDir: URL {
+        supportDir.appendingPathComponent("lkg", isDirectory: true)
+            .appendingPathComponent("modes", isDirectory: true)
+    }
+
     var modes: [Mode] {
         if let modesCache { return modesCache }
         let result = ModeStore.load(
-            in: supportDir.appendingPathComponent("modes", isDirectory: true), previous: lastGoodModes)
+            in: supportDir.appendingPathComponent("modes", isDirectory: true),
+            previous: lastGoodModes, lkgDir: lkgModesDir)
         for failure in result.failures {
             log.error("mode '\(failure.id, privacy: .public)' failed to load\(failure.usedLastKnownGood ? " (kept last-known-good)" : " (skipped)", privacy: .public): \(failure.message, privacy: .public)")
         }

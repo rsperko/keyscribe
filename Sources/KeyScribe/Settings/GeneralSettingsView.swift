@@ -62,7 +62,7 @@ struct GeneralSettingsView: View {
                 SettingRow(
                     title: "Keep dictation history on this Mac",
                     result: "Audio is never saved; stored text can be sensitive.",
-                    help: "Stores each dictation's transcript and final text locally so you can search and correct them. Nothing leaves this Mac. For sensitive work, lower retention below or exclude a mode in its Result handling.")
+                    help: "Stores transcripts and final text locally so you can search and correct them. Nothing leaves this Mac. Password-field dictations are never saved; for other sensitive work, lower retention below or exclude a mode in its Result handling.")
                 {
                     Toggle("", isOn: $model.historyEnabled).labelsHidden()
                 }

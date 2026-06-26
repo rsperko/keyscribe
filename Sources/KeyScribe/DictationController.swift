@@ -43,6 +43,12 @@ final class DictationController {
     private(set) var dictationTask: Task<Void, Never>?
     private var lastUsedAt: Double = 0
     private(set) var lastResult: String?
+    // One structured, in-memory diagnostics record for the most recent dictation, kept UNCONDITIONALLY
+    // (never gated on history). `building` accumulates stage timings + boundary fingerprints as the
+    // in-flight dictation progresses; finalizeRecord publishes it to `lastRecord`. Privacy: only token
+    // COUNTS and one-way fingerprints enter the record — never the token→original map (design.md §4.2).
+    private(set) var lastRecord: DictationRecord?
+    private var building = DictationRecord(modeName: DictationController.fallbackModeName)
     private var nextModeOverrideID: String?
     private var pendingLocalTranscript: String?
     private var pendingHeardTranscript: String?
@@ -257,6 +263,7 @@ final class DictationController {
         guard machine.beginRecording() else { return }
         hideTask?.cancel()
         idleEvictionTask?.cancel()
+        building = DictationRecord(modeName: currentModeName)
         // A denied mic does NOT make AVAudioEngine throw — it starts and captures silence, which would
         // surface as a misleading "No speech detected". Catch the real cause up front and point the user
         // at the fix instead of recording nothing.
@@ -265,6 +272,7 @@ final class DictationController {
             return
         }
         capturedSnapshot = snapshot()
+        building.targetBundleId = capturedSnapshot?.bundleId
         capturedPlan = config.resolved
         capturedEngine = provider.active
         captureStarted = false
@@ -278,7 +286,7 @@ final class DictationController {
         // known before capture. When a probe IS needed we resolve off the main thread so it never blocks
         // the cue, capture, or HUD — the mode is only needed at commit (transcribeAndInsert awaits this),
         // and the HUD fills its mode in once the probe returns.
-        if ModeResolver.requiresURLContext(plan.modes) {
+        if ModeResolver.requiresURLContext(plan.modes) || ModeResolver.requiresWindowTitleContext(plan.modes) {
             modeResolveTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
@@ -288,7 +296,7 @@ final class DictationController {
             }
         } else {
             modeResolveTask = nil
-            applyResolvedMode(triggerKey: triggerKey, url: nil)
+            applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
         }
 
         warmActiveEngine()
@@ -427,7 +435,8 @@ final class DictationController {
                 self.releaseCapturedPlan()
                 return
             }
-            let drainMs = Double(DispatchTime.now().uptimeNanoseconds - drainStart.uptimeNanoseconds) / 1e6
+            let drainMs = self.elapsedMs(since: drainStart)
+            self.building.stageMillis[.drain] = drainMs
             if let f = try? AVAudioFile(forReading: url) {
                 self.log.debug("wav \(f.length) frames @ \(f.fileFormat.sampleRate, privacy: .public)Hz ch=\(f.fileFormat.channelCount, privacy: .public) drain=\(drainMs, privacy: .public)ms")
             } else {
@@ -437,28 +446,46 @@ final class DictationController {
         }
     }
 
-    // Phase A (design.md §4.3): resolve the mode from app/URL context before recording. A non-nil
+    // Phase A (design.md §4.3): resolve the mode from routing context before recording. A non-nil
     // triggerKey (from a mode's own HotkeyMonitor binding) forces that mode, overriding context. The
-    // browser URL is fetched only when a URL-constrained mode exists (resolveModeProbing); otherwise
-    // url is nil here.
-    private func applyResolvedMode(triggerKey: String?, url: String?) {
+    // URL and window title are fetched only when a matching constraint exists (resolveModeProbing);
+    // otherwise they are nil here.
+    private func applyResolvedMode(triggerKey: String?, url: String?, windowTitle: String?) {
         let modes = plan.modes
-        let context = RoutingContext(bundleId: capturedSnapshot?.bundleId, url: url)
+        let context = RoutingContext(bundleId: capturedSnapshot?.bundleId, url: url, windowTitle: windowTitle)
         routingContext = context
         eligibleModes = ModeResolver.eligibleModes(modes, context: context)
         let automaticMode = ModeResolver.resolvePhaseA(
             modes: modes, defaultModeId: settings.defaultModeId, context: context, triggerKey: triggerKey)
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
-        activeMode = override ?? automaticMode
+        activeMode = securePolicyApplied(override ?? automaticMode)
+    }
+
+    // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no
+    // context, never recorded (design.md §4.4). Applied at every site that sets activeMode so a Phase-B
+    // voice re-route to a cloud mode is neutered too. Best-effort — depends on the field exposing the
+    // AXSecureTextField subrole (captured in TargetSnapshot.isSecureField).
+    private func securePolicyApplied(_ mode: Mode?) -> Mode? {
+        guard capturedSnapshot?.isSecureField == true else { return mode }
+        return mode?.localOnlyForSecureField()
     }
 
     private func resolveModeProbing(triggerKey: String?) async {
         var url: String?
+        var windowTitle: String?
         if let bundleId = capturedSnapshot?.bundleId {
-            url = await ContextProbe.browserURLAsync(forBundleId: bundleId)
+            // Each probe is gated on a mode actually using it: the URL probe needs Apple Events (an
+            // Automation prompt), the title probe an extra AX round trip — neither runs unless a mode's
+            // constraints depend on it.
+            if ModeResolver.requiresURLContext(plan.modes) {
+                url = await ContextProbe.browserURLAsync(forBundleId: bundleId)
+            }
+            if ModeResolver.requiresWindowTitleContext(plan.modes) {
+                windowTitle = ContextProbe.focusedWindowTitle(bundleId: bundleId)
+            }
         }
-        applyResolvedMode(triggerKey: triggerKey, url: url)
+        applyResolvedMode(triggerKey: triggerKey, url: url, windowTitle: windowTitle)
     }
 
     // Dictionary terms fed to the engine's recognition bias before STT. Only the Phase-A mode's
@@ -491,6 +518,9 @@ final class DictationController {
     private func transcribeAndInsert(url: URL) async {
         await modeResolveTask?.value
         let engine = activeEngine
+        building.audioSeconds = (try? AVAudioFile(forReading: url))
+            .map { Double($0.length) / $0.fileFormat.sampleRate }
+        let transcribeStart = DispatchTime.now()
         let raw: String
         do {
             raw = try await transcribeBounded(url: url, biasTerms: recognitionBiasTerms(), engine: engine)
@@ -516,6 +546,8 @@ final class DictationController {
             return
         }
         try? FileManager.default.removeItem(at: url)
+        building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
+        building.fingerprints[.raw] = .of(raw)
 
         // Cancelled during STT: bail before routing, rewrite, insertion, or history. cancel() already
         // ended effects and hid the HUD — a stale task must not run the cloud rewrite, touch the
@@ -526,7 +558,7 @@ final class DictationController {
         // and is stripped from the transcript; otherwise the Phase-A mode stands.
         let routed = ModeResolver.resolvePhaseB(eligibleModes: eligibleModes, transcript: raw, context: routingContext)
         let finalMode = routed.routedModeId.flatMap { id in eligibleModes.first { $0.id == id } } ?? activeMode
-        if let finalMode { activeMode = finalMode }
+        if let finalMode { activeMode = securePolicyApplied(finalMode) }
         pendingHeardTranscript = raw
         let (final, rewrite, transformed) = await produceFinalText(routed: routed, mode: finalMode)
 
@@ -561,6 +593,9 @@ final class DictationController {
         // false-`.success` data-loss footgun). Divert to the clipboard so the text survives and the
         // outcome reports "copied" truthfully instead of a phantom "inserted".
         let decision = accessibilityGranted() ? targetDecision : .clipboardFallback(reason: .accessibilityDenied)
+        building.targetBundleId = current.bundleId ?? capturedSnapshot?.bundleId
+        if case .clipboardFallback(let reason) = decision { building.fallbackReason = String(describing: reason) }
+        building.fingerprints[.final] = .of(transcript)
         let outcome = DictationMachine.outcomeForTranscript(transcript, decision: decision)
         switch outcome {
         case .noSpeech:
@@ -571,7 +606,9 @@ final class DictationController {
             // OUTSIDE that atom and only on a verified insert — never .copied, where a synthesized Return
             // would hit whatever app is now focused instead of the target the text reached.
             let trailing = activeMode?.trailing ?? .none
+            let insertStart = DispatchTime.now()
             await insert(decision, activeMode?.insertion ?? .paste, transcript + trailing.suffix)
+            building.stageMillis[.insert] = elapsedMs(since: insertStart)
             if outcome == .inserted, let submit = activeMode?.submit, submit != .none {
                 await submitKey(submit)
             }
@@ -579,6 +616,14 @@ final class DictationController {
         case .failed:
             machine.finish(outcome)
         }
+        let recordOutcome: DictationRecord.Outcome
+        switch outcome {
+        case .noSpeech: recordOutcome = .noSpeech
+        case .inserted: recordOutcome = rewrite?.fellBack == true ? .localFallback : .inserted
+        case .copied: recordOutcome = rewrite?.fellBack == true ? .localFallback : .copied
+        case .failed: recordOutcome = .failed
+        }
+        finalizeRecord(outcome: recordOutcome)
         recordHistory(heard: heard, transformed: transformed, result: transcript, insertion: outcome, rewrite: rewrite)
         let endCue: DuringDictationEffects.EndCue
         switch outcome {
@@ -603,7 +648,11 @@ final class DictationController {
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
         rewrite: RewriteDetails?
     ) {
-        guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false) else { return }
+        // A secure-field dictation is never persisted, regardless of the history setting or the mode —
+        // the spoken text is a password (design.md §4.4). The diagnostics record holds only fingerprints
+        // (hashes), never the transcript, so it is safe to keep; this guards the verbatim history store.
+        guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false),
+              capturedSnapshot?.isSecureField != true else { return }
         let outcome: HistoryEntry.Outcome
         switch insertion {
         case .noSpeech: return
@@ -688,6 +737,7 @@ final class DictationController {
         let resolved = mode.flatMap { m in connection(for: m).map { (mode: m, connection: $0) } }
         let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil)
 
+        let localStart = DispatchTime.now()
         var ctx = PipelineContext(text: transcript)
         pipeline.forward(&ctx)
         let tokenized = ctx.text
@@ -697,6 +747,8 @@ final class DictationController {
         var localCtx = PipelineContext(text: tokenized)
         pipeline.reverse(&localCtx)
         let localProcessed = localCtx.text
+        building.stageMillis[.localProcess] = elapsedMs(since: localStart)
+        building.fingerprints[.localProcessed] = .of(localProcessed)
         // Only record the middle stage when local processing actually changed the transcript;
         // otherwise Heard already equals it (ui_design.md §8).
         let transformed = localProcessed != transcript ? localProcessed : nil
@@ -765,6 +817,15 @@ final class DictationController {
         instruction: String, mode: Mode, connection: Connection
     ) async -> (text: String, ok: Bool, details: RewriteDetails) {
         let issuedTokens = pipeline.issuedTokens
+        // Cloud-boundary metadata for the diagnostics record. `content` is exactly what crosses to the
+        // LLM (forward-tokenized), so its fingerprint is the sentToLLM boundary for both the dictation
+        // and selection paths. The token→original map is never stored — only the count.
+        building.cloudInvolved = true
+        building.connection = connection.name
+        building.model = connection.model
+        building.redaction = mode.commands.privacy
+        building.issuedTokenCount = issuedTokens.count
+        building.fingerprints[.sentToLLM] = .of(content)
         if mode.commands.privacy {
             log.debug("redaction: \(issuedTokens.count, privacy: .public) span(s) tokenized before cloud rewrite")
         }
@@ -785,12 +846,14 @@ final class DictationController {
             capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection,
             visibleTextCap: Self.visibleTextCap, contextBudgetChars: Self.contextBudgetChars).build()
 
+        let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(
             localText: content, inputs: request.inputs, connection: request.sized, issuedTokens: issuedTokens)
+        building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
         var restoreCtx = PipelineContext(text: content)
         let fellBack: Bool
         switch outcome {
-        case .rewritten(let out): restoreCtx.text = out; fellBack = false
+        case .rewritten(let out): restoreCtx.text = out; fellBack = false; building.fingerprints[.llmOut] = .of(out)
         case .localFallback(let local): restoreCtx.text = local; fellBack = true
         }
         pipeline.reverse(&restoreCtx)
@@ -879,11 +942,27 @@ final class DictationController {
         pendingHeardTranscript = nil
     }
 
+    private func elapsedMs(since start: DispatchTime) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
+    }
+
+    // Publish the in-flight `building` record to `lastRecord` and emit its textless one-line summary.
+    // Called at every terminal point (finishInsertion, finishError) UNCONDITIONALLY — the diagnostics
+    // record is not gated on history. humanSummary() carries hashes/counts/ms only, never transcript.
+    private func finalizeRecord(outcome: DictationRecord.Outcome, error: String? = nil) {
+        building.modeName = currentModeName
+        building.outcome = outcome
+        if let error { building.error = error }
+        lastRecord = building
+        log.debug("\(self.building.humanSummary(), privacy: .public)")
+    }
+
     private func finishError(_ message: String, action: HUDErrorAction? = nil) {
         machine.finish(.failed(message))
         effects.end(settings.duringDictation, cue: .error)
         hud?.render(.error(message: message, action: action))
         scheduleHide(after: action == nil ? 2 : 8)
+        finalizeRecord(outcome: .failed, error: message)
         releaseCapturedPlan()
     }
 

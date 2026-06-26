@@ -39,7 +39,11 @@ enum TextInserter {
         case .paste: await insertViaPaste(text)
         case .ax: await insertViaAX(text)
         case .type: await insertViaTyping(text)
-        case .clipboard: copyToClipboard(text)
+        case .clipboard:
+            // A secure-field divert conceals the copy so clipboard managers do not retain the password;
+            // every other fallback is a normal copy the user can paste back.
+            if case .clipboardFallback(.secureField) = decision { copyToClipboard(text, concealed: true) }
+            else { copyToClipboard(text) }
         }
     }
 
@@ -174,10 +178,20 @@ enum TextInserter {
         postKey(returnKeyCode, flags: flags)
     }
 
-    static func copyToClipboard(_ text: String) {
+    // `concealed` marks the item transient + concealed so clipboard managers do not capture it — used
+    // for the secure-field divert, where the copied text is a password.
+    static func copyToClipboard(_ text: String, concealed: Bool = false) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(text, forType: .string)
+        guard concealed else {
+            pb.setString(text, forType: .string)
+            return
+        }
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        pb.writeObjects([item])
     }
 
     // A full snapshot of every pasteboard item and type, so restore reproduces images / RTF / file

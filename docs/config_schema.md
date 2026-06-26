@@ -84,11 +84,15 @@ key = "right_option"        # canonical key descriptor; also e.g. "fn", "hyper",
 press_style = "hold-or-tap"
 tap_threshold_ms = 250      # release under this = a tap (latches on); over = push-to-talk hold
 
-# Context eligibility (Phase A). Empty = eligible everywhere. Each constraint is an app bundle id
-# and, when detectable, a URL pattern. Also constrains which phrases can route here.
+# Context eligibility (Phase A). Empty = eligible everywhere. A constraint ANDs its fields; any of
+# bundle_id (exact), bundle_prefix (case-insensitive bundle-id prefix), url_pattern (regex, when
+# detectable), window_title (regex). Also constrains which phrases can route here. Specificity ranks
+# url_pattern > window_title > bundle_id > bundle_prefix (design.md §4.3).
 [[constraints]]
 bundle_id = "com.apple.mail"
-# url_pattern = 'mail\.google\.com/.*'   # optional; best-effort
+# bundle_prefix = "com.jetbrains."        # optional; matches all bundle ids under the prefix
+# url_pattern = 'mail\.google\.com/.*'    # optional; best-effort
+# window_title = '(?i)pull request'       # optional; regex against the focused window title
 
 # ── Pipeline commands (spoken-command / pipeline features, opt-in per mode) ──
 [commands]
@@ -139,7 +143,7 @@ context = { app = true, visible_text = false, preceding_text = false }
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
 | `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — the default mode owns its trigger key. |
 | `trigger_phrases` | string[] | Regexes, suffix-matched post-STT. Zero or more. |
-| `constraints[]` | table[] | `bundle_id` (+ optional `url_pattern`). Empty ⇒ eligible everywhere. |
+| `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection`. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **tab**, **begin/end verbatim**). |

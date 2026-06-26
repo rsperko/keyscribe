@@ -275,8 +275,8 @@ enum ModeSummary {
            let descriptor = try? KeyDescriptor(parsing: key) {
             return "Triggered by \(triggerLabel(descriptor))"
         }
-        if mode.constraints.contains(where: { $0.bundleId != nil || $0.urlPattern != nil }) {
-            return "App or URL rule"
+        if !mode.constraints.isEmpty {
+            return "Routing rule"
         }
         if !mode.triggerPhrases.isEmpty { return "Spoken phrase" }
         if isDefault { return "Automatic default" }
@@ -313,6 +313,7 @@ private struct ModeEditorView: View {
     @State private var advancedExpanded = false
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
+    @State private var newWindowTitlePattern = ""
     @State private var newFragmentName = ""
     @State private var capturingCustom = false
     @State private var manualBundleId = ""
@@ -329,12 +330,12 @@ private struct ModeEditorView: View {
                 }
                 Toggle("Enabled", isOn: binding(\.enabled))
                 if isDefault {
-                    Label("Used automatically when no app rule or spoken phrase applies",
+                    Label("Used automatically when no routing rule or spoken phrase applies",
                           systemImage: "star.fill")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if mode.source != .selection {
                     Button("Use as default mode", action: onMakeDefault)
-                    Text("The default mode runs whenever no app rule, shortcut, or spoken phrase selects another mode.")
+                    Text("The default mode runs whenever no routing rule, shortcut, or spoken phrase selects another mode.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -500,11 +501,11 @@ private struct ModeEditorView: View {
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
-            Text("A mode shortcut starts this mode directly. Without one, it can still be selected by its app rules and spoken routing.")
+            Text("A mode shortcut starts this mode directly. Without one, it can still be selected by routing rules and spoken routing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DisclosureSection("Advanced routing", isExpanded: $routingExpanded) {
-                Text("Limit to apps or websites")
+                Text("Limit by app, URL, or window title")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(mode.constraints.indices, id: \.self) { index in
                     HStack {
@@ -538,11 +539,18 @@ private struct ModeEditorView: View {
                     }
                 }
                 HStack {
-                    TextField("URL pattern, e.g. github.com", text: $newURLPattern)
+                    TextField("URL regex, e.g. github\\.com", text: $newURLPattern)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitURLConstraint)
                     Button("Add", action: commitURLConstraint)
                         .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                HStack {
+                    TextField("Window title regex, e.g. (?i)pull request", text: $newWindowTitlePattern)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitWindowTitleConstraint)
+                    Button("Add", action: commitWindowTitleConstraint)
+                        .disabled(newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 Text("Choose by spoken phrase")
@@ -562,7 +570,7 @@ private struct ModeEditorView: View {
                         .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                Text("App and website limits choose a mode before recording. A spoken phrase said at the end can reroute the result after transcription. URL patterns are local routing rules and are never sent to a rewrite provider.")
+                Text("Routing rules choose a mode before recording. App rules match bundle IDs, URL and window title rules are regular expressions, and each is checked only when a mode uses it. URLs are local routing keys and are never sent to a rewrite provider. A spoken phrase said at the end can reroute the result after transcription.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -731,7 +739,8 @@ private struct ModeEditorView: View {
     }
 
     @ViewBuilder private func constraintLabel(_ constraint: Mode.Constraint) -> some View {
-        if let bundle = constraint.bundleId {
+        let parts = constraintParts(constraint)
+        if let bundle = constraint.bundleId, parts.count == 1 {
             HStack(spacing: 6) {
                 if let icon = InstalledApps.icon(forBundleId: bundle) {
                     Image(nsImage: icon).resizable().frame(width: 16, height: 16)
@@ -739,9 +748,21 @@ private struct ModeEditorView: View {
                 Text(InstalledApps.name(forBundleId: bundle) ?? bundle).font(.callout)
                 Text(bundle).font(.caption).foregroundStyle(.secondary)
             }
-        } else if let url = constraint.urlPattern {
-            Text("URL: \(url)").font(.callout)
+        } else {
+            Text(parts.joined(separator: " + ")).font(.callout)
         }
+    }
+
+    private func constraintParts(_ constraint: Mode.Constraint) -> [String] {
+        var parts: [String] = []
+        if let bundle = constraint.bundleId {
+            let name = InstalledApps.name(forBundleId: bundle) ?? bundle
+            parts.append("App: \(name)")
+        }
+        if let prefix = constraint.bundlePrefix { parts.append("App prefix: \(prefix)") }
+        if let url = constraint.urlPattern { parts.append("URL regex: \(url)") }
+        if let title = constraint.windowTitle { parts.append("Window title regex: \(title)") }
+        return parts.isEmpty ? ["Empty routing rule"] : parts
     }
 
     private func addWord(_ word: String) {
@@ -795,6 +816,15 @@ private struct ModeEditorView: View {
         updated.constraints.append(.init(bundleId: nil, urlPattern: value))
         onUpdate(updated)
         newURLPattern = ""
+    }
+
+    private func commitWindowTitleConstraint() {
+        let value = newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        var updated = mode
+        updated.constraints.append(.init(windowTitle: value))
+        onUpdate(updated)
+        newWindowTitlePattern = ""
     }
 
     private func removeConstraint(at index: Int) {

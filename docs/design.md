@@ -79,7 +79,7 @@ The same app serves both via progressive disclosure.
 ## 4. System architecture
 
 ```
-  context: frontmost APP + URL (best effort)  ──┐ ranks eligible modes specificity→order
+  context: frontmost APP + URL/window title (best effort) ─┐ ranks eligible modes specificity→order
                                                 │ (auto-start + which trigger phrases can route)
                                                 ▼
   KEY forces its mode / context  ─▶  INITIAL MODE  ─────────────────────────────┐
@@ -296,7 +296,7 @@ mode, not special-cased). What users informally call "the global hotkey" is that
   tap), **hold-only**, and **tap-to-toggle**. A key **selects its mode** as the initial mode and runs
   that mode's *entire* pipeline including pre-STT bias. When a *single* mode owns the key, pressing it
   invokes that mode even where context would not auto-select it — a deliberate press is never a no-op.
-  When **several modes share the key**, context disambiguates: the bound mode whose app/URL
+  When **several modes share the key**, context disambiguates: the bound mode whose routing
   constraints best fit the current context wins (most specific, then declaration order), with an
   unconstrained bound mode as the fallback — so one key can drive a Slack-only mode in Slack and a
   plain mode everywhere else. (The STT *engine* is global — modes do not pick it; see §4.1.) Any key
@@ -304,17 +304,21 @@ mode, not special-cased). What users informally call "the global hotkey" is that
   mode, with **right-Option** as a conflict-free alternative. Holding **Hyper** (⌃⌥⇧⌘) can be a
   trigger. Conflicts with system/other-app shortcuts are handled **best-effort** (detect and warn at
   assignment).
-- **Context constraints (bundle / URL):** the frontmost app, and the URL when detectable, are
-  identified **best-effort** to **rank the eligible modes** in that context. Context *suggests* the
+- **Context constraints (`bundle_id` / `bundle_prefix` / `url_pattern` / `window_title`):** the
+  frontmost app, and the URL / window title when detectable, are identified **best-effort** to **rank
+  the eligible modes** in that context. A constraint ANDs all of its fields. Context *suggests* the
   starting mode; it does not restrict an explicit key press. The eligible set also bounds Phase-B
-  voice routing.
+  voice routing. (`url_pattern` needs an Automation prompt and `window_title` an extra AX read, so each
+  is probed only when some enabled mode actually uses it.)
 
 **Mode resolution (one resolver, both phases).** When no key is pressed, Phase A picks the initial
 mode; when a transcript suffix matches, Phase B picks the routed-to mode. Both use the **same rule
-over the eligible (context-allowed) modes: specificity first, then declaration order.** A mode
-constrained to the *current* context (app, or app+URL — URL is narrower than app) outranks a
-less-constrained one; an **unconstrained** mode is the least specific. Equal specificity breaks by
-the mode list's declaration order. Only **constrained** modes auto-start in Phase A; if none match,
+over the eligible (context-allowed) modes: specificity first, then declaration order.** A constraint
+scores by summing the narrowness of each present field — **`url_pattern`=4 > `window_title`=3 >
+`bundle_id`=2 > `bundle_prefix`=1** — so fields combine (`bundle_id`+`url_pattern`=6 beats
+`url_pattern` alone=4) and a mode constrained to the *current* context outranks a less-constrained
+one; an **unconstrained** mode is the least specific (0). Equal specificity breaks by the mode list's
+declaration order. Only **constrained** modes auto-start in Phase A; if none match,
 resolution falls to the single **default mode**. Unconstrained *non-default* modes never auto-start —
 they are reachable by **key or voice only** (so two catch-alls never compete to start).
 
@@ -451,10 +455,12 @@ in `ui_design.md` and `ui_components.md`.
 ### 4.7 Local history
 Optional, **on-device only** (a **`history/` directory with one JSONL file per day**, append-only),
 never synced. A **simple retention policy** bounds it (delete day-files older than N days, or cap
-entries). Per-mode "exclude from history."
+entries). Per-mode "exclude from history." Password-field dictations are never written to history,
+regardless of the global or per-mode setting.
 
 **Stored per entry:** raw transcription, the mode used, the **exact prompt sent to the LLM**, and the
-**final text pasted/inserted**. **Audio is never stored.** The stored prompt carries the **tokens**
+**final text pasted/inserted**. History can be searched, summarized, and exported as Markdown, plain
+text, or JSONL. **Audio is never stored.** The stored prompt carries the **tokens**
 (⟦SN:…⟧), not their originals — the **redaction map is never stored** — but the raw transcription and
 final insert do contain the real values, so for sensitive work the lever is **disabling history** for
 that app/mode (per-mode "exclude from history").
@@ -533,6 +539,11 @@ carries a **`schema_version`**.
 - A **pre-migration backup** is written so a failed or unwanted migration is recoverable.
 - User-editable files are **validated** on load; invalid files surface a clear error rather than being
   silently dropped.
+- **Last-known-good recovery (modes):** every clean mode decode is copied to a recovery store
+  (`<support>/lkg/modes/`, outside the watched tree). A malformed mode file falls back to its prior
+  good copy — in-memory first, then the disk copy when memory has nothing (the file was already
+  malformed **at launch**) — so one bad hand edit never makes a mode disappear. Recovery is reported,
+  never silent; a re-seed/reset clears the store so it cannot resurrect a removed mode.
 
 ---
 

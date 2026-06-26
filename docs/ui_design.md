@@ -458,9 +458,10 @@ Correction actions are directly beside the relevant text:
 
 ### Storage truth
 
-History settings and the empty state must state: `History stays on this Mac. Audio is never
-saved. Stored transcripts and final text can still contain sensitive information.` Link the
-user directly to retention and per-mode exclusion from this explanation.
+History settings and the empty state must state: `History stays on this Mac. Audio and
+password-field dictations are never saved. Stored transcripts and final text can still contain
+sensitive information.` Link the user directly to retention and per-mode exclusion from this
+explanation.
 
 ---
 

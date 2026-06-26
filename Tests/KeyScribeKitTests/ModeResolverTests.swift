@@ -39,6 +39,75 @@ struct ModeResolverTests {
             context: .init(bundleId: "com.google.Chrome", url: "https://docs.google.com")).isEmpty)
     }
 
+    @Test func bundlePrefixConstrains() {
+        var ide = mode("ide")
+        ide.constraints = [Mode.Constraint(bundlePrefix: "com.jetbrains.")]
+        #expect(ModeResolver.eligibleModes([ide], context: .init(bundleId: "com.jetbrains.intellij")).count == 1)
+        #expect(ModeResolver.eligibleModes([ide], context: .init(bundleId: "com.jetbrains.pycharm")).count == 1)
+        #expect(ModeResolver.eligibleModes([ide], context: .init(bundleId: "com.apple.dt.Xcode")).isEmpty)
+    }
+
+    @Test func bundlePrefixIsCaseInsensitive() {
+        var ide = mode("ide")
+        ide.constraints = [Mode.Constraint(bundlePrefix: "com.jetbrains.")]
+        #expect(ModeResolver.eligibleModes([ide], context: .init(bundleId: "COM.JetBrains.GoLand")).count == 1)
+    }
+
+    @Test func windowTitleConstrains() {
+        var review = mode("review")
+        review.constraints = [Mode.Constraint(windowTitle: #"(?i)pull request"#)]
+        #expect(ModeResolver.eligibleModes([review],
+            context: .init(bundleId: "com.google.Chrome", windowTitle: "Add modes · Pull Request #42")).count == 1)
+        #expect(ModeResolver.eligibleModes([review],
+            context: .init(bundleId: "com.google.Chrome", windowTitle: "Inbox")).isEmpty)
+        #expect(ModeResolver.eligibleModes([review],
+            context: .init(bundleId: "com.google.Chrome", windowTitle: nil)).isEmpty)
+    }
+
+    @Test func bundleIdBeatsBundlePrefixOnSharedKey() {
+        var exact = mode("exact", keys: ["right_option"])
+        exact.constraints = [Mode.Constraint(bundleId: "com.jetbrains.intellij")]
+        var prefix = mode("prefix", keys: ["right_option"])
+        prefix.constraints = [Mode.Constraint(bundlePrefix: "com.jetbrains.")]
+        let m = ModeResolver.resolvePhaseA(
+            modes: [prefix, exact], defaultModeId: "prefix",
+            context: .init(bundleId: "com.jetbrains.intellij"), triggerKey: "right_option")
+        #expect(m?.id == "exact")
+    }
+
+    @Test func urlBeatsWindowTitleOnSharedKey() {
+        var titled = mode("titled", keys: ["right_option"])
+        titled.constraints = [Mode.Constraint(windowTitle: #"(?i)github"#)]
+        var urled = mode("urled", keys: ["right_option"])
+        urled.constraints = [Mode.Constraint(urlPattern: #"github\.com"#)]
+        let m = ModeResolver.resolvePhaseA(
+            modes: [titled, urled], defaultModeId: "titled",
+            context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x", windowTitle: "GitHub"),
+            triggerKey: "right_option")
+        #expect(m?.id == "urled")
+    }
+
+    @Test func requiresWindowTitleContextOnlyWhenAModeUsesIt() {
+        var titled = mode("titled")
+        titled.constraints = [Mode.Constraint(windowTitle: #"x"#)]
+        #expect(ModeResolver.requiresWindowTitleContext([titled]))
+        #expect(!ModeResolver.requiresWindowTitleContext([mode("plain")]))
+        var off = titled; off.enabled = false
+        #expect(!ModeResolver.requiresWindowTitleContext([off]))
+    }
+
+    @Test func constraintFieldsCombineForSpecificity() {
+        var both = mode("both", keys: ["right_option"])
+        both.constraints = [Mode.Constraint(bundleId: "com.google.Chrome", urlPattern: #"github\.com"#)]
+        var urlOnly = mode("urlOnly", keys: ["right_option"])
+        urlOnly.constraints = [Mode.Constraint(urlPattern: #"github\.com"#)]
+        let m = ModeResolver.resolvePhaseA(
+            modes: [urlOnly, both], defaultModeId: "urlOnly",
+            context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x"),
+            triggerKey: "right_option")
+        #expect(m?.id == "both")
+    }
+
     // Phase A
     @Test func triggerKeyBindingSelectsKeyedMode() {
         let plain = mode("plain")
