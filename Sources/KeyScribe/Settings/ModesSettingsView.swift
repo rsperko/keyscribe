@@ -50,7 +50,9 @@ final class ModesSettingsModel: ObservableObject {
 
     func create() {
         let name = "New Mode"
-        let mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
+        var mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
+        mode.trailing = .space
+        mode.commands.liveEdits = true
         save(mode)
         selectedID = mode.id
         lastCreatedId = mode.id
