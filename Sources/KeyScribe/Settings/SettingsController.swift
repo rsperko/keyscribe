@@ -191,6 +191,7 @@ struct SettingsRootView: View {
         }
         ordered.append(.init(id: GlobalHotkey.dictionaryId, key: general.addDictionaryShortcut))
         ordered.append(.init(id: GlobalHotkey.replacementId, key: general.addReplacementShortcut))
+        ordered.append(.init(id: GlobalHotkey.pasteLastId, key: general.pasteLastShortcut))
         return HotkeyConflicts.shadowed(ordered)
     }
 
@@ -225,7 +226,8 @@ struct SettingsRootView: View {
                 GeneralSettingsView(
                     model: general,
                     dictionaryShadowed: shadowed.contains(GlobalHotkey.dictionaryId),
-                    replacementShadowed: shadowed.contains(GlobalHotkey.replacementId))
+                    replacementShadowed: shadowed.contains(GlobalHotkey.replacementId),
+                    pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId))
             case .speechModels:
                 SpeechModelsView(model: speechModels)
             case .vocabulary:
@@ -317,6 +319,7 @@ final class SettingsModel: ObservableObject {
     @Published var eviction: String { didSet { persist() } }
     @Published var addDictionaryShortcut: String { didSet { persist() } }
     @Published var addReplacementShortcut: String { didSet { persist() } }
+    @Published var pasteLastShortcut: String { didSet { persist() } }
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
     @Published var inputDeviceUID: String { didSet { persist() } }
     // The friendly name last seen for `inputDeviceUID`, so a disconnected preferred device still reads as
@@ -391,6 +394,7 @@ final class SettingsModel: ObservableObject {
         eviction = settings.stt.eviction.rawValue
         addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
         addReplacementShortcut = settings.shortcuts.addReplacement
+        pasteLastShortcut = settings.shortcuts.pasteLastDictation
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
     }
@@ -407,6 +411,7 @@ final class SettingsModel: ObservableObject {
         eviction = settings.stt.eviction.rawValue
         addDictionaryShortcut = settings.shortcuts.addDictionaryEntry
         addReplacementShortcut = settings.shortcuts.addReplacement
+        pasteLastShortcut = settings.shortcuts.pasteLastDictation
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
         loading = false
@@ -438,7 +443,8 @@ final class SettingsModel: ObservableObject {
             eviction: Eviction(rawValue: eviction) ?? .balanced,
             evictionIdleSeconds: settings.stt.evictionIdleSeconds)
         settings.shortcuts = .init(
-            addDictionaryEntry: addDictionaryShortcut, addReplacement: addReplacementShortcut)
+            addDictionaryEntry: addDictionaryShortcut, addReplacement: addReplacementShortcut,
+            pasteLastDictation: pasteLastShortcut)
         if inputDeviceUID.isEmpty {
             storedInputDeviceName = nil
         } else if let live = AudioInputDevices.available().first(where: { $0.uid == inputDeviceUID }) {

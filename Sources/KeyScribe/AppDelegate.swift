@@ -170,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ordered.append(.init(id: GlobalHotkey.dictionaryId, key: settings.shortcuts.addDictionaryEntry))
         ordered.append(.init(id: GlobalHotkey.replacementId, key: settings.shortcuts.addReplacement))
+        ordered.append(.init(id: GlobalHotkey.pasteLastId, key: settings.shortcuts.pasteLastDictation))
         return HotkeyConflicts.shadowed(ordered)
     }
 
@@ -191,7 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let actionDescriptors = Dictionary(uniqueKeysWithValues: actionBindings.map { ($0.id, $0.descriptor) })
         menu.setActionShortcuts(
             addDictionary: actionDescriptors[HotkeyAction.addDictionary.rawValue],
-            addReplacement: actionDescriptors[HotkeyAction.addReplacement.rawValue])
+            addReplacement: actionDescriptors[HotkeyAction.addReplacement.rawValue],
+            pasteLast: actionDescriptors[HotkeyAction.pasteLast.rawValue])
 
         if hotkey == nil {
             hotkey = HotkeyMonitor(
@@ -207,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private enum HotkeyAction: String { case addDictionary, addReplacement }
+    private enum HotkeyAction: String { case addDictionary, addReplacement, pasteLast }
 
     // Only chord descriptors are honored — a modifier-only named key would also drive dictation and
     // makes no sense as a discrete action. An unparseable or non-chord string is silently skipped.
@@ -215,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let entries: [(HotkeyAction, String, String)] = [
             (.addDictionary, settings.shortcuts.addDictionaryEntry, GlobalHotkey.dictionaryId),
             (.addReplacement, settings.shortcuts.addReplacement, GlobalHotkey.replacementId),
+            (.pasteLast, settings.shortcuts.pasteLastDictation, GlobalHotkey.pasteLastId),
         ]
         return entries.compactMap { action, key, globalId in
             guard !shadowed.contains(globalId), !key.isEmpty,
@@ -227,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch HotkeyAction(rawValue: id) {
         case .addDictionary: correctionPanel.present(.dictionary)
         case .addReplacement: correctionPanel.present(.replacement)
+        case .pasteLast: controller.pasteLast()
         case nil: break
         }
     }

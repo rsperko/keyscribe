@@ -77,10 +77,13 @@ struct SettingsTests {
 
     @Test func shortcutsRoundTrip() throws {
         var s = Settings.defaults
-        s.shortcuts = .init(addDictionaryEntry: "control+option+shift+d", addReplacement: "control+option+shift+r")
+        s.shortcuts = .init(
+            addDictionaryEntry: "control+option+shift+d", addReplacement: "control+option+shift+r",
+            pasteLastDictation: "control+option+shift+v")
         let decoded = try SettingsStore.decode(from: SettingsStore.encode(s))
         #expect(decoded.shortcuts.addDictionaryEntry == "control+option+shift+d")
         #expect(decoded.shortcuts.addReplacement == "control+option+shift+r")
+        #expect(decoded.shortcuts.pasteLastDictation == "control+option+shift+v")
         #expect(decoded == s)
     }
 
@@ -88,6 +91,7 @@ struct SettingsTests {
         let s = try SettingsStore.decode(from: "schema_version = 1")
         #expect(s.shortcuts.addDictionaryEntry == "control+option+shift+d")
         #expect(s.shortcuts.addReplacement == "control+option+shift+r")
+        #expect(s.shortcuts.pasteLastDictation.isEmpty)
     }
 
     @Test func explicitlyEmptyShortcutStaysOff() throws {

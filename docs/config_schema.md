@@ -263,15 +263,18 @@ sounds = true                   # start/end sounds
 enabled = true
 retention_days = 7              # default; delete day-files older than this (or retention_entries)
 
-[shortcuts]                                 # global shortcuts for the standalone correction panel
+[shortcuts]                                 # global shortcuts for menu-bar actions
 add_dictionary_entry = "control+option+shift+d"  # canonical chord; "" = off
 add_replacement = "control+option+shift+r"       # canonical chord; "" = off
+paste_last_dictation = ""                        # canonical chord; "" = off (default)
 ```
 
-> **`[shortcuts]`** drive the standalone **Add Dictionary Entry…** / **Add Replacement…** panel
-> (also always available in the menu bar). They **default on** to `⌃⌥⇧D` / `⌃⌥⇧R` — the
+> **`[shortcuts]`** drive the standalone **Add Dictionary Entry…** / **Add Replacement…** panel and
+> the **Paste Last Dictation** action (all also always available in the menu bar). Add Dictionary /
+> Add Replacement **default on** to `⌃⌥⇧D` / `⌃⌥⇧R` — the
 > triple-modifier zone the system never reserves, so the global grab is least likely to collide with
-> an app. An **absent** key falls back to that default; an explicit `""` means the user turned it
+> an app; **Paste Last Dictation defaults off** (`""`). An **absent** key falls back to that field's
+> default; an explicit `""` means the user turned it
 > off. Only **chord** descriptors are honored (a
 > bare modifier key already drives dictation). The event tap is **active** (`.defaultTap`), so a
 > registered chord — for these shortcuts and for mode triggers — is **swallowed** before the focused

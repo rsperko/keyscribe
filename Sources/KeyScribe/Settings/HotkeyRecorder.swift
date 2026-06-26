@@ -14,6 +14,7 @@ final class HotkeyRecordingState: ObservableObject {
 enum GlobalHotkey {
     static let dictionaryId = "global:add_dictionary"
     static let replacementId = "global:add_replacement"
+    static let pasteLastId = "global:paste_last"
 }
 
 struct HotkeyRecorder: View {

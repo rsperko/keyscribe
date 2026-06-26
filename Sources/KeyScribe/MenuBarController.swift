@@ -125,9 +125,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // Mirror the active (non-shadowed, chord-only) global shortcuts onto the menu items as a
     // right-aligned glyph. Nil clears it — unset or shadowed shouldn't advertise a shortcut.
-    func setActionShortcuts(addDictionary: KeyDescriptor?, addReplacement: KeyDescriptor?) {
+    func setActionShortcuts(addDictionary: KeyDescriptor?, addReplacement: KeyDescriptor?, pasteLast: KeyDescriptor?) {
         apply(addDictionary, to: addDictionaryItem)
         apply(addReplacement, to: addReplacementItem)
+        apply(pasteLast, to: pasteLastItem)
     }
 
     private func apply(_ descriptor: KeyDescriptor?, to item: NSMenuItem) {

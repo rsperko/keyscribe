@@ -4,6 +4,7 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var dictionaryShadowed = false
     var replacementShadowed = false
+    var pasteLastShadowed = false
 
     var body: some View {
         Form {
@@ -51,10 +52,20 @@ struct GeneralSettingsView: View {
                         if replacementShadowed { ShadowedHotkeyNote() }
                     }
                 }
+                SettingRow(
+                    title: "Paste Last Dictation",
+                    result: "Re-inserts your most recent dictation result.",
+                    help: "Optional global shortcut. Leave unset to use the menu instead.")
+                {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        HotkeyRecorder(key: $model.pasteLastShortcut)
+                        if pasteLastShadowed { ShadowedHotkeyNote() }
+                    }
+                }
             } header: {
                 Text("Shortcuts")
             } footer: {
-                Text("Both are also in the menu bar menu. Use a modifier combo (e.g. ⌃⌥⇧D) to avoid clashing with apps.")
+                Text("These are also in the menu bar menu. Use a modifier combo (e.g. ⌃⌥⇧D) to avoid clashing with apps.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

@@ -131,21 +131,26 @@ public struct Settings: Codable, Equatable, Sendable {
     public struct Shortcuts: Codable, Equatable, Sendable {
         public static let defaultAddDictionaryEntry = "control+option+shift+d"
         public static let defaultAddReplacement = "control+option+shift+r"
+        public static let defaultPasteLastDictation = ""
 
         public var addDictionaryEntry: String
         public var addReplacement: String
+        public var pasteLastDictation: String
 
         enum CodingKeys: String, CodingKey {
             case addDictionaryEntry = "add_dictionary_entry"
             case addReplacement = "add_replacement"
+            case pasteLastDictation = "paste_last_dictation"
         }
 
         public init(
             addDictionaryEntry: String = defaultAddDictionaryEntry,
-            addReplacement: String = defaultAddReplacement
+            addReplacement: String = defaultAddReplacement,
+            pasteLastDictation: String = defaultPasteLastDictation
         ) {
             self.addDictionaryEntry = addDictionaryEntry
             self.addReplacement = addReplacement
+            self.pasteLastDictation = pasteLastDictation
         }
 
         public init(from decoder: Decoder) throws {
@@ -154,6 +159,8 @@ public struct Settings: Codable, Equatable, Sendable {
                 ?? Self.defaultAddDictionaryEntry
             addReplacement = try c.decodeIfPresent(String.self, forKey: .addReplacement)
                 ?? Self.defaultAddReplacement
+            pasteLastDictation = try c.decodeIfPresent(String.self, forKey: .pasteLastDictation)
+                ?? Self.defaultPasteLastDictation
         }
     }
 
