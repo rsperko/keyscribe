@@ -71,6 +71,10 @@ SHORT_VERSION="$(git describe --tags --dirty 2>/dev/null | sed 's/^v//' || true)
 [ -z "$SHORT_VERSION" ] && SHORT_VERSION="0.1"
 BUILD_VERSION="$(git rev-list --count HEAD 2>/dev/null || true)"
 [ -z "$BUILD_VERSION" ] && BUILD_VERSION="1"
+# The exact commit the build came from (generic build metadata — lets a build later tell whether it
+# is behind the repo's main). Falls back like the versions above when built from a non-git tarball.
+SCM_REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
+[ -z "$SCM_REVISION" ] && SCM_REVISION="unknown"
 
 echo "== building KeyScribe ($CONFIG) =="
 swift build -c "$CONFIG" --product KeyScribe
@@ -107,9 +111,10 @@ cp Resources/model-selftest.wav "$APP/Contents/Resources/model-selftest.wav"
 # First-party "now listening" start cue (loaded via Bundle.main at runtime).
 cp Resources/start-cue.wav "$APP/Contents/Resources/start-cue.wav"
 # Info.plist is a tracked source file (Resources/Info.plist); stamp the git-derived version into it.
-echo "== Info.plist: $BUNDLE_NAME $SHORT_VERSION (build $BUILD_VERSION), id $BUNDLE_ID =="
+echo "== Info.plist: $BUNDLE_NAME $SHORT_VERSION (build $BUILD_VERSION), id $BUNDLE_ID, scm $SCM_REVISION =="
 sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \
     -e "s/__BUNDLE_ID__/$BUNDLE_ID/" -e "s/__BUNDLE_NAME__/$BUNDLE_NAME/" \
+    -e "s/__SCM_REVISION__/$SCM_REVISION/" \
   Resources/Info.plist > "$APP/Contents/Info.plist"
 
 # Signing identity is variant-aware (macOS TCC only needs a *valid, stable* signature — no Apple

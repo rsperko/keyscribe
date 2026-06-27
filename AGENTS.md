@@ -270,6 +270,18 @@ it stops before pushing anything public. Variant plumbing: `AppVariant` (KeyScri
 `KeyScribePaths`/`KeychainStore`; **downloaded models are shared** (pinned to `KeyScribe/models`, never
 per-variant — the easy-to-miss part). Full detail in `agent_notes/distribution_plan` + `dev_variant`.
 
+**Shipping a release** (`./release.sh patch|minor|major` → `make ship`): the build + double Apple
+notarization (app, then DMG) takes ~10–30 min, so it is a **background + poll** job, not a foreground
+one (see the global "Command Execution" discipline). Write the log to a file and `tail` it. Two resume
+footguns: (1) if a `patch`/`minor`/`major` run already created the next tag, re-running with the bump
+arg creates a *duplicate later* tag and errors on `tag already exists` — instead resume with a **bare
+`./release.sh`** (or `make ship` with no bump) which builds from the existing tag. (2) an orphaned
+`swift-package`/`swift-test` can hold a stale `.build/.lock` (it caches the PID, rechecks, but a wedged
+process never clears it) and silently block all builds — if a build reports `Another instance of
+SwiftPM (PID: …) is already running` for minutes, confirm that PID is dead (`ps -p <pid>`), then
+`rm -f .build/.lock` and relaunch. Do not stack concurrent `make ship`/`make release` invocations:
+they race on the lock and on `make publish`.
+
 `KeyScribe.entitlements` (hardened-runtime) is passed by **`release.sh`** for the notarized build;
 `make-app.sh`'s dev signing omits it (a teamless self-signed cert can't authorize it). Keep its XML
 comments free of `--` — AMFI's strict parser rejects them. The bundle's `Info.plist` is a tracked

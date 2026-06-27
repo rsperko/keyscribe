@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Canonical Info.plist for KeyScribe.app. make-app.sh copies this into the bundle and stamps
-     __SHORT_VERSION__ / __BUILD_VERSION__ from git and __BUNDLE_ID__ / __BUNDLE_NAME__ from the build
-     variant (KeyScribe vs KeyScribeDev). Edit keys here, not in the build script. -->
+     __SHORT_VERSION__ / __BUILD_VERSION__ / __SCM_REVISION__ from git and __BUNDLE_ID__ / __BUNDLE_NAME__
+     from the build variant (KeyScribe vs KeyScribeDev). Edit keys here, not in the build script. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>__BUNDLE_ID__</string>
@@ -12,6 +12,7 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>__SHORT_VERSION__</string>
   <key>CFBundleVersion</key><string>__BUILD_VERSION__</string>
+  <key>SCMRevision</key><string>__SCM_REVISION__</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
