@@ -6,7 +6,11 @@ enum KeyScribePaths {
     // so dev runs can exercise onboarding without touching the real configuration.
     nonisolated(unsafe) static var configDirOverride: URL?
 
-    static var variant: AppVariant { AppVariant(bundleID: Bundle.main.bundleIdentifier) }
+    static var variant: AppVariant {
+        AppVariant(
+            bundleID: Bundle.main.bundleIdentifier,
+            bundleName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+    }
 
     private static var appSupportBase: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

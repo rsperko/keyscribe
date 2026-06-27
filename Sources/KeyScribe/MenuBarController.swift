@@ -53,6 +53,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return dot
     }()
 
+    // Passive "update available" affordance — only rendered when an injected updater reports one.
+    // A separate colored layer (top-right) so it is distinct from the top-left error badge.
+    private let updateDot: NSView = {
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        dot.layer?.cornerRadius = 3
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.isHidden = true
+        return dot
+    }()
+    private let updateItem = NSMenuItem(title: "Update…", action: nil, keyEquivalent: "")
+    private var appMenu: NSMenu?
+
     var onPasteLast: (() -> Void)?
     var onOpenHistory: (() -> Void)?
     var onOpenSettings: (() -> Void)?
@@ -63,8 +77,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onSelectNextMode: ((String?) -> Void)?
     var onSelectSpeechModel: ((String) -> Void)?
     var onAddVocabulary: (() -> Void)?
+    var onUpdate: (() -> Void)?
 
-    private let variant = AppVariant(bundleID: Bundle.main.bundleIdentifier)
+    private let variant = KeyScribePaths.variant
     private static let devTint = NSColor.systemOrange
     private static let recordingIcon = glyph(color: .systemRed)
     private static let devIcon = glyph(color: devTint)
@@ -76,14 +91,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             button.image = idleIcon
             button.image?.accessibilityDescription = variant.displayName
             button.addSubview(badgeDot)
+            button.addSubview(updateDot)
             NSLayoutConstraint.activate([
                 badgeDot.widthAnchor.constraint(equalToConstant: 6),
                 badgeDot.heightAnchor.constraint(equalToConstant: 6),
                 badgeDot.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 1),
                 badgeDot.topAnchor.constraint(equalTo: button.topAnchor, constant: 2),
+                updateDot.widthAnchor.constraint(equalToConstant: 6),
+                updateDot.heightAnchor.constraint(equalToConstant: 6),
+                updateDot.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -1),
+                updateDot.topAnchor.constraint(equalTo: button.topAnchor, constant: 2),
             ])
         }
         let menu = NSMenu()
+        appMenu = menu
         statusLine.isEnabled = false
         menu.addItem(statusLine)
 
@@ -180,6 +201,22 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // permission problem. A separate colored layer so it survives the recording tint and the template
     // glyph's appearance adaptation.
     func setErrorBadge(_ visible: Bool) { badgeDot.isHidden = !visible }
+
+    // Inert by default: with no updater injected this is never called, so no dot and no menu item
+    // render. When set, a passive dot appears on the glyph and an "Update…" item is added to the menu.
+    func setUpdateAvailable(_ available: Bool) {
+        updateDot.isHidden = !available
+        guard let appMenu else { return }
+        let present = appMenu.items.contains(updateItem)
+        if available, !present {
+            updateItem.target = self
+            updateItem.action = #selector(triggerUpdate)
+            appMenu.insertItem(updateItem, at: 0)
+        } else if !available, present {
+            appMenu.removeItem(updateItem)
+        }
+    }
+
     func setModes(
         _ modes: [Mode], automaticName: String?, overrideName: String?,
         inertReasons: [String: String] = [:]
@@ -225,4 +262,5 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         onSelectSpeechModel?(id)
     }
     @objc private func addVocabulary() { onAddVocabulary?() }
+    @objc private func triggerUpdate() { onUpdate?() }
 }

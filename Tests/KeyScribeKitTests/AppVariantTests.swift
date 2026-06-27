@@ -28,4 +28,37 @@ final class AppVariantTests: XCTestCase {
     func testModelsAreSharedAcrossVariants() {
         XCTAssertEqual(AppVariant.sharedModelsFolderName, AppVariant.production.supportFolderName)
     }
+
+    func testCustomBundleIDIsCustomVariant() {
+        let variant = AppVariant(bundleID: "com.acme.notes", bundleName: "Acme Notes")
+        XCTAssertEqual(variant, .custom(displayName: "Acme Notes", keychainService: "com.acme.notes.llm"))
+        XCTAssertFalse(variant.isDev)
+    }
+
+    func testCustomVariantIdentityIsDerivedFromBundle() {
+        let variant = AppVariant(bundleID: "com.acme.notes", bundleName: "Acme Notes")
+        XCTAssertEqual(variant.displayName, "Acme Notes")
+        XCTAssertEqual(variant.supportFolderName, "Acme Notes")
+        XCTAssertEqual(variant.keychainService, "com.acme.notes.llm")
+    }
+
+    func testCustomVariantFallsBackToBundleIDWhenNameMissing() {
+        XCTAssertEqual(AppVariant(bundleID: "com.acme.notes").displayName, "com.acme.notes")
+        XCTAssertEqual(AppVariant(bundleID: "com.acme.notes", bundleName: "").displayName, "com.acme.notes")
+    }
+
+    func testCustomVariantIsIsolatedFromProductionAndDev() {
+        let custom = AppVariant(bundleID: "com.acme.notes", bundleName: "Acme Notes")
+        XCTAssertNotEqual(custom.supportFolderName, AppVariant.production.supportFolderName)
+        XCTAssertNotEqual(custom.supportFolderName, AppVariant.dev.supportFolderName)
+        XCTAssertNotEqual(custom.keychainService, AppVariant.production.keychainService)
+        XCTAssertNotEqual(custom.keychainService, AppVariant.dev.keychainService)
+    }
+
+    func testProductionAndDevDetectionUnchanged() {
+        XCTAssertEqual(AppVariant(bundleID: "com.keyscribe.app", bundleName: "Anything"), .production)
+        XCTAssertEqual(AppVariant(bundleID: "com.keyscribe.app.dev", bundleName: "Anything"), .dev)
+        XCTAssertFalse(AppVariant.production.isDev)
+        XCTAssertTrue(AppVariant.dev.isDev)
+    }
 }

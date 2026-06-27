@@ -22,11 +22,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var correctionPanel: CorrectionPanelController!
     private var configRepository: ConfigRepository!
 
+    // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
+    // launch. With neither set, lifecycle and bootstrap behave exactly as without them.
+    var updater: AppUpdater?
+    var legacyImporter: LegacyConfigImporter?
+
     private let firstRunKey = ResetTool.firstRunKey
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
 
     func applicationDidFinishLaunching(_: Notification) {
+        runLegacyImportIfNeeded()
         loadSettings()
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
@@ -77,7 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu.onSelectSpeechModel = { [weak self] id in self?.speechModels.select(id) }
         menu.onAddVocabulary = { [weak self] in self?.correctionPanel.present() }
-        controller.onRecordingChanged = { [weak self] active in self?.menu.setDictating(active) }
+        menu.onUpdate = { [weak self] in self?.updater?.performUpdate() }
+        updater?.onUpdateAvailable = { [weak self] in self?.menu.setUpdateAvailable(true) }
+        controller.onRecordingChanged = { [weak self] active in
+            self?.menu.setDictating(active)
+            if !active { self?.updater?.dictationDidFinish() }
+        }
         controller.onBecameIdle = { [weak self] in
             guard let self, self.pendingHotkeyRebuild else { return }
             self.pendingHotkeyRebuild = false
@@ -144,6 +155,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.prewarmCapture()
             _ = self?.config.resolved
         }
+    }
+
+    // First-run only: before KeyScribe seeds or loads any config, let an injected importer populate the
+    // support dir from a legacy app. Gated on the variant's support dir not yet existing, so it runs at
+    // most once; no importer injected → no-op.
+    private func runLegacyImportIfNeeded() {
+        guard let legacyImporter else { return }
+        let supportDir = KeyScribePaths.supportDir
+        guard !FileManager.default.fileExists(atPath: supportDir.path) else { return }
+        do { try legacyImporter.importIfNeeded(into: supportDir) }
+        catch { Log.config.error("legacy import failed: \(error.localizedDescription, privacy: .public)") }
     }
 
     private func loadSettings() {

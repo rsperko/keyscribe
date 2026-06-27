@@ -9,10 +9,16 @@ cd "$(dirname "$0")"
 # Build variant (KEYSCRIBE_VARIANT): `dev` (default) builds KeyScribeDev.app / com.keyscribe.app.dev —
 # fully isolated from an installed production KeyScribe (its own TCC grants, config dir, and Keychain
 # service; downloaded models are shared). `release` (set by release.sh) builds the production
-# KeyScribe.app / com.keyscribe.app. The executable inside is named "KeyScribe" for both.
+# KeyScribe.app / com.keyscribe.app. `custom` builds a generic isolated variant whose app name,
+# bundle id, and bundle name come from KEYSCRIBE_APP_NAME / KEYSCRIBE_BUNDLE_ID / KEYSCRIBE_BUNDLE_NAME
+# (no identity hardcoded here) — it gets its own config dir / Keychain / display name the same way dev
+# does, and shares the downloaded models. The executable inside is named "KeyScribe" for every variant.
 VARIANT="${KEYSCRIBE_VARIANT:-dev}"
 case "$VARIANT" in
   release|prod|production) APP="KeyScribe.app";    BUNDLE_ID="com.keyscribe.app";     BUNDLE_NAME="KeyScribe" ;;
+  custom)                  APP="${KEYSCRIBE_APP_NAME:?custom variant requires KEYSCRIBE_APP_NAME}.app"
+                           BUNDLE_ID="${KEYSCRIBE_BUNDLE_ID:?custom variant requires KEYSCRIBE_BUNDLE_ID}"
+                           BUNDLE_NAME="${KEYSCRIBE_BUNDLE_NAME:?custom variant requires KEYSCRIBE_BUNDLE_NAME}" ;;
   dev|*)                   APP="KeyScribeDev.app"; BUNDLE_ID="com.keyscribe.app.dev"; BUNDLE_NAME="KeyScribeDev" ;;
 esac
 BIN=".build/release/KeyScribe"
@@ -117,7 +123,9 @@ sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERS
 #  - release: the Developer ID identity from KEYSCRIBE_SIGN_ID, then CODESIGN_IDENTITY (release.sh sets
 #    it); else ad-hoc. release.sh additionally adds --options runtime + --entitlements and notarizes.
 case "$VARIANT" in
-  release|prod|production)
+  release|prod|production|custom)
+    # release uses the Developer ID from release.sh; custom signs with whatever identity the build
+    # provides (KEYSCRIBE_SIGN_ID, else CODESIGN_IDENTITY), else ad-hoc.
     ID="${KEYSCRIBE_SIGN_ID:-${CODESIGN_IDENTITY:-}}"
     ;;
   *)
