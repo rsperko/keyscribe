@@ -57,6 +57,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onOpenHistory: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
+    var onOpenModes: (() -> Void)?
     var onOpenNotices: (() -> Void)?
     var onMenuWillOpen: (() -> Void)?
     var onSelectNextMode: ((String?) -> Void)?
@@ -206,7 +207,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let hint = NSMenuItem(title: "Applies to the next dictation only", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         modesMenu.addItem(hint)
-        let manage = NSMenuItem(title: "Manage Modes…", action: #selector(openSettings), keyEquivalent: "")
+        let manage = NSMenuItem(title: "Manage Modes…", action: #selector(openModes), keyEquivalent: "")
         manage.target = self
         modesMenu.addItem(manage)
     }
@@ -215,6 +216,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openHistory() { onOpenHistory?() }
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func openSpeechModels() { onOpenSpeechModels?() }
+    @objc private func openModes() { onOpenModes?() }
     @objc private func openNotices() { onOpenNotices?() }
     @objc private func selectAutomatic() { onSelectNextMode?(nil) }
     @objc private func selectMode(_ sender: NSMenuItem) { onSelectNextMode?(sender.representedObject as? String) }

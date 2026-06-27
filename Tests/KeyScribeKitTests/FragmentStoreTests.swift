@@ -21,6 +21,37 @@ struct FragmentStoreTests {
         #expect(FragmentStore.body(ofFile: "---\nname: X\n---\n") == "")
     }
 
+    @Test func nameReadsYAMLNameField() {
+        let s = "---\nschema_version: 1\nname: My Voice\n---\nWrite in my voice."
+        #expect(FragmentStore.name(ofFile: s) == "My Voice")
+    }
+
+    @Test func nameNilWhenNoFrontmatter() {
+        #expect(FragmentStore.name(ofFile: "Just text.") == nil)
+    }
+
+    @Test func nameNilWhenFieldAbsentOrEmpty() {
+        #expect(FragmentStore.name(ofFile: "---\nschema_version: 1\n---\nbody") == nil)
+        #expect(FragmentStore.name(ofFile: "---\nname:   \n---\nbody") == nil)
+    }
+
+    @Test func replacingBodyPreservesFrontmatter() {
+        let s = "---\nschema_version: 1\nname: My Voice\n---\nOld body."
+        let out = FragmentStore.replacingBody(inFile: s, with: "  New body.  ")
+        #expect(out == "---\nschema_version: 1\nname: My Voice\n---\nNew body.\n")
+        #expect(FragmentStore.body(ofFile: out) == "New body.")
+        #expect(FragmentStore.name(ofFile: out) == "My Voice")
+    }
+
+    @Test func replacingBodyKeepsHeaderWhenBodyCleared() {
+        let s = "---\nname: X\n---\nold"
+        #expect(FragmentStore.replacingBody(inFile: s, with: "  ") == "---\nname: X\n---\n")
+    }
+
+    @Test func replacingBodyWithoutFrontmatterReturnsTrimmedBody() {
+        #expect(FragmentStore.replacingBody(inFile: "old", with: "  new  ") == "new")
+    }
+
     @Test func slugLowercasesAndHyphenates() {
         #expect(FragmentStore.slug(for: "My Voice") == "my-voice")
         #expect(FragmentStore.slug(for: "  email — style!  ") == "email-style")
@@ -51,6 +82,7 @@ struct FragmentStoreTests {
         let written = try String(contentsOf: url, encoding: .utf8)
         #expect(written.contains("name: My Voice"))
         #expect(written.contains("schema_version: 1"))
+        #expect(FragmentStore.body(ofFile: written) == "")
         #expect(FragmentStore.ids(in: dir) == ["my-voice"])
     }
 

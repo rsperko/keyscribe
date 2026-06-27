@@ -213,7 +213,9 @@ struct FirstRunView: View {
                 .foregroundStyle(.secondary)
             Text("Dictate into this box to finish setup:").font(.callout)
             TextEditor(text: $model.trialText)
-                .font(.body).frame(height: 110)
+                .font(.body)
+                .ghostText("Your dictated words will appear here\u{2026}", visible: model.trialText.isEmpty)
+                .frame(height: 110)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($trialFieldFocused)
             if model.trialSucceeded {

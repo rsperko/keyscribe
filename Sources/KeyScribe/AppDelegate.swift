@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onOpenHistory = { [weak self] in self?.historyController.present() }
         menu.onOpenSettings = { [weak self] in self?.settingsController.present() }
         menu.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
+        menu.onOpenModes = { [weak self] in self?.settingsController.present(.modes) }
         menu.onOpenNotices = { [weak self] in self?.notices.present() }
         menu.onMenuWillOpen = { [weak self] in self?.refreshStatus() }
         menu.onSelectNextMode = { [weak self] id in

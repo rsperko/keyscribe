@@ -375,8 +375,15 @@ private struct AIServiceEditor: View {
                 modelField
             }
             Section("API key") {
-                SecureField(hasKey ? "Replace API key" : "API key (optional for local endpoints)", text: $apiKey)
+                SecureField(hasKey ? "" : "API key (optional for local endpoints)", text: $apiKey)
                     .onSubmit(saveKey)
+                    .overlay(alignment: .leading) {
+                        if hasKey && apiKey.isEmpty {
+                            Text(String(repeating: "•", count: 12))
+                                .foregroundStyle(.secondary)
+                                .allowsHitTesting(false)
+                        }
+                    }
                 HStack {
                     Text(hasKey ? "Key stored in Keychain" : "No key stored")
                         .font(.caption).foregroundStyle(.secondary)

@@ -140,35 +140,49 @@ struct CommittedTextField: View {
 
 struct PromptEditor: View {
     let title: String
+    let placeholder: String
     let text: String
+    // Live commit (write on every change) is for an editor that lives in a dismissing container like a
+    // popover: TextEditor's focus-loss/onDisappear commit does NOT fire reliably when the container is
+    // torn down on Done, so the only dependable save is per-change. Inline editors (the writing
+    // instruction in the form) keep focus-loss to avoid per-keystroke config-watcher churn.
+    let commitsOnChange: Bool
     let commit: (String) -> Void
     @State private var draft: String
     @State private var expanded = false
     @FocusState private var focused: Bool
 
-    init(title: String, text: String, commit: @escaping (String) -> Void) {
+    init(
+        title: String, placeholder: String = "", text: String,
+        commitsOnChange: Bool = false, commit: @escaping (String) -> Void
+    ) {
         self.title = title
+        self.placeholder = placeholder
         self.text = text
+        self.commitsOnChange = commitsOnChange
         self.commit = commit
         _draft = State(initialValue: text)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // TextEditor has no onSubmit (Return inserts a newline), so it commits on focus loss.
+            // TextEditor has no onSubmit (Return inserts a newline), so an inline editor commits on
+            // focus loss; a popover editor commits live (see commitsOnChange).
             TextEditor(text: $draft)
                 .font(.body)
+                .ghostText(placeholder, visible: draft.isEmpty)
                 .frame(minHeight: 120, maxHeight: 220)
                 .padding(4)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($focused)
+                .onChange(of: draft) { if commitsOnChange { commitIfChanged() } }
                 .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
                 .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
             Button("Open in a larger editor…") { expanded = true }
                 .font(.caption).buttonStyle(.link)
         }
         .sheet(isPresented: $expanded) {
-            PromptEditorSheet(title: title, text: $draft) { commitIfChanged() }
+            PromptEditorSheet(title: title, placeholder: placeholder, text: $draft) { commitIfChanged() }
         }
     }
 
@@ -177,6 +191,7 @@ struct PromptEditor: View {
 
 private struct PromptEditorSheet: View {
     let title: String
+    let placeholder: String
     @Binding var text: String
     let onDone: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -186,6 +201,7 @@ private struct PromptEditorSheet: View {
             Text(title).font(.headline)
             TextEditor(text: $text)
                 .font(.body)
+                .ghostText(placeholder, visible: text.isEmpty)
                 .frame(minWidth: 480, minHeight: 360)
                 .padding(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
@@ -196,5 +212,22 @@ private struct PromptEditorSheet: View {
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 440)
+    }
+}
+
+// Ghost text for TextEditor, which (unlike TextField) has no native placeholder. Aligns with
+// TextEditor's internal text inset and ignores hits so it never blocks typing.
+extension View {
+    func ghostText(_ placeholder: String, visible: Bool) -> some View {
+        overlay(alignment: .topLeading) {
+            if visible && !placeholder.isEmpty {
+                Text(placeholder)
+                    .font(.body)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 5)
+                    .padding(.top, 1)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }

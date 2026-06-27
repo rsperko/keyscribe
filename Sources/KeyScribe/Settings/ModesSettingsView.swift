@@ -7,6 +7,7 @@ final class ModesSettingsModel: ObservableObject {
     @Published private(set) var modes: [Mode] = []
     @Published private(set) var connections: [Connection] = []
     @Published private(set) var fragmentIds: [String] = []
+    @Published private(set) var fragmentNames: [String: String] = [:]
     @Published var selectedID: String?
     @Published var lastCreatedId: String?
     @Published private(set) var error: String?
@@ -86,18 +87,20 @@ final class ModesSettingsModel: ObservableObject {
     private var fragmentsDir: URL { supportDir.appendingPathComponent("fragments", isDirectory: true) }
 
     private func loadFragmentIds() -> [String] {
-        FragmentStore.ids(in: fragmentsDir)
+        let ids = FragmentStore.ids(in: fragmentsDir)
+        fragmentNames = Dictionary(uniqueKeysWithValues: ids.map {
+            ($0, FragmentStore.name(id: $0, in: fragmentsDir) ?? $0)
+        })
+        return ids
     }
 
-    // Create (or resolve) a fragment file by name, refresh the list, and reveal it so the user can
-    // fill in the instruction text. Returns the fragment id to add to the mode.
+    // Create (or resolve) a fragment file by name and refresh the list. Returns the fragment id to
+    // add to the mode; the caller opens it in the in-app editor to fill in the instruction text.
     func addFragmentFile(named name: String) -> String? {
         do {
             let id = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
             fragmentIds = loadFragmentIds()
             error = nil
-            NSWorkspace.shared.activateFileViewerSelecting(
-                [fragmentsDir.appendingPathComponent("\(id).md")])
             return id
         } catch {
             self.error = "Could not create the instruction file: \(error.localizedDescription)"
@@ -105,10 +108,46 @@ final class ModesSettingsModel: ObservableObject {
         }
     }
 
+    func fragmentBody(_ id: String) -> String {
+        let url = fragmentsDir.appendingPathComponent("\(id).md")
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return FragmentStore.body(ofFile: content)
+    }
+
+    func saveFragmentBody(_ id: String, _ body: String) {
+        let url = fragmentsDir.appendingPathComponent("\(id).md")
+        do {
+            let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            try FragmentStore.replacingBody(inFile: content, with: body)
+                .write(to: url, atomically: true, encoding: .utf8)
+            error = nil
+        } catch {
+            self.error = "Could not save the instruction: \(error.localizedDescription)"
+        }
+    }
+
     func revealFragment(_ id: String) {
         let url = fragmentsDir.appendingPathComponent("\(id).md")
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    // Closing the editor on an empty instruction discards it: detach from the editing mode and, when
+    // no other mode still references it, delete the file. So an instruction created but never written
+    // never persists — an empty one is not a saveable instruction.
+    func closeFragment(_ id: String, fromMode modeId: String) {
+        guard fragmentBody(id).isEmpty else { return }
+        if var mode = modes.first(where: { $0.id == modeId }),
+           var rewrite = mode.aiRewrite, rewrite.fragments.contains(id) {
+            rewrite.fragments.removeAll { $0 == id }
+            mode.aiRewrite = rewrite
+            save(mode)
+        }
+        let stillUsed = modes.contains { $0.aiRewrite?.fragments.contains(id) == true }
+        if !stillUsed {
+            try? FileManager.default.removeItem(at: fragmentsDir.appendingPathComponent("\(id).md"))
+            fragmentIds = loadFragmentIds()
+        }
     }
 
     private func save(_ mode: Mode) {
@@ -168,11 +207,15 @@ struct ModesSettingsView: View {
                     ModeEditorView(
                         mode: mode, allModes: model.modes,
                         connections: model.connections, fragmentIds: model.fragmentIds,
+                        fragmentNames: model.fragmentNames,
                         isDefault: model.isDefault(mode),
                         autofocusName: model.lastCreatedId == mode.id,
                         onUpdate: model.update,
                         onMakeDefault: { model.makeDefault(mode) },
                         onAddFragmentFile: model.addFragmentFile(named:),
+                        onLoadFragmentBody: model.fragmentBody,
+                        onSaveFragmentBody: model.saveFragmentBody,
+                        onCloseFragment: model.closeFragment(_:fromMode:),
                         onRevealFragment: model.revealFragment,
                         onConsumeFocus: model.consumeCreated,
                         onDelete: { modePendingDelete = mode })
@@ -303,20 +346,25 @@ private struct ModeEditorView: View {
     let allModes: [Mode]
     let connections: [Connection]
     let fragmentIds: [String]
+    let fragmentNames: [String: String]
     let isDefault: Bool
     var autofocusName = false
     let onUpdate: (Mode) -> Void
     let onMakeDefault: () -> Void
     let onAddFragmentFile: (String) -> String?
+    let onLoadFragmentBody: (String) -> String
+    let onSaveFragmentBody: (String, String) -> Void
+    let onCloseFragment: (String, String) -> Void
     let onRevealFragment: (String) -> Void
     var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
     @State private var routingExpanded = false
-    @State private var advancedExpanded = false
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
     @State private var newWindowTitlePattern = ""
     @State private var newFragmentName = ""
+    @State private var editingFragment: String?
+    @State private var creatingFragment = false
     @State private var capturingCustom = false
     @State private var manualBundleId = ""
     @State private var enteringBundleId = false
@@ -427,8 +475,6 @@ private struct ModeEditorView: View {
                     Toggle("", isOn: binding(\.excludeFromHistory)).labelsHidden()
                 }
             }
-
-            advancedSection
 
             Section {
                 Button("Delete Mode", role: .destructive, action: onDelete)
@@ -640,12 +686,106 @@ private struct ModeEditorView: View {
                     .labelsHidden().fixedSize()
                 }
                 if mode.aiRewrite != nil {
-                    PromptEditor(title: "Writing instruction", text: mode.aiRewrite?.prompt ?? "") { value in
+                    PromptEditor(
+                        title: "Writing instruction",
+                        placeholder: "Describe how the AI should rewrite your dictation\u{2026}",
+                        text: mode.aiRewrite?.prompt ?? ""
+                    ) { value in
                         updateRewrite { $0.prompt = value }
                     }
+                    reusableInstructions
                 }
             }
         }
+    }
+
+    @ViewBuilder private var reusableInstructions: some View {
+        let attached = mode.aiRewrite?.fragments ?? []
+        if attached.isEmpty {
+            addInstructionMenu
+            Text("Reusable writing instructions are saved snippets appended to this mode's prompt and shared across modes \u{2014} a \u{201C}my voice\u{201D} style guide, a standard sign-off, a glossary of names to spell right, or tone rules like \u{201C}keep it terse.\u{201D} Add one to reuse it across modes.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            Text("Reusable writing instructions")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ForEach(attached, id: \.self) { id in
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                    Text(fragmentName(id)).font(.callout)
+                    Spacer()
+                    Button("Edit") { editingFragment = id }
+                        .buttonStyle(.borderless)
+                        .popover(isPresented: Binding(
+                            get: { editingFragment == id },
+                            set: { if !$0 { closeFragmentEditor(id) } })) {
+                            fragmentEditor(id)
+                        }
+                    Button("Remove", role: .destructive) { removeFragment(id) }
+                        .buttonStyle(.borderless)
+                }
+            }
+            .onMove(perform: moveFragment)
+            addInstructionMenu
+            Text("Each is appended after the writing instruction, in order. Instructions are shared, so editing one changes it for every mode that uses it.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var addInstructionMenu: some View {
+        Menu {
+            if !unusedFragmentIds.isEmpty {
+                ForEach(unusedFragmentIds, id: \.self) { id in
+                    Button(fragmentName(id)) { addFragment(id) }
+                }
+                Divider()
+            }
+            Button { creatingFragment = true } label: {
+                Label("New instruction…", systemImage: "plus")
+            }
+        } label: {
+            Label("Add instruction", systemImage: "plus.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .alert("New reusable instruction", isPresented: $creatingFragment) {
+            TextField("Name, e.g. Email style", text: $newFragmentName)
+            Button("Create", action: commitNewFragment)
+            Button("Cancel", role: .cancel) { newFragmentName = "" }
+        } message: {
+            Text("Creates a reusable instruction you can edit here and attach to any mode.")
+        }
+    }
+
+    @ViewBuilder private func fragmentEditor(_ id: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(fragmentName(id)).font(.headline)
+            Label("Shared — editing this changes it for every mode that uses it.",
+                  systemImage: "person.2")
+                .font(.caption).foregroundStyle(.secondary)
+            PromptEditor(
+                title: fragmentName(id),
+                placeholder: "Describe the reusable instruction\u{2026}",
+                text: onLoadFragmentBody(id),
+                commitsOnChange: true
+            ) { body in
+                onSaveFragmentBody(id, body)
+            }
+            HStack {
+                Button { onRevealFragment(id) } label: {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+                .buttonStyle(.link).font(.caption)
+                Spacer()
+                Button("Done") { closeFragmentEditor(id) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 460)
+    }
+
+    private func fragmentName(_ id: String) -> String {
+        let name = fragmentNames[id]
+        return (name?.isEmpty == false) ? name! : id
     }
 
     private var aiServiceLabel: String {
@@ -693,52 +833,21 @@ private struct ModeEditorView: View {
         }
     }
 
-    @ViewBuilder private var advancedSection: some View {
-        Section {
-            DisclosureSection("Advanced", isExpanded: $advancedExpanded) {
-                if mode.aiRewrite != nil {
-                    Text("Reusable writing instructions")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(mode.aiRewrite?.fragments ?? [], id: \.self) { fragment in
-                        HStack {
-                            Text(fragment).font(.callout)
-                            Spacer()
-                            Button { onRevealFragment(fragment) } label: { Image(systemName: "folder") }
-                                .buttonStyle(.borderless)
-                                .help("Reveal this instruction's file in Finder to edit it.")
-                            Button("Remove", role: .destructive) { removeFragment(fragment) }
-                        }
-                    }
-                    HStack {
-                        TextField("New instruction name, e.g. email-style", text: $newFragmentName)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit(commitNewFragment)
-                        if !unusedFragmentIds.isEmpty {
-                            Menu("Add existing") {
-                                ForEach(unusedFragmentIds, id: \.self) { id in
-                                    Button(id) { addFragment(id) }
-                                }
-                            }
-                            .fixedSize()
-                        }
-                        Button("Create", action: commitNewFragment)
-                            .disabled(newFragmentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    Text("Each instruction is a prompt file appended after the writing instruction, in order. Creating one opens its file so you can write the instruction.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("Reusable writing instructions become available once this mode uses an AI service.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
     private func commitNewFragment() {
         let name = newFragmentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        newFragmentName = ""
         guard !name.isEmpty, let id = onAddFragmentFile(name) else { return }
         addFragment(id)
-        newFragmentName = ""
+        editingFragment = id
+    }
+
+    private func closeFragmentEditor(_ id: String) {
+        guard editingFragment == id else { return }
+        let modeId = mode.id
+        editingFragment = nil
+        // Tearing the popover down flushes the editor's pending edit via its onDisappear commit; let
+        // that land before deciding whether the instruction is empty and should be discarded.
+        Task { @MainActor in onCloseFragment(id, modeId) }
     }
 
     private var unusedFragmentIds: [String] {
@@ -853,6 +962,14 @@ private struct ModeEditorView: View {
     private func removeFragment(_ fragment: String) {
         guard var rewrite = mode.aiRewrite else { return }
         rewrite.fragments.removeAll { $0 == fragment }
+        var updated = mode
+        updated.aiRewrite = rewrite
+        onUpdate(updated)
+    }
+
+    private func moveFragment(from source: IndexSet, to destination: Int) {
+        guard var rewrite = mode.aiRewrite else { return }
+        rewrite.fragments.move(fromOffsets: source, toOffset: destination)
         var updated = mode
         updated.aiRewrite = rewrite
         onUpdate(updated)

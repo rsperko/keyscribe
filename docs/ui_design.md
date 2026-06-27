@@ -409,11 +409,15 @@ sections:
 2. **When this mode is used** — its hotkey, app rules, and spoken routing, each with examples.
 3. **What it does** — plain dictation, work on selection, live edits, spoken symbols, numbers
    (inverse text normalization), fuzzy correction, dictionary, and replacements.
-4. **Improve with AI** — disabled by default; connection and plain-language instruction.
+4. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
+   mode's **reusable writing instructions** (fragments): listed by name directly under the
+   instruction they extend, reorderable (they append in order), edited in place in a popover, and
+   added from a single menu of existing instructions or a new one. They appear only once an AI
+   service is selected, since a fragment is appended to the rewrite instruction.
 5. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
    mutually exclusive by design; the UI makes the tradeoff explicit before allowing either.
 6. **Result handling** — insertion method and history exclusion.
-7. **Advanced** — fragments, regular-expression trigger phrases, and configuration details.
+7. **Advanced** — regular-expression trigger phrases and configuration details.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to
