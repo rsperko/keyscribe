@@ -20,6 +20,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var insertion: Insertion
     public var trailing: Trailing
     public var submit: Submit
+    public var trimTrailingPunctuation: Bool
     public var excludeFromHistory: Bool
 
     public enum Source: String, Codable, Sendable { case dictation, selection }
@@ -197,6 +198,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case constraints, source, output, commands, dictionary, replacements
         case aiRewrite = "ai_rewrite"
         case insertion, trailing, submit
+        case trimTrailingPunctuation = "trim_trailing_punctuation"
         case excludeFromHistory = "exclude_from_history"
     }
 
@@ -219,6 +221,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         insertion = .paste
         trailing = .none
         submit = .none
+        trimTrailingPunctuation = false
         excludeFromHistory = false
     }
 
@@ -242,6 +245,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? .paste
         trailing = try c.decodeIfPresent(Trailing.self, forKey: .trailing) ?? .none
         submit = try c.decodeIfPresent(Submit.self, forKey: .submit) ?? .none
+        trimTrailingPunctuation = try c.decodeIfPresent(Bool.self, forKey: .trimTrailingPunctuation) ?? false
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
     }
 
@@ -264,6 +268,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(insertion, forKey: .insertion)
         if trailing != .none { try c.encode(trailing, forKey: .trailing) }
         if submit != .none { try c.encode(submit, forKey: .submit) }
+        if trimTrailingPunctuation { try c.encode(trimTrailingPunctuation, forKey: .trimTrailingPunctuation) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
@@ -364,9 +369,11 @@ public enum ModeStore {
 
         var shell = Mode(id: "shell", name: "Shell")
         shell.enabled = false
+        shell.trimTrailingPunctuation = true
+        shell.commands.numbers = true
         shell.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "The dictated text describes a shell command. Output a single shell command (or pipeline) that does what I said, ready to paste at a terminal prompt. Convert spoken symbols to their shell characters — for example \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" to >, \"append to\" to >>, \"and and\" to &&, \"tilde\" to ~, \"slash\" to /, \"star\" to *, \"dollar\" to $. Correct common speech-to-text mishearings of shell vocabulary back to the intended command: \"sue do\" or \"pseudo\" to sudo, \"see dee\" to cd, \"ellis\" to ls, \"make dir\" to mkdir, \"g it\" to git, \"groep\" or \"grep\" to grep, \"vee eye\" to vi. Keep file names, paths, flags, branch names, and other identifiers exactly as I said them. Output ONLY the command text — no leading $ prompt, no surrounding code fence or backticks, no explanation, comments, or extra lines. Do NOT run, answer, or describe the command; if I phrase it as a question (\"how do I…\"), output the command that does it, not an answer. If the text does not describe a command, return it unchanged.")
+            prompt: "Convert the dictated text into a single shell command for a Unix shell (zsh or bash on macOS), ready to paste and run at a terminal prompt.\n\nOutput ONLY the command — one line or a pipeline, with no leading $ prompt, no surrounding code fence or backticks, no comments, and no explanation. Never run, answer, or describe the command; if the text is phrased as a question (\"how do I...\", \"what is the command to...\"), output the command that does it, not an answer.\n\nBuild exactly the command described. Do not add flags, paths, redirects, or behavior I did not ask for, and never introduce destructive options (rm -rf, --force, -f, overwriting redirects) unless I explicitly said so. Keep file names, paths, flags, branch names, URLs, and other identifiers exactly as dictated. Quote any argument that contains spaces or shell metacharacters. Write numbers as digits.\n\nMap spoken symbols to shell syntax: \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" or \"output to\" to >, \"append to\" to >>, \"and and\" to &&, \"or or\" to ||, \"semicolon\" to ;, \"tilde\" to ~, \"slash\" to /, \"dot\" to ., \"star\" or \"glob\" to *, \"dollar\" to $, \"ampersand\" or \"in the background\" to &.\n\nCorrect common speech-to-text mishearings of command names back to the intended tool: \"sue do\" or \"pseudo\" to sudo, \"see dee\" to cd, \"ellis\" to ls, \"make dir\" to mkdir, \"g it\" to git, \"groep\" to grep, \"vee eye\" to vim, \"ess ess h\" to ssh, \"ceh mod\" to chmod, \"cube control\" or \"coob cuttle\" to kubectl, \"dock er\" to docker, \"home brew\" to brew. Use judgment for similar mishearings, but keep anything that is clearly a file name or identifier as spoken.\n\nExamples:\nlist all files including hidden ones in long format → ls -la\nfind every python file under src and search them for the word token → find src -name '*.py' | xargs grep token\ngit checkout a new branch called fix dash auth → git checkout -b fix-auth\nsee dee into tilde slash projects → cd ~/projects\nshow what is listening on port 8000 → lsof -i :8000\n\nIf the text does not describe a command, return it unchanged.")
 
         return [plain, polished, message, email, prompt, selection, markdown, shell].map {
             var mode = $0

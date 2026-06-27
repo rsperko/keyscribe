@@ -161,6 +161,7 @@ struct ModeTests {
         m.insertion = .type
         m.trailing = .newline
         m.submit = .shiftReturn
+        m.trimTrailingPunctuation = true
         m.excludeFromHistory = true
         m.seedId = "email"
         m.seedVersion = 3
@@ -207,6 +208,31 @@ struct ModeTests {
         let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
         #expect(mode.trailing == .none)
         #expect(mode.submit == .none)
+    }
+
+    @Test func trimTrailingPunctuationDefaultsToOff() throws {
+        let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
+        #expect(!mode.trimTrailingPunctuation)
+        #expect(try !ModeStore.encode(mode).contains("trim_trailing_punctuation"))
+    }
+
+    @Test func trimTrailingPunctuationDecodesAndRoundTrips() throws {
+        let toml = "schema_version = 1\nname = \"Shell\"\ntrim_trailing_punctuation = true"
+        let mode = try ModeStore.decode(from: toml, id: "shell")
+        #expect(mode.trimTrailingPunctuation)
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "shell")
+        #expect(again.trimTrailingPunctuation)
+    }
+
+    @Test func shellStarterTrimsTrailingPunctuation() {
+        let shell = ModeStore.starterModes().first { $0.id == "shell" }
+        #expect(shell?.trimTrailingPunctuation == true)
+    }
+
+    @Test func nonShellStartersDoNotTrim() {
+        for mode in ModeStore.starterModes() where mode.id != "shell" {
+            #expect(!mode.trimTrailingPunctuation)
+        }
     }
 
     @Test func trailingSuffixMapping() {

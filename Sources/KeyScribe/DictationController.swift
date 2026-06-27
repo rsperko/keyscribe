@@ -645,8 +645,15 @@ final class DictationController {
     }
 
     private func finishInsertion(
-        transcript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?
+        transcript rawTranscript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?
     ) async {
+        // Trim runs on the fully-restored final string, before the trailing suffix is appended, so a
+        // command/subject-line mode never ends in a stray "." or "?" — enforcement the rewrite prompt
+        // can only request, not guarantee. Applied here so the trimmed text is what the fingerprint,
+        // no-speech outcome, insert, and history all see.
+        let transcript = (activeMode?.trimTrailingPunctuation ?? false)
+            ? OutputCleanup.trimTrailingPunctuation(rawTranscript)
+            : rawTranscript
         clearRewriteEscapeHatch()
         machine.beginInserting()
         hud?.relinquishKeyFocus()

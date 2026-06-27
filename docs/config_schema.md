@@ -74,6 +74,7 @@ trigger_phrases = ['(?i)\bas an email$']
 insertion = "paste"          # "paste" (default) | "insert" | "type"
 trailing = "none"            # "none" (default) | "space" | "newline" — appended INSIDE the atomic insert
 submit = "none"              # "none" (default) | "return" | "shift_return" | "cmd_return" — keystroke AFTER a verified insert
+trim_trailing_punctuation = false  # strip a final . ! ? (and trailing whitespace) from the result, BEFORE `trailing` is appended
 exclude_from_history = false
 
 # ── When it runs ─────────────────────────────────────────────────────────────
@@ -157,6 +158,7 @@ context = { app = true, preceding_text = false }
 | `insertion` | enum | `paste` \| `insert` \| `type`. |
 | `trailing` | enum | `none` (default) \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). |
 | `submit` | enum | `none` (default) \| `return` \| `shift_return` \| `cmd_return`. A keystroke synthesized after a **verified** insert (outside the undo atom). Never fires on a clipboard fallback — the text never reached the target. |
+| `trim_trailing_punctuation` | bool | `false` (default). Strip a final `.` `!` `?` (and trailing whitespace) from the result, applied to the restored final string **before** `trailing` appends its suffix. Deterministic enforcement for command/identifier/subject-line modes (e.g. seeded **Shell** ships `true`) that should not end in sentence punctuation — the rewrite prompt can request this but cannot guarantee it. Closing quotes/parens/backticks/fences are left untouched. |
 | `exclude_from_history` | bool | Skip writing this mode's dictations to history. |
 
 The **default mode** is recorded once in `settings.toml` (`default_mode_id`), not as a flag on

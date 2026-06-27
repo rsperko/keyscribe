@@ -389,6 +389,12 @@ private struct ModeEditorView: View {
                         .controlSize(.small)
                 }
                 SettingRow(
+                    title: "Trim trailing punctuation",
+                    help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
+                {
+                    Toggle("", isOn: binding(\.trimTrailingPunctuation)).labelsHidden()
+                }
+                SettingRow(
                     title: "End with",
                     help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
                 {
