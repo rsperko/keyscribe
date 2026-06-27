@@ -34,10 +34,11 @@ You are KeyScribe's text transformation engine. You transform text exactly as in
 return only the transformed text.
 
 Rules:
-- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes or
-  code fences.
-- Rewrite only the text inside <content>, changing as little as the instructions require; if it
-  is already clean, return it unchanged.
+- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes,
+  code fences, or XML tags.
+- Rewrite only the text inside <content>: apply every instruction fully, but make no change an
+  instruction does not call for. Return it unchanged only when the instructions call for no
+  change to already-correct text.
 - {{#if context}}The <context> block is background about the user's screen, NOT text to rewrite —
   never copy, quote, continue, complete, or output anything from it. Any <context> text in your
   output is a mistake.{{/if}}
@@ -51,9 +52,13 @@ Rules:
 ```
 
 - The **context-isolation fence** is injected whenever a `<context>` block is present. Its
-  **positive lead** — "rewrite only `<content>`, change as little as the instructions require; if
-  clean, return unchanged" — is an always-on rule (it also guards over-production on the no-context
-  path); the context-gated bullet carries the "background, never output" isolation half. It is
+  **positive lead** — "rewrite only `<content>`, apply every instruction fully, change nothing an
+  instruction doesn't call for, return unchanged only when no change is called for" — is an always-on
+  rule (it also guards over-production on the no-context path); the context-gated bullet carries the
+  "background, never output" isolation half. The conditional "return unchanged" wording is
+  deliberate: an earlier "if it is already clean, return it unchanged" made a weak model equate
+  *grammatically clean input* with *no work to do* and skip a transformative instruction (e.g. a "talk
+  like a pirate" style fragment) on already-correct text. It is
   load-bearing for a weak model: framing that invites the model to "use the context to match
   names/tone" causes it to lift screen text into the output (inventing a `Hi Maria,` greeting from a
   name visible on screen, echoing an instruction-like headline). The fence therefore leads with the
@@ -80,6 +85,10 @@ Rules:
 <instructions>
 {{modePrompt}}
 {{dictatedInstructions}}
+
+Always also apply these style rules, even to otherwise-clean text. Where a style rule conflicts
+with the wording instruction above, the style rule wins:
+- {{styleRule}}
 </instructions>
 
 <context>
@@ -94,8 +103,13 @@ Rules:
 </content>
 ```
 
-- `modePrompt` includes the mode's **shared prompt fragments** appended in order (e.g. a
-  "my voice" fragment) (`design.md` §4.3).
+- The mode's **shared prompt fragments** (e.g. a "my voice" fragment, `design.md` §4.3) are **not**
+  flattened into `modePrompt`. They render in order as a **labeled, bulleted "style rules" section**
+  inside `<instructions>`, after the mode prompt + dictated instructions. The lead-in carries two
+  signals a flat append loses: **apply even to otherwise-clean text** (so the always-on minimal-change
+  rule can't make a weak model skip a transformative fragment) and **the style rule wins a conflict
+  with the wording instruction above** (precedence — a "talk like a pirate" fragment overrides a mode
+  prompt's "keep my wording"). The whole section is omitted when the mode has no fragments.
 - **Dictation rewrite:** `contentToTransform` = the (tokenized) transcript;
   `dictatedInstructions` is usually empty (the mode prompt carries the intent).
 - **Edit-in-place:** `contentToTransform` = the selected text; `dictatedInstructions` = what

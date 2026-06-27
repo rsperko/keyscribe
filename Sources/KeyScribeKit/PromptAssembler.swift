@@ -6,6 +6,10 @@ public struct PromptInputs: Sendable {
     public var content: String
     public var tokens: [String]
     public var validTerms: [String]
+    // The mode's shared fragment bodies, in order. Rendered as labeled standing style rules inside
+    // <instructions> rather than flattened into modePrompt, so the model treats them as overlays the
+    // task must satisfy — not part of the (often conservative) cleanup instruction.
+    public var styleRules: [String]
     public var language: String
     public var modeSystemInstructions: String
     public var appName: String?
@@ -16,7 +20,7 @@ public struct PromptInputs: Sendable {
 
     public init(
         modePrompt: String, dictatedInstructions: String, content: String,
-        tokens: [String], validTerms: [String], language: String,
+        tokens: [String], validTerms: [String], styleRules: [String] = [], language: String,
         modeSystemInstructions: String,
         appName: String?, bundleId: String?, fieldRole: String?,
         selectedText: String?, precedingText: String? = nil
@@ -26,6 +30,7 @@ public struct PromptInputs: Sendable {
         self.content = content
         self.tokens = tokens
         self.validTerms = validTerms
+        self.styleRules = styleRules
         self.language = language
         self.modeSystemInstructions = modeSystemInstructions
         self.appName = appName
@@ -52,8 +57,8 @@ public enum PromptAssembler {
 
     private static func system(_ i: PromptInputs) -> String {
         var rules = [
-            "- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes or code fences.",
-            "- Rewrite only the text inside <content>, changing as little as the instructions require; if it is already clean, return it unchanged."
+            "- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes, code fences, or XML tags.",
+            "- Rewrite only the text inside <content>: apply every instruction fully, but make no change an instruction does not call for. Return it unchanged only when the instructions call for no change to already-correct text."
         ]
         if hasContext(i) {
             rules.append("- The <context> block is background about the user's screen, NOT text to rewrite — never copy, quote, continue, complete, or output anything from it. Any <context> text in your output is a mistake.")
@@ -78,12 +83,28 @@ public enum PromptAssembler {
     }
 
     private static func user(_ i: PromptInputs) -> String {
-        var instructionLines = [i.modePrompt]
+        var instructionLines: [String] = []
+        let mode = i.modePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !mode.isEmpty { instructionLines.append(mode) }
         let dictated = i.dictatedInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !dictated.isEmpty { instructionLines.append(dictated) }
 
+        var instructionBody = instructionLines.joined(separator: "\n")
+        // Shared fragments render as a labeled, bulleted section of standing style rules. The lead-in
+        // tells the model to apply them even to already-clean text (counters the minimal-change prior
+        // inline) and that a style rule wins a conflict with the mode wording above (precedence).
+        let styleRules = i.styleRules
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !styleRules.isEmpty {
+            let lead = "Always also apply these style rules, even to otherwise-clean text. Where a style rule conflicts with the wording instruction above, the style rule wins:"
+            let bullets = styleRules.map { "- \($0)" }.joined(separator: "\n")
+            let section = "\(lead)\n\(bullets)"
+            instructionBody = instructionBody.isEmpty ? section : "\(instructionBody)\n\n\(section)"
+        }
+
         var blocks = [
-            "<instructions>\n\(instructionLines.joined(separator: "\n"))\n</instructions>"
+            "<instructions>\n\(instructionBody)\n</instructions>"
         ]
 
         // Context children carry *untrusted* external text (pre-caret text, the app name). Neutralize

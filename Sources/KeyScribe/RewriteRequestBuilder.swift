@@ -30,10 +30,11 @@ struct RewriteRequestBuilder {
         sized.params.maxTokens = ContextBudget.maxTokens(
             forSelectionChars: content.count, floor: connection.params.maxTokens)
 
-        // Mode prompt + shared fragments (appended in order).
-        let modePrompt = ([mode.aiRewrite?.prompt ?? ""] + plan.fragmentBodies(ids: mode.aiRewrite?.fragments ?? []))
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        // The mode prompt is the task; shared fragments are standing style rules layered on top. They
+        // are passed separately (not flattened in) so PromptAssembler can label them and signal
+        // precedence — see prompt_design.md.
+        let modePrompt = mode.aiRewrite?.prompt ?? ""
+        let styleRules = plan.fragmentBodies(ids: mode.aiRewrite?.fragments ?? [])
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
         // Lowercase the content once rather than re-folding it per term inside a case-insensitive scan.
@@ -62,7 +63,7 @@ struct RewriteRequestBuilder {
 
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
-            tokens: issuedTokens, validTerms: validTerms, language: "English",
+            tokens: issuedTokens, validTerms: validTerms, styleRules: styleRules, language: "English",
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText)

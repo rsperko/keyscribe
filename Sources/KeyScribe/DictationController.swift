@@ -549,9 +549,7 @@ final class DictationController {
     // (a structured task group would wait for it). A late result resolves a no-op and is discarded.
     // Because an abandoned transcribe may still be running, the gate refuses a second concurrent call
     // (throws `Busy`) until the wedged one truly settles, so two transcribes never run at once.
-    private func transcribeBounded(url: URL, biasTerms: [String], engine: any SpeechEngine) async throws -> String {
-        let audioSeconds = (try? AVAudioFile(forReading: url))
-            .map { Double($0.length) / $0.fileFormat.sampleRate } ?? 0
+    private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL) async throws -> String {
         let timeout = max(30, audioSeconds * 20)
         return try await transcribeGate.run(seconds: timeout) {
             try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
@@ -561,8 +559,9 @@ final class DictationController {
     private func transcribeAndInsert(url: URL) async {
         await modeResolveTask?.value
         let engine = activeEngine
-        building.audioSeconds = (try? AVAudioFile(forReading: url))
+        let audioSeconds = (try? AVAudioFile(forReading: url))
             .map { Double($0.length) / $0.fileFormat.sampleRate }
+        building.audioSeconds = audioSeconds
 
         // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a legitimate one-time
         // cost — a 632 MB model measured ~140 s to load even from a compiled cache — so counting it
@@ -587,7 +586,8 @@ final class DictationController {
         let transcribeStart = DispatchTime.now()
         let raw: String
         do {
-            raw = try await transcribeBounded(url: url, biasTerms: recognitionBiasTerms(), engine: engine)
+            raw = try await transcribeBounded(
+                audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url)
         } catch is SingleFlightDeadline.Busy {
             try? FileManager.default.removeItem(at: url)
             if Task.isCancelled { return }

@@ -44,6 +44,18 @@ enum AudioInputDevices {
             || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
+    // Set the system default *input* device. Returns true on success. This is a GLOBAL change that affects
+    // every app on the machine, so a caller must save the prior default and restore it (see AudioCapture's
+    // temporary-default swap) — leaving it changed would hijack every other app's microphone.
+    @discardableResult
+    static func setSystemDefaultInput(_ id: AudioDeviceID) -> Bool {
+        var deviceID = id
+        var addr = address(kAudioHardwarePropertyDefaultInputDevice)
+        return AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size), &deviceID) == noErr
+    }
+
     // MARK: - Property reads
 
     private static func allDeviceIDs() -> [AudioDeviceID] {

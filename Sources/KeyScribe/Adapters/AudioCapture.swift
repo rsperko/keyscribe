@@ -99,9 +99,32 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private let deviceListenerQueue = DispatchQueue(label: "com.keyscribe.audio.device-listener")
     private var defaultInputListenerBlock: AudioObjectPropertyListenerBlock?
     private var deviceListListenerBlock: AudioObjectPropertyListenerBlock?
+    // Coalesces a storm of topology callbacks (one physical plug/unplug fires the listener several times)
+    // into a single rebuild, and skips the rebuild entirely when the effective device did not actually
+    // change. Both fields are touched ONLY on `deviceListenerQueue`, so they need no lock.
+    private var topologyDebounce: DispatchWorkItem?
+    private var lastEffectiveDeviceID: AudioDeviceID?
+
+    // Layer 6: while RECORDING, a device change (swap, sample-rate change, or a Bluetooth A2DP↔HFP profile
+    // flip) is observed by the running engine's I/O unit, which stops + uninitializes the engine and posts
+    // AVAudioEngineConfigurationChange — the HAL listeners above deliberately no-op while recording because
+    // this notification is the in-flight path. We observe it per-engine and restart capture on the control
+    // queue, keeping the same capture file so the dictation continues instead of silently truncating.
+    private var configChangeObserver: NSObjectProtocol?
+    // Bounds a flapping device: each restart attempt increments this; past the cap we stop retrying and let
+    // the release→finishDraining path finalize the partial capture. Reset when a new capture is armed.
+    private var configRestartCount = 0
+    private static let maxConfigRestarts = 5
+
+    // Holds the user's ORIGINAL system default input while we have temporarily overridden it to honor a
+    // preferred device the AUHAL refuses to pin (the -10868 case — classically while a Bluetooth headset
+    // holds the default). Every teardown path restores it; leaving it changed would hijack every other
+    // app's microphone (the bug we saw other apps ship). nil when we have not swapped.
+    private var swappedDefaultInput: AudioDeviceID?
 
     init() {
         registerInputListeners()
+        observeConfigChanges(of: engineSnapshot(), generation: currentGeneration())
     }
 
     deinit {
@@ -115,6 +138,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             AudioObjectRemovePropertyListenerBlock(
                 AudioObjectID(kAudioObjectSystemObject), &address, deviceListenerQueue, deviceListListenerBlock)
         }
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+        }
+        // Last-ditch: if we are torn down mid-swap (app quit during a dictation), put the user's default
+        // input back so we never leave the system pointed at our temporary choice.
+        restoreDefaultInputIfSwapped()
     }
 
     func setPreferredInputUID(_ uid: String?) {
@@ -215,26 +244,119 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         self.converter = nil
         self.converterInputFormat = nil
         self.outBuffer = nil
+        self.configRestartCount = 0
         lock.unlock()
 
         do {
-            try arm()
+            try armBestEffort()
         } catch {
-            // The engine caches its input-device binding and never re-resolves it, so if that device
-            // disconnected while idle (no ConfigurationChange fires while stopped) start() throws. Rebuild
-            // the engine once to bind the current default input and retry — the costly input-unit
-            // realization is paid only on a device change, not on every dictation. A wedge (vs a throw) is
-            // handled upstream by the bring-up watchdog instead.
-            lock.lock(); engine = AVAudioEngine(); lock.unlock()
-            do {
-                try arm()
-            } catch {
-                markRebuild()
-                discardPendingCapture()
-                throw error
-            }
+            restoreDefaultInputIfSwapped()
+            markRebuild()
+            discardPendingCapture()
+            throw error
         }
         return url
+    }
+
+    // Bring the engine up with the best strategy available for the user's chosen mic, escalating on
+    // failure. This is the whole point of the device handling: get the right microphone live, and if we
+    // cannot, get *a* microphone live rather than failing.
+    //   1. PIN the preferred device on the input AUHAL — zero global side effects. Skipped when a Bluetooth
+    //      device holds the system default, because pinning a non-default input then reliably fails -10868.
+    //      When no preferred device is set (or it already is the default), this simply follows the default.
+    //   2. TEMPORARILY make the preferred device the system default so the engine can follow it — the route
+    //      a non-default input can't be pinned into. Restored on every teardown path. This is what lets you
+    //      dictate on the built-in mic while AirPods (busy on a call) hold the default.
+    //   3. FOLLOW the system default as-is, with a brief Bluetooth/USB warm-up retry — the last resort so
+    //      dictation still works on *some* mic.
+    private func armBestEffort() throws {
+        let override = preferredDeviceNeedingOverride()
+        let defaultIsBluetooth = systemDefaultInputIsBluetooth()
+
+        if override == nil || !defaultIsBluetooth {
+            do { try arm(); return } catch { /* escalate */ }
+        }
+        if let override {
+            do { try armWithTemporaryDefault(override); return }
+            catch { restoreDefaultInputIfSwapped() }
+        }
+        try fallBackToDefaultWithRetry()
+    }
+
+    // The preferred device to honor, only when it is set, currently connected, AND not already the system
+    // default — i.e. the case that needs the AUHAL pin or the temporary-default swap. nil otherwise.
+    private func preferredDeviceNeedingOverride() -> AudioDeviceID? {
+        let uid = lock.withLock { preferredInputUID }
+        guard let uid, let preferred = AudioInputDevices.deviceID(forUID: uid) else { return nil }
+        guard let current = AudioInputDevices.systemDefaultInputID(), preferred != current else { return nil }
+        return preferred
+    }
+
+    private func systemDefaultInputIsBluetooth() -> Bool {
+        guard let id = AudioInputDevices.systemDefaultInputID() else { return false }
+        return AudioInputDevices.isBluetooth(id)
+    }
+
+    // Honor a preferred device the AUHAL can't pin by TEMPORARILY making it the system default and letting
+    // the engine follow the default (which always starts), then restoring the user's original default on
+    // teardown. Strict save → set → settle → capture; the original is stashed for restoreDefaultInputIfSwapped().
+    private func armWithTemporaryDefault(_ preferred: AudioDeviceID) throws {
+        guard let original = AudioInputDevices.systemDefaultInputID() else {
+            throw AudioCaptureError.formatUnavailable
+        }
+        guard AudioInputDevices.setSystemDefaultInput(preferred) else {
+            throw AudioCaptureError.formatUnavailable
+        }
+        lock.withLock { swappedDefaultInput = original }
+        settleDefaultInput(expected: preferred, timeout: 0.4)
+        try rebuildAndArmFollowingDefault()
+    }
+
+    // Block (on the control queue) until the system default input reports the expected device, so a freshly
+    // built engine binds to the new default rather than the one we just replaced. Bounded — proceed anyway
+    // on timeout (a stale bind degrades to the original default, which still starts).
+    private func settleDefaultInput(expected: AudioDeviceID, timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while AudioInputDevices.systemDefaultInputID() != expected, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+    }
+
+    // Restore the user's system default input if we temporarily overrode it. Idempotent: clears the stash,
+    // so every teardown path can call it unconditionally.
+    private func restoreDefaultInputIfSwapped() {
+        let original = lock.withLock { () -> AudioDeviceID? in
+            let o = swappedDefaultInput; swappedDefaultInput = nil; return o
+        }
+        guard let original else { return }
+        AudioInputDevices.setSystemDefaultInput(original)
+    }
+
+    private func fallBackToDefaultWithRetry() throws {
+        do {
+            try rebuildAndArmFollowingDefault()
+        } catch {
+            // A just-connected Bluetooth/USB input can fail the FIRST bring-up while its HAL proxy is still
+            // initializing (cf. wispr's 250 ms Bluetooth retry, Chromium's tolerance of transient startup
+            // errors). Wait briefly and retry once more. A wedge is handled upstream by the bring-up watchdog.
+            Thread.sleep(forTimeInterval: 0.25)
+            try rebuildAndArmFollowingDefault()
+        }
+    }
+
+    // Fresh engine bound to the system default (no preferred-device pin), with the config-change observer
+    // re-pointed at it. Used by the fallbacks and the mid-recording restart. Bumps the generation so a late
+    // buffer from the engine we just dropped is rejected by the tap guard; keeps the current control queue
+    // (we are already executing on it).
+    private func rebuildAndArmFollowingDefault() throws {
+        lock.lock()
+        engineGeneration &+= 1
+        engine = AVAudioEngine()
+        let newEngine = engine
+        let generation = engineGeneration
+        lock.unlock()
+        observeConfigChanges(of: newEngine, generation: generation)
+        try arm(followSystemDefault: true)
     }
 
     // AUHAL reports 0 ch / 0 Hz for an output-only device; tapping that format aborts the process (arm()).
@@ -242,14 +364,23 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         sampleRate > 0 && channelCount > 0
     }
 
-    private func arm() throws {
+    private func arm(followSystemDefault: Bool = false) throws {
         let engine = engineSnapshot()
         let generation = currentGeneration()
         // Pin the preferred device (if present) before the tap is installed, so the tap binds to its live
         // format. No-op when no preferred device is set or it is absent — the engine then follows the
-        // system default, which is exactly the fallback policy.
-        applyPreferredDevice(to: engine)
+        // system default, which is exactly the fallback policy. `followSystemDefault` forces that no-op
+        // path even when a preferred device is set: pinning a non-default input AUHAL CurrentDevice raises
+        // -10868 (FormatNotSupported in AUGraph input-chain init) whenever a Bluetooth headset holds the
+        // system default, so armSync's retry drops the pin and follows the (startable) default instead.
+        if !followSystemDefault {
+            applyPreferredDevice(to: engine)
+        }
         let input = engine.inputNode
+        // Defensively drop any tap already on this bus so arm() is restart-safe: the mid-recording
+        // config-change path re-arms the SAME engine, and installTap on a bus that already has one raises.
+        // removeTap on a tap-less bus is a no-op, so this is harmless on the normal first arm.
+        try? ObjCException.catching { input.removeTap(onBus: 0) }
         // installTap on a degenerate format (0 ch / 0 Hz, an output-only/mid-churn default) raises an ObjC
         // NSException Swift can't catch (→ SIGABRT). Throw instead so armSync rebuilds and retries.
         let inputFormat = input.outputFormat(forBus: 0)
@@ -288,6 +419,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     func finishDraining() async -> URL? {
         await drainTail()
         let url = await teardownAndFinalize()
+        restoreDefaultInputIfSwapped()
         releaseEngineIfBluetooth()
         return url
     }
@@ -373,6 +505,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         queue.async {
             Self.teardownEngine(box.engine)
         }
+        restoreDefaultInputIfSwapped()
         releaseEngineIfBluetooth()
         return url
     }
@@ -401,6 +534,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Drop a half-open capture (bring-up threw or timed out): clear recording state and delete the
     // partially-written file. Never touches the engine — a wedged one is abandoned via the rebuild flag.
     private func discardPendingCapture() {
+        restoreDefaultInputIfSwapped()
         let url = lock.withLock { currentURL }
         finalizeCapture()
         if let url { try? FileManager.default.removeItem(at: url) }
@@ -495,12 +629,18 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private func markRebuild() { lock.withLock { mustRebuild = true } }
 
     private func rebuildEngineIfNeeded() {
-        lock.lock(); defer { lock.unlock() }
-        guard mustRebuild else { return }
+        lock.lock()
+        guard mustRebuild else { lock.unlock(); return }
         mustRebuild = false
         engineGeneration &+= 1
         engine = AVAudioEngine()
         controlQueue = DispatchQueue(label: "com.keyscribe.audio.\(engineGeneration)")
+        let newEngine = engine
+        let generation = engineGeneration
+        lock.unlock()
+        // Re-point the config-change observer at the fresh engine (NotificationCenter add/remove is
+        // internally synchronized, so this is safe outside the lock).
+        observeConfigChanges(of: newEngine, generation: generation)
     }
 
     // MARK: - Preferred-device resolution
@@ -585,13 +725,76 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func handleInputTopologyChanged() {
+        // One physical plug/unplug fires this listener several times; coalesce a burst into a single
+        // rebuild by debouncing on the (serial) listener queue. The trailing edge runs applyTopologyChange.
+        topologyDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.applyTopologyChange() }
+        topologyDebounce = work
+        deviceListenerQueue.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    private func applyTopologyChange() {
         // Only act while idle: a change mid-recording is the running engine's own ConfigurationChange to
         // handle. While idle (stopped) that notification never fires, so proactively flag a rebuild and
         // re-prewarm against the new effective device (preferred-if-present, else default) — the hot path
         // then finds a fresh, valid engine.
         let recording = lock.withLock { currentURL != nil }
         guard !recording else { return }
+        // Skip the rebuild when the effective device is unchanged: the device list churns for reasons that
+        // don't affect us (an output-only device appearing, a property tweak), and a needless engine
+        // rebuild + prewarm would re-realize the input unit for nothing. lastEffectiveDeviceID is touched
+        // only here (on deviceListenerQueue), so it needs no lock.
+        let current = effectiveDeviceID()
+        guard current != lastEffectiveDeviceID else { return }
+        lastEffectiveDeviceID = current
         markRebuild()
         prewarm()
+    }
+
+    // MARK: - Mid-recording config-change recovery (Layer 6)
+
+    private func observeConfigChanges(of engine: AVAudioEngine, generation: Int) {
+        let token = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            self?.handleConfigurationChange(generation: generation)
+        }
+        let previous = lock.withLock { () -> NSObjectProtocol? in
+            let old = configChangeObserver
+            configChangeObserver = token
+            return old
+        }
+        if let previous { NotificationCenter.default.removeObserver(previous) }
+    }
+
+    private func handleConfigurationChange(generation: Int) {
+        // The running engine observed a hardware change (device swap, sample-rate change, or a Bluetooth
+        // A2DP↔HFP flip) and has already STOPPED + uninitialized itself. Restart on the control queue,
+        // keeping the same capture file so the dictation continues. The generation guard drops a stale
+        // notification from an engine we have since rebuilt out.
+        let queue = currentQueue()
+        queue.async { [self] in
+            guard isGeneration(generation) else { return }
+            let recording = lock.withLock { currentURL != nil }
+            guard recording else { return }
+            restartCaptureAfterConfigChange()
+        }
+    }
+
+    // Runs on the control queue. Re-arms capture into the still-open file. Coalesces a notification storm
+    // (an already-running engine needs nothing) and bounds a flapping device via configRestartCount; once
+    // the cap is hit we stop retrying and let the release→finishDraining path finalize the partial capture.
+    private func restartCaptureAfterConfigChange() {
+        if engineSnapshot().isRunning { return }
+        let attempts = lock.withLock { () -> Int in configRestartCount += 1; return configRestartCount }
+        guard attempts <= Self.maxConfigRestarts else { return }
+        do {
+            // Re-arm the same engine the notification stopped, honoring the preferred device if it pins
+            // cleanly; arm() defensively removes the prior tap first so the reinstall doesn't raise.
+            try arm()
+        } catch {
+            // Preferred pin failed (e.g. it became non-default) — fall back to a fresh default-following
+            // engine, same file. If that also throws, give up; the partial capture is finalized on release.
+            try? rebuildAndArmFollowingDefault()
+        }
     }
 }

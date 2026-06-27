@@ -7,6 +7,7 @@ private func inputs(
     content: String = "hello there",
     tokens: [String] = [],
     validTerms: [String] = [],
+    styleRules: [String] = [],
     appName: String? = nil, bundleId: String? = nil,
     fieldRole: String? = nil, selected: String? = nil,
     preceding: String? = nil,
@@ -14,7 +15,7 @@ private func inputs(
 ) -> PromptInputs {
     PromptInputs(
         modePrompt: modePrompt, dictatedInstructions: dictated, content: content,
-        tokens: tokens, validTerms: validTerms, language: "English",
+        tokens: tokens, validTerms: validTerms, styleRules: styleRules, language: "English",
         modeSystemInstructions: modeSystem,
         appName: appName, bundleId: bundleId, fieldRole: fieldRole,
         selectedText: selected, precedingText: preceding)
@@ -24,16 +25,62 @@ struct PromptAssemblerTests {
     @Test func alwaysHasOutputOnlyRuleAndLanguage() {
         let p = PromptAssembler.assemble(inputs())
         #expect(p.system.contains("Output ONLY the transformed text"))
+        // The output-only rule forbids XML tags too: a labeled style section primed a coder model to
+        // echo a stray closing tag (e.g. </pirate>) onto the end of the output, which the token gate
+        // does not catch — so it would leak into the insert.
+        #expect(p.system.contains("code fences, or XML tags"))
         #expect(p.system.contains("Write in English."))
     }
 
     @Test func minimalChangeRuleAlwaysPresent() {
-        // The over-production guard is always on, not gated on context — most dictations carry
-        // no context, and that path previously had no "if already clean, return unchanged" rule.
+        // The over-production guard is always on, not gated on context — most dictations carry no
+        // context. R1: the guard must not read as "clean input → do nothing", which made a weak model
+        // skip a transformative instruction (e.g. a style fragment) on already-correct text. So it
+        // leads with "apply every instruction fully" and conditions "return unchanged" on the
+        // instructions calling for no change.
         let p = PromptAssembler.assemble(inputs())
-        #expect(p.system.contains("changing as little as the instructions require"))
-        #expect(p.system.contains("if it is already clean, return it unchanged"))
+        #expect(p.system.contains("Rewrite only the text inside <content>"))
+        #expect(p.system.contains("apply every instruction fully"))
+        #expect(p.system.contains("make no change an instruction does not call for"))
+        #expect(p.system.contains("Return it unchanged only when the instructions call for no change"))
+        #expect(!p.system.contains("if it is already clean, return it unchanged"))
         #expect(!p.system.contains("background about the user's screen"))
+    }
+
+    @Test func styleRulesRenderedAsLabeledBulletsInsideInstructions() {
+        // R2: fragments are not flattened into the mode prompt — they render as labeled standing
+        // style rules so the model treats them as overlays, not part of the cleanup task. They stay
+        // inside <instructions> (no new block that could read as ignorable context).
+        let p = PromptAssembler.assemble(inputs(
+            modePrompt: "Clean up grammar.", styleRules: ["Talk like a pirate", "Keep it terse"]))
+        #expect(p.user.contains("<instructions>"))
+        #expect(p.user.contains("Clean up grammar."))
+        #expect(p.user.contains("- Talk like a pirate"))
+        #expect(p.user.contains("- Keep it terse"))
+        #expect(!p.user.contains("<style>"))
+        // the style section sits after the mode prompt, before </instructions>
+        let body = p.user
+        #expect(body.range(of: "Clean up grammar.")!.lowerBound
+            < body.range(of: "- Talk like a pirate")!.lowerBound)
+    }
+
+    @Test func styleSectionCarriesApplyAnywayAndPrecedence() {
+        // R2 + R3: the lead-in tells the model to apply style even to clean text (countering the
+        // minimal-change prior inline) and that a style rule wins a conflict with the mode wording.
+        let p = PromptAssembler.assemble(inputs(styleRules: ["Talk like a pirate"]))
+        #expect(p.user.contains("even to otherwise-clean text"))
+        #expect(p.user.contains("the style rule wins"))
+    }
+
+    @Test func noStyleSectionWhenNoFragments() {
+        let p = PromptAssembler.assemble(inputs())
+        #expect(!p.user.contains("even to otherwise-clean text"))
+        #expect(!p.user.contains("the style rule wins"))
+    }
+
+    @Test func blankStyleRulesAreSkipped() {
+        let p = PromptAssembler.assemble(inputs(styleRules: ["  ", ""]))
+        #expect(!p.user.contains("even to otherwise-clean text"))
     }
 
     @Test func tokenDirectiveOnlyWhenTokensPresent() {
