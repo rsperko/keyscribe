@@ -17,9 +17,9 @@ struct ResolvedConfigTests {
 
     @Test func mergedDictionaryUnionsGlobalAndModeWithDedup() {
         var mode = Mode(id: "m", name: "M")
-        mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["ChargeBee", "Shopify"])
-        let rc = resolved(modes: [mode], dictionary: ["Shopify", "Kubernetes"])
-        #expect(rc.mergedDictionary(for: mode) == ["Shopify", "Kubernetes", "ChargeBee"])
+        mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["ChargeBee", "Postgres"])
+        let rc = resolved(modes: [mode], dictionary: ["Postgres", "Kubernetes"])
+        #expect(rc.mergedDictionary(for: mode) == ["Postgres", "Kubernetes", "ChargeBee"])
     }
 
     @Test func mergedDictionaryHonorsIncludeGlobalFalse() {
@@ -64,8 +64,8 @@ struct ResolvedConfigTests {
     @Test func recognitionBiasTermsTrimWhitespaceAndDropBlanks() {
         var mode = Mode(id: "m", name: "M")
         mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["  Padded  ", "   "])
-        let rc = resolved(modes: [mode], dictionary: ["Shopify"])
-        #expect(rc.recognitionBiasTerms(for: mode) == ["Shopify", "Padded"])
+        let rc = resolved(modes: [mode], dictionary: ["Postgres"])
+        #expect(rc.recognitionBiasTerms(for: mode) == ["Postgres", "Padded"])
     }
 
     @Test func recognitionBiasTermsFallBackToGlobalForNilMode() {

@@ -57,8 +57,6 @@ public enum RedactionTokenizer {
         Detector(#"\bglpat-[A-Za-z0-9_-]{20,}"#, requires: ["glpat-"]),                         // GitLab PAT
         Detector(#"\bxox[baprs]-[A-Za-z0-9-]{10,}"#, requires: ["xox"]),                       // Slack token
         Detector(#"\bxapp-[0-9]-[A-Za-z0-9-]{10,}"#, requires: ["xapp-"]),                     // Slack app-level token
-        Detector(#"\bREDACTED_VENDOR_TOKEN\b"#,                                   // vendor token
-            requires: ["_", "_", "_", "_"]),
         Detector(#"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*"#, requires: ["bearer"]),           // Authorization: Bearer …
         Detector(                                                                              // KEY = "value" assignment
             #"(?i)\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|API)[A-Z0-9_]*\s*[=:]\s*["']?[^\s"']{6,}["']?"#,
