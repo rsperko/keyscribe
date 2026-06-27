@@ -375,9 +375,9 @@ struct DictationCancellationTests {
 
     @Test func rewriteHUDNamesTheActualSharedContext() {
         let state = HUDState.rewriting(
-            connection: "Gemini", redacted: false, contextCategories: ["app", "visible text"],
+            connection: "Gemini", redacted: false, contextCategories: ["app", "preceding text"],
             offerLocalTranscript: false)
-        #expect(state.secondaryText == "App shared · Visible text shared")
+        #expect(state.secondaryText == "App shared · Preceding text shared")
     }
 }
 

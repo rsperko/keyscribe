@@ -58,8 +58,8 @@ struct HistoryEntryCodecTests {
     @Test func dataBoundaryLabelsUseSharedVocabulary() {
         let entry = HistoryEntry(
             timestamp: Date(), modeName: "Email", heard: "hello", result: "Hello.", outcome: .inserted,
-            cloudInvolved: true, redaction: false, contextCategories: ["app", "visible text"])
-        #expect(entry.dataBoundaryLabels == ["Cloud rewrite", "App shared", "Visible text shared"])
+            cloudInvolved: true, redaction: false, contextCategories: ["app", "preceding text"])
+        #expect(entry.dataBoundaryLabels == ["Cloud rewrite", "App shared", "Preceding text shared"])
     }
 
     @Test func contextLabelsExcludeRedactionAndUnknownCategories() {
@@ -74,8 +74,8 @@ struct HistoryEntryCodecTests {
         let entry = HistoryEntry(
             timestamp: Date(), modeName: "Email", heard: "hello", result: "Hello.", outcome: .inserted,
             cloudInvolved: true, redaction: false,
-            contextCategories: ["app", "visible text", "preceding text"])
-        #expect(entry.contextLabels == ["App shared", "Visible text shared", "Preceding text shared"])
+            contextCategories: ["app", "preceding text"])
+        #expect(entry.contextLabels == ["App shared", "Preceding text shared"])
     }
 }
 

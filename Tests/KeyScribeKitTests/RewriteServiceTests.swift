@@ -24,7 +24,7 @@ private func inputs(content: String = "hello") -> PromptInputs {
     PromptInputs(
         modePrompt: "Rewrite.", dictatedInstructions: "", content: content,
         tokens: [], validTerms: [], language: "English", modeSystemInstructions: "",
-        appName: nil, bundleId: nil, fieldRole: nil, visibleWindowText: nil, selectedText: nil)
+        appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
 }
 
 struct RewriteServiceTests {

@@ -90,7 +90,6 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public static func contextLabel(for category: String) -> String? {
         switch category {
         case "app": "App shared"
-        case "visible text": "Visible text shared"
         case "preceding text": "Preceding text shared"
         default: nil
         }

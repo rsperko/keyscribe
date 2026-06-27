@@ -670,13 +670,6 @@ private struct ModeEditorView: View {
                     Toggle("", isOn: contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
                 }
                 SettingRow(
-                    title: "Send visible window text",
-                    help: "Shares a capped excerpt of the focused window's visible text as untrusted reference. It can include anything on screen, so leave it off for sensitive windows.",
-                    dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
-                {
-                    Toggle("", isOn: contextBinding(\.visibleText)).labelsHidden().disabled(mode.commands.privacy)
-                }
-                SettingRow(
                     title: "Send text before the cursor",
                     help: "Shares a short, bounded excerpt of the text just before the insertion point as untrusted reference, so a rewrite can match the surrounding voice and tense. Native text fields only — best-effort (browsers expose nothing).",
                     dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)

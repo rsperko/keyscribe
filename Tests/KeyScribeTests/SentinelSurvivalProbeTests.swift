@@ -166,7 +166,7 @@ struct SentinelSurvivalProbeTests {
             let inputs = PromptInputs(
                 modePrompt: s.modePrompt, dictatedInstructions: s.dictated, content: content,
                 tokens: issued, validTerms: [], language: "English", modeSystemInstructions: "",
-                appName: nil, bundleId: nil, fieldRole: nil, visibleWindowText: nil, selectedText: nil)
+                appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
             let prompt = PromptAssembler.assemble(inputs)
             var system = prompt.system
             if let rule = Self.env("PROBE_TOKEN_RULE") {

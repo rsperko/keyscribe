@@ -127,7 +127,7 @@ connection = "gemini-flash"     # references a [[connection]] in connections.tom
 prompt = "Rewrite the dictation as a clear, professional email. Keep my meaning."
 fragments = ["my-voice"]        # shared prompt fragments, appended in order
 # Context opt-in (what gets sent to the LLM):
-context = { app = true, visible_text = false, preceding_text = false }
+context = { app = true, preceding_text = false }
                                                      # selection is sent when source = "selection".
                                                      #   preceding_text = bounded text before the caret
                                                      #   (native-only, best-effort via AX).
@@ -153,7 +153,7 @@ context = { app = true, visible_text = false, preceding_text = false }
 | `dictionary` | table | `include_global` + `words[]`. |
 | `replacements` | table | `include_global` + `rules[]` of `{heard, replace, regex}`. |
 | `[ai_rewrite]` | table | Absent ⇒ no rewrite. `connection`, `prompt`, `fragments[]`, `context`. |
-| `ai_rewrite.context` | inline table | `{ app, visible_text, preceding_text }` booleans. `preceding_text` sends bounded text before the caret (native-only, best-effort via AX). (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
+| `ai_rewrite.context` | inline table | `{ app, preceding_text }` booleans. `preceding_text` sends bounded text before the caret (native-only, best-effort via AX). (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
 | `insertion` | enum | `paste` \| `insert` \| `type`. |
 | `trailing` | enum | `none` (default) \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). |
 | `submit` | enum | `none` (default) \| `return` \| `shift_return` \| `cmd_return`. A keystroke synthesized after a **verified** insert (outside the undo atom). Never fires on a clipboard fallback — the text never reached the target. |

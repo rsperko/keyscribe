@@ -22,7 +22,7 @@ private func inputs(_ content: String, tokens: [String]) -> PromptInputs {
     PromptInputs(
         modePrompt: "Polish this.", dictatedInstructions: "", content: content,
         tokens: tokens, validTerms: [], language: "English", modeSystemInstructions: "",
-        appName: nil, bundleId: nil, fieldRole: nil, visibleWindowText: nil, selectedText: nil)
+        appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
 }
 
 private func rewrittenText(_ o: RewriteOutcome) -> String? {

@@ -190,9 +190,9 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
 - A cloud request always names the selected connection, not a generic “AI” label.
 - A cloud request with privacy enabled displays **“Best-effort redaction”**. Its expanded help
   says: “Recognizable sensitive text is replaced before this request. Pattern matching can miss
-  content. App, window, and selected-text context are off for this mode.”
-- A cloud request without privacy enabled displays every enabled category: `App shared`,
-  `Visible text shared`, and/or `Selected text shared`.
+  content. App and selected-text context are off for this mode.”
+- A cloud request without privacy enabled displays every enabled category: `App shared`
+  and/or `Selected text shared`.
 - While a rewrite is pending, the HUD shows the processing state and never the pre-rewrite
   transcript. KeyScribe cannot know in advance whether a rewrite is light or heavy, so the rule is
   mechanical: rewrite enabled and pending ⇒ no transcript shown. The raw transcript is not the

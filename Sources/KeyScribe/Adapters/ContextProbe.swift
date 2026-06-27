@@ -109,24 +109,13 @@ enum ContextProbe {
         return title
     }
 
-    // Visible on-screen text for a mode that opted into visible-text context (design.md §4.4).
-    // Reads the Accessibility tree (no screenshot/OCR — verified sufficient across native/WebKit/
-    // Chrome/Electron). Runs off the main actor with a messaging timeout + wall-clock deadline so a
-    // slow app (some native AX trees take ~1s) never blocks the dictation flow. Best-effort: nil
-    // when AX exposes nothing.
-    static func visibleText(forBundleId bundleId: String, maxChars: Int = 8000) async -> String? {
-        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-            .first?.processIdentifier else { return nil }
-        return await Task.detached { AXVisibleText.capture(pid: pid, maxChars: maxChars) }.value
-    }
-
     // Bounded text immediately before the caret in the focused field, for a mode that opted into
     // preceding-text context (design.md §4.4). Read straight from the focused element's selected range
     // via AX — precise and native-only: Chromium/Electron expose no caret range, so this returns nil
-    // there (best-effort, like visible text). Privacy mode forces the opt-in off upstream
+    // there (best-effort). Privacy mode forces the opt-in off upstream
     // (Mode.effectiveContext), so this is never called when redaction is active.
     static func precedingText(forBundleId bundleId: String, maxChars: Int = 600) async -> String? {
-        // Scope to the captured app, like visibleText. precedingText is read at rewrite time — after STT
+        // Scope to the captured app. precedingText is read at rewrite time — after STT
         // and partway into the LLM round trip — so resolving the live system-wide focused element would
         // read whatever the user has since switched to, feeding the wrong field's (possibly sensitive)
         // text to the LLM. Read only when the captured app is still frontmost, via that app's own focused
@@ -215,150 +204,4 @@ enum ContextProbe {
         return Set(NSWorkspace.shared.urlsForApplications(toOpen: https)
             .compactMap { Bundle(url: $0)?.bundleIdentifier })
     }()
-}
-
-// Off-main Accessibility-tree walk. Scopes to the largest scrollable content region (the message
-// pane / article / note body / document), preferring the one holding the focused element, so the
-// sidebar / nav / file-tree chrome is excluded; falls back to the whole focused window. Bounded by
-// a per-call messaging timeout, a wall-clock deadline, and node/depth caps.
-enum AXVisibleText {
-    private static let messagingTimeout: Float = 0.3
-    private static let deadline: TimeInterval = 0.7
-    private static let wakeDeadline: TimeInterval = 1.0
-    private static let maxNodes = 4000
-    private static let maxDepth = 60
-    private static let textRoles: Set<String> = ["AXStaticText", "AXTextArea", "AXTextField", "AXTextView"]
-    private static let regionRoles: Set<String> = ["AXScrollArea", "AXWebArea"]
-
-    static func capture(pid: pid_t, maxChars: Int) -> String? {
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, messagingTimeout)
-        if let text = read(app: app, deadline: deadline, maxChars: maxChars) { return text }
-        // Empty tree — the case for lazy-AX Electron apps (VS Code, Claude desktop) that only expose
-        // their AX tree once an assistive technology asks. Set Electron's documented
-        // AXManualAccessibility wake on the app element and retry. Strictly safe: only runs when the
-        // cold read already yielded nothing, so apps that read cold (browsers/native/Antigravity) are
-        // never touched; a harmless no-op (-25205 unsupported) on non-Electron. The wake persists, so
-        // even if this first read is too early for the tree to build, the next dictation reads cold.
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        return read(app: app, deadline: wakeDeadline, maxChars: maxChars)
-    }
-
-    // `maxChars` stops the walk once enough text is gathered — the downstream context budget caps the
-    // result anyway, so a large window's tree need not be fully traversed or its strings retained.
-    private static func read(app: AXUIElement, deadline: TimeInterval, maxChars: Int) -> String? {
-        guard let window = focusedWindow(of: app) else { return nil }
-        let windowFrame = frame(window)
-        let stopAt = Date().addingTimeInterval(deadline)
-        let root = contentRegion(in: window, focused: focusedElement(of: app), windowFrame: windowFrame, stopAt: stopAt) ?? window
-
-        var texts: [String] = []
-        var seen = Set<AXKey>()
-        var nodes = 0
-        var chars = 0
-
-        func collect(_ el: AXUIElement, _ depth: Int) {
-            if nodes >= maxNodes || depth > maxDepth || chars >= maxChars || Date() >= stopAt { return }
-            let key = AXKey(el)
-            if seen.contains(key) { return }
-            seen.insert(key)
-            nodes += 1
-            let role = string(el, kAXRoleAttribute as String) ?? ""
-            if textRoles.contains(role), onScreen(el, clip: windowFrame), let s = visibleString(el, role: role) {
-                texts.append(s)
-                chars += s.count
-            }
-            for child in children(el) { collect(child, depth + 1) }
-        }
-        collect(root, 0)
-
-        let joined = texts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return joined.isEmpty ? nil : joined
-    }
-
-    private static func contentRegion(in window: AXUIElement, focused: AXUIElement?,
-                                      windowFrame: CGRect?, stopAt: Date) -> AXUIElement? {
-        let focusedFrame = focused.flatMap { frame($0) }
-        let windowArea = windowFrame.map { $0.width * $0.height } ?? 0
-        guard windowArea > 0 else { return nil }
-        var best: (el: AXUIElement, area: CGFloat)?
-        var bestContainingFocus: (el: AXUIElement, area: CGFloat)?
-        var nodes = 0
-        func visit(_ el: AXUIElement, _ depth: Int) {
-            if nodes >= maxNodes || depth > maxDepth || Date() >= stopAt { return }
-            nodes += 1
-            if regionRoles.contains(string(el, kAXRoleAttribute as String) ?? ""), let f = frame(el) {
-                let area = f.width * f.height
-                if area > (best?.area ?? 0) { best = (el, area) }
-                if let ff = focusedFrame, f.intersects(ff), area > (bestContainingFocus?.area ?? 0) {
-                    bestContainingFocus = (el, area)
-                }
-            }
-            for child in children(el) { visit(child, depth + 1) }
-        }
-        visit(window, 0)
-        guard let chosen = bestContainingFocus ?? best, chosen.area >= 0.2 * windowArea else { return nil }
-        return chosen.el
-    }
-
-    private static func visibleString(_ el: AXUIElement, role: String) -> String? {
-        if role == "AXTextArea" || role == "AXTextView",
-           let rangeV = copy(el, "AXVisibleCharacterRange"), CFGetTypeID(rangeV) == AXValueGetTypeID() {
-            var range = CFRange(location: 0, length: 0)
-            if AXValueGetValue((rangeV as! AXValue), .cfRange, &range), range.length > 0, range.length < 200_000,
-               let rv = AXValueCreate(.cfRange, &range) {
-                var out: CFTypeRef?
-                if AXUIElementCopyParameterizedAttributeValue(el, "AXStringForRange" as CFString, rv, &out) == .success,
-                   let s = out as? String, !s.isEmpty { return s }
-            }
-        }
-        for attr in [kAXValueAttribute as String, kAXTitleAttribute as String, kAXDescriptionAttribute as String] {
-            if let s = string(el, attr), !s.isEmpty { return s }
-        }
-        return nil
-    }
-
-    private static func focusedWindow(of app: AXUIElement) -> AXUIElement? {
-        if let v = copy(app, kAXFocusedWindowAttribute as String) { return (v as! AXUIElement) }
-        if let v = copy(app, kAXMainWindowAttribute as String) { return (v as! AXUIElement) }
-        return nil
-    }
-
-    private static func focusedElement(of app: AXUIElement) -> AXUIElement? {
-        copy(app, kAXFocusedUIElementAttribute as String).map { ($0 as! AXUIElement) }
-    }
-
-    private static func children(_ el: AXUIElement) -> [AXUIElement] {
-        guard let v = copy(el, kAXChildrenAttribute as String) else { return [] }
-        return (v as? [AXUIElement]) ?? []
-    }
-
-    private static func frame(_ el: AXUIElement) -> CGRect? {
-        guard let posV = copy(el, kAXPositionAttribute as String),
-              let sizeV = copy(el, kAXSizeAttribute as String),
-              CFGetTypeID(posV) == AXValueGetTypeID(), CFGetTypeID(sizeV) == AXValueGetTypeID() else { return nil }
-        var pt = CGPoint.zero, sz = CGSize.zero
-        AXValueGetValue((posV as! AXValue), .cgPoint, &pt)
-        AXValueGetValue((sizeV as! AXValue), .cgSize, &sz)
-        return CGRect(origin: pt, size: sz)
-    }
-
-    private static func onScreen(_ el: AXUIElement, clip: CGRect?) -> Bool {
-        guard let clip, let f = frame(el) else { return true }
-        return clip.intersects(f)
-    }
-
-    private static func string(_ el: AXUIElement, _ attr: String) -> String? { copy(el, attr) as? String }
-
-    private static func copy(_ el: AXUIElement, _ attr: String) -> CFTypeRef? {
-        var v: CFTypeRef?
-        return AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success ? v : nil
-    }
-
-    private struct AXKey: Hashable {
-        let el: AXUIElement
-        init(_ el: AXUIElement) { self.el = el }
-        static func == (l: AXKey, r: AXKey) -> Bool { CFEqual(l.el, r.el) }
-        func hash(into h: inout Hasher) { h.combine(CFHash(el)) }
-    }
 }

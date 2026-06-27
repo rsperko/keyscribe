@@ -97,7 +97,6 @@ and technical prompt behavior.
 | `Cloud rewrite` | The named connection processes text. | Name the connection and model. |
 | `Best-effort redaction` | Recognizable sensitive spans are tokenized before cloud rewrite. | “Pattern matching can miss content. Context is off.” |
 | `App shared` | App identity is sent with the rewrite. (URL is never sent — it is a local routing key only.) | State this exact category. |
-| `Visible text shared` | Window text excerpt is sent with the rewrite. | State this exact category. |
 | `Selected text shared` | Selection is sent with the rewrite. | State this exact category. |
 
 **Behavior:** labels are never shortened to an unexplained shield or lock. Multiple context
@@ -236,7 +235,6 @@ Use these terms consistently:
 | `Cloud rewrite` | AI mode, remote magic |
 | `No cloud rewrite` (rewrite off) | off, don't use AI |
 | `Best-effort redaction` | protected, anonymized, safe |
-| `Visible text shared` | context enabled |
 | `Insert without rewriting` | local transcript (implies raw STT), bypass, raw fallback |
 | `Copied instead of inserted` | failed paste |
 | `speech model` / `model` | engine (in user copy) |

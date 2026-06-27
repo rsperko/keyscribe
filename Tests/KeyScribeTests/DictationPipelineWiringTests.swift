@@ -198,7 +198,7 @@ struct DictationPipelineWiringTests {
     // child would render (appName falls back to the bundle id) and the categories would be recorded.
     @Test func privacyModeForcesAllContextOffEvenWhenTheModeRequestsIt() async {
         let m = mode(id: "secure", privacy: true, connectionId: "c",
-                     context: .init(app: true, visibleText: true, precedingText: true))
+                     context: .init(app: true, precedingText: true))
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
         let out = await run(transcript: "draft the memo", mode: m, connection: conn, llm: EchoLLM())
 

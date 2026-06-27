@@ -8,12 +8,6 @@ final class DictationController {
     static let fallbackModeName = "Plain Dictation"
     private let log = Logger(subsystem: "com.keyscribe.app", category: "dictation")
 
-    // Visible-text context caps (prompt_design.md §Context & token budget — measured defaults vs
-    // the Gemini 2.5 Flash floor). Visible text is the lowest-priority block, capped aggressively;
-    // the budget bounds the mandatory content (instructions + transcript/selection).
-    private static let visibleTextCap = 4000
-    private static let contextBudgetChars = 24000
-
     private(set) var settings: Settings
     private let provider: SpeechEngineProvider
     private let config: ConfigCache
@@ -916,8 +910,7 @@ final class DictationController {
         // the size-bumped connection — the change-prone assembly lives in its own builder.
         let request = await RewriteRequestBuilder(
             mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens,
-            capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection,
-            visibleTextCap: Self.visibleTextCap, contextBudgetChars: Self.contextBudgetChars).build()
+            capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection).build()
 
         let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(

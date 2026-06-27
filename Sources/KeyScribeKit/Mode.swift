@@ -151,20 +151,17 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public struct ContextOptIn: Codable, Equatable, Sendable {
         public var app: Bool
-        public var visibleText: Bool
         public var precedingText: Bool   // bounded text before the caret (native-only, best-effort)
         enum CodingKeys: String, CodingKey {
-            case app; case visibleText = "visible_text"; case precedingText = "preceding_text"
+            case app; case precedingText = "preceding_text"
         }
-        public init(app: Bool = false, visibleText: Bool = false, precedingText: Bool = false) {
+        public init(app: Bool = false, precedingText: Bool = false) {
             self.app = app
-            self.visibleText = visibleText
             self.precedingText = precedingText
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             app = try c.decodeIfPresent(Bool.self, forKey: .app) ?? false
-            visibleText = try c.decodeIfPresent(Bool.self, forKey: .visibleText) ?? false
             precedingText = try c.decodeIfPresent(Bool.self, forKey: .precedingText) ?? false
         }
     }
@@ -293,7 +290,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         let context = effectiveContext
         var categories: [String] = []
         if context.app { categories.append("app") }
-        if context.visibleText { categories.append("visible text") }
         if context.precedingText { categories.append("preceding text") }
         return categories
     }

@@ -41,8 +41,8 @@ struct HUDStateTests {
     @Test func rewritingBadgesListEachBoundaryCategorySeparately() {
         let state = HUDState.rewriting(
             connection: "Gemini", redacted: false,
-            contextCategories: ["app", "visible text"], offerLocalTranscript: false)
-        #expect(state.dataBoundaryBadges == ["Cloud rewrite", "App shared", "Visible text shared"])
+            contextCategories: ["app", "preceding text"], offerLocalTranscript: false)
+        #expect(state.dataBoundaryBadges == ["Cloud rewrite", "App shared", "Preceding text shared"])
     }
 
     @Test func redactionReplacesContextWithTheRedactionBadge() {

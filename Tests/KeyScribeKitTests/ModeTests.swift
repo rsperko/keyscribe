@@ -39,7 +39,7 @@ struct ModeTests {
         connection = "gemini-flash"
         prompt = "Rewrite as an email."
         fragments = ["my-voice"]
-        context = { app = true, visible_text = false }
+        context = { app = true }
         """
         let mode = try ModeStore.decode(from: toml, id: "email")
         #expect(mode.id == "email")
@@ -57,7 +57,6 @@ struct ModeTests {
         #expect(mode.replacements.rules.first?.replace == "@gmail.com")
         #expect(mode.aiRewrite?.connection == "gemini-flash")
         #expect(mode.aiRewrite?.context.app == true)
-        #expect(mode.aiRewrite?.context.visibleText == false)
         #expect(mode.insertion == .paste)
         #expect(!mode.excludeFromHistory)
     }
@@ -81,14 +80,14 @@ struct ModeTests {
         let mode = try ModeStore.decode(
             from: "schema_version = 1\nname = \"Secure\"\n[commands]\nprivacy = true", id: "secure")
         #expect(mode.commands.privacy)
-        #expect(mode.effectiveContext == Mode.ContextOptIn(app: false, visibleText: false))
+        #expect(mode.effectiveContext == Mode.ContextOptIn(app: false))
     }
 
     @Test func localOnlyForSecureFieldStripsCloudAndContext() {
         var mode = Mode(id: "polished", name: "Polished")
         mode.aiRewrite = Mode.AIRewrite(
             connection: "gemini", prompt: "Clean it up.",
-            context: .init(app: true, visibleText: true, precedingText: true))
+            context: .init(app: true, precedingText: true))
         let secured = mode.localOnlyForSecureField()
         #expect(secured.aiRewrite == nil)
         #expect(secured.commands.privacy)
@@ -158,7 +157,7 @@ struct ModeTests {
         m.dictionary = .init(includeGlobal: false, words: ["KeyScribe"])
         m.replacements = .init(includeGlobal: false, rules: [.init(heard: "a", replace: "b", regex: true)])
         m.aiRewrite = .init(connection: "gemini", prompt: "Rewrite.", fragments: ["my-voice"],
-                            context: .init(app: true, visibleText: true))
+                            context: .init(app: true))
         m.insertion = .type
         m.trailing = .newline
         m.submit = .shiftReturn
@@ -172,8 +171,8 @@ struct ModeTests {
 
     @Test func effectiveContextWhenPrivacyOffReturnsModeContext() {
         var m = Mode(id: "x", name: "X")
-        m.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: true, visibleText: false))
-        #expect(m.effectiveContext == Mode.ContextOptIn(app: true, visibleText: false))
+        m.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: true))
+        #expect(m.effectiveContext == Mode.ContextOptIn(app: true))
     }
 
     @Test func privacyForcesPrecedingTextOff() throws {
@@ -186,20 +185,20 @@ struct ModeTests {
 
     @Test func precedingTextContextRoundTrips() throws {
         var m = Mode(id: "x", name: "X")
-        m.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: false, visibleText: false, precedingText: true))
+        m.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: false, precedingText: true))
         let again = try ModeStore.decode(from: ModeStore.encode(m), id: "x")
         #expect(again.aiRewrite?.context.precedingText == true)
         #expect(again.effectiveContextCategories.contains("preceding text"))
     }
 
     @Test func effectiveContextWithNoRewriteIsAllOff() {
-        #expect(Mode(id: "x", name: "X").effectiveContext == Mode.ContextOptIn(app: false, visibleText: false))
+        #expect(Mode(id: "x", name: "X").effectiveContext == Mode.ContextOptIn(app: false))
     }
 
     @Test func effectiveContextCategoriesRespectPrivacy() {
         var mode = Mode(id: "x", name: "X")
-        mode.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: true, visibleText: true))
-        #expect(mode.effectiveContextCategories == ["app", "visible text"])
+        mode.aiRewrite = .init(connection: "c", prompt: "p", context: .init(app: true, precedingText: true))
+        #expect(mode.effectiveContextCategories == ["app", "preceding text"])
         mode.commands.privacy = true
         #expect(mode.effectiveContextCategories.isEmpty)
     }

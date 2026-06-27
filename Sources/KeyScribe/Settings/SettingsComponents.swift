@@ -83,7 +83,7 @@ struct SettingRow<Control: View>: View {
 }
 
 // ui_components.md data-boundary badge: one shared capsule for "On this Mac", "Cloud rewrite",
-// "Best-effort redaction", "App shared", "Visible text shared", "Selected text shared". The label
+// "Best-effort redaction", "App shared", "Selected text shared". The label
 // strings come from KeyScribeKit (HistoryEntry); this is the single view used in HUD, Mode
 // summaries, and History so the categories never collapse into a generic "context" label.
 struct DataBoundaryBadge: View {

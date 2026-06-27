@@ -110,7 +110,7 @@ The same app serves both via progressive disclosure.
                         ┌───────────────────────┴───────────────────────┐
                         │            AI REWRITE (optional, BYOK)         │
             [ pre-LLM ] ─▶  cloud/local LLM (OpenAI/Anthropic/Gemini) ─▶ [ post-LLM ]
-            context the mode opts into (app, visible text) + selection + fragments
+            context the mode opts into (app) + selection + fragments
                         └───────────────────────┬───────────────────────┘
                                                 ▼
                           RESTORE: de-tokenize redaction/verbatim nonces
@@ -345,13 +345,13 @@ Each mode also carries:
   dictionary/replacements.
 - **Privacy toggle** — when on, best-effort redaction (§4.2) runs for this mode, and **context is
   disabled and prevented** for the mode (§4.4): the context checkboxes are forced off and locked, so
-  no window/app/selection text can be sent to the cloud alongside the transcript. Redaction therefore
+  no app/selection text can be sent to the cloud alongside the transcript. Redaction therefore
   only has to cover the transcript.
 - **Live-edits opt-in** — whether the spoken command list (new line, paragraph, scratch that,
   begin/end verbatim) is active for this mode.
-- **Context opt-in** — checkboxes for what to send to the LLM: **App**, **visible text**, and
-  **preceding text** (bounded text before the caret, native-only/best-effort) (§4.4). (The URL is a
-  routing key only, never sent — §4.3.)
+- **Context opt-in** — checkboxes for what to send to the LLM: **App** and **preceding text**
+  (bounded text before the caret, native-only/best-effort) (§4.4). (The URL is a routing key only,
+  never sent — §4.3.)
 - **Shared prompt fragments** — named, reusable snippets **appended** to the mode's prompt (e.g. a
   "my voice" fragment shared across email and Slack modes). Appended in order, kept simple.
 - Optional **AI rewrite** (a **named LLM connection** + prompt + fragments + opted-in context).
@@ -378,17 +378,16 @@ present. It is the one case that bends the Mode model (input is selection+voice,
 but it stays a configured mode, not an engine fork.
 
 ### 4.4 AI rewrite context
-A mode **opts into** the context it sends to the LLM via checkboxes — **App**, **visible text**, and
-**preceding text** (a bounded amount of text immediately before the caret, native-only and
-best-effort) — plus the current selection when it is an edit-in-place mode. Nothing is sent that the
-mode did not opt into. Optional, BYOK, and only over redacted payloads.
+A mode **opts into** the context it sends to the LLM via checkboxes — **App** and **preceding text**
+(a bounded amount of text immediately before the caret, native-only and best-effort) — plus the
+current selection when it is an edit-in-place mode. Nothing is sent that the mode did not opt into.
+Optional, BYOK, and only over redacted payloads.
 
 **The URL is never sent to the LLM.** It is a *local* routing key only (`url_pattern`, §4.3): matched
 against a regex on-device to rank modes, never transmitted. As rewrite context it adds little over
-the app identity plus the visible-window text (which already carries what page the user is on) while
-disproportionately widening the cloud payload — URLs routinely embed session tokens, record ids, and
-search queries the user never sees. So URL is scoped to routing; app identity, visible text, and
-preceding text are the only situational context channels.
+the app identity while disproportionately widening the cloud payload — URLs routinely embed session
+tokens, record ids, and search queries the user never sees. So URL is scoped to routing; app identity
+and preceding text are the only situational context channels.
 
 The frontmost **app/bundle id is always available**. (Browser **URL detection** — AppleScript/Apple
 Events per browser, not AX — feeds `url_pattern` only, §4.3/§4.5.)

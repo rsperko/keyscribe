@@ -46,10 +46,10 @@
 - A cached post-install **self-test-failed** model flag (needs persisted state) to broaden the error
   badge's coverage.
 - **Inline prompt slots (power-user prompt layout).** Today `PromptAssembler` builds a fixed
-  `<context>` block (app / field / window / selection / preceding) and a mode's prompt is the system
+  `<context>` block (app / field / selection / preceding) and a mode's prompt is the system
   message. Add optional `{{ … }}` slots a user can place *inside* the prompt body —
-  `{{ dictation }}`, `{{ selected_text }}`, `{{ text_before_cursor }}`, `{{ active_window_text }}`,
-  `{{ window }}` — so the prompt itself becomes the user-message layout (with a fixed system guard,
+  `{{ dictation }}`, `{{ selected_text }}`, `{{ text_before_cursor }}` — so the prompt itself
+  becomes the user-message layout (with a fixed system guard,
   keeping untrusted context out of the trusted channel). Composable **prompt fragments** already
   exist (`Mode.AIRewrite.fragments` → `RewriteRequestBuilder`/`ResolvedConfig.fragmentBodies`), so
   slots layer on top of them. Also add the **whitespace-preservation rule** (emit only when the

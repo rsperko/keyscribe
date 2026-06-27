@@ -60,7 +60,7 @@ Rules:
   **positive task**, frames context as pure **background, never to be output**, labels any context in
   the output "a mistake," and **deliberately drops** the "use it to match names/tone" purpose.
   - **Design consequence:** controlled terminology/name matching belongs in the **`validTerms`**
-    channel (the Dictionary), which is safe; raw visible-text context is for *situational grounding
+    channel (the Dictionary), which is safe; opted-in context is for *situational grounding
     only*, fenced from output.
   - This is a **quality** failure mode, not a privacy one: the output is inserted **locally** (the
     user's own screen content returning to their screen); the cloud already received the opted-in
@@ -85,7 +85,6 @@ Rules:
 <context>
   <app>{{appName}} ({{bundleId}})</app>
   <field>{{fieldRole}}</field>
-  <window_excerpt>{{visibleWindowText}}</window_excerpt>
   <selection>{{selectedText}}</selection>
   <preceding_text>{{precedingText}}</preceding_text>
 </context>
@@ -102,10 +101,9 @@ Rules:
 - **Edit-in-place:** `contentToTransform` = the selected text; `dictatedInstructions` = what
   the user just spoke; `<selection>` may be omitted to avoid duplicating the content.
 - **Context is opt-in per mode** (`design.md` §4.4): `<app>`/`<field>` appear only if the
-  mode opted into **App**; `<window_excerpt>` only if it opted into **visible text**;
-  `<preceding_text>` (bounded text before the caret, native-only/best-effort) only if it opted
-  into **preceding text**. Any `<context>` child with no value is omitted; if all are empty, drop
-  `<context>` entirely.
+  mode opted into **App**; `<preceding_text>` (bounded text before the caret, native-only/best-effort)
+  only if it opted into **preceding text**. Any `<context>` child with no value is omitted; if all are
+  empty, drop `<context>` entirely.
 
 ---
 
@@ -117,10 +115,10 @@ The output passes a deterministic gate before insertion (`design.md` §4.2):
 - **On failure** — retry once with a stricter minimal prompt, then fall back to the local
   (un-rewritten) text with a HUD notice. Never insert partially-restored text.
 
-Opted-in context blocks (`<window_excerpt>`, `<selection>`, `<preceding_text>`) are **untrusted
+Opted-in context blocks (`<selection>`, `<preceding_text>`) are **untrusted
 data, not instructions** — kept in separate delimited blocks. Before send, `PromptAssembler.neutralize()`
 **breaks any of our own delimiter tags** that appear inside untrusted context (it inserts a zero-width
-space right after the `<` of a `</window_excerpt>`-style tag) so embedded text cannot close our block
+space right after the `<` of a `</preceding_text>`-style tag) so embedded text cannot close our block
 or open a new one; the ZWSP is invisible to the model and never reaches the insert. The post-LLM gate
 is the second line of defense, catching context that still tries to steer the rewrite or drop tokens
 (indirect prompt injection). No classifier in v1.
@@ -129,9 +127,7 @@ is the second line of defense, catching context that still tries to steer the re
 Large context causes latency, cost, and truncation artifacts. The policy is explicit and
 **never silently truncates user content**:
 - **Instructions and mode prompt are never truncated** — they define the task.
-- **Selected text is content** and takes priority over visible-window context.
-- **Visible text is capped aggressively** and excerpted around the cursor/selection when
-  possible — it is the lowest-priority, untrusted block.
+- **Selected text is content** and takes priority over other context.
 - **If assembled content exceeds budget, refuse the rewrite** and offer local paste/copy — do
   not silently cut the user's selection or transcript.
 - **`max_tokens` scales with edit-in-place** — a long selection needs output room ≥ its own
