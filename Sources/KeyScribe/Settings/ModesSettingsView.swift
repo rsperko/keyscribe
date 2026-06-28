@@ -10,6 +10,7 @@ final class ModesSettingsModel: ObservableObject {
     @Published private(set) var fragmentNames: [String: String] = [:]
     @Published var selectedID: String?
     @Published var lastCreatedId: String?
+    private var awaitingInitialName: String?
     @Published private(set) var error: String?
     @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
 
@@ -57,17 +58,52 @@ final class ModesSettingsModel: ObservableObject {
         save(mode)
         selectedID = mode.id
         lastCreatedId = mode.id
+        awaitingInitialName = mode.id
     }
 
     func consumeCreated() { lastCreatedId = nil }
 
+    // A freshly created mode's id is the slug of the placeholder "New Mode". The first time the user
+    // gives it a real name, re-slug the id so the TOML filename matches the name instead of staying
+    // "new-mode" (the id is the filename stem). Only the initial naming re-slugs; later renames keep
+    // the file so external references stay stable.
     func update(_ mode: Mode) {
+        if mode.id == awaitingInitialName {
+            let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
+            if newId != mode.id {
+                awaitingInitialName = nil
+                rename(mode, to: newId)
+                return
+            }
+        }
         save(mode)
+    }
+
+    private func rename(_ mode: Mode, to newId: String) {
+        let oldId = mode.id
+        var renamed = mode
+        renamed.id = newId
+        do {
+            try ModeStore.write(renamed, to: modesDir)
+            try? ModeStore.delete(mode, from: modesDir)
+            if let index = modes.firstIndex(where: { $0.id == oldId }) {
+                modes[index] = renamed
+            } else {
+                modes.append(renamed)
+            }
+            if defaultModeId() == oldId { onSetDefault(newId) }
+            if selectedID == oldId { selectedID = newId }
+            if lastCreatedId == oldId { lastCreatedId = newId }
+            error = nil
+        } catch {
+            self.error = "Could not save \(mode.name): \(error.localizedDescription)"
+        }
     }
 
     func delete(_ mode: Mode) {
         do {
             try ModeStore.delete(mode, from: modesDir)
+            if awaitingInitialName == mode.id { awaitingInitialName = nil }
             let wasDefault = mode.id == defaultModeId()
             modes.removeAll { $0.id == mode.id }
             selectedID = modes.first?.id
