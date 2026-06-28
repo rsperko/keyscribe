@@ -64,7 +64,7 @@ above a screen.
 
 ### Advanced disclosure
 
-**Use for:** regex, connection parameters, model eviction, insertion method, config file access,
+**Use for:** regex, connection parameters, model eviction, config file access,
 and technical prompt behavior.
 
 **Behavior:**
@@ -195,9 +195,10 @@ are valid outcomes that must explain why they occurred and offer the relevant ne
 When one option changes another, preserve visibility and explain the dependency. Examples:
 
 - privacy mode locks context off;
-- work on selection recommends a rewrite connection — without one it replaces the selection with
+- rewrite selected text recommends an AI connection — without one it replaces the selection with
   the literal dictation, so the editor says what it will do rather than blocking the mode;
-- AX insertion needs Accessibility permission;
+- TOML-only insertion escapes remain visible as read-only notes when active, rather than becoming
+  normal Settings controls;
 - regular-expression substitution fields appear only when regex mode is enabled.
 
 Never silently reset a dependent user value. Preserve it for restoration when the dependency is
@@ -238,7 +239,7 @@ Use these terms consistently:
 | `Insert without rewriting` | local transcript (implies raw STT), bypass, raw fallback |
 | `Copied instead of inserted` | failed paste |
 | `speech model` / `model` | engine (in user copy) |
-| `Work on selection` | edit mode |
+| `Rewrite selected text` | edit mode, work on selection |
 | `Reusable writing instruction` | prompt fragment |
 
 ---

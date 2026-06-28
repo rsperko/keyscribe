@@ -19,10 +19,10 @@ enum TextInserter {
     // character). We only restore once our ⌘C has actually overwritten the clipboard — if nothing was
     // copied (no selection) the clipboard is untouched, so an unconditional restore would be a redundant
     // rewrite that could clobber whatever another app wrote during the settle window.
-    static func captureSelection() async -> String? {
+    static func captureSelection(modifier: Mode.ClipboardModifier = .command) async -> String? {
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
-        postCommand(cKeyCode)
+        postKey(cKeyCode, flags: eventFlags(modifier))
         guard await waitForChange(since: snapshot.changeCount) else { return nil }
         let copied = pb.string(forType: .string)
         snapshot.restore()
@@ -34,10 +34,10 @@ enum TextInserter {
     // targets that prefer them; both proved unreliable in the M0 survey, so each degrades to paste
     // when it can't act. The focus-race safety decision is authoritative — a clipboardFallback
     // diverts to the clipboard regardless of the mode's preferred method.
-    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, text: String) async {
+    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String) async {
         switch insertionAction(decision: decision, method: method) {
-        case .paste: await insertViaPaste(text)
-        case .ax: await insertViaAX(text)
+        case .paste: await insertViaPaste(text, modifier: modifier)
+        case .ax: await insertViaAX(text, modifier: modifier)
         case .type: await insertViaTyping(text)
         case .clipboard:
             // A secure-field divert conceals the copy so clipboard managers do not retain the password;
@@ -47,7 +47,7 @@ enum TextInserter {
         }
     }
 
-    static func insertViaPaste(_ text: String) async {
+    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command) async {
         guard !text.isEmpty else { return }
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
@@ -66,7 +66,7 @@ enum TextInserter {
         // pre-write count (then scratchSurvived misreads our own write as a foreign one and skips the
         // restore, leaving the dictated text on the clipboard).
         let stamp = pb.changeCount
-        postCommand(vKeyCode)
+        postKey(vKeyCode, flags: eventFlags(modifier))
         // Give the target time to consume ⌘V before we touch the clipboard again — restoring too early
         // clobbers the paste (M0 proved ~200ms is needed; restore is best-effort). A paste produces no
         // observable pasteboard event, so we wait out a bounded window, but bail early if anything wrote
@@ -121,13 +121,13 @@ enum TextInserter {
     // no-op it, silently dropping the text. Instead we only take the AX path when we can read the
     // field's value back and confirm it actually changed; otherwise we fall back to paste, which
     // lands everywhere. So `insert` uses AX on native fields and paste on web/Electron, never losing text.
-    static func insertViaAX(_ text: String) async {
+    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command) async {
         if axInsertVerified(text) {
             Log.insertion.notice("ax-insert: succeeded")
             return
         }
         Log.insertion.notice("ax-insert: unverified here, falling back to paste")
-        await insertViaPaste(text)
+        await insertViaPaste(text, modifier: modifier)
     }
 
     private static func axInsertVerified(_ text: String) -> Bool {
@@ -229,8 +229,11 @@ enum TextInserter {
         }
     }
 
-    private static func postCommand(_ keyCode: CGKeyCode) {
-        postKey(keyCode, flags: .maskCommand)
+    private static func eventFlags(_ modifier: Mode.ClipboardModifier) -> CGEventFlags {
+        switch modifier {
+        case .command: return .maskCommand
+        case .control: return .maskControl
+        }
     }
 
     private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {

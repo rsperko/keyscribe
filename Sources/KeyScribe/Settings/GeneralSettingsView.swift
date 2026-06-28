@@ -4,7 +4,6 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var vocabularyShadowed = false
     var pasteLastShadowed = false
-    @State private var advancedModelBehaviorExpanded = false
 
     var body: some View {
         Form {
@@ -73,30 +72,20 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                DisclosureSection(isExpanded: $advancedModelBehaviorExpanded) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Advanced model behavior")
-                        Text(modelMemorySummary).font(.caption).foregroundStyle(.secondary)
-                    }
-                } content: {
-                    Picker("Model memory", selection: $model.eviction) {
-                        ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
-                    }
-                    Text(model.evictionFooter)
-                        .font(.caption).foregroundStyle(.secondary)
+                Picker("Model memory", selection: $model.eviction) {
+                    ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
                 }
             } header: {
                 Text("Performance")
+            } footer: {
+                Text(model.evictionFooter)
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
         }
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var modelMemorySummary: String {
-        model.evictions.first { $0.id == model.eviction }?.label ?? "Choose when speech models stay loaded"
     }
 }
 

@@ -122,7 +122,7 @@ Cross-cutting capabilities that show up repeatedly and map onto KeyScribe's arch
 1. **Per-context Modes / Power Mode** (Superwhisper, VoiceInk, Wispr) — auto-switch config by active app/URL. → our **Modes + routing constraints + trigger keys/phrases**.
 2. **LLM rewrite with BYOK / model choice** (Superwhisper, Aqua, Wispr) → our **AI Service BYOK + per-mode AI rewrite + prompt + context**.
 3. **Context injection from the active window** (Superwhisper, Aqua) → our **Context: app & field details**.
-4. **Voice editing commands on selected text** ("make concise," "translate") — Wispr Command Mode, Aqua → our **edit-in-place** (Work on Selection).
+4. **Voice editing commands on selected text** ("make concise," "translate") — Wispr Command Mode, Aqua → our **edit-in-place** (Edit Selection).
 5. **Filler-word removal + self-correction / "scratch that"** (Wispr, Parakeet-native) → our **Live edits: scratch that / new line / paragraph**.
 6. **Custom dictionary + regex replacements** (Aqua, Willow, all) → our **Dictionary & Replacements (heard/replace/regex)**.
 7. **Wake word / hands-free** ("Hey Flow") → *not in scope yet; future.*

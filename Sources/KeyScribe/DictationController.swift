@@ -13,9 +13,9 @@ final class DictationController {
     private let config: ConfigCache
     private let history: HistoryStore?
     private let audio: AudioCapturing
-    private let insert: (InsertionDecision, Mode.Insertion, String) async -> Void
+    private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void
     private let submitKey: (Mode.Submit) async -> Void
-    private let captureSelection: () async -> String?
+    private let captureSelection: (Mode.ClipboardModifier) async -> String?
     private let snapshot: @MainActor () -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
@@ -148,9 +148,9 @@ final class DictationController {
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
         audio: AudioCapturing = AudioCapture(),
-        insert: @escaping (InsertionDecision, Mode.Insertion, String) async -> Void = TextInserter.perform,
+        insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
-        captureSelection: @escaping () async -> String? = TextInserter.captureSelection,
+        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
@@ -678,7 +678,7 @@ final class DictationController {
             // would hit whatever app is now focused instead of the target the text reached.
             let trailing = activeMode?.trailing ?? .none
             let insertStart = DispatchTime.now()
-            await insert(decision, activeMode?.insertion ?? .paste, transcript + trailing.suffix)
+            await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix)
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
             if outcome == .inserted, let submit = activeMode?.submit, submit != .none {
                 await submitKey(submit)
@@ -851,11 +851,11 @@ final class DictationController {
         // The selection-capture ⌘C must reach the target, so drop key focus held for ESC-cancel; the
         // subsequent .rewriting render re-takes it so ESC still cancels the rewrite.
         hud?.relinquishKeyFocus()
-        guard let selection = await captureSelection(), !selection.isEmpty else {
+        guard let selection = await captureSelection(mode.clipboardModifier), !selection.isEmpty else {
             return (.abort("Select some text first", nil), nil)
         }
         guard let connection = connection(for: mode) else {
-            return (.abort("Work on Selection needs an AI connection", nil), nil)
+            return (.abort("\(mode.name) needs an AI connection", nil), nil)
         }
         // The selection IS the content (no post-STT text stages); only the tokenization commands run.
         // A selection can be large (whole documents), and tokenization is pure CPU — run the forward

@@ -28,6 +28,8 @@ Superwhisper, Wispr Flow, Aqua, and MacWhisper without giving up serious workflo
   preserve your clipboard when safe, and avoid inserting into the wrong app if focus changes.
 - **The files are yours.** Config, modes, replacements, prompt fragments, and history are plain files
   under `~/Library/Application Support/KeyScribe/`; secrets live in macOS Keychain.
+  Advanced mode features that are not exposed in Settings are documented in the
+  [TOML schema](docs/config_schema.md).
 
 Full privacy details are in [PRIVACY.md](PRIVACY.md).
 
@@ -135,4 +137,6 @@ KeyScribe is open source under GPLv3. Bug reports, fixes, and new built-in modes
 - [BUILD.md](BUILD.md) — building, signing, and prerequisites from source.
 - [PRIVACY.md](PRIVACY.md) — exactly what stays local and what (optionally) leaves.
 - [FAQ.md](FAQ.md) — permissions, key conflicts, engine choice, troubleshooting.
+- [docs/config_schema.md](docs/config_schema.md) — hand-editable TOML schema for modes,
+  connections, shortcuts, and advanced file-only options.
 - [`docs/`](docs/) — the full design spec (architecture, pipeline, modes, storage).

@@ -31,8 +31,8 @@ abstractions, no speculative indirection.
 ## 4. UX-first — progressive disclosure is THE key
 The product is judged by how it feels, not how powerful it is on paper.
 - Default path is dead simple: download a model → set a hotkey → talk.
-- Every power feature (modes, pipeline stages, insertion control, BYOK rewrite) ships, but
-  lives behind Advanced surfaces that never burden a casual user.
+- Every power feature (modes, pipeline stages, BYOK rewrite, TOML escape hatches) ships, but
+  never burdens the casual Settings path.
 - A new power feature is not "done" if it complicates the default path. Simple by default,
   powerful on demand.
 

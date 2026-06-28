@@ -6,27 +6,33 @@ struct ModeStoreSeedTests {
     @Test func starterSetMatchesCatalog() {
         let starters = ModeStore.starterModes()
         #expect(starters.map(\.id) == [
-            "plain-dictation", "polished-dictation", "message", "email", "prompt", "work-on-selection",
+            "plain-dictation", "polish", "message", "email", "edit-selection", "ai-prompt", "code",
             "markdown", "shell",
         ])
 
-        // Markdown and Shell ship disabled as examples; the resolver ignores them until enabled.
-        #expect(starters.filter { !$0.enabled }.map(\.id) == ["markdown", "shell"])
-        #expect(starters.filter { $0.id == "markdown" || $0.id == "shell" }.allSatisfy { !$0.enabled })
-        #expect(starters.filter { $0.id != "markdown" && $0.id != "shell" }.allSatisfy { $0.enabled })
+        #expect(starters.filter { $0.enabled }.map(\.id) == ["plain-dictation"])
         let plain = starters[0]
-        #expect(plain.commands.liveEdits)                       // plain has live edits
-        #expect(plain.aiRewrite == nil)                         // plain is local-only
+        #expect(plain.commands.liveEdits)
+        #expect(plain.aiRewrite == nil)
         #expect(plain.triggerKeys == [.init(key: "fn")])
 
-        let selection = starters.first { $0.id == "work-on-selection" }
+        let polish = starters.first { $0.id == "polish" }
+        #expect(polish?.name == "Polish")
+
+        let selection = starters.first { $0.id == "edit-selection" }
+        #expect(selection?.name == "Edit Selection")
         #expect(selection?.source == .selection)
         #expect(selection?.output == .replaceSelection)
+        #expect(selection?.trailing == Mode.Trailing.none)
 
-        // Only the default mode owns a trigger key; the rest are picked from the menu.
+        for mode in starters where mode.source == .dictation && mode.id != "shell" {
+            #expect(mode.trailing == .space)
+        }
+        let shell = starters.first { $0.id == "shell" }
+        #expect(shell?.trailing == Mode.Trailing.none)
+
         #expect(starters.filter { !$0.triggerKeys.isEmpty }.map(\.id) == ["plain-dictation"])
 
-        // Every non-default mode carries an inert (empty-connection) rewrite with a non-empty prompt.
         for mode in starters where mode.id != "plain-dictation" {
             #expect(mode.aiRewrite != nil)
             #expect(mode.aiRewrite?.connection == "")
@@ -42,17 +48,18 @@ struct ModeStoreSeedTests {
         ModeStore.seedStartersIfEmpty(in: dir)
         let loaded = ModeStore.loadAll(in: dir)
         #expect(Set(loaded.map(\.id)) == [
-            "plain-dictation", "polished-dictation", "message", "email", "prompt", "work-on-selection",
+            "plain-dictation", "polish", "message", "email", "edit-selection", "ai-prompt", "code",
             "markdown", "shell",
         ])
-        #expect(loaded.first { $0.id == "work-on-selection" }?.source == .selection)
+        #expect(loaded.first { $0.id == "edit-selection" }?.source == .selection)
         #expect(loaded.first { $0.id == "email" }?.aiRewrite?.prompt.contains("professional email") == true)
+        #expect(loaded.first { $0.id == "ai-prompt" }?.enabled == false)
+        #expect(loaded.first { $0.id == "code" }?.enabled == false)
         #expect(loaded.first { $0.id == "shell" }?.enabled == false)
         #expect(loaded.first { $0.id == "markdown" }?.enabled == false)
 
-        // Seeding again is a no-op (does not clobber existing files).
         ModeStore.seedStartersIfEmpty(in: dir)
-        #expect(ModeStore.loadAll(in: dir).count == 8)
+        #expect(ModeStore.loadAll(in: dir).count == 9)
 
         try? FileManager.default.removeItem(at: dir)
     }

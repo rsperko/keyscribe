@@ -5,36 +5,36 @@ import Testing
 @MainActor
 struct HUDStateTests {
     @Test func completedInsertedCarriesTheResolvedModeName() {
-        let state = HUDState.complete(outcome: .inserted, mode: "Polished Dictation")
+        let state = HUDState.complete(outcome: .inserted, mode: "Polish")
         #expect(state.primaryText == "Inserted")
-        #expect(state.secondaryText == "Polished Dictation")
+        #expect(state.secondaryText == "Polish")
         #expect(state.offersPasteLast == false)
     }
 
     @Test func completedCopiedExplainsFocusChangeAndOffersPaste() {
-        let state = HUDState.complete(outcome: .copied(.focusChanged), mode: "Work on Selection")
+        let state = HUDState.complete(outcome: .copied(.focusChanged), mode: "Edit Selection")
         #expect(state.primaryText == "Copied instead of inserted")
         #expect(state.secondaryText == "Focus changed while KeyScribe was working")
         #expect(state.offersPasteLast)
     }
 
     @Test func localFallbackInsertedSaysRewriteFailed() {
-        let state = HUDState.localFallback(outcome: .inserted, mode: "Polished Dictation")
+        let state = HUDState.localFallback(outcome: .inserted, mode: "Polish")
         #expect(state.primaryText == "Inserted without rewriting")
         #expect(state.secondaryText == "Rewrite could not be completed")
         #expect(state.offersPasteLast == false)
     }
 
     @Test func localFallbackCopiedTellsTheTruthAndOffersPaste() {
-        let state = HUDState.localFallback(outcome: .copied(.focusChanged), mode: "Polished Dictation")
+        let state = HUDState.localFallback(outcome: .copied(.focusChanged), mode: "Polish")
         #expect(state.primaryText == "Copied without rewriting")
         #expect(state.secondaryText == "Focus changed while KeyScribe was working")
         #expect(state.offersPasteLast)
     }
 
     @Test func readyAcknowledgesTheOneShotMode() {
-        let state = HUDState.ready(mode: "Work on Selection")
-        #expect(state.primaryText == "Work on Selection")
+        let state = HUDState.ready(mode: "Edit Selection")
+        #expect(state.primaryText == "Edit Selection")
         #expect(state.secondaryText == "Next dictation")
     }
 
@@ -53,8 +53,8 @@ struct HUDStateTests {
     }
 
     @Test func nonRewritingStatesHaveNoBoundaryBadges() {
-        #expect(HUDState.complete(outcome: .inserted, mode: "Polished Dictation").dataBoundaryBadges.isEmpty)
-        #expect(HUDState.ready(mode: "Work on Selection").dataBoundaryBadges.isEmpty)
+        #expect(HUDState.complete(outcome: .inserted, mode: "Polish").dataBoundaryBadges.isEmpty)
+        #expect(HUDState.ready(mode: "Edit Selection").dataBoundaryBadges.isEmpty)
         #expect(HUDState.error(message: "Transcription failed", action: nil).dataBoundaryBadges.isEmpty)
     }
 

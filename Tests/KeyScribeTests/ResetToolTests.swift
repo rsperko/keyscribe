@@ -85,6 +85,30 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
+    // eraseAll = all (wipe config, keep shared models) PLUS erasing the BYOK Keychain keys. The Keychain
+    // seam is injected so the test never touches the real login keychain; TCC is left untouched.
+    @Test func eraseAllWipesConfigKeepsModelsAndErasesKeychain() throws {
+        let dir = try makeSupportDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let defaults = ephemeralDefaults()
+        let fm = FileManager.default
+        var keychainErased = false
+        var tccCalls: [String] = []
+
+        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        tool.eraseKeychain = { keychainErased = true; return ["Erased 2 saved AI keys from the Keychain."] }
+        tool.resetTCCService = { service, _ in tccCalls.append(service); return "" }
+        tool.run(.eraseAll)
+
+        #expect(keychainErased)
+        #expect(tccCalls.isEmpty)
+        #expect(fm.fileExists(atPath: dir.appendingPathComponent("models/parakeet/weights.bin").path))
+        #expect(!fm.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
+        #expect(!fm.fileExists(atPath: dir.appendingPathComponent("modes/custom-junk.toml").path))
+        #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
+    }
+
     @Test func permissionsResetsEachTCCServiceWithoutTouchingFilesOrFlag() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }

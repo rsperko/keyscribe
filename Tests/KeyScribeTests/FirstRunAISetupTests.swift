@@ -25,7 +25,7 @@ struct FirstRunAISetupTests {
             onComplete: onComplete)
     }
 
-    @Test func creatingAIServiceConnectsSeededRewriteModesThatNeedAConnection() async throws {
+    @Test func creatingAIServiceConnectsAndEnablesLaunchRewriteModes() async throws {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
@@ -64,9 +64,14 @@ struct FirstRunAISetupTests {
         #expect(model.step == .aiServiceComplete)
 
         let modes = ModeStore.loadAll(in: modesDir)
-        let seededRewriteModes = modes.filter { $0.seedId != nil && $0.aiRewrite != nil }
-        #expect(!seededRewriteModes.isEmpty)
-        #expect(seededRewriteModes.allSatisfy { $0.aiRewrite?.connection == connection.id })
+        let connected = modes.filter { ["polish", "message", "email", "edit-selection"].contains($0.id) }
+        #expect(connected.count == 4)
+        #expect(connected.allSatisfy { $0.enabled })
+        #expect(connected.allSatisfy { $0.aiRewrite?.connection == connection.id })
+        let examples = modes.filter { ["ai-prompt", "code", "markdown", "shell"].contains($0.id) }
+        #expect(examples.count == 4)
+        #expect(examples.allSatisfy { !$0.enabled })
+        #expect(examples.allSatisfy { $0.aiRewrite?.connection == "" })
         #expect(try #require(modes.first { $0.id == "custom" }).aiRewrite?.connection == "")
     }
 

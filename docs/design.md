@@ -115,7 +115,7 @@ The same app serves both via progressive disclosure.
                                                 ▼
                           RESTORE: de-tokenize redaction/verbatim nonces
                                                 ▼
-                               [ insertion ]  paste (primary) · insert · type
+                               [ insertion ]  paste (Settings default) · insert/type (TOML escapes)
                                                 ▼
                                           target app field
                                                 ▼
@@ -408,15 +408,17 @@ rewrite and privacy are therefore mutually exclusive per mode by design.
   top-tier instruction-following.
 
 ### 4.5 Insertion
-**Paste is the primary method.** Paste lands text across Electron/Chromium/native and **undoes in a
-single ⌘Z**. **AX-insert and type are unreliable** (no visible insert in several apps; some apps also
-intercept the keystrokes) — they are opt-in `mode.insertion` choices for the few targets that
-benefit, not the default. AX-insert sets the focused element's selected text but **does not trust the
-API's `.success` return** — Chromium/Electron return success and silently no-op it. It only takes the
-AX path when it can read the field value back and confirm it changed, else **falls back to paste** —
-so `insert` uses AX on native fields and paste on web/Electron and never loses text. Type posts
-Unicode key events with no success signal, so it is best-effort with no fallback. The focus-race
-clipboard fallback (below) overrides whichever method the mode picks.
+**Paste is the primary method and the Settings behavior.** Paste lands text across
+Electron/Chromium/native and **undoes in a single ⌘Z**. **AX-insert and type are unreliable** (no
+visible insert in several apps; some apps also intercept the keystrokes), so they remain TOML-only
+compatibility escapes for the few targets that benefit (Settings treatment in `config_schema.md`).
+AX-insert sets the focused element's
+selected text but **does not trust the API's `.success` return** — Chromium/Electron return success
+and silently no-op it. It only takes the AX path when it can read the field value back and confirm it
+changed, else **falls back to paste** — so `insert` uses AX on native fields and paste on
+web/Electron and never loses text. Type posts Unicode key events with no success signal, so it is
+best-effort with no fallback. The focus-race clipboard fallback (below) overrides whichever method
+the mode picks.
 - **Permissions:** **two** TCC categories — **Accessibility** (post ⌘V/⌘C and AX reads;
   `kTCCServicePostEvent` for posting, `kTCCServiceAccessibility` for AX, both shown under
   "Accessibility") **and** the modifier-only trigger event tap (an active `.defaultTap` watching
@@ -449,8 +451,9 @@ than risk inserting in the wrong place.
 - **AI Services (BYOK):** **named LLM connections** — each a `(name, provider, model, key-ref in
   Keychain, params)`. Modes reference a connection by name; multiple connections allowed (best-of-breed
   connection UX, cf. LibreChat — `principles.md` §5).
-- **Modes:** full mode editor (§4.3); each mode persists as a **TOML** file. Schema and the referenced
-  config files are specified in `config_schema.md`.
+- **Modes:** a focused mode editor for common behavior plus read-only notes for advanced TOML-only
+  behavior; each mode persists as a **TOML** file. Schema and the referenced config files are
+  specified in `config_schema.md`.
 
 The settings information architecture, progressive-help contract, and control behavior are normative
 in `ui_design.md` and `ui_components.md`.
@@ -551,6 +554,16 @@ carries a **`schema_version`**.
   good copy — in-memory first, then the disk copy when memory has nothing (the file was already
   malformed **at launch**) — so one bad hand edit never makes a mode disappear. Recovery is reported,
   never silent; a re-seed/reset clears the store so it cannot resurrect a removed mode.
+- **Seed reconcile (modes):** schema versioning above upgrades a file's *format*; seed reconcile
+  separately carries the **seeded starter catalog** forward as it drifts (renames, new starters, prompt
+  revisions) without clobbering edits or resurrecting deletions. It is driven by a **seed ledger**
+  (`<support>/lkg/seed-ledger.toml`, beside the LKG store and cleared by the same reset) keyed on a
+  **template fingerprint** that excludes the `connection`/`enabled` user-knobs — so a starter the user
+  merely connected still matches and stays eligible for an update; only a real template edit diverges.
+  Every step fails safe (a wrong guess only ever *skips* a change, never clobbers) and the pass is
+  idempotent; `default_mode_id` follows a rename. Revising a starter's template **requires bumping its
+  `seed_version`** — the only signal that carries the change to existing installs. Full step semantics
+  (rename / additive / re-baseline / update, ledger bootstrap, deletion honoring) in `config_schema.md`.
 
 ---
 

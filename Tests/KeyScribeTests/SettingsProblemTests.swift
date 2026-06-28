@@ -87,6 +87,14 @@ struct SettingsProblemTests {
         #expect(problems.first?.pane == .modes)
     }
 
+    @Test func enabledModeMissingAIServiceFlagsModesPane() {
+        let problems = SettingsProblem.detect(
+            hasConfigError: false, microphoneGranted: true,
+            accessibilityGranted: true, modeNeedsAIService: true)
+        #expect(problems == [.modeNeedsAIService])
+        #expect(problems.first?.pane == .modes)
+    }
+
     @Test func keylessConnectionIsNotAProblem() {
         let problems = SettingsProblem.detect(
             hasConfigError: false, microphoneGranted: true,

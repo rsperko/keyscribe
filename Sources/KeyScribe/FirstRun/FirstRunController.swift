@@ -108,6 +108,7 @@ final class FirstRunModel: ObservableObject {
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
     private var pendingConnectionId: String?
+    private let starterModeIdsEnabledOnFirstAIConnection: Set<String> = ["polish", "message", "email", "edit-selection"]
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
     var onRelaunch: () -> Void = {}
@@ -341,7 +342,8 @@ final class FirstRunModel: ObservableObject {
     private func modesToConnect() -> [Mode] {
         let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         return ModeStore.loadAll(in: modesDir).filter { mode in
-            guard mode.seedId != nil, let rewrite = mode.aiRewrite else { return false }
+            guard let seedId = mode.seedId, starterModeIdsEnabledOnFirstAIConnection.contains(seedId),
+                  let rewrite = mode.aiRewrite else { return false }
             return rewrite.connection.isEmpty || !connections.contains { $0.id == rewrite.connection }
         }
     }
@@ -352,6 +354,7 @@ final class FirstRunModel: ObservableObject {
             guard var rewrite = mode.aiRewrite else { continue }
             rewrite.connection = connectionId
             mode.aiRewrite = rewrite
+            mode.enabled = true
             do { try ModeStore.write(mode, to: modesDir) }
             catch { failed.append(mode.name) }
         }

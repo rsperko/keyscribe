@@ -93,15 +93,15 @@ privacy, or output.
 | Fragment | “Reusable writing instruction” | The fragment is appended to a mode’s rewrite instruction, in order; it is not executable code. |
 | Dictionary | “Words KeyScribe should recognize” | Engine support varies; entries always help rewrite prompts when a rewrite is enabled. |
 | Replacement | “Change a recognized phrase automatically” | Replacements occur before rewrite; regular expressions are Advanced. |
-| Work on selection | “Replace selected text using your spoken instruction” | Selection is copied at trigger time and is sent to the selected rewrite provider when rewrite runs. |
-| Insertion method | “How finished text reaches the target app” | Paste is recommended; Insert and Type need more permission and have different compatibility. |
+| Rewrite selected text | “Replace selected text using your spoken instruction” | Selection is copied at trigger time and is sent to the selected rewrite provider when rewrite runs. |
+| Insertion method | “How finished text reaches the target app” | Paste is the normal Settings behavior; Insert and Type are TOML-only compatibility escapes. |
 | History | “Keep dictations on this Mac” | Audio is never saved; transcript and final text may be sensitive; per-mode exclusion and retention are available. |
 
 ### Help writing rules
 
 - Lead with the user-visible effect, not the internal mechanism.
 - State limits in the same expansion as the benefit.
-- Use a concrete example for fragments, trigger phrases, regex, redaction, and insertion.
+- Use a concrete example for fragments, trigger phrases, regex, and redaction.
 - Do not bury required permissions in an error after the user configured a feature. Explain
   them beside the setting and request them only when needed.
 
@@ -234,8 +234,10 @@ Dictate with ▸
   Automatic — Plain Dictation ✓
   ─────────────
   Plain Dictation
-  Polished Dictation
-  Work on Selection
+  Polish
+  Message
+  Email
+  Edit Selection
   Manage Modes…
 
 Paste Last Dictation
@@ -267,10 +269,10 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 > in General ▸ Shortcuts; `[shortcuts]` in `config_schema.md`). A **`Check for Updates…`** item is planned alongside the
 > Sparkle update mechanism and the update badge below (not yet built).
 
-The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows the
-**seeded starter modes** defined in `config_schema.md`. Polished Dictation and any other
-rewrite-using starter mode are present but inert until an AI connection exists, and say so in
-place rather than disappearing — shown disabled as `[Mode] — needs an AI service`.
+The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows only
+**Plain Dictation** until the user adds an AI service. First AI setup connects and enables the
+starter rewrite modes defined in `config_schema.md`; disabled examples stay hidden until the user
+enables them in Modes settings.
 
 ### One-shot manual-mode override
 
@@ -406,9 +408,12 @@ The editor presents a short **Mode summary** at the top. The editor is divided i
 sections:
 
 1. **Basics** — name, enabled, and `Use as default` where appropriate.
-2. **When this mode is used** — its hotkey, app rules, and spoken routing, each with examples.
-3. **What it does** — plain dictation, work on selection, live edits, spoken symbols, numbers
-   (inverse text normalization), fuzzy correction, dictionary, and replacements.
+2. **When this mode is used** — the direct shortcut stays visible; app/URL/window-title rules,
+   custom shortcut behavior, and spoken routing live under `Advanced routing`.
+3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
+   (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
+   under `Recognition and replacements`; TOML-only fuzzy correction appears as a read-only note when
+   active.
 4. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
    mode's **reusable writing instructions** (fragments): listed by name directly under the
    instruction they extend, reorderable (they append in order), edited in place in a popover, and
@@ -416,8 +421,8 @@ sections:
    service is selected, since a fragment is appended to the rewrite instruction.
 5. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
    mutually exclusive by design; the UI makes the tradeoff explicit before allowing either.
-6. **Result handling** — insertion method and history exclusion.
-7. **Advanced** — regular-expression trigger phrases and configuration details.
+6. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
+   notes when TOML-only insertion or submit behavior is active.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to

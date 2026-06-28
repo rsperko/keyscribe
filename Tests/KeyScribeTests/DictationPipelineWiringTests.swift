@@ -50,14 +50,20 @@ struct DictationPipelineWiringTests {
     // Captures the real insertion call (method + the exact string, which includes the trailing suffix).
     private actor InsertSpy {
         private(set) var method: Mode.Insertion?
+        private(set) var modifier: Mode.ClipboardModifier?
         private(set) var text: String?
-        func record(_ m: Mode.Insertion, _ t: String) { method = m; text = t }
+        func record(_ m: Mode.Insertion, _ mod: Mode.ClipboardModifier, _ t: String) { method = m; modifier = mod; text = t }
     }
 
     // Captures every post-insert submit keystroke the controller fires.
     private actor SubmitSpy {
         private(set) var keys: [Mode.Submit] = []
         func record(_ s: Mode.Submit) { keys.append(s) }
+    }
+
+    private actor ModifierSpy {
+        private(set) var value: Mode.ClipboardModifier?
+        func set(_ m: Mode.ClipboardModifier) { value = m }
     }
 
     @MainActor
@@ -71,6 +77,7 @@ struct DictationPipelineWiringTests {
         let outcome: HistoryEntry.Outcome?
         let insertedText: String?
         let insertionMethod: Mode.Insertion?
+        let insertedModifier: Mode.ClipboardModifier?
         let submits: [Mode.Submit]
         let llm: any LLMClient
         let historyEntry: HistoryEntry?
@@ -80,7 +87,7 @@ struct DictationPipelineWiringTests {
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
-        captureSelection: @escaping () async -> String? = { nil }
+        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil }
     ) async -> Result {
         await run(transcript: transcript, modes: [mode], defaultModeId: mode.id,
                   connection: connection, llm: llm, accessibility: accessibility,
@@ -90,7 +97,7 @@ struct DictationPipelineWiringTests {
     private func run(
         transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
-        captureSelection: @escaping () async -> String? = { nil }
+        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil }
     ) async -> Result {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
@@ -117,7 +124,7 @@ struct DictationPipelineWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hudSpy,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, method, text in await insertSpy.record(method, text) },
+            insert: { _, method, modifier, text in await insertSpy.record(method, modifier, text) },
             submitKey: { await submitSpy.record($0) },
             captureSelection: captureSelection,
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -133,6 +140,7 @@ struct DictationPipelineWiringTests {
         return Result(
             lastResult: controller.lastResult, outcome: entry?.outcome,
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
+            insertedModifier: await insertSpy.modifier,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
             lastHUD: hudSpy.states.last)
     }
@@ -248,7 +256,7 @@ struct DictationPipelineWiringTests {
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
         let out = await run(
             transcript: "make it formal", mode: m, connection: conn, llm: DropTokenLLM(),
-            captureSelection: { "reach me at bob@example.com" })
+            captureSelection: { _ in "reach me at bob@example.com" })
 
         #expect(out.insertedText == nil)
         #expect(out.lastResult == nil)
@@ -263,11 +271,36 @@ struct DictationPipelineWiringTests {
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
         let out = await run(
             transcript: "make it formal", mode: m, connection: conn, llm: EchoLLM(),
-            captureSelection: { "the original text" })
+            captureSelection: { _ in "the original text" })
 
         #expect(out.lastResult == "the original text")
         #expect(out.insertedText == "the original text")
         #expect(out.outcome == .inserted)
+    }
+
+    // ── clipboard_modifier: the mode's modifier must reach BOTH clipboard keystrokes ───────────────
+
+    @Test func defaultModeInsertsWithCommandModifier() async {
+        let out = await run(transcript: "hello", mode: mode(id: "plain"))
+        #expect(out.insertedModifier == .command)
+    }
+
+    @Test func clipboardModifierReachesTheInsertKeystroke() async {
+        var m = mode(id: "vm")
+        m.clipboardModifier = .control
+        let out = await run(transcript: "hello", mode: m)
+        #expect(out.insertedModifier == .control)
+    }
+
+    @Test func clipboardModifierReachesTheSelectionCaptureKeystroke() async {
+        var m = mode(id: "vm-edit", connectionId: "c", source: .selection)
+        m.clipboardModifier = .control
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let seen = ModifierSpy()
+        _ = await run(
+            transcript: "make it formal", mode: m, connection: conn, llm: EchoLLM(),
+            captureSelection: { mod in await seen.set(mod); return "the original text" })
+        #expect(await seen.value == .control)
     }
 
     // ── Insertion-end features: trailing + submit (the just-added work) ────────────────────────────

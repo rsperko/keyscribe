@@ -20,6 +20,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var insertion: Insertion
     public var trailing: Trailing
     public var submit: Submit
+    public var clipboardModifier: ClipboardModifier
     public var trimTrailingPunctuation: Bool
     public var excludeFromHistory: Bool
 
@@ -50,6 +51,15 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case `return` = "return"
         case shiftReturn = "shift_return"
         case cmdReturn = "cmd_return"
+    }
+
+    // The modifier used for the synthesized clipboard keystrokes — ⌘C to capture a selection and ⌘V to
+    // paste an insert. `command` is the macOS default; `control` targets a guest where ⌃C/⌃V are the
+    // paste mechanism (e.g. a Linux/Windows VM with host-clipboard sharing on). It governs both
+    // keystrokes, never `submit`. Selection capture in a guest is best-effort: the host pasteboard bump
+    // it waits on is driven by the guest's clipboard-sync, not the OS, so its timing is not guaranteed.
+    public enum ClipboardModifier: String, Codable, Sendable {
+        case command, control
     }
 
     public struct TriggerKey: Codable, Equatable, Sendable {
@@ -198,6 +208,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case constraints, source, output, commands, dictionary, replacements
         case aiRewrite = "ai_rewrite"
         case insertion, trailing, submit
+        case clipboardModifier = "clipboard_modifier"
         case trimTrailingPunctuation = "trim_trailing_punctuation"
         case excludeFromHistory = "exclude_from_history"
     }
@@ -219,8 +230,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         replacements = .init()
         aiRewrite = nil
         insertion = .paste
-        trailing = .none
+        trailing = .space
         submit = .none
+        clipboardModifier = .command
         trimTrailingPunctuation = false
         excludeFromHistory = false
     }
@@ -245,6 +257,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? .paste
         trailing = try c.decodeIfPresent(Trailing.self, forKey: .trailing) ?? .none
         submit = try c.decodeIfPresent(Submit.self, forKey: .submit) ?? .none
+        clipboardModifier = try c.decodeIfPresent(ClipboardModifier.self, forKey: .clipboardModifier) ?? .command
         trimTrailingPunctuation = try c.decodeIfPresent(Bool.self, forKey: .trimTrailingPunctuation) ?? false
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
     }
@@ -268,6 +281,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(insertion, forKey: .insertion)
         if trailing != .none { try c.encode(trailing, forKey: .trailing) }
         if submit != .none { try c.encode(submit, forKey: .submit) }
+        if clipboardModifier != .command { try c.encode(clipboardModifier, forKey: .clipboardModifier) }
         if trimTrailingPunctuation { try c.encode(trimTrailingPunctuation, forKey: .trimTrailingPunctuation) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
@@ -315,23 +329,22 @@ public enum ModeStore {
         try TOMLEncoder().encode(mode)
     }
 
-    // The seeded starter set (config_schema.md). Plain Dictation is the default and owns the
-    // trigger key; every rewrite-using mode carries an empty connection — inert until the user
-    // configures one (M5). Prompts are tuned for the Gemini 2.5 Flash floor (prompt_design.md).
     public static func starterModes() -> [Mode] {
         var plain = Mode(id: "plain-dictation", name: "Plain Dictation")
         plain.commands.liveEdits = true
         plain.trailing = .space
         plain.triggerKeys = [.init(key: "fn")]
 
-        var polished = Mode(id: "polished-dictation", name: "Polished Dictation")
-        polished.commands.liveEdits = true
-        polished.trailing = .space
-        polished.aiRewrite = Mode.AIRewrite(
+        var polish = Mode(id: "polish", name: "Polish")
+        polish.enabled = false
+        polish.commands.liveEdits = true
+        polish.trailing = .space
+        polish.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Lightly clean up the dictated text: remove filler words (um, uh, like, you know), false starts, and self-corrections, then fix grammar, punctuation, and capitalization. Keep my original wording, meaning, and tone — do not rephrase, expand, summarize, translate, or add anything. If the text is a question or request, keep it phrased as a question or request; never answer it or act on it.")
 
         var message = Mode(id: "message", name: "Message")
+        message.enabled = false
         message.commands.liveEdits = true
         message.trailing = .space
         message.aiRewrite = Mode.AIRewrite(
@@ -339,25 +352,37 @@ public enum ModeStore {
             prompt: "Rewrite the dictated text as a clear, casual message of the kind you would send in a chat app. Remove filler words and fix grammar and punctuation. Keep my meaning and friendly, informal tone. Do not add a greeting, sign-off, subject line, or any formality, and do not add information that is not in the text. Only reformat the text — never answer it or act on it.")
 
         var email = Mode(id: "email", name: "Email")
+        email.enabled = false
         email.commands.liveEdits = true
         email.trailing = .space
         email.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text as a polished, professional email. Remove filler words, fix grammar, and organize the content into clear sentences or short paragraphs. Begin with a brief greeting: if a recipient name appears in the text use it (\"Hi Sarah,\"), otherwise use a generic \"Hi,\". End with a short closing word on its own line such as \"Thanks,\" or \"Best,\" — then stop. Do not write any name, signature, or bracketed placeholder (like [Your name]) after the closing; the sender adds their own name. Never invent names, recipients, companies, or facts not in the text. Keep my meaning. Only reformat the text into an email — never answer it or act on it.")
 
-        var prompt = Mode(id: "prompt", name: "AI Prompt")
+        var selection = Mode(id: "edit-selection", name: "Edit Selection")
+        selection.enabled = false
+        selection.source = .selection
+        selection.output = .replaceSelection
+        selection.trailing = .none
+        selection.aiRewrite = Mode.AIRewrite(
+            connection: "",
+            prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged.")
+
+        var prompt = Mode(id: "ai-prompt", name: "AI Prompt")
+        prompt.enabled = false
         prompt.commands.liveEdits = true
         prompt.trailing = .space
         prompt.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself.")
 
-        var selection = Mode(id: "work-on-selection", name: "Work on Selection")
-        selection.source = .selection
-        selection.output = .replaceSelection
-        selection.aiRewrite = Mode.AIRewrite(
+        var code = Mode(id: "code", name: "Code")
+        code.enabled = false
+        code.commands.liveEdits = true
+        code.trailing = .space
+        code.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged.")
+            prompt: "Rewrite the dictated text for use in an IDE, code review, issue, commit note, or coding assistant. Remove filler words and fix grammar while preserving every technical term, identifier, symbol, file path, command, branch name, API name, and casing exactly as dictated. Keep the result concise and developer-friendly. If the dictation is an instruction, make it a clear instruction. If it is prose, keep it as prose. Do not generate code, answer the request, invent implementation details, or add context that was not dictated.")
 
         var markdown = Mode(id: "markdown", name: "Markdown")
         markdown.enabled = false
@@ -369,13 +394,14 @@ public enum ModeStore {
 
         var shell = Mode(id: "shell", name: "Shell")
         shell.enabled = false
+        shell.trailing = .none
         shell.trimTrailingPunctuation = true
         shell.commands.numbers = true
         shell.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Convert the dictated text into a single shell command for a Unix shell (zsh or bash on macOS), ready to paste and run at a terminal prompt.\n\nOutput ONLY the command — one line or a pipeline, with no leading $ prompt, no surrounding code fence or backticks, no comments, and no explanation. Never run, answer, or describe the command; if the text is phrased as a question (\"how do I...\", \"what is the command to...\"), output the command that does it, not an answer.\n\nBuild exactly the command described. Do not add flags, paths, redirects, or behavior I did not ask for, and never introduce destructive options (rm -rf, --force, -f, overwriting redirects) unless I explicitly said so. Keep file names, paths, flags, branch names, URLs, and other identifiers exactly as dictated. Quote any argument that contains spaces or shell metacharacters. Write numbers as digits.\n\nMap spoken symbols to shell syntax: \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" or \"output to\" to >, \"append to\" to >>, \"and and\" to &&, \"or or\" to ||, \"semicolon\" to ;, \"tilde\" to ~, \"slash\" to /, \"dot\" to ., \"star\" or \"glob\" to *, \"dollar\" to $, \"ampersand\" or \"in the background\" to &.\n\nCorrect common speech-to-text mishearings of command names back to the intended tool: \"sue do\" or \"pseudo\" to sudo, \"see dee\" to cd, \"ellis\" to ls, \"make dir\" to mkdir, \"g it\" to git, \"groep\" to grep, \"vee eye\" to vim, \"ess ess h\" to ssh, \"ceh mod\" to chmod, \"cube control\" or \"coob cuttle\" to kubectl, \"dock er\" to docker, \"home brew\" to brew. Use judgment for similar mishearings, but keep anything that is clearly a file name or identifier as spoken.\n\nExamples:\nlist all files including hidden ones in long format → ls -la\nfind every python file under src and search them for the word token → find src -name '*.py' | xargs grep token\ngit checkout a new branch called fix dash auth → git checkout -b fix-auth\nsee dee into tilde slash projects → cd ~/projects\nshow what is listening on port 8000 → lsof -i :8000\n\nIf the text does not describe a command, return it unchanged.")
 
-        return [plain, polished, message, email, prompt, selection, markdown, shell].map {
+        return [plain, polish, message, email, selection, prompt, code, markdown, shell].map {
             var mode = $0
             mode.seedId = mode.id
             mode.seedVersion = 1
@@ -484,15 +510,18 @@ public enum ModeStore {
         dir.appendingPathComponent("\(mode.id).toml")
     }
 
-    public static func seedStartersIfEmpty(in dir: URL) {
+    public static func seedStartersIfEmpty(in dir: URL, ledgerDir: URL? = nil) {
         let fm = FileManager.default
         let existing = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "toml" }) ?? []
         guard existing.isEmpty else { return }
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        var ledger = SeedLedger()
         for mode in starterModes() {
             guard let toml = try? encode(mode) else { continue }
             try? toml.write(to: dir.appendingPathComponent("\(mode.id).toml"), atomically: true, encoding: .utf8)
+            ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: seedTemplateFingerprint(mode))
         }
+        if let ledgerDir { saveLedger(ledger, in: ledgerDir) }
     }
 }

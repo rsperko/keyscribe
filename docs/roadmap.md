@@ -32,8 +32,10 @@
   dropping a non-SpeechAnalyzer capability.
 
 ### Polish
-- **Progressive-disclosure pass.** The Mode editor's top-level basic/advanced split is not done
-  (the editor keeps its existing disclosure sections). General settings have a partial pass.
+- **Visual/UI polish.** The Mode editor now uses a simpler progressive surface: common settings are
+  visible, routing and recognition/replacements carry the remaining disclosures, and riskier escape
+  hatches stay TOML-only with read-only notes. Still needs visual QA across the seeded modes and an
+  accessibility pass.
 - **Accessibility / error-state / onboarding polish.** Partial: the error HUD offers a repair action
   on a mic failure, and first run has **Skip for now** on the model + permissions steps. More to do.
 

@@ -4,7 +4,7 @@ import Testing
 
 private func sampleEntry(
     heard: String = "send the report", result: String = "Send the report.",
-    mode: String = "Polished Dictation", outcome: HistoryEntry.Outcome = .inserted,
+        mode: String = "Polish", outcome: HistoryEntry.Outcome = .inserted,
     at seconds: TimeInterval = 0
 ) -> HistoryEntry {
     HistoryEntry(

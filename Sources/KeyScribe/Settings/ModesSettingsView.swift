@@ -187,7 +187,7 @@ struct ModesSettingsView: View {
                 ForEach(model.modes) { mode in
                     ModeSummaryRow(
                         mode: mode, isDefault: model.isDefault(mode),
-                        connectionBroken: usesBrokenConnection(mode))
+                        issue: issue(for: mode))
                         .tag(mode.id)
                 }
             }
@@ -247,9 +247,18 @@ struct ModesSettingsView: View {
         }
     }
 
-    private func usesBrokenConnection(_ mode: Mode) -> Bool {
-        guard let rewrite = mode.aiRewrite else { return false }
-        return brokenConnectionIds.contains(rewrite.connection)
+    private func issue(for mode: Mode) -> ModeSummaryIssue? {
+        guard mode.enabled, let rewrite = mode.aiRewrite else { return nil }
+        if rewrite.connection.isEmpty {
+            return .needsService
+        }
+        if !model.connections.contains(where: { $0.id == rewrite.connection }) {
+            return .missingService
+        }
+        if brokenConnectionIds.contains(rewrite.connection) {
+            return .failedService
+        }
+        return nil
     }
 }
 
@@ -280,7 +289,7 @@ private struct ModeLoadFailureBanner: View {
 private struct ModeSummaryRow: View {
     let mode: Mode
     let isDefault: Bool
-    var connectionBroken = false
+    var issue: ModeSummaryIssue?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -292,12 +301,13 @@ private struct ModeSummaryRow: View {
                         .background(.tint.opacity(0.2), in: Capsule()).foregroundStyle(.tint)
                 }
                 if !mode.enabled {
-                    Text("Disabled").font(.caption2).foregroundStyle(.secondary)
+                    Text(mode.seedId == nil ? "Disabled" : "Disabled starter")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
-                if connectionBroken {
+                if let issue {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2).foregroundStyle(.red)
-                        .help("This mode's AI service failed its last connection test")
+                        .help(issue.help)
                 }
             }
             Text(summary).font(.caption).foregroundStyle(.secondary)
@@ -306,9 +316,31 @@ private struct ModeSummaryRow: View {
 
     private var summary: String {
         var values = [ModeSummary.whenRuns(mode, isDefault: isDefault)]
-        values.append(mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite")
+        values.append(issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite"))
         if mode.excludeFromHistory { values.append("No history") }
         return values.joined(separator: " · ")
+    }
+}
+
+private enum ModeSummaryIssue {
+    case needsService
+    case missingService
+    case failedService
+
+    var summary: String {
+        switch self {
+        case .needsService: "Needs AI service"
+        case .missingService: "AI service missing"
+        case .failedService: "AI service failed"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .needsService: "Choose an AI service for this enabled mode."
+        case .missingService: "The selected AI service no longer exists."
+        case .failedService: "This mode's AI service failed its last connection test."
+        }
     }
 }
 
@@ -333,8 +365,8 @@ enum ModeSummary {
         case "fn": "Fn (Globe)"
         case "right_option": "Right Option"
         case "right_command": "Right Command"
-        case "hyper": "Hyper"
-        default: descriptor.canonical
+        case "hyper": "⌃⌥⇧⌘"
+        default: descriptor.displayString
         }
     }
 }
@@ -360,9 +392,6 @@ private struct ModeEditorView: View {
     let onDelete: () -> Void
     @State private var routingExpanded = false
     @State private var recognitionExpanded = false
-    @State private var reusableInstructionsExpanded = false
-    @State private var finishingExpanded = false
-    @State private var dangerExpanded = false
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
     @State private var newWindowTitlePattern = ""
@@ -405,7 +434,7 @@ private struct ModeEditorView: View {
                 }
                 SettingRow(
                     title: "Turn spoken commands into edits",
-                    help: "Interprets spoken commands like \u{201C}delete that\u{201D} or \u{201C}new line\u{201D} as edits to the text instead of typing them literally. Turn it off if you dictate prose that uses those words verbatim.")
+                    help: "Turns phrases you say into edits: \u{201C}new line\u{201D}, \u{201C}line break\u{201D}, \u{201C}new paragraph\u{201D}, \u{201C}scratch that\u{201D}, \u{201C}strike that\u{201D}, \u{201C}tab key\u{201D}, \u{201C}insert tab\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: commandsBinding(\.liveEdits)).labelsHidden()
                 }
@@ -415,40 +444,18 @@ private struct ModeEditorView: View {
             dataSentWithAISection
 
             Section("Result handling") {
-                SettingRow(
-                    title: "How text is inserted",
-                    result: insertionLabel,
-                    help: "Paste is recommended: it inserts the finished dictation atomically (one ⌘Z undoes it) and works in the widest range of apps. Insert and Type place text key-by-key and need Accessibility permission; some apps reject them.",
-                    dependencyReason: accessibilityMissingForInsertion
-                        ? "\(insertionLabel) needs Accessibility permission, which isn't granted. Without it this method can silently fail — grant access or use Paste."
-                        : nil)
-                {
-                    Picker("", selection: binding(\.insertion)) {
-                        Text("Paste").tag(Mode.Insertion.paste)
-                        Text("Insert").tag(Mode.Insertion.insert)
-                        Text("Type").tag(Mode.Insertion.type)
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                if accessibilityMissingForInsertion {
-                    Button("Open Accessibility Settings") { Permissions.openSettings(.accessibility) }
-                        .controlSize(.small)
-                }
+                nonPasteInsertionNotice
                 SettingRow(
                     title: "Do not save this mode in history",
                     help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
                 {
                     Toggle("", isOn: binding(\.excludeFromHistory)).labelsHidden()
                 }
-                finishingDisclosure
+                finishingControls
             }
 
             Section {
-                DisclosureSection(isExpanded: $dangerExpanded) {
-                    disclosureLabel("Danger zone", "Delete this mode")
-                } content: {
-                    Button("Delete Mode", role: .destructive, action: onDelete)
-                }
+                Button("Delete Mode", role: .destructive, action: onDelete)
             }
         }
         .formStyle(.grouped)
@@ -456,16 +463,10 @@ private struct ModeEditorView: View {
         .onAppear { if autofocusName { onConsumeFocus() } }
     }
 
-    private var accessibilityMissingForInsertion: Bool {
-        (mode.insertion == .insert || mode.insertion == .type)
-            && Permissions.accessibilityStatus() != .granted
-    }
-
-    private var insertionLabel: String {
-        switch mode.insertion {
-        case .paste: "Paste"
-        case .insert: "Insert"
-        case .type: "Type"
+    @ViewBuilder private var nonPasteInsertionNotice: some View {
+        if mode.insertion != .paste {
+            Label("This mode uses a custom insertion method from its TOML file.", systemImage: "keyboard")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -489,7 +490,10 @@ private struct ModeEditorView: View {
 
     private var boundarySummary: String {
         guard let rewrite = mode.aiRewrite else { return "Stays on this Mac" }
-        let name = connections.first { $0.id == rewrite.connection }?.name ?? "an AI service"
+        guard !rewrite.connection.isEmpty else { return "Needs AI service" }
+        guard let name = connections.first(where: { $0.id == rewrite.connection })?.name else {
+            return "AI service missing"
+        }
         let redaction = mode.commands.privacy ? ", best-effort redaction on" : ""
         return "Cloud rewrite via \(name)\(redaction)"
     }
@@ -627,29 +631,17 @@ private struct ModeEditorView: View {
 
             if mode.source != .selection {
                 Toggle("Write numbers as digits", isOn: commandsBinding(\.numbers))
-                Toggle("Prefer dictionary words", isOn: commandsBinding(\.fuzzyCorrection))
-                Text("These tidy the transcript on this Mac, before any AI rewrite.")
+                Text("Numbers are tidied on this Mac, before any AI rewrite.")
                     .font(.caption).foregroundStyle(.secondary)
+                fuzzyCorrectionNotice
             }
 
-            SettingRow(
-                title: "Use global dictionary",
-                help: "Adds your global dictionary terms to this mode as recognition hints, on top of the mode-only words below. A dictionary term tells the model a word is valid — it does not force the word to appear, and an AI rewrite may still change it.")
-            {
-                Toggle("", isOn: dictionaryBinding(\.includeGlobal)).labelsHidden()
-            }
             Text("Mode-only names, product terms, and jargon KeyScribe should recognize as written in this mode.")
                 .font(.caption).foregroundStyle(.secondary)
             DictionaryRows(
                 words: mode.dictionary.words,
                 onRemove: removeWord)
 
-            SettingRow(
-                title: "Use global replacements",
-                help: "Applies your global replacement rules in this mode, on top of the mode-only rules below. Replacements run on this Mac before any AI rewrite, so a rewrite can still change the replaced text.")
-            {
-                Toggle("", isOn: replacementsBinding(\.includeGlobal)).labelsHidden()
-            }
             Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
                 .font(.caption).foregroundStyle(.secondary)
             ReplacementRows(
@@ -658,22 +650,39 @@ private struct ModeEditorView: View {
         }
     }
 
+    @ViewBuilder private var fuzzyCorrectionNotice: some View {
+        if mode.commands.fuzzyCorrection {
+            Label("This mode corrects close matches to vocabulary from its TOML file.",
+                  systemImage: "text.magnifyingglass")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     private var recognitionSummary: String {
+        var parts: [String] = []
+        if mode.source != .selection, mode.commands.numbers { parts.append("Numbers as digits") }
+        if mode.source != .selection, mode.commands.fuzzyCorrection { parts.append("TOML vocabulary correction") }
         let wordCount = mode.dictionary.words.count
         let replacementCount = mode.replacements.rules.count
-        if wordCount == 0 && replacementCount == 0 { return "No mode-only words or replacements" }
-        var parts: [String] = []
         if wordCount > 0 { parts.append("\(wordCount) word\(wordCount == 1 ? "" : "s")") }
         if replacementCount > 0 { parts.append("\(replacementCount) replacement\(replacementCount == 1 ? "" : "s")") }
-        return parts.joined(separator: ", ")
+        return parts.isEmpty ? "No mode-only words or replacements" : parts.joined(separator: ", ")
     }
 
     @ViewBuilder private var improveWithAISection: some View {
         Section("Improve with AI") {
             if connections.isEmpty {
+                if let aiServiceIssueText {
+                    Label(aiServiceIssueText, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.red)
+                }
                 Text("Add an AI service in Settings before a mode can rewrite the transcript.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
+                if let aiServiceIssueText {
+                    Label(aiServiceIssueText, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.red)
+                }
                 SettingRow(
                     title: "AI service",
                     result: aiServiceLabel,
@@ -695,17 +704,9 @@ private struct ModeEditorView: View {
                     ) { value in
                         updateRewrite { $0.prompt = value }
                     }
-                    reusableInstructionsDisclosure
+                    reusableInstructions
                 }
             }
-        }
-    }
-
-    @ViewBuilder private var reusableInstructionsDisclosure: some View {
-        DisclosureSection(isExpanded: $reusableInstructionsExpanded) {
-            disclosureLabel("Reusable writing instructions", reusableInstructionsSummary)
-        } content: {
-            reusableInstructions
         }
     }
 
@@ -741,72 +742,48 @@ private struct ModeEditorView: View {
         }
     }
 
-    private var reusableInstructionsSummary: String {
-        let count = mode.aiRewrite?.fragments.count ?? 0
-        if count == 0 { return "None attached" }
-        return "\(count) attached"
+    @ViewBuilder private var finishingControls: some View {
+        SettingRow(
+            title: "Trim trailing punctuation",
+            help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
+        {
+            Toggle("", isOn: binding(\.trimTrailingPunctuation)).labelsHidden()
+        }
+        SettingRow(
+            title: "End with",
+            help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
+        {
+            Picker("", selection: binding(\.trailing)) {
+                Text("Nothing").tag(Mode.Trailing.none)
+                Text("Space").tag(Mode.Trailing.space)
+                Text("Line break").tag(Mode.Trailing.newline)
+            }
+            .labelsHidden().fixedSize()
+        }
+        nonDefaultSubmitNotice
     }
 
-    @ViewBuilder private var finishingDisclosure: some View {
-        DisclosureSection(isExpanded: $finishingExpanded) {
-            disclosureLabel("Finishing behavior", finishingSummary)
-        } content: {
-            SettingRow(
-                title: "Trim trailing punctuation",
-                help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
-            {
-                Toggle("", isOn: binding(\.trimTrailingPunctuation)).labelsHidden()
-            }
-            SettingRow(
-                title: "End with",
-                help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
-            {
-                Picker("", selection: binding(\.trailing)) {
-                    Text("Nothing").tag(Mode.Trailing.none)
-                    Text("Space").tag(Mode.Trailing.space)
-                    Text("Line break").tag(Mode.Trailing.newline)
-                }
-                .labelsHidden().fixedSize()
-            }
-            SettingRow(
-                title: "Send after inserting",
-                help: "After inserting, sends a keystroke to submit — Return sends in most chat and prompt boxes, ⇧Return adds a soft line break, ⌘Return sends in Slack and similar. Only fires when the text actually reached the target (never on a clipboard fallback). Leave on \u{201C}Nothing\u{201D} to avoid sending half-finished messages.",
-                dependencyReason: mode.submit != .none && mode.source == .selection
-                    ? "This mode replaces a selection, so a send keystroke usually isn't what you want here."
-                    : nil)
-            {
-                Picker("", selection: binding(\.submit)) {
-                    Text("Nothing").tag(Mode.Submit.none)
-                    Text("Return").tag(Mode.Submit.return)
-                    Text("⇧Return").tag(Mode.Submit.shiftReturn)
-                    Text("⌘Return").tag(Mode.Submit.cmdReturn)
-                }
-                .labelsHidden().fixedSize()
-            }
+    @ViewBuilder private var nonDefaultSubmitNotice: some View {
+        if mode.submit != .none {
+            Label("This mode sends \(submitLabel) after inserting, configured in its TOML file.",
+                  systemImage: "return")
+                .font(.caption).foregroundStyle(.secondary)
         }
-    }
-
-    private var finishingSummary: String {
-        var parts: [String] = []
-        if mode.trimTrailingPunctuation { parts.append("trim punctuation") }
-        switch mode.trailing {
-        case .none: break
-        case .space: parts.append("end with space")
-        case .newline: parts.append("end with line break")
-        }
-        switch mode.submit {
-        case .none: break
-        case .return: parts.append("send Return")
-        case .shiftReturn: parts.append("send ⇧Return")
-        case .cmdReturn: parts.append("send ⌘Return")
-        }
-        return parts.isEmpty ? "No extra finishing steps" : parts.joined(separator: ", ")
     }
 
     private func disclosureLabel(_ title: String, _ summary: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
             Text(summary).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var submitLabel: String {
+        switch mode.submit {
+        case .none: "nothing"
+        case .return: "Return"
+        case .shiftReturn: "Shift-Return"
+        case .cmdReturn: "Command-Return"
         }
     }
 
@@ -869,10 +846,21 @@ private struct ModeEditorView: View {
 
     private var aiServiceLabel: String {
         guard let id = mode.aiRewrite?.connection,
-              let name = connections.first(where: { $0.id == id })?.name else {
+              !id.isEmpty else {
+            if mode.aiRewrite != nil { return "Choose an AI service" }
             return "No cloud rewrite"
         }
+        guard let name = connections.first(where: { $0.id == id })?.name else { return "Missing AI service" }
         return name
+    }
+
+    private var aiServiceIssueText: String? {
+        guard mode.enabled, let rewrite = mode.aiRewrite else { return nil }
+        if rewrite.connection.isEmpty { return "Choose an AI service for this enabled mode." }
+        if !connections.contains(where: { $0.id == rewrite.connection }) {
+            return "The selected AI service no longer exists."
+        }
+        return nil
     }
 
     // ui_design.md §4.4 / review #7: when a mode rewrites, the user must be able to see exactly what
@@ -1216,26 +1204,6 @@ private struct ModeEditorView: View {
             set: { value in
                 var updated = mode
                 updated.commands[keyPath: keyPath] = value
-                onUpdate(updated)
-            })
-    }
-
-    private func dictionaryBinding(_ keyPath: WritableKeyPath<Mode.ModeDictionary, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { mode.dictionary[keyPath: keyPath] },
-            set: { value in
-                var updated = mode
-                updated.dictionary[keyPath: keyPath] = value
-                onUpdate(updated)
-            })
-    }
-
-    private func replacementsBinding(_ keyPath: WritableKeyPath<Mode.ModeReplacements, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { mode.replacements[keyPath: keyPath] },
-            set: { value in
-                var updated = mode
-                updated.replacements[keyPath: keyPath] = value
                 onUpdate(updated)
             })
     }

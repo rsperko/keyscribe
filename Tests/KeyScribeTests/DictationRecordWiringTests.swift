@@ -63,7 +63,7 @@ struct DictationRecordWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: historyEnabled ? HistoryStore(supportDir: supportDir) : nil, hud: nil,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _ in },
+            insert: { _, _, _, _ in },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },
             accessibilityGranted: { true },

@@ -20,6 +20,7 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                                 config       Wipe config/modes/fragments (keeps models) + first-run flag.
                                 permissions  Remove TCC grants (Mic/Accessibility/Automation) so macOS re-prompts.
                                 all          Wipe the whole support dir + first-run flag (shared models kept).
+                                eraseAll     Like all, plus erase the variant's BYOK Keychain keys (TCC grants kept).
       --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
         --engines <a,b,...>     Limit the benchmark run to these engine ids.
         --raw                   Emit raw per-clip benchmark output.
@@ -49,7 +50,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
           modes        Re-seed the starter modes (discards edits to default modes).
           config       Wipe config/modes/fragments but keep downloaded models, and clear the first-run flag.
           permissions  Remove the app's TCC grants (Microphone, Accessibility, Automation) so macOS re-prompts.
-          all          Wipe the whole support dir and clear the first-run flag (shared models are kept).\n
+          all          Wipe the whole support dir and clear the first-run flag (shared models are kept).
+          eraseAll     Like all, plus erase the variant's BYOK Keychain keys (TCC grants kept).\n
         """.utf8))
         exit(2)
     }

@@ -153,7 +153,7 @@ struct DictationCancellationTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record() },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: micStatus,
             accessibilityGranted: accessibilityGranted)
@@ -161,6 +161,13 @@ struct DictationCancellationTests {
         return Harness(
             controller: controller, history: history, insertSpy: insertSpy,
             started: started, release: release, supportDir: supportDir, hud: hud)
+    }
+
+    private func enableSeedMode(_ id: String, in supportDir: URL) throws {
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        var mode = try #require(ModeStore.loadAll(in: modesDir).first { $0.id == id })
+        mode.enabled = true
+        try ModeStore.write(mode, to: modesDir)
     }
 
     @Test func commitDrainsTheTailInsteadOfStoppingImmediately() async {
@@ -181,7 +188,7 @@ struct DictationCancellationTests {
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), audio: audio,
-            insert: { _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record() },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -233,7 +240,7 @@ struct DictationCancellationTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record() },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -270,7 +277,7 @@ struct DictationCancellationTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record() },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -313,15 +320,16 @@ struct DictationCancellationTests {
         #expect(!FileManager.default.fileExists(atPath: captureURL.path))
     }
 
-    @Test func oneShotModeOverridesTheNextRecordingOnly() async {
+    @Test func oneShotModeOverridesTheNextRecordingOnly() async throws {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        try enableSeedMode("edit-selection", in: h.supportDir)
 
-        h.controller.setNextModeOverride(id: "work-on-selection")
+        h.controller.setNextModeOverride(id: "edit-selection")
         h.controller.handleStart()
         await h.controller.captureBringUpTask?.value   // the .recording HUD lands once the mic is live
 
-        #expect(h.hud.states.last == .recording(mode: "Work on Selection", level: 0))
+        #expect(h.hud.states.last == .recording(mode: "Edit Selection", level: 0))
         #expect(h.controller.nextModeOverrideName == nil)
     }
 
@@ -355,11 +363,12 @@ struct DictationCancellationTests {
         #expect(completeOutcomes.contains(.copied(.accessibilityDenied)))
     }
 
-    @Test func selectionModeWithoutAccessibilityNamesTheRealCauseNotMissingSelection() async {
+    @Test func selectionModeWithoutAccessibilityNamesTheRealCauseNotMissingSelection() async throws {
         let h = makeHarness(accessibilityGranted: { false })
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        try enableSeedMode("edit-selection", in: h.supportDir)
 
-        h.controller.setNextModeOverride(id: "work-on-selection")
+        h.controller.setNextModeOverride(id: "edit-selection")
         h.controller.handleStart()
         h.controller.handleCommit()
         await h.started.wait()
@@ -423,7 +432,7 @@ struct DictationCaptureStartTests {
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
-            insert: { _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record() },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
     }

@@ -23,6 +23,7 @@
   history/                 # append-only local history, one JSONL file per day
     2026-06-20.jsonl
   backups/                 # pre-migration backups (design.md §5.1)
+  lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
     parakeet-tdt-0.6b-v3/
 ```
@@ -72,8 +73,9 @@ output = "cursor"
 trigger_phrases = ['(?i)\bas an email$']
 
 insertion = "paste"          # "paste" (default) | "insert" | "type"
-trailing = "none"            # "none" (default) | "space" | "newline" — appended INSIDE the atomic insert
+trailing = "space"           # "none" | "space" (new-mode default) | "newline" — appended INSIDE the atomic insert
 submit = "none"              # "none" (default) | "return" | "shift_return" | "cmd_return" — keystroke AFTER a verified insert
+clipboard_modifier = "command"  # "command" (default) | "control" — modifier for the synthesized ⌘C capture + ⌘V paste; "control" targets a guest VM
 trim_trailing_punctuation = false  # strip a final . ! ? (and trailing whitespace) from the result, BEFORE `trailing` is appended
 exclude_from_history = false
 
@@ -103,8 +105,7 @@ privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
 numbers    = false          # inverse text normalization: "twenty five" -> "25"
                             #   (leaves year idioms like "twenty twenty six" as words)
-fuzzy_correction = false    # snap mangled words to dictionary terms ("charge bee" -> "ChargeBee");
-                            #   conservative — the dictionary is a hint, not authoritative
+fuzzy_correction = false    # TOML-only; see "Settings UI vs advanced TOML" below
 
 # ── Vocabulary (mode-local; may exclude the global sets) ─────────────────────
 [dictionary]
@@ -150,53 +151,97 @@ context = { app = true, preceding_text = false }
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **tab**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
-| `commands.fuzzy_correction` | bool | Opt-in to snapping mangled words to dictionary terms; conservative (the dictionary stays a hint). |
+| `commands.fuzzy_correction` | bool | TOML-only opt-in; post-STT fallback for weak-bias engines. See **Settings UI vs advanced TOML**. |
 | `dictionary` | table | `include_global` + `words[]`. |
 | `replacements` | table | `include_global` + `rules[]` of `{heard, replace, regex}`. |
 | `[ai_rewrite]` | table | Absent ⇒ no rewrite. `connection`, `prompt`, `fragments[]`, `context`. |
 | `ai_rewrite.context` | inline table | `{ app, preceding_text }` booleans. `preceding_text` sends bounded text before the caret (native-only, best-effort via AX). (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
 | `insertion` | enum | `paste` \| `insert` \| `type`. |
-| `trailing` | enum | `none` (default) \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). |
+| `trailing` | enum | `none` \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). New modes created in Settings default to `space`; omitted TOML decodes as `none` for compatibility with existing config files. |
 | `submit` | enum | `none` (default) \| `return` \| `shift_return` \| `cmd_return`. A keystroke synthesized after a **verified** insert (outside the undo atom). Never fires on a clipboard fallback — the text never reached the target. |
 | `trim_trailing_punctuation` | bool | `false` (default). Strip a final `.` `!` `?` (and trailing whitespace) from the result, applied to the restored final string **before** `trailing` appends its suffix. Deterministic enforcement for command/identifier/subject-line modes (e.g. seeded **Shell** ships `true`) that should not end in sentence punctuation — the rewrite prompt can request this but cannot guarantee it. Closing quotes/parens/backticks/fences are left untouched. |
+| `clipboard_modifier` | enum | `command` (default) \| `control`. The modifier used for the synthesized clipboard keystrokes — ⌘C to capture a selection and ⌘V to paste an insert. `control` targets a guest where ⌃C/⌃V are the paste mechanism (e.g. a Linux/Windows VM with host-clipboard sharing on). Governs both keystrokes, never `submit`. TOML-only; no Settings UI. Selection capture in a guest is **best-effort** — the host-pasteboard bump it waits on is driven by the guest's clipboard-sync, not the OS, so its timing is not guaranteed. |
 | `exclude_from_history` | bool | Skip writing this mode's dictations to history. |
 
 The **default mode** is recorded once in `settings.toml` (`default_mode_id`), not as a flag on
 each mode — single source of truth, so two modes can't both claim default.
 
 The mode editor surfaces `source = "selection"` + `output = "replace_selection"` together as a
-single **"Work on selection"** checkbox; the two-field model stays in TOML for flexibility.
+single **"Rewrite selected text"** checkbox; the two-field model stays in TOML for flexibility.
+
+### Settings UI vs advanced TOML
+
+The Settings UI exposes mode behavior in user-facing terms. Some fields stay available in TOML
+without being normal editable controls because changing them casually can make a mode feel broken
+or make global behavior hard to reason about.
+
+| TOML field | Settings behavior | Why it is advanced |
+|---|---|---|
+| `insertion` | New and edited modes use `paste` in Settings. If a mode file sets `insert` or `type`, Settings shows a read-only note that a custom insertion method is active. | `insert` and `type` are compatibility escapes for unusual targets. They need Accessibility permission and can fail app-by-app, while `paste` is the predictable default. |
+| `submit` | New and edited modes use `none` in Settings. If a mode file sets `return`, `shift_return`, or `cmd_return`, Settings shows a read-only note that the mode sends a key after insertion. | Submit keystrokes can send unfinished messages or commands in the target app. They are useful for deliberate automation modes, not casual editing. |
+| `commands.fuzzy_correction` | No toggle in Settings. If enabled in TOML, Settings shows a read-only note that the mode corrects close matches to vocabulary. | This is a post-transcription rescue for engines with no/weak vocabulary bias. It can help names and jargon, but it can also change intended text, so it stays deliberate. |
+| `dictionary.include_global` | No per-mode toggle in Settings; global dictionary terms stay included by default. | Turning this off makes a mode stop using vocabulary the user expects to apply everywhere. |
+| `replacements.include_global` | No per-mode toggle in Settings; global replacements stay included by default. | Turning this off creates surprising mode-specific replacement gaps. |
+| `source` + `output` | Shown as one “Rewrite selected text” control. | The app-supported selection workflow is the paired shape: capture the current selection and replace it with the rewritten result. |
+| `trigger_keys[].press_style` / `tap_threshold_ms` | The mode shortcut itself is editable in Settings. Press style and tap threshold stay with advanced routing details. | Most users need only “which key starts this mode”; hold/tap behavior is a routing detail. |
 
 ---
 
 ## Seeded starter modes
 
-A fresh install ships eight example modes — six enabled, two disabled. They are ordinary mode
-files — nothing about them is special-cased in source — and the user can edit or delete any of
-them. This set is the canonical one the menu and onboarding refer to (`ui_design.md` §6 menu bar).
+A fresh install ships nine starter modes — one enabled local dictation mode and eight disabled
+AI-backed modes. They are ordinary mode files — nothing about them is special-cased in source —
+and the user can edit or delete any of them. This set is the canonical one the menu and onboarding
+refer to (`ui_design.md` §6 menu bar).
 
 | id | name | Shape | Rewrite |
 |---|---|---|---|
 | `plain-dictation` | Plain Dictation | `source = dictation`, `output = cursor` | none — fully on-device. The seeded `default_mode_id`; the only mode that owns a trigger key (Fn/Globe). |
-| `polished-dictation` | Polished Dictation | `source = dictation`, `output = cursor` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Inert until a connection exists. |
-| `message` | Message | `source = dictation`, `output = cursor` | casual chat-style message; no greeting/sign-off. Inert until a connection exists. |
-| `email` | Email | `source = dictation`, `output = cursor` | polished professional email with greeting + closing; never invents names/facts. Inert until a connection exists. |
-| `prompt` | AI Prompt | `source = dictation`, `output = cursor` | cleans dictation into a clear instruction for an AI assistant, preserving technical terms; never answers it. Inert until a connection exists. Benefits from a stronger connection (e.g. Sonnet) but is tuned to hold on the Flash floor. |
-| `work-on-selection` | Work on Selection | `source = selection`, `output = replace_selection` | transforms the selection from a spoken instruction; recommends a connection but is not blocked without one (`ui_components.md` control dependencies). |
-| `markdown` | Markdown | `source = dictation`, `output = cursor` | **disabled by default.** Reformats dictation into raw Markdown (headings, bullet/numbered lists, bold, blockquotes, inline/fenced code) without wrapping the output in a code fence. Inert until a connection exists. |
-| `shell` | Shell | `source = dictation`, `output = cursor` | **disabled by default.** Turns a spoken command or description into a single terminal-ready shell command, mapping spoken symbols ("dash dash", "pipe", "tilde slash") to shell syntax; emits only the command, never runs or explains it. Inert until a connection exists. |
+| `polish` | Polish | `source = dictation`, `output = cursor` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Auto-enabled and connected when the first AI service is added. |
+| `message` | Message | `source = dictation`, `output = cursor` | casual chat-style message; no greeting/sign-off. Auto-enabled and connected when the first AI service is added. |
+| `email` | Email | `source = dictation`, `output = cursor` | polished professional email with greeting + closing; never invents names/facts. Auto-enabled and connected when the first AI service is added. |
+| `edit-selection` | Edit Selection | `source = selection`, `output = replace_selection` | transforms the selection from a spoken instruction. Auto-enabled and connected when the first AI service is added. |
+| `ai-prompt` | AI Prompt | `source = dictation`, `output = cursor` | **disabled by default.** Cleans dictation into a clear instruction for an AI assistant, preserving technical terms; never answers it. Intended as a smart-model example. |
+| `code` | Code | `source = dictation`, `output = cursor` | **disabled by default.** Cleans dictation for IDEs, code review, issues, commits, and coding assistants while preserving technical identifiers. |
+| `markdown` | Markdown | `source = dictation`, `output = cursor` | **disabled by default.** Reformats dictation into raw Markdown (headings, bullet/numbered lists, bold, blockquotes, inline/fenced code) without wrapping the output in a code fence. |
+| `shell` | Shell | `source = dictation`, `output = cursor` | **disabled by default.** Turns a spoken command or description into a single terminal-ready shell command, mapping spoken symbols ("dash dash", "pipe", "tilde slash") to shell syntax; emits only the command, never runs or explains it. |
 
-The `markdown` and `shell` modes ship **disabled** (`enabled = false`) as discoverable examples
-of more technical presets — the resolver ignores disabled modes (they own no trigger key and never
-auto-start), so the user enables one only after editing it to taste and attaching a connection.
+`ai-prompt`, `code`, `markdown`, and `shell` ship **disabled** (`enabled = false`) as discoverable
+examples of more technical presets — the resolver ignores disabled modes (they own no trigger key
+and never auto-start), so the user enables one only after editing it to taste and attaching a
+connection.
 
-Only `plain-dictation` works with zero configuration. The rewrite modes are seeded so the
-rewrite and edit-in-place capabilities are discoverable, and each states in place what it needs
-before it can run. The same spoken words producing a casual message vs. a formal email vs. a
-cleaned AI prompt is the most legible demo of modes-as-presets. The default English engine plus
-`plain-dictation` is the minimum first-run target (`ui_design.md` §2 first run). Mode prompts are
-tuned for the **Gemini 2.5 Flash** floor (`prompt_design.md`) — they instruct, never answer,
-keep redaction tokens intact, and avoid bracketed signature placeholders.
+Only `plain-dictation` works with zero configuration. When the first AI service is added, onboarding
+connects and enables `polish`, `message`, `email`, and `edit-selection`; the remaining modes stay as
+disabled examples for deliberate setup. The default English engine plus `plain-dictation` is the
+minimum first-run target (`ui_design.md` §2 first run). Mode prompts instruct, never answer, keep
+redaction tokens intact, and avoid bracketed signature placeholders.
+
+### Seed reconcile & the `seed_version` discipline
+
+Each starter carries `seed_id` (its catalog lineage) and `seed_version` (the catalog revision it was
+written from). After the one-time seeding, every launch runs **seed reconcile** (`design.md` §5.1):
+unedited starters are silently carried forward as the catalog drifts — renamed, newly added, or
+**prompt-revised** — while hand-edited or deleted modes are never clobbered or resurrected. "Unedited"
+is judged by a **template fingerprint** that excludes the `connection` and `enabled` user-knobs, so a
+starter you connected during onboarding still receives updates; only editing its prompt/shape opts it
+out.
+
+> **Discipline:** whenever you change a starter's template in `starterModes()` (prompt, fragments,
+> source/output, commands, trim), **bump that starter's `seed_version`**. The version bump is the *only*
+> signal that carries the revision to existing installs — change the prompt without it and the
+> improvement ships to fresh installs only, never to anyone already running. The
+> `revisingAStarterTemplateRequiresAVersionBump` test pins each starter's `(seed_version, template
+> fingerprint)` and fails on an un-versioned template change to enforce this.
+
+> **Sequencing footgun:** never ship a starter's *first-ever* `seed_version` bump in the same release
+> that introduces or changes the fingerprint scheme — split them across two releases. The first reconcile
+> on an upgrading install writes that install's template fingerprint; a bump in that same pass has no
+> baseline to match yet, so reconcile skips it (the self-heal needs the on-disk template to still equal
+> the catalog, which a bump breaks). The mode is left on its *prior, still-working* prompt — no crash or
+> corruption — but the revision never reaches that narrow population (upgraders who connected/enabled but
+> never edited the mode). Fresh installs are unaffected. Let this introducing release settle the
+> fingerprints first; bump in a later one and it lands cleanly.
 
 ---
 

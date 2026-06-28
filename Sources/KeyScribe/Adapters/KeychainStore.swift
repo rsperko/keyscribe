@@ -67,4 +67,26 @@ enum KeychainStore {
     static func delete(_ keyRef: String) {
         SecItemDelete(baseQuery(keyRef) as CFDictionary)
     }
+
+    // Erase every BYOK secret under this variant's service in one call (no account ⇒ all items match).
+    // Variant-scoped, so the dev build never touches the production app's keys. Backs the "Erase All
+    // KeyScribe Data" action. The count is read with attributes only (no ACL prompt), for an honest
+    // action message; deletion needs no data access either.
+    @discardableResult
+    static func deleteAll() -> Int {
+        let countQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: CFTypeRef?
+        let count = SecItemCopyMatching(countQuery as CFDictionary, &result) == errSecSuccess
+            ? ((result as? [[String: Any]])?.count ?? 0) : 0
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ] as CFDictionary)
+        return count
+    }
 }

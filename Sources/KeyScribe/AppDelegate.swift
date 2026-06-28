@@ -37,7 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
         provider = resolveProvider(engines: engines)
-        ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir)
+        ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
+        let reconciled = ModeStore.reconcileSeeds(
+            modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
+            settingsDir: KeyScribePaths.supportDir)
+        if !reconciled.isEmpty {
+            Log.models.info("seed reconcile: renamed=\(reconciled.renamed, privacy: .public) added=\(reconciled.added, privacy: .public) updated=\(reconciled.updated, privacy: .public)")
+            loadSettings()
+        }
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
         configRepository = ConfigRepository(supportDir: KeyScribePaths.supportDir, config: config)
         configRepository.onChange = { [weak self] in self?.refreshStatus() }
@@ -118,7 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
             detectProblems: { [weak self] in self?.currentProblems() ?? [] },
             accessibilityTapActive: { [weak self] in self?.hotkey?.isTapActive ?? false },
-            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() })
+            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
+            onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() })
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }
@@ -373,6 +381,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Erase all on-disk data + BYOK Keychain keys, then relaunch into a clean first run. The fresh
+    // instance is spawned before this one terminates so the menu-bar app does not just vanish; with the
+    // onboarding flag cleared (and TCC grants intact) it lands on the first-run wizard.
+    private func eraseAllDataAndRelaunch() {
+        ResetTool(supportDir: KeyScribePaths.supportDir, defaults: .standard).run(.eraseAll)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
+    }
+
     private func refreshStatus() {
         menu.setHasResult(controller.hasResult)
         let modes = config.modes.filter(\.enabled)
@@ -419,15 +439,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             aiConnectionMissing: modes.contains { connectionDangling(for: $0) },
             aiConnectionTestFailed: failedConnectionIds.isEmpty == false,
             aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
+            modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
             modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
             hotkeyConflict: shadowedHotkeyIds().contains {
                 $0 == GlobalHotkey.vocabularyId
             })
     }
 
-    // Mode wants AI but the named connection cannot be used right now — empty (not yet chosen) or
-    // not found. Drives the menu's inert "needs an AI service" label; the empty case is the optional
-    // "no AI yet" default, so it is *not* an error badge.
     private func connectionUnavailable(for mode: Mode) -> Bool {
         guard let rewrite = mode.aiRewrite else { return false }
         return rewrite.connection.isEmpty || config.connections.connection(id: rewrite.connection) == nil

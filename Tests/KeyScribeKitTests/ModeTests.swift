@@ -111,12 +111,12 @@ struct ModeTests {
     }
 
     @Test func seedProvenanceRoundTrips() throws {
-        let toml = "schema_version = 1\nseed_id = \"polished-dictation\"\nseed_version = 2\nname = \"Polished\""
-        let mode = try ModeStore.decode(from: toml, id: "polished-dictation")
-        #expect(mode.seedId == "polished-dictation")
+        let toml = "schema_version = 1\nseed_id = \"polish\"\nseed_version = 2\nname = \"Polish\""
+        let mode = try ModeStore.decode(from: toml, id: "polish")
+        #expect(mode.seedId == "polish")
         #expect(mode.seedVersion == 2)
-        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "polished-dictation")
-        #expect(again.seedId == "polished-dictation")
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "polish")
+        #expect(again.seedId == "polish")
         #expect(again.seedVersion == 2)
     }
 
@@ -204,7 +204,13 @@ struct ModeTests {
         #expect(mode.effectiveContextCategories.isEmpty)
     }
 
-    @Test func trailingAndSubmitDefaultToNone() throws {
+    @Test func newModesDefaultToTrailingSpaceAndNoSubmit() {
+        let mode = Mode(id: "new", name: "New")
+        #expect(mode.trailing == .space)
+        #expect(mode.submit == .none)
+    }
+
+    @Test func missingTrailingInTomlDecodesToNoneForCompatibility() throws {
         let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
         #expect(mode.trailing == .none)
         #expect(mode.submit == .none)
@@ -222,6 +228,25 @@ struct ModeTests {
         #expect(mode.trimTrailingPunctuation)
         let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "shell")
         #expect(again.trimTrailingPunctuation)
+    }
+
+    @Test func clipboardModifierDefaultsToCommandAndIsOmittedFromToml() throws {
+        let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
+        #expect(mode.clipboardModifier == .command)
+        #expect(try !ModeStore.encode(mode).contains("clipboard_modifier"))
+    }
+
+    @Test func newModesDefaultToCommandClipboardModifier() {
+        #expect(Mode(id: "new", name: "New").clipboardModifier == .command)
+    }
+
+    @Test func clipboardModifierControlDecodesAndRoundTrips() throws {
+        let toml = "schema_version = 1\nname = \"VM\"\nclipboard_modifier = \"control\""
+        let mode = try ModeStore.decode(from: toml, id: "vm")
+        #expect(mode.clipboardModifier == .control)
+        #expect(try ModeStore.encode(mode).contains("clipboard_modifier"))
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "vm")
+        #expect(again.clipboardModifier == .control)
     }
 
     @Test func shellStarterTrimsTrailingPunctuation() {

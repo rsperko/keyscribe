@@ -16,6 +16,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     case aiConnectionMissing
     case aiConnectionTestFailed
     case aiConnectionMisconfigured
+    case modeNeedsAIService
     case modeUsesFailedConnection
     case hotkeyConflict
 
@@ -25,7 +26,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
         case .activeEngineUnavailable: .speechModels
         case .aiConnectionMissing, .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
-        case .modeUsesFailedConnection: .modes
+        case .modeNeedsAIService, .modeUsesFailedConnection: .modes
         case .hotkeyConflict: .general
         }
     }
@@ -40,7 +41,8 @@ enum SettingsProblem: Equatable, CaseIterable {
         accessibilityTapActive: Bool = true,
         activeEngineUsable: Bool = true,
         aiConnectionMissing: Bool = false, aiConnectionTestFailed: Bool = false,
-        aiConnectionMisconfigured: Bool = false, modeUsesFailedConnection: Bool = false,
+        aiConnectionMisconfigured: Bool = false, modeNeedsAIService: Bool = false,
+        modeUsesFailedConnection: Bool = false,
         hotkeyConflict: Bool = false
     ) -> [SettingsProblem] {
         var problems: [SettingsProblem] = []
@@ -52,6 +54,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         if aiConnectionMissing { problems.append(.aiConnectionMissing) }
         if aiConnectionTestFailed { problems.append(.aiConnectionTestFailed) }
         if aiConnectionMisconfigured { problems.append(.aiConnectionMisconfigured) }
+        if modeNeedsAIService { problems.append(.modeNeedsAIService) }
         if modeUsesFailedConnection { problems.append(.modeUsesFailedConnection) }
         if hotkeyConflict { problems.append(.hotkeyConflict) }
         return problems
@@ -100,14 +103,15 @@ final class SettingsController: NSObject, NSWindowDelegate {
         onResetHUDPosition: @escaping () -> Void,
         detectProblems: @escaping () -> [SettingsProblem],
         accessibilityTapActive: @escaping () -> Bool = { true },
-        onRelaunch: @escaping () -> Void = {}
+        onRelaunch: @escaping () -> Void = {},
+        onEraseAllData: @escaping () -> Void = {}
     ) {
         self.detectProblems = detectProblems
         self.accessibilityTapActive = accessibilityTapActive
         self.onRelaunch = onRelaunch
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
-            onResetHUDPosition: onResetHUDPosition)
+            onResetHUDPosition: onResetHUDPosition, onEraseAllData: onEraseAllData)
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(supportDir: KeyScribePaths.supportDir)
         replacements = ReplacementsSettingsModel(supportDir: KeyScribePaths.supportDir)
@@ -281,6 +285,7 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
 
 private struct AdvancedSettingsView: View {
     @ObservedObject var model: SettingsModel
+    @State private var confirmingErase = false
 
     var body: some View {
         Form {
@@ -297,9 +302,21 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Erase Data") {
+                Button("Erase All KeyScribe Data…", role: .destructive) { confirmingErase = true }
+                Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts KeyScribe. Downloaded speech models and system permissions are kept. This cannot be undone.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(16)
+        .alert("Erase all KeyScribe data?", isPresented: $confirmingErase) {
+            Button("Erase All Data", role: .destructive) { model.eraseAllData() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your modes, settings, AI services, saved keys, and dictation history, and restarts KeyScribe. Downloaded speech models and system permissions are kept. This cannot be undone.")
+        }
     }
 }
 
@@ -369,16 +386,19 @@ final class SettingsModel: ObservableObject {
     private let onChange: (Settings) -> Void
     private let onReload: () -> Void
     private let onResetHUDPosition: () -> Void
+    private let onEraseAllData: () -> Void
     private var loading = false
 
     init(
         settings: Settings, onChange: @escaping (Settings) -> Void,
-        onReload: @escaping () -> Void, onResetHUDPosition: @escaping () -> Void
+        onReload: @escaping () -> Void, onResetHUDPosition: @escaping () -> Void,
+        onEraseAllData: @escaping () -> Void = {}
     ) {
         self.settings = settings
         self.onChange = onChange
         self.onReload = onReload
         self.onResetHUDPosition = onResetHUDPosition
+        self.onEraseAllData = onEraseAllData
         sounds = settings.duringDictation.sounds
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
         muteSystemAudio = settings.duringDictation.muteSystemAudio
@@ -424,6 +444,8 @@ final class SettingsModel: ObservableObject {
     func reload() { onReload() }
 
     func resetHUDPosition() { onResetHUDPosition() }
+
+    func eraseAllData() { onEraseAllData() }
 
     private func persist() {
         guard !loading else { return }

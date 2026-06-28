@@ -2,7 +2,7 @@ import Foundation
 import KeyScribeKit
 
 enum ResetTarget: String, CaseIterable {
-    case onboarding, modes, config, permissions, all
+    case onboarding, modes, config, permissions, all, eraseAll
 }
 
 struct ResetTool {
@@ -19,6 +19,8 @@ struct ResetTool {
     var bundleID: String = Bundle.main.bundleIdentifier ?? "com.keyscribe.app"
     // Seam so tests can exercise the dispatch without touching the real TCC database.
     var resetTCCService: (_ service: String, _ bundleID: String) -> String = ResetTool.tccutilReset
+    // Seam so tests exercise the erase dispatch without touching the real Keychain.
+    var eraseKeychain: () -> [String] = ResetTool.eraseKeychainKeys
 
     @discardableResult
     func run(_ target: ResetTarget) -> [String] {
@@ -28,7 +30,23 @@ struct ResetTool {
         case .config: return wipeConfig()
         case .permissions: return resetPermissions()
         case .all: return wipeAll()
+        case .eraseAll: return eraseAllData()
         }
+    }
+
+    // The full user-facing erase: wipe the support dir (config/modes/fragments/history; shared models
+    // kept) and the variant's BYOK Keychain keys. TCC grants are deliberately left alone — they are
+    // system permissions, not KeyScribe data, and resetting them mid-run would break the live mic/event
+    // tap; a fresh relaunch lands cleanly with permissions intact.
+    private func eraseAllData() -> [String] {
+        var actions = wipeAll()
+        actions += eraseKeychain()
+        return actions
+    }
+
+    private static func eraseKeychainKeys() -> [String] {
+        let count = KeychainStore.deleteAll()
+        return ["Erased \(count) saved AI key\(count == 1 ? "" : "s") from the Keychain."]
     }
 
     private func clearOnboarding() -> [String] {
@@ -40,9 +58,11 @@ struct ResetTool {
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         try? fileManager.removeItem(at: modesDir)
         try? fileManager.createDirectory(at: modesDir, withIntermediateDirectories: true)
-        // Drop the disk-backed last-known-good too, so a re-seed can never resurrect a pre-reset mode.
-        try? fileManager.removeItem(at: supportDir.appendingPathComponent("lkg", isDirectory: true))
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        // Drop the disk-backed last-known-good (and the seed ledger that lives beside it) too, so a
+        // re-seed can never resurrect a pre-reset mode.
+        let lkgDir = supportDir.appendingPathComponent("lkg", isDirectory: true)
+        try? fileManager.removeItem(at: lkgDir)
+        ModeStore.seedStartersIfEmpty(in: modesDir, ledgerDir: lkgDir)
         return ["Re-seeded \(ModeStore.starterModes().count) starter modes in \(modesDir.path)."]
     }
 
