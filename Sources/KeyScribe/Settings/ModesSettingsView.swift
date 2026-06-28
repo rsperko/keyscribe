@@ -359,6 +359,10 @@ private struct ModeEditorView: View {
     var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
     @State private var routingExpanded = false
+    @State private var recognitionExpanded = false
+    @State private var reusableInstructionsExpanded = false
+    @State private var finishingExpanded = false
+    @State private var dangerExpanded = false
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
     @State private var newWindowTitlePattern = ""
@@ -405,14 +409,8 @@ private struct ModeEditorView: View {
                 {
                     Toggle("", isOn: commandsBinding(\.liveEdits)).labelsHidden()
                 }
-                if mode.source != .selection {
-                    Toggle("Write numbers as digits", isOn: commandsBinding(\.numbers))
-                    Toggle("Prefer dictionary words", isOn: commandsBinding(\.fuzzyCorrection))
-                    Text("These tidy the transcript on this Mac, before any AI rewrite.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                recognitionDisclosure
             }
-            dictionarySection
             improveWithAISection
             dataSentWithAISection
 
@@ -437,47 +435,20 @@ private struct ModeEditorView: View {
                         .controlSize(.small)
                 }
                 SettingRow(
-                    title: "Trim trailing punctuation",
-                    help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
-                {
-                    Toggle("", isOn: binding(\.trimTrailingPunctuation)).labelsHidden()
-                }
-                SettingRow(
-                    title: "End with",
-                    help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
-                {
-                    Picker("", selection: binding(\.trailing)) {
-                        Text("Nothing").tag(Mode.Trailing.none)
-                        Text("Space").tag(Mode.Trailing.space)
-                        Text("Line break").tag(Mode.Trailing.newline)
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                SettingRow(
-                    title: "Send after inserting",
-                    help: "After inserting, sends a keystroke to submit — Return sends in most chat and prompt boxes, ⇧Return adds a soft line break, ⌘Return sends in Slack and similar. Only fires when the text actually reached the target (never on a clipboard fallback). Leave on \u{201C}Nothing\u{201D} to avoid sending half-finished messages.",
-                    dependencyReason: mode.submit != .none && mode.source == .selection
-                        ? "This mode replaces a selection, so a send keystroke usually isn't what you want here."
-                        : nil)
-                {
-                    Picker("", selection: binding(\.submit)) {
-                        Text("Nothing").tag(Mode.Submit.none)
-                        Text("Return").tag(Mode.Submit.return)
-                        Text("⇧Return").tag(Mode.Submit.shiftReturn)
-                        Text("⌘Return").tag(Mode.Submit.cmdReturn)
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                SettingRow(
                     title: "Do not save this mode in history",
                     help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
                 {
                     Toggle("", isOn: binding(\.excludeFromHistory)).labelsHidden()
                 }
+                finishingDisclosure
             }
 
             Section {
-                Button("Delete Mode", role: .destructive, action: onDelete)
+                DisclosureSection(isExpanded: $dangerExpanded) {
+                    disclosureLabel("Danger zone", "Delete this mode")
+                } content: {
+                    Button("Delete Mode", role: .destructive, action: onDelete)
+                }
             }
         }
         .formStyle(.grouped)
@@ -543,21 +514,24 @@ private struct ModeEditorView: View {
                     Text("Custom shortcut…").tag(customTriggerTag)
                 }
             }
-            Picker("How the shortcut works", selection: pressStyle) {
-                Text("Hold or tap").tag("hold-or-tap")
-                Text("Hold only").tag("hold-only")
-                Text("Tap to toggle").tag("tap-to-toggle")
-            }
-            .disabled(mode.triggerKeys.isEmpty)
-            if let conflict = triggerConflict {
-                Label("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by KeyScribe while it runs, so they won’t also go Back or Forward in other apps.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            DisclosureSection("Advanced routing", isExpanded: $routingExpanded) {
+            DisclosureSection(isExpanded: $routingExpanded) {
+                disclosureLabel("Advanced routing", routingSummary)
+            } content: {
+                Picker("How the shortcut works", selection: pressStyle) {
+                    Text("Hold or tap").tag("hold-or-tap")
+                    Text("Hold only").tag("hold-only")
+                    Text("Tap to toggle").tag("tap-to-toggle")
+                }
+                .disabled(mode.triggerKeys.isEmpty)
+                if let conflict = triggerConflict {
+                    Label("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by KeyScribe while it runs, so they won’t also go Back or Forward in other apps.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text("Limit by app, URL, or window title")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(mode.constraints.indices, id: \.self) { index in
@@ -630,15 +604,34 @@ private struct ModeEditorView: View {
         }
     }
 
-    @ViewBuilder private var dictionarySection: some View {
-        Section("Add to Vocabulary") {
+    private var routingSummary: String {
+        if triggerConflict != nil { return "Shortcut conflict" }
+        let ruleCount = mode.constraints.count
+        let phraseCount = mode.triggerPhrases.count
+        if ruleCount == 0 && phraseCount == 0 { return "No app rules or spoken phrases" }
+        var parts: [String] = []
+        if ruleCount > 0 { parts.append("\(ruleCount) rule\(ruleCount == 1 ? "" : "s")") }
+        if phraseCount > 0 { parts.append("\(phraseCount) spoken phrase\(phraseCount == 1 ? "" : "s")") }
+        return parts.joined(separator: ", ")
+    }
+
+    @ViewBuilder private var recognitionDisclosure: some View {
+        DisclosureSection(isExpanded: $recognitionExpanded) {
+            disclosureLabel("Recognition and replacements", recognitionSummary)
+        } content: {
             VocabularyComposer(
                 onAddWord: addWord,
                 onAddReplacement: addReplacementRule)
             Text("Mode-only words and replacements apply on top of the global lists for this mode.")
                 .font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Words to Recognize") {
+
+            if mode.source != .selection {
+                Toggle("Write numbers as digits", isOn: commandsBinding(\.numbers))
+                Toggle("Prefer dictionary words", isOn: commandsBinding(\.fuzzyCorrection))
+                Text("These tidy the transcript on this Mac, before any AI rewrite.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             SettingRow(
                 title: "Use global dictionary",
                 help: "Adds your global dictionary terms to this mode as recognition hints, on top of the mode-only words below. A dictionary term tells the model a word is valid — it does not force the word to appear, and an AI rewrite may still change it.")
@@ -650,8 +643,7 @@ private struct ModeEditorView: View {
             DictionaryRows(
                 words: mode.dictionary.words,
                 onRemove: removeWord)
-        }
-        Section("Automatic Replacements") {
+
             SettingRow(
                 title: "Use global replacements",
                 help: "Applies your global replacement rules in this mode, on top of the mode-only rules below. Replacements run on this Mac before any AI rewrite, so a rewrite can still change the replaced text.")
@@ -664,6 +656,16 @@ private struct ModeEditorView: View {
                 rules: mode.replacements.rules,
                 onRemove: removeReplacement(at:))
         }
+    }
+
+    private var recognitionSummary: String {
+        let wordCount = mode.dictionary.words.count
+        let replacementCount = mode.replacements.rules.count
+        if wordCount == 0 && replacementCount == 0 { return "No mode-only words or replacements" }
+        var parts: [String] = []
+        if wordCount > 0 { parts.append("\(wordCount) word\(wordCount == 1 ? "" : "s")") }
+        if replacementCount > 0 { parts.append("\(replacementCount) replacement\(replacementCount == 1 ? "" : "s")") }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder private var improveWithAISection: some View {
@@ -693,9 +695,17 @@ private struct ModeEditorView: View {
                     ) { value in
                         updateRewrite { $0.prompt = value }
                     }
-                    reusableInstructions
+                    reusableInstructionsDisclosure
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var reusableInstructionsDisclosure: some View {
+        DisclosureSection(isExpanded: $reusableInstructionsExpanded) {
+            disclosureLabel("Reusable writing instructions", reusableInstructionsSummary)
+        } content: {
+            reusableInstructions
         }
     }
 
@@ -728,6 +738,75 @@ private struct ModeEditorView: View {
             addInstructionMenu
             Text("Each is appended after the writing instruction, in order. Instructions are shared, so editing one changes it for every mode that uses it.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var reusableInstructionsSummary: String {
+        let count = mode.aiRewrite?.fragments.count ?? 0
+        if count == 0 { return "None attached" }
+        return "\(count) attached"
+    }
+
+    @ViewBuilder private var finishingDisclosure: some View {
+        DisclosureSection(isExpanded: $finishingExpanded) {
+            disclosureLabel("Finishing behavior", finishingSummary)
+        } content: {
+            SettingRow(
+                title: "Trim trailing punctuation",
+                help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
+            {
+                Toggle("", isOn: binding(\.trimTrailingPunctuation)).labelsHidden()
+            }
+            SettingRow(
+                title: "End with",
+                help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
+            {
+                Picker("", selection: binding(\.trailing)) {
+                    Text("Nothing").tag(Mode.Trailing.none)
+                    Text("Space").tag(Mode.Trailing.space)
+                    Text("Line break").tag(Mode.Trailing.newline)
+                }
+                .labelsHidden().fixedSize()
+            }
+            SettingRow(
+                title: "Send after inserting",
+                help: "After inserting, sends a keystroke to submit — Return sends in most chat and prompt boxes, ⇧Return adds a soft line break, ⌘Return sends in Slack and similar. Only fires when the text actually reached the target (never on a clipboard fallback). Leave on \u{201C}Nothing\u{201D} to avoid sending half-finished messages.",
+                dependencyReason: mode.submit != .none && mode.source == .selection
+                    ? "This mode replaces a selection, so a send keystroke usually isn't what you want here."
+                    : nil)
+            {
+                Picker("", selection: binding(\.submit)) {
+                    Text("Nothing").tag(Mode.Submit.none)
+                    Text("Return").tag(Mode.Submit.return)
+                    Text("⇧Return").tag(Mode.Submit.shiftReturn)
+                    Text("⌘Return").tag(Mode.Submit.cmdReturn)
+                }
+                .labelsHidden().fixedSize()
+            }
+        }
+    }
+
+    private var finishingSummary: String {
+        var parts: [String] = []
+        if mode.trimTrailingPunctuation { parts.append("trim punctuation") }
+        switch mode.trailing {
+        case .none: break
+        case .space: parts.append("end with space")
+        case .newline: parts.append("end with line break")
+        }
+        switch mode.submit {
+        case .none: break
+        case .return: parts.append("send Return")
+        case .shiftReturn: parts.append("send ⇧Return")
+        case .cmdReturn: parts.append("send ⌘Return")
+        }
+        return parts.isEmpty ? "No extra finishing steps" : parts.joined(separator: ", ")
+    }
+
+    private func disclosureLabel(_ title: String, _ summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(summary).font(.caption).foregroundStyle(.secondary)
         }
     }
 

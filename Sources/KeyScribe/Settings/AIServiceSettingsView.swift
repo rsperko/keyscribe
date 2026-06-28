@@ -350,6 +350,8 @@ private struct AIServiceEditor: View {
     var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
     @State private var apiKey = ""
+    @State private var advancedModelExpanded = false
+    @State private var dangerExpanded = false
 
     var body: some View {
         Form {
@@ -372,7 +374,10 @@ private struct AIServiceEditor: View {
                     Text("Required for an OpenAI-compatible endpoint, e.g. http://127.0.0.1:11234/v1.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                modelField
+                CommittedTextField("Model", text: connection.model) { value in
+                    var updated = connection; updated.model = value; onUpdate(updated, nil)
+                }
+                advancedModelBehavior
             }
             Section("API key") {
                 SecureField(hasKey ? "" : "API key (optional for local endpoints)", text: $apiKey)
@@ -410,7 +415,14 @@ private struct AIServiceEditor: View {
             Section {
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Delete AI Service", role: .destructive, action: onDelete)
+                DisclosureSection(isExpanded: $dangerExpanded) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Danger zone")
+                        Text("Delete this AI service").font(.caption).foregroundStyle(.secondary)
+                    }
+                } content: {
+                    Button("Delete AI Service", role: .destructive, action: onDelete)
+                }
             }
         }
         .formStyle(.grouped)
@@ -431,41 +443,57 @@ private struct AIServiceEditor: View {
             })
     }
 
-    private var modelField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                CommittedTextField("Model", text: connection.model) { value in
-                    var updated = connection; updated.model = value; onUpdate(updated, nil)
-                }
-                if !modelSuggestions.isEmpty {
-                    Menu {
-                        ForEach(modelSuggestions, id: \.self) { model in
-                            Button(model) {
-                                var updated = connection
-                                updated.model = model
-                                onUpdate(updated, nil)
+    private var advancedModelBehavior: some View {
+        DisclosureSection(isExpanded: $advancedModelExpanded) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Advanced model selection")
+                Text(modelDiscoverySummary).font(.caption).foregroundStyle(.secondary)
+            }
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Button("Fetch Models") { onFetchModels(apiKey.isEmpty ? nil : apiKey) }
+                        .disabled(modelDiscoveryState == .loading || !canFetchModels)
+                    if modelDiscoveryState == .loading { ProgressView().controlSize(.small) }
+                    if !modelSuggestions.isEmpty {
+                        Menu("Use Found Model") {
+                            ForEach(modelSuggestions, id: \.self) { model in
+                                Button(model) {
+                                    var updated = connection
+                                    updated.model = model
+                                    onUpdate(updated, nil)
+                                }
                             }
                         }
-                    } label: {
-                        Image(systemName: "chevron.down.circle")
+                        .fixedSize()
                     }
-                    .menuStyle(.borderlessButton)
                 }
-                Button("Fetch Models") { onFetchModels(apiKey.isEmpty ? nil : apiKey) }
-                    .disabled(modelDiscoveryState == .loading || !canFetchModels)
-                if modelDiscoveryState == .loading { ProgressView().controlSize(.small) }
+                if !modelSuggestions.isEmpty {
+                    Text("Found \(modelSuggestions.count) model\(modelSuggestions.count == 1 ? "" : "s").")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                switch modelDiscoveryState {
+                case .failed(let message):
+                    Text("Could not fetch models: \(message)")
+                        .font(.caption).foregroundStyle(.orange)
+                default:
+                    Text("Fetch models to choose from the provider list, or type a model id manually above.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            switch modelDiscoveryState {
-            case .loaded where !modelSuggestions.isEmpty:
-                Text("Found \(modelSuggestions.count) model\(modelSuggestions.count == 1 ? "" : "s").")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .failed(let message):
-                Text("Could not fetch models: \(message)")
-                    .font(.caption).foregroundStyle(.orange)
-            default:
-                Text("Fetch models to choose from the provider list, or type a model id manually.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+        }
+    }
+
+    private var modelDiscoverySummary: String {
+        switch modelDiscoveryState {
+        case .loading:
+            return "Fetching models"
+        case .loaded where !modelSuggestions.isEmpty:
+            return "\(modelSuggestions.count) found"
+        case .failed:
+            return "Fetch failed"
+        default:
+            return "Fetch provider model list"
         }
     }
 
