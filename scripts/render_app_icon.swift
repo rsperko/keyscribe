@@ -16,21 +16,27 @@ let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { b
     )
 
     NSColor(red: 0.97, green: 0.98, blue: 1, alpha: 1).setStroke()
-    for (x, lower, upper) in [(244.0, 458.0, 566.0), (397.0, 374.0, 650.0), (550.0, 286.0, 738.0)] {
-        let path = NSBezierPath()
-        path.lineWidth = 86
-        path.lineCapStyle = .round
-        path.move(to: NSPoint(x: x, y: lower))
-        path.line(to: NSPoint(x: x, y: upper))
-        path.stroke()
+    func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+        NSPoint(x: x * CGFloat(size) / 18, y: y * CGFloat(size) / 18)
     }
 
-    for (y, endX) in [(458.0, 818.0), (634.0, 878.0)] {
+    let wave = NSBezierPath()
+    wave.lineWidth = 91
+    wave.lineCapStyle = .round
+    wave.lineJoinStyle = .round
+    wave.move(to: point(1.6, 9))
+    wave.curve(to: point(3.4, 12.7), controlPoint1: point(2.2, 9.1), controlPoint2: point(2.6, 12.6))
+    wave.curve(to: point(5.2, 5), controlPoint1: point(4.3, 12.8), controlPoint2: point(4.3, 5))
+    wave.curve(to: point(7, 16.2), controlPoint1: point(6.1, 5), controlPoint2: point(5.9, 16.2))
+    wave.curve(to: point(9.2, 2), controlPoint1: point(8.2, 16.2), controlPoint2: point(7.8, 2))
+    wave.stroke()
+
+    for (y, endX) in [(11.4, 14.6), (6.6, 15.3)] {
         let path = NSBezierPath()
         path.lineWidth = 86
         path.lineCapStyle = .round
-        path.move(to: NSPoint(x: 664, y: y))
-        path.line(to: NSPoint(x: endX, y: y))
+        path.move(to: point(10.5, y))
+        path.line(to: point(endX, y))
         path.stroke()
     }
 

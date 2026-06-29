@@ -202,14 +202,14 @@ struct ModeSeedReconcileTests {
     // it. The connection/enabled user-knobs are excluded, so onboarding never trips this.
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
-            "polish": (1, "9627d08e9098ec1e"),
-            "message": (1, "9975c76120898009"),
-            "email": (1, "5022830f085e4508"),
-            "edit-selection": (1, "9f949cdaf462f4e6"),
-            "ai-prompt": (1, "f6e8880e163379b3"),
-            "code": (1, "89e8d9dd1fa90de6"),
-            "markdown": (1, "bebc8b4e4f506f1"),
-            "shell": (1, "24b3cce80e1b4b86"),
+            "polish": (1, "be068027ccdcbc8f"),
+            "message": (1, "3d5e80682ee60696"),
+            "email": (1, "6a39d5592cb100d"),
+            "edit-selection": (1, "224ed44b73fd1efb"),
+            "ai-prompt": (1, "1d2a6ddd622432ac"),
+            "code": (1, "9443bc91a7b665d7"),
+            "markdown": (1, "77433d0d01ef487e"),
+            "shell": (1, "debf79feb745f80b"),
         ]
         let catalog = ModeStore.starterModes()
         #expect(Set(catalog.map(\.id)) == Set(pinned.keys),

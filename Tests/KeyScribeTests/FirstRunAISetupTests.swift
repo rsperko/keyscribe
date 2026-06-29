@@ -120,6 +120,32 @@ struct FirstRunAISetupTests {
         #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
     }
 
+    @Test func emptyAPIKeyDoesNotSaveOrTestConnection() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var saveCalled = false
+        var testCalled = false
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: { _, _ in saveCalled = true; return true },
+            testConnection: { _ in testCalled = true; return .passed })
+
+        model.aiProvider = .openai
+        model.aiAuthMethod = .apiKey
+        model.aiModel = "gpt-5.4-mini"
+        model.aiAPIKey = "   "
+        await model.createAIService()
+
+        #expect(model.aiSetupError == "API key is required.")
+        #expect(saveCalled == false)
+        #expect(testCalled == false)
+        #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
+    }
+
     @Test func failedConnectionTestDoesNotPersistOrFinish() async throws {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
@@ -169,5 +195,129 @@ struct FirstRunAISetupTests {
         #expect(model.aiAvailableModels == ["qwen3", "llama"])
         #expect(model.aiModel == "qwen3")
         #expect(model.aiModelDiscoveryError == nil)
+    }
+
+    @Test func fetchingModelsCanUseOpenAICompatibleNoAuth() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            listModels: { connection, apiKey in
+                #expect(connection.provider == .openaiCompatible)
+                #expect(connection.authMethod == .none)
+                #expect(connection.baseUrl == "http://127.0.0.1:11234/v1")
+                #expect(apiKey == nil)
+                return ["qwen3"]
+            })
+
+        model.aiProvider = .openaiCompatible
+        model.aiAuthMethod = .none
+        model.aiModel = ""
+        model.aiBaseURL = "http://127.0.0.1:11234/v1"
+        await model.fetchAIModels()
+
+        #expect(model.aiAvailableModels == ["qwen3"])
+        #expect(model.aiModel == "qwen3")
+        #expect(model.aiModelDiscoveryError == nil)
+    }
+
+    @Test func creatingOpenAICompatibleNoAuthDoesNotSaveKey() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var saveCalled = false
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: { _, _ in saveCalled = true; return false },
+            testConnection: { connection in
+                #expect(connection.authMethod == .none)
+                #expect(connection.baseUrl == "http://127.0.0.1:11234/v1")
+                return .passed
+            })
+
+        model.aiServiceName = "Local oMLX"
+        model.aiProvider = .openaiCompatible
+        model.aiAuthMethod = .none
+        model.aiModel = "qwen3"
+        model.aiBaseURL = "http://127.0.0.1:11234/v1"
+        model.aiAPIKey = "ignored"
+        await model.createAIService()
+
+        let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
+        #expect(connection.authMethod == .none)
+        #expect(connection.tokenCommand == nil)
+        #expect(saveCalled == false)
+        #expect(model.step == .aiServiceComplete)
+    }
+
+    @Test func creatingOpenAICompatibleTokenCommandPersistsCommandWithoutSavingKey() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var saveCalled = false
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: { _, _ in saveCalled = true; return false },
+            testConnection: { connection in
+                #expect(connection.authMethod == .tokenCommand)
+                #expect(connection.tokenCommand == "print-token")
+                return .passed
+            })
+
+        model.aiServiceName = "Token Proxy"
+        model.aiProvider = .openaiCompatible
+        model.aiAuthMethod = .tokenCommand
+        model.aiTokenCommand = "print-token"
+        model.aiModel = "qwen3"
+        model.aiBaseURL = "http://127.0.0.1:11234/v1"
+        await model.createAIService()
+
+        let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
+        #expect(connection.authMethod == .tokenCommand)
+        #expect(connection.tokenCommand == "print-token")
+        #expect(saveCalled == false)
+        #expect(model.step == .aiServiceComplete)
+    }
+
+    @Test func creatingHostedProviderTokenCommandPersistsCommandWithoutSavingKey() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+        var saveCalled = false
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            saveAPIKey: { _, _ in saveCalled = true; return false },
+            testConnection: { connection in
+                #expect(connection.provider == .openai)
+                #expect(connection.authMethod == .tokenCommand)
+                #expect(connection.tokenCommand == "print-token")
+                return .passed
+            })
+
+        model.aiServiceName = "OpenAI Proxy"
+        model.aiProvider = .openai
+        model.aiAuthMethod = .tokenCommand
+        model.aiTokenCommand = "print-token"
+        model.aiModel = "gpt-5.4-mini"
+        model.aiAPIKey = "ignored"
+        await model.createAIService()
+
+        let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
+        #expect(connection.authMethod == .tokenCommand)
+        #expect(connection.tokenCommand == "print-token")
+        #expect(saveCalled == false)
+        #expect(model.step == .aiServiceComplete)
     }
 }

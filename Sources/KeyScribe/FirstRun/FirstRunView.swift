@@ -18,7 +18,7 @@ struct FirstRunView: View {
             }
         }
         .padding(28)
-        .frame(width: 480, height: 500, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: model.step) { _, step in
             if step == .permissions { model.startPolling() } else { model.stopPolling() }
             if step == .tryIt { trialFieldFocused = true }
@@ -244,14 +244,13 @@ struct FirstRunView: View {
     }
 
     private var aiService: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Optional text cleanup").font(.title.bold())
-            Text("Connect an AI service if you want \(Branding.appName) to clean up dictation, draft messages, or work on selected text. Speech recognition still stays on this Mac.")
-                .foregroundStyle(.secondary)
+            Text("Connect an AI service for rewrite modes. Speech stays local.")
+                .font(.callout).foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Only modes that use AI rewrite send text to this provider.", systemImage: "cloud")
-                Label("Hosted providers need an API key. Local OpenAI-compatible endpoints can be keyless.", systemImage: "key")
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Hosted providers use API keys. Local OpenAI-compatible endpoints can use no auth or a token command.", systemImage: "key")
                 if !model.aiModeNames.isEmpty {
                     Label("\(Branding.appName) will connect \(formattedModeNames(model.aiModeNames)) to this service.", systemImage: "wand.and.stars")
                 }
@@ -259,40 +258,7 @@ struct FirstRunView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            Form {
-                TextField("Name", text: $model.aiServiceName)
-                Picker("Provider", selection: $model.aiProvider) {
-                    Text("OpenAI").tag(Connection.Provider.openai)
-                    Text("Anthropic").tag(Connection.Provider.anthropic)
-                    Text("Gemini").tag(Connection.Provider.gemini)
-                    Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
-                }
-                if model.aiProvider == .openaiCompatible {
-                    TextField("Base URL", text: $model.aiBaseURL)
-                }
-                SecureField("API key (optional for local endpoints)", text: $model.aiAPIKey)
-                HStack {
-                    TextField("Model", text: $model.aiModel)
-                    if !model.aiAvailableModels.isEmpty {
-                        Menu {
-                            ForEach(model.aiAvailableModels, id: \.self) { id in
-                                Button(id) { model.aiModel = id }
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down.circle")
-                        }
-                        .menuStyle(.borderlessButton)
-                    }
-                    Button(model.aiFetchingModels ? "Fetching…" : "Fetch Models") {
-                        Task { await model.fetchAIModels() }
-                    }
-                    .disabled(model.aiFetchingModels || !model.aiCanFetchModels)
-                    if model.aiFetchingModels { ProgressView().controlSize(.small) }
-                }
-                Text("Fetch models to choose from the provider list, or type a model id manually.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .formStyle(.grouped)
+            aiServiceFields
 
             if let error = model.aiModelDiscoveryError {
                 Text(error).font(.callout).foregroundStyle(.orange)
@@ -316,13 +282,168 @@ struct FirstRunView: View {
             }
         }
         .onChange(of: model.aiProvider) { oldProvider, provider in
-            // Only re-default the name while the user hasn't typed their own.
             if model.aiServiceName == oldProvider.defaultName {
                 model.aiServiceName = provider.defaultName
             }
             model.aiModel = provider.defaultModel
+            if provider == .openaiCompatible {
+                if model.aiAuthMethod == .apiKey,
+                   model.aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    model.aiAuthMethod = .none
+                }
+            } else if model.aiAuthMethod == .none {
+                model.aiAuthMethod = .apiKey
+            }
             model.resetAIModelDiscovery()
         }
+    }
+
+    private var aiServiceFields: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            aiTextRow("Name", text: $model.aiServiceName)
+            aiThinDivider
+            HStack {
+                Text("Provider")
+                Spacer()
+                Picker("", selection: $model.aiProvider) {
+                    Text("OpenAI").tag(Connection.Provider.openai)
+                    Text("Anthropic").tag(Connection.Provider.anthropic)
+                    Text("Gemini").tag(Connection.Provider.gemini)
+                    Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
+                }
+                .labelsHidden()
+                .frame(maxWidth: 230, alignment: .trailing)
+            }
+            if model.aiProvider == .openaiCompatible {
+                aiThinDivider
+                VStack(alignment: .leading, spacing: 4) {
+                    aiTextRow("Base URL", text: $model.aiBaseURL)
+                    Text("Example: http://127.0.0.1:11234/v1")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        aiRequiredLabel("Base URL is required.")
+                    }
+                }
+            }
+            aiThinDivider
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Credential")
+                    Spacer()
+                    Picker("Credential", selection: aiCredentialBinding) {
+                        if model.aiProvider == .openaiCompatible {
+                            Text("No Auth").tag(Connection.AuthMethod.none)
+                        }
+                        Text("API Key").tag(Connection.AuthMethod.apiKey)
+                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: model.aiProvider == .openaiCompatible ? 310 : 220)
+                }
+                aiCredentialFields
+            }
+            aiThinDivider
+            aiModelFields
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private func aiTextRow(_ title: String, text: Binding<String>, prompt: String? = nil) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField("", text: text, prompt: prompt.map(Text.init))
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.plain)
+                .frame(maxWidth: 260)
+        }
+    }
+
+    private var aiThinDivider: some View {
+        Divider().padding(.vertical, 6)
+    }
+
+    private var aiCredentialBinding: Binding<Connection.AuthMethod> {
+        Binding(
+            get: { model.aiEffectiveAuthMethod },
+            set: { value in
+                let next = (model.aiProvider != .openaiCompatible && value == .none) ? .apiKey : value
+                model.aiAuthMethod = next
+                model.resetAIModelDiscovery()
+            })
+    }
+
+    @ViewBuilder private var aiCredentialFields: some View {
+        switch aiCredentialBinding.wrappedValue {
+        case .none:
+            Label("No Authorization header", systemImage: "globe")
+                .font(.caption).foregroundStyle(.secondary)
+        case .apiKey:
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("API key")
+                    Spacer()
+                    SecureField("API key", text: $model.aiAPIKey)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.plain)
+                        .frame(maxWidth: 260)
+                }
+                if model.aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    aiRequiredLabel("Enter an API key before connecting.")
+                }
+                Label("Saved to Keychain when you connect", systemImage: "key")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        case .tokenCommand:
+            VStack(alignment: .leading, spacing: 4) {
+                aiTextRow(
+                    "Command", text: $model.aiTokenCommand,
+                    prompt: "e.g. print-token")
+                if model.aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    aiRequiredLabel("Enter the command that prints a fresh token or key.")
+                }
+                Text("stdout: raw token or JSON token fields.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var aiModelFields: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            aiTextRow("Model ID", text: $model.aiModel)
+            if model.aiModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                aiRequiredLabel("Model ID is required.")
+            }
+            HStack {
+                Button(model.aiFetchingModels ? "Fetching Models" : "Fetch Models") {
+                    Task { await model.fetchAIModels() }
+                }
+                .disabled(model.aiFetchingModels || !model.aiCanFetchModels)
+                if model.aiFetchingModels { ProgressView().controlSize(.small) }
+                Spacer()
+                if !model.aiAvailableModels.isEmpty {
+                    Text("\(model.aiAvailableModels.count) found")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Menu("Choose") {
+                        ForEach(model.aiAvailableModels, id: \.self) { id in
+                            Button(id) { model.aiModel = id }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+            }
+            if let reason = model.aiModelFetchDisabledReason {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func aiRequiredLabel(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.circle.fill")
+            .font(.caption).foregroundStyle(.orange)
     }
 
     private var aiServiceComplete: some View {
@@ -333,14 +454,16 @@ struct FirstRunView: View {
             Text("AI cleanup is connected").font(.title.bold())
             Text("\(model.aiServiceName) is ready to clean up dictation, draft messages, and work on selected text in rewrite modes.")
                 .foregroundStyle(.secondary)
-            if model.aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Label("No API key was stored for this service.", systemImage: "key")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
+            switch model.aiAuthMethod {
+            case .none:
+                Label("No Authorization header is used for this service.", systemImage: "globe")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .apiKey:
                 Label("Your API key is stored in Keychain.", systemImage: "key")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
+            case .tokenCommand:
+                Label("Token command saved. Generated tokens are kept in memory only.", systemImage: "terminal")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             HStack {

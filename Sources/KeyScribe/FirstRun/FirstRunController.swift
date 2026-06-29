@@ -101,7 +101,9 @@ final class FirstRunModel: ObservableObject {
     @Published var aiProvider: Connection.Provider = .openai
     @Published var aiModel = Connection.Provider.openai.defaultModel
     @Published var aiBaseURL = ""
+    @Published var aiAuthMethod: Connection.AuthMethod = .apiKey
     @Published var aiAPIKey = ""
+    @Published var aiTokenCommand = ""
     @Published private(set) var aiAvailableModels: [String] = []
     @Published private(set) var aiModelDiscoveryError: String?
     @Published private(set) var aiFetchingModels = false
@@ -273,16 +275,67 @@ final class FirstRunModel: ObservableObject {
     var aiCanConnect: Bool {
         let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty || model.isEmpty { return false }
-        if aiProvider == .openaiCompatible { return !base.isEmpty }
-        return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return aiCredentialReady
     }
 
     var aiCanFetchModels: Bool {
+        aiCredentialReady
+    }
+
+    var aiModelFetchDisabledReason: String? {
+        guard !aiFetchingModels, !aiCanFetchModels else { return nil }
+        return aiCredentialDisabledReason(action: "fetching models")
+    }
+
+    var aiConnectDisabledReason: String? {
+        guard !aiCanConnect else { return nil }
+        let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return "Name is required." }
+        if model.isEmpty { return "Model ID is required." }
+        return aiCredentialDisabledReason(action: "connecting")
+    }
+
+    private var aiCredentialReady: Bool {
         let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if aiProvider == .openaiCompatible { return !base.isEmpty }
-        return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if aiProvider == .openaiCompatible, base.isEmpty { return false }
+        switch aiEffectiveAuthMethod {
+        case .none:
+            return true
+        case .apiKey:
+            return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .tokenCommand:
+            return !aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func aiCredentialDisabledReason(action: String) -> String? {
+        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if aiProvider == .openaiCompatible, base.isEmpty {
+            return "Base URL is required before \(action)."
+        }
+        switch aiEffectiveAuthMethod {
+        case .none:
+            return nil
+        case .apiKey:
+            return aiProvider == .openaiCompatible
+                ? "Enter an API key or choose No Auth before \(action)."
+                : "API key is required before \(action)."
+        case .tokenCommand:
+            return "Token command is required before \(action)."
+        }
+    }
+
+    var aiEffectiveAuthMethod: Connection.AuthMethod {
+        if aiProvider != .openaiCompatible, aiAuthMethod == .none { return .apiKey }
+        return aiAuthMethod
+    }
+
+    private var aiRequestAPIKey: String? {
+        guard aiEffectiveAuthMethod == .apiKey else { return nil }
+        let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? nil : key
     }
 
     func fetchAIModels() async {
@@ -290,7 +343,7 @@ final class FirstRunModel: ObservableObject {
         aiFetchingModels = true
         defer { aiFetchingModels = false }
         do {
-            let models = try await listModels(aiDraftConnection(), aiAPIKey)
+            let models = try await listModels(aiDraftConnection(), aiRequestAPIKey)
             aiAvailableModels = models
             if !models.isEmpty && !models.contains(aiModel.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 aiModel = models[0]
@@ -315,14 +368,13 @@ final class FirstRunModel: ObservableObject {
         let id = pendingConnectionId ?? ConnectionStore.newID(for: name, existing: existing.map(\.id))
         pendingConnectionId = id
         let keyRef = "keyscribe.llm.\(id)"
-        var connection = Connection(
-            id: id, name: name, provider: aiProvider,
-            model: aiModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            keyRef: keyRef)
-        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if aiProvider == .openaiCompatible { connection.baseUrl = base }
+        let connection = aiConnection(id: id, keyRef: keyRef)
         let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !key.isEmpty, !saveAPIKey(keyRef, key) {
+        if connection.authMethod == .apiKey, key.isEmpty {
+            aiSetupError = "API key is required."
+            return
+        }
+        if connection.authMethod == .apiKey, !saveAPIKey(keyRef, key) {
             aiSetupError = "Could not save the API key to the Keychain."
             return
         }
@@ -350,12 +402,20 @@ final class FirstRunModel: ObservableObject {
 
     private func aiDraftConnection() -> Connection {
         let id = pendingConnectionId ?? "new-ai-service"
+        return aiConnection(id: id, keyRef: "keyscribe.llm.\(id)")
+    }
+
+    private func aiConnection(id: String, keyRef: String) -> Connection {
+        let authMethod = aiEffectiveAuthMethod
+        let command = aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         var connection = Connection(
             id: id,
             name: aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines),
             provider: aiProvider,
             model: aiModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            keyRef: "keyscribe.llm.\(id)")
+            keyRef: keyRef,
+            authMethod: authMethod,
+            tokenCommand: authMethod == .tokenCommand && !command.isEmpty ? command : nil)
         if aiProvider == .openaiCompatible {
             connection.baseUrl = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         }

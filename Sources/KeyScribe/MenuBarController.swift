@@ -10,20 +10,38 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             (color ?? .black).setStroke()
 
-            for (x, lower, upper) in [(2.5, 7.5, 10.5), (5, 5.5, 12.5), (7.5, 3, 15)] {
-                let pulse = NSBezierPath()
-                pulse.lineWidth = 1.75
-                pulse.lineCapStyle = .round
-                pulse.move(to: NSPoint(x: x, y: lower))
-                pulse.line(to: NSPoint(x: x, y: upper))
-                pulse.stroke()
-            }
+            let pulse = NSBezierPath()
+            pulse.lineWidth = 1.6
+            pulse.lineCapStyle = .round
+            pulse.lineJoinStyle = .round
+            pulse.move(to: NSPoint(x: 1.6, y: 9))
+            pulse.curve(
+                to: NSPoint(x: 3.4, y: 12.7),
+                controlPoint1: NSPoint(x: 2.2, y: 9.1),
+                controlPoint2: NSPoint(x: 2.6, y: 12.6)
+            )
+            pulse.curve(
+                to: NSPoint(x: 5.2, y: 5),
+                controlPoint1: NSPoint(x: 4.3, y: 12.8),
+                controlPoint2: NSPoint(x: 4.3, y: 5)
+            )
+            pulse.curve(
+                to: NSPoint(x: 7, y: 16.2),
+                controlPoint1: NSPoint(x: 6.1, y: 5),
+                controlPoint2: NSPoint(x: 5.9, y: 16.2)
+            )
+            pulse.curve(
+                to: NSPoint(x: 9.2, y: 2),
+                controlPoint1: NSPoint(x: 8.2, y: 16.2),
+                controlPoint2: NSPoint(x: 7.8, y: 2)
+            )
+            pulse.stroke()
 
-            for (y, endX) in [(11.5, 15), (6.5, 16.5)] {
+            for (y, endX) in [(11.4, 14.6), (6.6, 15.3)] {
                 let line = NSBezierPath()
                 line.lineWidth = 1.75
                 line.lineCapStyle = .round
-                line.move(to: NSPoint(x: 11, y: y))
+                line.move(to: NSPoint(x: 10.5, y: y))
                 line.line(to: NSPoint(x: endX, y: y))
                 line.stroke()
             }
