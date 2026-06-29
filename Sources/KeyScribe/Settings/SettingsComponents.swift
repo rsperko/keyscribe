@@ -106,21 +106,32 @@ struct DataBoundaryBadge: View {
 struct CommittedTextField: View {
     let title: String
     let text: String
+    let prompt: String?
     let autofocus: Bool
     let commit: (String) -> Void
     @State private var draft: String
     @FocusState private var focused: Bool
 
-    init(_ title: String, text: String, autofocus: Bool = false, commit: @escaping (String) -> Void) {
+    init(
+        _ title: String, text: String, prompt: String? = nil,
+        autofocus: Bool = false, commit: @escaping (String) -> Void
+    ) {
         self.title = title
         self.text = text
+        self.prompt = prompt
         self.autofocus = autofocus
         self.commit = commit
         _draft = State(initialValue: text)
     }
 
     var body: some View {
-        TextField(title, text: $draft)
+        Group {
+            if let prompt {
+                TextField(title, text: $draft, prompt: Text(prompt))
+            } else {
+                TextField(title, text: $draft)
+            }
+        }
             .focused($focused)
             .onSubmit { commitIfChanged() }
             .onExitCommand { draft = text }

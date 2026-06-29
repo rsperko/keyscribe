@@ -8,6 +8,8 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     public var model: String
     public var keyRef: String
     public var baseUrl: String?
+    public var authMethod: AuthMethod
+    public var tokenCommand: String?
     public var params: Params
 
     public enum Provider: String, Codable, Sendable {
@@ -33,6 +35,12 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         }
     }
 
+    public enum AuthMethod: String, Codable, Sendable {
+        case apiKey = "api_key"
+        case tokenCommand = "token_command"
+        case none
+    }
+
     public struct Params: Codable, Equatable, Sendable {
         public var temperature: Double
         public var maxTokens: Int
@@ -52,12 +60,15 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         case id, name, provider, model
         case keyRef = "key_ref"
         case baseUrl = "base_url"
+        case authMethod = "auth_method"
+        case tokenCommand = "token_command"
         case params
     }
 
     public init(
         id: String, name: String, provider: Provider, model: String,
-        keyRef: String, baseUrl: String? = nil, params: Params = .init()
+        keyRef: String, baseUrl: String? = nil, authMethod: AuthMethod? = nil,
+        tokenCommand: String? = nil, params: Params = .init()
     ) {
         self.id = id
         self.name = name
@@ -65,6 +76,8 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         self.model = model
         self.keyRef = keyRef
         self.baseUrl = baseUrl
+        self.authMethod = authMethod ?? (tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .tokenCommand : .apiKey)
+        self.tokenCommand = tokenCommand
         self.params = params
     }
 
@@ -76,6 +89,9 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         model = try c.decode(String.self, forKey: .model)
         keyRef = try c.decode(String.self, forKey: .keyRef)
         baseUrl = try c.decodeIfPresent(String.self, forKey: .baseUrl)
+        tokenCommand = try c.decodeIfPresent(String.self, forKey: .tokenCommand)
+        authMethod = try c.decodeIfPresent(AuthMethod.self, forKey: .authMethod)
+            ?? (tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .tokenCommand : .apiKey)
         params = try c.decodeIfPresent(Params.self, forKey: .params) ?? .init()
     }
 }
@@ -88,6 +104,7 @@ extension Connection {
     public enum ConfigIssue: Equatable, Sendable {
         case missingModel
         case missingBaseURL
+        case missingTokenCommand
     }
 
     public var configIssue: ConfigIssue? {
@@ -95,6 +112,10 @@ extension Connection {
         if provider == .openaiCompatible,
            (baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .missingBaseURL
+        }
+        if authMethod == .tokenCommand,
+           (tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .missingTokenCommand
         }
         return nil
     }

@@ -53,6 +53,31 @@ struct ModelDiscoveryTests {
         #expect(models == ["qwen", "llama"])
     }
 
+    @Test func openAICompatibleModelListUsesTokenCommand() async throws {
+        StubURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "http://127.0.0.1:11234/v1/models")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-token")
+            let body = #"{"object":"list","data":[{"id":"qwen"}]}"#.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let lister = HTTPModelLister(
+            session: session(),
+            keyProvider: { _ in "stale-token" },
+            tokenCommandRunner: { command in
+                #expect(command == "print-token")
+                return #"{"access_token":"fresh-token"}"#
+            },
+            tokenCache: TokenCommandCache())
+        let connection = Connection(
+            id: "local", name: "Local", provider: .openaiCompatible,
+            model: "", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1",
+            tokenCommand: "print-token")
+
+        let models = try await lister.listModels(for: connection, apiKey: nil)
+
+        #expect(models == ["qwen"])
+    }
+
     @Test func geminiListsOnlyGenerateContentModelsByBaseModelId() async throws {
         StubURLProtocol.handler = { request in
             #expect(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models?key=gemini-key")

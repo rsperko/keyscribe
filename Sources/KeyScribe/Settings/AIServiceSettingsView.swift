@@ -321,6 +321,8 @@ struct AIServiceSettingsView: View {
             return ("No model set", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
         case .missingBaseURL:
             return ("Needs a base URL", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
+        case .missingTokenCommand:
+            return ("Needs token command", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
         case nil:
             break
         }
@@ -330,6 +332,12 @@ struct AIServiceSettingsView: View {
         case .testing:
             return ("Testing…", "ellipsis.circle", AnyShapeStyle(.secondary))
         default:
+            if connection.provider == .openaiCompatible, connection.authMethod == .none {
+                return ("No auth", "globe", AnyShapeStyle(.secondary))
+            }
+            if connection.authMethod == .tokenCommand {
+                return ("Token command", "terminal", AnyShapeStyle(.secondary))
+            }
             return model.hasKey(connection)
                 ? ("Key stored", "key.fill", AnyShapeStyle(.secondary))
                 : ("No key set", "key", AnyShapeStyle(.secondary))
@@ -353,7 +361,7 @@ private struct AIServiceEditor: View {
 
     var body: some View {
         Form {
-            Section("Connection") {
+            Section("Service") {
                 CommittedTextField("Name", text: connection.name, autofocus: autofocusName) { value in
                     var updated = connection; updated.name = value; onUpdate(updated, nil)
                 }
@@ -363,40 +371,40 @@ private struct AIServiceEditor: View {
                     Text("Gemini").tag(Connection.Provider.gemini)
                     Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
                 }
-                if connection.provider == .openaiCompatible {
-                    CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
-                        var updated = connection
-                        updated.baseUrl = value.isEmpty ? nil : value
-                        onUpdate(updated, nil)
-                    }
-                    Text("Required for an OpenAI-compatible endpoint, e.g. http://127.0.0.1:11234/v1.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                modelField
             }
-            Section("API key") {
-                SecureField(hasKey ? "" : "API key (optional for local endpoints)", text: $apiKey)
-                    .onSubmit(saveKey)
-                    .overlay(alignment: .leading) {
-                        if hasKey && apiKey.isEmpty {
-                            Text(String(repeating: "•", count: 12))
-                                .foregroundStyle(.secondary)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                HStack {
-                    Text(hasKey ? "Key stored in Keychain" : "No key stored")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Save Key", action: saveKey).disabled(apiKey.isEmpty)
+            if connection.provider == .openaiCompatible {
+                Section("Endpoint") {
+                    baseURLField
                 }
-                Text("Hosted providers need an API key. Local OpenAI-compatible endpoints can be keyless.")
-                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Authentication") {
+                if connection.provider == .openaiCompatible {
+                    Picker("Credential", selection: authMethodBinding) {
+                        Text("No Auth").tag(Connection.AuthMethod.none)
+                        Text("API Key").tag(Connection.AuthMethod.apiKey)
+                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
+                    }
+                    .pickerStyle(.segmented)
+                    switch connection.authMethod {
+                    case .none:
+                        Label("No Authorization header", systemImage: "globe")
+                            .font(.caption).foregroundStyle(.secondary)
+                    case .apiKey:
+                        apiKeyFields(optional: true)
+                    case .tokenCommand:
+                        tokenCommandField
+                    }
+                } else {
+                    apiKeyFields(optional: false)
+                }
+            }
+            Section("Model") {
+                modelField
             }
             Section("Connection test") {
                 HStack {
                     Button("Test Connection", action: onTest)
-                        .disabled(testState == .testing)
+                        .disabled(testState == .testing || !canTest)
                     if testState == .testing { ProgressView().controlSize(.small) }
                     Spacer()
                     testStatus
@@ -404,8 +412,9 @@ private struct AIServiceEditor: View {
                 if case .failed(let message) = testState {
                     Text(message).font(.caption).foregroundStyle(.red)
                 }
-                Text("Sends a short test message to confirm the key, model, and base URL respond.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if let reason = testDisabledReason {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section {
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
@@ -415,11 +424,12 @@ private struct AIServiceEditor: View {
         }
         .formStyle(.grouped)
         .padding(16)
-        .onAppear { if autofocusName { onConsumeFocus() } }
+        .onAppear {
+            if autofocusName { onConsumeFocus() }
+            normalizeAuthForProvider()
+        }
     }
 
-    // Switching provider resets the model to the new provider's default, matching first-run onboarding —
-    // otherwise the model field silently keeps the prior provider's id.
     private var providerBinding: Binding<Connection.Provider> {
         Binding(
             get: { connection.provider },
@@ -427,51 +437,217 @@ private struct AIServiceEditor: View {
                 var updated = connection
                 updated.provider = value
                 updated.model = value.defaultModel
+                if value == .openaiCompatible {
+                    updated.authMethod = hasKey ? .apiKey : .none
+                } else {
+                    updated.authMethod = .apiKey
+                    updated.tokenCommand = nil
+                }
+                apiKey = ""
                 onUpdate(updated, nil)
             })
     }
 
+    private var authMethodBinding: Binding<Connection.AuthMethod> {
+        Binding(
+            get: { connection.authMethod },
+            set: { value in
+                var updated = connection
+                updated.authMethod = value
+                if value != .tokenCommand { updated.tokenCommand = nil }
+                apiKey = ""
+                onUpdate(updated, nil)
+            })
+    }
+
+    private var baseURLField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
+                var updated = connection
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.baseUrl = trimmed.isEmpty ? nil : trimmed
+                onUpdate(updated, nil)
+            }
+            Text("Example: http://127.0.0.1:11234/v1")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func apiKeyFields(optional: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SecureField(hasKey ? "Enter replacement key" : optional ? "API key" : "API key required", text: $apiKey)
+                .onSubmit(saveKey)
+            HStack {
+                let status = apiKeyStatus
+                Label(status.text, systemImage: status.icon)
+                    .font(.caption).foregroundStyle(status.style)
+                Spacer()
+                Button("Save to Keychain", action: saveKey)
+                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text(optional ? "Use No Auth if this endpoint accepts unauthenticated requests." : "Hosted providers require a saved key.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var tokenCommandField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CommittedTextField(
+                "Command", text: connection.tokenCommand ?? "",
+                prompt: "e.g. gcloud auth print-access-token"
+            ) { value in
+                var updated = connection
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.authMethod = .tokenCommand
+                updated.tokenCommand = trimmed.isEmpty ? nil : trimmed
+                onUpdate(updated, nil)
+            }
+            if (connection.tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label("Enter the command that prints a fresh bearer token.", systemImage: "exclamationmark.circle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            Text("Runs before requests. stdout can be a raw token or JSON containing access_token, token, id_token, or status.token.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     private var modelField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            CommittedTextField("Model", text: connection.model) { value in
+            CommittedTextField("Model ID", text: connection.model) { value in
                 var updated = connection; updated.model = value; onUpdate(updated, nil)
             }
             HStack {
-                Button("Fetch…") { onFetchModels(apiKey.isEmpty ? nil : apiKey) }
+                Button(modelDiscoveryState == .loading ? "Fetching Models" : "Fetch Models") { onFetchModels(nil) }
                     .disabled(modelDiscoveryState == .loading || !canFetchModels)
                 if modelDiscoveryState == .loading { ProgressView().controlSize(.small) }
-                if !modelSuggestions.isEmpty {
-                    Menu("Use Found Model") {
-                        ForEach(modelSuggestions, id: \.self) { model in
-                            Button(model) {
-                                var updated = connection
-                                updated.model = model
-                                onUpdate(updated, nil)
-                            }
-                        }
+                Spacer()
+                modelDiscoveryStatus
+            }
+            if !modelSuggestions.isEmpty {
+                Picker("Found Model", selection: foundModelBinding) {
+                    Text("Manual / current").tag("")
+                    ForEach(modelSuggestions, id: \.self) { model in
+                        Text(model).tag(model)
                     }
-                    .fixedSize()
                 }
             }
-            switch modelDiscoveryState {
-            case .loaded where !modelSuggestions.isEmpty:
-                Text("Found \(modelSuggestions.count) model\(modelSuggestions.count == 1 ? "" : "s").")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .failed(let message):
-                Text("Could not fetch models: \(message)")
-                    .font(.caption).foregroundStyle(.orange)
-            default:
-                Text("Type a model id manually, or fetch the provider's model list.")
-                    .font(.caption).foregroundStyle(.secondary)
+            if let reason = modelFetchDisabledReason {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    private var canFetchModels: Bool {
-        if connection.provider == .openaiCompatible {
-            return !(connection.baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    @ViewBuilder private var modelDiscoveryStatus: some View {
+        switch modelDiscoveryState {
+        case .loaded where !modelSuggestions.isEmpty:
+            Text("\(modelSuggestions.count) found").font(.caption).foregroundStyle(.secondary)
+        case .failed(let message):
+            Text(message).font(.caption).foregroundStyle(.orange)
+                .lineLimit(1)
+        default:
+            EmptyView()
         }
-        return hasKey || !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var foundModelBinding: Binding<String> {
+        Binding(
+            get: { modelSuggestions.contains(connection.model) ? connection.model : "" },
+            set: { value in
+                guard !value.isEmpty else { return }
+                var updated = connection
+                updated.model = value
+                onUpdate(updated, nil)
+            })
+    }
+
+    private var canFetchModels: Bool {
+        if hasUnsavedAPIKey { return false }
+        switch connection.provider {
+        case .openaiCompatible:
+            guard !(connection.baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return false
+            }
+            switch connection.authMethod {
+            case .none:
+                return true
+            case .apiKey:
+                return hasKey
+            case .tokenCommand:
+                return !(connection.tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        case .openai, .anthropic, .gemini:
+            return hasKey
+        }
+    }
+
+    private var canTest: Bool {
+        if hasUnsavedAPIKey || connection.configIssue != nil { return false }
+        switch connection.provider {
+        case .openaiCompatible:
+            switch connection.authMethod {
+            case .none:
+                return true
+            case .apiKey:
+                return hasKey
+            case .tokenCommand:
+                return !(connection.tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        case .openai, .anthropic, .gemini:
+            return hasKey
+        }
+    }
+
+    private var modelFetchDisabledReason: String? {
+        guard modelDiscoveryState != .loading, !canFetchModels else { return nil }
+        if hasUnsavedAPIKey { return "Save the typed key before fetching models." }
+        switch connection.configIssue {
+        case .missingBaseURL:
+            return "Base URL is required before fetching models."
+        case .missingTokenCommand:
+            return "Token command is required before fetching models."
+        case .missingModel, nil:
+            break
+        }
+        if connection.provider == .openaiCompatible {
+            if connection.authMethod == .apiKey && !hasKey { return "Save an API key or choose No Auth before fetching models." }
+        } else if !hasKey {
+            return "Save an API key before fetching models."
+        }
+        return nil
+    }
+
+    private var testDisabledReason: String? {
+        if hasUnsavedAPIKey { return "Typed key is not saved yet." }
+        switch connection.configIssue {
+        case .missingModel:
+            return "Model ID is required."
+        case .missingBaseURL:
+            return "Base URL is required."
+        case .missingTokenCommand:
+            return "Token command is required."
+        case nil:
+            break
+        }
+        if connection.provider == .openaiCompatible {
+            if connection.authMethod == .apiKey && !hasKey { return "Save an API key or choose No Auth." }
+        } else if !hasKey {
+            return "Save an API key before testing."
+        }
+        return nil
+    }
+
+    private var hasUnsavedAPIKey: Bool {
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var apiKeyStatus: (text: String, icon: String, style: AnyShapeStyle) {
+        if hasUnsavedAPIKey {
+            return ("Typed key not saved", "exclamationmark.circle.fill", AnyShapeStyle(.orange))
+        }
+        if hasKey {
+            return ("Saved in Keychain", "key.fill", AnyShapeStyle(.secondary))
+        }
+        return ("No saved key", "key", AnyShapeStyle(.secondary))
     }
 
     @ViewBuilder private var testStatus: some View {
@@ -490,8 +666,21 @@ private struct AIServiceEditor: View {
     }
 
     private func saveKey() {
-        onUpdate(connection, apiKey)
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var updated = connection
+        updated.authMethod = .apiKey
+        updated.tokenCommand = nil
+        onUpdate(updated, trimmed)
         apiKey = ""
+    }
+
+    private func normalizeAuthForProvider() {
+        guard connection.provider != .openaiCompatible, connection.authMethod != .apiKey else { return }
+        var updated = connection
+        updated.authMethod = .apiKey
+        updated.tokenCommand = nil
+        onUpdate(updated, nil)
     }
 }
 

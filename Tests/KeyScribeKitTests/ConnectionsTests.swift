@@ -35,6 +35,13 @@ struct ConnectionsTests {
         #expect(connection(provider: .openaiCompatible, model: "local", baseUrl: " ").configIssue == .missingBaseURL)
     }
 
+    @Test func tokenCommandAuthWithoutCommandIsAnIssue() {
+        let c = Connection(
+            id: "c", name: "c", provider: .openaiCompatible, model: "local", keyRef: "k",
+            baseUrl: "http://127.0.0.1:11234/v1", authMethod: .tokenCommand)
+        #expect(c.configIssue == .missingTokenCommand)
+    }
+
     @Test func nonCompatibleProviderDoesNotNeedBaseURL() {
         #expect(connection(provider: .anthropic, model: "claude-x", baseUrl: nil).configIssue == nil)
     }
@@ -49,6 +56,39 @@ struct ConnectionsTests {
         #expect(c.params.temperature == 0.2)
         #expect(c.params.maxTokens == 2048)
         #expect(c.baseUrl == nil)
+    }
+
+    @Test func decodesTokenCommand() throws {
+        let t = """
+        schema_version = 1
+        [[connection]]
+        id = "proxy"
+        name = "Proxy"
+        provider = "openai_compatible"
+        model = "m"
+        key_ref = "keyscribe.llm.proxy"
+        base_url = "https://proxy.example/v1"
+        token_command = "gcloud auth print-access-token"
+        """
+        let c = try #require(try ConnectionStore.decode(from: t).connection(id: "proxy"))
+        #expect(c.tokenCommand == "gcloud auth print-access-token")
+        #expect(c.authMethod == .tokenCommand)
+    }
+
+    @Test func decodesExplicitNoAuth() throws {
+        let t = """
+        schema_version = 1
+        [[connection]]
+        id = "local"
+        name = "Local"
+        provider = "openai_compatible"
+        model = "m"
+        key_ref = "keyscribe.llm.local"
+        base_url = "http://127.0.0.1:11234/v1"
+        auth_method = "none"
+        """
+        let c = try #require(try ConnectionStore.decode(from: t).connection(id: "local"))
+        #expect(c.authMethod == .none)
     }
 
     @Test func lookupUnknownIsNil() throws {
@@ -103,7 +143,9 @@ struct ConnectionsTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-connection-write-test")
         try? FileManager.default.removeItem(at: dir)
         let original = ConnectionSet(connections: [
-            .init(id: "local", name: "Local", provider: .openaiCompatible, model: "qwen", keyRef: "local-key"),
+            .init(
+                id: "local", name: "Local", provider: .openaiCompatible, model: "qwen",
+                keyRef: "local-key", tokenCommand: "op read op://ai/token"),
         ])
 
         try ConnectionStore.write(original, to: dir)

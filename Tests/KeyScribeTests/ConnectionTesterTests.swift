@@ -77,6 +77,50 @@ struct ConnectionTesterTests {
         #expect(await tester.test(connection) == .passed)
     }
 
+    @Test func openAICompatibleNoAuthDoesNotSendStoredKey() async {
+        StubURLProtocol.handler = { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+            let body = #"{"choices":[{"message":{"content":"OK"}}]}"#.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in "stored-key" })
+        let tester = ConnectionTester(client: client)
+        let connection = Connection(
+            id: "local", name: "Local", provider: .openaiCompatible,
+            model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1",
+            authMethod: Connection.AuthMethod.none)
+
+        #expect(await tester.test(connection) == .passed)
+    }
+
+    @Test func openAICompatibleUsesTokenCommandAsBearerToken() async {
+        StubURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "http://127.0.0.1:11234/v1/chat/completions")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-token")
+            let body = #"{"choices":[{"message":{"content":"OK"}}]}"#.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let client = HTTPLLMClient(
+            session: URLSession(configuration: config),
+            keyProvider: { _ in "stale-token" },
+            tokenCommandRunner: { command in
+                #expect(command == "print-token")
+                return "fresh-token\n"
+            },
+            tokenCache: TokenCommandCache())
+        let tester = ConnectionTester(client: client)
+        let connection = Connection(
+            id: "local", name: "Local", provider: .openaiCompatible,
+            model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1",
+            tokenCommand: "print-token")
+
+        #expect(await tester.test(connection) == .passed)
+    }
+
     @Test func hostedProviderWithoutAKeyThrowsMissingKeyAndNeverHitsTheNetwork() async {
         StubURLProtocol.handler = { _ in
             Issue.record("hosted provider must not reach the network without a key")

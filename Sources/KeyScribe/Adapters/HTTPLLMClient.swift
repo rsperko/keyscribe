@@ -33,9 +33,12 @@ struct HTTPLLMClient: LLMClient {
         return URLSession(configuration: config)
     }()
     var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
+    var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
+    var tokenCache: TokenCommandCache = .shared
+    var now: @Sendable () -> Date = { Date() }
 
     func complete(system: String, user: String, connection: Connection) async throws -> String {
-        let key = keyProvider(connection.keyRef)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = try await credential(for: connection)
         if connection.provider != .openaiCompatible, key?.isEmpty != false {
             throw LLMClientError.missingKey(connection.keyRef)
         }
@@ -46,6 +49,22 @@ struct HTTPLLMClient: LLMClient {
             throw LLMClientError.http(http.statusCode)
         }
         return try parse(data, provider: connection.provider)
+    }
+
+    private func credential(for connection: Connection) async throws -> String? {
+        switch connection.authMethod {
+        case .none:
+            return nil
+        case .apiKey:
+            return keyProvider(connection.keyRef)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .tokenCommand:
+            guard let command = connection.tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
+                throw TokenCommandError.emptyCommand
+            }
+            return try await tokenCache.token(forKey: command, now: now()) {
+                try await tokenCommandRunner(command)
+            }
+        }
     }
 
     private func buildRequest(system: String, user: String, connection: Connection, key: String?) throws -> URLRequest {

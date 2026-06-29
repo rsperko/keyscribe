@@ -26,15 +26,34 @@ struct HTTPModelLister {
         return URLSession(configuration: config)
     }()
     var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
+    var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
+    var tokenCache: TokenCommandCache = .shared
+    var now: @Sendable () -> Date = { Date() }
 
     func listModels(for connection: Connection, apiKey: String?) async throws -> [String] {
-        let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let storedKey = key?.isEmpty == false ? key : keyProvider(connection.keyRef)
+        let storedKey = try await credential(for: connection, apiKey: apiKey)
         let request = try request(for: connection, key: storedKey)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ModelListError.badResponse }
         guard (200..<300).contains(http.statusCode) else { throw ModelListError.http(http.statusCode) }
         return try parse(data, provider: connection.provider)
+    }
+
+    private func credential(for connection: Connection, apiKey: String?) async throws -> String? {
+        switch connection.authMethod {
+        case .none:
+            return nil
+        case .apiKey:
+            let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return key?.isEmpty == false ? key : keyProvider(connection.keyRef)
+        case .tokenCommand:
+            guard let command = connection.tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
+                throw TokenCommandError.emptyCommand
+            }
+            return try await tokenCache.token(forKey: command, now: now()) {
+                try await tokenCommandRunner(command)
+            }
+        }
     }
 
     private func request(for connection: Connection, key: String?) throws -> URLRequest {
