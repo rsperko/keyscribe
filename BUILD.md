@@ -17,8 +17,9 @@ Same name, different identity per machine; that is expected and fine.
    but macOS re-prompts for Mic / Accessibility on every rebuild.
 3. **Build and run** — `./make-app.sh && open ./KeyScribeDev.app`. It auto-detects the cert by name.
    (`make-app.sh` defaults to the **dev** variant — see **Build variants** below.)
-4. **Re-enter your BYOK API keys** in **Settings ▸ AI Services**. Keys live in this machine's
-   keychain, never in the repo.
+4. **Re-enter your AI service credentials** in **Settings ▸ AI Services**. Saved API keys live in
+   this machine's keychain, never in the repo. OpenAI-compatible local/proxy endpoints can also use
+   No Auth or a token command instead of a saved key.
 
 ## Prerequisites
 

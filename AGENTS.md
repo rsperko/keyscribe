@@ -44,8 +44,9 @@ This file is the entry point. Read the design docs before writing code — they 
 - **Dictionary is a hint, replacements are not protected.** Dictionary terms only tell the LLM
   "valid, not a misspelling" (it may still transform them); replacements flow into the LLM and
   can be rewritten. Only **nonce tokens** are guaranteed to survive the rewrite (`design.md` §4.2).
-- **Secrets live in Keychain only.** TOML stores a `key_ref`, never key material
-  (`config_schema.md`).
+- **Credential material is never persisted in config.** Saved API keys live in Keychain and TOML
+  stores only `key_ref`; command-generated bearer tokens are in-memory only. `token_command` stores
+  the command to run, not the token material itself (`config_schema.md`).
 - **Edit-in-place is a capability, not a special mode** — any mode can be `source=selection` /
   `output=replace_selection`; ⌘C→pasteboard is the selection capture, AX is a native-only bonus
   (`design.md` §4.3).

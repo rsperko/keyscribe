@@ -304,15 +304,16 @@ glance and can show simultaneously:
   *Wired to:* a malformed config, any missing required permission, an **unusable active STT model**
   (deleted out from under us), and the AI checks — a **dangling connection** (a mode names a deleted
   connection), a **structurally misconfigured connection** (no model, or OpenAI-compatible with no
-  base URL), and a **failed Test Connection**. Opening Settings **flags the offending sidebar pane
-  with a matching red dot** — Advanced (config) · Permissions · Speech Models (model) · AI Services
-  (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
+  base URL, or token-command auth with no command), and a **failed Test Connection**. Opening
+  Settings **flags the offending sidebar pane with a matching red dot** — Advanced (config) ·
+  Permissions · Speech Models (model) · AI Services (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. The sidebar polls
-  while open and clears the flag the moment it's fixed. **A missing key is not an error** — it is
-  legitimate for a local/no-auth endpoint. **KeyScribe never passively probes the provider** (privacy
-  invariant); the only live AI signal is the **user-initiated** Test Connection. (Drawn as a separate
-  colored layer so it survives both the template glyph's appearance adaptation and the red recording
-  tint.)
+  while open and clears the flag the moment it's fixed. **A missing key is not always an error** —
+  it is legitimate when an OpenAI-compatible endpoint is set to No Auth, but hosted providers and
+  API Key auth require a saved Keychain key before testing or fetching models. **KeyScribe never
+  passively probes the provider** (privacy invariant); the only live AI signal is the
+  **user-initiated** Test Connection. (Drawn as a separate colored layer so it survives both the
+  template glyph's appearance adaptation and the red recording tint.)
 - **Update badge — small blue dot, top-right.** Shows when an app update is available. Planned
   alongside the Sparkle update mechanism (not yet built).
 
@@ -330,7 +331,7 @@ capabilities. The sidebar order is fixed:
 2. **Speech Models** — active local engine, language capability, download/prepare/select/delete
    (any per-engine preparation step, such as a model conversion, is named for what it does).
 3. **Vocabulary** — global recognition terms and automatic corrections.
-4. **AI Services** — named BYOK connections; keys live in Keychain.
+4. **AI Services** — named BYOK connections; hosted-provider keys live in Keychain.
 5. **Modes** — automatic rules and per-mode behavior.
 6. **Permissions** — review and repair macOS access.
 7. **Advanced** — configuration folder, diagnostics, migration/config errors, and notices.
@@ -391,8 +392,21 @@ Both screens prioritize fast correction over configuration theory.
 ### AI Services
 
 An AI service is a named connection, not a global provider choice. The main list shows name,
-provider/model, availability, and whether the Keychain key is present. Connection editing is a
-focused detail page.
+provider/model, availability, and the active credential state: no auth, key stored/no key, token
+command, or failed test. Connection editing is a focused detail page.
+
+The editor uses progressive sections:
+
+- **Service** — name and provider.
+- **Endpoint** — visible for OpenAI-compatible connections; base URL is required before model fetch
+  or test.
+- **Authentication** — segmented credential choice for OpenAI-compatible endpoints: **No Auth**,
+  **API Key**, or **Command**. API Key shows explicit saved/unsaved/no-key states and a **Save to
+  Keychain** action. Command shows the command field, placeholder, and an inline required-state
+  message when empty. Generated tokens stay in memory only.
+- **Model** — model id is always visible. Fetching models is a helper; when fetched models exist, a
+  visible picker selects one while the chosen id remains visible in the model field.
+- **Connection test** — user-initiated only, disabled until the visible prerequisites are met.
 
 Do not present API parameters until the connection works. Put temperature, output limits, and
 compatible endpoint configuration under `Advanced connection settings`.

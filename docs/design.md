@@ -479,9 +479,11 @@ than risk inserting in the wrong place.
   audio, keep display awake, sound on start/end); local history; optional correction-panel shortcuts.
 - **Speech models:** download/select/delete.
 - **Vocabulary:** global Dictionary & Replacements.
-- **AI Services (BYOK):** **named LLM connections** — each a `(name, provider, model, key-ref in
-  Keychain, params)`. Modes reference a connection by name; multiple connections allowed (best-of-breed
-  connection UX, cf. LibreChat — `principles.md` §5).
+- **AI Services (BYOK):** **named LLM connections** — each a `(name, provider, model, auth method,
+  params)`. Hosted providers use a `key_ref` into Keychain. OpenAI-compatible endpoints additionally
+  support no auth for local/no-auth servers or a token command that mints a bearer token on demand;
+  generated tokens are cached in memory only and never persisted. Modes reference a connection by
+  name; multiple connections allowed.
 - **Modes:** a focused mode editor for common behavior plus read-only notes for advanced TOML-only
   behavior; each mode persists as a **TOML** file. Schema and the referenced config files are
   specified in `config_schema.md`.
@@ -543,8 +545,9 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
 - **Global hotkeys / insertion:** CGEvent (`kTCCServicePostEvent`) for paste keystroke; Accessibility
   (`kTCCServiceAccessibility`) for context reading and optional AX insert; `RegisterEventHotKey`
   (Carbon) for chord triggers.
-- **LLM:** thin BYOK client over OpenAI/Anthropic/Gemini/OpenAI-compatible HTTP APIs; keys in
-  Keychain; connection UX modeled on best-of-breed (LibreChat).
+- **LLM:** thin BYOK client over OpenAI/Anthropic/Gemini/OpenAI-compatible HTTP APIs; hosted-provider
+  keys in Keychain; OpenAI-compatible endpoints can use no auth, a Keychain-backed bearer token, or
+  a command-generated bearer token cached in memory until its expiry/default TTL.
 - **Storage (file-based, no DB):**
   - **Modes → TOML files** (one per mode) — human-readable, hand-editable, diff-friendly, naturally
     data-driven (`principles.md` §2).
@@ -552,7 +555,8 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
     retention drops old day-files.
   - **Global dictionary & replacements → TOML.**
   - **Shared prompt fragments → `fragments/` directory, markdown + YAML frontmatter.**
-  - **LLM connections → TOML** (key material in Keychain, referenced by id).
+  - **LLM connections → TOML** (key material in Keychain, referenced by id; command-generated
+    tokens in memory only).
   - **STT weights → `models/` dir** under the support root (runtime-downloaded, never committed,
     backup-excluded; §4.1).
   - **Redaction/verbatim maps → in-memory only**, never persisted.

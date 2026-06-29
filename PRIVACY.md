@@ -13,8 +13,11 @@ not a legal privacy policy.
   transcripts, usage data, or diagnostics. There is no account and no sign-in.
 - **History stays local.** Past dictations are stored as plain JSONL files under
   `~/Library/Application Support/KeyScribe/` and are never uploaded.
-- **Your API keys stay in the Keychain.** BYOK provider keys are stored in the macOS Keychain. The
-  on-disk config holds only a reference to a key, never the key material itself.
+- **Your saved API keys stay in the Keychain.** BYOK provider keys are stored in the macOS
+  Keychain. The on-disk config holds only a reference to a key, never the key material itself.
+- **Command-generated tokens are not persisted.** OpenAI-compatible endpoints can use a command that
+  prints a bearer token. KeyScribe keeps generated tokens in memory only, honoring reported expiry
+  when present.
 
 ## The only thing that can leave your Mac
 
@@ -24,8 +27,9 @@ a provider and enable it for a mode.
 
 When it runs:
 
-- The request goes to **the provider and endpoint you configured**, authenticated with **your** key.
-  KeyScribe has no LLM service of its own.
+- The request goes to **the provider and endpoint you configured**, authenticated using the
+  credential method you selected: a Keychain-backed API key, no auth for local/no-auth endpoints, or
+  a command-generated bearer token. KeyScribe has no LLM service of its own.
 - Before the request is sent, sensitive spans are **tokenized out** of the transcript (the redaction
   wedge, below) and restored locally in the response.
 - Turn the cleanup off and KeyScribe makes no network calls at all after the initial one-time model

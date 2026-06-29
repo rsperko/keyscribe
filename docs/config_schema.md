@@ -265,11 +265,27 @@ name = "Gemini 2.5 Flash"
 provider = "gemini"             # "openai" | "anthropic" | "gemini" | "openai_compatible"
 model = "gemini-2.5-flash"
 key_ref = "keyscribe.llm.gemini-flash"   # Keychain item id — the key itself never lives in TOML
-# base_url = "https://..."      # for openai_compatible endpoints
+# auth_method = "api_key"       # "api_key" | "token_command" | "none"; defaults to "api_key"
+# base_url = "https://..."      # required for openai_compatible endpoints
+# token_command = "..."         # required when auth_method = "token_command"
 [connection.params]
 temperature = 0.2
 max_tokens = 2048   # floor; raised per request for long edit-in-place selections (prompt_design.md budget policy)
 ```
+
+`auth_method` controls how requests are authenticated:
+
+| `auth_method` | Meaning |
+| --- | --- |
+| `api_key` | Read the secret from Keychain using `key_ref`. Hosted providers require this. OpenAI-compatible endpoints may use it when a proxy expects a bearer token. |
+| `token_command` | Run `token_command` before requests and send its output as `Authorization: Bearer …`. The generated token is kept in memory only and never written to disk. |
+| `none` | Send no Authorization header. Valid for local/no-auth OpenAI-compatible endpoints. |
+
+`token_command` stdout may be a raw token on the first line, `Bearer <token>`, OAuth-style JSON
+(`access_token`, `token`, or `id_token`), or Kubernetes ExecCredential-style JSON
+(`status.token`). If stdout includes `expires_in`, `expiration`, `expires_at`, or
+`status.expirationTimestamp`, KeyScribe honors that expiry with a short refresh skew; otherwise the
+token is cached in memory for five minutes to avoid re-running the command for every rewrite.
 
 ### `fragments/<id>.md` — shared prompt fragments (one file per fragment)
 Prose lives best as a markdown body with a small YAML header; structured config stays TOML.
@@ -343,7 +359,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 ## Conventions
 - **Unknown keys** in a user-edited file are preserved on rewrite where possible, but a file
   whose `schema_version` exceeds the app's is left untouched and surfaced (`design.md` §5.1).
-- **Secrets never in TOML** — LLM keys live in Keychain; TOML stores only `key_ref`.
+- **Secrets never in TOML** — saved LLM keys live in Keychain; command-generated tokens live only in
+  memory. TOML stores `key_ref`, `auth_method`, and the command to run, never key or token material.
 - **kebab-case ids**, snake_case fields, consistently.
 
 ## Notes & conventions

@@ -44,8 +44,11 @@
 - Per-keystroke config writes → an explicit **Save** in the mode/connection editors.
 
 ### AI rewrite
-- **Connection-UX research** (`principles.md` §5): study the cleanest LLM-connection UX (e.g.
-  LibreChat) and refine the AI Services pane against it.
+- **AI Services polish:** the pane now uses progressive sections for service, endpoint,
+  authentication, model discovery, and connection test. OpenAI-compatible endpoints support no auth,
+  a Keychain-backed API key, or a command-generated bearer token. Remaining polish is narrow: long
+  discovered model names can make the native picker wide, and the unsaved-key state needs continued
+  visual QA.
 - A cached post-install **self-test-failed** model flag (needs persisted state) to broaden the error
   badge's coverage.
 - **Inline prompt slots (power-user prompt layout).** Today `PromptAssembler` builds a fixed

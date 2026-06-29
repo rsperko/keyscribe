@@ -110,8 +110,10 @@ Qwen3-ASR 1.7B, and Moonshine Base (English).
 Trade accuracy, speed, and footprint without sending audio to a server.
 
 **Optional cleanup on your terms.** BYOK LLM cleanup can strip filler, fix grammar, or reformat text
-using your OpenAI-compatible provider and key. Best-effort redaction tokenizes recognizable sensitive
-spans before rewrite and restores them locally afterward.
+using OpenAI, Anthropic, Gemini, or an OpenAI-compatible endpoint. Hosted providers use a key saved
+in Keychain; local OpenAI-compatible endpoints can use no auth, a saved key, or a command that prints
+a short-lived bearer token. Best-effort redaction tokenizes recognizable sensitive spans before
+rewrite and restores them locally afterward.
 
 **Inspectable history.** Browse and reuse past dictations stored as local JSONL, with processing
 details that show what was heard, transformed, rewritten, or kept local.
