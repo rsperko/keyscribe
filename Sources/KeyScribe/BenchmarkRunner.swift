@@ -19,7 +19,7 @@ enum BenchmarkRunner {
         var recallBiased = 0.0
     }
 
-    static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false) async {
+    static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false, fuzzy: Bool = false) async {
         let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {
@@ -60,23 +60,34 @@ enum BenchmarkRunner {
                 guard let biased = try? await engine.transcribe(wavURL: wav, biasTerms: entry.biasTerms)
                 else { continue }
                 let elapsed = Date().timeIntervalSince(start)
-                let unbiased = (try? await engine.transcribe(wavURL: wav, biasTerms: [])) ?? biased
+                let unbiasedRaw = (try? await engine.transcribe(wavURL: wav, biasTerms: [])) ?? biased
+
+                // Optionally apply the real post-STT fuzzy stage (dictionary = this clip's bias terms)
+                // so we can measure how much it recovers on top of the engine — the lever for bias-less
+                // engines. Timed RTF stays engine-only (fuzzy runs after `elapsed`).
+                var biasedH = biased
+                var unbiasedH = unbiasedRaw
+                if fuzzy, !entry.biasTerms.isEmpty {
+                    let prepared = FuzzyCorrector.prepare(entry.biasTerms)
+                    biasedH = FuzzyCorrector.apply(biased, prepared: prepared)
+                    unbiasedH = FuzzyCorrector.apply(unbiasedRaw, prepared: prepared)
+                }
 
                 r.clips += 1
-                r.werBiased += BenchmarkScoring.wer(reference: entry.text, hypothesis: biased)
-                r.werUnbiased += BenchmarkScoring.wer(reference: entry.text, hypothesis: unbiased)
+                r.werBiased += BenchmarkScoring.wer(reference: entry.text, hypothesis: biasedH)
+                r.werUnbiased += BenchmarkScoring.wer(reference: entry.text, hypothesis: unbiasedH)
                 if dur > 0 { r.rtfSum += elapsed / dur }
                 if !entry.biasTerms.isEmpty {
                     r.termClips += 1
-                    let recB = BenchmarkScoring.termRecall(terms: entry.biasTerms, in: biased)
+                    let recB = BenchmarkScoring.termRecall(terms: entry.biasTerms, in: biasedH)
                     r.recallBiased += recB
-                    r.recallUnbiased += BenchmarkScoring.termRecall(terms: entry.biasTerms, in: unbiased)
+                    r.recallUnbiased += BenchmarkScoring.termRecall(terms: entry.biasTerms, in: unbiasedH)
                     if verbose, recB < 1 {
-                        let missed = entry.biasTerms.filter { biased.range(of: $0, options: .caseInsensitive) == nil }
+                        let missed = entry.biasTerms.filter { biasedH.range(of: $0, options: .caseInsensitive) == nil }
                         print("  [\(engine.id) \(entry.id)] MISS \(missed)")
                         print("    want : \(entry.text)")
-                        print("    bias : \(biased)")
-                        print("    plain: \(unbiased)")
+                        print("    bias : \(biasedH)")
+                        print("    plain: \(unbiasedH)")
                     }
                 }
             }

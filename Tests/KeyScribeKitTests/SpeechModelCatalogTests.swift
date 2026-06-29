@@ -5,8 +5,8 @@ struct SpeechModelCatalogTests {
     @Test func curatedListIsTheKnownEngines() {
         #expect(
             Set(SpeechModelCatalog.all.map(\.id))
-                == ["parakeet", "parakeet-tdt-ctc-110m", "whisper", "apple",
-                    "qwen3-asr-0.6b", "qwen3-asr-1.7b", "moonshine-base-en"])
+                == ["parakeet", "parakeet-tdt-ctc-110m", "whisper", "whisper-small-en", "apple",
+                    "qwen3-asr-0.6b", "qwen3-asr-1.7b", "nemotron-en", "moonshine-base-en"])
     }
 
     @Test func exactlyOneDefaultEnglishEngine() {
@@ -29,6 +29,17 @@ struct SpeechModelCatalogTests {
     }
 
 
+    @Test func smallEnglishWhisperIsACompactEnglishBiasCapableVariant() {
+        let small = SpeechModelCatalog.entry(for: "whisper-small-en")
+        #expect(small?.kind == .whisper)
+        #expect(small?.languageCount == 1)
+        #expect(small?.supportsRecognitionBias == true)
+        #expect(small?.isDefaultEnglish == false)
+        // Meaningfully smaller than the Large v3 Turbo it sits beside.
+        let turbo = SpeechModelCatalog.entry(for: "whisper")
+        #expect((small?.approxDownloadBytes ?? .max) < (turbo?.approxDownloadBytes ?? 0))
+    }
+
     @Test func languageCountsAreSane() {
         #expect(SpeechModelCatalog.entry(for: "parakeet")?.languageCount == 25)
         #expect(SpeechModelCatalog.entry(for: "whisper")?.languageCount == 99)
@@ -40,9 +51,12 @@ struct SpeechModelCatalogTests {
     }
 
     @Test func recognitionBiasSupportIsPerEngine() {
-        // Moonshine has no on-device bias path; every other engine does.
-        #expect(SpeechModelCatalog.entry(for: "moonshine-base-en")?.supportsRecognitionBias == false)
-        for e in SpeechModelCatalog.all where e.id != "moonshine-base-en" {
+        // Moonshine and Nemotron have no on-device bias path; every other engine does.
+        let biasExempt: Set<String> = ["moonshine-base-en", "nemotron-en"]
+        for id in biasExempt {
+            #expect(SpeechModelCatalog.entry(for: id)?.supportsRecognitionBias == false)
+        }
+        for e in SpeechModelCatalog.all where !biasExempt.contains(e.id) {
             #expect(e.supportsRecognitionBias == true)
         }
     }

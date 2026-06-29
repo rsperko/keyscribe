@@ -12,18 +12,40 @@ import WhisperKit
 // without "sending" the instance off-actor. Access is serialized by the commit-on-release dictation
 // state machine (load/evict happen between dictations, never during one), so `nonisolated(unsafe)`
 // storage is the proven SDK-edge pattern here, not a race.
+// Per-model identity bundled so adding a Whisper model is adding a profile constant, not editing
+// the engine. Each profile owns its own install subdir under modelsDir so reconcile/delete treats
+// the variants independently (the Large v3 Turbo keeps the original "whisper" dir for back-compat).
+struct WhisperModelProfile {
+    let id: String
+    let displayName: String
+    let variant: String
+    let installDir: String
+
+    static let largeV3Turbo = WhisperModelProfile(
+        id: "whisper", displayName: "Whisper Large v3 Turbo",
+        variant: "openai_whisper-large-v3-v20240930_turbo_632MB", installDir: "whisper")
+    static let smallEnglish = WhisperModelProfile(
+        id: "whisper-small-en", displayName: "Whisper Small (English)",
+        variant: "openai_whisper-small.en_217MB", installDir: "whisper-small-en")
+}
+
 final class WhisperEngine: SpeechEngine, @unchecked Sendable {
-    let id = "whisper"
-    let displayName = "Whisper Large v3 Turbo"
+    let id: String
+    let displayName: String
     let supportsRecognitionBias = true
-    let installDirNames = ["whisper"]
+    let installDirNames: [String]
 
-    private static let variant = "openai_whisper-large-v3-v20240930_turbo_632MB"
-
+    private let variant: String
+    private let installDir: String
     private let modelsDir: URL
     nonisolated(unsafe) private var pipe: WhisperKit?
 
-    init(modelsDir: URL) {
+    init(profile: WhisperModelProfile, modelsDir: URL) {
+        self.id = profile.id
+        self.displayName = profile.displayName
+        self.variant = profile.variant
+        self.installDir = profile.installDir
+        self.installDirNames = [profile.installDir]
         self.modelsDir = modelsDir
     }
 
@@ -36,9 +58,9 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         // Reserve a tail of the bar for the opaque CoreML load/compile step, which has no progress
         // callback — so the download doesn't prematurely show 100% while WhisperKit loads ~632 MB.
         let downloadShare = 0.9
-        let base = modelsDir.appendingPathComponent("whisper", isDirectory: true)
+        let base = modelsDir.appendingPathComponent(installDir, isDirectory: true)
         let folder = try await WhisperKit.download(
-            variant: Self.variant, downloadBase: base,
+            variant: variant, downloadBase: base,
             progressCallback: { p in
                 progress?(.init(phase: "Downloading speech model…", fraction: p.fractionCompleted * downloadShare))
             })

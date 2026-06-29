@@ -1,5 +1,5 @@
 {
-  "originHash" : "02568bd4f3eb8ba20270b0a3e611afcc616a8085ca3882ce4e84af7804251fc0",
+  "originHash" : "935611039007851695503e7ec8d07028bf1ffd43a75892b6058c902bd946b472",
   "pins" : [
     {
       "identity" : "argmax-oss-swift",
@@ -23,7 +23,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/rsperko/FluidAudio.git",
       "state" : {
-        "revision" : "b70367711966c4974905dc79b5f2c82b2209d072"
+        "revision" : "a95ec26ee05f19b5f6e69c62e1d4fae420537730"
       }
     },
     {

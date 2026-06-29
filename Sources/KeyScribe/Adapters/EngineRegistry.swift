@@ -45,13 +45,15 @@ enum EngineRegistry {
         switch id {
         case "parakeet": return ParakeetEngine(profile: .tdtV3, modelsDir: modelsDir)
         case "parakeet-tdt-ctc-110m": return ParakeetEngine(profile: .tdtCtc110m, modelsDir: modelsDir)
-        case "whisper": return WhisperEngine(modelsDir: modelsDir)
+        case "whisper": return WhisperEngine(profile: .largeV3Turbo, modelsDir: modelsDir)
+        case "whisper-small-en": return WhisperEngine(profile: .smallEnglish, modelsDir: modelsDir)
         case "apple":
             if #available(macOS 26, *) { return AppleEngine() }
             fatalError("EngineRegistry: Apple Speech engine requires macOS 26")
         case "qwen3-asr-0.6b": return Qwen3ASREngine(profile: .small, modelsDir: modelsDir)
         case "qwen3-asr-1.7b": return Qwen3ASREngine(profile: .large, modelsDir: modelsDir)
         case "moonshine-base-en": return MoonshineEngine(modelsDir: modelsDir)
+        case "nemotron-en": return NemotronEngine(modelsDir: modelsDir)
         default: fatalError("EngineRegistry: no constructor for engine id '\(id)'")
         }
     }

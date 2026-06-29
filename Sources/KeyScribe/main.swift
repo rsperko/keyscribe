@@ -24,6 +24,7 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
       --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
         --engines <a,b,...>     Limit the benchmark run to these engine ids.
         --raw                   Emit raw per-clip benchmark output.
+        --fuzzy                 Apply the post-STT fuzzy corrector (dict = clip bias terms) before scoring.
       --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                               (downloaded models stay shared). Pair with --first-run to test
                               onboarding without touching your real configuration.
@@ -77,9 +78,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
         only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
     }
     let raw = CommandLine.arguments.contains("--raw")
+    let fuzzy = CommandLine.arguments.contains("--fuzzy")
     let done = DispatchSemaphore(value: 0)
     Task.detached {
-        await BenchmarkRunner.run(dir: dir, only: only, raw: raw)
+        await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
         done.signal()
     }
     done.wait()

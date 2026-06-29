@@ -40,7 +40,8 @@ struct BiasBenchmarkTests {
         var engines: [(String, @Sendable () -> any SpeechEngine)] = [
             ("Parakeet v3", { ParakeetEngine(profile: .tdtV3, modelsDir: dir) }),
             ("Parakeet 110M", { ParakeetEngine(profile: .tdtCtc110m, modelsDir: dir) }),
-            ("Whisper", { WhisperEngine(modelsDir: dir) }),
+            ("Whisper", { WhisperEngine(profile: .largeV3Turbo, modelsDir: dir) }),
+            ("Whisper small.en", { WhisperEngine(profile: .smallEnglish, modelsDir: dir) }),
         ]
         if #available(macOS 26, *) {
             engines.append(("Apple", { AppleEngine() }))

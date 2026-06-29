@@ -64,8 +64,8 @@ actor ParakeetEngine: SpeechEngine {
     //
     // `spotterRescue` gates FluidAudio's spotter-anchored rescue pass (acoustic-only replacement,
     // no similarity gate). It's safe only with an accurate CTC model: on by default (ctc06b/v3),
-    // off for the weaker ctc110m where it hallucinated swaps (e.g. "I'm"→"KeyScribe"). Requires our
-    // FluidAudio fork's `enableSpotterRescue` param (see Package.swift).
+    // off for the weaker ctc110m where it hallucinated swaps (e.g. "I'm"→"KeyScribe"). Set through
+    // FluidAudio's `VocabularyRescorer.Config.spotterRescueEnabled` (upstreamed in #724).
     private var ctcSpotter: CtcKeywordSpotter?
     private var ctcTokenizer: CtcTokenizer?
     private var ctcDir: URL?
@@ -172,8 +172,7 @@ actor ParakeetEngine: SpeechEngine {
                 logProbs: spot.logProbs,
                 frameDuration: spot.frameDuration,
                 cbw: vocabConfig.cbw,
-                minSimilarity: vocabConfig.minSimilarity,
-                enableSpotterRescue: spotterRescue)
+                minSimilarity: vocabConfig.minSimilarity)
 
             Log.bias.info(
                 "\(self.id, privacy: .public) terms=\(biasTerms.joined(separator: "|"), privacy: .private) applied=\(rescored.wasModified, privacy: .public) replacements=\(rescored.replacements.count, privacy: .public)"
@@ -204,7 +203,9 @@ actor ParakeetEngine: SpeechEngine {
     ) async throws -> VocabularyRescorer {
         if let cachedRescorer { return cachedRescorer }
         let rescorer = try await VocabularyRescorer.create(
-            spotter: spotter, vocabulary: vocab, config: .default, ctcModelDirectory: ctcDir)
+            spotter: spotter, vocabulary: vocab,
+            config: VocabularyRescorer.Config(spotterRescueEnabled: spotterRescue),
+            ctcModelDirectory: ctcDir)
         cachedRescorer = rescorer
         return rescorer
     }

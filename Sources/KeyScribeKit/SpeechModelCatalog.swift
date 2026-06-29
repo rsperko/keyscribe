@@ -1,7 +1,7 @@
 import Foundation
 
 public enum EngineKind: String, Codable, Sendable, Equatable {
-    case parakeet, whisper, apple, qwen3asr, moonshine
+    case parakeet, whisper, apple, qwen3asr, moonshine, nemotron
 }
 
 public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
@@ -50,6 +50,11 @@ public enum SpeechModelCatalog {
             languageCount: 99, approxDownloadBytes: 632_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
+            id: "whisper-small-en", kind: .whisper, displayName: "Whisper Small (English)",
+            summary: "Compact English Whisper — smaller and faster than Turbo, lower accuracy.",
+            languageCount: 1, approxDownloadBytes: 217_000_000, systemManaged: false,
+            isDefaultEnglish: false, supportsRecognitionBias: true),
+        SpeechModelInfo(
             id: "apple", kind: .apple, displayName: "Apple Speech",
             summary: "Native macOS transcription. No download, fastest startup.",
             languageCount: 20, approxDownloadBytes: 0, systemManaged: true,
@@ -64,6 +69,11 @@ public enum SpeechModelCatalog {
             summary: "Largest multilingual model; top accuracy in our benchmarks.",
             languageCount: 52, approxDownloadBytes: 2_000_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
+        SpeechModelInfo(
+            id: "nemotron-en", kind: .nemotron, displayName: "Nemotron Speech 3.5 (English)",
+            summary: "Fast, accurate English model; cannot bias toward your dictionary.",
+            languageCount: 1, approxDownloadBytes: 627_000_000, systemManaged: false,
+            isDefaultEnglish: false, supportsRecognitionBias: false),
         SpeechModelInfo(
             id: "moonshine-base-en", kind: .moonshine, displayName: "Moonshine Base (English)",
             summary: "Lightweight English model; no dictionary bias.",
