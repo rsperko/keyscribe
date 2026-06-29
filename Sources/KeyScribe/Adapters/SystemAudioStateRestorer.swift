@@ -10,8 +10,24 @@ import KeyScribeKit
 // 0.1.7's crash with a hijacked default mic. Devices are resolved by UID, never by transient AudioDeviceID.
 final class SystemAudioStateRestorer: Sendable {
     private let store: PendingSystemRestoreStore
+    private let resolveInputDevice: @Sendable (String) -> AudioDeviceID?
+    private let resolveAnyDevice: @Sendable (String) -> AudioDeviceID?
+    private let setDefaultInput: @Sendable (AudioDeviceID) -> Bool
+    private let setOutputMute: @Sendable (UInt32, AudioDeviceID) -> Bool
 
-    init(store: PendingSystemRestoreStore) { self.store = store }
+    init(
+        store: PendingSystemRestoreStore,
+        resolveInputDevice: @escaping @Sendable (String) -> AudioDeviceID? = AudioInputDevices.deviceID(forUID:),
+        resolveAnyDevice: @escaping @Sendable (String) -> AudioDeviceID? = AudioInputDevices.deviceID(forAnyUID:),
+        setDefaultInput: @escaping @Sendable (AudioDeviceID) -> Bool = AudioInputDevices.setSystemDefaultInput,
+        setOutputMute: @escaping @Sendable (UInt32, AudioDeviceID) -> Bool = SystemOutputAudio.setMute
+    ) {
+        self.store = store
+        self.resolveInputDevice = resolveInputDevice
+        self.resolveAnyDevice = resolveAnyDevice
+        self.setDefaultInput = setDefaultInput
+        self.setOutputMute = setOutputMute
+    }
 
     // MARK: - Record / clear (called around each in-process mutation)
 
@@ -39,11 +55,12 @@ final class SystemAudioStateRestorer: Sendable {
     func reconcile() {
         let pending = store.load()
         guard !pending.isEmpty else { return }
-        if let uid = pending.defaultInputUID, let device = AudioInputDevices.deviceID(forUID: uid) {
-            AudioInputDevices.setSystemDefaultInput(device)
+        if let uid = pending.defaultInputUID, let device = resolveInputDevice(uid) {
+            _ = setDefaultInput(device)
         }
-        if let mute = pending.outputMute, let device = AudioInputDevices.deviceID(forAnyUID: mute.deviceUID) {
-            SystemOutputAudio.setMute(mute.previousMute, on: device)
+        if let mute = pending.outputMute, mute.previousMute == 0,
+           let device = resolveAnyDevice(mute.deviceUID) {
+            _ = setOutputMute(0, device)
         }
         // Clear unconditionally — even if a recorded device is absent right now (cannot be restored). A
         // stale marker must never survive to re-fire on every future launch; when that device returns the
