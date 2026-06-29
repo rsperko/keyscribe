@@ -38,6 +38,13 @@ struct HUDStateTests {
         #expect(state.secondaryText == "Next dictation")
     }
 
+    @Test func armingDictationIsCancellable() {
+        let state = HUDState.arming(mode: "Plain Dictation")
+        #expect(state.primaryText == "Plain Dictation")
+        #expect(state.secondaryText == "Starting")
+        #expect(state.holdsKeyFocus)
+    }
+
     @Test func rewritingBadgesListEachBoundaryCategorySeparately() {
         let state = HUDState.rewriting(
             connection: "Gemini", redacted: false,

@@ -67,8 +67,8 @@ struct FocusGuardWiringTests {
             accessibilityGranted: { true })
 
         controller.handleStart()
-        controller.handleCommit()
         await controller.captureBringUpTask?.value
+        controller.handleCommit()
         await controller.dictationTask?.value
         return result.decision
     }

@@ -65,6 +65,13 @@ final class HotkeyMonitor {
         rebuildMouse()
     }
 
+    func cancelGestures() {
+        for i in bindings.indices {
+            bindings[i].gesture.cancel()
+            bindings[i].hyperEngaged = false
+        }
+    }
+
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
     // A `.listenOnly` session tap that only observes modifiers is authorized by Accessibility alone (no
     // Input Monitoring). `.listenOnly` (not `.defaultTap`): we never consume or modify an event, and a

@@ -42,6 +42,26 @@ struct PreferredDevicePinTests {
     @Test func preferredDifferentFromADifferentPinRepins() {
         #expect(AudioCapture.pinDecision(preferred: 7, systemDefault: 5, currentlyPinned: 9) == .pin(7))
     }
+
+    @Test func systemDefaultFallbackAllowedWhenNoPreferredDeviceIsConfigured() {
+        #expect(AudioCapture.allowsSystemDefaultFallback(
+            preferredUID: nil, preferredDevice: nil, systemDefault: 5))
+    }
+
+    @Test func systemDefaultFallbackAllowedWhenPreferredDeviceIsDisconnected() {
+        #expect(AudioCapture.allowsSystemDefaultFallback(
+            preferredUID: "DeskMic", preferredDevice: nil, systemDefault: 5))
+    }
+
+    @Test func systemDefaultFallbackAllowedWhenPreferredDeviceIsAlreadyDefault() {
+        #expect(AudioCapture.allowsSystemDefaultFallback(
+            preferredUID: "BuiltInMic", preferredDevice: 5, systemDefault: 5))
+    }
+
+    @Test func systemDefaultFallbackRejectedWhenPreferredDeviceIsAvailableButDifferent() {
+        #expect(!AudioCapture.allowsSystemDefaultFallback(
+            preferredUID: "BuiltInMic", preferredDevice: 7, systemDefault: 5))
+    }
 }
 
 // The shim must turn a raised NSException into a Swift error, and stay transparent on a clean block.

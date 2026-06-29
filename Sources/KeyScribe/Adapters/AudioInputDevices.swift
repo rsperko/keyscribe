@@ -51,6 +51,11 @@ enum AudioInputDevices {
         return deviceID
     }
 
+    static func systemDefaultInput() -> Device? {
+        guard let id = systemDefaultInputID(), let uid = uid(of: id) else { return nil }
+        return Device(id: id, uid: uid, name: name(of: id) ?? uid)
+    }
+
     static func isBluetooth(_ id: AudioDeviceID) -> Bool {
         guard let transport = transportType(of: id) else { return false }
         return transport == kAudioDeviceTransportTypeBluetooth

@@ -272,6 +272,8 @@ private struct HUDView: View {
         switch model.state {
         case .ready:
             Image(systemName: "mic").foregroundStyle(.secondary)
+        case .arming:
+            ProgressView().controlSize(.small)
         case .recording:
             RecordingIcon(level: level)
         case .transcribing, .rewriting:

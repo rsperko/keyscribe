@@ -65,8 +65,8 @@ struct TrailingAndSubmitTests {
             accessibilityGranted: { accessibilityGranted })
 
         controller.handleStart()
+        await controller.captureBringUpTask?.value
         controller.handleCommit()
-        await controller.captureBringUpTask?.value   // mic bring-up is async; commit is deferred until it lands
         await controller.dictationTask?.value
         return captured
     }

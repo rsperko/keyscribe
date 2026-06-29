@@ -72,10 +72,11 @@ This file is the entry point. Read the design docs before writing code — they 
   the next dictation rebuilds a fresh engine + queue — so the healthy path keeps reusing the prewarmed
   engine (no fresh build per dictation) and a wedge degrades to a graceful "Could not start the
   microphone" instead of a hang. A tap buffer carries the engine `generation` so a wedged engine that
-  finally unblocks can't write into a newer recording. Because bring-up is async, `handleCommit` **defers
-  the release** (`pendingCommit`) until `captureStarted` flips true, rather than transcribing an empty
-  file. A `kAudioHardwarePropertyDefaultInputDevice` listener re-prewarms on a device change while idle
-  (no `AVAudioEngineConfigurationChange` fires while stopped), keeping the prewarmed engine's binding fresh.
+  finally unblocks can't write into a newer recording. Because bring-up is async, `handleCommit` before
+  `captureStarted` cancels the not-yet-live attempt rather than queueing a commit against audio that was
+  not recording yet. A `kAudioHardwarePropertyDefaultInputDevice` listener re-prewarms on a device change
+  while idle (no `AVAudioEngineConfigurationChange` fires while stopped), keeping the prewarmed engine's
+  binding fresh.
 - **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs at the top of `transcribeAndInsert`, in

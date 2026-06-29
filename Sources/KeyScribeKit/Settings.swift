@@ -166,8 +166,9 @@ public struct Settings: Codable, Equatable, Sendable {
 
     // Preferred capture device. `inputDeviceUID` is a CoreAudio device UID (stable across reconnect,
     // unlike the ephemeral AudioDeviceID); nil means "follow the system default input." The capture
-    // adapter resolves it live each bring-up: preferred device if present, else the system default —
-    // and switches back when the preferred device returns. `inputDeviceName` is the human-friendly label
+    // adapter resolves it live each bring-up: preferred device if present, else the system default. A
+    // present preferred device is strict; fallback is for disconnected preferred devices. `inputDeviceName`
+    // is the human-friendly label
     // captured when the device was last seen; it may be stale (the host refreshes it at startup whenever
     // the device is connected) and is shown only so a disconnected preferred device still reads as itself.
     public struct Audio: Codable, Equatable, Sendable {

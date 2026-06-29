@@ -58,12 +58,10 @@ final class DictationController {
     private var modeResolveTask: Task<Void, Never>?
     private var captureStartTask: Task<Void, Never>?
     // Engine bring-up now runs async (off the main thread, watchdogged) so a wedging device can never
-    // freeze the app. captureStarted flips true only once the mic is actually live; pendingCommit holds a
-    // release that arrived during bring-up (or the cue-gap) so it is honored the instant capture comes up
-    // rather than transcribing an empty file.
+    // freeze the app. captureStarted flips true only once the mic is actually live.
     private(set) var captureBringUpTask: Task<Void, Never>?
     private var captureStarted = false
-    private var pendingCommit = false
+    private var captureBringUpCancelling = false
 
     // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
     // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
@@ -141,7 +139,7 @@ final class DictationController {
     // stranded by a mid-dictation config reload.
     var onBecameIdle: (() -> Void)?
 
-    var isBusy: Bool { machine.isBusy }
+    var isBusy: Bool { machine.isBusy || captureBringUpCancelling }
     var hasResult: Bool { lastResult != nil }
     var nextModeOverrideName: String? {
         nextModeOverrideID.flatMap { id in config.modes.first { $0.id == id }?.name }
@@ -188,7 +186,7 @@ final class DictationController {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: .critical, queue: .main)
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, !self.machine.isBusy else { return }
+                guard let self, !self.isBusy else { return }
                 let active = self.provider.active
                 self.log.notice("memory pressure (critical): evicting \(active.id, privacy: .public)")
                 Task { await active.evict() }
@@ -208,7 +206,7 @@ final class DictationController {
     // evicting under a live transcribe is a use-after-close. Defer to the terminal state instead.
     func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
         invalidateWarm(engine.id)
-        if machine.isBusy {
+        if isBusy {
             deferredEvictionEngine = engine
         } else {
             Task { await engine.evict() }
@@ -222,7 +220,7 @@ final class DictationController {
     // transcribe.
     func evictEngineForSettings(_ engine: any SpeechEngine) async {
         invalidateWarm(engine.id)
-        if !machine.isBusy || capturedEngine?.id != engine.id {
+        if !isBusy || capturedEngine?.id != engine.id {
             await engine.evict()
             return
         }
@@ -303,12 +301,13 @@ final class DictationController {
     // ui_design.md §6: a one-shot mode picked from the menu is acknowledged in the HUD before the
     // next dictation. Only when idle — never stomp an in-flight dictation's state.
     func acknowledgeNextMode() {
-        guard !machine.isBusy, let name = nextModeOverrideName else { return }
+        guard !isBusy, let name = nextModeOverrideName else { return }
         hud?.render(.ready(mode: name))
         scheduleHide()
     }
 
     func handleStart(triggerKey: String? = nil) {
+        guard !captureBringUpCancelling else { return }
         guard machine.beginRecording() else { return }
         hideTask?.cancel()
         idleEvictionTask?.cancel()
@@ -325,7 +324,6 @@ final class DictationController {
         capturedPlan = config.resolved
         capturedEngine = provider.active
         captureStarted = false
-        pendingCommit = false
         activeMode = nil
         eligibleModes = []
         routingContext = RoutingContext()
@@ -341,6 +339,8 @@ final class DictationController {
                 await self.resolveModeProbing(triggerKey: triggerKey)
                 if self.machine.state == .recording, self.captureStarted {
                     self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel)))
+                } else if self.machine.state == .recording {
+                    self.hud?.render(.arming(mode: self.activeMode?.name ?? self.currentModeName))
                 }
             }
         } else {
@@ -351,13 +351,12 @@ final class DictationController {
         warmActiveEngine()
 
         // Option A cue gating: the start cue plays now and CAPTURE comes up only after it finishes, so the
-        // cue never lands in the recording. The HUD, however, shows instantly — the truthful `.ready`
-        // state (not `.recording`) during the gap, so the window appears with no perceptible delay without
-        // claiming to listen before the mic is live; beginCapture flips it to `.recording` when the mic
-        // goes live. No cue (sounds off / unbundled) → zero delay → capture and HUD fire together.
+        // cue never lands in the recording. The HUD, however, shows instantly — the truthful `.arming`
+        // state (not `.recording`) during the gap, so ESC can cancel before the mic is live and before any
+        // deferred output mute fires; beginCapture flips it to `.recording` when the mic goes live.
         let cueDelay = effects.begin(settings.duringDictation)
+        hud?.render(.arming(mode: currentModeName))
         if cueDelay > 0 {
-            hud?.render(.ready(mode: currentModeName))
             captureStartTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(cueDelay))
                 guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
@@ -380,9 +379,17 @@ final class DictationController {
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still trying to record.
-                if Task.isCancelled || self.machine.state != .recording { return }
+                if Task.isCancelled || self.machine.state != .recording {
+                    if self.captureBringUpCancelling {
+                        self.finishCanceledBringUp(stopAudio: false)
+                    }
+                    return
+                }
                 self.log.error("bring-up failed: \(String(describing: error), privacy: .public)")
-                if case AudioCaptureError.formatUnavailable = error {
+                if case AudioCaptureError.preferredInputFailed = error {
+                    let name = self.settings.audio.inputDeviceName ?? "selected microphone"
+                    self.finishError("Could not start \(name)", action: .openMicrophoneSettings)
+                } else if case AudioCaptureError.formatUnavailable = error {
                     // No usable input stream, not a permission issue — so no settings action.
                     self.finishError("No microphone is available")
                 } else {
@@ -391,19 +398,16 @@ final class DictationController {
                 return
             }
             // Released or cancelled while the mic was coming up: nothing to record, so tear the capture
-            // back down and bail (a pendingCommit is dropped — there is no audio to transcribe).
+            // back down and bail.
             guard !Task.isCancelled, self.machine.state == .recording else {
-                if let url = self.audio.stop() { try? FileManager.default.removeItem(at: url) }
+                self.finishCanceledBringUp(stopAudio: true)
                 return
             }
             self.captureStarted = true
+            self.effects.activateMute()
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
             self.hud?.render(.recording(mode: self.activeMode?.name, level: 0))
-            if self.pendingCommit {
-                self.pendingCommit = false
-                self.handleCommit()
-            }
         }
     }
 
@@ -440,7 +444,6 @@ final class DictationController {
         captureBringUpTask?.cancel()
         captureBringUpTask = nil
         captureStarted = false
-        pendingCommit = false
         capturedPlan = nil
         capturedEngine = nil
         // An engine the user switched away from mid-dictation was held back from eviction to avoid
@@ -464,10 +467,10 @@ final class DictationController {
 
     func handleCommit() {
         guard machine.state == .recording else { return }
-        // The mic may still be coming up (cue-gap, or a slow async bring-up). Defer the release until
-        // capture is live so beginCapture honors it the instant the engine starts — transcribing now
-        // would drain an empty file.
-        guard captureStarted else { pendingCommit = true; return }
+        guard captureStarted else {
+            cancelBeforeCaptureStarted()
+            return
+        }
         recordingLimitTask?.cancel()
         onRecordingChanged?(false)
         machine.beginTranscribing()
@@ -496,6 +499,31 @@ final class DictationController {
             }
             await self.transcribeAndInsert(url: url)
         }
+    }
+
+    private func cancelBeforeCaptureStarted() {
+        let waitForBringUpCleanup = captureBringUpTask != nil
+        captureBringUpCancelling = waitForBringUpCleanup
+        machine.cancel()
+        effects.end(settings.duringDictation, cue: .cancel)
+        hud?.render(.hidden)
+        clearRewriteEscapeHatch()
+        modeResolveTask?.cancel()
+        modeResolveTask = nil
+        captureStartTask?.cancel()
+        captureStartTask = nil
+        guard waitForBringUpCleanup else {
+            releaseCapturedPlan()
+            return
+        }
+    }
+
+    private func finishCanceledBringUp(stopAudio: Bool) {
+        if stopAudio, let url = audio.stop() {
+            try? FileManager.default.removeItem(at: url)
+        }
+        captureBringUpCancelling = false
+        releaseCapturedPlan()
     }
 
     // Phase A (design.md §4.3): resolve the mode from routing context before recording. A non-nil
@@ -777,7 +805,7 @@ final class DictationController {
         let usedAt = lastUsedAt
         idleEvictionTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(after))
-            guard let self, !Task.isCancelled, !self.machine.isBusy else { return }
+            guard let self, !Task.isCancelled, !self.isBusy else { return }
             let now = ProcessInfo.processInfo.systemUptime
             switch EvictionPolicy.onIdleCheck(mode: mode, lastUsedAt: usedAt, now: now, idleSeconds: idle) {
             case .evictNow:
@@ -989,6 +1017,10 @@ final class DictationController {
 
     func cancel() {
         guard machine.isBusy else { return }
+        if machine.state == .recording, !captureStarted, captureBringUpTask != nil {
+            cancelBeforeCaptureStarted()
+            return
+        }
         onRecordingChanged?(false)
         dictationTask?.cancel()
         dictationTask = nil
@@ -1058,7 +1090,7 @@ final class DictationController {
         hideTask?.cancel()
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, !machine.isBusy else { return }
+            guard !Task.isCancelled, !isBusy else { return }
             hud?.render(.hidden)
         }
     }

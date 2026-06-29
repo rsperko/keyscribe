@@ -84,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
+            self?.hotkey.cancelGestures()
             self?.controller.cancel()
             self?.refreshStatus()
         }

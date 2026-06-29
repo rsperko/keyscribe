@@ -6,7 +6,9 @@ import Foundation
 // normally runs in-process on the dictation's teardown path — but a crash (the 0.1.7 SIGSEGV), SIGKILL,
 // force-quit, or panic kills the process first, stranding the change system-wide: a hijacked default mic,
 // a muted output, with no recovery. This marker is written BEFORE each change and cleared AFTER the
-// restore, so the next launch can reconcile — any field still present means we died dirty.
+// restore, so the next launch can reconcile — any field still present means we died dirty. Output mute
+// is recorded only when KeyScribe changed an audible output to muted; if output was already muted, there
+// is nothing for crash recovery to put back.
 //
 // Identity is by device UID (stable across reconnect/reboot), never AudioDeviceID (transient, so a stored
 // AudioDeviceID could resolve to a different device after a reboot).
@@ -22,7 +24,7 @@ public struct PendingSystemRestore: Codable, Equatable, Sendable {
 
     // The user's original system default INPUT device UID, saved while we override it. nil = not overridden.
     public var defaultInputUID: String?
-    // The output device we muted + the mute value to put back. nil = we have not muted.
+    // The output device KeyScribe muted from an audible state. nil = we did not change audible output.
     public var outputMute: OutputMute?
 
     public init(defaultInputUID: String? = nil, outputMute: OutputMute? = nil) {

@@ -18,6 +18,7 @@ enum HUDErrorAction: Equatable {
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
+    case arming(mode: String?)
     case recording(mode: String?, level: Float)
     case transcribing(mode: String)
     case rewriting(connection: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
@@ -32,6 +33,8 @@ extension HUDState {
         case .hidden:
             return nil
         case .ready(let mode):
+            return mode
+        case .arming(let mode):
             return mode
         case .recording(let mode, _):
             return mode
@@ -58,6 +61,8 @@ extension HUDState {
         switch self {
         case .ready:
             return "Next dictation"
+        case .arming:
+            return "Starting"
         case .recording:
             return "Listening"
         case .transcribing(let mode):
@@ -119,7 +124,7 @@ extension HUDState {
     // .transcribing through the cloud rewrite). The HUD takes key focus in these so ESC cancels locally.
     var holdsKeyFocus: Bool {
         switch self {
-        case .recording, .transcribing, .rewriting: return true
+        case .arming, .recording, .transcribing, .rewriting: return true
         default: return false
         }
     }

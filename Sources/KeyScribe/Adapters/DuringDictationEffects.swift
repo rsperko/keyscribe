@@ -22,15 +22,54 @@ final class DuringDictationEffects {
 
     private var displayAssertion: IOPMAssertionID = 0
     private var hadDisplayAssertion = false
-    private var previousMute: UInt32?
-    private var mutedDevice: AudioDeviceID?
+    // Every device we have muted this dictation and the value it held before — restored exactly. A
+    // Bluetooth headset shifts the audible output between its A2DP and HFP instances as the mic opens, so
+    // the device carrying the audio changes mid-recording; we mute each one we see become the default and
+    // restore them all, never assuming a single device.
+    private struct MutedEntry { let uid: String?; let device: AudioDeviceID; let previous: UInt32 }
+    private var mutedEntries: [MutedEntry] = []
+    private var muting = false
+    private var muteFollowTask: Task<Void, Never>?
     private var generation = 0
+    // Bumped on each mute start. The follow loop and restore re-apply guard on this so a later dictation's
+    // mute is never clobbered by a stale task from an earlier one.
+    private var muteEpoch = 0
+    // Set when a dictation arms muting; the mute is applied only once capture is live (activateMute), so
+    // on a Bluetooth output it lands after the A2DP->HFP route switch settles. Cleared on apply or cancel.
+    private var pendingMuteGeneration: Int?
     // Records the mute to a durable marker before we apply it and clears it after we restore, so a crash
     // while muted does not leave the user's output stranded muted (reconciled on next launch).
     private let restorer: SystemAudioStateRestorer?
+    private let defaultOutputDeviceID: () -> AudioDeviceID?
+    private let outputMuteState: (AudioDeviceID) -> UInt32?
+    private let setOutputMute: (UInt32, AudioDeviceID) -> Bool
+    private let deviceUID: (AudioDeviceID) -> String?
+    private let resolveOutputDevice: (String) -> AudioDeviceID?
+    private let reapplyDelays: [Double]
+    private let muteFollowInterval: Double
 
-    init(restorer: SystemAudioStateRestorer? = nil) {
+    init(
+        restorer: SystemAudioStateRestorer? = nil,
+        defaultOutputDeviceID: @escaping () -> AudioDeviceID? = SystemOutputAudio.defaultOutputDeviceID,
+        outputMuteState: @escaping (AudioDeviceID) -> UInt32? = SystemOutputAudio.muteState,
+        setOutputMute: @escaping (UInt32, AudioDeviceID) -> Bool = SystemOutputAudio.setMute,
+        deviceUID: @escaping (AudioDeviceID) -> String? = AudioInputDevices.uid(of:),
+        resolveOutputDevice: @escaping (String) -> AudioDeviceID? = AudioInputDevices.deviceID(forAnyUID:),
+        // Span a Bluetooth route-switch settle window: an early attempt may still land mid-switch, so keep
+        // re-asserting out to ~2.5s when a later one can land cleanly on the settled (A2DP) device.
+        reapplyDelays: [Double] = [0.4, 1.0, 2.5],
+        // While recording, re-check the default output this often and mute it if the route moved to a
+        // device we have not muted yet (the Bluetooth A2DP<->HFP shift).
+        muteFollowInterval: Double = 0.3
+    ) {
         self.restorer = restorer
+        self.defaultOutputDeviceID = defaultOutputDeviceID
+        self.outputMuteState = outputMuteState
+        self.setOutputMute = setOutputMute
+        self.deviceUID = deviceUID
+        self.resolveOutputDevice = resolveOutputDevice
+        self.reapplyDelays = reapplyDelays
+        self.muteFollowInterval = muteFollowInterval
     }
     // Named system sounds are reloaded by NSSound(named:) on each call; keep one instance per cue for
     // the app's lifetime so begin/end don't re-resolve them every dictation.
@@ -63,26 +102,21 @@ final class DuringDictationEffects {
     func begin(_ config: Settings.DuringDictation) -> TimeInterval {
         generation &+= 1
         if config.keepDisplayAwake { acquireDisplayAssertion() }
+        // Arm muting now, apply it only once capture is live (activateMute). Two reasons it must wait:
+        // the start cue routes through the same output (muting first swallows it), and on a Bluetooth
+        // output the device is mid A2DP->HFP route switch until capture comes up — writing the mute then
+        // races the switch. Cancelled-before-capture bumps generation, so activateMute drops the mute.
+        pendingMuteGeneration = config.muteSystemAudio ? generation : nil
         let startCue = config.sounds ? startCueSound() : nil
         startCue?.play()
-        if config.muteSystemAudio {
-            // Mute the output device AFTER the start cue plays — muting it first swallows the cue, since
-            // the cue routes through that same device. With the cue OFF the mute is instant; with the cue
-            // ON we defer past its length. The generation guard drops the mute if the dictation already
-            // ended (a sub-cue-length press must never leave the output muted).
-            if let startCue {
-                let gen = generation
-                let delay = startCue.duration
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(delay))
-                    guard let self, self.generation == gen else { return }
-                    self.muteOutput()
-                }
-            } else {
-                muteOutput()
-            }
-        }
         return startCue?.duration ?? 0
+    }
+
+    // Apply the armed mute. Called when capture goes live (the route has settled) — never from begin.
+    func activateMute() {
+        guard let armed = pendingMuteGeneration, armed == generation else { return }
+        pendingMuteGeneration = nil
+        startMuting()
     }
 
     // Restore the muted output as soon as capture is done, without waiting for the rest of the
@@ -97,6 +131,7 @@ final class DuringDictationEffects {
 
     func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
         generation &+= 1
+        pendingMuteGeneration = nil
         releaseDisplayAssertion()
         restoreOutput()
         if config.sounds { sound(named: cue.soundName)?.play() }
@@ -118,30 +153,73 @@ final class DuringDictationEffects {
         hadDisplayAssertion = false
     }
 
-    private func muteOutput() {
-        guard let device = SystemOutputAudio.defaultOutputDeviceID(),
-              let current = SystemOutputAudio.muteState(of: device) else { return }
-        previousMute = current
-        mutedDevice = device
-        // Record the marker BEFORE muting: if we crash while muted, reconcileOnLaunch puts it back. (Only
-        // when the device's UID resolves — it effectively always does; the in-process restore below is the
-        // backstop either way.)
-        if let uid = AudioInputDevices.uid(of: device) {
+    private func startMuting() {
+        guard !muting else { return }
+        muting = true
+        muteEpoch &+= 1
+        muteCurrentDefault()
+        // Follow the active output: the Bluetooth A2DP<->HFP shift moves the audible device a beat after
+        // the mic opens, so poll the default and mute whatever it becomes for the life of the recording.
+        let epoch = muteEpoch
+        muteFollowTask = Task { @MainActor [weak self] in
+            while true {
+                try? await Task.sleep(for: .seconds(self?.muteFollowInterval ?? 0.3))
+                guard let self, self.muting, self.muteEpoch == epoch else { return }
+                self.muteCurrentDefault()
+            }
+        }
+    }
+
+    // Mute the current default output if we have not already. Re-asserts on a device we are tracking too,
+    // in case the route switch cleared the flag we set.
+    private func muteCurrentDefault() {
+        guard let device = defaultOutputDeviceID() else { return }
+        if let existing = mutedEntries.first(where: { $0.device == device }) {
+            _ = setOutputMute(1, existing.device)
+            return
+        }
+        guard let current = outputMuteState(device) else { return }
+        let uid = deviceUID(device)
+        // Record the durable crash-recovery marker for the first (primary) device only — the common case is
+        // a single device; the in-process restore below covers the rest.
+        if mutedEntries.isEmpty, let uid {
             restorer?.recordOutputMute(deviceUID: uid, previousMute: current)
         }
-        SystemOutputAudio.setMute(1, on: device)
+        mutedEntries.append(MutedEntry(uid: uid, device: device, previous: current))
+        _ = setOutputMute(1, device)
     }
 
     private func restoreOutput() {
-        // Restore the exact device we muted, not the current default. If the output device changed
-        // mid-dictation (e.g. headphones unplugged), re-resolving the default would leave the device we
-        // muted stuck muted forever and wrongly write our saved state onto the new default device.
-        guard let previousMute, let device = mutedDevice else { return }
-        SystemOutputAudio.setMute(previousMute, on: device)
-        self.previousMute = nil
-        self.mutedDevice = nil
+        muting = false
+        muteFollowTask?.cancel()
+        muteFollowTask = nil
+        guard !mutedEntries.isEmpty else { return }
+        let entries = mutedEntries
+        mutedEntries = []
+        for entry in entries {
+            _ = setOutputMute(entry.previous, entry.device)
+        }
         // Clear the marker only AFTER the in-process restore: a crash in between just makes launch reconcile
         // re-apply the same (already-correct) value — idempotent.
         restorer?.clearOutputMute()
+        scheduleRestoreReapply(entries: entries)
+    }
+
+    // A Bluetooth output switching HFP->A2DP as the mic closes is mid-route-change exactly when we restore,
+    // so the unmute write can be dropped and the headset is stranded muted. Re-assert each restored value
+    // by UID after the route settles. Guarded on muteEpoch + !muting so a fresh dictation's mute is never
+    // clobbered: a new mute bumps the epoch and sets muting, and we bail.
+    private func scheduleRestoreReapply(entries: [MutedEntry]) {
+        let epoch = muteEpoch
+        Task { @MainActor [weak self] in
+            for delay in self?.reapplyDelays ?? [] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, self.muteEpoch == epoch, !self.muting else { return }
+                for entry in entries {
+                    let device = entry.uid.flatMap { self.resolveOutputDevice($0) } ?? entry.device
+                    _ = self.setOutputMute(entry.previous, device)
+                }
+            }
+        }
     }
 }

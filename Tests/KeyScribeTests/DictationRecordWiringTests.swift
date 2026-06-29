@@ -70,8 +70,8 @@ struct DictationRecordWiringTests {
             llmClient: llm)
 
         controller.handleStart()
-        controller.handleCommit()
         await controller.captureBringUpTask?.value
+        controller.handleCommit()
         await controller.dictationTask?.value
         return controller.lastRecord
     }

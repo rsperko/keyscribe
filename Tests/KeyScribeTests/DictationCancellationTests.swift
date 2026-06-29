@@ -193,6 +193,7 @@ struct DictationCancellationTests {
             micStatus: { .granted }, accessibilityGranted: { true })
 
         controller.handleStart()
+        await controller.captureBringUpTask?.value
         controller.handleCommit()
         await started.wait()
         release.fire()
@@ -208,6 +209,7 @@ struct DictationCancellationTests {
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
 
         h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
         h.controller.handleCommit()
         await h.started.wait()                 // engine is suspended mid-transcribe
         let task = h.controller.dictationTask  // capture before cancel() clears it
@@ -245,6 +247,7 @@ struct DictationCancellationTests {
             micStatus: { .granted }, accessibilityGranted: { true })
 
         controller.handleStart()
+        await controller.captureBringUpTask?.value
         controller.handleCommit()
         await started.wait()
         let task = controller.dictationTask
@@ -282,6 +285,7 @@ struct DictationCancellationTests {
             micStatus: { .granted }, accessibilityGranted: { true })
 
         controller.handleStart()
+        await controller.captureBringUpTask?.value
         controller.handleCommit()
         await started.wait()
         let task = controller.dictationTask
@@ -297,6 +301,7 @@ struct DictationCancellationTests {
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
 
         h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
         h.controller.handleCommit()
         await h.started.wait()
         let task = h.controller.dictationTask
@@ -308,14 +313,15 @@ struct DictationCancellationTests {
         #expect(h.history.entries().count == 1)
     }
 
-    @Test func cancellingDuringRecordingDeletesTheCaptureFile() {
+    @Test func cancellingDuringRecordingDeletesTheCaptureFile() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         let captureURL = h.supportDir.appendingPathComponent("capture.wav")
         FileManager.default.createFile(atPath: captureURL.path, contents: Data("pcm".utf8))
 
-        h.controller.handleStart()      // recording; the capture file is live on disk
-        h.controller.cancel()           // cancel before commit — nothing else will clean it up
+        h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
+        h.controller.cancel()
 
         #expect(!FileManager.default.fileExists(atPath: captureURL.path))
     }
@@ -348,6 +354,7 @@ struct DictationCancellationTests {
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
 
         h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
         h.controller.handleCommit()
         await h.started.wait()
         let task = h.controller.dictationTask
@@ -370,6 +377,7 @@ struct DictationCancellationTests {
 
         h.controller.setNextModeOverride(id: "edit-selection")
         h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
         h.controller.handleCommit()
         await h.started.wait()
         let task = h.controller.dictationTask
@@ -405,22 +413,68 @@ private final class NoInputDeviceAudio: AudioCapturing, @unchecked Sendable {
     func stop() -> URL? { nil }
 }
 
+private final class PreferredInputFailedAudio: AudioCapturing, @unchecked Sendable {
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        throw AudioCaptureError.preferredInputFailed
+    }
+    func stop() -> URL? { nil }
+}
+
 // Bring-up that blocks until released — models a commit arriving while the mic is still coming up.
 private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     private let gate: Signal
+    private let lock = NSLock()
+    private var _stopCalls = 0
+    var stopCalls: Int { lock.withLock { _stopCalls } }
     init(url: URL, gate: Signal) { self.url = url; self.gate = gate }
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
         await gate.wait()
         return url
     }
-    func stop() -> URL? { url }
+    func stop() -> URL? {
+        lock.withLock { _stopCalls += 1 }
+        return url
+    }
+}
+
+private final class CountingGatedStartAudio: AudioCapturing, @unchecked Sendable {
+    private let url: URL
+    private let gate: Signal
+    private let started = Signal()
+    private let lock = NSLock()
+    private var _startCalls = 0
+    private var _stopCalls = 0
+    var startCalls: Int { lock.withLock { _startCalls } }
+    var stopCalls: Int { lock.withLock { _stopCalls } }
+
+    init(url: URL, gate: Signal) {
+        self.url = url
+        self.gate = gate
+    }
+
+    func waitUntilStarted() async {
+        await started.wait()
+    }
+
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        lock.withLock { _startCalls += 1 }
+        started.fire()
+        await gate.wait()
+        return url
+    }
+
+    func stop() -> URL? {
+        lock.withLock { _stopCalls += 1 }
+        return url
+    }
 }
 
 @MainActor
 struct DictationCaptureStartTests {
     private func makeController(
-        audio: AudioCapturing, hud: HUDPresenting, insertSpy: InsertSpy, supportDir: URL
+        audio: AudioCapturing, hud: HUDPresenting, insertSpy: InsertSpy, supportDir: URL,
+        configureSettings: (inout Settings) -> Void = { _ in }
     ) -> DictationController {
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
@@ -429,6 +483,7 @@ struct DictationCaptureStartTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        configureSettings(&settings)
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
@@ -468,7 +523,26 @@ struct DictationCaptureStartTests {
         #expect(hud.states.last == .error(message: "No microphone is available", action: nil))
     }
 
-    @Test func commitDuringBringUpIsHonoredOnceCaptureStarts() async {
+    @Test func preferredInputFailureNamesTheSelectedMicrophone() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let hud = HUDSpy()
+        let controller = makeController(
+            audio: PreferredInputFailedAudio(), hud: hud, insertSpy: InsertSpy(), supportDir: supportDir
+        ) { settings in
+            settings.audio = .init(inputDeviceUID: "BuiltInMic", inputDeviceName: "MacBook Pro Microphone")
+        }
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+
+        #expect(controller.isBusy == false)
+        #expect(hud.states.last == .error(
+            message: "Could not start MacBook Pro Microphone", action: .openMicrophoneSettings))
+    }
+
+    @Test func commitDuringBringUpCancelsThePendingCapture() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
@@ -479,12 +553,55 @@ struct DictationCaptureStartTests {
             audio: audio, hud: HUDSpy(), insertSpy: insertSpy, supportDir: supportDir)
 
         controller.handleStart()
-        controller.handleCommit()   // mic not up yet → deferred, not transcribed against an empty file
-        gate.fire()                 // bring-up completes → the deferred commit must now run
-        await controller.captureBringUpTask?.value
+        let bringUpTask = controller.captureBringUpTask
+        controller.handleCommit()
+        #expect(controller.isBusy)
+        gate.fire()
+        await bringUpTask?.value
         await controller.dictationTask?.value
 
-        #expect(await insertSpy.calls == 1)
-        #expect(controller.lastResult == "hello world")
+        #expect(await insertSpy.calls == 0)
+        #expect(controller.lastResult == nil)
+        #expect(audio.stopCalls == 1)
+        #expect(controller.isBusy == false)
+    }
+
+    @Test func startShowsCancellableArmingBeforeCaptureIsLive() {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let hud = HUDSpy()
+        let audio = GatedStartAudio(url: supportDir.appendingPathComponent("capture.wav"), gate: Signal())
+        let controller = makeController(
+            audio: audio, hud: hud, insertSpy: InsertSpy(), supportDir: supportDir)
+
+        controller.handleStart()
+
+        #expect(hud.states.last == .arming(mode: "Plain Dictation"))
+        #expect(controller.isCancellable)
+    }
+
+    @Test func startDuringCanceledBringUpIsIgnoredUntilCleanupFinishes() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let gate = Signal()
+        let audio = CountingGatedStartAudio(url: supportDir.appendingPathComponent("capture.wav"), gate: gate)
+        let controller = makeController(
+            audio: audio, hud: HUDSpy(), insertSpy: InsertSpy(), supportDir: supportDir)
+
+        controller.handleStart()
+        await audio.waitUntilStarted()
+        let bringUpTask = controller.captureBringUpTask
+        controller.handleCommit()
+        controller.handleStart()
+        #expect(audio.startCalls == 1)
+        gate.fire()
+        await bringUpTask?.value
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+
+        #expect(audio.startCalls == 2)
+        #expect(audio.stopCalls == 1)
     }
 }

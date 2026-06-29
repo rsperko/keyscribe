@@ -343,11 +343,11 @@ final class SettingsModel: ObservableObject {
         let connected: Bool
     }
 
-    // Picker rows: "System Default" first, then every connected input device. If the saved preference
+    // Picker rows: "Follow macOS Input" first, then every connected input device. If the saved preference
     // points at a device that is not currently connected, append a trailing disabled row (labeled with the
     // last-seen name) so the picker can still render the current selection instead of silently snapping.
     var inputDeviceOptions: [InputDeviceOption] {
-        var options = [InputDeviceOption(id: "", label: "System Default", connected: true)]
+        var options = [InputDeviceOption(id: "", label: "Follow macOS Input", connected: true)]
         let live = AudioInputDevices.available()
         options += live.map { InputDeviceOption(id: $0.uid, label: $0.name, connected: true) }
         if !inputDeviceUID.isEmpty, !live.contains(where: { $0.uid == inputDeviceUID }) {
@@ -355,6 +355,36 @@ final class SettingsModel: ObservableObject {
             options.append(InputDeviceOption(id: inputDeviceUID, label: "\(name) (not connected)", connected: false))
         }
         return options
+    }
+
+    var microphoneStatusText: String {
+        Self.microphoneStatusText(
+            inputDeviceUID: inputDeviceUID,
+            storedInputDeviceName: storedInputDeviceName,
+            liveDevices: AudioInputDevices.available(),
+            systemDefault: AudioInputDevices.systemDefaultInput())
+    }
+
+    nonisolated static func microphoneStatusText(
+        inputDeviceUID: String,
+        storedInputDeviceName: String?,
+        liveDevices: [AudioInputDevices.Device],
+        systemDefault: AudioInputDevices.Device?
+    ) -> String {
+        let systemName = systemDefault?.name ?? "No macOS input"
+        guard !inputDeviceUID.isEmpty else {
+            return systemDefault == nil ? "No macOS input available." : "Using macOS input: \(systemName)."
+        }
+        if let selected = liveDevices.first(where: { $0.uid == inputDeviceUID }) {
+            guard let systemDefault, systemDefault.uid != selected.uid else {
+                return "Preferred: \(selected.name)."
+            }
+            return "Preferred: \(selected.name). macOS input is \(systemDefault.name)."
+        }
+        let preferredName = storedInputDeviceName ?? "Preferred microphone"
+        return systemDefault == nil
+            ? "\(preferredName) unavailable. No macOS input available."
+            : "\(preferredName) unavailable. Using macOS input: \(systemName)."
     }
 
     var evictions: [(id: String, label: String)] {

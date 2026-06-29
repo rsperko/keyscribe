@@ -24,6 +24,7 @@ extension AudioCapturing {
 
 enum AudioCaptureError: Error {
     case formatUnavailable
+    case preferredInputFailed
     // Engine bring-up did not return within the watchdog window — the device (classically a Bluetooth
     // headset mid A2DP↔HFP switch, or a half-transitioned/dead input) wedged a synchronous CoreAudio
     // call. The main thread was never blocked; the dictation fails gracefully and the next attempt
@@ -273,14 +274,20 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     //   2. TEMPORARILY make the preferred device the system default so the engine can follow it — the route
     //      a non-default input can't be pinned into. Restored on every teardown path. This is what lets you
     //      dictate on the built-in mic while AirPods (busy on a call) hold the default.
-    //   3. FOLLOW the system default as-is, with a brief Bluetooth/USB warm-up retry — the last resort so
-    //      dictation still works on *some* mic.
+    //   3. FOLLOW the system default as-is only when no preferred device is configured, or the configured
+    //      device is disconnected. If a connected preferred device fails, surface that failure instead of
+    //      silently recording from a different microphone.
     private func armBestEffort() throws {
-        let override = preferredDeviceNeedingOverride()
-        let defaultIsBluetooth = systemDefaultInputIsBluetooth()
+        let preferredUID = lock.withLock { preferredInputUID }
+        let preferredDevice = preferredUID.flatMap(AudioInputDevices.deviceID(forUID:))
+        let systemDefault = AudioInputDevices.systemDefaultInputID()
+        let override = preferredDeviceNeedingOverride(preferred: preferredDevice, systemDefault: systemDefault)
+        let fallbackAllowed = Self.allowsSystemDefaultFallback(
+            preferredUID: preferredUID, preferredDevice: preferredDevice, systemDefault: systemDefault)
+        let defaultIsBluetooth = systemDefault.map(AudioInputDevices.isBluetooth) ?? false
 
         if override == nil || !defaultIsBluetooth {
-            do { try arm(); return } catch { /* escalate */ }
+            do { try arm(); return } catch { }
         }
         if let override {
             do { try armWithTemporaryDefault(override); return }
@@ -288,23 +295,30 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             // I/O-unit property listener is still registered. DISPOSE it before restoring the default below:
             // restoring fires that listener, and the fallback rebuild would otherwise deallocate the engine
             // concurrently — the same AVAudioIOUnit use-after-free as the happy path. Dispose-then-restore.
-            catch { disposeCurrentEngine(); restoreDefaultInputIfSwapped() }
+            catch {
+                disposeCurrentEngine()
+                restoreDefaultInputIfSwapped()
+            }
         }
+        guard fallbackAllowed else { throw AudioCaptureError.preferredInputFailed }
         try fallBackToDefaultWithRetry()
     }
 
     // The preferred device to honor, only when it is set, currently connected, AND not already the system
     // default — i.e. the case that needs the AUHAL pin or the temporary-default swap. nil otherwise.
-    private func preferredDeviceNeedingOverride() -> AudioDeviceID? {
-        let uid = lock.withLock { preferredInputUID }
-        guard let uid, let preferred = AudioInputDevices.deviceID(forUID: uid) else { return nil }
-        guard let current = AudioInputDevices.systemDefaultInputID(), preferred != current else { return nil }
+    private func preferredDeviceNeedingOverride(
+        preferred: AudioDeviceID?, systemDefault: AudioDeviceID?
+    ) -> AudioDeviceID? {
+        guard let preferred, let current = systemDefault, preferred != current else { return nil }
         return preferred
     }
 
-    private func systemDefaultInputIsBluetooth() -> Bool {
-        guard let id = AudioInputDevices.systemDefaultInputID() else { return false }
-        return AudioInputDevices.isBluetooth(id)
+    static func allowsSystemDefaultFallback(
+        preferredUID: String?, preferredDevice: AudioDeviceID?, systemDefault: AudioDeviceID?
+    ) -> Bool {
+        guard let preferredUID, !preferredUID.isEmpty else { return true }
+        guard let preferredDevice else { return true }
+        return preferredDevice == systemDefault
     }
 
     // Honor a preferred device the AUHAL can't pin by TEMPORARILY making it the system default and letting

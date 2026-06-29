@@ -19,10 +19,13 @@ struct GeneralSettingsView: View {
                         Text(option.label).tag(option.id)
                     }
                 }
+                Text(model.microphoneStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Microphone")
             } footer: {
-                Text("KeyScribe captures from this device. If it is unavailable it falls back to the system default and switches back when the device returns.")
+                Text("If the preferred microphone is unavailable, KeyScribe uses the macOS input until it reconnects.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

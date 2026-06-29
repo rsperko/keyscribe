@@ -40,7 +40,11 @@ final class SystemAudioStateRestorer: Sendable {
     }
 
     func recordOutputMute(deviceUID: String, previousMute: UInt32) {
-        store.update { $0.outputMute = .init(deviceUID: deviceUID, previousMute: previousMute) }
+        store.update {
+            $0.outputMute = previousMute == 0
+                ? .init(deviceUID: deviceUID, previousMute: previousMute)
+                : nil
+        }
     }
 
     func clearOutputMute() {
@@ -58,8 +62,7 @@ final class SystemAudioStateRestorer: Sendable {
         if let uid = pending.defaultInputUID, let device = resolveInputDevice(uid) {
             _ = setDefaultInput(device)
         }
-        if let mute = pending.outputMute, mute.previousMute == 0,
-           let device = resolveAnyDevice(mute.deviceUID) {
+        if let mute = pending.outputMute, let device = resolveAnyDevice(mute.deviceUID) {
             _ = setOutputMute(0, device)
         }
         // Clear unconditionally — even if a recorded device is absent right now (cannot be restored). A

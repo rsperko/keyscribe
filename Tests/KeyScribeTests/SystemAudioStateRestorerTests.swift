@@ -59,7 +59,7 @@ struct SystemAudioStateRestorerTests {
         #expect(store.load().isEmpty)
     }
 
-    @Test func launchReconcileNeverMutesOutputWhenPreviousStateWasMuted() {
+    @Test func launchReconcileUnmutesStaleOutputMarkerEvenWhenPreviousStateWasRecordedMuted() {
         let recorder = AudioRestoreRecorder()
         let store = makeStore(.init(outputMute: .init(deviceUID: "out", previousMute: 1)))
         let restorer = SystemAudioStateRestorer(
@@ -71,8 +71,19 @@ struct SystemAudioStateRestorerTests {
 
         restorer.reconcile()
 
-        #expect(recorder.mutes.isEmpty)
+        #expect(recorder.mutes.count == 1)
+        #expect(recorder.mutes.first?.value == 0)
+        #expect(recorder.mutes.first?.device == 42)
         #expect(store.load().isEmpty)
+    }
+
+    @Test func outputMuteMarkerIsOnlyRecordedWhenKeyScribeChangedAudibleState() {
+        let store = makeStore(.init(defaultInputUID: "mic"))
+        let restorer = SystemAudioStateRestorer(store: store)
+
+        restorer.recordOutputMute(deviceUID: "out", previousMute: 1)
+
+        #expect(store.load() == PendingSystemRestore(defaultInputUID: "mic"))
     }
 
     @Test func launchReconcileStillRestoresDefaultInput() {
