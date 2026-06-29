@@ -25,6 +25,13 @@ final class DuringDictationEffects {
     private var previousMute: UInt32?
     private var mutedDevice: AudioDeviceID?
     private var generation = 0
+    // Records the mute to a durable marker before we apply it and clears it after we restore, so a crash
+    // while muted does not leave the user's output stranded muted (reconciled on next launch).
+    private let restorer: SystemAudioStateRestorer?
+
+    init(restorer: SystemAudioStateRestorer? = nil) {
+        self.restorer = restorer
+    }
     // Named system sounds are reloaded by NSSound(named:) on each call; keep one instance per cue for
     // the app's lifetime so begin/end don't re-resolve them every dictation.
     private var soundCache: [String: NSSound] = [:]
@@ -78,6 +85,16 @@ final class DuringDictationEffects {
         return startCue?.duration ?? 0
     }
 
+    // Restore the muted output as soon as capture is done, without waiting for the rest of the
+    // dictation (transcription + the cloud LLM rewrite) to finish. There is no reason to keep the
+    // output muted once we have stopped listening. The generation bump drops any still-pending
+    // deferred mute (begin's cue-gated Task), so a sub-cue-length press can't re-mute after this.
+    // restoreOutput is idempotent, so a later end(...) calling it again is a no-op.
+    func restoreAudio() {
+        generation &+= 1
+        restoreOutput()
+    }
+
     func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
         generation &+= 1
         releaseDisplayAssertion()
@@ -101,36 +118,18 @@ final class DuringDictationEffects {
         hadDisplayAssertion = false
     }
 
-    private func defaultOutputDevice() -> AudioDeviceID? {
-        var deviceID = AudioDeviceID(0)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID)
-        return status == noErr ? deviceID : nil
-    }
-
-    private func muteAddress() -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain)
-    }
-
     private func muteOutput() {
-        guard let device = defaultOutputDevice() else { return }
-        var addr = muteAddress()
-        guard AudioObjectHasProperty(device, &addr) else { return }
-        var current: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &current) == noErr else { return }
+        guard let device = SystemOutputAudio.defaultOutputDeviceID(),
+              let current = SystemOutputAudio.muteState(of: device) else { return }
         previousMute = current
         mutedDevice = device
-        var muted: UInt32 = 1
-        _ = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &muted)
+        // Record the marker BEFORE muting: if we crash while muted, reconcileOnLaunch puts it back. (Only
+        // when the device's UID resolves — it effectively always does; the in-process restore below is the
+        // backstop either way.)
+        if let uid = AudioInputDevices.uid(of: device) {
+            restorer?.recordOutputMute(deviceUID: uid, previousMute: current)
+        }
+        SystemOutputAudio.setMute(1, on: device)
     }
 
     private func restoreOutput() {
@@ -138,11 +137,11 @@ final class DuringDictationEffects {
         // mid-dictation (e.g. headphones unplugged), re-resolving the default would leave the device we
         // muted stuck muted forever and wrongly write our saved state onto the new default device.
         guard let previousMute, let device = mutedDevice else { return }
-        var addr = muteAddress()
-        var value = previousMute
-        let size = UInt32(MemoryLayout<UInt32>.size)
-        _ = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &value)
+        SystemOutputAudio.setMute(previousMute, on: device)
         self.previousMute = nil
         self.mutedDevice = nil
+        // Clear the marker only AFTER the in-process restore: a crash in between just makes launch reconcile
+        // re-apply the same (already-correct) value — idempotent.
+        restorer?.clearOutputMute()
     }
 }

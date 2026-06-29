@@ -122,7 +122,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // app's microphone (the bug we saw other apps ship). nil when we have not swapped.
     private var swappedDefaultInput: AudioDeviceID?
 
-    init() {
+    // Records the temporary default-input override to a durable marker before we apply it and clears it
+    // after we restore, so a crash while swapped does not strand the user's system default mic pointed at
+    // our temporary choice (reconciled on next launch / on graceful terminate). nil in tests/fakes.
+    private let restorer: SystemAudioStateRestorer?
+
+    init(restorer: SystemAudioStateRestorer? = nil) {
+        self.restorer = restorer
         registerInputListeners()
         observeConfigChanges(of: engineSnapshot(), generation: currentGeneration())
     }
@@ -278,7 +284,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         if let override {
             do { try armWithTemporaryDefault(override); return }
-            catch { restoreDefaultInputIfSwapped() }
+            // The swap succeeded but arming the new default failed, leaving a realized (failed) engine whose
+            // I/O-unit property listener is still registered. DISPOSE it before restoring the default below:
+            // restoring fires that listener, and the fallback rebuild would otherwise deallocate the engine
+            // concurrently — the same AVAudioIOUnit use-after-free as the happy path. Dispose-then-restore.
+            catch { disposeCurrentEngine(); restoreDefaultInputIfSwapped() }
         }
         try fallBackToDefaultWithRetry()
     }
@@ -304,12 +314,25 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard let original = AudioInputDevices.systemDefaultInputID() else {
             throw AudioCaptureError.formatUnavailable
         }
+        // Dispose the current (idle, old-default-bound) engine BEFORE changing the system default. Changing
+        // the default fires CoreAudio's property listener on the engine's I/O unit (on AVFoundation's own
+        // AVAudioIOUnit queue); deallocating that unit at the same instant is the AVAudioIOUnit property-
+        // listener use-after-free that crashed 0.1.7. Disposing first removes the listener, so the swap
+        // below enqueues nothing for the dead unit. The fresh placeholder it leaves has no realized unit.
+        disposeCurrentEngine()
+        // Write the crash-recovery marker BEFORE the global change, so a crash anytime after this point can
+        // be undone on next launch. (Resolving the UID effectively always succeeds; if it doesn't we skip
+        // the marker and rely on the in-process restore.)
+        let originalUID = AudioInputDevices.uid(of: original)
+        if let originalUID { restorer?.recordDefaultInputOverride(originalUID: originalUID) }
         guard AudioInputDevices.setSystemDefaultInput(preferred) else {
+            restorer?.clearDefaultInputOverride()
             throw AudioCaptureError.formatUnavailable
         }
         lock.withLock { swappedDefaultInput = original }
         settleDefaultInput(expected: preferred, timeout: 0.4)
-        try rebuildAndArmFollowingDefault()
+        // The placeholder from disposeCurrentEngine() realizes against the now-current default; arm it.
+        try arm(followSystemDefault: true)
     }
 
     // Block (on the control queue) until the system default input reports the expected device, so a freshly
@@ -330,6 +353,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         guard let original else { return }
         AudioInputDevices.setSystemDefaultInput(original)
+        // Marker cleared only AFTER the in-process restore; a crash in between just re-applies the same
+        // (already-correct) default on next launch — idempotent.
+        restorer?.clearDefaultInputOverride()
     }
 
     private func fallBackToDefaultWithRetry() throws {
@@ -349,6 +375,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // buffer from the engine we just dropped is rejected by the tap guard; keeps the current control queue
     // (we are already executing on it).
     private func rebuildAndArmFollowingDefault() throws {
+        // Stop the outgoing engine before it is dropped + deallocated below, so its stop()/removeTap is
+        // ordered ahead of the dealloc on this (control) queue rather than racing it. (Callers here do not
+        // mutate the system default, so there is no concurrent default-changed callback to fence against —
+        // armWithTemporaryDefault handles that case via disposeCurrentEngine.)
+        Self.teardownEngine(engineSnapshot())
         lock.lock()
         engineGeneration &+= 1
         engine = AVAudioEngine()
@@ -419,19 +450,28 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     func finishDraining() async -> URL? {
         await drainTail()
         let url = await teardownAndFinalize()
-        restoreDefaultInputIfSwapped()
-        releaseEngineIfBluetooth()
+        await disposeIfNeededThenRestoreDefault()
         return url
     }
 
-    // After a dictation the engine's input unit stays realized (engine.stop() does not deallocate it),
-    // which keeps a Bluetooth headset pinned to HFP and the user's music muted while idle. Drop the engine
-    // so the unit deallocates and the headset renegotiates A2DP; the next dictation rebuilds on demand. No
-    // effect on wired/built-in inputs (they keep the prewarmed engine resident, no per-dictation rebuild).
-    private func releaseEngineIfBluetooth() {
-        guard effectiveInputIsBluetooth() else { return }
-        markRebuild()
-        rebuildEngineIfNeeded()
+    // After capture stops: if we temporarily overrode the system default and/or the engine is holding a
+    // Bluetooth device, DISPOSE the engine and THEN restore the default — strictly in that order. Restoring
+    // the default fires the I/O unit's property listener; doing it while that unit is deallocating is the
+    // teardown-side form of the 0.1.7 AVAudioIOUnit use-after-free, so the unit must be gone first.
+    // Disposing also frees a Bluetooth headset from HFP (the unit stays realized through engine.stop(), so
+    // a plain stop would keep music muted while idle). Built-in/wired inputs with no override skip this and
+    // keep the prewarmed engine resident — no per-dictation rebuild.
+    private func disposeIfNeededThenRestoreDefault() async {
+        let mustDispose = lock.withLock { swappedDefaultInput != nil } || effectiveInputIsBluetooth()
+        guard mustDispose else { return }
+        let queue = currentQueue()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            queue.async { [self] in
+                disposeCurrentEngine()
+                restoreDefaultInputIfSwapped()
+                cont.resume()
+            }
+        }
     }
 
     private func drainTail() async {
@@ -502,11 +542,18 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let box = EngineBox(engineSnapshot())
         let url = lock.withLock { currentURL }
         finalizeCapture()
-        queue.async {
-            Self.teardownEngine(box.engine)
+        // Same ordering rule as the commit path: when we must restore an overridden default and/or drop a
+        // Bluetooth engine, DISPOSE the engine before restoring the default so the restore's property
+        // callback can't hit a deallocating I/O unit. Otherwise just stop and keep the engine resident.
+        let mustDispose = lock.withLock { swappedDefaultInput != nil } || effectiveInputIsBluetooth()
+        queue.async { [self] in
+            if mustDispose {
+                disposeCurrentEngine()
+                restoreDefaultInputIfSwapped()
+            } else {
+                Self.teardownEngine(box.engine)
+            }
         }
-        restoreDefaultInputIfSwapped()
-        releaseEngineIfBluetooth()
         return url
     }
 
@@ -533,8 +580,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // Drop a half-open capture (bring-up threw or timed out): clear recording state and delete the
     // partially-written file. Never touches the engine — a wedged one is abandoned via the rebuild flag.
+    // Deliberately does NOT restore the system default: this runs OFF the control queue on the bring-up
+    // TIMEOUT path, where the abandoned armSync may still be running on the control queue (a timeout is
+    // "too slow", not necessarily "wedged forever"). An off-queue setSystemDefaultInput would both race
+    // that in-flight armSync mutating the same global default AND enqueue an AVAudioIOUnit property callback
+    // that the abandoned armSync's fallback could then deallocate into — the exact UAF shape we are
+    // eliminating. So restore happens on the control queue only: the on-queue caller (armSync's catch)
+    // restores before calling this, and a timeout leaves the swap in place to be undone safely on the next
+    // on-queue teardown (disposeIfNeededThenRestoreDefault still sees swappedDefaultInput set), or by the
+    // durable marker at next launch if no further dictation runs.
     private func discardPendingCapture() {
-        restoreDefaultInputIfSwapped()
         let url = lock.withLock { currentURL }
         finalizeCapture()
         if let url { try? FileManager.default.removeItem(at: url) }
@@ -628,16 +683,47 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private func isGeneration(_ generation: Int) -> Bool { lock.withLock { engineGeneration == generation } }
     private func markRebuild() { lock.withLock { mustRebuild = true } }
 
+    // MUST run on the control queue. Stop + DISPOSE the current engine — its realized I/O unit and the
+    // CoreAudio property listeners AVFoundation rides on it — and swap in a fresh, UNREALIZED placeholder.
+    // Callers that mutate the system default input MUST call this BEFORE the mutation: the old engine is
+    // deallocated by the time this returns (its `let` reference cannot outlive this scope), so its property
+    // listener is gone before any default-changed callback could be enqueued for it. This is the fix for the
+    // AVAudioIOUnit::IOUnitPropertyListener use-after-free (0.1.7). The placeholder is bare (AVAudioEngine
+    // realizes its input unit lazily, on first inputNode/prepare), so it carries no listener until armed.
+    private func disposeCurrentEngine() {
+        Self.teardownEngine(engineSnapshot())
+        lock.lock()
+        engineGeneration &+= 1
+        engine = AVAudioEngine()
+        let placeholder = engine
+        let generation = engineGeneration
+        lock.unlock()
+        observeConfigChanges(of: placeholder, generation: generation)
+    }
+
     private func rebuildEngineIfNeeded() {
         lock.lock()
         guard mustRebuild else { lock.unlock(); return }
         mustRebuild = false
+        let outgoing = engine
+        let outgoingQueue = controlQueue
         engineGeneration &+= 1
         engine = AVAudioEngine()
         controlQueue = DispatchQueue(label: "com.keyscribe.audio.\(engineGeneration)")
         let newEngine = engine
         let generation = engineGeneration
         lock.unlock()
+        // Tear down + release the outgoing engine on its OWN (outgoing) queue, async and fire-and-forget,
+        // rather than letting it deallocate inline on whatever thread called us (start / prewarm /
+        // applyTopologyChange — often the device-listener queue). Two wins: (1) a HEALTHY outgoing engine
+        // (a device/preference change, not a wedge) gets an orderly stop()/removeTap + dealloc serialized
+        // off the caller's thread, instead of a raw cross-thread drop that could race a device-change
+        // property callback during dealloc (the IOUnitPropertyListener UAF class); (2) a WEDGED outgoing
+        // engine (the reason we are escaping to a fresh queue) can no longer block the caller — its teardown
+        // simply never runs on the abandoned queue and the dead engine is left behind, exactly the intended
+        // abandonment, but now the caller does not pay the dealloc on its own thread.
+        let box = EngineBox(outgoing)
+        outgoingQueue.async { Self.teardownEngine(box.engine) }
         // Re-point the config-change observer at the fresh engine (NotificationCenter add/remove is
         // internally synchronized, so this is safe outside the lock).
         observeConfigChanges(of: newEngine, generation: generation)

@@ -12,6 +12,10 @@ final class DictationController {
     private let provider: SpeechEngineProvider
     private let config: ConfigCache
     private let history: HistoryStore?
+    // History writes are append-only file I/O — serialized off the main actor so the disk write never
+    // sits on the dictation's completion path. Serial so concurrent dictations can't interleave a write
+    // or reorder appends within a day file.
+    private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
     private let audio: AudioCapturing
     private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void
     private let submitKey: (Mode.Submit) async -> Void
@@ -20,7 +24,7 @@ final class DictationController {
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
     private let llmClient: any LLMClient
-    private let effects = DuringDictationEffects()
+    private let effects: DuringDictationEffects
     // Serialises the STT call: a deadline only abandons a wedged transcribe, so this keeps a second
     // dictation from starting a concurrent transcribe on the same engine until the first truly settles.
     private let transcribeGate = SingleFlightDeadline()
@@ -147,7 +151,8 @@ final class DictationController {
     init(
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
-        audio: AudioCapturing = AudioCapture(),
+        restorer: SystemAudioStateRestorer? = nil,
+        audio: AudioCapturing? = nil,
         insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
@@ -161,7 +166,8 @@ final class DictationController {
         self.config = config
         self.history = history
         self.hud = hud
-        self.audio = audio
+        self.audio = audio ?? AudioCapture(restorer: restorer)
+        self.effects = DuringDictationEffects(restorer: restorer)
         self.insert = insert
         self.submitKey = submitKey
         self.captureSelection = captureSelection
@@ -170,7 +176,7 @@ final class DictationController {
         self.accessibilityGranted = accessibilityGranted
         self.llmClient = llmClient
         levelCoalescer.onLevel = { [weak self] level in self?.renderLevel(level) }
-        audio.setPreferredInputUID(settings.audio.inputDeviceUID)
+        self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
     }
 
@@ -478,6 +484,9 @@ final class DictationController {
                 self.releaseCapturedPlan()
                 return
             }
+            // Capture is done — unmute the output now rather than holding it muted across
+            // transcription and the (potentially slow) cloud LLM rewrite.
+            self.effects.restoreAudio()
             let drainMs = self.elapsedMs(since: drainStart)
             self.building.stageMillis[.drain] = drainMs
             if let f = try? AVAudioFile(forReading: url) {
@@ -687,15 +696,9 @@ final class DictationController {
         case .failed:
             machine.finish(outcome)
         }
-        let recordOutcome: DictationRecord.Outcome
-        switch outcome {
-        case .noSpeech: recordOutcome = .noSpeech
-        case .inserted: recordOutcome = rewrite?.fellBack == true ? .localFallback : .inserted
-        case .copied: recordOutcome = rewrite?.fellBack == true ? .localFallback : .copied
-        case .failed: recordOutcome = .failed
-        }
-        finalizeRecord(outcome: recordOutcome)
-        recordHistory(heard: heard, transformed: transformed, result: transcript, insertion: outcome, rewrite: rewrite)
+        // Fire the user-perceptible completion (end cue + HUD) the instant the text has landed, before
+        // any record-keeping — the cue and HUD are what the user waits on; the diagnostics record, the
+        // history write, and engine eviction are invisible and must not delay the "done" signal.
         let endCue: DuringDictationEffects.EndCue
         switch outcome {
         case .inserted, .copied: endCue = .success
@@ -707,6 +710,15 @@ final class DictationController {
             ? .localFallback(outcome: outcome, mode: currentModeName)
             : .complete(outcome: outcome, mode: currentModeName))
         scheduleHide()
+        let recordOutcome: DictationRecord.Outcome
+        switch outcome {
+        case .noSpeech: recordOutcome = .noSpeech
+        case .inserted: recordOutcome = rewrite?.fellBack == true ? .localFallback : .inserted
+        case .copied: recordOutcome = rewrite?.fellBack == true ? .localFallback : .copied
+        case .failed: recordOutcome = .failed
+        }
+        finalizeRecord(outcome: recordOutcome)
+        recordHistory(heard: heard, transformed: transformed, result: transcript, insertion: outcome, rewrite: rewrite)
         applyEvictionAfterDictation(engine: activeEngine)
         releaseCapturedPlan()
         onDictationCompleted?(outcome)
@@ -737,8 +749,11 @@ final class DictationController {
             cloudInvolved: rewrite != nil, redaction: rewrite?.redaction ?? false,
             contextCategories: rewrite?.contextCategories ?? [],
             connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt)
-        do { try history?.append(entry) }
-        catch { log.error("history append failed: \(error.localizedDescription, privacy: .public)") }
+        guard let history else { return }
+        historyWriteQueue.async { [log] in
+            do { try history.append(entry) }
+            catch { log.error("history append failed: \(error.localizedDescription, privacy: .public)") }
+        }
     }
 
     // Evicts the engine the dictation actually used (the captured one), not whatever is active now —

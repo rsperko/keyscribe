@@ -35,6 +35,17 @@ enum KeyScribePaths {
             .appendingPathComponent("models", isDirectory: true)
     }
 
+    // A small runtime marker recording global system audio state we must put back after a crash. It must
+    // persist across a crash but is NOT user config, so it lives as a sibling FILE of supportDir (directly
+    // under Application Support), NOT inside the FSEvents-watched config tree — otherwise the per-dictation
+    // record/clear writes would fire ConfigWatcher and trigger spurious config reloads. Keyed by variant
+    // (dev vs prod isolation) but never redirected by `--config-dir`: it is about real system state, so a
+    // normal launch must still find a throwaway run's marker to recover.
+    static var pendingSystemRestoreFile: URL {
+        appSupportBase.appendingPathComponent(
+            "\(variant.supportFolderName)-pending-system-restore.json", isDirectory: false)
+    }
+
     static var modesDir: URL {
         supportDir.appendingPathComponent("modes", isDirectory: true)
     }

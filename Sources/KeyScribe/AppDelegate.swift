@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var historyController: HistoryController!
     private var correctionPanel: CorrectionPanelController!
     private var configRepository: ConfigRepository!
+    // Crash-safe restoration of global audio state (temporary default-input override, output mute) that a
+    // crash/SIGKILL/force-quit could otherwise strand system-wide. Reconciled at launch and on terminate.
+    private var audioRestorer: SystemAudioStateRestorer!
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
     // launch. With neither set, lifecycle and bootstrap behave exactly as without them.
@@ -31,7 +34,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
 
+    // A graceful Cmd-Q during an active dictation tears the app down without running the dictation-end
+    // restore paths, leaving the system output muted and/or the default input overridden. Run the SAME
+    // ordered in-process teardown a cancel uses — it disposes the realized engine BEFORE restoring the
+    // default (via AudioCapture.stop's dispose-first path) and restores the mute synchronously, rather than
+    // a raw default-device change against a still-live engine (which would reopen the AVAudioIOUnit UAF).
+    // Whatever its async engine dispose cannot finish during process exit is covered by reconcile() at the
+    // next launch — the same backstop as a hard crash / SIGKILL (which skips this entirely). cancel() is a
+    // no-op when idle, and a stale marker from a prior crash was already cleared by reconcile() at launch.
+    func applicationWillTerminate(_: Notification) {
+        controller?.cancel()
+    }
+
     func applicationDidFinishLaunching(_: Notification) {
+        // Undo any global audio state a prior run died without restoring (hijacked default mic, muted
+        // output) BEFORE anything touches audio — prewarm, dictation, or the mic permission flow.
+        audioRestorer = SystemAudioStateRestorer(
+            store: PendingSystemRestoreStore(persistence: FilePendingSystemRestorePersistence(
+                url: KeyScribePaths.pendingSystemRestoreFile)))
+        audioRestorer.reconcile()
         runLegacyImportIfNeeded()
         loadSettings()
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
@@ -56,7 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             history.applyRetention(retentionDays: settings.history.retentionDays)
         }
         controller = DictationController(
-            settings: settings, provider: provider, config: config, history: history, hud: hud)
+            settings: settings, provider: provider, config: config, history: history, hud: hud,
+            restorer: audioRestorer)
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }

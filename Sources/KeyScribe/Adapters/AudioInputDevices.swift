@@ -26,6 +26,19 @@ enum AudioInputDevices {
         available().first { $0.uid == uid }?.id
     }
 
+    // Resolve a UID to ANY currently-connected device (input or output), or nil if absent. Used by the
+    // crash-recovery reconcile to restore an output device's mute by UID — output devices have no input
+    // streams, so `deviceID(forUID:)` (input-only) would not find them.
+    static func deviceID(forAnyUID uid: String) -> AudioDeviceID? {
+        allDeviceIDs().first { Self.uid(of: $0) == uid }
+    }
+
+    // The device's stable UID (input or output). Exposed so callers can persist a device identity across
+    // launches/reboots; AudioDeviceID is transient and must never be stored.
+    static func uid(of id: AudioDeviceID) -> String? {
+        stringProperty(id, kAudioDevicePropertyDeviceUID)
+    }
+
     // The system default *input* device, or nil if it has no input stream (CoreAudio can name an
     // output-only default during route churn — device 106 in the crash log).
     static func systemDefaultInputID() -> AudioDeviceID? {
@@ -78,10 +91,6 @@ enum AudioInputDevices {
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr else { return false }
         return size > 0
-    }
-
-    private static func uid(of id: AudioDeviceID) -> String? {
-        stringProperty(id, kAudioDevicePropertyDeviceUID)
     }
 
     private static func name(of id: AudioDeviceID) -> String? {

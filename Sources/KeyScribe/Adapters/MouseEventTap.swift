@@ -26,16 +26,30 @@ protocol MouseTapping: AnyObject {
 // and hands the edge to main asynchronously; it touches no audio/AX/SwiftUI/AppleScript, so nothing it
 // does can stall for seconds, and a wedged MAIN thread is a different thread that cannot block it. This
 // is the same isolation every mouse utility (SensibleSideButtons, Scroll Reverser, Mos) relies on.
+//
+// Cross-thread discipline (the tap thread runs concurrently with main, so this is load-bearing): the
+// callback finds the instance through the tap's `userInfo` pointer (set when the tap is created), NOT a
+// shared global — `self` is held alive on the tap thread's stack for the entire run loop, so an unretained
+// pointer is safe and there is no global weak to race. The CFMachPort tap is created, re-enabled, and
+// disposed ONLY on the tap thread — main never touches it. The single piece main reaches is the tap
+// thread's run loop, handed off under a lock, used only to signal teardown.
 @MainActor
 final class MouseEventTap: MouseTapping {
     var onEdge: ((Int, TriggerEdge) -> Void)?
 
-    // Read on the tap thread, written on main. The ONLY cross-thread state, behind one lock.
+    // Read on the tap thread, written on main. Thread-safe by construction.
     fileprivate let consumed = OSAllocatedUnfairLock<Set<Int>>(initialState: [])
 
-    // Set on the tap thread in `runTapLoop`, torn down on main in `stop`.
+    // The CFMachPort tap: created, re-enabled (reEnable), and disposed ONLY on the tap thread, so its
+    // access needs no cross-thread synchronization. main no longer touches it (teardown goes via `control`).
     nonisolated(unsafe) fileprivate var tap: CFMachPort?
-    nonisolated(unsafe) private var runLoop: CFRunLoop?
+
+    // The only state shared between main and the tap thread for teardown. main's stop() sets `stopRequested`
+    // and stops the published loop; the tap thread publishes its loop here, or — if stop() already fired —
+    // sees the request and skips running the loop (closing the start-vs-stop race). Lock-guarded both ways.
+    private struct Control { var runLoop: CFRunLoop?; var stopRequested = false }
+    private let control = OSAllocatedUnfairLock(uncheckedState: Control())
+
     private var thread: Thread?
 
     func setConsumedButtons(_ buttons: Set<Int>) {
@@ -45,10 +59,10 @@ final class MouseEventTap: MouseTapping {
 
     // The thread is created at most once and lives for the app's lifetime — config reloads and
     // suspend/resume only swap the lock-guarded set, never spawn or kill the thread, so there is no
-    // per-change lifecycle to race on.
+    // per-change lifecycle to race on. stop() is a TERMINAL teardown (app exit / test seam), not designed
+    // to be followed by a restart.
     private func ensureRunning() {
         guard thread == nil else { return }
-        activeMouseEventTap = self
         let t = Thread { [weak self] in self?.runTapLoop() }
         t.name = "com.keyscribe.mousetap"
         t.start()
@@ -58,9 +72,13 @@ final class MouseEventTap: MouseTapping {
     private nonisolated func runTapLoop() {
         let mask = CGEventMask(
             (1 << CGEventType.otherMouseDown.rawValue) | (1 << CGEventType.otherMouseUp.rawValue))
+        // `self` is strongly held on this stack frame for the whole CFRunLoopRun() below, and the OS fires
+        // the callback only while that loop runs — so passing `self` UNRETAINED via userInfo is safe and
+        // lets the callback reach the instance without a cross-thread global weak (the prior data race).
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-            eventsOfInterest: mask, callback: mouseTapCallback, userInfo: nil)
+            eventsOfInterest: mask, callback: mouseTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque())
         else {
             mouseLog.error("mouse event tap not created; Accessibility verdict is likely cached as denied from launch — relaunch needed")
             return
@@ -68,16 +86,30 @@ final class MouseEventTap: MouseTapping {
         self.tap = tap
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         let rl = CFRunLoopGetCurrent()
-        self.runLoop = rl
         CFRunLoopAddSource(rl, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        mouseLog.info("mouse event tap active on dedicated thread")
-        CFRunLoopRun()
+        // Publish the loop for stop(), unless stop() already fired before we got here — then skip running
+        // the loop and fall straight to teardown, so a stop() that raced startup never leaves it spinning.
+        // withLockUnchecked: CFRunLoop is not Sendable, so it cannot cross the @Sendable `withLock` closure
+        // boundary. Access is still serialized by the lock; only the compile-time Sendable check is waived.
+        let run = control.withLockUnchecked { c -> Bool in
+            guard !c.stopRequested else { return false }
+            c.runLoop = rl
+            return true
+        }
+        if run {
+            mouseLog.info("mouse event tap active on dedicated thread")
+            CFRunLoopRun()
+            control.withLockUnchecked { $0.runLoop = nil }
+        }
         CFRunLoopRemoveSource(rl, source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: false)
+        CFMachPortInvalidate(tap)
+        self.tap = nil
     }
 
     // macOS disables the tap (emitting one of these) if the callback is slow or under certain input
-    // conditions; re-enable or the tap goes permanently deaf. Called from the tap thread.
+    // conditions; re-enable or the tap goes permanently deaf. Called from the tap thread (the callback).
     fileprivate nonisolated func reEnable() {
         guard let tap else { return }
         mouseLog.error("mouse event tap disabled; re-enabling")
@@ -94,25 +126,26 @@ final class MouseEventTap: MouseTapping {
 
     func stop() {
         consumed.withLock { $0 = [] }
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let runLoop { CFRunLoopStop(runLoop) }
-        tap = nil
-        runLoop = nil
+        // Signal the tap thread to exit; it disables + disposes the tap on its OWN thread (runTapLoop
+        // teardown), so main never touches `tap`. Setting stopRequested also covers the case where the tap
+        // thread has not yet published its run loop.
+        control.withLockUnchecked { c in
+            c.stopRequested = true
+            if let rl = c.runLoop { CFRunLoopStop(rl) }
+        }
         thread = nil
-        activeMouseEventTap = nil
     }
 }
-
-nonisolated(unsafe) private weak var activeMouseEventTap: MouseEventTap?
 
 private func mouseTapCallback(
     proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
+    guard let userInfo else { return Unmanaged.passUnretained(event) }
+    let inst = Unmanaged<MouseEventTap>.fromOpaque(userInfo).takeUnretainedValue()
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        activeMouseEventTap?.reEnable()
+        inst.reEnable()
         return Unmanaged.passUnretained(event)
     }
-    guard let inst = activeMouseEventTap else { return Unmanaged.passUnretained(event) }
     let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
     guard inst.consumed.withLock({ $0.contains(button) }) else { return Unmanaged.passUnretained(event) }
     inst.deliver(button: button, edge: type == .otherMouseDown ? .down : .up)
