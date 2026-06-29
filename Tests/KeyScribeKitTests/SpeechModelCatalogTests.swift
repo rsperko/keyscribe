@@ -6,7 +6,7 @@ struct SpeechModelCatalogTests {
         #expect(
             Set(SpeechModelCatalog.all.map(\.id))
                 == ["parakeet", "parakeet-tdt-ctc-110m", "whisper", "whisper-small-en", "apple",
-                    "qwen3-asr-0.6b", "qwen3-asr-1.7b", "nemotron-en", "moonshine-base-en"])
+                    "qwen3-asr-0.6b", "qwen3-asr-1.7b", "moonshine-base-en"])
     }
 
     @Test func exactlyOneDefaultEnglishEngine() {
@@ -51,8 +51,8 @@ struct SpeechModelCatalogTests {
     }
 
     @Test func recognitionBiasSupportIsPerEngine() {
-        // Moonshine and Nemotron have no on-device bias path; every other engine does.
-        let biasExempt: Set<String> = ["moonshine-base-en", "nemotron-en"]
+        // Moonshine has no on-device bias path; every other engine does.
+        let biasExempt: Set<String> = ["moonshine-base-en"]
         for id in biasExempt {
             #expect(SpeechModelCatalog.entry(for: id)?.supportsRecognitionBias == false)
         }

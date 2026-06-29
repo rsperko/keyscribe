@@ -53,7 +53,6 @@ enum EngineRegistry {
         case "qwen3-asr-0.6b": return Qwen3ASREngine(profile: .small, modelsDir: modelsDir)
         case "qwen3-asr-1.7b": return Qwen3ASREngine(profile: .large, modelsDir: modelsDir)
         case "moonshine-base-en": return MoonshineEngine(modelsDir: modelsDir)
-        case "nemotron-en": return NemotronEngine(modelsDir: modelsDir)
         default: fatalError("EngineRegistry: no constructor for engine id '\(id)'")
         }
     }

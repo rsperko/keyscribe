@@ -222,10 +222,11 @@ keyscribe/
 
 ## STT engines
 
-KeyScribe ships **7 curated models across 5 engine kinds**, all with in-app download/install:
-Parakeet TDT v3, Parakeet TDT-CTC 110M (English default), Whisper (Large v3 Turbo), Apple
-SpeechAnalyzer, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base (EN). Six are bias-capable;
-**Moonshine is bias-exempt** (`supportsRecognitionBias = false`, badged in Settings). Engines are
+KeyScribe ships **8 curated models across 5 engine kinds**, all with in-app download/install:
+Parakeet TDT v3, Parakeet TDT-CTC 110M (English default), Whisper Large v3 Turbo,
+Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and
+Moonshine Base (English). Seven are bias-capable; **Moonshine has no recognition bias**
+(`supportsRecognitionBias = false`, dictionary recovery available in Settings). Engines are
 wired through a single **`EngineRegistry`** descriptor list (catalog ↔ constructor) that the
 provider, download path, install reconcile/delete, and the benchmark all derive from — adding an
 engine is one descriptor + one catalog entry. `load(progress:)` is on the `SpeechEngine` protocol;
@@ -235,7 +236,7 @@ each engine owns its install footprint (`installDirNames` / `installState`); aud
 A dev **STT benchmark** (`KeyScribe --benchmark <dir> [--engines …]`, runner + pure scoring in
 KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorded clips. On a
 16-clip real-voice corpus Qwen3-ASR 1.7B wins (0.8% WER biased, 100% term recall); 0.6B is the
-speed/accuracy sweet spot; bias is decisive (bias-less Moonshine ~15%).
+speed/accuracy sweet spot; bias is decisive (Moonshine without recognition bias ~15%).
 
 ### Forked / pinned STT deps
 
@@ -252,7 +253,8 @@ Three forks + one pinned binary dep; the forks work live and cost nothing day-to
   so stock `speech-swift`'s `argmaxinc/WhisperKit` doesn't collide with our WhisperKit fork.
   Qwen3-ASR bias is **native** (`Qwen3DecodingOptions.context`), so no source patch is needed.
 - **Moonshine** → `moonshine-ai/moonshine-swift` (no fork): ONNX Runtime ships as a prebuilt
-  `Moonshine.xcframework` binaryTarget. No on-device bias path, so `supportsRecognitionBias = false`.
+  `Moonshine.xcframework` binaryTarget. No on-device bias path, so `supportsRecognitionBias = false`
+  and dictionary recovery handles close matches after transcription.
 
 **MLX metallib is a hard runtime requirement.** Qwen3-ASR (MLX) crashes ("Failed to load the default
 metallib") without `mlx.metallib` beside the executable. `make-app.sh` builds it from the

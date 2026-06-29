@@ -97,21 +97,21 @@ pipeline stages cannot stay purely theoretical until late in the build (cf. `roa
 
 ## B. Underlying STT model families (our pluggable engines)
 
-KeyScribe ships **7 curated models across 5 engine families** (Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base EN). Here is the state of each family as of 2026. (A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on our own 16-clip real-voice benchmark Qwen3-ASR 1.7B is the WER winner.)
+KeyScribe ships **8 curated models across 5 engine families** (Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base (English)). Here is the state of each family as of 2026. (A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on our own 16-clip real-voice benchmark Qwen3-ASR 1.7B is the WER winner.)
 
 | Engine | Speed (Apple Silicon) | Accuracy (English WER) | Languages | Notes |
 |---|---|---|---|---|
 | **NVIDIA Parakeet** (TDT 0.6B v3 + TDT-CTC 110M) | ~3,333x realtime; ~10x faster than Whisper Large v3 Turbo; latency can hit ~80ms | ~12.0% WER — slightly **better** than Whisper; wins on disfluent speech (tuned to drop fillers, reconstruct sentences) | **25** (v3) / **1** (110M) | Fastest by a wide margin. Built-in diarization (v3). The compact **110M tier is KeyScribe's English default**; v3 is the larger multilingual tier. |
-| **OpenAI Whisper** (Large v3 Turbo) | ~146x realtime | ~12.6% WER | **99** | The multilingual workhorse. Best when language coverage matters. WhisperKit makes on-device easy. |
+| **OpenAI Whisper** (Large v3 Turbo + Small English) | ~146x realtime for Large v3 Turbo | ~12.6% WER for Large v3 Turbo | **99** / **1** | The multilingual workhorse plus a compact English tier. Best when language coverage matters. WhisperKit makes on-device easy. |
 | **Apple Speech** (SpeechAnalyzer, Tahoe) | ~150–400ms latency; ~55% faster than Whisper | Most accurate on clean read-aloud FR/ES/DE/IT; weaker than Parakeet in English; ~Whisper for supported langs | **20** | Zero-install, OS-native, free, on-device, system-managed. Great latency/accuracy for European languages; session/robustness limits. |
 | **Qwen3-ASR** (0.6B + 1.7B) | 0.6B is the speed/accuracy sweet spot in our benchmarks | **WER winner on our real-voice corpus** (1.7B, 0.8% biased); 0.6B close behind (1.5%) | **52** | Two shipping tiers. Native on-device bias (`Qwen3DecodingOptions.context`). |
-| **Moonshine** (Base, English) | Lightweight, fast | competitive English | **1** | Small (~141MB) English model. **No on-device dictionary bias** — bias-exempt, badged in Settings. |
+| **Moonshine** (Base, English) | Lightweight, fast | competitive English | **1** | Small (~141MB) English model. No recognition bias; dictionary recovery is available in Settings. |
 
 **Implications for KeyScribe's pluggable-STT design (as shipped):**
-- **Parakeet TDT-CTC 110M = English default** (compact + fast + accurate); **Qwen3-ASR / Whisper = multilingual** (52 / 99 langs); **Apple = zero-footprint** (no download, good EU-language accuracy); **Moonshine = lightweight English** (no bias).
+- **Parakeet TDT-CTC 110M = English default** (compact + fast + accurate); **Qwen3-ASR / Whisper = multilingual** (52 / 99 langs); **Apple = zero-footprint** (no download, good EU-language accuracy); **Moonshine = lightweight English** (dictionary recovery).
 - Model **download/compile-with-progress + select + delete** is the shipped UX — every serious local app does this; engines are wired through a single `EngineRegistry` descriptor.
 - Diarization is a Parakeet-v3 capability we get largely "for free" and could expose.
-- **Bias is decisive** in our benchmark (bias-less Moonshine ~15% WER vs <2% for biased Qwen3/Parakeet), so recognition bias is a first-class engine capability, not an add-on. NVIDIA Canary-Qwen was evaluated and deliberately dropped.
+- **Bias is decisive** in our benchmark (Moonshine without recognition bias ~15% WER vs <2% for biased Qwen3/Parakeet), so recognition bias is a first-class engine capability, not an add-on. NVIDIA Canary-Qwen was evaluated and deliberately dropped.
 
 ---
 

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum EngineKind: String, Codable, Sendable, Equatable {
-    case parakeet, whisper, apple, qwen3asr, moonshine, nemotron
+    case parakeet, whisper, apple, qwen3asr, moonshine
 }
 
 public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
@@ -69,11 +69,6 @@ public enum SpeechModelCatalog {
             summary: "Largest multilingual model; top accuracy in our benchmarks.",
             languageCount: 52, approxDownloadBytes: 2_000_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
-        SpeechModelInfo(
-            id: "nemotron-en", kind: .nemotron, displayName: "Nemotron Speech 3.5 (English)",
-            summary: "Fast, accurate English model; dictionary recovery available.",
-            languageCount: 1, approxDownloadBytes: 627_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: false),
         SpeechModelInfo(
             id: "moonshine-base-en", kind: .moonshine, displayName: "Moonshine Base (English)",
             summary: "Lightweight English model; dictionary recovery available.",

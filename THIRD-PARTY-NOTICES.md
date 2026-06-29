@@ -31,7 +31,7 @@ the property of its publisher and is used under its own license.
 |---|---|---|
 | Parakeet TDT v3 / Parakeet TDT-CTC 110M | NVIDIA | CC-BY-4.0 |
 | pyannote segmentation/speaker models (via FluidAudio) | pyannote | CC-BY-4.0 |
-| Whisper | OpenAI | MIT |
+| Whisper Large v3 Turbo / Whisper Small (English) | OpenAI | MIT |
 | Qwen3-ASR 0.6B / 1.7B | Alibaba Cloud (Qwen) | Apache-2.0 |
 | Moonshine Base (English) | Moonshine AI | MIT |
 | Apple on-device speech (`DictationTranscriber`) | Apple | macOS system framework — no separate distribution |

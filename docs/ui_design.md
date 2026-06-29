@@ -380,12 +380,12 @@ Both screens prioritize fast correction over configuration theory.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
   Apple; a soft nudge on Whisper/Parakeet), and dictionary terms always help the optional rewrite
-  regardless of engine. Bias-less engines should be labeled **No recognition bias**, then offer
-  **Dictionary recovery** as a best-effort post-transcription fallback that can be turned off if it
-  changes ordinary words. On **Parakeet** specifically, bias runs a second lightweight recognition pass
-  over the audio — on the order of **a second on a long dictation, negligible on short ones** (measured:
-  `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed recognition or a
-  noticeable wait for normal use.
+  regardless of engine. Models without recognition bias should be labeled **No recognition bias**,
+  then offer **Dictionary recovery** as a best-effort post-transcription fallback that can be turned
+  off if it changes ordinary words. On **Parakeet** specifically, bias runs a second lightweight
+  recognition pass over the audio — on the order of **a second on a long dictation, negligible on short
+  ones** (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
+  recognition or a noticeable wait for normal use.
 - Replacements: a clear `Heard` → `Use instead` pair. Regex rows keep a `Regex` badge.
 
 ### AI Services

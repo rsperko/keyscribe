@@ -4,7 +4,8 @@
 > local dictation → modes (Phase-A app/URL/window-title routing + Phase-B trigger-phrase routing + per-mode
 > trigger keys) → dictionary / replacements / live edits / numbers / fuzzy → optional **BYOK
 > rewrite** → **verbatim + redaction wedge** (secrets tokenized before any cloud call, restored
-> locally) → atomic insert. Plus edit-in-place, 7 STT engines with bias, the Settings UI
+> locally) → atomic insert. Plus edit-in-place, 8 STT models with recognition bias on seven and
+> dictionary recovery for Moonshine, the Settings UI
 > (General · Speech Models · Vocabulary · AI Services · Modes · Permissions · Advanced), local
 > history with the correction surface, and the standalone correction panel.
 >

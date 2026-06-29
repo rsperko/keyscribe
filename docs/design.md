@@ -143,7 +143,7 @@ measured (`principles.md` §1):
   user is never stuck waiting on the cloud.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
-**9 curated models across 6 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
+**8 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
 download/install:
 - **FluidAudio / Parakeet TDT-CTC 110M** — **default for English.** Compact (~440MB), fast and
   accurate. English only.
@@ -154,8 +154,6 @@ download/install:
 - **Apple Speech** (SpeechAnalyzer, macOS Tahoe) — zero-install, system-managed, 20 languages.
 - **Qwen3-ASR 0.6B** — compact multilingual (52 languages); the speed/accuracy sweet spot.
 - **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the benchmark WER winner.
-- **Nemotron Speech 3.5 (English)** — fast, accurate English model; **no recognition bias**
-  (dictionary recovery available in Settings).
 - **Moonshine Base (English)** — lightweight English model; **no recognition bias** (dictionary
   recovery available in Settings).
 
@@ -164,9 +162,9 @@ the provider, download path, install reconcile/delete, and the benchmark all der
 engine is one descriptor + one catalog entry.
 
 **Engine bias support.** Recognition bias is grounded in the acoustics, never a blind post-STT
-find-and-replace (that silently corrupts output). Seven of the nine models bias, each via its model's
-own mechanism, all taking dictionary terms through `transcribe(wavURL:biasTerms:)`. Nemotron and
-Moonshine have no on-device bias path and use dictionary recovery instead:
+find-and-replace (that silently corrupts output). Seven of the eight models bias, each via its model's
+own mechanism, all taking dictionary terms through `transcribe(wavURL:biasTerms:)`. Moonshine has no
+on-device bias path and uses dictionary recovery instead:
 - **Whisper** — a decode-time conditioning prompt (`promptTokens`); a soft hint the model may ignore.
 - **Apple** — `AnalysisContext` contextual strings, weighted during the single decode. Requires the
   `DictationTranscriber` module — `SpeechTranscriber` silently ignores `contextualStrings`.
@@ -209,7 +207,7 @@ A linear pipeline of typed stages, each declaring its **position** in the flow. 
 | **Replacements** | post-STT | Heard→Replace, literal or regex with substitutions. The result flows into the LLM normally and may be transformed by it (e.g. a "pig latin" mode). Replacements are not protected from rewrite. A user regex is screened by **`ReplacementSafety`** before it runs: a nested-quantifier ("evil") pattern that could catastrophically backtrack on the dictation hot path is refused, not executed (there is no way to interrupt a synchronous `NSRegularExpression` match). |
 | **Live edits** | post-STT | Spoken commands from a **small documented list** (*new line*, *paragraph*, *scratch that*, *tab*, *begin/end verbatim* — sentence/newline-aware), **opt-in per mode** (one toggle). **"Scratch that" only fires at a clause boundary** — its phrase ends with a terminator (. ! ?) or comma, or ends the utterance — so literal use ("scratch that lottery ticket", a continuing word follows) is left as text. Matching tolerates a trailing terminator/comma; the gate is scratch-only (newline/tab fire inline). This leans on the STT punctuating a spoken correction, so a non-punctuating engine (e.g. Apple) **under-fires rather than corrupts**. |
 | **Numbers (inverse text normalization)** | post-STT | Optional per-mode deterministic spoken-number → digits ("twenty five" → "25"), `commands.numbers`. Conservative by design: a run that does not form one unambiguous cardinal is left exactly as spoken (preserves year idioms like "twenty twenty six"). Wrong number output is worse than none. **Tier 1 decorators** fold in the low-ambiguity cases around a validated cardinal: sign ("minus five" → "-5", only when not preceded by a number, so subtraction is left alone), decimals ("three point one four" → "3.14"; fractional part is single digits only), percent ("fifty percent" → "50%"), and ordinals ("twenty first" → "21st"). Each decorator only fires on a cardinal that already parses and clears the standalone-small gate; anything ambiguous echoes the spoken words. **Tier 2** (currency symbols + placement, thousands grouping, dates, times) is locale/house-style/context-dependent, so it is left to the optional LLM rewrite (and skipped entirely in no-LLM modes) rather than guessed deterministically here. |
-| **Dictionary recovery** | post-STT | The post-STT substitute for recognition bias: snaps mangled words to dictionary terms ("charge bee" → "ChargeBee") via the `FuzzyStage` (Levenshtein + Soundex gated; the dictionary stays a *hint*, not a protected substitution). Not a mode command — it is a **per-engine** property of bias-less models (`settings.stt.dictionary_recovery_engines`, default on for every bias-exempt engine), applied only when the active engine cannot bias. Bias-capable engines never run it (recognition bias already recovers the terms). |
+| **Dictionary recovery** | post-STT | The post-STT substitute for recognition bias: snaps mangled words to dictionary terms ("charge bee" → "ChargeBee") via the `FuzzyStage` (Levenshtein + Soundex gated; the dictionary stays a *hint*, not a protected substitution). Not a mode command — it is a **per-engine** property of models without recognition bias (`settings.stt.dictionary_recovery_engines`, default on for each one), applied only when the active engine cannot bias. Bias-capable engines never run it (recognition bias already recovers the terms). |
 | **Verbatim** | tokenize **before** the text stages / restore last | A **live edit** (enabled by the live-edits toggle): spans delimited by spoken triggers ("begin verbatim" / "end verbatim") are pulled into a **single nonce token** **before** live edits / replacements / numbers / fuzzy run, so the span is protected from **everything except STT** (the text stages and the LLM all see only the token); restored verbatim after. Same machinery as redaction, different intent and position (protect-from-edit, first vs withhold-sensitive, last). |
 | **Privacy / redaction** | tokenize **after** the text stages / restore (+ system-prompt) | **Best-effort pattern matching** of sensitive data (API keys, PII, credit cards, …); matched spans are tokenized out of the fully-transformed text **before** the (possibly cloud) LLM and restored after. Enabled per-mode via a **privacy** toggle. Privacy mode also **forces context off** (§4.4), so the redacted transcript is the only user content that can leave the machine. |
 
@@ -605,7 +603,7 @@ carries a **`schema_version`**.
 | Capability | KeyScribe | Superwhisper | Wispr Flow | VoiceInk | Apple |
 |---|---|---|---|---|---|
 | STT always local (no cloud STT) | ✅ | ✅ (opt) | ❌ cloud | ✅ | ✅ |
-| Pluggable engines | ✅ 7 | ✅ 2 | ❌ | ✅ 1 | n/a |
+| Pluggable engines | ✅ 8 | ✅ 2 | ❌ | ✅ 1 | n/a |
 | Per-context modes (data-driven) | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Staged pipeline (pre/post STT+LLM) | ✅ **unique** | partial | ❌ | ❌ | ❌ |
 | Redaction + restoration (cloud-safe) | ✅ **unique** | ❌ | ❌ | ❌ | ❌ |

@@ -23,7 +23,8 @@ Superwhisper, Wispr Flow, Aqua, and MacWhisper without giving up serious workflo
 - **Dictation fits the work.** One mode can write a terse Slack update, another can draft email,
   another can format Markdown, and another can rewrite a selected paragraph in place.
 - **Corrections do not break your flow.** Fix a misheard name, command, or acronym from the current
-  app or a history item, and future dictations learn it through dictionary bias or replacements.
+  app or a history item, and future dictations learn it through recognition bias, dictionary
+  recovery, or replacements.
 - **Insertion behaves like a good Mac citizen.** Dictations insert atomically, undo in one **⌘Z**,
   preserve your clipboard when safe, and avoid inserting into the wrong app if focus changes.
 - **The files are yours.** Config, modes, replacements, prompt fragments, and history are plain files
@@ -103,8 +104,9 @@ from then on.
 shorter", "turn this into bullets", or "make this warmer." KeyScribe replaces the selection in the
 app you're already using.
 
-**Choose the local engine.** Seven on-device speech engines are available in-app: Parakeet TDT v3,
-Parakeet TDT-CTC 110M, Whisper, Apple, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base (EN).
+**Choose the local engine.** Eight on-device speech models are available in-app: Parakeet TDT v3,
+Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple, Qwen3-ASR 0.6B,
+Qwen3-ASR 1.7B, and Moonshine Base (English).
 Trade accuracy, speed, and footprint without sending audio to a server.
 
 **Optional cleanup on your terms.** BYOK LLM cleanup can strip filler, fix grammar, or reformat text
