@@ -111,7 +111,7 @@ extension HUDState {
         case .secureField:
             return "Password field — kept local and copied to the clipboard. Paste with ⌘V."
         case .appChanged, .focusChanged, .unknownTarget:
-            return "Focus changed while KeyScribe was working"
+            return "Focus changed while \(Branding.appName) was working"
         }
     }
 

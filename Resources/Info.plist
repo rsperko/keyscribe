@@ -17,8 +17,8 @@
   <key>LSUIElement</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>KeyScribe transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
+  <string>__BUNDLE_NAME__ transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>KeyScribe reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
+  <string>__BUNDLE_NAME__ reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
 </dict>
 </plist>

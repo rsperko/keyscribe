@@ -14,7 +14,7 @@ struct HUDStateTests {
     @Test func completedCopiedExplainsFocusChangeAndOffersPaste() {
         let state = HUDState.complete(outcome: .copied(.focusChanged), mode: "Edit Selection")
         #expect(state.primaryText == "Copied instead of inserted")
-        #expect(state.secondaryText == "Focus changed while KeyScribe was working")
+        #expect(state.secondaryText == "Focus changed while \(Branding.appName) was working")
         #expect(state.offersPasteLast)
     }
 
@@ -28,7 +28,7 @@ struct HUDStateTests {
     @Test func localFallbackCopiedTellsTheTruthAndOffersPaste() {
         let state = HUDState.localFallback(outcome: .copied(.focusChanged), mode: "Polish")
         #expect(state.primaryText == "Copied without rewriting")
-        #expect(state.secondaryText == "Focus changed while KeyScribe was working")
+        #expect(state.secondaryText == "Focus changed while \(Branding.appName) was working")
         #expect(state.offersPasteLast)
     }
 

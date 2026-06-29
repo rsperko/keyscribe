@@ -35,7 +35,7 @@ private struct NoticesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("KeyScribe").font(.largeTitle.bold())
+                Text(Branding.appName).font(.largeTitle.bold())
                 Text(versionLine)
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -44,7 +44,7 @@ private struct NoticesView: View {
                     .foregroundStyle(.secondary)
                 Divider()
                 Text("License").font(.headline)
-                Text("KeyScribe is open source under the GNU General Public License v3.")
+                Text("\(Branding.appName) is open source under the GNU General Public License v3.")
                     .font(.callout)
                 Text("Open-source notices").font(.headline)
                 Text("""

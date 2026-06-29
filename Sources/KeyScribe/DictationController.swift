@@ -889,7 +889,7 @@ final class DictationController {
         // the read silently fails and the abort below would misreport it as "no selection". Name the
         // real cause and offer the fix instead.
         guard accessibilityGranted() else {
-            return (.abort("Accessibility is off — KeyScribe can't read the selected text.", .openAccessibilitySettings), nil)
+            return (.abort("Accessibility is off — \(Branding.appName) can't read the selected text.", .openAccessibilitySettings), nil)
         }
         // The selection-capture ⌘C must reach the target, so drop key focus held for ESC-cancel; the
         // subsequent .rewriting render re-takes it so ESC still cancels the rewrite.

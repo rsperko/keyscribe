@@ -259,7 +259,7 @@ struct ModesSettingsView: View {
                 } else {
                     ContentUnavailableView(
                         "No modes", systemImage: "square.stack.3d.up",
-                        description: Text("Create a mode to choose how KeyScribe handles a dictation."))
+                        description: Text("Create a mode to choose how \(Branding.appName) handles a dictation."))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -568,7 +568,7 @@ private struct ModeEditorView: View {
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by KeyScribe while it runs, so they won’t also go Back or Forward in other apps.")
+                Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by \(Branding.appName) while it runs, so they won’t also go Back or Forward in other apps.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -672,7 +672,7 @@ private struct ModeEditorView: View {
                 fuzzyCorrectionNotice
             }
 
-            Text("Mode-only names, product terms, and jargon KeyScribe should recognize as written in this mode.")
+            Text("Mode-only names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.")
                 .font(.caption).foregroundStyle(.secondary)
             DictionaryRows(
                 words: mode.dictionary.words,

@@ -322,4 +322,10 @@ This repo has a **normal git origin** (it is *not* shop/world) — plain `git`/`
 - **File-based storage, no SQLite** — everything under `~/Library/Application Support/KeyScribe/`.
 - **Reuse the UI vocabulary** in `ui_components.md`; never overstate privacy (no "secure/safe/
   private" for best-effort redaction — say what actually happens).
+- **Never hardcode the product name in user-facing copy — use `Branding.appName`** (resolves from the
+  running bundle: "KeyScribe" prod, "KeyScribeDev" dev, the bundle name for a `custom` rebrand). The
+  literal "KeyScribe" lives in exactly one place, `AppVariant.production.displayName`; everything else
+  interpolates `\(Branding.appName)`. This is the white-label seam (with `make-app.sh
+  KEYSCRIBE_VARIANT=custom` + the `__BUNDLE_NAME__` placeholder in `Info.plist`); a hardcoded name
+  breaks a downstream rebrand and shows the wrong name in the dev build.
 - When a design choice leans on a principle, note it inline as the docs do.

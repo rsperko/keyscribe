@@ -41,7 +41,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     func present() {
         let hosting = NSHostingController(rootView: FirstRunView(model: model))
         let window = NSWindow(contentViewController: hosting)
-        window.title = model.permissionsOnly ? "Set Up Permissions" : "Welcome to KeyScribe"
+        window.title = model.permissionsOnly ? "Set Up Permissions" : "Welcome to \(Branding.appName)"
         window.styleMask = [.titled, .closable]
         window.setContentSize(NSSize(width: 480, height: 500))
         window.center()

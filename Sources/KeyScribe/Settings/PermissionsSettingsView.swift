@@ -11,12 +11,12 @@ struct PermissionsSettingsView: View {
     var body: some View {
         Form {
             Section("Permissions") {
-                Text("KeyScribe asks for access only when a capability needs it. You can review or repair access here.")
+                Text("\(Branding.appName) asks for access only when a capability needs it. You can review or repair access here.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 PermissionRow(
                     title: "Microphone", status: microphoneStatus,
-                    purpose: "Lets KeyScribe hear a dictation.",
+                    purpose: "Lets \(Branding.appName) hear a dictation.",
                     unavailable: "Dictation cannot start without microphone access.",
                     request: {
                         Task {
@@ -27,7 +27,7 @@ struct PermissionsSettingsView: View {
                     openSettings: { Permissions.openSettings(.microphone) })
                 PermissionRow(
                     title: "Accessibility", status: accessibilityStatus,
-                    purpose: "Lets KeyScribe detect a modifier-key trigger and paste finished text into the focused field.",
+                    purpose: "Lets \(Branding.appName) detect a modifier-key trigger and paste finished text into the focused field.",
                     unavailable: "Modifier-key triggers won't start dictation, and finished text is copied instead of inserted.",
                     request: {
                         _ = Permissions.accessibilityStatus(prompt: true)

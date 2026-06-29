@@ -28,8 +28,8 @@ struct FirstRunView: View {
     private var intro: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "waveform").font(.system(size: 44)).foregroundStyle(.tint)
-            Text("Welcome to KeyScribe").font(.largeTitle.bold())
-            Text("KeyScribe turns your voice into text, entirely on this Mac. Speech recognition never leaves it.")
+            Text("Welcome to \(Branding.appName)").font(.largeTitle.bold())
+            Text("\(Branding.appName) turns your voice into text, entirely on this Mac. Speech recognition never leaves it.")
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Get Started") { model.step = .model }
@@ -40,7 +40,7 @@ struct FirstRunView: View {
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Download speech recognition").font(.title.bold())
-            Text("KeyScribe needs one on-device recognizer before it can turn speech into text. Start with the recommended option; it is a good balance of accuracy, speed, and size.")
+            Text("\(Branding.appName) needs one on-device recognizer before it can turn speech into text. Start with the recommended option; it is a good balance of accuracy, speed, and size.")
                 .foregroundStyle(.secondary)
             modelCard
             DisclosureSection("Advanced: choose a different recognizer", isExpanded: $modelChoiceExpanded) {
@@ -130,7 +130,7 @@ struct FirstRunView: View {
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Set up dictation").font(.title.bold())
-            Text("KeyScribe asks for one permission at a time, only when the next part of dictation needs it.")
+            Text("\(Branding.appName) asks for one permission at a time, only when the next part of dictation needs it.")
                 .foregroundStyle(.secondary)
 
             permissionStep
@@ -172,7 +172,7 @@ struct FirstRunView: View {
     @ViewBuilder private var permissionStep: some View {
         switch model.nextPermission {
         case .microphone:
-            permissionRow("Microphone", "So KeyScribe can hear you.",
+            permissionRow("Microphone", "So \(Branding.appName) can hear you.",
                           "Dictation cannot start without it.", model.micStatus,
                           openSettings: { model.openMicrophoneSettings() }) { model.requestMicrophone() }
         case .accessibility:
@@ -246,14 +246,14 @@ struct FirstRunView: View {
     private var aiService: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Optional text cleanup").font(.title.bold())
-            Text("Connect an AI service if you want KeyScribe to clean up dictation, draft messages, or work on selected text. Speech recognition still stays on this Mac.")
+            Text("Connect an AI service if you want \(Branding.appName) to clean up dictation, draft messages, or work on selected text. Speech recognition still stays on this Mac.")
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
                 Label("Only modes that use AI rewrite send text to this provider.", systemImage: "cloud")
                 Label("Hosted providers need an API key. Local OpenAI-compatible endpoints can be keyless.", systemImage: "key")
                 if !model.aiModeNames.isEmpty {
-                    Label("KeyScribe will connect \(formattedModeNames(model.aiModeNames)) to this service.", systemImage: "wand.and.stars")
+                    Label("\(Branding.appName) will connect \(formattedModeNames(model.aiModeNames)) to this service.", systemImage: "wand.and.stars")
                 }
             }
             .font(.caption)

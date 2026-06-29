@@ -25,12 +25,12 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Microphone")
             } footer: {
-                Text("If the preferred microphone is unavailable, KeyScribe uses the macOS input until it reconnects.")
+                Text("If the preferred microphone is unavailable, \(Branding.appName) uses the macOS input until it reconnects.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Startup") {
-                Toggle("Start KeyScribe at login", isOn: $model.loadOnLogin)
+                Toggle("Start \(Branding.appName) at login", isOn: $model.loadOnLogin)
             }
 
             Section {

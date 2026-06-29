@@ -152,7 +152,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
-        window.title = "KeyScribe Settings"
+        window.title = "\(Branding.appName) Settings"
         window.styleMask = [.titled, .closable, .resizable]
         window.collectionBehavior = .fullScreenNone
         window.setContentSize(NSSize(width: 940, height: 640))
@@ -303,19 +303,19 @@ private struct AdvancedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Erase Data") {
-                Button("Erase All KeyScribe Data…", role: .destructive) { confirmingErase = true }
-                Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts KeyScribe. Downloaded speech models and system permissions are kept. This cannot be undone.")
+                Button("Erase All \(Branding.appName) Data…", role: .destructive) { confirmingErase = true }
+                Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .padding(16)
-        .alert("Erase all KeyScribe data?", isPresented: $confirmingErase) {
+        .alert("Erase all \(Branding.appName) data?", isPresented: $confirmingErase) {
             Button("Erase All Data", role: .destructive) { model.eraseAllData() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently deletes your modes, settings, AI services, saved keys, and dictation history, and restarts KeyScribe. Downloaded speech models and system permissions are kept. This cannot be undone.")
+            Text("This permanently deletes your modes, settings, AI services, saved keys, and dictation history, and restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")
         }
     }
 }

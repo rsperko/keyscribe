@@ -8,7 +8,7 @@ struct SpeechModelsView: View {
         Form {
             Section { activeBanner }
             Section {
-                Text("KeyScribe runs one speech model at a time, entirely on this Mac, before any AI step. Pick it here.")
+                Text("\(Branding.appName) runs one speech model at a time, entirely on this Mac, before any AI step. Pick it here.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(model.rows) { row in
                     EngineRow(row: row, model: model)
@@ -38,7 +38,7 @@ struct SpeechModelsView: View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.seal.fill").foregroundStyle(.tint).font(.title3)
             VStack(alignment: .leading, spacing: 2) {
-                Text("KeyScribe uses \(model.activeName)").font(.headline)
+                Text("\(Branding.appName) uses \(model.activeName)").font(.headline)
                 Text("Used for every dictation, before any AI step.")
                     .font(.caption).foregroundStyle(.secondary)
             }

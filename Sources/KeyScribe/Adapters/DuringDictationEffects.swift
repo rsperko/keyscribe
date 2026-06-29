@@ -142,7 +142,7 @@ final class DuringDictationEffects {
         let ok = IOPMAssertionCreateWithName(
             kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "KeyScribe dictating" as CFString,
+            "\(Branding.appName) dictating" as CFString,
             &displayAssertion)
         hadDisplayAssertion = (ok == kIOReturnSuccess)
     }

@@ -85,7 +85,7 @@ final class CorrectionPanelController {
         Task { @MainActor in
             target.activate()
             guard await waitUntilFrontmost(target) else {
-                status.message = "Saved to your vocabulary. KeyScribe could not return to the app, so the selected text was not changed."
+                status.message = "Saved to your vocabulary. \(Branding.appName) could not return to the app, so the selected text was not changed."
                 NSApp.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)
                 return
@@ -154,7 +154,7 @@ private struct CorrectionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Add a word KeyScribe should recognize, or fill in Use instead to replace a phrase KeyScribe keeps hearing wrong.")
+            Text("Add a word \(Branding.appName) should recognize, or fill in Use instead to replace a phrase \(Branding.appName) keeps hearing wrong.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

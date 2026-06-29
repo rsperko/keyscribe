@@ -140,7 +140,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(notices)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit KeyScribe", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit \(Branding.appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         menu.delegate = self
         statusItem.menu = menu

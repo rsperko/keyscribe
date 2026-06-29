@@ -634,7 +634,7 @@ private struct CreateReplacementSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Create Replacement").font(.headline)
             VStack(alignment: .leading, spacing: 4) {
-                Text("When KeyScribe hears").font(.caption).foregroundStyle(.secondary)
+                Text("When \(Branding.appName) hears").font(.caption).foregroundStyle(.secondary)
                 TextField("The misheard words", text: $source)
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .source).onSubmit { save() }
             }

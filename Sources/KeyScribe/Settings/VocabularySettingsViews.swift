@@ -147,11 +147,11 @@ struct VocabularySettingsView: View {
                     onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) })
             }
             Section("Words to Recognize") {
-                Text("Names, product terms, and jargon KeyScribe should recognize as written. Keep this list short; too many terms can reduce recognition accuracy.")
+                Text("Names, product terms, and jargon \(Branding.appName) should recognize as written. Keep this list short; too many terms can reduce recognition accuracy.")
                     .font(.caption).foregroundStyle(.secondary)
                 DictionaryRows(words: dictionary.words, onRemove: dictionary.remove)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
-                    Label("You have \(dictionary.words.count) entries. Large dictionaries can make recognition less accurate, not more. Remove words KeyScribe now gets right, or move always-misheard phrases to Replacements.", systemImage: "info.circle")
+                    Label("You have \(dictionary.words.count) entries. Large dictionaries can make recognition less accurate, not more. Remove words \(Branding.appName) now gets right, or move always-misheard phrases to Replacements.", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let error = dictionary.error {
