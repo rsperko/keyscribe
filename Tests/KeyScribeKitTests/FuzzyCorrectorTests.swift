@@ -55,8 +55,33 @@ struct FuzzyCorrectorTests {
         #expect(FuzzyCorrector.levenshtein("abc", "abc") == 0)
     }
 
-    @Test func soundexGroupsLikeSounds() {
-        #expect(FuzzyCorrector.soundex("Robert") == FuzzyCorrector.soundex("Rupert"))
-        #expect(FuzzyCorrector.soundex("Postgres") == FuzzyCorrector.soundex("Postgress"))
+    @Test func phoneticKeyGroupsLikeSounds() {
+        #expect(FuzzyCorrector.phoneticKey("Robert") == FuzzyCorrector.phoneticKey("Rupert"))
+        #expect(FuzzyCorrector.phoneticKey("Postgres") == FuzzyCorrector.phoneticKey("Postgress"))
+        // First letter is coded (not kept literal), so a soft C and an S share a key — the exact
+        // Soundex weakness the gate depends on.
+        #expect(FuzzyCorrector.phoneticKey("Celery") == FuzzyCorrector.phoneticKey("Sellery"))
+        // Distinct leading sounds stay distinct, so the gate can reject a near-miss.
+        #expect(FuzzyCorrector.phoneticKey("Java") != FuzzyCorrector.phoneticKey("Lava"))
+    }
+
+    // Audit #2: phonetic agreement must GATE a fuzzy snap, not merely buy a second edit. A common word
+    // one edit from a dictionary term but phonetically distinct (different leading sound) must be left
+    // alone — otherwise "Java" in the dictionary eats spoken "lava", "Rust" eats "dust". This is the
+    // classic edit-distance false-positive band (Austria/Australia). A genuine same-sound misspelling
+    // (postgress → Postgres) must still correct.
+    @Test func doesNotSnapPhoneticallyDistinctNearMiss() {
+        #expect(fix("i bought a lava lamp", ["Java"]) == "i bought a lava lamp")
+        #expect(fix("the dust settled", ["Rust"]) == "the dust settled")
+        #expect(fix("install postgress now", ["Postgres"]) == "install Postgres now")
+    }
+
+    // Audit #1: Soundex anchors on the literal first letter, so a mis-heard leading consonant that is
+    // phonetically identical (soft C ≡ S) yields different codes and the phonetic +1 never fires —
+    // "sellery" (a plausible mishearing of soft-C "Celery") is two edits away and stays uncorrected.
+    // A first-letter-insensitive phonetic key (Double Metaphone: both → "SLR") would grant the edit and
+    // recover it.
+    @Test func recoversLeadingConsonantHomophone() {
+        #expect(fix("run the sellery worker", ["Celery"]) == "run the Celery worker")
     }
 }

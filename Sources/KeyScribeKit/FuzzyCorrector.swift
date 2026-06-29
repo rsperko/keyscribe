@@ -3,14 +3,17 @@ import Foundation
 // Repairs proper nouns / identifiers the STT split or mangled, snapping them to a dictionary term
 // ("charge bee" → "ChargeBee"). Used as per-engine dictionary recovery and deliberately timid:
 // the dictionary is a *hint*, never authoritative (design.md §4.2), so we only touch distinctive
-// terms (≥4 normalized chars) and never rewrite across more than 2 edits — Soundex agreement only
-// buys the second edit (and only on short terms, where cap is 1), and breaks ties toward the
-// phonetic match. A pure casing/spacing fix (same normalized form) is always safe.
-// Bias-less engines benefit most; bias-capable engines use recognition bias instead.
+// terms (≥4 normalized chars) and never rewrite across more than 2 edits. A pure casing/spacing fix
+// (same normalized form) is always safe and needs no phonetic check. Every *fuzzy* (non-exact) snap
+// requires phonetic agreement as a NECESSARY gate, not a bonus — otherwise a common word one edit
+// from a term but distinct in sound ("lava"→"Java", "dust"→"Rust") gets swallowed, the classic
+// edit-distance false-positive band. Agreement then buys one edit beyond the bare cap (ceiling 2),
+// so a plausible mishearing ("sellery"→"Celery") still recovers. Bias-less engines benefit most;
+// bias-capable engines use recognition bias instead.
 public enum FuzzyCorrector {
-    // Canonicalized dictionary, with each term's Soundex precomputed once. Built when the stage is
-    // constructed (per mode/config generation) so a dictation never re-normalizes or re-Soundexes the
-    // whole dictionary, and never recomputes a term's Soundex per input token.
+    // Canonicalized dictionary, with each term's phonetic key precomputed once. Built when the stage
+    // is constructed (per mode/config generation) so a dictation never re-normalizes or re-keys the
+    // whole dictionary, and never recomputes a term's phonetic key per input token.
     public struct Prepared: Sendable {
         fileprivate let terms: [Term]
         fileprivate let byNorm: [String: Term]            // O(1) casing/spacing match
@@ -59,7 +62,7 @@ public enum FuzzyCorrector {
         return out.joined(separator: " ")
     }
 
-    fileprivate struct Term: Sendable { let canonical: String; let norm: String; let soundex: String }
+    fileprivate struct Term: Sendable { let canonical: String; let norm: String; let key: String }
 
     private static func canonicalize(_ terms: [String]) -> [Term] {
         var seen = Set<String>()
@@ -68,7 +71,7 @@ public enum FuzzyCorrector {
             let canonical = term.trimmingCharacters(in: .whitespaces)
             let norm = normalize(canonical)
             guard norm.count >= 4, seen.insert(norm).inserted else { continue }
-            result.append(Term(canonical: canonical, norm: norm, soundex: soundex(norm)))
+            result.append(Term(canonical: canonical, norm: norm, key: phoneticKey(norm)))
         }
         return result
     }
@@ -76,33 +79,26 @@ public enum FuzzyCorrector {
     private static func bestMatch(_ norm: String, in prepared: Prepared, allowFuzzy: Bool) -> Term? {
         if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
         guard allowFuzzy else { return nil }
-        let normSoundex = soundex(norm)
-        let cap = norm.count >= 8 ? 2 : 1
-        // distance ≤ allowed ≤ cap+1 implies the lengths differ by at most cap+1, so only those length
-        // buckets can hold a match — the rest never need a Levenshtein computation. Indices are
-        // gathered ascending so equal-distance, equal-phonetic ties resolve to the earliest-declared term.
-        let maxDelta = cap + 1
+        let normKey = phoneticKey(norm)
+        // Phonetic agreement is mandatory for a fuzzy snap and buys one edit beyond the bare cap,
+        // ceilinged at 2. distance ≤ allowed ≤ 2 implies the lengths differ by at most 2, so only those
+        // length buckets can hold a match. Indices are gathered ascending so equal-distance ties
+        // resolve to the earliest-declared term.
+        let allowed = min((norm.count >= 8 ? 2 : 1) + 1, 2)
         var candidateIndices: [Int] = []
-        for len in (norm.count - maxDelta)...(norm.count + maxDelta) where len >= 0 {
+        for len in (norm.count - allowed)...(norm.count + allowed) where len >= 0 {
             if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }
         }
         candidateIndices.sort()
         var best: Term?
         var bestDistance = Int.max
-        var bestSoundexMatch = false
         for idx in candidateIndices {
             let term = prepared.terms[idx]
+            guard term.key == normKey else { continue }
             let distance = levenshtein(norm, term.norm)
-            let soundexMatch = normSoundex == term.soundex
-            let allowed = min(soundexMatch ? cap + 1 : cap, 2)
-            guard distance <= allowed else { continue }
-            let better = distance < bestDistance
-                || (distance == bestDistance && soundexMatch && !bestSoundexMatch)
-            if better {
-                bestDistance = distance
-                bestSoundexMatch = soundexMatch
-                best = term
-            }
+            guard distance <= allowed, distance < bestDistance else { continue }
+            bestDistance = distance
+            best = term
         }
         return best
     }
@@ -139,9 +135,14 @@ public enum FuzzyCorrector {
         return prev[t.count]
     }
 
-    static func soundex(_ s: String) -> String {
-        let letters = Array(s.uppercased().unicodeScalars.filter { ("A"..."Z").contains(Character($0)) }.map(Character.init))
-        guard let first = letters.first else { return "" }
+    // A first-letter-coded consonant skeleton. Unlike Soundex — which keeps the leading letter
+    // literal, truncates to four chars, and so (a) misses a mis-heard leading consonant that is
+    // phonetically equivalent (soft C ≡ S, both group 2) and (b) collides long terms — every letter
+    // including the first is coded, nothing is truncated, and vowels (plus H/W/Y) separate consonant
+    // runs so a repeated code across a vowel survives. Grouping follows Soundex's well-tuned consonant
+    // classes, so common ASR confusions (PH≡F, C/K/S, B/P/V, D/T, M/N) share a key. Used only as a
+    // necessary phonetic gate, never as proof of a match — the edit-distance check still decides.
+    static func phoneticKey(_ s: String) -> String {
         func code(_ c: Character) -> Character? {
             switch c {
             case "B", "F", "P", "V": return "1"
@@ -153,14 +154,17 @@ public enum FuzzyCorrector {
             default: return nil
             }
         }
-        var result = String(first)
-        var lastCode = code(first)
-        for c in letters.dropFirst() {
-            let current = code(c)
-            if let current, current != lastCode { result.append(current) }
-            if c != "H" && c != "W" { lastCode = current }
+        var result = ""
+        var lastCode: Character?
+        for scalar in s.uppercased().unicodeScalars where ("A"..."Z").contains(Character(scalar)) {
+            if let current = code(Character(scalar)) {
+                if current != lastCode { result.append(current) }
+                lastCode = current
+            } else {
+                lastCode = nil
+            }
         }
-        return String((result + "000").prefix(4))
+        return result
     }
 }
 
