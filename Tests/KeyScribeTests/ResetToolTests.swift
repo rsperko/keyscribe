@@ -140,7 +140,8 @@ struct ResetToolTests {
         let tomls = (try? FileManager.default.contentsOfDirectory(at: modesDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "toml" }) ?? []
         let stems = Set(tomls.map { $0.deletingPathExtension().lastPathComponent })
-        #expect(stems == Set(ModeStore.starterModes().map { $0.id }))
+        // Reset reseeds the starters AND the system Direct floor.
+        #expect(stems == Set(ModeStore.starterModes().map { $0.id }).union([Mode.directId]))
         #expect(!stems.contains("custom-junk"))
     }
 }

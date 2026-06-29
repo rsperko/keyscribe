@@ -55,7 +55,6 @@ struct DictationRecordWiringTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
-        settings.defaultModeId = mode.id
         settings.history = .init(enabled: historyEnabled, retentionDays: 7)
 
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
@@ -69,6 +68,7 @@ struct DictationRecordWiringTests {
             accessibilityGranted: { true },
             llmClient: llm)
 
+        controller.setNextModeOverride(id: mode.id)
         controller.handleStart()
         await controller.captureBringUpTask?.value
         controller.handleCommit()

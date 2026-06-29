@@ -535,11 +535,17 @@ final class DictationController {
         let context = RoutingContext(bundleId: capturedSnapshot?.bundleId, url: url, windowTitle: windowTitle)
         routingContext = context
         eligibleModes = ModeResolver.eligibleModes(modes, context: context)
-        let automaticMode = ModeResolver.resolvePhaseA(
-            modes: modes, defaultModeId: settings.defaultModeId, context: context, triggerKey: triggerKey)
+        // The Direct floor is a persisted system mode, so its user-configured trigger/insertion apply
+        // both when its key is pressed and when a trigger falls through to it. Fall back to the canonical
+        // profile only if it is somehow missing on disk.
+        let directFallback = modes.first { $0.id == Mode.directId } ?? .direct
+        let resolved = ModeResolver.resolvePhaseA(
+            modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey)
+        // A menu-picked one-shot mode is an explicit choice that bypasses the context gate — it is the
+        // deliberate way to run a constrained mode outside its apps (design.md §4.3).
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
-        activeMode = securePolicyApplied(override ?? automaticMode)
+        activeMode = securePolicyApplied(override ?? resolved)
     }
 
     // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no

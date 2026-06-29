@@ -157,8 +157,8 @@ extension ModeStore {
     }
 
     // Reconcile the on-disk seeded modes against the current starter catalog. Idempotent: a second run
-    // changes nothing. Returns what it did (for logging). `settingsDir` is patched only when a rename
-    // moves the mode `default_mode_id` points at.
+    // changes nothing. Returns what it did (for logging). (`settingsDir` is retained for call-site
+    // compatibility; it is no longer patched now that there is no `default_mode_id` to follow.)
     @discardableResult
     public static func reconcileSeeds(modesDir: URL, ledgerDir: URL, settingsDir: URL?,
                                       catalog: [Mode] = starterModes()) -> ReconcileOutcome {
@@ -173,7 +173,6 @@ extension ModeStore {
         }
 
         var outcome = ReconcileOutcome()
-        var renamedOldToNew: [String: String] = [:]
 
         // 1. Renames: carry an unedited old-id file forward to the new identity, preserving the user's
         //    connection + enabled state. Edited files are left at the old id (cosmetic divergence).
@@ -194,7 +193,6 @@ extension ModeStore {
             writeAndRecord(newSeed, to: modesDir, ledger: &ledger)
             try? FileManager.default.removeItem(at: oldURL)
             ledger.remove(rename.old)
-            renamedOldToNew[rename.old] = rename.new
             outcome.renamed.append(rename.new)
         }
 
@@ -248,14 +246,6 @@ extension ModeStore {
         }
 
         saveLedger(ledger, in: ledgerDir)
-
-        if !renamedOldToNew.isEmpty, let settingsDir,
-           var settings = try? SettingsStore.loadOrCreate(supportDir: settingsDir),
-           let newId = renamedOldToNew[settings.defaultModeId] {
-            settings.defaultModeId = newId
-            try? SettingsStore.write(settings, to: settingsDir)
-        }
-
         return outcome
     }
 }

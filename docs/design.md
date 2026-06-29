@@ -86,7 +86,7 @@ The same app serves both via progressive disclosure.
   context: frontmost APP + URL/window title (best effort) ─┐ ranks eligible modes specificity→order
                                                 │ (auto-start + which trigger phrases can route)
                                                 ▼
-  KEY forces its mode / context  ─▶  INITIAL MODE  ─────────────────────────────┐
+  KEY selects its eligible mode (else Direct floor)  ─▶  INITIAL MODE  ──────────┐
                                                                                  │
   mic audio ─▶ [ pre-STT ]  ─▶  LOCAL STT ENGINE  ─▶  raw transcript             │
                (dictionary bias)   (ONE active engine — global, batch)           │
@@ -292,28 +292,33 @@ mode's name or purpose (`principles.md` §2). Routing happens in two phases beca
 known before speech and some only after:
 
 **There is no separate "global hotkey."** A hotkey always belongs to a mode; the familiar Fn/Globe
-key is simply the **default mode's** trigger key (`principles.md` §2 — the default is an ordinary
-mode, not special-cased). What users informally call "the global hotkey" is that default-mode key.
+key is simply the trigger key of whatever mode owns it — by default the **Direct** floor (§4.3).
+What users informally call "the global hotkey" is just that Fn binding.
 
 **Phase A — known before STT (full pipeline available):**
 - **Trigger key(s):** press styles are **hold-or-tap** (push-to-talk while held *or* fires on a quick
   tap), **hold-only**, and **tap-to-toggle**. A key **selects its mode** as the initial mode and runs
-  that mode's *entire* pipeline including pre-STT bias. When a *single* mode owns the key, pressing it
-  invokes that mode even where context would not auto-select it — a deliberate press is never a no-op.
-  When **several modes share the key**, context disambiguates: the bound mode whose routing
-  constraints best fit the current context wins (most specific, then declaration order), with an
-  unconstrained bound mode as the fallback — so one key can drive a Slack-only mode in Slack and a
-  plain mode everywhere else. (The STT *engine* is global — modes do not pick it; see §4.1.) Any key
-  is **capturable** — the **recommended default is Fn/Globe with hold-or-tap**, bound to the default
-  mode, with **right-Option** as a conflict-free alternative. Holding **Hyper** (⌃⌥⇧⌘) can be a
-  trigger. Conflicts with system/other-app shortcuts are handled **best-effort** (detect and warn at
+  that mode's *entire* pipeline including pre-STT bias. A key only selects a mode that is **eligible in
+  the current context** (its constraints match): pressing a key bound to a Slack-only mode while in
+  Slack runs it; pressing it elsewhere does **not** — an app constraint scopes the mode for *every*
+  trigger, not just automatic selection. When **several modes share the key**, the eligible bound mode
+  whose constraints best fit wins (most specific, then declaration order), with an unconstrained bound
+  mode as the fallback — so one key can drive a Slack-only mode in Slack and a plain mode everywhere
+  else. **A press is never a no-op and never silently borrows a different configured mode:** when no
+  bound mode is eligible here, the key falls through to the **Direct** floor (see below) — a plain,
+  on-device dictation. (The STT *engine* is global — modes do not pick it; see §4.1.) Any key is
+  **capturable** — the **recommended default is Fn/Globe with hold-or-tap**, bound to Direct,
+  with **right-Option** as a conflict-free alternative. Holding **Hyper** (⌃⌥⇧⌘) can be a trigger.
+  Conflicts with system/other-app shortcuts are handled **best-effort** (detect and warn at
   assignment).
 - **Context constraints (`bundle_id` / `bundle_prefix` / `url_pattern` / `window_title`):** the
-  frontmost app, and the URL / window title when detectable, are identified **best-effort** to **rank
-  the eligible modes** in that context. A constraint ANDs all of its fields. Context *suggests* the
-  starting mode; it does not restrict an explicit key press. The eligible set also bounds Phase-B
-  voice routing. (`url_pattern` needs an Automation prompt and `window_title` an extra AX read, so each
-  is probed only when some enabled mode actually uses it.)
+  frontmost app, and the URL / window title when detectable, are identified **best-effort** to **gate
+  and rank the eligible modes** in that context. A constraint ANDs all of its fields. A constraint
+  **gates** the mode (it cannot run outside its context, by key *or* voice) and, among eligible modes,
+  **ranks** them. The eligible set bounds both the key press and Phase-B voice routing. The one
+  deliberate escape hatch is the menu: picking a mode by name runs it regardless of context. (`url_pattern`
+  needs an Automation prompt and `window_title` an extra AX read, so each is probed only when some
+  enabled mode actually uses it.)
 
 **Mode resolution (one resolver, both phases).** When no key is pressed, Phase A picks the initial
 mode; when a transcript suffix matches, Phase B picks the routed-to mode. Both use the **same rule
@@ -322,9 +327,11 @@ scores by summing the narrowness of each present field — **`url_pattern`=4 > `
 `bundle_id`=2 > `bundle_prefix`=1** — so fields combine (`bundle_id`+`url_pattern`=6 beats
 `url_pattern` alone=4) and a mode constrained to the *current* context outranks a less-constrained
 one; an **unconstrained** mode is the least specific (0). Equal specificity breaks by the mode list's
-declaration order. Only **constrained** modes auto-start in Phase A; if none match,
-resolution falls to the single **default mode**. Unconstrained *non-default* modes never auto-start —
-they are reachable by **key or voice only** (so two catch-alls never compete to start).
+declaration order. Only **constrained** modes auto-start in Phase A; if none match, resolution falls
+to the **Direct** floor. There is **no separate "default mode"** — Direct *is* the single catch-all
+(it owns Fn out of the box) and what every unmatched trigger lands on. Unconstrained modes never
+auto-start — they are reachable by **key or voice only**. When a key is pressed but **no mode bound
+to it is eligible here**, the press also falls to Direct — it still dictates, just plainly.
 
 **Phase B — known only after STT (trigger-phrase routing):**
 - **Trigger phrase(s) (regex):** a mode may have **multiple** phrase regexes (e.g. *"as pig latin"*
@@ -357,11 +364,33 @@ Each mode also carries:
 - Optional **AI rewrite** (a **named LLM connection** + prompt + fragments + opted-in context).
 - **Insertion method**; **exclude-from-history**.
 
-**Default mode.** There is always a **default mode** (plain dictation) used when no key, context, or
-phrase selects another. It **owns the recommended hotkey** (Fn/Globe) and is the catch-all the
-resolver falls back to when no constrained mode matches the context. It is an ordinary mode, not
-special-cased in code (`principles.md` §2) — "default" is just a designated role: the unconstrained
-mode that auto-starts.
+**The Direct floor (there is no separate "default mode").** The **Direct** floor (id `_direct`,
+**shown to users as "Plain Dictation"** — "Direct" is the internal name) is the single always-available
+floor: it **owns Fn/Globe out of the box** and is what every unmatched trigger — a key whose bound
+modes aren't eligible here, or a no-key/no-context start — lands on. There is deliberately **no second
+"default mode" designation**: a configurable everyday default plus a locked floor was two competing
+catch-alls (and a constrained default could itself fail to match and drop to the floor — confusing),
+so they are merged into Direct. The everyday mode is simply *whatever you bind to Fn* — Direct by
+default; bind a different mode there to change it.
+
+Direct is a **guaranteed minimal recipe** that can never be deleted, duplicated, made-default, or
+misconfigured to leak: **never an LLM rewrite, never context, never edit-in-place, no vocabulary of
+its own** (it relies on the **global** dictionary for recognition bias and **global** replacements).
+A few fields *are* user-editable — its **trigger key**, insertion method, trailing/submit, live-edits,
+and whether it **records to history** (it records per the global History setting by default; you can
+switch that off for Direct specifically). It occupies a reserved **system-mode id namespace** (a
+leading underscore, `_direct`) that the mode-name slugger can never produce, so a user-created mode can
+never collide with it; locked fields are re-enforced on load so a hand-edit can't weaken the floor. The
+recording HUD shows **Plain Dictation** while it runs, so a fallthrough is honest, not silent. This
+makes a key press a two-part promise: a constrained mode scopes only its *processing*, never your
+*ability to dictate* — when the recipe does not apply here, the floor still types your words.
+
+**Shared-key limitation.** When two modes own the same physical key (e.g. Plain Dictation and an
+app-scoped mode both on Fn — the intended "context disambiguates" workflow), the resolver still picks
+the right mode by context, but the *gesture* (press style: hold-or-tap / hold-only / tap-to-toggle) is
+shared: one physical key has one interpretation, taken from the higher-precedence mode (Plain Dictation
+leads, since system/declaration order). A shared key can't have two press styles at once — this is
+inherent, not a routing bug.
 
 **Edit-in-place is a capability, not a magic mode.** There is no special "edit selection" mode — any
 mode can be configured this way. The flow:
@@ -561,7 +590,7 @@ carries a **`schema_version`**.
   **template fingerprint** that excludes the `connection`/`enabled` user-knobs — so a starter the user
   merely connected still matches and stays eligible for an update; only a real template edit diverges.
   Every step fails safe (a wrong guess only ever *skips* a change, never clobbers) and the pass is
-  idempotent; `default_mode_id` follows a rename. Revising a starter's template **requires bumping its
+  idempotent. Revising a starter's template **requires bumping its
   `seed_version`** — the only signal that carries the change to existing installs. Full step semantics
   (rename / additive / re-baseline / update, ledger bootstrap, deletion honoring) in `config_schema.md`.
 

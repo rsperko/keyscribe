@@ -286,6 +286,51 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
+    // The reserved id namespace (a leading underscore) the slugger can never produce — `newID` builds
+    // ids from letters/numbers joined by hyphens, so a user-named mode can never collide with a system
+    // mode. The prefix reserves the namespace for *creation*; `isSystem` keys off the exact recognized
+    // id, NOT the prefix — so a stray hand-written `_foo.toml` is an ordinary (editable, deletable) mode,
+    // not an unguarded pseudo-system one (`systemNormalized` only knows how to lock `_direct`).
+    public static let systemIdPrefix = "_"
+    public static let directId = "_direct"
+    public var isSystem: Bool { id == Mode.directId }
+
+    // The always-available floor (id `_direct`, shown to users as "Plain Dictation"): the mode a trigger
+    // falls through to when no eligible mode matches the current context, and the everyday mode that owns
+    // Fn by default (design.md §4.3). "Direct"/`_direct` is the internal name; the display name differs.
+    // Guaranteed
+    // on-device — never an LLM rewrite, never context, never edit-in-place. It still dictates fully: voice
+    // edit commands and result handling (trailing/submit/insertion) apply, and it relies on the GLOBAL
+    // dictionary/replacements (no vocabulary of its own). History is user-editable — it records per the
+    // global History setting by default. A system mode (reserved id) so it can never be deleted,
+    // duplicated, or misconfigured to leak.
+    public static var direct: Mode {
+        var mode = Mode(id: directId, name: "Plain Dictation")
+        mode.commands = Commands(liveEdits: true)
+        mode.dictionary = ModeDictionary(includeGlobal: true, words: [])
+        mode.replacements = ModeReplacements(includeGlobal: true, rules: [])
+        mode.aiRewrite = nil
+        return mode
+    }
+
+    // Enforce a system mode's locked guarantees while preserving the few fields the user may edit, so a
+    // hand-edited or stale file can never weaken the floor. Only Direct exists today; any other system id
+    // is returned unchanged. Editable: trigger key(s), insertion method, trailing, submit, clipboard
+    // modifier, the live-edits toggle, and the exclude-from-history toggle (Direct records per the global
+    // History setting unless turned off here). Everything else comes from the canonical locked base.
+    public func systemNormalized() -> Mode {
+        guard id == Mode.directId else { return self }
+        var mode = Mode.direct
+        mode.triggerKeys = triggerKeys
+        mode.insertion = insertion
+        mode.trailing = trailing
+        mode.submit = submit
+        mode.clipboardModifier = clipboardModifier
+        mode.commands.liveEdits = commands.liveEdits
+        mode.excludeFromHistory = excludeFromHistory
+        return mode
+    }
+
     // A copy of this mode forced fully local for a secure (password) field: no cloud rewrite and no
     // captured context, whatever the mode normally does. The dictated text into a secure field is itself
     // a secret, so even a redacted cloud payload is wrong — the whole transcript is the secret, and
@@ -329,12 +374,19 @@ public enum ModeStore {
         try TOMLEncoder().encode(mode)
     }
 
-    public static func starterModes() -> [Mode] {
+    // The original Plain Dictation seed, kept only so the one-time migration can recognize an
+    // unmodified copy on disk and replace it with the Direct floor (it is no longer a starter — Direct
+    // fills the plain-dictation-on-Fn role). Trigger is compared separately, so it is omitted here.
+    static var legacyPlainDictationSeed: Mode {
         var plain = Mode(id: "plain-dictation", name: "Plain Dictation")
         plain.commands.liveEdits = true
         plain.trailing = .space
-        plain.triggerKeys = [.init(key: "fn")]
+        plain.seedId = "plain-dictation"
+        plain.seedVersion = 1
+        return plain
+    }
 
+    public static func starterModes() -> [Mode] {
         var polish = Mode(id: "polish", name: "Polish")
         polish.enabled = false
         polish.commands.liveEdits = true
@@ -401,7 +453,7 @@ public enum ModeStore {
             connection: "",
             prompt: "Convert the dictated text into a single shell command for a Unix shell (zsh or bash on macOS), ready to paste and run at a terminal prompt.\n\nOutput ONLY the command — one line or a pipeline, with no leading $ prompt, no surrounding code fence or backticks, no comments, and no explanation. Never run, answer, or describe the command; if the text is phrased as a question (\"how do I...\", \"what is the command to...\"), output the command that does it, not an answer.\n\nBuild exactly the command described. Do not add flags, paths, redirects, or behavior I did not ask for, and never introduce destructive options (rm -rf, --force, -f, overwriting redirects) unless I explicitly said so. Keep file names, paths, flags, branch names, URLs, and other identifiers exactly as dictated. Quote any argument that contains spaces or shell metacharacters. Write numbers as digits.\n\nMap spoken symbols to shell syntax: \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" or \"output to\" to >, \"append to\" to >>, \"and and\" to &&, \"or or\" to ||, \"semicolon\" to ;, \"tilde\" to ~, \"slash\" to /, \"dot\" to ., \"star\" or \"glob\" to *, \"dollar\" to $, \"ampersand\" or \"in the background\" to &.\n\nCorrect common speech-to-text mishearings of command names back to the intended tool: \"sue do\" or \"pseudo\" to sudo, \"see dee\" to cd, \"ellis\" to ls, \"make dir\" to mkdir, \"g it\" to git, \"groep\" to grep, \"vee eye\" to vim, \"ess ess h\" to ssh, \"ceh mod\" to chmod, \"cube control\" or \"coob cuttle\" to kubectl, \"dock er\" to docker, \"home brew\" to brew. Use judgment for similar mishearings, but keep anything that is clearly a file name or identifier as spoken.\n\nExamples:\nlist all files including hidden ones in long format → ls -la\nfind every python file under src and search them for the word token → find src -name '*.py' | xargs grep token\ngit checkout a new branch called fix dash auth → git checkout -b fix-auth\nsee dee into tilde slash projects → cd ~/projects\nshow what is listening on port 8000 → lsof -i :8000\n\nIf the text does not describe a command, return it unchanged.")
 
-        return [plain, polish, message, email, selection, prompt, code, markdown, shell].map {
+        return [polish, message, email, selection, prompt, code, markdown, shell].map {
             var mode = $0
             mode.seedId = mode.id
             mode.seedVersion = 1
@@ -447,8 +499,10 @@ public enum ModeStore {
             let id = url.deletingPathExtension().lastPathComponent
             do {
                 let toml = try String(contentsOf: url, encoding: .utf8)
-                let mode = try decode(from: toml, id: id)
-                modes.append(mode)
+                let decoded = try decode(from: toml, id: id)
+                // A system mode's locked guarantees are enforced at load, so a hand-edited file can never
+                // weaken the floor — only its editable fields survive (Mode.systemNormalized).
+                modes.append(decoded.isSystem ? decoded.systemNormalized() : decoded)
                 if let lkgDir { saveLKG(toml, id: id, in: lkgDir) }
             } catch {
                 if let lastGood = prior[id] {
@@ -488,7 +542,65 @@ public enum ModeStore {
     }
 
     public static func delete(_ mode: Mode, from dir: URL) throws {
+        guard !mode.isSystem else { return }
         try FileManager.default.removeItem(at: fileURL(for: mode, in: dir))
+    }
+
+    // Ensure every system mode (the Direct floor) exists on disk and is normalized to its locked
+    // guarantees. Idempotent: a present file is re-normalized (healing any hand-edit) while keeping its
+    // editable fields; a missing one is seeded fresh. Writes ONLY when the normalized content differs
+    // from disk, so a steady-state install never rewrites the file (no needless FSEvents churn → no
+    // spurious config reload / hotkey rebuild on every launch or Settings open). Call after
+    // seedStartersIfEmpty.
+    //
+    // The FIRST time it runs (no `_direct.toml` yet) it also performs the one-time Plain-Dictation→Direct
+    // migration: if a stock, enabled `plain-dictation.toml` exists, it is removed and its trigger is
+    // carried onto Direct (so Fn — or wherever the user rebound it — keeps doing plain dictation).
+    // Anything else (a customized or disabled Plain Dictation, a promoted different mode) is left
+    // untouched, and Direct takes Fn only if no enabled mode already holds it. NOTE: `_direct.toml`'s
+    // presence IS the migration marker, so this migration runs at most once — see AGENTS.md
+    // "Config migrations" before adding another that needs to re-run.
+    public static func ensureSystemModes(in dir: URL) {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = fileURL(for: .direct, in: dir)
+        if let current = try? String(contentsOf: url, encoding: .utf8) {
+            let resolved = (try? decode(from: current, id: Mode.directId))?.systemNormalized() ?? .direct
+            guard let encoded = try? encode(resolved), encoded != current else { return }
+            try? encoded.write(to: url, atomically: true, encoding: .utf8)
+            return
+        }
+        try? encode(migratedDirect(in: dir)).write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // First-run Direct profile + Plain-Dictation migration (see ensureSystemModes).
+    private static func migratedDirect(in dir: URL) -> Mode {
+        var direct = Mode.direct
+        let modes = loadAll(in: dir)
+        let plainURL = dir.appendingPathComponent("plain-dictation.toml")
+        if let plain = modes.first(where: { $0.id == "plain-dictation" }), isStockPlainDictation(plain) {
+            direct.triggerKeys = plain.triggerKeys.isEmpty
+                ? (fnIsFree(modes) ? [.init(key: "fn")] : [])
+                : plain.triggerKeys
+            try? FileManager.default.removeItem(at: plainURL)
+        } else {
+            direct.triggerKeys = fnIsFree(modes) ? [.init(key: "fn")] : []
+        }
+        return direct.systemNormalized()
+    }
+
+    // A Plain Dictation file the user never meaningfully touched (trigger aside): safe to replace with
+    // Direct. Enabled + every template field matches the original seed once the trigger, enabled flag,
+    // and AI connection are normalized out.
+    private static func isStockPlainDictation(_ mode: Mode) -> Bool {
+        guard mode.id == "plain-dictation", mode.enabled else { return false }
+        func shape(_ m: Mode) -> Mode {
+            var s = m; s.triggerKeys = []; s.enabled = true; s.aiRewrite?.connection = ""; return s
+        }
+        return shape(mode) == shape(legacyPlainDictationSeed)
+    }
+
+    private static func fnIsFree(_ modes: [Mode]) -> Bool {
+        !modes.contains { $0.enabled && $0.triggerKeys.contains { $0.key.lowercased() == "fn" } }
     }
 
     public static func newID(for name: String, existing: [String]) -> String {

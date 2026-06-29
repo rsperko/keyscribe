@@ -50,7 +50,6 @@ struct TrailingAndSubmitTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
-        settings.defaultModeId = mode.id
 
         let captured = Captured()
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
@@ -64,6 +63,7 @@ struct TrailingAndSubmitTests {
             micStatus: { .granted },
             accessibilityGranted: { accessibilityGranted })
 
+        controller.setNextModeOverride(id: mode.id)
         controller.handleStart()
         await controller.captureBringUpTask?.value
         controller.handleCommit()

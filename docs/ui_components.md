@@ -163,9 +163,9 @@ permission merely `Required` without the affected feature.
 and deleting a mode.
 
 **Behavior:** name what is removed and whether it can be recovered. Do not require confirmation
-for ordinary reversible setting changes. Deleting the **default mode** is allowed, not blocked: the
-confirmation says another mode will become the default, and on delete the default is reassigned to
-a remaining mode so it never dangles.
+for ordinary reversible setting changes. The **Direct** system mode (the floor) cannot be deleted or
+duplicated — its row offers neither; every ordinary mode can be deleted freely (there is no "default
+mode" to reassign).
 
 ---
 

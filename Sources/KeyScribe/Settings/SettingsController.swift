@@ -115,11 +115,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(supportDir: KeyScribePaths.supportDir)
         replacements = ReplacementsSettingsModel(supportDir: KeyScribePaths.supportDir)
-        let general = model
         modes = ModesSettingsModel(
-            modesDir: KeyScribePaths.modesDir, supportDir: KeyScribePaths.supportDir,
-            defaultModeId: { general.currentDefaultModeId },
-            onSetDefault: { general.setDefaultMode($0) })
+            modesDir: KeyScribePaths.modesDir, supportDir: KeyScribePaths.supportDir)
         aiServices = AIServiceSettingsModel(supportDir: KeyScribePaths.supportDir)
         super.init()
     }
@@ -457,14 +454,6 @@ final class SettingsModel: ObservableObject {
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
         loading = false
-    }
-
-    var currentDefaultModeId: String { settings.defaultModeId }
-
-    func setDefaultMode(_ id: String) {
-        guard settings.defaultModeId != id else { return }
-        settings.defaultModeId = id
-        onChange(settings)
     }
 
     func revealConfig() {

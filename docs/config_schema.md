@@ -10,14 +10,14 @@
 
 ```
 ~/Library/Application Support/KeyScribe/
-  settings.toml            # general settings + active STT engine + default mode
+  settings.toml            # general settings + active STT engine
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
   modes/                   # one file per mode; filename stem = mode id
-    plain-dictation.toml
+    _direct.toml             # the Direct system floor (reserved `_` id)
     email.toml
     pig-latin.toml
   history/                 # append-only local history, one JSONL file per day
@@ -30,6 +30,12 @@
 
 - **Mode id = filename stem** (kebab-case). The id is stable; `name` is the display label and
   can change freely.
+- **System modes use a reserved `_`-prefixed id** (`_direct.toml` = the Direct floor, shown to users
+  as "Plain Dictation", `design.md` §4.3). The kebab-case slugger never emits a leading underscore, so user modes can't collide. The
+  file is auto-seeded and re-normalized on load: only its editable fields (trigger keys, insertion,
+  trailing, submit, clipboard modifier, live-edits, **and exclude-from-history**) are honored; the
+  locked guarantees (no AI rewrite, dictation/cursor only, global vocabulary) are enforced regardless
+  of edits. Direct owns Fn by default and records to history per the global setting unless turned off.
 - Config files are human-editable text. **Model weights** are downloaded at runtime (never
   committed) into `models/`, consolidated under the KeyScribe support dir.
 
@@ -143,7 +149,7 @@ context = { app = true, preceding_text = false }
 | `schema_version` | int | Required. Migrated forward on load. |
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
-| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — the default mode owns its trigger key. |
+| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
 | `trigger_phrases` | string[] | Regexes, suffix-matched post-STT. Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
@@ -163,8 +169,10 @@ context = { app = true, preceding_text = false }
 | `clipboard_modifier` | enum | `command` (default) \| `control`. The modifier used for the synthesized clipboard keystrokes — ⌘C to capture a selection and ⌘V to paste an insert. `control` targets a guest where ⌃C/⌃V are the paste mechanism (e.g. a Linux/Windows VM with host-clipboard sharing on). Governs both keystrokes, never `submit`. TOML-only; no Settings UI. Selection capture in a guest is **best-effort** — the host-pasteboard bump it waits on is driven by the guest's clipboard-sync, not the OS, so its timing is not guaranteed. |
 | `exclude_from_history` | bool | Skip writing this mode's dictations to history. |
 
-The **default mode** is recorded once in `settings.toml` (`default_mode_id`), not as a flag on
-each mode — single source of truth, so two modes can't both claim default.
+There is **no "default mode"** setting. The **Direct** system mode (`_direct`, §"System modes" above)
+is the single floor and owns Fn by default; the everyday mode is simply whichever mode is bound to Fn.
+(Older `settings.toml` files may still carry a `default_mode_id` key — it is ignored and dropped on the
+next write.)
 
 The mode editor surfaces `source = "selection"` + `output = "replace_selection"` together as a
 single **"Rewrite selected text"** checkbox; the two-field model stays in TOML for flexibility.
@@ -189,14 +197,14 @@ or make global behavior hard to reason about.
 
 ## Seeded starter modes
 
-A fresh install ships nine starter modes — one enabled local dictation mode and eight disabled
-AI-backed modes. They are ordinary mode files — nothing about them is special-cased in source —
-and the user can edit or delete any of them. This set is the canonical one the menu and onboarding
-refer to (`ui_design.md` §6 menu bar).
+A fresh install ships eight starter modes — all disabled, AI-backed examples. They are ordinary mode
+files — nothing about them is special-cased in source — and the user can edit or delete any of them.
+Plain local dictation on Fn is provided by the **Direct** system mode (`_direct`, see "System modes"),
+not a starter. This set is the canonical one the menu and onboarding refer to (`ui_design.md` §6 menu
+bar).
 
 | id | name | Shape | Rewrite |
 |---|---|---|---|
-| `plain-dictation` | Plain Dictation | `source = dictation`, `output = cursor` | none — fully on-device. The seeded `default_mode_id`; the only mode that owns a trigger key (Fn/Globe). |
 | `polish` | Polish | `source = dictation`, `output = cursor` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Auto-enabled and connected when the first AI service is added. |
 | `message` | Message | `source = dictation`, `output = cursor` | casual chat-style message; no greeting/sign-off. Auto-enabled and connected when the first AI service is added. |
 | `email` | Email | `source = dictation`, `output = cursor` | polished professional email with greeting + closing; never invents names/facts. Auto-enabled and connected when the first AI service is added. |
@@ -211,11 +219,12 @@ examples of more technical presets — the resolver ignores disabled modes (they
 and never auto-start), so the user enables one only after editing it to taste and attaching a
 connection.
 
-Only `plain-dictation` works with zero configuration. When the first AI service is added, onboarding
-connects and enables `polish`, `message`, `email`, and `edit-selection`; the remaining modes stay as
-disabled examples for deliberate setup. The default English engine plus `plain-dictation` is the
-minimum first-run target (`ui_design.md` §2 first run). Mode prompts instruct, never answer, keep
-redaction tokens intact, and avoid bracketed signature placeholders.
+The **Direct** system mode (`_direct`, shown to users as **"Plain Dictation"**) works with zero
+configuration (it's the Fn default; all starters ship disabled). When the first AI service is added, onboarding connects and enables `polish`, `message`,
+`email`, and `edit-selection`; the remaining modes stay as disabled examples for deliberate setup. The
+default English engine plus **Direct** is the minimum first-run target (`ui_design.md` §2 first run).
+Mode prompts instruct, never answer, keep redaction tokens intact, and avoid bracketed signature
+placeholders.
 
 ### Seed reconcile & the `seed_version` discipline
 
@@ -294,7 +303,6 @@ regex = false
 schema_version = 1
 
 load_on_login = true
-default_mode_id = "plain-dictation"
 
 [stt]
 engine = "parakeet-tdt-ctc-110m"  # the single active engine (default: the compact 110M tier)

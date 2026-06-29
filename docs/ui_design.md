@@ -270,9 +270,9 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 > Sparkle update mechanism and the update badge below (not yet built).
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows only
-**Plain Dictation** until the user adds an AI service. First AI setup connects and enables the
-starter rewrite modes defined in `config_schema.md`; disabled examples stay hidden until the user
-enables them in Modes settings.
+**Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
+setup connects and enables the starter rewrite modes defined in `config_schema.md`; disabled examples
+stay hidden until the user enables them in Modes settings.
 
 ### One-shot manual-mode override
 
@@ -407,7 +407,9 @@ The Modes list shows the user-visible summary of each mode:
 The editor presents a short **Mode summary** at the top. The editor is divided into progressive
 sections:
 
-1. **Basics** — name, enabled, and `Use as default` where appropriate.
+1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
+   floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
+   reduced, mostly-locked form: shortcut + result handling only.)
 2. **When this mode is used** — the direct shortcut stays visible; app/URL/window-title rules,
    custom shortcut behavior, and spoken routing live under `Advanced routing`.
 3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers

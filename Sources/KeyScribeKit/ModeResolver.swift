@@ -28,30 +28,29 @@ public enum ModeResolver {
     }
 
     public static func resolvePhaseA(
-        modes: [Mode], defaultModeId: String, context: RoutingContext, triggerKey: String?
-    ) -> Mode? {
+        modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?
+    ) -> Mode {
         let enabled = modes.filter(\.enabled)
         let eligible = enabled.filter { isEligible($0, context) }
 
-        // 1. Explicit key binding selects its mode. When several enabled modes share the pressed key,
-        //    the one whose routing constraints best fit the current context wins (ties → declaration
-        //    order); an unconstrained mode is the fallback. A deliberate press still fires even where
-        //    no constraint matches — it falls back to the first mode bound to the key.
+        // 1. Explicit key binding. App constraints gate the press too: only modes eligible in the
+        //    current context can run. Among the eligible modes bound to the pressed key, the most
+        //    specific wins (ties → declaration order). When modes are bound to the key but none is
+        //    eligible here, the press neither blocks nor substitutes a different mode — it falls through
+        //    to `directFallback`, the always-on-device, no-LLM floor (design.md §4.3).
         if let key = triggerKey {
             let wanted = normalizeKey(key)
             let bound = enabled.filter { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
             if !bound.isEmpty {
                 if let m = mostSpecific(bound.filter { isEligible($0, context) }, context) { return m }
-                return bound.first
+                return directFallback
             }
         }
         // 2. Context auto-start: the most specific eligible *constrained* mode (ties → declaration
-        //    order). Only constrained modes auto-start; unconstrained non-defaults need key/voice.
+        //    order). Only constrained modes auto-start; unconstrained modes need a key or voice phrase.
         if let m = mostSpecific(eligible.filter { !$0.constraints.isEmpty }, context) { return m }
-        // 3. Global default mode, if eligible here.
-        if let m = eligible.first(where: { $0.id == defaultModeId }) { return m }
-        // 4. Last resort: the default by id regardless, else any enabled mode.
-        return enabled.first(where: { $0.id == defaultModeId }) ?? enabled.first
+        // 3. Nothing else applies → the Direct floor (no separate "default mode"; design.md §4.3).
+        return directFallback
     }
 
     public static func resolvePhaseB(

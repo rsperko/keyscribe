@@ -339,6 +339,32 @@ struct DictationCancellationTests {
         #expect(h.controller.nextModeOverrideName == nil)
     }
 
+    @Test func keyPressInAWrongAppFallsThroughToDirect() async throws {
+        let h = makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        // A mode bound to right_option but constrained to Slack; the harness frontmost app is
+        // "test.bundle", so the press is out of context and must fall through to the Direct floor.
+        var slack = Mode(id: "slacky", name: "Slacky")
+        slack.triggerKeys = [Mode.TriggerKey(key: "right_option")]
+        slack.constraints = [Mode.Constraint(bundleId: "com.tinyspeck.slackmacgap")]
+        try ModeStore.write(slack, to: h.supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        h.controller.handleStart(triggerKey: "right_option")
+        await h.controller.captureBringUpTask?.value
+        #expect(h.hud.states.last == .recording(mode: "Plain Dictation", level: 0))
+
+        h.controller.handleCommit()
+        await h.started.wait()
+        let task = h.controller.dictationTask
+        h.release.fire()
+        await task?.value
+
+        #expect(h.controller.lastResult == "hello world")   // it dictated via the Direct floor
+        // The Direct floor records per the global History setting now (it's the everyday floor, not a
+        // silent fallback), so the dictation lands in history under its display name.
+        #expect(h.history.entries().map(\.modeName) == ["Plain Dictation"])
+    }
+
     @Test func deniedMicrophoneSurfacesAnErrorWithSettingsActionInsteadOfRecordingSilence() {
         let h = makeHarness(micStatus: { .denied })
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -577,6 +603,7 @@ struct DictationCaptureStartTests {
 
         controller.handleStart()
 
+        // No key, nothing matches → the Direct floor (shown as "Plain Dictation").
         #expect(hud.states.last == .arming(mode: "Plain Dictation"))
         #expect(controller.isCancellable)
     }

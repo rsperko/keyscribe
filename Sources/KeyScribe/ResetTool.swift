@@ -63,6 +63,7 @@ struct ResetTool {
         let lkgDir = supportDir.appendingPathComponent("lkg", isDirectory: true)
         try? fileManager.removeItem(at: lkgDir)
         ModeStore.seedStartersIfEmpty(in: modesDir, ledgerDir: lkgDir)
+        ModeStore.ensureSystemModes(in: modesDir)
         return ["Re-seeded \(ModeStore.starterModes().count) starter modes in \(modesDir.path)."]
     }
 

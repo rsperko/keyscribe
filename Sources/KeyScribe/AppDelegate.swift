@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ModelInstallStore.reconcile(engines: engines)
         provider = resolveProvider(engines: engines)
         ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
+        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
         let reconciled = ModeStore.reconcileSeeds(
             modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
             settingsDir: KeyScribePaths.supportDir)
@@ -296,6 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // replaces its bindings and clears gesture state; doing that while a key is held would drop the
     // pending release edge, so defer the rebuild until the in-flight dictation finishes.
     func reloadConfig() {
+        // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
+        // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
+        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
         config.invalidate()
         if controller.isBusy {
             pendingHotkeyRebuild = true
@@ -426,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshStatus() {
         menu.setHasResult(controller.hasResult)
         let modes = config.modes.filter(\.enabled)
-        let automatic = modes.first { $0.id == settings.defaultModeId } ?? modes.first
+        let automatic = modes.first { $0.id == Mode.directId } ?? modes.first
         var inertReasons: [String: String] = [:]
         for mode in modes where connectionUnavailable(for: mode) {
             inertReasons[mode.id] = "needs an AI service"

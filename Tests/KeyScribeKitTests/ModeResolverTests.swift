@@ -13,6 +13,15 @@ private func mode(
     return m
 }
 
+// Phase-A resolution always lands on a concrete mode; tests pass the Direct floor as the fallback.
+// `defaultModeId` is accepted but ignored now that there is no separate default mode — it just keeps
+// the existing call sites readable.
+private func phaseA(
+    _ modes: [Mode], defaultModeId: String = "", context: RoutingContext, triggerKey: String?
+) -> Mode {
+    ModeResolver.resolvePhaseA(modes: modes, directFallback: .direct, context: context, triggerKey: triggerKey)
+}
+
 struct ModeResolverTests {
     // Eligibility
     @Test func emptyConstraintsEligibleEverywhere() {
@@ -69,10 +78,9 @@ struct ModeResolverTests {
         exact.constraints = [Mode.Constraint(bundleId: "com.jetbrains.intellij")]
         var prefix = mode("prefix", keys: ["right_option"])
         prefix.constraints = [Mode.Constraint(bundlePrefix: "com.jetbrains.")]
-        let m = ModeResolver.resolvePhaseA(
-            modes: [prefix, exact], defaultModeId: "prefix",
+        let m = phaseA([prefix, exact], defaultModeId: "prefix",
             context: .init(bundleId: "com.jetbrains.intellij"), triggerKey: "right_option")
-        #expect(m?.id == "exact")
+        #expect(m.id == "exact")
     }
 
     @Test func urlBeatsWindowTitleOnSharedKey() {
@@ -80,11 +88,10 @@ struct ModeResolverTests {
         titled.constraints = [Mode.Constraint(windowTitle: #"(?i)github"#)]
         var urled = mode("urled", keys: ["right_option"])
         urled.constraints = [Mode.Constraint(urlPattern: #"github\.com"#)]
-        let m = ModeResolver.resolvePhaseA(
-            modes: [titled, urled], defaultModeId: "titled",
+        let m = phaseA([titled, urled], defaultModeId: "titled",
             context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x", windowTitle: "GitHub"),
             triggerKey: "right_option")
-        #expect(m?.id == "urled")
+        #expect(m.id == "urled")
     }
 
     @Test func requiresWindowTitleContextOnlyWhenAModeUsesIt() {
@@ -101,78 +108,99 @@ struct ModeResolverTests {
         both.constraints = [Mode.Constraint(bundleId: "com.google.Chrome", urlPattern: #"github\.com"#)]
         var urlOnly = mode("urlOnly", keys: ["right_option"])
         urlOnly.constraints = [Mode.Constraint(urlPattern: #"github\.com"#)]
-        let m = ModeResolver.resolvePhaseA(
-            modes: [urlOnly, both], defaultModeId: "urlOnly",
+        let m = phaseA([urlOnly, both], defaultModeId: "urlOnly",
             context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x"),
             triggerKey: "right_option")
-        #expect(m?.id == "both")
+        #expect(m.id == "both")
     }
 
     // Phase A
     @Test func triggerKeyBindingSelectsKeyedMode() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"])
-        let m = ModeResolver.resolvePhaseA(
-            modes: [plain, email], defaultModeId: "plain", context: .init(), triggerKey: "right_option")
-        #expect(m?.id == "email")
+        let m = phaseA([plain, email], defaultModeId: "plain", context: .init(), triggerKey: "right_option")
+        #expect(m.id == "email")
     }
 
     @Test func contextDefaultPrefersAppSpecificMode() {
         let plain = mode("plain")
         let email = mode("email", bundles: ["com.apple.mail"])
-        let m = ModeResolver.resolvePhaseA(
-            modes: [plain, email], defaultModeId: "plain",
+        let m = phaseA([plain, email], defaultModeId: "plain",
             context: .init(bundleId: "com.apple.mail"), triggerKey: nil)
-        #expect(m?.id == "email")
+        #expect(m.id == "email")
     }
 
-    @Test func fallsBackToGlobalDefaultWhenNothingMatches() {
+    @Test func fallsBackToDirectWhenNoKeyAndNoContextMatch() {
+        // No key, and the only constrained mode doesn't match the app → the Direct floor (there is no
+        // separate "default mode" anymore).
         let plain = mode("plain")
         let email = mode("email", bundles: ["com.apple.mail"])
-        let m = ModeResolver.resolvePhaseA(
-            modes: [plain, email], defaultModeId: "plain",
-            context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
-        #expect(m?.id == "plain")
+        let m = phaseA([plain, email], context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
+        #expect(m.id == Mode.directId)
     }
 
-    @Test func keyForcesModeOverridingContext() {
-        // email is keyed to right_option but constrained to Mail; pressing the key in Notes still
-        // forces it — an explicit key overrides context (design.md §4.3, constraints gate only
-        // automatic selection).
+    @Test func keyPressFallsThroughToDirectWhenConstraintExcludesContext() {
+        // email is keyed to right_option but constrained to Mail; pressing the key in Notes neither runs
+        // email nor borrows the default — it falls through to the Direct floor (design.md §4.3: an app
+        // constraint gates every trigger, and a press is never a no-op).
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
-        let m = ModeResolver.resolvePhaseA(
-            modes: [plain, email], defaultModeId: "plain",
+        let m = phaseA([plain, email], defaultModeId: "plain",
             context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option")
-        #expect(m?.id == "email")
+        #expect(m.id == Mode.direct.id)
+        #expect(m.aiRewrite == nil)
+    }
+
+    @Test func keyPressRunsConstrainedModeInsideItsContext() {
+        let plain = mode("plain")
+        let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
+        let m = phaseA([plain, email], defaultModeId: "plain",
+            context: .init(bundleId: "com.apple.mail"), triggerKey: "right_option")
+        #expect(m.id == "email")
+    }
+
+    @Test func userNamedDirectCannotCollideWithTheSystemFloor() {
+        // The floor lives in the reserved "_" namespace the slugger can never produce, so a user mode
+        // named "Direct" gets a distinct id and the two never clash.
+        let userId = ModeStore.newID(for: "Direct", existing: [Mode.directId])
+        #expect(userId == "direct")
+        #expect(userId != Mode.directId)
+        #expect(Mode.direct.isSystem)
+        #expect(!mode("direct").isSystem)
+    }
+
+    @Test func keyPressFallsThroughToDirectWhenAllBoundModesAreIneligible() {
+        let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
+        let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
+        let m = phaseA([slack, obsidian], defaultModeId: "slack",
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option")
+        #expect(m.id == Mode.direct.id)
     }
 
     @Test func sharedKeyRoutesByAppContext() {
         let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
         let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
         let modes = [slack, obsidian]
-        let inSlack = ModeResolver.resolvePhaseA(
-            modes: modes, defaultModeId: "slack",
+        let inSlack = phaseA(modes, defaultModeId: "slack",
             context: .init(bundleId: "com.tinyspeck.slackmacgap"), triggerKey: "right_option")
-        let inObsidian = ModeResolver.resolvePhaseA(
-            modes: modes, defaultModeId: "slack",
+        let inObsidian = phaseA(modes, defaultModeId: "slack",
             context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
-        #expect(inSlack?.id == "slack")
-        #expect(inObsidian?.id == "obsidian")
+        #expect(inSlack.id == "slack")
+        #expect(inObsidian.id == "obsidian")
     }
 
     @Test func sharedKeyConstrainedBeatsUnconstrainedInItsApp() {
         let plain = mode("plain", keys: ["right_option"])
         let markdown = mode("markdown", keys: ["right_option"], bundles: ["md.obsidian"])
         let modes = [plain, markdown]
-        let inObsidian = ModeResolver.resolvePhaseA(
-            modes: modes, defaultModeId: "plain",
+        let inObsidian = phaseA(modes, defaultModeId: "plain",
             context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
-        let elsewhere = ModeResolver.resolvePhaseA(
-            modes: modes, defaultModeId: "plain",
+        // An unconstrained mode shares the key, so it stays eligible everywhere — the press runs it, not
+        // the Direct floor.
+        let elsewhere = phaseA(modes, defaultModeId: "plain",
             context: .init(bundleId: "com.apple.Notes"), triggerKey: "right_option")
-        #expect(inObsidian?.id == "markdown")
-        #expect(elsewhere?.id == "plain")
+        #expect(inObsidian.id == "markdown")
+        #expect(elsewhere.id == "plain")
     }
 
     @Test func phaseAPrefersMostSpecificConstraintOverDeclarationOrder() {
@@ -180,8 +208,8 @@ struct ModeResolverTests {
         let appUrl = mode("appurl", bundles: ["com.google.Chrome"], urlPattern: #"github\.com"#) // score 3
         let ctx = RoutingContext(bundleId: "com.google.Chrome", url: "https://github.com/x")
         // app is declared first, but appUrl is more specific and must win.
-        let m = ModeResolver.resolvePhaseA(modes: [app, appUrl], defaultModeId: "app", context: ctx, triggerKey: nil)
-        #expect(m?.id == "appurl")
+        let m = phaseA([app, appUrl], defaultModeId: "app", context: ctx, triggerKey: nil)
+        #expect(m.id == "appurl")
     }
 
     // Phase B
@@ -219,14 +247,11 @@ struct ModeResolverTests {
         #expect(r.routedModeId == nil)
     }
 
-    // Tier-4 fallback: the default mode is returned even when it's not eligible in this context and
-    // nothing else is — better the default than nothing.
-    @Test func fallsBackToDefaultEvenWhenDefaultIneligible() {
+    // With no eligible mode at all, resolution lands on the Direct floor.
+    @Test func fallsBackToDirectWhenTheOnlyModeIsIneligible() {
         let plain = mode("plain", bundles: ["com.apple.mail"])
-        let m = ModeResolver.resolvePhaseA(
-            modes: [plain], defaultModeId: "plain",
-            context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
-        #expect(m?.id == "plain")
+        let m = phaseA([plain], context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
+        #expect(m.id == Mode.directId)
     }
 
     @Test func urlOnlyConstraintMatchesByURL() {

@@ -45,7 +45,6 @@ struct FocusGuardWiringTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
-        settings.defaultModeId = mode.id
 
         let result = Captured()
         // snapshot() is read once at press (capture) and once at insertion (current); hand back the
@@ -66,6 +65,7 @@ struct FocusGuardWiringTests {
             micStatus: { .granted },
             accessibilityGranted: { true })
 
+        controller.setNextModeOverride(id: mode.id)
         controller.handleStart()
         await controller.captureBringUpTask?.value
         controller.handleCommit()

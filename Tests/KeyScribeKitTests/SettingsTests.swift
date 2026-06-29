@@ -61,7 +61,7 @@ struct SettingsTests {
     // defaults-only round-trip would miss.
     @Test func nonDefaultSettingsRoundTrip() throws {
         let s = Settings(
-            schemaVersion: 1, loadOnLogin: true, defaultModeId: "email",
+            schemaVersion: 1, loadOnLogin: true,
             stt: .init(engine: "whisper", eviction: .fastest, evictionIdleSeconds: 45),
             duringDictation: .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false),
             history: .init(enabled: false, retentionDays: 30),

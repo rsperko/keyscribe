@@ -38,7 +38,7 @@ struct ModeSeedReconcileTests {
 
         let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
         #expect(outcome.isEmpty)
-        #expect(ModeStore.loadAll(in: d.modes).count == 9)
+        #expect(ModeStore.loadAll(in: d.modes).count == 8)
     }
 
     @Test func renamesUneditedSeedPreservingConnectionAndEnabled() throws {
@@ -73,9 +73,9 @@ struct ModeSeedReconcileTests {
     @Test func additiveAddsGenuinelyNewCatalogMode() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        // A minimal existing install: only plain-dictation survives. No ledger (pre-ledger install).
-        let plain = try #require(ModeStore.starterModes().first { $0.id == "plain-dictation" })
-        try ModeStore.write(plain, to: d.modes)
+        // A minimal existing install: only email survives. No ledger (pre-ledger install).
+        let survivor = try #require(ModeStore.starterModes().first { $0.id == "email" })
+        try ModeStore.write(survivor, to: d.modes)
 
         ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
         #expect(FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("code.toml").path))
@@ -84,12 +84,12 @@ struct ModeSeedReconcileTests {
     @Test func preLedgerDeletedModesAreNotResurrected() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        // Existing install that kept only plain-dictation (everything else deleted under the old build).
-        let plain = try #require(ModeStore.starterModes().first { $0.id == "plain-dictation" })
-        try ModeStore.write(plain, to: d.modes)
+        // Existing install that kept only email (everything else deleted under the old build).
+        let survivor = try #require(ModeStore.starterModes().first { $0.id == "email" })
+        try ModeStore.write(survivor, to: d.modes)
 
         ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
-        for resurrected in ["markdown", "shell", "message", "email"] {
+        for resurrected in ["markdown", "shell", "message"] {
             #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("\(resurrected).toml").path))
         }
     }
@@ -104,20 +104,6 @@ struct ModeSeedReconcileTests {
         // The edited old file stays; additive must NOT seed a second "ai-prompt" alongside it.
         #expect(FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("prompt.toml").path))
         #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("ai-prompt.toml").path))
-    }
-
-    @Test func defaultModeIdFollowsARename() throws {
-        let d = tempDirs()
-        defer { try? FileManager.default.removeItem(at: d.support) }
-        try writeLegacy(newId: "edit-selection", oldId: "work-on-selection", oldName: "Work on Selection",
-                        to: d.modes)
-        var settings = Settings.defaults
-        settings.defaultModeId = "work-on-selection"
-        try SettingsStore.write(settings, to: d.support)
-
-        ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
-        let loaded = try SettingsStore.loadOrCreate(supportDir: d.support)
-        #expect(loaded.defaultModeId == "edit-selection")
     }
 
     // A copy of the real catalog with one starter's prompt rewritten and its seed_version bumped —
@@ -216,7 +202,6 @@ struct ModeSeedReconcileTests {
     // it. The connection/enabled user-knobs are excluded, so onboarding never trips this.
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
-            "plain-dictation": (1, "33c1c108ae0c08f2"),
             "polish": (1, "9627d08e9098ec1e"),
             "message": (1, "9975c76120898009"),
             "email": (1, "5022830f085e4508"),

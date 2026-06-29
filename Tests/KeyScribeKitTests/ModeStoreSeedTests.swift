@@ -6,15 +6,14 @@ struct ModeStoreSeedTests {
     @Test func starterSetMatchesCatalog() {
         let starters = ModeStore.starterModes()
         #expect(starters.map(\.id) == [
-            "plain-dictation", "polish", "message", "email", "edit-selection", "ai-prompt", "code",
+            "polish", "message", "email", "edit-selection", "ai-prompt", "code",
             "markdown", "shell",
         ])
 
-        #expect(starters.filter { $0.enabled }.map(\.id) == ["plain-dictation"])
-        let plain = starters[0]
-        #expect(plain.commands.liveEdits)
-        #expect(plain.aiRewrite == nil)
-        #expect(plain.triggerKeys == [.init(key: "fn")])
+        // Plain Dictation is no longer a starter — the Direct floor fills that role; all starters now
+        // ship disabled and triggerless.
+        #expect(starters.allSatisfy { !$0.enabled })
+        #expect(starters.allSatisfy { $0.triggerKeys.isEmpty })
 
         let polish = starters.first { $0.id == "polish" }
         #expect(polish?.name == "Polish")
@@ -31,9 +30,7 @@ struct ModeStoreSeedTests {
         let shell = starters.first { $0.id == "shell" }
         #expect(shell?.trailing == Mode.Trailing.none)
 
-        #expect(starters.filter { !$0.triggerKeys.isEmpty }.map(\.id) == ["plain-dictation"])
-
-        for mode in starters where mode.id != "plain-dictation" {
+        for mode in starters {
             #expect(mode.aiRewrite != nil)
             #expect(mode.aiRewrite?.connection == "")
             let promptLength = mode.aiRewrite?.prompt.count ?? 0
@@ -48,7 +45,7 @@ struct ModeStoreSeedTests {
         ModeStore.seedStartersIfEmpty(in: dir)
         let loaded = ModeStore.loadAll(in: dir)
         #expect(Set(loaded.map(\.id)) == [
-            "plain-dictation", "polish", "message", "email", "edit-selection", "ai-prompt", "code",
+            "polish", "message", "email", "edit-selection", "ai-prompt", "code",
             "markdown", "shell",
         ])
         #expect(loaded.first { $0.id == "edit-selection" }?.source == .selection)
@@ -59,7 +56,7 @@ struct ModeStoreSeedTests {
         #expect(loaded.first { $0.id == "markdown" }?.enabled == false)
 
         ModeStore.seedStartersIfEmpty(in: dir)
-        #expect(ModeStore.loadAll(in: dir).count == 9)
+        #expect(ModeStore.loadAll(in: dir).count == 8)
 
         try? FileManager.default.removeItem(at: dir)
     }
@@ -80,6 +77,113 @@ struct ModeStoreSeedTests {
         try ModeStore.delete(mode, from: dir)
         #expect(ModeStore.loadAll(in: dir).isEmpty)
         try? FileManager.default.removeItem(at: dir)
+    }
+
+    @Test func ensureSystemModesSeedsDirectAndIsIdempotent() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-seed-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        ModeStore.ensureSystemModes(in: dir)
+        let loaded = ModeStore.loadAll(in: dir)
+        let direct = try #require(loaded.first { $0.id == Mode.directId })
+        #expect(direct.name == "Plain Dictation")   // display name; id is still _direct
+        #expect(direct.isSystem)
+        #expect(direct.aiRewrite == nil)
+        #expect(!direct.excludeFromHistory)                  // records per global setting by default
+        #expect(direct.triggerKeys == [.init(key: "fn")])    // fresh install: Fn is free → Direct takes it
+
+        ModeStore.ensureSystemModes(in: dir)        // idempotent
+        #expect(ModeStore.loadAll(in: dir).filter { $0.id == Mode.directId }.count == 1)
+    }
+
+    @Test func systemModeKeepsEditableTriggerButReNormalizesLockedFieldsOnLoad() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-tamper-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // A hand-edited Direct file that sets editable fields AND tries to weaken the locked ones.
+        var tampered = Mode.direct
+        tampered.triggerKeys = [.init(key: "right_option")]   // editable — must survive
+        tampered.insertion = .type                            // editable — must survive
+        tampered.excludeFromHistory = true                   // editable — must survive
+        tampered.aiRewrite = Mode.AIRewrite(connection: "x", prompt: "leak")  // locked — must be stripped
+        tampered.source = .selection                         // locked — must be forced back
+        try ModeStore.write(tampered, to: dir)
+
+        let direct = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
+        #expect(direct.triggerKeys == [.init(key: "right_option")])
+        #expect(direct.insertion == .type)
+        #expect(direct.excludeFromHistory)                   // editable, preserved
+        #expect(direct.aiRewrite == nil)
+        #expect(direct.source == .dictation)
+    }
+
+    @Test func ensureSystemModesHealsATamperedDirectFileOnDisk() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-heal-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var tampered = Mode.direct
+        tampered.triggerKeys = [.init(key: "right_option")]   // editable — must survive
+        tampered.aiRewrite = Mode.AIRewrite(connection: "x", prompt: "leak")  // locked — must be healed
+        try ModeStore.write(tampered, to: dir)
+
+        ModeStore.ensureSystemModes(in: dir)
+
+        let toml = try String(contentsOf: dir.appendingPathComponent("\(Mode.directId).toml"), encoding: .utf8)
+        let healed = try ModeStore.decode(from: toml, id: Mode.directId)
+        #expect(healed.aiRewrite == nil)
+        #expect(healed.triggerKeys == [.init(key: "right_option")])
+    }
+
+    @Test func migrationRemovesStockPlainDictationAndDirectInheritsItsTrigger() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-mig-stock-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var plain = ModeStore.legacyPlainDictationSeed
+        plain.triggerKeys = [.init(key: "fn")]
+        try ModeStore.write(plain, to: dir)
+
+        ModeStore.ensureSystemModes(in: dir)   // first run → migration
+
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("plain-dictation.toml").path))
+        let direct = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
+        #expect(direct.triggerKeys == [.init(key: "fn")])
+    }
+
+    @Test func migrationCarriesARemappedTriggerOntoDirect() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-mig-remap-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var plain = ModeStore.legacyPlainDictationSeed   // stock shape, only the trigger moved
+        plain.triggerKeys = [.init(key: "right_option")]
+        try ModeStore.write(plain, to: dir)
+
+        ModeStore.ensureSystemModes(in: dir)
+
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("plain-dictation.toml").path))
+        let direct = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
+        #expect(direct.triggerKeys == [.init(key: "right_option")])
+    }
+
+    @Test func migrationKeepsACustomizedPlainDictationAndDirectStaysTriggerless() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-mig-custom-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var custom = ModeStore.legacyPlainDictationSeed
+        custom.triggerKeys = [.init(key: "fn")]
+        custom.aiRewrite = Mode.AIRewrite(connection: "c", prompt: "clean it up")   // user customization
+        try ModeStore.write(custom, to: dir)
+
+        ModeStore.ensureSystemModes(in: dir)
+
+        // The user's customized mode is never deleted; Direct does not steal its key.
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("plain-dictation.toml").path))
+        let direct = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
+        #expect(direct.triggerKeys.isEmpty)
+    }
+
+    @Test func deleteRefusesSystemModes() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-del-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        ModeStore.ensureSystemModes(in: dir)
+        try ModeStore.delete(.direct, from: dir)
+        #expect(ModeStore.loadAll(in: dir).contains { $0.id == Mode.directId })
     }
 
     @Test func newIDNormalizesNamesAndAvoidsExistingIDs() {

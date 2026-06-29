@@ -16,29 +16,15 @@ final class ModesSettingsModel: ObservableObject {
 
     private let modesDir: URL
     private let supportDir: URL
-    private let defaultModeId: () -> String
-    private let onSetDefault: (String) -> Void
 
-    init(
-        modesDir: URL, supportDir: URL,
-        defaultModeId: @escaping () -> String = { "" },
-        onSetDefault: @escaping (String) -> Void = { _ in }
-    ) {
+    init(modesDir: URL, supportDir: URL) {
         self.modesDir = modesDir
         self.supportDir = supportDir
-        self.defaultModeId = defaultModeId
-        self.onSetDefault = onSetDefault
         reload()
     }
 
-    func isDefault(_ mode: Mode) -> Bool { mode.id == defaultModeId() }
-
-    func makeDefault(_ mode: Mode) {
-        onSetDefault(mode.id)
-        objectWillChange.send()
-    }
-
     func reload() {
+        ModeStore.ensureSystemModes(in: modesDir)
         let result = ModeStore.load(in: modesDir, previous: modes)
         modes = result.modes
         loadFailures = result.failures
@@ -62,6 +48,22 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     func consumeCreated() { lastCreatedId = nil }
+
+    // Duplicate an existing mode into a new user-created mode. The system Direct floor is not
+    // duplicable. The copy drops the seed identity (it is now user-created) and its trigger keys, so it
+    // never silently clashes with the original's shortcut — the user assigns a new one.
+    func duplicate(_ mode: Mode) {
+        guard !mode.isSystem else { return }
+        let name = "\(mode.name) copy"
+        var copy = mode
+        copy.id = ModeStore.newID(for: name, existing: modes.map(\.id))
+        copy.name = name
+        copy.seedId = nil
+        copy.seedVersion = nil
+        copy.triggerKeys = []
+        save(copy)
+        selectedID = copy.id
+    }
 
     // A freshly created mode's id is the slug of the placeholder "New Mode". The first time the user
     // gives it a real name, re-slug the id so the TOML filename matches the name instead of staying
@@ -91,7 +93,6 @@ final class ModesSettingsModel: ObservableObject {
             } else {
                 modes.append(renamed)
             }
-            if defaultModeId() == oldId { onSetDefault(newId) }
             if selectedID == oldId { selectedID = newId }
             if lastCreatedId == oldId { lastCreatedId = newId }
             error = nil
@@ -101,15 +102,12 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     func delete(_ mode: Mode) {
+        guard !mode.isSystem else { return }
         do {
             try ModeStore.delete(mode, from: modesDir)
             if awaitingInitialName == mode.id { awaitingInitialName = nil }
-            let wasDefault = mode.id == defaultModeId()
             modes.removeAll { $0.id == mode.id }
             selectedID = modes.first?.id
-            // Default-mode delete guard (session-status follow-up): hand the default to a remaining
-            // mode so settings.default_mode_id never dangles after the default is removed.
-            if wasDefault, let next = modes.first { onSetDefault(next.id) }
             error = nil
         } catch {
             self.error = "Could not delete \(mode.name): \(error.localizedDescription)"
@@ -187,6 +185,7 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     private func save(_ mode: Mode) {
+        let mode = mode.isSystem ? mode.systemNormalized() : mode
         do {
             try ModeStore.write(mode, to: modesDir)
             if let index = modes.firstIndex(where: { $0.id == mode.id }) {
@@ -221,9 +220,7 @@ struct ModesSettingsView: View {
         HStack(spacing: 0) {
             List(selection: $model.selectedID) {
                 ForEach(model.modes) { mode in
-                    ModeSummaryRow(
-                        mode: mode, isDefault: model.isDefault(mode),
-                        issue: issue(for: mode))
+                    ModeSummaryRow(mode: mode, issue: issue(for: mode))
                         .tag(mode.id)
                 }
             }
@@ -244,16 +241,15 @@ struct ModesSettingsView: View {
                         mode: mode, allModes: model.modes,
                         connections: model.connections, fragmentIds: model.fragmentIds,
                         fragmentNames: model.fragmentNames,
-                        isDefault: model.isDefault(mode),
                         autofocusName: model.lastCreatedId == mode.id,
                         onUpdate: model.update,
-                        onMakeDefault: { model.makeDefault(mode) },
                         onAddFragmentFile: model.addFragmentFile(named:),
                         onLoadFragmentBody: model.fragmentBody,
                         onSaveFragmentBody: model.saveFragmentBody,
                         onCloseFragment: model.closeFragment(_:fromMode:),
                         onRevealFragment: model.revealFragment,
                         onConsumeFocus: model.consumeCreated,
+                        onDuplicate: { model.duplicate(mode) },
                         onDelete: { modePendingDelete = mode })
                         .id(mode.id)
                 } else {
@@ -277,9 +273,7 @@ struct ModesSettingsView: View {
             }
             Button("Cancel", role: .cancel) { modePendingDelete = nil }
         } message: {
-            let isDefault = modePendingDelete.map(model.isDefault) ?? false
-            Text("\(modePendingDelete?.name ?? "This mode") and its configuration will be removed. This cannot be undone."
-                + (isDefault ? " It is the default mode — another mode will become the default." : ""))
+            Text("\(modePendingDelete?.name ?? "This mode") and its configuration will be removed. This cannot be undone.")
         }
     }
 
@@ -324,17 +318,16 @@ private struct ModeLoadFailureBanner: View {
 
 private struct ModeSummaryRow: View {
     let mode: Mode
-    let isDefault: Bool
     var issue: ModeSummaryIssue?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(mode.name)
-                if isDefault {
-                    Text("Default").font(.caption2)
+                if mode.isSystem {
+                    Text("Built in").font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.tint.opacity(0.2), in: Capsule()).foregroundStyle(.tint)
+                        .background(.secondary.opacity(0.18), in: Capsule()).foregroundStyle(.secondary)
                 }
                 if !mode.enabled {
                     Text(mode.seedId == nil ? "Disabled" : "Disabled starter")
@@ -351,7 +344,7 @@ private struct ModeSummaryRow: View {
     }
 
     private var summary: String {
-        var values = [ModeSummary.whenRuns(mode, isDefault: isDefault)]
+        var values = [ModeSummary.whenRuns(mode)]
         values.append(issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite"))
         if mode.excludeFromHistory { values.append("No history") }
         return values.joined(separator: " · ")
@@ -383,16 +376,26 @@ private enum ModeSummaryIssue {
 // Shared user-facing summary phrasing (ui_components.md "Mode summary"): when a mode runs and
 // where its text goes, in plain words — never bundle IDs or raw regex.
 enum ModeSummary {
-    static func whenRuns(_ mode: Mode, isDefault: Bool) -> String {
-        if let key = mode.triggerKeys.first?.key,
-           let descriptor = try? KeyDescriptor(parsing: key) {
-            return "Triggered by \(triggerLabel(descriptor))"
+    static func whenRuns(_ mode: Mode) -> String {
+        let constrained = !mode.constraints.isEmpty
+        // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
+        if mode.isSystem {
+            if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
+                return "Triggered by \(triggerLabel(descriptor)) · fallback"
+            }
+            return "Fallback when no mode matches"
         }
-        if !mode.constraints.isEmpty {
-            return "Routing rule"
+        // A shortcut is what makes a mode run automatically. A constrained mode only runs in matching
+        // apps; a constrained mode with NO shortcut/phrase never auto-runs (Fn goes to Plain Dictation)
+        // — it's reachable from the menu, so don't imply it's automatic.
+        if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
+            return constrained ? "Triggered by \(triggerLabel(descriptor)) in matching apps"
+                               : "Triggered by \(triggerLabel(descriptor))"
         }
-        if !mode.triggerPhrases.isEmpty { return "Spoken phrase" }
-        if isDefault { return "Automatic default" }
+        if !mode.triggerPhrases.isEmpty {
+            return constrained ? "Spoken phrase in matching apps" : "Spoken phrase"
+        }
+        if constrained { return "App rule — add a shortcut to use it" }
         return "Pick from the menu"
     }
 
@@ -415,16 +418,15 @@ private struct ModeEditorView: View {
     let connections: [Connection]
     let fragmentIds: [String]
     let fragmentNames: [String: String]
-    let isDefault: Bool
     var autofocusName = false
     let onUpdate: (Mode) -> Void
-    let onMakeDefault: () -> Void
     let onAddFragmentFile: (String) -> String?
     let onLoadFragmentBody: (String) -> String
     let onSaveFragmentBody: (String, String) -> Void
     let onCloseFragment: (String, String) -> Void
     let onRevealFragment: (String) -> Void
     var onConsumeFocus: () -> Void = {}
+    var onDuplicate: () -> Void = {}
     let onDelete: () -> Void
     @State private var routingExpanded = false
     @State private var recognitionExpanded = false
@@ -440,6 +442,59 @@ private struct ModeEditorView: View {
     @State private var runningApps: [InstalledApps.Info] = []
 
     var body: some View {
+        if mode.isSystem { systemBody } else { normalBody }
+    }
+
+    // The Direct floor (`_direct`, shown to users as "Plain Dictation"): a reduced, mostly-locked
+    // editor. Only its shortcut and result handling are editable; the guarantees (no AI, no
+    // edit-in-place, global vocabulary only) are fixed.
+    private var systemBody: some View {
+        Form {
+            Section {
+                Label("Plain Dictation is the built-in fallback — it dictates on-device with no AI and always types plainly, and runs whenever no other mode applies. You can change its shortcut and result handling (including whether it saves to history); everything else is fixed.",
+                      systemImage: "lock.fill")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Shortcut") {
+                triggerPickerRow
+                Picker("How the shortcut works", selection: pressStyle) {
+                    Text("Hold or tap").tag("hold-or-tap")
+                    Text("Hold only").tag("hold-only")
+                    Text("Tap to toggle").tag("tap-to-toggle")
+                }
+                .disabled(mode.triggerKeys.isEmpty)
+                if let conflict = triggerConflict {
+                    Label("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Text("Plain Dictation owns Fn by default. Change or clear its shortcut here — even with no shortcut it still runs automatically whenever no other mode applies.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("What it does") {
+                SettingRow(
+                    title: "Turn spoken commands into edits",
+                    help: "Turns phrases you say into edits: \u{201C}new line\u{201D}, \u{201C}new paragraph\u{201D}, \u{201C}scratch that\u{201D}, \u{201C}tab key\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
+                {
+                    Toggle("", isOn: commandsBinding(\.liveEdits)).labelsHidden()
+                }
+            }
+            Section("Result handling") {
+                nonPasteInsertionNotice
+                SettingRow(
+                    title: "Do not save this mode in history",
+                    help: "When on, Direct's dictations are never written to local history. Otherwise it records per your global History setting.")
+                {
+                    Toggle("", isOn: binding(\.excludeFromHistory)).labelsHidden()
+                }
+                finishingControls
+            }
+        }
+        .formStyle(.grouped)
+        .padding(16)
+    }
+
+    private var normalBody: some View {
         Form {
             Section { summaryCard }
 
@@ -448,15 +503,6 @@ private struct ModeEditorView: View {
                     var updated = mode; updated.name = value; onUpdate(updated)
                 }
                 Toggle("Enabled", isOn: binding(\.enabled))
-                if isDefault {
-                    Label("Used automatically when no routing rule or spoken phrase applies",
-                          systemImage: "star.fill")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if mode.source != .selection {
-                    Button("Use as default mode", action: onMakeDefault)
-                    Text("The default mode runs whenever no routing rule, shortcut, or spoken phrase selects another mode.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
             }
 
             whenUsedSection
@@ -491,6 +537,7 @@ private struct ModeEditorView: View {
             }
 
             Section {
+                Button("Duplicate Mode", systemImage: "plus.square.on.square", action: onDuplicate)
                 Button("Delete Mode", role: .destructive, action: onDelete)
             }
         }
@@ -508,7 +555,7 @@ private struct ModeEditorView: View {
 
     @ViewBuilder private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            summaryLine("When", ModeSummary.whenRuns(mode, isDefault: isDefault))
+            summaryLine("When", ModeSummary.whenRuns(mode))
             summaryLine("Does", mode.source == .selection
                 ? "Replaces the selected text using your spoken instruction"
                 : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))
@@ -534,26 +581,30 @@ private struct ModeEditorView: View {
         return "Cloud rewrite via \(name)\(redaction)"
     }
 
+    // The shortcut row: the menu, or — for a custom chord — the recorder in place. Choosing "Custom
+    // shortcut…" arms it immediately; Esc or clearing reverts to the menu. Shared by the normal and
+    // system-mode editors.
+    @ViewBuilder private var triggerPickerRow: some View {
+        if isCustom {
+            LabeledContent("Start this mode with") {
+                HotkeyRecorder(
+                    key: triggerKey, autostart: capturingCustom,
+                    onCancel: { capturingCustom = false })
+            }
+        } else {
+            Picker("Start this mode with", selection: triggerSelection) {
+                Text("No mode shortcut").tag("")
+                Text("Fn (Globe)").tag("fn")
+                Text("Right Option").tag("right_option")
+                Text("Right Command").tag("right_command")
+                Text("Custom shortcut…").tag(customTriggerTag)
+            }
+        }
+    }
+
     @ViewBuilder private var whenUsedSection: some View {
         Section("When this mode is used") {
-            // The Mode shortcut row holds either the menu or, for a custom chord, the recorder itself —
-            // no separate "Shortcut" row. Choosing "Custom shortcut…" arms it in place immediately;
-            // Esc or clearing reverts to the menu. (autostart only when freshly entering custom.)
-            if isCustom {
-                LabeledContent("Start this mode with") {
-                    HotkeyRecorder(
-                        key: triggerKey, autostart: capturingCustom,
-                        onCancel: { capturingCustom = false })
-                }
-            } else {
-                Picker("Start this mode with", selection: triggerSelection) {
-                    Text("No mode shortcut").tag("")
-                    Text("Fn (Globe)").tag("fn")
-                    Text("Right Option").tag("right_option")
-                    Text("Right Command").tag("right_command")
-                    Text("Custom shortcut…").tag(customTriggerTag)
-                }
-            }
+            triggerPickerRow
             DisclosureSection(isExpanded: $routingExpanded) {
                 disclosureLabel("Advanced routing", routingSummary)
             } content: {
@@ -574,6 +625,10 @@ private struct ModeEditorView: View {
 
                 Text("Limit by app, URL, or window title")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if !mode.constraints.isEmpty && mode.triggerKeys.isEmpty {
+                    Text("An app rule alone doesn’t run a mode automatically — give it the same shortcut as Plain Dictation (Fn) to take over in matching apps, or pick it from the menu.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 ForEach(mode.constraints.indices, id: \.self) { index in
                     HStack {
                         constraintLabel(mode.constraints[index])

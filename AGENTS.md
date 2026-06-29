@@ -306,6 +306,21 @@ JSONL-per-day, downloaded STT weights consolidated in `models/` (`config_schema.
 *config* file carries `schema_version` and migrates forward (`design.md` §5.1); `models/` is
 runtime-downloaded, never committed.
 
+**Config migrations — there is no migration *framework*, so don't assume one.** `ConfigDecode.table`
+only **gates** versions (it rejects a file newer than the app; it does not transform). "Migrating
+forward" is whatever the type's `init(from:)` does on read — almost always additive `decodeIfPresent ??
+default`, re-derived from `schema_version` on **every** load, never a recorded one-shot. Consequences a
+future migration must respect: (1) a migration is an **idempotent read transform**, not a step that
+runs once — a read-only old file stays its old version on disk until something rewrites it, and gets
+re-normalized every read; (2) **there is no step chaining** — the *current* decoder must understand
+**every** still-supported old version directly (a user can jump v1→v3 without ever running v2's code);
+(3) **removing a field is free** — the key is just ignored on read and dropped on next write (this is
+how `default_mode_id` was retired). Where a migration genuinely must run **once** (e.g. the
+Plain-Dictation→Direct replacement in `ModeStore.ensureSystemModes`), it keys off a durable artifact —
+the presence of `_direct.toml` — as its marker, which means **it will not re-run**. If you add a
+one-shot migration that must re-run after a later change, that file-presence marker is *not* enough; add
+an explicit migration flag (e.g. in the seed ledger) instead.
+
 This repo has a **normal git origin** (it is *not* shop/world) — plain `git`/`gh` apply.
 
 ---

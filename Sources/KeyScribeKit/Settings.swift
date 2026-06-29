@@ -8,7 +8,6 @@ public enum Eviction: String, Codable, Sendable, Equatable {
 public struct Settings: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var loadOnLogin: Bool
-    public var defaultModeId: String
     public var stt: STT
     public var duringDictation: DuringDictation
     public var history: History
@@ -18,7 +17,6 @@ public struct Settings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case loadOnLogin = "load_on_login"
-        case defaultModeId = "default_mode_id"
         case stt
         case duringDictation = "during_dictation"
         case history
@@ -30,7 +28,8 @@ public struct Settings: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
         loadOnLogin = try c.decodeIfPresent(Bool.self, forKey: .loadOnLogin) ?? Settings.defaults.loadOnLogin
-        defaultModeId = try c.decodeIfPresent(String.self, forKey: .defaultModeId) ?? Settings.defaults.defaultModeId
+        // `default_mode_id` was removed when the Direct floor took over the primary role; an old file's
+        // key is simply ignored here and dropped on the next write (see AGENTS.md "Config migrations").
         stt = try c.decodeIfPresent(STT.self, forKey: .stt) ?? Settings.defaults.stt
         duringDictation = try c.decodeIfPresent(DuringDictation.self, forKey: .duringDictation) ?? Settings.defaults.duringDictation
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? Settings.defaults.history
@@ -39,13 +38,12 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 
     public init(
-        schemaVersion: Int, loadOnLogin: Bool, defaultModeId: String,
+        schemaVersion: Int, loadOnLogin: Bool,
         stt: STT, duringDictation: DuringDictation, history: History,
         shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
-        self.defaultModeId = defaultModeId
         self.stt = stt
         self.duringDictation = duringDictation
         self.history = history
@@ -195,7 +193,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public static let defaults = Settings(
         schemaVersion: 1,
         loadOnLogin: false,
-        defaultModeId: "plain-dictation",
         stt: STT(engine: "parakeet-tdt-ctc-110m", eviction: .fastest),
         duringDictation: DuringDictation(muteSystemAudio: true, keepDisplayAwake: true, sounds: true),
         history: History(enabled: true, retentionDays: 7),
