@@ -142,6 +142,18 @@ struct HotkeyMonitorChordTests {
         #expect(fake.lastRegistrations.count == 1)
     }
 
+    @Test func untrustedDefersTapButStillRegistersChords() {
+        let fake = FakeChordRegistrar()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in }, onCommit: { _ in },
+            carbon: fake, mouseTap: FakeMouseTap(), isProcessTrusted: { false })
+        m.update(bindings: [chordBinding("control+option+e")])
+
+        #expect(m.start() == false)
+        #expect(m.isTapActive == false)
+        #expect(fake.lastRegistrations.count == 1)
+    }
+
     @Test func hudHoldsKeyFocusOnlyAcrossCancellableStates() {
         #expect(HUDState.recording(mode: nil, level: 0).holdsKeyFocus)
         #expect(HUDState.transcribing(mode: "m").holdsKeyFocus)

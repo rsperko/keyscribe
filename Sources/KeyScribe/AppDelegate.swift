@@ -307,8 +307,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startListening() {
         // start() registers the Carbon chord hotkeys (no permission needed) regardless of the tap, and
-        // creates the modifier-only event tap only if Accessibility is granted (it returns false, leaving
-        // chords working, otherwise). So chord triggers do not depend on Accessibility.
+        // creates the modifier-only event tap only when Accessibility is already granted — untrusted it
+        // defers tap creation and returns false (leaving chords working). So chord triggers never depend on
+        // Accessibility, and we never poke tapCreate before the grant.
         _ = hotkey.start()
         refreshStatus()
     }
@@ -394,8 +395,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Relaunch into the guided setup so the new process reads the just-granted Accessibility verdict
-    // fresh (it is cached at launch and won't apply to this process).
+    // fresh (it is cached at launch and won't apply to this process). First clear any denied ListenEvent
+    // (Input Monitoring) record: KeyScribe never uses Input Monitoring, but a pre-fix build could have left
+    // a denied record (from calling tapCreate before Accessibility was granted) that silently suppresses the
+    // modifier-only event tap even once Accessibility is granted. Clearing it heals such installs; on a
+    // healthy machine there is no record and the reset is a harmless no-op. User-initiated (this is the
+    // "Relaunch to finish setup" action), so it cannot loop.
     private func relaunchForPermissionSetup() {
+        ResetTool.resetInputMonitoring()
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.arguments = ["--setup-permissions"]

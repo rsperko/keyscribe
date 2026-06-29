@@ -170,11 +170,20 @@ keyscribe/
   - **The hotkey mechanism is split by trigger type, and no path needs Input Monitoring**
     (`HotkeyMonitor` + `CarbonHotKeys`):
     - **Modifier-only triggers** (Fn / right-Option / right-Command / Hyper) → a `.listenOnly`
-      `CGEventTap` watching **only `.flagsChanged`**. A session tap observing *modifiers* is authorized
-      by **Accessibility alone**; it never consumes a keystroke. `.listenOnly` (not `.defaultTap`)
-      because we never modify/consume the event: a listen-only tap is delivered async, so the window
-      server does NOT block the system input stream on our callback — a busy/wedged main thread can never
-      hold global input hostage, it only delays our own observation.
+      `CGEventTap` watching **only `.flagsChanged`**. Once Accessibility is granted, a session tap
+      observing *modifiers* runs on **Accessibility** (we never request Input Monitoring) and never
+      consumes a keystroke. `.listenOnly` (not `.defaultTap`) because we never modify/consume the event:
+      a listen-only tap is delivered async, so the window server does NOT block the system input stream on
+      our callback — a busy/wedged main thread can never hold global input hostage, it only delays our own
+      observation.
+      **Footgun — the authorization is one-directional, so `start()` gates `tapCreate` on
+      `AXIsProcessTrusted()`:** calling `tapCreate` *before* the grant not only fails, it makes tccd write
+      a *denied* `ListenEvent` (Input Monitoring) record and pop a spurious Input Monitoring prompt; that
+      denied record then suppresses the tap **permanently** — even after Accessibility is later granted —
+      until ListenEvent is reset. The gate (`HotkeyMonitor.start()`) makes that impossible, and
+      `relaunchForPermissionSetup()` runs `tccutil reset ListenEvent` (via `ResetTool.resetInputMonitoring`)
+      before the permission relaunch to heal installs poisoned by a pre-gate build (harmless no-op on a
+      clean machine). Never call `tapCreate` untrusted, and never "simplify" the gate away.
       Footgun: that tap is **deaf to `keyDown`** without Input Monitoring — both `CGEventTap` and
       `NSEvent.addGlobalMonitorForEvents` deliver zero key events on Accessibility alone. So chords
       and ESC can NOT ride the tap.

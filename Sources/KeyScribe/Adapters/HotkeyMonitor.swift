@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import KeyScribeKit
@@ -36,6 +37,7 @@ final class HotkeyMonitor {
     private var runLoopSource: CFRunLoopSource?
     private let carbon: ChordRegistering
     private let mouseTap: MouseTapping
+    private let isProcessTrusted: () -> Bool
 
     let onStart: (String?) -> Void
     let onCommit: (String?) -> Void
@@ -46,7 +48,8 @@ final class HotkeyMonitor {
         onStart: @escaping (String?) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
         carbon: ChordRegistering = CarbonHotKeys(),
-        mouseTap: MouseTapping = MouseEventTap()
+        mouseTap: MouseTapping = MouseEventTap(),
+        isProcessTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }
     ) {
         self.bindings = bindings
         self.actionBindings = actionBindings
@@ -55,6 +58,7 @@ final class HotkeyMonitor {
         self.onAction = onAction
         self.carbon = carbon
         self.mouseTap = mouseTap
+        self.isProcessTrusted = isProcessTrusted
         self.mouseTap.onEdge = { [weak self] button, edge in self?.fireMouse(button: button, edge: edge) }
     }
 
@@ -73,23 +77,37 @@ final class HotkeyMonitor {
     }
 
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
-    // A `.listenOnly` session tap that only observes modifiers is authorized by Accessibility alone (no
-    // Input Monitoring). `.listenOnly` (not `.defaultTap`): we never consume or modify an event, and a
-    // listen-only tap is delivered asynchronously — the window server does NOT block the system input
-    // stream waiting on our callback, so a busy/wedged main thread can never hold global input hostage
-    // (it would only delay our own observation). Chords → `CarbonHotKeys`; ESC-to-cancel → the recording HUD.
+    // Once Accessibility is granted, a `.listenOnly` session tap that only observes modifiers runs on
+    // Accessibility — KeyScribe never requests Input Monitoring. But the authorization is one-directional:
+    // calling `tapCreate` *before* the grant cannot succeed AND makes tccd write a *denied* ListenEvent
+    // (Input Monitoring) record plus a spurious Input Monitoring prompt; that denied record then suppresses
+    // the tap permanently — even after Accessibility is later granted — until ListenEvent is reset. So
+    // `start()` gates `tapCreate` on `isProcessTrusted()` and never touches it untrusted (see the gate
+    // below). `.listenOnly` (not `.defaultTap`): we never consume or modify an event, and a listen-only tap
+    // is delivered asynchronously — the window server does NOT block the system input stream waiting on our
+    // callback, so a busy/wedged main thread can never hold global input hostage (it would only delay our
+    // own observation). Chords → `CarbonHotKeys`; ESC-to-cancel → the recording HUD.
     // True once the modifier-only `.flagsChanged` tap exists. `false` while Accessibility reads granted
-    // means `tapCreate` saw a launch-cached denied verdict — the process needs a relaunch (the readiness
-    // signal AppDelegate/Settings surface, since the live `AXIsProcessTrusted` would otherwise say "Ready").
+    // means either the verdict was launch-cached as denied, or a denied ListenEvent record is suppressing
+    // the tap — both repaired by the permission relaunch (which resets ListenEvent first); the readiness
+    // signal AppDelegate/Settings surface, since the live `AXIsProcessTrusted` would otherwise say "Ready".
     var isTapActive: Bool { tap != nil }
 
     @discardableResult
     func start() -> Bool {
         defer { rebuildCarbon(); rebuildMouse() }
         if tap != nil { return true }
+        // Never create the tap untrusted: tapCreate would fail anyway AND can leave a denied ListenEvent
+        // record that suppresses it for good (see the isTapActive comment above). The post-grant relaunch
+        // re-invokes start() with the verdict present, so the tap comes up enabled. Carbon chords + the
+        // mouse tap still register via the defer — they do not depend on Accessibility.
+        guard isProcessTrusted() else {
+            hotkeyLog.info("modifier-key event tap deferred until Accessibility is granted")
+            return false
+        }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         guard let tap = makeTap(mask: mask, options: .listenOnly) else {
-            hotkeyLog.error("modifier-key event tap not created; Accessibility verdict is likely cached as denied from launch — relaunch needed")
+            hotkeyLog.error("modifier-key event tap not created despite Accessibility granted; a denied ListenEvent record may be suppressing it — relaunch to repair")
             return false
         }
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)

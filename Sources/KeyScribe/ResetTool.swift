@@ -109,6 +109,15 @@ struct ResetTool {
         return actions
     }
 
+    // Clears the app's Input Monitoring (ListenEvent) TCC record. KeyScribe never requests Input
+    // Monitoring, but a build that called tapCreate before Accessibility was granted could leave a denied
+    // ListenEvent record that suppresses the modifier-only event tap permanently. Resetting it on a
+    // permission relaunch repairs such installs; on a healthy machine there is no record to remove.
+    @discardableResult
+    static func resetInputMonitoring(bundleID: String = Bundle.main.bundleIdentifier ?? "com.keyscribe.app") -> String {
+        tccutilReset("ListenEvent", bundleID)
+    }
+
     private static func tccutilReset(_ service: String, _ bundleID: String) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
