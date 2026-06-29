@@ -32,8 +32,8 @@ struct ResolvedConfigTests {
     @Test func nilModeFallsBackToGlobalDictionaryAndDefaultStages() {
         let rc = resolved(dictionary: ["Global"])
         #expect(rc.mergedDictionary(for: nil) == ["Global"])
-        // nil mode defaults: live edits on, replacements, no numbers/fuzzy → LiveEdits + Replacements.
-        let stages = rc.postSTTTextStages(for: nil)
+        // nil mode defaults: live edits on, replacements, no numbers → LiveEdits + Replacements.
+        let stages = rc.postSTTTextStages(for: nil, dictionaryRecovery: false)
         #expect(stages.count == 2)
     }
 
@@ -41,18 +41,25 @@ struct ResolvedConfigTests {
         var mode = Mode(id: "m", name: "M")
         mode.commands.liveEdits = true
         mode.commands.numbers = true
-        mode.commands.fuzzyCorrection = true
         let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        // LiveEdits + Replacements + Numbers + Fuzzy.
-        #expect(rc.postSTTTextStages(for: mode).count == 4)
+        // LiveEdits + Replacements + Numbers (dictionary recovery off).
+        #expect(rc.postSTTTextStages(for: mode, dictionaryRecovery: false).count == 3)
+    }
+
+    @Test func dictionaryRecoveryAddsFuzzyStageRegardlessOfMode() {
+        var mode = Mode(id: "m", name: "M")  // no mode-level fuzzy command exists anymore
+        mode.commands.liveEdits = true
+        let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
+        // Off → LiveEdits + Replacements; on → + FuzzyStage. The gate is the host-supplied flag.
+        #expect(rc.postSTTTextStages(for: mode, dictionaryRecovery: false).count == 2)
+        #expect(rc.postSTTTextStages(for: mode, dictionaryRecovery: true).count == 3)
     }
 
     @Test func postSTTTextStagesAreMemoizedSameInstanceReused() {
-        var mode = Mode(id: "m", name: "M")
-        mode.commands.fuzzyCorrection = true
+        let mode = Mode(id: "m", name: "M")
         let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        let first = rc.postSTTTextStages(for: mode)
-        let second = rc.postSTTTextStages(for: mode)
+        let first = rc.postSTTTextStages(for: mode, dictionaryRecovery: true)
+        let second = rc.postSTTTextStages(for: mode, dictionaryRecovery: true)
         #expect(first.count == second.count)
     }
 

@@ -82,6 +82,7 @@ final class DictationController {
     // out from under the active call. One capture, used everywhere for this dictation.
     private var capturedEngine: (any SpeechEngine)?
     private var activeEngine: any SpeechEngine { capturedEngine ?? provider.active }
+    private var capturedDictionaryRecovery: Bool?
 
     // The in-flight (or completed) model load for `warmEngineId`, so the press-time warm and the
     // commit-time wait share ONE load instead of racing two concurrent compiles of a multi-hundred-MB
@@ -323,6 +324,8 @@ final class DictationController {
         building.targetBundleId = capturedSnapshot?.bundleId
         capturedPlan = config.resolved
         capturedEngine = provider.active
+        capturedDictionaryRecovery = !activeEngine.supportsRecognitionBias
+            && settings.stt.dictionaryRecoveryEngines.contains(activeEngine.id)
         captureStarted = false
         activeMode = nil
         eligibleModes = []
@@ -446,6 +449,7 @@ final class DictationController {
         captureStarted = false
         capturedPlan = nil
         capturedEngine = nil
+        capturedDictionaryRecovery = nil
         // An engine the user switched away from mid-dictation was held back from eviction to avoid
         // racing the in-flight call; now that we're idle it is safe to free.
         if let deferred = deferredEvictionEngine {
@@ -993,7 +997,12 @@ final class DictationController {
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
     private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
-        var stages = plan.postSTTTextStages(for: mode)
+        // Dictionary recovery is the post-STT substitute for recognition bias: apply it only when the
+        // engine that transcribed this dictation cannot bias and the user left it enabled for that engine.
+        let dictionaryRecovery = capturedDictionaryRecovery
+            ?? (!activeEngine.supportsRecognitionBias
+                && settings.stt.dictionaryRecoveryEngines.contains(activeEngine.id))
+        var stages = plan.postSTTTextStages(for: mode, dictionaryRecovery: dictionaryRecovery)
         if mode?.commands.liveEdits ?? true { stages.append(TokenizingStage.verbatim()) }
         if (mode?.commands.privacy ?? false) && willRewrite { stages.append(TokenizingStage.redaction()) }
         return Pipeline(stages)

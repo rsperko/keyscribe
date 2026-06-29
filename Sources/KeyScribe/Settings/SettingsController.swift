@@ -124,6 +124,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func update(settings: Settings) {
         model.apply(settings)
         speechModels.syncActive(settings.stt.engine)
+        speechModels.syncDictionaryRecovery(settings.stt.dictionaryRecoveryEngines)
     }
 
     func refreshProblems() { problems.update(detectProblems()) }
@@ -471,10 +472,7 @@ final class SettingsModel: ObservableObject {
         settings.duringDictation = .init(muteSystemAudio: muteSystemAudio, keepDisplayAwake: keepDisplayAwake, sounds: sounds)
         settings.loadOnLogin = loadOnLogin
         settings.history = .init(enabled: historyEnabled, retentionDays: retentionDays)
-        settings.stt = .init(
-            engine: settings.stt.engine,
-            eviction: Eviction(rawValue: eviction) ?? .balanced,
-            evictionIdleSeconds: settings.stt.evictionIdleSeconds)
+        settings.stt.eviction = Eviction(rawValue: eviction) ?? .balanced
         settings.shortcuts = .init(
             addVocabulary: addVocabularyShortcut,
             pasteLastDictation: pasteLastShortcut)

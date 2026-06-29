@@ -13,9 +13,12 @@ struct DictationPipelineWiringTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
         let id = "fixed"
         let displayName = "Fixed"
-        let supportsRecognitionBias = false
+        let supportsRecognitionBias: Bool
         private let text: String
-        init(text: String) { self.text = text }
+        init(text: String, supportsRecognitionBias: Bool = false) {
+            self.text = text
+            self.supportsRecognitionBias = supportsRecognitionBias
+        }
         func loadIfNeeded() async throws {}
         func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
         func evict() async {}
@@ -87,17 +90,26 @@ struct DictationPipelineWiringTests {
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
-        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil }
+        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
+        dictionaryRecoveryEngines: [String]? = nil,
+        engineSupportsRecognitionBias: Bool = false,
+        updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         await run(transcript: transcript, modes: [mode], defaultModeId: mode.id,
                   connection: connection, llm: llm, accessibility: accessibility,
-                  captureSelection: captureSelection)
+                  captureSelection: captureSelection,
+                  dictionaryRecoveryEngines: dictionaryRecoveryEngines,
+                  engineSupportsRecognitionBias: engineSupportsRecognitionBias,
+                  updateSettingsAfterStart: updateSettingsAfterStart)
     }
 
     private func run(
         transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
-        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil }
+        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
+        dictionaryRecoveryEngines: [String]? = nil,
+        engineSupportsRecognitionBias: Bool = false,
+        updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
@@ -111,10 +123,14 @@ struct DictationPipelineWiringTests {
         }
 
         var settings = Settings.defaults
-        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.stt = .init(
+            engine: "fixed", eviction: .frugal,
+            dictionaryRecoveryEngines: dictionaryRecoveryEngines ?? Settings.defaults.stt.dictionaryRecoveryEngines)
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
 
-        let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
+        let provider = try! SpeechEngineProvider(
+            engines: [FixedEngine(text: transcript, supportsRecognitionBias: engineSupportsRecognitionBias)],
+            activeId: "fixed")
         let history = HistoryStore(supportDir: supportDir)
         let insertSpy = InsertSpy()
         let submitSpy = SubmitSpy()
@@ -133,16 +149,28 @@ struct DictationPipelineWiringTests {
 
         controller.setNextModeOverride(id: defaultModeId)   // select the mode under test
         controller.handleStart()
+        if let updateSettingsAfterStart {
+            updateSettingsAfterStart(&settings)
+            controller.updateSettings(settings)
+        }
         await controller.captureBringUpTask?.value
         controller.handleCommit()
         await controller.dictationTask?.value
-        let entry = history.entries().first
+        let entry = await firstHistoryEntry(in: history)
         return Result(
             lastResult: controller.lastResult, outcome: entry?.outcome,
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
             insertedModifier: await insertSpy.modifier,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
             lastHUD: hudSpy.states.last)
+    }
+
+    private func firstHistoryEntry(in history: HistoryStore) async -> HistoryEntry? {
+        for _ in 0..<20 {
+            if let entry = history.entries().first { return entry }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return nil
     }
 
     private func mode(
@@ -198,6 +226,37 @@ struct DictationPipelineWiringTests {
 
         #expect(out.lastResult == "Mr Smith email alice@example.com")
         #expect(out.outcome == .localFallback)
+    }
+
+    @Test func dictionaryRecoveryCorrectsBiaslessEngineWhenEnabled() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "charge bee", mode: m,
+            dictionaryRecoveryEngines: ["fixed"])
+        #expect(out.lastResult == "ChargeBee")
+    }
+
+    @Test func dictionaryRecoveryUsesRecordStartSettings() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "charge bee", mode: m,
+            dictionaryRecoveryEngines: ["fixed"],
+            updateSettingsAfterStart: { settings in
+                settings.stt.dictionaryRecoveryEngines = []
+            })
+        #expect(out.lastResult == "ChargeBee")
+    }
+
+    @Test func dictionaryRecoveryDoesNotRunForBiasCapableEngine() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "charge bee", mode: m,
+            dictionaryRecoveryEngines: ["fixed"],
+            engineSupportsRecognitionBias: true)
+        #expect(out.lastResult == "charge bee")
     }
 
     // Privacy mode forces every context channel off, even when the mode explicitly opts into all of

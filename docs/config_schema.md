@@ -111,7 +111,8 @@ privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
 numbers    = false          # inverse text normalization: "twenty five" -> "25"
                             #   (leaves year idioms like "twenty twenty six" as words)
-fuzzy_correction = false    # TOML-only; see "Settings UI vs advanced TOML" below
+# (Dictionary recovery is no longer a mode command — it is a per-engine setting,
+#  settings.toml [stt].dictionary_recovery_engines.)
 
 # ── Vocabulary (mode-local; may exclude the global sets) ─────────────────────
 [dictionary]
@@ -157,7 +158,6 @@ context = { app = true, preceding_text = false }
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **tab**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
-| `commands.fuzzy_correction` | bool | TOML-only opt-in; post-STT fallback for weak-bias engines. See **Settings UI vs advanced TOML**. |
 | `dictionary` | table | `include_global` + `words[]`. |
 | `replacements` | table | `include_global` + `rules[]` of `{heard, replace, regex}`. |
 | `[ai_rewrite]` | table | Absent ⇒ no rewrite. `connection`, `prompt`, `fragments[]`, `context`. |
@@ -187,7 +187,6 @@ or make global behavior hard to reason about.
 |---|---|---|
 | `insertion` | New and edited modes use `paste` in Settings. If a mode file sets `insert` or `type`, Settings shows a read-only note that a custom insertion method is active. | `insert` and `type` are compatibility escapes for unusual targets. They need Accessibility permission and can fail app-by-app, while `paste` is the predictable default. |
 | `submit` | New and edited modes use `none` in Settings. If a mode file sets `return`, `shift_return`, or `cmd_return`, Settings shows a read-only note that the mode sends a key after insertion. | Submit keystrokes can send unfinished messages or commands in the target app. They are useful for deliberate automation modes, not casual editing. |
-| `commands.fuzzy_correction` | No toggle in Settings. If enabled in TOML, Settings shows a read-only note that the mode corrects close matches to vocabulary. | This is a post-transcription rescue for engines with no/weak vocabulary bias. It can help names and jargon, but it can also change intended text, so it stays deliberate. |
 | `dictionary.include_global` | No per-mode toggle in Settings; global dictionary terms stay included by default. | Turning this off makes a mode stop using vocabulary the user expects to apply everywhere. |
 | `replacements.include_global` | No per-mode toggle in Settings; global replacements stay included by default. | Turning this off creates surprising mode-specific replacement gaps. |
 | `source` + `output` | Shown as one “Rewrite selected text” control. | The app-supported selection workflow is the paired shape: capture the current selection and replace it with the rewritten result. |

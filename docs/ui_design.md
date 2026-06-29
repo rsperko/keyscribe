@@ -380,10 +380,12 @@ Both screens prioritize fast correction over configuration theory.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
   Apple; a soft nudge on Whisper/Parakeet), and dictionary terms always help the optional rewrite
-  regardless of engine. On **Parakeet** specifically, bias runs a second lightweight recognition
-  pass over the audio — on the order of **a second on a long dictation, negligible on short ones**
-  (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
-  recognition or a noticeable wait for normal use.
+  regardless of engine. Bias-less engines should be labeled **No recognition bias**, then offer
+  **Dictionary recovery** as a best-effort post-transcription fallback that can be turned off if it
+  changes ordinary words. On **Parakeet** specifically, bias runs a second lightweight recognition pass
+  over the audio — on the order of **a second on a long dictation, negligible on short ones** (measured:
+  `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed recognition or a
+  noticeable wait for normal use.
 - Replacements: a clear `Heard` → `Use instead` pair. Regex rows keep a `Regex` badge.
 
 ### AI Services
@@ -414,8 +416,8 @@ sections:
    custom shortcut behavior, and spoken routing live under `Advanced routing`.
 3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
    (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
-   under `Recognition and replacements`; TOML-only fuzzy correction appears as a read-only note when
-   active.
+   under `Recognition and replacements`. (Dictionary recovery is no longer a mode setting — it is a
+   per-engine option on bias-less speech models; see the Speech Models settings.)
 4. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
    mode's **reusable writing instructions** (fragments): listed by name directly under the
    instruction they extend, reorderable (they append in order), edited in place in a popover, and

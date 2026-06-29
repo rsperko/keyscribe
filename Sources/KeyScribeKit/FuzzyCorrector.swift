@@ -1,12 +1,12 @@
 import Foundation
 
 // Repairs proper nouns / identifiers the STT split or mangled, snapping them to a dictionary term
-// ("charge bee" → "ChargeBee"). Opt-in per mode (commands.fuzzyCorrection) and deliberately timid:
+// ("charge bee" → "ChargeBee"). Used as per-engine dictionary recovery and deliberately timid:
 // the dictionary is a *hint*, never authoritative (design.md §4.2), so we only touch distinctive
 // terms (≥4 normalized chars) and never rewrite across more than 2 edits — Soundex agreement only
 // buys the second edit (and only on short terms, where cap is 1), and breaks ties toward the
 // phonetic match. A pure casing/spacing fix (same normalized form) is always safe.
-// Bias-less engines (Moonshine) benefit most; bias-capable engines rarely need it.
+// Bias-less engines benefit most; bias-capable engines use recognition bias instead.
 public enum FuzzyCorrector {
     // Canonicalized dictionary, with each term's Soundex precomputed once. Built when the stage is
     // constructed (per mode/config generation) so a dictation never re-normalizes or re-Soundexes the

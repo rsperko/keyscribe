@@ -106,26 +106,26 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         public var liveEdits: Bool
         public var privacy: Bool
         public var numbers: Bool          // inverse text normalization ("twenty five" → "25")
-        public var fuzzyCorrection: Bool  // snap mangled words to dictionary terms
+        // Dictionary recovery (formerly `fuzzy_correction`) moved off the mode: it is now a per-engine
+        // property of bias-less speech models (Settings.stt.dictionaryRecoveryEngines), not a mode
+        // command. An old mode TOML's `fuzzy_correction` key is simply ignored on decode.
         enum CodingKeys: String, CodingKey {
             case liveEdits = "live_edits"; case privacy
-            case numbers; case fuzzyCorrection = "fuzzy_correction"
+            case numbers
         }
         public init(
             liveEdits: Bool = false, privacy: Bool = false,
-            numbers: Bool = false, fuzzyCorrection: Bool = false
+            numbers: Bool = false
         ) {
             self.liveEdits = liveEdits
             self.privacy = privacy
             self.numbers = numbers
-            self.fuzzyCorrection = fuzzyCorrection
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             liveEdits = try c.decodeIfPresent(Bool.self, forKey: .liveEdits) ?? false
             privacy = try c.decodeIfPresent(Bool.self, forKey: .privacy) ?? false
             numbers = try c.decodeIfPresent(Bool.self, forKey: .numbers) ?? false
-            fuzzyCorrection = try c.decodeIfPresent(Bool.self, forKey: .fuzzyCorrection) ?? false
         }
     }
 

@@ -724,7 +724,6 @@ private struct ModeEditorView: View {
                 Toggle("Write numbers as digits", isOn: commandsBinding(\.numbers))
                 Text("Numbers are tidied on this Mac, before any AI rewrite.")
                     .font(.caption).foregroundStyle(.secondary)
-                fuzzyCorrectionNotice
             }
 
             Text("Mode-only names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.")
@@ -741,18 +740,9 @@ private struct ModeEditorView: View {
         }
     }
 
-    @ViewBuilder private var fuzzyCorrectionNotice: some View {
-        if mode.commands.fuzzyCorrection {
-            Label("This mode corrects close matches to vocabulary from its TOML file.",
-                  systemImage: "text.magnifyingglass")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
     private var recognitionSummary: String {
         var parts: [String] = []
         if mode.source != .selection, mode.commands.numbers { parts.append("Numbers as digits") }
-        if mode.source != .selection, mode.commands.fuzzyCorrection { parts.append("TOML vocabulary correction") }
         let wordCount = mode.dictionary.words.count
         let replacementCount = mode.replacements.rules.count
         if wordCount > 0 { parts.append("\(wordCount) word\(wordCount == 1 ? "" : "s")") }

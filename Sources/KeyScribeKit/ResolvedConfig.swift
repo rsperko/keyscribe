@@ -67,19 +67,22 @@ public final class ResolvedConfig: @unchecked Sendable {
         return terms
     }
 
-    // Post-STT TEXT stages for a mode (live edits → replacements → numbers → fuzzy), memoized per
-    // mode. Verbatim/redaction tokenizers are per-dictation and added separately by the host; these
-    // stages are pure config so they compile once and are reused (fuzzy precomputes its tables here).
-    public func postSTTTextStages(for mode: Mode?) -> [any PipelineStage] {
-        let key = mode?.id ?? Self.nilModeKey
+    // Post-STT TEXT stages for a mode (live edits → replacements → numbers → dictionary recovery),
+    // memoized per (mode, dictionaryRecovery). Dictionary recovery (FuzzyStage) is no longer a mode
+    // command: it is the post-STT substitute for recognition bias, gated by the host on the active
+    // engine's capability (`dictionaryRecovery` is true only when that engine cannot bias and the user
+    // opted it in). Verbatim/redaction tokenizers are per-dictation and added separately by the host;
+    // these stages are pure config so they compile once and are reused (fuzzy precomputes its tables).
+    public func postSTTTextStages(for mode: Mode?, dictionaryRecovery: Bool) -> [any PipelineStage] {
+        let key = "\(mode?.id ?? Self.nilModeKey)|\(dictionaryRecovery)"
         lock.lock(); defer { lock.unlock() }
         if let cached = textStageCache[key] { return cached }
-        let stages = buildTextStages(for: mode)
+        let stages = buildTextStages(for: mode, dictionaryRecovery: dictionaryRecovery)
         textStageCache[key] = stages
         return stages
     }
 
-    private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {
+    private func buildTextStages(for mode: Mode?, dictionaryRecovery: Bool) -> [any PipelineStage] {
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
         let rules = VocabularyMerge.rules(
@@ -88,7 +91,7 @@ public final class ResolvedConfig: @unchecked Sendable {
             includeGlobal: mode?.replacements.includeGlobal ?? true)
         stages.append(ReplacementsStage(rules: rules))
         if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
-        if mode?.commands.fuzzyCorrection ?? false {
+        if dictionaryRecovery {
             stages.append(FuzzyStage(terms: mergedDictionaryUnlocked(for: mode)))
         }
         return stages

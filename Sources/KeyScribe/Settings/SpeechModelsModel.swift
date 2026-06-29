@@ -15,6 +15,8 @@ final class SpeechModelsModel: ObservableObject {
         let testPassed: Bool
         let errorText: String?
         let installedBytes: Int64?
+        // Only meaningful for bias-less engines: whether they recover dictionary terms post-STT.
+        let dictionaryRecoveryOn: Bool
     }
 
     @Published private(set) var rows: [Row] = []
@@ -37,22 +39,29 @@ final class SpeechModelsModel: ObservableObject {
     private var installedSizes: [String: Int64] = [:]
     private var sizeRefreshGeneration = 0
 
+    private var dictionaryRecoveryEngines: Set<String>
+
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let verify: (String) async -> Bool?
     private let evictEngine: (String) async -> Void
     private let onActiveChange: (String) -> Void
+    private let onDictionaryRecoveryChange: ([String]) -> Void
 
     init(
         activeId: String,
+        dictionaryRecoveryEngines: [String],
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         verify: @escaping (String) async -> Bool?,
         evictEngine: @escaping (String) async -> Void,
-        onActiveChange: @escaping (String) -> Void
+        onActiveChange: @escaping (String) -> Void,
+        onDictionaryRecoveryChange: @escaping ([String]) -> Void
     ) {
+        self.dictionaryRecoveryEngines = Set(dictionaryRecoveryEngines)
         self.download = download
         self.verify = verify
         self.evictEngine = evictEngine
         self.onActiveChange = onActiveChange
+        self.onDictionaryRecoveryChange = onDictionaryRecoveryChange
         set = SpeechModelSet(
             catalog: EngineRegistry.availableCatalog,
             installed: ModelInstallStore.installedIds(),
@@ -96,6 +105,21 @@ final class SpeechModelsModel: ObservableObject {
     func syncActive(_ id: String) {
         guard set.isUsable(id), set.activeId != id else { return }
         try? set.select(id)
+        rebuild()
+    }
+
+    // Keep the in-memory opt-in set aligned with a settings reload from elsewhere (no persist callback).
+    func syncDictionaryRecovery(_ ids: [String]) {
+        let incoming = Set(ids)
+        guard incoming != dictionaryRecoveryEngines else { return }
+        dictionaryRecoveryEngines = incoming
+        rebuild()
+    }
+
+    // Toggle post-STT dictionary recovery for a bias-less engine, then persist the opted-in set.
+    func setDictionaryRecovery(_ on: Bool, for id: String) {
+        if on { dictionaryRecoveryEngines.insert(id) } else { dictionaryRecoveryEngines.remove(id) }
+        onDictionaryRecoveryChange(dictionaryRecoveryEngines.sorted())
         rebuild()
     }
 
@@ -261,6 +285,7 @@ final class SpeechModelsModel: ObservableObject {
             verificationFailed: verifyFailed.contains(info.id),
             testPassed: verifiedOk.contains(info.id),
             errorText: errors[info.id],
-            installedBytes: installed ? installedSizes[info.id] : nil)
+            installedBytes: installed ? installedSizes[info.id] : nil,
+            dictionaryRecoveryOn: dictionaryRecoveryEngines.contains(info.id))
     }
 }

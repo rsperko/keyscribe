@@ -71,12 +71,12 @@ public enum SpeechModelCatalog {
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
             id: "nemotron-en", kind: .nemotron, displayName: "Nemotron Speech 3.5 (English)",
-            summary: "Fast, accurate English model; cannot bias toward your dictionary.",
+            summary: "Fast, accurate English model; dictionary recovery available.",
             languageCount: 1, approxDownloadBytes: 627_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: false),
         SpeechModelInfo(
             id: "moonshine-base-en", kind: .moonshine, displayName: "Moonshine Base (English)",
-            summary: "Lightweight English model; no dictionary bias.",
+            summary: "Lightweight English model; dictionary recovery available.",
             languageCount: 1, approxDownloadBytes: 141_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: false),
     ]
@@ -87,5 +87,11 @@ public enum SpeechModelCatalog {
 
     public static var defaultEnglishId: String {
         all.first(where: \.isDefaultEnglish)?.id ?? all[0].id
+    }
+
+    // Engines with no on-device recognition bias. These are the models that earn dictionary-term
+    // recovery from the post-STT fuzzy stage instead (Settings.stt.dictionaryRecoveryEngines).
+    public static var biasExemptIds: [String] {
+        all.filter { !$0.supportsRecognitionBias }.map(\.id)
     }
 }

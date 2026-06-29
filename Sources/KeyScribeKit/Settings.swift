@@ -55,16 +55,25 @@ public struct Settings: Codable, Equatable, Sendable {
         public var engine: String
         public var eviction: Eviction
         public var evictionIdleSeconds: Int?
+        // Bias-less engine ids that recover dictionary terms via the post-STT fuzzy stage. Only the
+        // active engine's membership matters (it gates that engine's pipeline); listed per id so the
+        // choice persists independently across engines. Defaults to every bias-exempt engine on.
+        public var dictionaryRecoveryEngines: [String]
 
         enum CodingKeys: String, CodingKey {
             case engine, eviction
             case evictionIdleSeconds = "eviction_idle_seconds"
+            case dictionaryRecoveryEngines = "dictionary_recovery_engines"
         }
 
-        public init(engine: String, eviction: Eviction, evictionIdleSeconds: Int? = nil) {
+        public init(
+            engine: String, eviction: Eviction, evictionIdleSeconds: Int? = nil,
+            dictionaryRecoveryEngines: [String] = SpeechModelCatalog.biasExemptIds
+        ) {
             self.engine = engine
             self.eviction = eviction
             self.evictionIdleSeconds = evictionIdleSeconds
+            self.dictionaryRecoveryEngines = dictionaryRecoveryEngines
         }
 
         public init(from decoder: Decoder) throws {
@@ -73,6 +82,8 @@ public struct Settings: Codable, Equatable, Sendable {
             engine = try c.decodeIfPresent(String.self, forKey: .engine) ?? d.engine
             eviction = try c.decodeIfPresent(Eviction.self, forKey: .eviction) ?? d.eviction
             evictionIdleSeconds = try c.decodeIfPresent(Int.self, forKey: .evictionIdleSeconds)
+            dictionaryRecoveryEngines = try c.decodeIfPresent(
+                [String].self, forKey: .dictionaryRecoveryEngines) ?? d.dictionaryRecoveryEngines
         }
     }
 

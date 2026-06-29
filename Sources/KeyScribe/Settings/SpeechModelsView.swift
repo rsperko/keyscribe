@@ -78,8 +78,8 @@ private struct EngineRow: View {
                         SpeechBadge(text: row.info.languageCount <= 1 ? "English" : "Multilingual")
                         SpeechBadge(text: sizeClass)
                         if !row.info.supportsRecognitionBias {
-                            SpeechBadge(text: "No dictionary bias")
-                                .help("Runs fully on-device, but can't bias recognition toward your dictionary terms.")
+                            SpeechBadge(text: "No recognition bias")
+                                .help("Dictionary recovery can still fix close matches after transcription.")
                         }
                         Spacer(minLength: 0)
                         if row.isActive {
@@ -93,6 +93,23 @@ private struct EngineRow: View {
                         Text(languageScope).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+            }
+
+            if !row.info.supportsRecognitionBias {
+                VStack(alignment: .leading, spacing: 3) {
+                    Toggle(isOn: dictionaryRecoveryBinding) {
+                        Text("Dictionary recovery").font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    Text("Uses your dictionary after transcription to fix close matches, like "
+                         + "\"charge bee\" to \"ChargeBee\". Best effort; turn this off if it "
+                         + "changes ordinary words.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.leading, 36)
+                .help("This model cannot bias recognition toward your dictionary, so recovery runs after transcription.")
             }
 
             if let frac = row.downloadFraction {
@@ -141,6 +158,12 @@ private struct EngineRow: View {
                     .offset(x: -8)
             }
         }
+    }
+
+    private var dictionaryRecoveryBinding: Binding<Bool> {
+        Binding(
+            get: { row.dictionaryRecoveryOn },
+            set: { model.setDictionaryRecovery($0, for: row.id) })
     }
 
     private var icon: String {
