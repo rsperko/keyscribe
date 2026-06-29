@@ -52,6 +52,17 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         self.window = window
         model.onComplete = { [weak self] in self?.complete() }
+        // The permission relaunch spawns this instance in the background while System Settings is still
+        // frontmost. A background-launched .accessory app usually cannot take focus from inside
+        // applicationDidFinishLaunching, so the activate above is a no-op and the wizard stays hidden
+        // behind the frontmost app — looking, to the user, like it never reappeared. Re-assert once the
+        // launch settles, with orderFrontRegardless so the window surfaces even if activation is denied.
+        Task { @MainActor [weak self] in
+            guard let window = self?.window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
     }
 
     // Single teardown for both the finish-the-flow path and a manual window close: stop the permission
@@ -194,10 +205,22 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
+    // The system consent dialog is the single grant action: its "Open System Settings" button does the
+    // navigation and registers KeyScribe in the Accessibility list. Do NOT also open System Settings here —
+    // a second window stealing focus leaves the consent dialog stranded behind it, which the user then has
+    // to dismiss with "Deny" after granting. The deep-link is the row's separate "Open System Settings"
+    // button instead (used when a prior denial means the prompt no longer fires).
     func requestAccessibility() {
         _ = Permissions.accessibilityStatus(prompt: true)
-        Permissions.openSettings(.accessibility)
         refreshStatuses()
+    }
+
+    func openAccessibilitySettings() {
+        Permissions.openSettings(.accessibility)
+    }
+
+    func openMicrophoneSettings() {
+        Permissions.openSettings(.microphone)
     }
 
     func refreshStatuses() {

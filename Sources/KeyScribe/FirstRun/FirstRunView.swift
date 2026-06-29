@@ -173,17 +173,19 @@ struct FirstRunView: View {
         switch model.nextPermission {
         case .microphone:
             permissionRow("Microphone", "So KeyScribe can hear you.",
-                          "Dictation cannot start without it.", model.micStatus) { model.requestMicrophone() }
+                          "Dictation cannot start without it.", model.micStatus,
+                          openSettings: { model.openMicrophoneSettings() }) { model.requestMicrophone() }
         case .accessibility:
             permissionRow("Accessibility", "So finished text can be pasted into the focused field.",
-                          "Dictation can be transcribed, but it will be copied instead of inserted.", model.axStatus) {
+                          "Dictation can be transcribed, but it will be copied instead of inserted.", model.axStatus,
+                          openSettings: { model.openAccessibilitySettings() }) {
                 model.requestAccessibility()
             }
         }
     }
 
     private func permissionRow(_ title: String, _ detail: String, _ unavailable: String, _ status: PermissionStatus,
-                               action: @escaping () -> Void) -> some View {
+                               openSettings: @escaping () -> Void, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 12) {
             statusIcon(status)
             VStack(alignment: .leading, spacing: 2) {
@@ -195,7 +197,11 @@ struct FirstRunView: View {
             }
             Spacer()
             if status != .granted {
-                Button("Grant", action: action)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Button("Grant", action: action)
+                    Button("Open System Settings", action: openSettings)
+                        .buttonStyle(.link).font(.caption)
+                }
             }
         }
     }

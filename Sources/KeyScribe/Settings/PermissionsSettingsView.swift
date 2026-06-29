@@ -31,7 +31,6 @@ struct PermissionsSettingsView: View {
                     unavailable: "Modifier-key triggers won't start dictation, and finished text is copied instead of inserted.",
                     request: {
                         _ = Permissions.accessibilityStatus(prompt: true)
-                        Permissions.openSettings(.accessibility)
                     },
                     openSettings: { Permissions.openSettings(.accessibility) })
                 if accessibilityStatus == .granted && !tapActive {
