@@ -220,6 +220,24 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "a dog a cat")
     }
 
+    // The local pipeline runs on EVERY dictation, so history records the on-device intermediate even
+    // when local processing changed nothing. Otherwise a no-op leaves no artifact, and the JSONL (or
+    // anything mining it) reads "the local pipeline was skipped" — the exact misread that prompted this.
+    // `transformed` is the local output recorded unconditionally; it equals `heard` when nothing changed.
+    @Test func transformedRecordsLocalOutputEvenWhenLocalIsANoOp() async {
+        let out = await run(transcript: "hello world", mode: mode(id: "plain"))
+        #expect(out.lastResult == "hello world")
+        #expect(out.historyEntry?.heard == "hello world")
+        #expect(out.historyEntry?.transformed == "hello world")
+    }
+
+    @Test func transformedRecordsLocalOutputWhenLocalChangedIt() async {
+        let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "cat", replace: "dog", regex: false)])
+        let out = await run(transcript: "a cat", mode: m)
+        #expect(out.lastResult == "a dog")
+        #expect(out.historyEntry?.transformed == "a dog")
+    }
+
     @Test func verbatimAndRedactionAreTokenizedBeforeTheLLMThenRestored() async {
         let m = mode(id: "polish", liveEdits: true, privacy: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")

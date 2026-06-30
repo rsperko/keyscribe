@@ -20,8 +20,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var engine: String?
     public var heard: String
     // The local text after replacements and spoken edits, before any AI rewrite — the middle of the
-    // Heard → Transformed → Result model (ui_design.md §8). nil when nothing local changed the
-    // transcript (older entries also decode to nil), in which case Heard already equals Result.
+    // Heard → Transformed → Result model (ui_design.md §8). Recorded on every entry, even when local
+    // processing changed nothing (then it equals Heard), so history is durable proof the local
+    // pipeline ran rather than was skipped. nil only on older entries written before this was captured.
     public var transformed: String?
     public var result: String
     public var outcome: Outcome

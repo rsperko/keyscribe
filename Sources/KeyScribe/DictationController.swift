@@ -24,6 +24,9 @@ final class DictationController {
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
     private let llmClient: any LLMClient
+    // Durable sink for a model-load failure that survives both automatic retries (engine id + error).
+    // Injected so tests assert the failure was recorded without touching the real diagnostics file.
+    private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
     private let effects: DuringDictationEffects
     // Serialises the STT call: a deadline only abandons a wedged transcribe, so this keeps a second
     // dictation from starting a concurrent transcribe on the same engine until the first truly settles.
@@ -158,7 +161,10 @@ final class DictationController {
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
-        llmClient: any LLMClient = HTTPLLMClient()
+        llmClient: any LLMClient = HTTPLLMClient(),
+        recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
+            ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
+        }
     ) {
         self.settings = settings
         self.provider = provider
@@ -174,6 +180,7 @@ final class DictationController {
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
         self.llmClient = llmClient
+        self.recordModelLoadFailure = recordModelLoadFailure
         levelCoalescer.onLevel = { [weak self] level in self?.renderLevel(level) }
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
@@ -621,18 +628,38 @@ final class DictationController {
         // because the abandoned load keeps running, leaves the single-flight gate `Busy` so every later
         // dictation reports "Still finishing…" until it settles. Awaiting the single warm load (started at
         // press, overlapping speech) here keeps the deadline on inference, where it belongs.
-        do {
+        func loadOnce() async throws {
             try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = warm(engine)] in
                 try await task.value
             }
-        } catch {
+        }
+        func failModelLoadTerminal(_ error: Error) {
             try? FileManager.default.removeItem(at: url)
-            if Task.isCancelled { return }
             invalidateWarm(engine.id)
             let timedOut = error is DeadlineExceeded
+            recordModelLoadFailure(engine.id, timedOut, String(describing: error))
             log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
             finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
-            return
+        }
+        do {
+            try await loadOnce()
+        } catch {
+            if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
+            // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
+            if error is DeadlineExceeded { failModelLoadTerminal(error); return }
+            // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch, and a
+            // fresh reload (what a user does by hand) usually succeeds. invalidateWarm drops the failed task
+            // so warm(engine) builds a new one; the HUD stays on `transcribing`, so a recovered transient is
+            // invisible. Mirrors the pipeline's one-retry policy (design.md §4.2).
+            invalidateWarm(engine.id)
+            log.notice("model load failed, retrying once (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+            do {
+                try await loadOnce()
+            } catch {
+                if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
+                failModelLoadTerminal(error)
+                return
+            }
         }
 
         let transcribeStart = DispatchTime.now()
@@ -884,7 +911,7 @@ final class DictationController {
         if let bare = ctx.bareReplacement {
             building.stageMillis[.localProcess] = elapsedMs(since: localStart)
             building.fingerprints[.localProcessed] = .of(bare)
-            return (.insert(bare, bare: true), nil, bare != transcript ? bare : nil)
+            return (.insert(bare, bare: true), nil, bare)
         }
 
         // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
@@ -894,9 +921,11 @@ final class DictationController {
         let localProcessed = localCtx.text
         building.stageMillis[.localProcess] = elapsedMs(since: localStart)
         building.fingerprints[.localProcessed] = .of(localProcessed)
-        // Only record the middle stage when local processing actually changed the transcript;
-        // otherwise Heard already equals it (ui_design.md §8).
-        let transformed = localProcessed != transcript ? localProcessed : nil
+        // Record the on-device intermediate unconditionally — the local pipeline runs on every
+        // dictation, so a no-op still has to leave an artifact, else history reads as "local was
+        // skipped". It equals `transcript` when nothing changed; the History diff renders that as
+        // "no differences" rather than a noise stage.
+        let transformed = localProcessed
 
         guard let resolved,
               !tokenized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

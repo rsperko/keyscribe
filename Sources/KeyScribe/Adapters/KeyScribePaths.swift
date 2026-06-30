@@ -46,6 +46,14 @@ enum KeyScribePaths {
             "\(variant.supportFolderName)-pending-system-restore.json", isDirectory: false)
     }
 
+    // Durable record of STT model-load failures. Like pendingSystemRestoreFile it is diagnostics, not
+    // user config, so it lives as a sibling FILE of supportDir (not inside the FSEvents-watched config
+    // tree — a write here must not fire ConfigWatcher). Keyed by variant so dev and prod stay isolated.
+    static var modelLoadDiagFile: URL {
+        appSupportBase.appendingPathComponent(
+            "\(variant.supportFolderName)-model-load-diagnostics.log", isDirectory: false)
+    }
+
     static var modesDir: URL {
         supportDir.appendingPathComponent("modes", isDirectory: true)
     }

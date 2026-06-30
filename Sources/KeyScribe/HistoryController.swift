@@ -43,7 +43,10 @@ final class HistoryController {
         let window = NSWindow(contentViewController: hosting)
         window.title = "History"
         window.styleMask = [.titled, .closable, .resizable]
-        window.setContentSize(NSSize(width: 860, height: 560))
+        window.minSize = NSSize(width: 820, height: 520)
+        let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1040, height: 720)
+        window.setContentSize(NSSize(width: min(1040, max(820, visible.width - 80)),
+                                     height: min(720, max(520, visible.height - 80))))
         window.center()
         window.isReleasedWhenClosed = false
         NSApp.activate(ignoringOtherApps: true)
@@ -295,7 +298,7 @@ private struct HistoryView: View {
             } else {
                 ContentUnavailableView(
                     "No dictation selected", systemImage: "clock",
-                    description: Text("Select an entry to see Heard → Transformed → Result and correction actions."))
+                    description: Text("Select an entry to review what was heard, what changed, and what came out."))
             }
         }
     }
@@ -360,39 +363,36 @@ private struct HistoryRowView: View {
 }
 
 private enum DetailStage: String, CaseIterable, Identifiable {
-    case result = "Result"
-    case heard = "Heard"
-    case transformed = "Transformed"
+    case whatHappened = "What Happened"
     case details = "Details"
     var id: String { rawValue }
 }
 
+private enum ComparisonTextRole {
+    case heard
+    case local
+    case result
+}
+
+private typealias ComparisonStage = HistoryComparison.Stage
+
 private struct HistoryDetailView: View {
     let entry: HistoryEntry
     @ObservedObject var model: HistoryViewModel
-    @State private var stage: DetailStage = .result
+    @State private var stage: DetailStage = .whatHappened
+    @State private var comparisonStage: ComparisonStage = .heardInserted
     @State private var selectedText = ""
+    @State private var selectedRole: ComparisonTextRole?
     @State private var showReplacementSheet = false
     @State private var showDictionarySheet = false
     @State private var promptExpanded = false
-
-    // Transformed is a distinct stage only when local edits actually changed the transcript; otherwise
-    // Heard already equals Result and the segment would be noise (ui_design.md §8).
-    private var hasTransformed: Bool {
-        if let t = entry.transformed { return t != entry.result }
-        return false
-    }
-
-    private var stages: [DetailStage] {
-        DetailStage.allCases.filter { $0 != .transformed || hasTransformed }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             actionBar
             Picker("", selection: $stage) {
-                ForEach(stages) { Text($0.rawValue).tag($0) }
+                ForEach(DetailStage.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -410,9 +410,21 @@ private struct HistoryDetailView: View {
         .padding(24)
         .onChange(of: entry.timestamp) {
             selectedText = ""
-            if !stages.contains(stage) { stage = .result }
+            selectedRole = nil
+            stage = .whatHappened
+            comparisonStage = .heardInserted
         }
-        .onChange(of: stage) { selectedText = "" }
+        .onChange(of: stage) {
+            selectedText = ""
+            selectedRole = nil
+        }
+        .onChange(of: comparisonStage) {
+            // Switching the comparison sub-tab swaps the pane texts; clear the seed explicitly rather than
+            // relying on the text view's selection-reset side effect (panes that keep identical spans across
+            // the switch never rebuild, so they would not fire it).
+            selectedText = ""
+            selectedRole = nil
+        }
         .sheet(isPresented: $showReplacementSheet) {
             CreateReplacementSheet(initialSource: replacementSource) { heard, replace in
                 model.addReplacement(heard, replace)
@@ -429,31 +441,87 @@ private struct HistoryDetailView: View {
 
     @ViewBuilder private var stageContent: some View {
         switch stage {
-        case .result: selectable(entry.result)
-        case .heard: selectable(entry.heard)
-        case .transformed: selectable(entry.transformed ?? entry.result)
+        case .whatHappened: whatHappened
         case .details: details
         }
     }
 
-    private func selectable(_ value: String) -> some View {
-        SelectableText(text: value) { selectedText = $0 }
-            .frame(minHeight: 80, maxHeight: 280)
+    private var whatHappened: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if comparisonStages.count > 1 {
+                Picker("", selection: $comparisonStage) {
+                    ForEach(comparisonStages) { Text(comparisonStageLabel($0)).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            ComparisonSectionView(section: selectedComparisonSection) { role, text in
+                selectedRole = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : role
+                selectedText = text
+            }
+        }
     }
 
-    // The replacement trigger is the misheard fragment, so it comes from the selection (or stays empty
-    // for a deliberate shortcut). It is never prefilled from the whole result: a global rule built from a
-    // paragraph would mangle every dictation containing it.
+    private var comparisonStages: [ComparisonStage] {
+        HistoryComparison.stages(cloudInvolved: entry.cloudInvolved)
+    }
+
+    private var selectedComparisonSection: ComparisonSection {
+        let available = Set(comparisonStages)
+        let selected = available.contains(comparisonStage) ? comparisonStage : .heardInserted
+        // onThisMac/rewrite only appear when a cloud rewrite was involved (see HistoryComparison.stages),
+        // so those stages always use the cloud wording.
+        let texts = HistoryComparison.texts(
+            for: selected, heard: entry.heard, transformed: entry.transformed, result: entry.result)
+        switch selected {
+        case .heardInserted:
+            return ComparisonSection(
+                id: "heard-inserted",
+                title: "Heard -> Inserted",
+                context: entry.cloudInvolved ? "Includes AI rewrite" : "No cloud rewrite",
+                from: .init(title: "Heard", role: .heard, text: texts.from),
+                to: .init(title: "Inserted", role: .result, text: texts.to))
+        case .onThisMac:
+            return ComparisonSection(
+                id: "on-this-mac",
+                title: "On this Mac",
+                context: "Before any cloud rewrite",
+                from: .init(title: "Heard", role: .heard, text: texts.from),
+                to: .init(title: "Before rewrite", role: .local, text: texts.to))
+        case .rewrite:
+            return ComparisonSection(
+                id: "rewrite",
+                title: "AI rewrite",
+                context: rewriteContext,
+                from: .init(title: "Before rewrite", role: .local, text: texts.from),
+                to: .init(title: "Inserted", role: .result, text: texts.to))
+        }
+    }
+
+    private var rewriteContext: String {
+        if let connection = entry.connection {
+            return "Sent to \(connection) for rewrite"
+        }
+        return "Sent to an AI service for rewrite"
+    }
+
+    private func comparisonStageLabel(_ stage: ComparisonStage) -> String {
+        switch stage {
+        case .heardInserted: "Heard -> Inserted"
+        case .onThisMac: "On this Mac"
+        case .rewrite: "AI rewrite"
+        }
+    }
+
+    private var selectionIsHeard: Bool { selectedRole == .heard }
+
     private var replacementSource: String {
-        selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        HistoryCorrectionSource.replacement(selection: selectedText, selectionIsHeard: selectionIsHeard)
     }
 
-    // A dictionary term is a single word. Prefer the selection; otherwise offer a one-word result.
     private var dictionarySource: String {
-        let selected = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !selected.isEmpty { return selected }
-        let result = entry.result.trimmingCharacters(in: .whitespacesAndNewlines)
-        return result.contains(where: \.isWhitespace) ? "" : result
+        HistoryCorrectionSource.dictionary(
+            selection: selectedText, selectionIsHeard: selectionIsHeard, result: entry.result)
     }
 
     private var header: some View {
@@ -509,9 +577,14 @@ private struct HistoryDetailView: View {
     }
 
     private var correctionHint: String {
-        selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Select the misheard words above first, so the correction targets just that phrase."
-            : "Using your selection \u{201C}\(replacementSource)\u{201D}."
+        switch HistoryCorrectionSource.hint(selection: selectedText, selectionIsHeard: selectionIsHeard) {
+        case .selectFirst:
+            return "Select words in a Heard box first, so the correction targets just that phrase."
+        case .usingHeard(let phrase):
+            return "Using your Heard selection \u{201C}\(phrase)\u{201D}."
+        case .selectHeard:
+            return "Select words in a Heard box to create a replacement or dictionary hint."
+        }
     }
 
     private var details: some View {
@@ -559,11 +632,188 @@ private struct HistoryDetailView: View {
     }
 }
 
-// A read-only, selectable text area that reports the user's current selection. SwiftUI's
-// `.textSelection` cannot hand back the selected range, and the correction flow needs the exact
-// misheard fragment, so the Heard/Result stages use this AppKit-backed view instead.
-private struct SelectableText: NSViewRepresentable {
-    let text: String
+private struct ComparisonSection: Identifiable {
+    struct Side {
+        let title: String
+        let role: ComparisonTextRole
+        let text: String
+    }
+
+    let id: String
+    let title: String
+    let context: String
+    let from: Side
+    let to: Side
+}
+
+private enum ComparisonSide {
+    case left
+    case right
+}
+
+// One source of truth for diff styling so the text rendering and the legend never diverge. Meaning is
+// never carried by color alone (ui_components.md §semantic colors): each changed kind also gets a
+// background tint and a typographic mark, so removed/added/changed stay distinguishable in grayscale
+// and for color-vision deficiency. Unchanged text recedes (secondary) so edits are what stand out.
+private enum DiffStyle {
+    static func foreground(_ kind: TextComparison.Span.Kind) -> NSColor {
+        switch kind {
+        case .unchanged, .formatting: return .secondaryLabelColor
+        case .removed: return .systemRed
+        case .added: return .systemGreen
+        case .changed: return .systemOrange
+        }
+    }
+
+    static func background(_ kind: TextComparison.Span.Kind) -> NSColor? {
+        switch kind {
+        case .unchanged: return nil
+        case .formatting: return NSColor.secondaryLabelColor.withAlphaComponent(0.14)
+        case .removed: return NSColor.systemRed.withAlphaComponent(0.14)
+        case .added: return NSColor.systemGreen.withAlphaComponent(0.14)
+        case .changed: return NSColor.systemOrange.withAlphaComponent(0.16)
+        }
+    }
+
+    enum Mark { case none, strikethrough, underline }
+    static func mark(_ kind: TextComparison.Span.Kind) -> Mark {
+        switch kind {
+        case .unchanged, .formatting: return .none
+        case .removed: return .strikethrough
+        case .added, .changed: return .underline
+        }
+    }
+
+    static func label(_ kind: TextComparison.Span.Kind) -> String {
+        switch kind {
+        case .unchanged: return "Unchanged"
+        case .formatting: return "Formatting"
+        case .removed: return "Removed"
+        case .added: return "Added"
+        case .changed: return "Changed"
+        }
+    }
+
+    // Legend chips read as a key, so they use the solid foreground hue rather than the faint in-text tint.
+    static func swatch(_ kind: TextComparison.Span.Kind) -> NSColor { foreground(kind) }
+
+    static let legendOrder: [TextComparison.Span.Kind] = [.removed, .added, .changed, .formatting]
+}
+
+private struct ComparisonSectionView: View {
+    let section: ComparisonSection
+    let onSelect: (ComparisonTextRole, String) -> Void
+
+    var body: some View {
+        // Compute the diff once per render — it is O(n·m) and was previously recomputed for each of
+        // status, left, and right on every body evaluation (including the user's own text selection).
+        let comparison = TextComparison.compare(section.from.text, section.to.text)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(section.title).font(.headline)
+                Spacer()
+                Text(status(comparison.summary))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(section.context)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ComparisonPane(
+                title: section.from.title,
+                role: section.from.role,
+                spans: comparison.left,
+                side: .left,
+                onSelect: onSelect)
+            ComparisonPane(
+                title: section.to.title,
+                role: section.to.role,
+                spans: comparison.right,
+                side: .right,
+                onSelect: onSelect)
+            DiffLegend(kinds: legendKinds(comparison))
+        }
+    }
+
+    private func status(_ summary: TextComparison.Summary) -> String {
+        switch summary {
+        case .identical: return "No differences"
+        case .formattingOnly: return "Only formatting changed"
+        case .substitution(let from, let to): return "Changed \u{201C}\(from)\u{201D} \u{2192} \u{201C}\(to)\u{201D}"
+        case .counts(let removed, let added, let changed):
+            var parts: [String] = []
+            if changed > 0 { parts.append("\(changed) changed") }
+            if added > 0 { parts.append("\(added) added") }
+            if removed > 0 { parts.append("\(removed) removed") }
+            return parts.joined(separator: " \u{00B7} ")
+        case .tooLongToCompare:
+            return "Text changed \u{2014} too long to compare in detail"
+        }
+    }
+
+    private func legendKinds(_ comparison: TextComparison) -> [TextComparison.Span.Kind] {
+        let present = Set(comparison.left.map(\.kind)).union(comparison.right.map(\.kind))
+        return DiffStyle.legendOrder.filter(present.contains)
+    }
+}
+
+private struct DiffLegend: View {
+    let kinds: [TextComparison.Span.Kind]
+
+    var body: some View {
+        if !kinds.isEmpty {
+            HStack(spacing: 12) {
+                ForEach(kinds, id: \.self) { kind in
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(nsColor: DiffStyle.swatch(kind)))
+                            .frame(width: 16, height: 11)
+                        Text(DiffStyle.label(kind)).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.top, 2)
+        }
+    }
+}
+
+private struct ComparisonPane: View {
+    let title: String
+    let role: ComparisonTextRole
+    let spans: [TextComparison.Span]
+    let side: ComparisonSide
+    let onSelect: (ComparisonTextRole, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if role == .heard {
+                    Label("Select to correct", systemImage: "cursorarrow.click")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor)
+                }
+                Spacer()
+            }
+            SelectableComparisonText(spans: spans, side: side) { onSelect(role, $0) }
+                .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    if role == .heard {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.accentColor.opacity(0.3), lineWidth: 1)
+                    }
+                }
+        }
+    }
+}
+
+private struct SelectableComparisonText: NSViewRepresentable {
+    let spans: [TextComparison.Span]
+    let side: ComparisonSide
     let onSelect: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect) }
@@ -574,9 +824,11 @@ private struct SelectableText: NSViewRepresentable {
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.delegate = context.coordinator
-        textView.font = .preferredFont(forTextStyle: .body)
-        textView.textContainerInset = NSSize(width: 0, height: 2)
-        textView.string = text.isEmpty ? "(empty)" : text
+        textView.textContainerInset = NSSize(width: 10, height: 8)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
         let scroll = NSScrollView()
         scroll.documentView = textView
         scroll.drawsBackground = false
@@ -588,16 +840,63 @@ private struct SelectableText: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.onSelect = onSelect
         guard let textView = scroll.documentView as? NSTextView else { return }
-        let display = text.isEmpty ? "(empty)" : text
-        if textView.string != display {
-            textView.string = display
+        // Rebuild only when the spans actually change. Rebuilding on every render collapsed the user's
+        // selection (the selection itself triggers a re-render), and restoring an old range into changed
+        // text both selected the wrong characters and fired a stale onSelect. Keep the selection across a
+        // pure attribute change (same text, different highlight); reset it on a real text change.
+        guard context.coordinator.renderedSpans != spans else { return }
+        let previousString = textView.string
+        let attributed = Self.attributed(spans: spans, side: side)
+        let selected = textView.selectedRange()
+        textView.textStorage?.setAttributedString(attributed)
+        context.coordinator.renderedSpans = spans
+        if previousString == attributed.string,
+            selected.location + selected.length <= attributed.string.utf16.count {
+            textView.setSelectedRange(selected)
+        } else {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
         }
+    }
+
+    private static func attributed(spans: [TextComparison.Span], side: ComparisonSide) -> NSAttributedString {
+        let font = NSFont.preferredFont(forTextStyle: .body)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        let base: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
+
+        guard !spans.isEmpty else {
+            var placeholder = base
+            placeholder[.foregroundColor] = NSColor.tertiaryLabelColor
+            return NSAttributedString(string: "(empty)", attributes: placeholder)
+        }
+
+        let out = NSMutableAttributedString()
+        for span in spans {
+            var attributes = base
+            let color = DiffStyle.foreground(span.kind)
+            attributes[.foregroundColor] = color
+            if let background = DiffStyle.background(span.kind) {
+                attributes[.backgroundColor] = background
+            }
+            switch DiffStyle.mark(span.kind) {
+            case .none:
+                break
+            case .strikethrough:
+                attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                attributes[.strikethroughColor] = color
+            case .underline:
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                attributes[.underlineColor] = color
+            }
+            out.append(NSAttributedString(string: span.text, attributes: attributes))
+        }
+        return out
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var onSelect: (String) -> Void
+        var renderedSpans: [TextComparison.Span]?
         init(onSelect: @escaping (String) -> Void) { self.onSelect = onSelect }
 
         func textViewDidChangeSelection(_ notification: Notification) {
