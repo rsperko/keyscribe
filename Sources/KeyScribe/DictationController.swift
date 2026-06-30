@@ -190,6 +190,7 @@ final class DictationController {
                 guard let self, !self.isBusy else { return }
                 let active = self.provider.active
                 self.log.notice("memory pressure (critical): evicting \(active.id, privacy: .public)")
+                self.invalidateWarm(active.id)
                 Task { await active.evict() }
             }
         }
@@ -496,12 +497,16 @@ final class DictationController {
             self.effects.restoreAudio()
             let drainMs = self.elapsedMs(since: drainStart)
             self.building.stageMillis[.drain] = drainMs
+            // Open the freshly-written capture once here, for both the debug log and the audioSeconds the
+            // transcribe deadline scales from — transcribeAndInsert no longer re-opens it.
+            var audioSeconds: Double?
             if let f = try? AVAudioFile(forReading: url) {
+                audioSeconds = Double(f.length) / f.fileFormat.sampleRate
                 self.log.debug("wav \(f.length) frames @ \(f.fileFormat.sampleRate, privacy: .public)Hz ch=\(f.fileFormat.channelCount, privacy: .public) drain=\(drainMs, privacy: .public)ms")
             } else {
                 self.log.error("wav unreadable at \(url.path, privacy: .public)")
             }
-            await self.transcribeAndInsert(url: url)
+            await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds)
         }
     }
 
@@ -544,7 +549,8 @@ final class DictationController {
         // profile only if it is somehow missing on disk.
         let directFallback = modes.first { $0.id == Mode.directId } ?? .direct
         let resolved = ModeResolver.resolvePhaseA(
-            modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey)
+            modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey,
+            eligible: eligibleModes)
         // A menu-picked one-shot mode is an explicit choice that bypasses the context gate — it is the
         // deliberate way to run a constrained mode outside its apps (design.md §4.3).
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
@@ -603,11 +609,9 @@ final class DictationController {
         }
     }
 
-    private func transcribeAndInsert(url: URL) async {
+    private func transcribeAndInsert(url: URL, audioSeconds: Double?) async {
         await modeResolveTask?.value
         let engine = activeEngine
-        let audioSeconds = (try? AVAudioFile(forReading: url))
-            .map { Double($0.length) / $0.fileFormat.sampleRate }
         building.audioSeconds = audioSeconds
 
         // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a legitimate one-time
@@ -986,7 +990,8 @@ final class DictationController {
 
         let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(
-            localText: content, inputs: request.inputs, connection: request.sized, issuedTokens: issuedTokens)
+            localText: content, inputs: request.inputs, connection: request.sized,
+            issuedTokens: issuedTokens, prompt: request.prompt)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
         var restoreCtx = PipelineContext(text: content)
         let fellBack: Bool

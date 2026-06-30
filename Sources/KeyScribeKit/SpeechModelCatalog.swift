@@ -45,19 +45,14 @@ public enum SpeechModelCatalog {
             languageCount: 25, approxDownloadBytes: 1_800_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
-            id: "whisper", kind: .whisper, displayName: "Whisper Large v3 Turbo",
-            summary: "Broad language coverage with strong accuracy.",
-            languageCount: 99, approxDownloadBytes: 632_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: true),
-        SpeechModelInfo(
             id: "whisper-small-en", kind: .whisper, displayName: "Whisper Small (English)",
             summary: "Compact English Whisper — smaller and faster than Turbo, lower accuracy.",
             languageCount: 1, approxDownloadBytes: 217_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
-            id: "apple", kind: .apple, displayName: "Apple Speech",
-            summary: "Native macOS transcription. No download, fastest startup.",
-            languageCount: 20, approxDownloadBytes: 0, systemManaged: true,
+            id: "whisper", kind: .whisper, displayName: "Whisper Large v3 Turbo",
+            summary: "Broad language coverage with strong accuracy.",
+            languageCount: 99, approxDownloadBytes: 632_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
             id: "qwen3-asr-0.6b", kind: .qwen3asr, displayName: "Qwen3-ASR 0.6B",
@@ -68,6 +63,11 @@ public enum SpeechModelCatalog {
             id: "qwen3-asr-1.7b", kind: .qwen3asr, displayName: "Qwen3-ASR 1.7B",
             summary: "Largest multilingual model; top accuracy in our benchmarks.",
             languageCount: 52, approxDownloadBytes: 2_000_000_000, systemManaged: false,
+            isDefaultEnglish: false, supportsRecognitionBias: true),
+        SpeechModelInfo(
+            id: "apple", kind: .apple, displayName: "Apple Speech",
+            summary: "Native macOS transcription. No download, fastest startup.",
+            languageCount: 20, approxDownloadBytes: 0, systemManaged: true,
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
             id: "moonshine-base-en", kind: .moonshine, displayName: "Moonshine Base (English)",

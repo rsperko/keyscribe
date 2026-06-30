@@ -37,20 +37,4 @@ public enum MigrationRunner {
         }
         return (table.convert(), true)
     }
-
-    // File-level helper: migrate in place, writing a pre-migration backup first (design.md §5.1).
-    @discardableResult
-    public static func migrateFile(
-        at url: URL, target: Int, steps: [MigrationStep], backupDir: URL
-    ) throws -> Bool {
-        let original = try String(contentsOf: url, encoding: .utf8)
-        let result = try migrate(toml: original, target: target, steps: steps)
-        guard result.didMigrate else { return false }
-
-        try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
-        let backup = backupDir.appendingPathComponent("\(url.lastPathComponent).bak")
-        try original.write(to: backup, atomically: true, encoding: .utf8)
-        try result.toml.write(to: url, atomically: true, encoding: .utf8)
-        return true
-    }
 }

@@ -3,9 +3,11 @@
 > Companion to `design.md`. The full feature set ships: the whole pipeline works end-to-end —
 > local dictation → modes (Phase-A app/URL/window-title routing + Phase-B trigger-phrase routing + per-mode
 > trigger keys) → dictionary / replacements / live edits / numbers / fuzzy → optional **BYOK
-> rewrite** → **verbatim + redaction wedge** (secrets tokenized before any cloud call, restored
-> locally) → atomic insert. Plus edit-in-place, 8 STT models with recognition bias on seven and
-> dictionary recovery for Moonshine, the Settings UI
+> rewrite** → **verbatim + redaction wedge** (recognizable sensitive spans best-effort tokenized
+> before any cloud rewrite, restored locally) → atomic insert. Plus edit-in-place, up to 8 STT
+> models with
+> recognition bias on every offered model except Moonshine and dictionary recovery for Moonshine, the
+> Settings UI
 > (General · Speech Models · Vocabulary · AI Services · Modes · Permissions · Advanced), local
 > history with the correction surface, and the standalone correction panel.
 >
@@ -16,21 +18,11 @@
 ## Remaining work
 
 ### Distribution & updates
-- **Notarization** (Developer ID, hardened runtime). `KeyScribe.entitlements` exists but is dormant
-  — `make-app.sh` does not pass it yet. A `Developer ID` cert is required.
 - **In-app updates (Sparkle)** + the menu-bar **update badge** (blue dot, top-right —
   `ui_design.md` §6) and the **Check for Updates…** menu item. None built yet.
-
-### Platform floor (investigation — not yet scoped to a version)
-- **Identify KeyScribe's actual minimum macOS version.** `Package.swift` pins `.macOS("26.0")`, but
-  the real floor is unverified — most of the app almost certainly runs lower, and the 26 pin is the
-  largest single limit on install base. Scope the investigation: (1) availability-gate the Apple
-  **SpeechAnalyzer** engine (`@available`) instead of pinning the whole app to 26 — the other engine
-  kinds (Parakeet/Whisper/Qwen3/Moonshine) are not OS-version-bound the same way; (2) audit each STT
-  dep's own deployment floor (FluidAudio, the WhisperKit fork, speech-swift/MLX, the Moonshine
-  xcframework); (3) audit SwiftUI/AppKit API usage for the `@available` markers needed below 26;
-  (4) define the test matrix for the chosen floor. Outcome: the lowest floor supportable without
-  dropping a non-SpeechAnalyzer capability.
+- **Release packaging floor alignment.** The app bundle and `Package.swift` declare macOS 15.0, and
+  Apple Speech is availability-gated to macOS 26+, but the Homebrew cask currently declares macOS
+  Tahoe. Decide whether the cask should relax to the app floor before the next publish.
 
 ### Polish
 - **Visual/UI polish.** The Mode editor now uses a simpler progressive surface: common settings are

@@ -106,7 +106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         menu.onOpenModes = { [weak self] in self?.settingsController.present(.modes) }
         menu.onOpenNotices = { [weak self] in self?.notices.present() }
-        menu.onMenuWillOpen = { [weak self] in self?.refreshStatus() }
+        menu.onMenuWillOpen = { [weak self] in
+            self?.rebuildMenuItems()
+            self?.refreshStatus()
+        }
         menu.onSelectNextMode = { [weak self] id in
             self?.controller.setNextModeOverride(id: id)
             self?.controller.acknowledgeNextMode()
@@ -309,6 +312,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             buildHotkeyMonitor()
         }
         refreshStatus()
+        // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
+        // modes/dictionary/fragments realization invalidate() just discarded (mirrors the launch warm).
+        Task { @MainActor [weak self] in _ = self?.config.resolved }
     }
 
     private func startListening() {
@@ -436,19 +442,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshStatus() {
         menu.setHasResult(controller.hasResult)
-        let modes = config.modes.filter(\.enabled)
-        let automatic = modes.first { $0.id == Mode.directId } ?? modes.first
-        var inertReasons: [String: String] = [:]
-        for mode in modes where connectionUnavailable(for: mode) {
-            inertReasons[mode.id] = "needs an AI service"
-        }
-        menu.setModes(
-            modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideName,
-            inertReasons: inertReasons)
-        menu.setSpeechModels(speechModels.rows)
         let problems = currentProblems()
         menu.setErrorBadge(!problems.isEmpty)
-        settingsController?.refreshProblems()
+        settingsController?.refreshProblems(problems)
 
         if let configError {
             menu.setStatus(configError)
@@ -462,10 +458,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Collapse the old "Next dictation:" row into the status line: the mode portion names the mode
             // the next dictation will use — a one-shot override if one is pending, otherwise the default
             // mode that Automatic resolves to. Falls back to just the model when no mode is configured.
+            let enabledModes = config.modes.filter(\.enabled)
+            let automatic = enabledModes.first { $0.id == Mode.directId } ?? enabledModes.first
             let nextMode = controller.nextModeOverrideName ?? automatic?.name
             let model = speechModels.activeName
             menu.setStatus(nextMode.map { "\($0) · \(model)" } ?? model)
         }
+    }
+
+    // The modes/speech-model submenus are only visible while the menu is open, so they are rebuilt on
+    // menuWillOpen rather than on every refreshStatus — the latter fires after each dictation, which
+    // otherwise reallocated every submenu item while the menu was closed.
+    private func rebuildMenuItems() {
+        let modes = config.modes.filter(\.enabled)
+        let automatic = modes.first { $0.id == Mode.directId } ?? modes.first
+        var inertReasons: [String: String] = [:]
+        for mode in modes where connectionUnavailable(for: mode) {
+            inertReasons[mode.id] = "needs an AI service"
+        }
+        menu.setModes(
+            modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideName,
+            inertReasons: inertReasons)
+        menu.setSpeechModels(speechModels.rows)
     }
 
     private func currentProblems() -> [SettingsProblem] {

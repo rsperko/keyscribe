@@ -187,7 +187,7 @@ private struct EngineRow: View {
             Label(status, systemImage: "checkmark.circle.fill")
                 .font(.caption2).foregroundStyle(.green)
         } else if !row.info.systemManaged, !row.isUsable, row.downloadFraction == nil {
-            Text("~\(ByteCountFormatter.string(fromByteCount: row.info.approxDownloadBytes, countStyle: .file)) download")
+            Text("~\(ByteCountFormatter.fileStyle.string(fromByteCount: row.info.approxDownloadBytes)) download")
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }
@@ -199,7 +199,7 @@ private struct EngineRow: View {
         }
         guard row.isUsable else { return nil }
         if let bytes = row.installedBytes {
-            return "Installed · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))"
+            return "Installed · \(ByteCountFormatter.fileStyle.string(fromByteCount: bytes))"
         }
         return "Installed"
     }

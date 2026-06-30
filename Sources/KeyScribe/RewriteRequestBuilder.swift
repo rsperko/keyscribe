@@ -20,6 +20,7 @@ struct RewriteRequestBuilder {
     struct Assembled {
         let sized: Connection
         let inputs: PromptInputs
+        let prompt: RewritePrompt
         let promptForHistory: String
         let contextCategories: [String]
     }
@@ -68,12 +69,13 @@ struct RewriteRequestBuilder {
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText)
 
-        // The exact prompt stored in history (design.md §4.7) — tokens, not their originals.
+        // The exact prompt stored in history (design.md §4.7) — tokens, not their originals. Assembled
+        // once here and handed to RewriteService so the same inputs are not assembled a second time.
         let assembled = PromptAssembler.assemble(inputs)
         let promptForHistory = "[system]\n\(assembled.system)\n\n[user]\n\(assembled.user)"
 
         return Assembled(
-            sized: sized, inputs: inputs, promptForHistory: promptForHistory,
+            sized: sized, inputs: inputs, prompt: assembled, promptForHistory: promptForHistory,
             contextCategories: contextCategories)
     }
 }

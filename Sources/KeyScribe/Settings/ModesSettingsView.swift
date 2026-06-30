@@ -16,6 +16,7 @@ final class ModesSettingsModel: ObservableObject {
 
     private let modesDir: URL
     private let supportDir: URL
+    private var loadedSignature: String?
 
     init(modesDir: URL, supportDir: URL) {
         self.modesDir = modesDir
@@ -23,7 +24,13 @@ final class ModesSettingsModel: ObservableObject {
         reload()
     }
 
-    func reload() {
+    // Re-read modes, connections, and fragments from disk. `.onAppear` calls this on every visit to the
+    // pane, but the model's own mutators keep memory in sync with disk — so when nothing on disk has
+    // changed since the last load (the common navigate-away-and-back case) the decode is skipped. The
+    // signature covers everything reload reads; a mutator's own write changes it, costing at most one
+    // redundant reload on the next visit.
+    func reload(force: Bool = false) {
+        guard force || configSignature() != loadedSignature else { return }
         ModeStore.ensureSystemModes(in: modesDir)
         let result = ModeStore.load(in: modesDir, previous: modes)
         modes = result.modes
@@ -33,7 +40,13 @@ final class ModesSettingsModel: ObservableObject {
         if selectedID == nil || !modes.contains(where: { $0.id == selectedID }) {
             selectedID = modes.first?.id
         }
+        loadedSignature = configSignature()
         error = nil
+    }
+
+    private func configSignature() -> String {
+        let connections = FileFingerprint.file(supportDir.appendingPathComponent(ConnectionStore.fileName))
+        return "m:\(FileFingerprint.dir(modesDir))|c:\(connections)|f:\(FileFingerprint.dir(fragmentsDir))"
     }
 
     func create() {

@@ -123,7 +123,7 @@ struct FirstRunView: View {
         let lang = info.languageCount <= 1 ? "English" : "\(info.languageCount) languages"
         let size = info.systemManaged
             ? "system-managed"
-            : "~\(ByteCountFormatter.string(fromByteCount: info.approxDownloadBytes, countStyle: .file))"
+            : "~\(ByteCountFormatter.fileStyle.string(fromByteCount: info.approxDownloadBytes))"
         return "\(lang) · \(size) · stays on this Mac"
     }
 

@@ -31,6 +31,15 @@ public struct ReplacementsStage: PipelineStage {
     // dropped here exactly as the old per-call guards skipped them.
     private let prepared: [(regex: NSRegularExpression, template: String)]
 
+    // A whole-utterance (bare) replacement is non-nil only when one rule owns the entire utterance —
+    // which, for any rule whose output differs from the span it matched, necessarily changed the text.
+    // So when the transform leaves the text untouched the only possible owner is an *identity*
+    // replacement (output == matched span); absent any such rule we skip the whole-utterance scan
+    // entirely. A literal rule is identity-capable iff heard == replace (case-insensitively, matching
+    // the case-insensitive match); a regex template can reproduce its input in ways we cannot cheaply
+    // rule out, so every regex rule is treated as identity-capable.
+    private let mayHaveIdentityReplacement: Bool
+
     public init(rules: [ReplacementRule]) {
         self.rules = rules
         self.prepared = rules.compactMap { rule in
@@ -47,12 +56,22 @@ public struct ReplacementsStage: PipelineStage {
             guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
             return (re, NSRegularExpression.escapedTemplate(for: rule.replace))
         }
+        self.mayHaveIdentityReplacement = rules.contains { rule in
+            guard !rule.heard.isEmpty else { return false }
+            return rule.isRegex || rule.heard.lowercased() == rule.replace.lowercased()
+        }
     }
 
     public func apply(_ context: inout PipelineContext) {
         let input = context.text
-        context.text = transform(input)
-        context.bareReplacement = bareReplacement(for: input)
+        let transformed = transform(input)
+        context.text = transformed
+        // Skip the whole-utterance scan when the text was unchanged and no identity replacement could
+        // own it. Otherwise hand `transformed` in so the owner-verification reuses it instead of
+        // running the rule battery a third time.
+        context.bareReplacement = (transformed != input || mayHaveIdentityReplacement)
+            ? bareReplacement(for: input, transformedInput: transformed)
+            : nil
     }
 
     private func transform(_ text: String) -> String {
@@ -71,14 +90,18 @@ public struct ReplacementsStage: PipelineStage {
     // clamps). The clamped value is the rule's GENERATED output (post-substitution for a regex), and
     // we only clamp when running every rule over the core reproduces exactly that value — so a second
     // rule mutating the owner's output conservatively falls through to the normal path.
-    public func bareReplacement(for input: String) -> String? {
+    public func bareReplacement(for input: String, transformedInput: String? = nil) -> String? {
         let core = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
         let coreRange = NSRange(core.startIndex..., in: core)
         for rule in prepared {
             guard let match = rule.regex.firstMatch(in: core, range: coreRange), match.range == coreRange else { continue }
             let generated = rule.regex.replacementString(for: match, in: core, offset: 0, template: rule.template)
-            return transform(core) == generated ? generated : nil
+            // Verify no later rule mutates the owner's output. When the core is the whole input (no
+            // surrounding whitespace/cruft), the caller's transform(input) already equals
+            // transform(core), so reuse it rather than running the battery again.
+            let coreTransformed = (transformedInput != nil && core == input) ? transformedInput! : transform(core)
+            return coreTransformed == generated ? generated : nil
         }
         return nil
     }

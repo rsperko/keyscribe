@@ -27,10 +27,6 @@ struct ParsedToken: Equatable, Sendable {
 }
 
 enum TokenCommandOutput {
-    static func token(from output: String) throws -> String {
-        try parse(from: output).token
-    }
-
     static func parse(from output: String) throws -> ParsedToken {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw TokenCommandError.emptyOutput }
@@ -133,8 +129,6 @@ actor TokenCommandCache {
         entries[key] = Entry(token: parsed.token, expiresAt: expiresAt)
         return parsed.token
     }
-
-    func reset() { entries.removeAll() }
 }
 
 enum TokenCommandRunner {

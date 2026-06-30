@@ -129,6 +129,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func refreshProblems() { problems.update(detectProblems()) }
 
+    // Variant for callers that have already run problem detection (refreshStatus computes the set once
+    // for the menu badge), so the same detection does not run back-to-back.
+    func refreshProblems(_ detected: [SettingsProblem]) { problems.update(detected) }
+
     // Connections whose last user-run Test Connection failed — the authoritative "this AI service is
     // broken" signal that drives the error badge (AppDelegate.currentProblems reads it).
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }

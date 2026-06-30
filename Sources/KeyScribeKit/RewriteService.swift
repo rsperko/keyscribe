@@ -25,9 +25,11 @@ public actor RewriteService {
 
     public func rewrite(
         localText: String, inputs: PromptInputs, connection: Connection,
-        issuedTokens: [String], allowDeletion: Bool = false
+        issuedTokens: [String], allowDeletion: Bool = false, prompt: RewritePrompt? = nil
     ) async -> RewriteOutcome {
-        let base = PromptAssembler.assemble(inputs)
+        // Reuse a prompt the caller already assembled (RewriteRequestBuilder builds it for the history
+        // record) rather than assembling the same inputs twice. Callers without one (tests) pass nil.
+        let base = prompt ?? PromptAssembler.assemble(inputs)
         var attempt = 0
         while true {
             let system = attempt == 0 ? base.system : base.system + "\n" + Self.strictReminder

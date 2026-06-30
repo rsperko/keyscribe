@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-DEVICE=":0"
+DEVICE=""   # empty = auto-resolve to the system default input mic BY NAME (see below)
 TIER=""
 STATUS_ONLY=0
 WANT=()   # explicit ids to (re)record; non-empty = overwrite those, ignore tier/skip
@@ -32,6 +32,26 @@ while [ $# -gt 0 ]; do
 done
 
 command -v ffmpeg >/dev/null || { echo "ffmpeg not found (brew install ffmpeg)"; exit 1; }
+
+# Resolve the avfoundation capture target. Selecting by numeric index (":0") is unstable: a virtual
+# audio device (a screen-recorder / meeting mic, e.g. "Achelous Microphone") can insert itself at
+# index 0 and push the real mic down, so ":0" silently records the virtual device — pure silence.
+# Default to the *system default input device by NAME*, which avfoundation resolves regardless of
+# index. An explicit --device (index or name) is always honored verbatim.
+default_input_name() {
+  system_profiler SPAudioDataType 2>/dev/null | awk '
+    /^ {8}[A-Za-z].*:$/ { name=$0; sub(/^ +/, "", name); sub(/:$/, "", name) }
+    /Default Input Device: Yes/ { print name; exit }'
+}
+if [ -z "$DEVICE" ]; then
+  micname="$(default_input_name)"
+  if [ -n "$micname" ]; then
+    DEVICE=":$micname"
+  else
+    DEVICE=":0"
+    echo "⚠️  could not resolve the default input device — falling back to index :0" >&2
+  fi
+fi
 
 # manifest.json → TSV: id \t tier \t tags \t text  (filtered by --tier if set)
 python3 - "$TIER" <<'PY' > /tmp/bench_prompts.tsv
@@ -80,8 +100,13 @@ fi
 
 echo "Recording from avfoundation device '$DEVICE'  (list devices: ffmpeg -f avfoundation -list_devices true -i \"\")"
 echo "First run may prompt your terminal for microphone permission — grant it, then re-run."
+echo "While recording: ⏎ saves · type r then ⏎ to re-record · q then ⏎ to quit · Ctrl-C discards."
 [ -n "$TIER" ] && echo "Tier filter: $TIER"
 [ ${#WANT[@]} -gt 0 ] && echo "Re-recording (overwrite): ${WANT[*]}"
+
+pid=""
+out=""
+trap 'echo; [ -n "$pid" ] && kill -INT "$pid" 2>/dev/null; [ -n "$out" ] && rm -f "$out"; echo "interrupted — discarded ${out:-current clip}"; exit 130' INT
 
 # Count how many in the (filtered) set still need recording, for an [n/total] progress readout.
 total=$(wc -l < /tmp/bench_prompts.tsv | tr -d ' ')
@@ -92,26 +117,48 @@ while IFS=$'\t' read -r id tier tags text; do
   out="$id.wav"
   # Full walk skips existing; explicit ids always overwrite.
   if [ ${#WANT[@]} -eq 0 ] && [ -f "$out" ]; then continue; fi
-  rm -f "$out"
   echo
   echo "[$idx/$total] [$id · $tier · ${tags:-—}] READ ALOUD:"
   echo "    $text"
-  read -r -p "  ⏎ to START… " _ </dev/tty
-  ffmpeg -nostdin -hide_banner -loglevel error -f avfoundation -i "$DEVICE" -ac 1 -ar 16000 "$out" &
-  pid=$!
-  read -r -p "  ● recording — ⏎ to STOP " _ </dev/tty
-  kill -INT "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  # Catch silent failures (no mic permission, bad device): a real clip is well over 4 KB.
-  size=$(stat -f%z "$out" 2>/dev/null || echo 0)
-  if [ "$size" -lt 4000 ]; then
-    echo "  ⚠️  $out is ${size} bytes — recording FAILED (check mic permission / device index)."
-  else
-    echo "  ✓ saved $out (${size} bytes)"
-  fi
+  # Re-record loop: a clip stays current until it is saved, skipped, or quit.
+  while true; do
+    rm -f "$out"
+    read -r -p "  ⏎ to START · s skip · q quit … " ans </dev/tty
+    case "$ans" in
+      q|Q) echo "  quit."; exit 0 ;;
+      s|S) echo "  ↷ skipped $id"; break ;;
+    esac
+    ffmpeg -nostdin -hide_banner -loglevel error -f avfoundation -i "$DEVICE" -ac 1 -ar 16000 "$out" &
+    pid=$!
+    read -r -p "  ● recording — ⏎ STOP · r ⏎ re-record · q ⏎ quit … " ans </dev/tty
+    kill -INT "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    pid=""
+    case "$ans" in
+      r|R) echo "  ↻ re-recording ${id}…"; continue ;;
+      q|Q) rm -f "$out"; echo "  quit."; exit 0 ;;
+    esac
+    # Catch silent failures: too-small file (no mic permission / bad device) OR a full-length file of
+    # pure silence (wrong/virtual device captured — bytes look fine but every sample is at the floor).
+    size=$(stat -f%z "$out" 2>/dev/null || echo 0)
+    if [ "$size" -lt 4000 ]; then
+      echo "  ⚠️  $out is ${size} bytes — recording FAILED (check mic permission / device index). Retrying."
+      continue
+    fi
+    mean=$(ffmpeg -nostdin -hide_banner -i "$out" -af volumedetect -f null - 2>&1 \
+           | sed -n 's/.*mean_volume: \(-*[0-9.]*\) dB.*/\1/p' | head -1)
+    if [ -n "$mean" ] && awk "BEGIN{exit !($mean <= -80)}"; then
+      echo "  ⚠️  $out is SILENT (${mean} dB) — '$DEVICE' captured no audio. Retrying."
+      echo "      A virtual mic may have hijacked the input; pick the real mic with --device, e.g.:"
+      echo "        ffmpeg -f avfoundation -list_devices true -i \"\"   # find your mic's index/name"
+      continue
+    fi
+    echo "  ✓ saved $out (${size} bytes, ${mean:-?} dB)"
+    break
+  done
 done < /tmp/bench_prompts.tsv
 
 echo
 echo "Done with this pass. Re-run any time — recorded clips are skipped. Progress: bash record.sh --status"
-echo "Then run the benchmark, e.g.:"
-echo "  .build/release/KeyScribe --benchmark benchmark --engines qwen3-asr-0.6b,parakeet,moonshine"
+echo "Then compare engines over these recordings:"
+echo "  bash benchmark/compare.sh"

@@ -127,9 +127,10 @@ keyscribe/
   scripts/             # dev helpers: setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
                        #   render_app_icon.swift (all reachable via make targets)
   docs/                # the design docs (tracked product spec)
-  benchmark/           # STT benchmark kit: manifest.json + record.sh + README (committed);
+  benchmark/           # STT benchmark kit: manifest.json + record.sh + compare.sh + README (committed);
                        #   *.wav recordings + results.json are gitignored (your own voice).
-                       #   Run: KeyScribe --benchmark benchmark [--engines a,b]
+                       #   Record: bash benchmark/record.sh; rank engines: bash benchmark/compare.sh
+                       #   (compare.sh wraps KeyScribe --benchmark benchmark [--engines a,b])
 ```
 
 ---
@@ -242,8 +243,13 @@ each engine owns its install footprint (`installDirNames` / `installState`); aud
 
 A dev **STT benchmark** (`KeyScribe --benchmark <dir> [--engines …]`, runner + pure scoring in
 KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorded clips. On a
-16-clip real-voice corpus Qwen3-ASR 1.7B wins (0.8% WER biased, 100% term recall); 0.6B is the
-speed/accuracy sweet spot; bias is decisive (Moonshine without recognition bias ~15%).
+107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
+Small) cluster around 5.7–6.0% biased WER; bias is decisive (Moonshine without recognition bias
+~15%). These numbers are speaker/mic/room dependent — reference table + caveats in
+`docs/stt_benchmarks.md`, reproduction in `benchmark/README.md`. The shipped list order is
+**recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
+benchmark rank — a single-voice ranking can't carry that authority and would fight the
+"Recommended" badge on the small default.
 
 ### Forked / pinned STT deps
 

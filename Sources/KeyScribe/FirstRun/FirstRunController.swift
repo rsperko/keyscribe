@@ -179,11 +179,17 @@ final class FirstRunModel: ObservableObject {
     func beginDownload() {
         downloading = true
         downloadError = nil
+        downloadProgress = 0
         let id = selectedEngineId
         Task {
             do {
                 try await download(id) { progress in
-                    Task { @MainActor in self.downloadProgress = progress.fraction }
+                    // Coalesce to whole-percent changes: the SDK can emit progress far faster than the
+                    // bar needs, and each publish re-renders the install view.
+                    Task { @MainActor in
+                        guard Int(progress.fraction * 100) != Int(self.downloadProgress * 100) else { return }
+                        self.downloadProgress = progress.fraction
+                    }
                 }
                 selectEngine(id)
                 downloading = false
@@ -286,15 +292,6 @@ final class FirstRunModel: ObservableObject {
     var aiModelFetchDisabledReason: String? {
         guard !aiFetchingModels, !aiCanFetchModels else { return nil }
         return aiCredentialDisabledReason(action: "fetching models")
-    }
-
-    var aiConnectDisabledReason: String? {
-        guard !aiCanConnect else { return nil }
-        let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty { return "Name is required." }
-        if model.isEmpty { return "Model ID is required." }
-        return aiCredentialDisabledReason(action: "connecting")
     }
 
     private var aiCredentialReady: Bool {

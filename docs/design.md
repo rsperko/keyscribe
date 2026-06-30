@@ -20,8 +20,8 @@ Speech recognition always runs **on-device** — audio never goes to the cloud. 
 STT produces then flows through a **staged command pipeline** that is as much of the product
 as the recognition itself: dictionaries, replacements, live edits, verbatim spans, and
 **privacy redaction with restoration**. An **optional** BYOK LLM rewrite step can polish the
-result — and because that step *can* be cloud, redaction is what lets you use it safely:
-sensitive content is tokenized out before it leaves the machine and restored after.
+result — and because that step *can* be cloud, best-effort redaction lowers what leaves the machine:
+recognizable sensitive content is tokenized out before the request and restored after.
 
 ### Positioning in one line
 > *"Apple Dictation's simplicity, Superwhisper's power, and a privacy story neither cloud
@@ -30,7 +30,8 @@ sensitive content is tokenized out before it leaves the machine and restored aft
 
 ### The wedge
 1. **Privacy-first, simple** — STT is always local; the default experience is clean and
-   unintimidating. Redaction + restoration make even cloud LLM rewrite privacy-safe.
+   unintimidating. Redaction + restoration reduce optional cloud rewrite payloads without pretending
+   they are a security boundary.
 2. **Post-processing is the product.** The transform from raw speech to finished text is an
    explicit, staged pipeline — not the opaque single LLM step competitors ship.
 3. **Progressive disclosure** — the full power ships, but lives behind Advanced surfaces so
@@ -143,17 +144,19 @@ measured (`principles.md` §1):
   user is never stuck waiting on the cloud.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
-**8 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
-download/install:
+**Up to 8 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
+download/install except the system-managed Apple engine:
 - **FluidAudio / Parakeet TDT-CTC 110M** — **default for English.** Compact (~440MB), fast and
   accurate. English only.
 - **FluidAudio / Parakeet TDT v3** — larger multilingual Parakeet (25 languages), slightly
   stronger raw accuracy; **pyannote speaker diarization bundled** in the same SDK.
 - **Whisper** (Large v3 Turbo via WhisperKit) — broad multilingual coverage, 99 languages.
 - **Whisper Small (English)** — compact English Whisper, smaller and faster than Turbo.
-- **Apple Speech** (SpeechAnalyzer, macOS Tahoe) — zero-install, system-managed, 20 languages.
+- **Apple Speech** (SpeechAnalyzer, macOS 26+) — zero-install, system-managed, 20 languages. It is
+  hidden on older supported macOS releases.
 - **Qwen3-ASR 0.6B** — compact multilingual (52 languages); the speed/accuracy sweet spot.
-- **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the benchmark WER winner.
+- **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the strongest Qwen tier in the
+  current benchmark.
 - **Moonshine Base (English)** — lightweight English model; **no recognition bias** (dictionary
   recovery available in Settings).
 
@@ -162,9 +165,9 @@ the provider, download path, install reconcile/delete, and the benchmark all der
 engine is one descriptor + one catalog entry.
 
 **Engine bias support.** Recognition bias is grounded in the acoustics, never a blind post-STT
-find-and-replace (that silently corrupts output). Seven of the eight models bias, each via its model's
-own mechanism, all taking dictionary terms through `transcribe(wavURL:biasTerms:)`. Moonshine has no
-on-device bias path and uses dictionary recovery instead:
+find-and-replace (that silently corrupts output). Every model except Moonshine biases, each via its
+model's own mechanism, all taking dictionary terms through `transcribe(wavURL:biasTerms:)`. Moonshine
+has no on-device bias path and uses dictionary recovery instead:
 - **Whisper** — a decode-time conditioning prompt (`promptTokens`); a soft hint the model may ignore.
 - **Apple** — `AnalysisContext` contextual strings, weighted during the single decode. Requires the
   `DictationTranscriber` module — `SpeechTranscriber` silently ignores `contextualStrings`.
@@ -195,7 +198,7 @@ Model lifecycle: **download → prepare (with progress) → select → delete**.
 SDK allows a custom download directory, and otherwise manages the SDK's own location through its API
 for the same single disk-usage/delete story. In Application Support, not Caches, so the OS cannot
 purge them mid-session; they are re-downloadable so deletion is safe and the dir is backup-excluded.
-Apple SpeechAnalyzer is **system-managed** (no KeyScribe-side storage).
+Apple SpeechAnalyzer is **system-managed** when available (no KeyScribe-side storage).
 
 ### 4.2 Command pipeline (the core)
 A linear pipeline of typed stages, each declaring its **position** in the flow. Several stages are
@@ -545,9 +548,9 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
 ## 5. Technology choices
 
 - **Language/UI:** Swift + SwiftUI (menu-bar app, settings window). Native for perf, accessibility
-  APIs, and Apple SpeechAnalyzer access.
+  APIs, and optional Apple SpeechAnalyzer access on macOS 26+.
 - **STT:** **FluidAudio** (Parakeet TDT v3 + pyannote diarization, CoreML/ANE); **WhisperKit** for
-  Whisper; system `SpeechAnalyzer` for Apple; **Qwen3Speech** (MLX) for Qwen3-ASR;
+  Whisper; system `SpeechAnalyzer` for Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR;
   **moonshine-swift** (ONNX) for Moonshine. (Fork/pin details in `AGENTS.md`.)
 - **Audio:** AVAudioEngine for capture; system-audio muting via Core Audio.
 - **Global hotkeys / insertion:** CGEvent (`kTCCServicePostEvent`) for paste keystroke; Accessibility
@@ -572,7 +575,7 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
     JSONL.
 - **Distribution & updates:** direct distribution, **notarized** (Developer ID) — **not** Mac App
   Store, whose App Sandbox restricts the AX APIs KeyScribe depends on. **In-app updates** (Sparkle)
-  with a **menu-bar indicator** when an update is available.
+  with a menu-bar indicator are planned, not built.
 - **License: GPLv3.** Compatible with the deps (Apache-2.0 and MIT code flow into a GPLv3 project;
   weights are runtime-downloaded *data*, not linked code, so the source tree stays clean), and it
   permits selling notarized binaries provided source is offered. The legal obligation is four things:

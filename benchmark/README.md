@@ -57,27 +57,40 @@ Prefer a GUI? Voice Memos or QuickTime → record → export, then convert:
 
     afconvert in.m4a -f WAVE -d LEI16@16000 -c 1 c27.wav
 
-## Run the benchmark
+## Compare engines
 
-From the repo root, build the release app once (bundles the MLX metallib Qwen3 needs):
+First build the app once (bundles the MLX metallib Qwen3 needs):
 
     ./make-app.sh release
 
-Then run the headless benchmark over this folder:
+Then score every installed engine over the clips you recorded and get a ranked report:
 
-    .build/release/KeyScribe --benchmark benchmark
+    bash benchmark/compare.sh
 
-It prints a per-engine table (WER unbiased vs biased, bias term recall, RTF) and writes
-`results.json` here. Engines whose models you haven't installed are skipped — install the ones you
-want to compare from Settings → Speech Models first, or limit with `--engines` to avoid downloading
+`compare.sh` runs the benchmark, then prints engines sorted by biased WER with a bias-term recall,
+speed (RTF), and install-size column, plus three picks: **best accuracy**, **lightest that stays
+close** to the best, and **fastest**. Engines whose models you haven't installed are skipped —
+install the ones you want from Settings → Speech Models first, or limit the set to avoid downloading
 all of them:
 
-    .build/release/KeyScribe --benchmark benchmark --engines qwen3-asr-0.6b,parakeet,moonshine
+    bash benchmark/compare.sh --engines qwen3-asr-0.6b,parakeet,moonshine-base-en
+    bash benchmark/compare.sh --fuzzy      # also apply the post-STT fuzzy corrector before scoring
+    bash benchmark/compare.sh --raw        # raw per-clip transcripts, no scoring or ranking
+    bash benchmark/compare.sh --bin PATH   # score with a specific build instead of .build/release
 
-Engine ids: `parakeet`, `parakeet-tdt-ctc-110m`, `whisper`, `apple`, `qwen3-asr-0.6b`,
-`qwen3-asr-1.7b`, `moonshine-base-en`.
+Engine ids: `parakeet`, `parakeet-tdt-ctc-110m`, `whisper`, `whisper-small-en`, `apple`,
+`qwen3-asr-0.6b`, `qwen3-asr-1.7b`, `moonshine-base-en`.
 
-**Finding the smallest engine that works for you:** record T2, then compare the smaller engines
-(`qwen3-asr-0.6b`, `parakeet-tdt-ctc-110m`, `moonshine-base-en`) against the larger ones on
-`WER(bias)`, `recall(bias)`, and `RTF`. The smallest engine whose biased WER and term recall stay
-close to the best is your pick — RTF shows it's fast enough, and it's the lightest install.
+**Finding the smallest engine that works for you:** record T2, then run `compare.sh`. The
+"lightest that stays close" pick is the engine with the smallest install whose `WER(bias)` and
+`recall(bias)` are within a hair of the best — that is usually your answer, since RTF < 1.0 means
+every engine is faster than real time anyway.
+
+### Under the hood
+
+`compare.sh` wraps the headless benchmark, which you can also run directly:
+
+    .build/release/KeyScribe --benchmark benchmark [--engines …] [--fuzzy] [--raw]
+
+It prints the per-engine table (WER unbiased vs biased, bias term recall, RTF) and writes
+`results.json` here; `compare.sh` adds the ranking and recommendations on top of that file.

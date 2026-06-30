@@ -141,7 +141,11 @@ final class SpeechModelsModel: ObservableObject {
         Task {
             do {
                 try await download(id) { progress in
+                    // Coalesce: skip the row rebuild unless the phase or whole-percent changed, so a
+                    // chatty SDK progress stream does not thrash the install UI.
                     Task { @MainActor in
+                        if let last = self.downloading[id], last.phase == progress.phase,
+                           Int(last.fraction * 100) == Int(progress.fraction * 100) { return }
                         self.downloading[id] = progress
                         self.updateRow(id)
                     }

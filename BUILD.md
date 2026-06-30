@@ -1,7 +1,8 @@
 # Building KeyScribe from source
 
-KeyScribe is not yet distributed as a notarized binary. You build it yourself with the Swift
-toolchain — no Apple Developer account, no paid certificate, and no passwords are required.
+This guide is for building KeyScribe yourself with the Swift toolchain. You do not need an Apple
+Developer account, a paid certificate, or any passwords for a local build; packaged prerelease
+DMGs and the Homebrew cask are covered in [README.md](README.md).
 
 ## New machine setup
 
@@ -23,7 +24,8 @@ Same name, different identity per machine; that is expected and fine.
 
 ## Prerequisites
 
-- **macOS 26+ on Apple silicon.**
+- **macOS 15+ on Apple silicon.** Apple Speech, the zero-download system speech model, is available
+  only on macOS 26+; the app hides that model on older supported macOS releases.
 - **Swift 6.0+** (declared floor — `swift build` refuses an older toolchain). Last verified on
   **Swift 6.3** with current Xcode. `make-app.sh` prints the detected vs. verified toolchain and, if
   yours is older, hints to update Xcode should a compiler error appear — it never blocks the build.
@@ -87,8 +89,8 @@ Git tags are the single source of truth for the version. `make-app.sh` stamps tw
   (`0.1.0-2-gc1dc4af`, with `-dirty` when the tree has uncommitted changes) so it can never be
   mistaken for the release. The About window (**menu ▸ About & Notices…**) shows this at runtime.
 - **`CFBundleVersion`** (build number) ← `git rev-list --count HEAD`, the monotonic commit count.
-  Sparkle (the M7 updater) orders updates by this number, **not** the marketing string, so it must
-  only ever increase. This holds on linear history — avoid rebasing/squashing across a released tag.
+  Sparkle will order updates by this number, **not** the marketing string, so it must only ever
+  increase. This holds on linear history — avoid rebasing/squashing across a released tag.
 
 Both fall back (`0.1` / `1`) when built from a non-git tarball.
 
@@ -96,9 +98,11 @@ Cutting a release:
 
 1. `git tag -a vX.Y.Z -m "…"` — SemVer. Pre-1.0, bump `Y` for features, `Z` for fixes; reserve
    `1.0.0` for the first build you would hand to a stranger.
-2. `./make-app.sh` — reads the tag, stamps the clean version into the bundle.
-3. (M7) notarize + staple, then add the build to the Sparkle appcast (EdDSA-signed, ordered by
-   `CFBundleVersion`).
+2. `./release.sh` — builds the production variant from the tag, signs with Developer ID, applies the
+   hardened runtime and entitlements, notarizes/staples when notary credentials are configured, and
+   writes `KeyScribe-<version>.dmg`.
+3. `make publish` — after reviewing the built DMG, pushes the tag, creates or updates the GitHub
+   release asset, and refreshes the Homebrew cask in the tap checkout.
 
 ## Signing: getting permissions that survive rebuilds
 

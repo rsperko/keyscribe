@@ -28,10 +28,13 @@ public enum ModeResolver {
     }
 
     public static func resolvePhaseA(
-        modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?
+        modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?,
+        eligible eligibleOverride: [Mode]? = nil
     ) -> Mode {
         let enabled = modes.filter(\.enabled)
-        let eligible = enabled.filter { isEligible($0, context) }
+        // The caller usually already computed the eligible set (it needs it for Phase B); reuse it so
+        // the enabled∧isEligible scan — which runs each mode's constraint regexes — is not repeated.
+        let eligible = eligibleOverride ?? enabled.filter { isEligible($0, context) }
 
         // 1. Explicit key binding. App constraints gate the press too: only modes eligible in the
         //    current context can run. Among the eligible modes bound to the pressed key, the most

@@ -29,9 +29,10 @@ cd keyscribe
 ```
 
 `make-app.sh` builds the **dev** variant (`KeyScribeDev.app`) so it never collides with a production
-install; `make help` lists the other tasks. Prerequisites (macOS 26+ on Apple silicon, full Xcode, the
-Metal Toolchain for the Qwen3-ASR engine), the build variants, and a one-time self-signed cert so TCC
-permissions survive rebuilds are covered in [BUILD.md](BUILD.md).
+install; `make help` lists the other tasks. Prerequisites (macOS 15+ on Apple silicon, full Xcode,
+the Metal Toolchain for the Qwen3-ASR engine), the build variants, and a one-time self-signed cert so
+TCC permissions survive rebuilds are covered in [BUILD.md](BUILD.md). Apple Speech is available only
+on macOS 26+.
 
 ## Project conventions
 

@@ -57,6 +57,7 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published var lastCreatedId: String?
 
     private let supportDir: URL
+    private var loadedSignature: String?
     private let tester: ConnectionTester
     private let listModels: (Connection, String?) async throws -> [String]
     private(set) var testTask: Task<Void, Never>?
@@ -121,9 +122,16 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func reload() {
-        connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
-        if selectedID == nil || !connections.contains(where: { $0.id == selectedID }) {
-            selectedID = connections.first?.id
+        // Skip re-decoding connections.toml when it has not changed since the last load, but always
+        // re-probe the Keychain: a key is saved/removed in the Keychain without touching the file
+        // (the TOML stores only key_ref), so keyedRefs must refresh even when the decode is skipped.
+        let signature = FileFingerprint.file(supportDir.appendingPathComponent(ConnectionStore.fileName))
+        if signature != loadedSignature {
+            connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+            if selectedID == nil || !connections.contains(where: { $0.id == selectedID }) {
+                selectedID = connections.first?.id
+            }
+            loadedSignature = signature
         }
         refreshKeyedRefs()
         error = nil

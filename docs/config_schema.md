@@ -45,7 +45,7 @@ All KeyScribe data — including STT weights — lives under the one support dir
 engine SDK at `models/<model-id>/`** where the SDK exposes a configurable download directory; where
 it does not, KeyScribe manages the SDK's own location through that SDK's API and the result is the
 same single disk-usage / delete story for Speech Models settings. **Apple SpeechAnalyzer is
-system-managed** and has no entry here.
+system-managed** when available and has no entry here.
 
 - **Application Support, not Caches** — weights must not be purged mid-session; they are
   re-downloadable, so deletion is always safe and the dir is marked excluded-from-backup so

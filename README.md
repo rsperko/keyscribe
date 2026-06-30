@@ -2,14 +2,14 @@
 
 **Local-first voice dictation for macOS. Your voice never leaves your Mac.**
 
-KeyScribe turns speech into text wherever you type: hold a key, say the thought, release, and the
-words land in the app you're already using. It feels like system dictation grew power-user muscle:
-mode routing, correction shortcuts, edit-in-place, local history, and optional cleanup that uses
-your provider and your key.
+KeyScribe turns speech into finished text wherever you type. Hold a key, say the thought, release,
+and the result lands in the app you're already using. It keeps the speed of system dictation, then
+adds the pieces heavy dictation users miss: mode routing, correction shortcuts, edit-in-place,
+local history, and optional cleanup through your provider and your key.
 
 Speech recognition runs **100% on-device**. There is no cloud STT, no account, no subscription, and
-no telemetry. The only thing that can ever leave your Mac is optional BYOK LLM cleanup, over a
-payload you control.
+no telemetry. The only user content that can ever leave your Mac is optional BYOK LLM cleanup, over
+a payload you control.
 
 KeyScribe is early, open source, and built for people who want a local-first alternative to
 Superwhisper, Wispr Flow, Aqua, and MacWhisper without giving up serious workflow control.
@@ -44,13 +44,14 @@ Full privacy details are in [PRIVACY.md](PRIVACY.md).
 brew install rsperko/tap/keyscribe
 ```
 
-> Homebrew 6+ guards third-party taps, so the first install asks you to trust this one — confirm when
-> prompted, or run `brew tap rsperko/tap && brew trust rsperko/tap` beforehand.
+> Homebrew 6+ can require trust for third-party taps. If prompted, confirm the tap, or run
+> `brew tap rsperko/tap && brew trust --tap rsperko/tap` beforehand.
 
 ### Direct download
 
-Grab the latest notarized `KeyScribe-<version>.dmg` from the [Releases](https://github.com/rsperko/keyscribe/releases)
-page, open it, and drag **KeyScribe** to Applications.
+Grab the latest notarized `KeyScribe-<version>.dmg` from the
+[Releases](https://github.com/rsperko/keyscribe/releases) page, open it, and drag
+**KeyScribe** to Applications. Current binaries are pre-1.0 prereleases.
 
 KeyScribe is a menu-bar app — after launching, look for the waveform glyph in the menu bar (no Dock
 icon, no window).
@@ -81,6 +82,9 @@ Prerequisites and signing options (so permissions survive rebuilds) are in [BUIL
 > alongside KeyScribe. Set it to "Do Nothing" in **System Settings ▸ Keyboard**, or pick **Right
 > Option** in KeyScribe ▸ Settings as the conflict-free alternative. More in [FAQ.md](FAQ.md).
 
+The full ramp from first dictation through advanced modes is in
+[docs/getting_started.md](docs/getting_started.md).
+
 ---
 
 ## Features
@@ -104,10 +108,13 @@ from then on.
 shorter", "turn this into bullets", or "make this warmer." KeyScribe replaces the selection in the
 app you're already using.
 
-**Choose the local engine.** Eight on-device speech models are available in-app: Parakeet TDT v3,
-Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple, Qwen3-ASR 0.6B,
-Qwen3-ASR 1.7B, and Moonshine Base (English).
-Trade accuracy, speed, and footprint without sending audio to a server.
+**Choose the local model.** Up to eight on-device speech models are available in-app: Parakeet TDT
+v3, Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech,
+Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base (English). Apple Speech appears only on
+macOS 26+; the other models are downloadable on supported Apple silicon Macs.
+Trade accuracy, speed, and footprint without sending audio to a server — see
+[docs/stt_benchmarks.md](docs/stt_benchmarks.md) for reference numbers (and how to benchmark your
+own voice).
 
 **Optional cleanup on your terms.** BYOK LLM cleanup can strip filler, fix grammar, or reformat text
 using OpenAI, Anthropic, Gemini, or an OpenAI-compatible endpoint. Hosted providers use a key saved
@@ -122,7 +129,8 @@ details that show what was heard, transformed, rewritten, or kept local.
 
 ## Requirements
 
-- macOS 26+ on Apple silicon.
+- macOS 15+ on Apple silicon.
+- Apple Speech, the zero-download system model, requires macOS 26+.
 
 ---
 
@@ -138,9 +146,13 @@ KeyScribe is open source under GPLv3. Bug reports, fixes, and new built-in modes
 
 ## Documentation
 
+- [docs/getting_started.md](docs/getting_started.md) — a progressive tutorial from first dictation
+  through advanced modes, privacy controls, history, and TOML-only automation.
 - [BUILD.md](BUILD.md) — building, signing, and prerequisites from source.
 - [PRIVACY.md](PRIVACY.md) — exactly what stays local and what (optionally) leaves.
 - [FAQ.md](FAQ.md) — permissions, key conflicts, engine choice, troubleshooting.
 - [docs/config_schema.md](docs/config_schema.md) — hand-editable TOML schema for modes,
   connections, shortcuts, and advanced file-only options.
+- [docs/stt_benchmarks.md](docs/stt_benchmarks.md) — reference speech-model accuracy/speed numbers
+  and how to benchmark your own voice.
 - [`docs/`](docs/) — the full design spec (architecture, pipeline, modes, storage).

@@ -10,21 +10,22 @@ you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
 
 ### Which speech engine should I pick?
 
-All eight run fully on-device; the trade-off is accuracy vs. speed vs. footprint:
+Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint:
 
 - **Best accuracy:** Qwen3-ASR 1.7B.
 - **Best default for English:** Parakeet TDT-CTC 110M — compact, fast, and accurate.
 - **Best multilingual balance:** Qwen3-ASR 0.6B.
 - **Smaller / faster footprint:** Whisper Small (English), Moonshine Base.
-- Apple Speech, Whisper Large v3 Turbo, and Parakeet TDT v3 are also available.
+- Apple Speech, Whisper Large v3 Turbo, and Parakeet TDT v3 are also available. Apple Speech appears
+  only on macOS 26+.
 
 You can switch engines anytime in **Settings ▸ Speech Models**; each is downloaded on first use.
 
 ### Why is one engine badged "no recognition bias"?
 
-Recognition bias teaches the engine your names, jargon, and acronyms while it transcribes. Seven of
-the eight models support it. Moonshine has no on-device bias path, so KeyScribe can instead run
-dictionary recovery after transcription to fix close matches.
+Recognition bias teaches the model your names, jargon, and acronyms while it transcribes. Every
+model except Moonshine supports it. Moonshine has no on-device bias path, so KeyScribe can instead
+run dictionary recovery after transcription to fix close matches.
 
 ### How do I make KeyScribe spell my names and jargon correctly?
 
