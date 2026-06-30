@@ -172,7 +172,7 @@ final class DictationController {
         self.history = history
         self.hud = hud
         self.audio = audio ?? AudioCapture(restorer: restorer)
-        self.effects = DuringDictationEffects(restorer: restorer)
+        self.effects = DuringDictationEffects()
         self.insert = insert
         self.submitKey = submitKey
         self.captureSelection = captureSelection
@@ -415,7 +415,7 @@ final class DictationController {
                 return
             }
             self.captureStarted = true
-            self.effects.activateMute()
+            self.effects.activateDuck()
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
             self.hud?.render(.recording(mode: self.activeMode?.name, level: 0))

@@ -19,19 +19,44 @@ private final class InMemoryPersistence: PendingSystemRestorePersisting, @unchec
 }
 
 struct PendingSystemRestoreModelTests {
-    @Test func isEmptyOnlyWhenAllFieldsNil() {
+    @Test func isEmptyOnlyWhenInputUIDNil() {
         #expect(PendingSystemRestore().isEmpty)
         #expect(!PendingSystemRestore(defaultInputUID: "uid").isEmpty)
-        #expect(!PendingSystemRestore(outputMute: .init(deviceUID: "out", previousMute: 0)).isEmpty)
     }
 
     @Test func roundTripsThroughJSON() throws {
-        let state = PendingSystemRestore(
-            defaultInputUID: "BuiltInMicrophoneDevice",
-            outputMute: .init(deviceUID: "BuiltInSpeakerDevice", previousMute: 0))
+        let state = PendingSystemRestore(defaultInputUID: "BuiltInMicrophoneDevice")
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(PendingSystemRestore.self, from: data)
         #expect(decoded == state)
+    }
+
+    // An older (pre-duck) build wrote an `outputMute` object; decoding such a marker must keep the input
+    // restore AND surface the muted device UID so launch reconcile can unmute the pre-upgrade strand.
+    @Test func decodingCapturesLegacyOutputMuteForRecovery() throws {
+        let legacy = #"{"defaultInputUID":"mic","outputMute":{"deviceUID":"out","previousMute":0}}"#
+        let decoded = try JSONDecoder().decode(PendingSystemRestore.self, from: Data(legacy.utf8))
+        #expect(decoded.defaultInputUID == "mic")
+        #expect(decoded.legacyMutedOutputUID == "out")
+    }
+
+    // An output-only legacy marker (the common shape — no input override) must not decode as empty, or
+    // reconcile would skip it and leave the user stranded muted.
+    @Test func outputOnlyLegacyMarkerIsNotEmpty() throws {
+        let legacy = #"{"outputMute":{"deviceUID":"out","previousMute":0}}"#
+        let decoded = try JSONDecoder().decode(PendingSystemRestore.self, from: Data(legacy.utf8))
+        #expect(!decoded.isEmpty)
+        #expect(decoded.legacyMutedOutputUID == "out")
+    }
+
+    // The legacy field is never written back: a current run silences via ducking and must leave a clean
+    // marker, so re-encoding a state must not resurrect an `outputMute` key.
+    @Test func legacyOutputMuteIsNeverReEncoded() throws {
+        var state = PendingSystemRestore(defaultInputUID: "mic")
+        state.legacyMutedOutputUID = "out"
+        let json = String(decoding: try JSONEncoder().encode(state), as: UTF8.self)
+        #expect(!json.contains("outputMute"))
+        #expect(!json.contains("out"))
     }
 }
 
@@ -47,32 +72,8 @@ struct PendingSystemRestoreStoreTests {
         #expect(store.load().defaultInputUID == "headset-uid")
     }
 
-    // The two writers (audio control queue / main actor) touch different fields; a field update must not
-    // clobber the other field even though each does a full read-modify-write of the same file.
-    @Test func independentFieldUpdatesDoNotClobber() {
-        let store = PendingSystemRestoreStore(persistence: InMemoryPersistence())
-        store.update { $0.defaultInputUID = "headset-uid" }
-        store.update { $0.outputMute = .init(deviceUID: "out-uid", previousMute: 0) }
-
-        let state = store.load()
-        #expect(state.defaultInputUID == "headset-uid")
-        #expect(state.outputMute == .init(deviceUID: "out-uid", previousMute: 0))
-    }
-
-    @Test func clearingOneFieldLeavesTheOther() {
-        let store = PendingSystemRestoreStore(persistence: InMemoryPersistence())
-        store.update { $0.defaultInputUID = "headset-uid" }
-        store.update { $0.outputMute = .init(deviceUID: "out-uid", previousMute: 0) }
-
-        store.update { $0.defaultInputUID = nil }
-
-        let state = store.load()
-        #expect(state.defaultInputUID == nil)
-        #expect(state.outputMute == .init(deviceUID: "out-uid", previousMute: 0))
-    }
-
     // A clean run must leave NO marker behind, or launch reconcile would restore stale state every time.
-    @Test func clearingAllFieldsDeletesTheFile() {
+    @Test func clearingTheFieldDeletesTheFile() {
         let persistence = InMemoryPersistence()
         let store = PendingSystemRestoreStore(persistence: persistence)
         store.update { $0.defaultInputUID = "headset-uid" }
@@ -91,11 +92,11 @@ struct PendingSystemRestoreStoreTests {
 
         let store = PendingSystemRestoreStore(
             persistence: FilePendingSystemRestorePersistence(url: url))
-        store.update { $0.outputMute = .init(deviceUID: "out-uid", previousMute: 1) }
+        store.update { $0.defaultInputUID = "headset-uid" }
         #expect(FileManager.default.fileExists(atPath: url.path))
-        #expect(store.load().outputMute?.previousMute == 1)
+        #expect(store.load().defaultInputUID == "headset-uid")
 
-        store.update { $0.outputMute = nil }
+        store.update { $0.defaultInputUID = nil }
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 }

@@ -371,7 +371,7 @@ eviction = "frugal"             # "fastest" | "balanced" | "frugal" (default: fr
 # (Legacy `dictionary_recovery_engines` is read once and migrated into the lists above, then dropped.)
 
 [during_dictation]
-mute_system_audio = true        # mute lands after the start sound (else it is swallowed); instant when sounds = false
+mute_system_audio = true        # ducks other audio (FaceTime-style, cannot strand); lands after the start sound, instant when sounds = false
 keep_display_awake = true
 sounds = true                   # start/end sounds
 

@@ -21,8 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var historyController: HistoryController!
     private var correctionPanel: CorrectionPanelController!
     private var configRepository: ConfigRepository!
-    // Crash-safe restoration of global audio state (temporary default-input override, output mute) that a
-    // crash/SIGKILL/force-quit could otherwise strand system-wide. Reconciled at launch and on terminate.
+    // Crash-safe restoration of the temporary default-input override that a crash/SIGKILL/force-quit could
+    // otherwise strand system-wide. Reconciled at launch and on terminate. (Output silencing uses ducking,
+    // which the OS releases on process exit, so it needs no recovery — except a one-time unmute of a marker
+    // left by an older, pre-duck build; see reconcile().)
     private var audioRestorer: SystemAudioStateRestorer!
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
@@ -35,20 +37,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
 
     // A graceful Cmd-Q during an active dictation tears the app down without running the dictation-end
-    // restore paths, leaving the system output muted and/or the default input overridden. Run the SAME
-    // ordered in-process teardown a cancel uses — it disposes the realized engine BEFORE restoring the
-    // default (via AudioCapture.stop's dispose-first path) and restores the mute synchronously, rather than
-    // a raw default-device change against a still-live engine (which would reopen the AVAudioIOUnit UAF).
-    // Whatever its async engine dispose cannot finish during process exit is covered by reconcile() at the
-    // next launch — the same backstop as a hard crash / SIGKILL (which skips this entirely). cancel() is a
-    // no-op when idle, and a stale marker from a prior crash was already cleared by reconcile() at launch.
+    // restore paths, leaving the default input overridden (the output duck releases itself on process exit).
+    // Run the SAME ordered in-process teardown a cancel uses — it disposes the realized engine BEFORE
+    // restoring the default (via AudioCapture.stop's dispose-first path), rather than a raw default-device
+    // change against a still-live engine (which would reopen the AVAudioIOUnit UAF). Whatever its async
+    // engine dispose cannot finish during process exit is covered by reconcile() at the next launch — the
+    // same backstop as a hard crash / SIGKILL (which skips this entirely). cancel() is a no-op when idle,
+    // and a stale marker from a prior crash was already cleared by reconcile() at launch.
     func applicationWillTerminate(_: Notification) {
         controller?.cancel()
     }
 
     func applicationDidFinishLaunching(_: Notification) {
-        // Undo any global audio state a prior run died without restoring (hijacked default mic, muted
-        // output) BEFORE anything touches audio — prewarm, dictation, or the mic permission flow.
+        // Undo any global audio state a prior run died without restoring (a hijacked default mic, or an
+        // output muted by an older pre-duck build) BEFORE anything touches audio — prewarm, dictation, or
+        // the mic permission flow.
         audioRestorer = SystemAudioStateRestorer(
             store: PendingSystemRestoreStore(persistence: FilePendingSystemRestorePersistence(
                 url: KeyScribePaths.pendingSystemRestoreFile)))

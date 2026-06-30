@@ -41,64 +41,54 @@ struct SystemAudioStateRestorerTests {
         return store
     }
 
-    @Test func launchReconcileUnmutesOutputWhenPreviousStateWasUnmuted() {
-        let recorder = AudioRestoreRecorder()
-        let store = makeStore(.init(outputMute: .init(deviceUID: "out", previousMute: 0)))
-        let restorer = SystemAudioStateRestorer(
-            store: store,
-            resolveInputDevice: { _ in nil },
-            resolveAnyDevice: { $0 == "out" ? 42 : nil },
-            setDefaultInput: recorder.setDefaultInput,
-            setOutputMute: recorder.setMute)
-
-        restorer.reconcile()
-
-        #expect(recorder.mutes.count == 1)
-        #expect(recorder.mutes.first?.value == 0)
-        #expect(recorder.mutes.first?.device == 42)
-        #expect(store.load().isEmpty)
-    }
-
-    @Test func launchReconcileUnmutesStaleOutputMarkerEvenWhenPreviousStateWasRecordedMuted() {
-        let recorder = AudioRestoreRecorder()
-        let store = makeStore(.init(outputMute: .init(deviceUID: "out", previousMute: 1)))
-        let restorer = SystemAudioStateRestorer(
-            store: store,
-            resolveInputDevice: { _ in nil },
-            resolveAnyDevice: { $0 == "out" ? 42 : nil },
-            setDefaultInput: recorder.setDefaultInput,
-            setOutputMute: recorder.setMute)
-
-        restorer.reconcile()
-
-        #expect(recorder.mutes.count == 1)
-        #expect(recorder.mutes.first?.value == 0)
-        #expect(recorder.mutes.first?.device == 42)
-        #expect(store.load().isEmpty)
-    }
-
-    @Test func outputMuteMarkerIsOnlyRecordedWhenKeyScribeChangedAudibleState() {
-        let store = makeStore(.init(defaultInputUID: "mic"))
-        let restorer = SystemAudioStateRestorer(store: store)
-
-        restorer.recordOutputMute(deviceUID: "out", previousMute: 1)
-
-        #expect(store.load() == PendingSystemRestore(defaultInputUID: "mic"))
-    }
-
-    @Test func launchReconcileStillRestoresDefaultInput() {
+    @Test func launchReconcileRestoresDefaultInput() {
         let recorder = AudioRestoreRecorder()
         let store = makeStore(.init(defaultInputUID: "mic"))
         let restorer = SystemAudioStateRestorer(
             store: store,
             resolveInputDevice: { $0 == "mic" ? 12 : nil },
-            resolveAnyDevice: { _ in nil },
+            setDefaultInput: recorder.setDefaultInput)
+
+        restorer.reconcile()
+
+        #expect(recorder.defaultInputs == [12])
+        #expect(store.load().isEmpty)
+    }
+
+    // A pre-duck build could crash while output was muted; reconcile must unmute that device once on the
+    // upgraded build and clear the stale marker, even when there was no input override (the common shape).
+    @Test func launchReconcileUnmutesLegacyOutputMuteMarker() throws {
+        let recorder = AudioRestoreRecorder()
+        // Seed the raw legacy bytes directly — a current encode would never produce an `outputMute` key.
+        let persistence = RestorerPersistence()
+        persistence.write(Data(#"{"outputMute":{"deviceUID":"out","previousMute":0}}"#.utf8))
+        let store = PendingSystemRestoreStore(persistence: persistence)
+        let restorer = SystemAudioStateRestorer(
+            store: store,
+            resolveInputDevice: { _ in nil },
+            resolveOutputDevice: { $0 == "out" ? 42 : nil },
             setDefaultInput: recorder.setDefaultInput,
             setOutputMute: recorder.setMute)
 
         restorer.reconcile()
 
-        #expect(recorder.defaultInputs == [12])
+        #expect(recorder.mutes.count == 1)
+        #expect(recorder.mutes.first?.value == 0)
+        #expect(recorder.mutes.first?.device == 42)
+        #expect(store.load().isEmpty)
+    }
+
+    @Test func launchReconcileClearsMarkerEvenWhenDeviceIsAbsent() {
+        let recorder = AudioRestoreRecorder()
+        let store = makeStore(.init(defaultInputUID: "mic"))
+        let restorer = SystemAudioStateRestorer(
+            store: store,
+            resolveInputDevice: { _ in nil },
+            setDefaultInput: recorder.setDefaultInput)
+
+        restorer.reconcile()
+
+        #expect(recorder.defaultInputs.isEmpty)
         #expect(store.load().isEmpty)
     }
 }

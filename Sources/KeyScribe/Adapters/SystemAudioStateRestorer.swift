@@ -3,28 +3,29 @@ import Foundation
 import KeyScribeKit
 
 // Crash-safe restoration of global macOS audio state KeyScribe temporarily changes during a dictation:
-// the system default INPUT device (overridden to honor a preferred mic the AUHAL cannot pin) and the
-// OUTPUT device's mute flag (muted during dictation). Each change is recorded to a durable marker BEFORE
-// it is applied and cleared AFTER it is restored in-process; if a crash/SIGKILL/force-quit lands between
-// the two, the marker survives and reconcileOnLaunch() undoes it on the next start — the gap that left
-// 0.1.7's crash with a hijacked default mic. Devices are resolved by UID, never by transient AudioDeviceID.
+// the system default INPUT device (overridden to honor a preferred mic the AUHAL cannot pin). The change
+// is recorded to a durable marker BEFORE it is applied and cleared AFTER it is restored in-process; if a
+// crash/SIGKILL/force-quit lands between the two, the marker survives and reconcile() undoes it on the next
+// start — the gap that left 0.1.7's crash with a hijacked default mic. Devices are resolved by UID, never
+// by transient AudioDeviceID. (Output silencing no longer needs a marker: it uses process-scoped ducking,
+// which the OS releases automatically when our process exits — see SystemOutputAudio.duck.)
 final class SystemAudioStateRestorer: Sendable {
     private let store: PendingSystemRestoreStore
     private let resolveInputDevice: @Sendable (String) -> AudioDeviceID?
-    private let resolveAnyDevice: @Sendable (String) -> AudioDeviceID?
+    private let resolveOutputDevice: @Sendable (String) -> AudioDeviceID?
     private let setDefaultInput: @Sendable (AudioDeviceID) -> Bool
     private let setOutputMute: @Sendable (UInt32, AudioDeviceID) -> Bool
 
     init(
         store: PendingSystemRestoreStore,
         resolveInputDevice: @escaping @Sendable (String) -> AudioDeviceID? = AudioInputDevices.deviceID(forUID:),
-        resolveAnyDevice: @escaping @Sendable (String) -> AudioDeviceID? = AudioInputDevices.deviceID(forAnyUID:),
+        resolveOutputDevice: @escaping @Sendable (String) -> AudioDeviceID? = AudioInputDevices.deviceID(forAnyUID:),
         setDefaultInput: @escaping @Sendable (AudioDeviceID) -> Bool = AudioInputDevices.setSystemDefaultInput,
         setOutputMute: @escaping @Sendable (UInt32, AudioDeviceID) -> Bool = SystemOutputAudio.setMute
     ) {
         self.store = store
         self.resolveInputDevice = resolveInputDevice
-        self.resolveAnyDevice = resolveAnyDevice
+        self.resolveOutputDevice = resolveOutputDevice
         self.setDefaultInput = setDefaultInput
         self.setOutputMute = setOutputMute
     }
@@ -39,18 +40,6 @@ final class SystemAudioStateRestorer: Sendable {
         store.update { $0.defaultInputUID = nil }
     }
 
-    func recordOutputMute(deviceUID: String, previousMute: UInt32) {
-        store.update {
-            $0.outputMute = previousMute == 0
-                ? .init(deviceUID: deviceUID, previousMute: previousMute)
-                : nil
-        }
-    }
-
-    func clearOutputMute() {
-        store.update { $0.outputMute = nil }
-    }
-
     // MARK: - Reconcile
 
     // Undo any global state recorded but not yet restored. Called at launch (to recover from a prior run
@@ -62,7 +51,10 @@ final class SystemAudioStateRestorer: Sendable {
         if let uid = pending.defaultInputUID, let device = resolveInputDevice(uid) {
             _ = setDefaultInput(device)
         }
-        if let mute = pending.outputMute, let device = resolveAnyDevice(mute.deviceUID) {
+        // Legacy: an older (pre-duck) build could have crashed while output was muted. Unmute that device
+        // once so an upgrade does not leave the user stranded muted with no recovery path. Current builds
+        // never write this — they duck, which the OS releases on exit.
+        if let uid = pending.legacyMutedOutputUID, let device = resolveOutputDevice(uid) {
             _ = setOutputMute(0, device)
         }
         // Clear unconditionally — even if a recorded device is absent right now (cannot be restored). A

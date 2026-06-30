@@ -151,9 +151,11 @@ the only signal.
   becoming a changing level value without bouncing or pulsing.
 - Completion, fallback, and errors settle quickly; no celebratory animation.
 - Start/end sounds are optional and must have equivalent visual feedback.
-- When "mute system audio" is on, the mute lands *after* the start sound finishes (muting first would
-  swallow the cue, which routes through the same output). So with the start sound **off** the mute is
-  instant — pick that for a dictation that feels immediate. The output device that was muted is the one
+- When "mute system audio" is on, other audio is silenced by *ducking* the output (the same call FaceTime
+  uses), not by toggling the device's mute flag — so it cannot strand the device quiet (a crash mid-dictation
+  releases the duck automatically). The duck lands *after* the start sound finishes (ducking first would
+  swallow the cue, which routes through the same output). So with the start sound **off** the silence is
+  instant — pick that for a dictation that feels immediate. The output device that was ducked is the one
   restored on completion, even if the default output changed mid-dictation.
 
 ---
