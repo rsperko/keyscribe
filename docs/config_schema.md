@@ -313,6 +313,38 @@ replace = "the"
 regex = false
 ```
 
+### Replacement matching & output
+
+How a rule behaves once it matches:
+
+- **Literal rules match case-insensitively, on whole words** (`pipe` never fires inside `pipeline`);
+  the replacement text is inserted verbatim (`$` / `\` are not template refs).
+- **Regex rules also match case-insensitively by default.** The input is STT output, whose casing
+  the engine chooses (it commonly capitalizes the first word), so a case-sensitive pattern would
+  silently miss. Opt back into case sensitivity with an inline `(?-i)`. Capture substitution (`$1`,
+  `\$` for a literal `$`) works as usual. Note the capture preserves the *matched* text's case — the
+  replacement template has no case-folding, so `slash (\w+)` → `/$1` on a spoken "Dog" yields `/Dog`,
+  not `/dog`.
+
+- **A replacement that owns the WHOLE utterance is inserted exactly — bare.** When the entire
+  dictation (ignoring surrounding whitespace and a trailing `.` / `!` / `?`) reduces to a single
+  replacement, its generated value is inserted verbatim: **no AI rewrite, no `trailing` suffix, no
+  `trim_trailing_punctuation`**. Said as *part of* a longer utterance, the same rule is ordinary text
+  and the mode's normal rewrite/trailing apply. This makes spoken commands deterministic without a
+  per-rule flag:
+
+  | You say | with rule `slash (\w+)` → `/$1` | Output |
+  |---|---|---|
+  | "slash resume" | owns the whole utterance → **bare** | `/resume` |
+  | "send slash resume" | part of a larger utterance → normal | `send /resume. ` |
+  | "slash resume now" | part of a larger utterance → normal | `/resume now. ` |
+
+  The trailing `. ` in the last two rows is the mode's normal decoration (rewrite punctuation +
+  `trailing`); only the first row, where the command *is* the whole utterance, comes out bare. The
+  rule is "one replacement owned the whole thing," so it never fires for a fuzzy-dictionary
+  correction or a chain of rules whose outputs combine — only an explicit replacement that consumed
+  the entire utterance.
+
 ### `settings.toml` — general
 ```toml
 schema_version = 1

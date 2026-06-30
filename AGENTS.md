@@ -44,6 +44,12 @@ This file is the entry point. Read the design docs before writing code — they 
 - **Dictionary is a hint, replacements are not protected.** Dictionary terms only tell the LLM
   "valid, not a misspelling" (it may still transform them); replacements flow into the LLM and
   can be rewritten. Only **nonce tokens** are guaranteed to survive the rewrite (`design.md` §4.2).
+  **One exception:** a replacement that consumes the **entire** utterance (a "whole-utterance
+  replacement" like `slash resume`→`/resume`) is inserted verbatim and **bypasses the LLM, trailing,
+  and trim** — detected at `ReplacementsStage` (reported via `PipelineContext.bareReplacement`) and
+  short-circuited in `DictationController.produceDictationText`. Regex/literal replacements both match
+  **case-insensitively** by default (STT output is engine-cased; `(?-i)` opts back in). See
+  `config_schema.md` *Replacement matching & output*.
 - **Credential material is never persisted in config.** Saved API keys live in Keychain and TOML
   stores only `key_ref`; command-generated bearer tokens are in-memory only. `token_command` stores
   the command to run, not the token material itself (`config_schema.md`).

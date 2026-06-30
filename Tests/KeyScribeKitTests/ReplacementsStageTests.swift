@@ -54,6 +54,23 @@ struct ReplacementsStageTests {
                     on: "that is 5 dollars") == "that is $5")
     }
 
+    // The match input is STT output, whose casing the engine chooses (it commonly capitalizes the
+    // first word) — so regex rules match case-insensitively by default, like literal rules.
+    @Test func regexIsCaseInsensitiveByDefault() {
+        #expect(run([ReplacementRule(heard: #"slash (\w+)"#, replace: "/$1", isRegex: true)], on: "Slash dog")
+            == "/dog")
+        #expect(run([ReplacementRule(heard: #"slash (\w+)"#, replace: "/$1", isRegex: true)], on: "SLASH dog")
+            == "/dog")
+    }
+
+    // (?-i) re-enables case sensitivity for the power user who genuinely needs it — the inline flag
+    // must override the default case-insensitive option.
+    @Test func regexCaseSensitivityOptOutWithInlineFlag() {
+        let rule = ReplacementRule(heard: #"(?-i)slash (\w+)"#, replace: "/$1", isRegex: true)
+        #expect(run([rule], on: "Slash dog") == "Slash dog")  // capital S not matched
+        #expect(run([rule], on: "slash dog") == "/dog")
+    }
+
     @Test func rulesApplyInOrder() {
         let rules = [
             ReplacementRule(heard: "cat", replace: "dog", isRegex: false),

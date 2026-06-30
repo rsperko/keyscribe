@@ -686,19 +686,21 @@ final class DictationController {
             clearRewriteEscapeHatch()
             applyEvictionAfterDictation(engine: engineUsed)
 
-        case .insert(let transcript):
-            await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite)
+        case .insert(let transcript, let bare):
+            await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare)
         }
     }
 
     private func finishInsertion(
-        transcript rawTranscript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?
+        transcript rawTranscript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?,
+        bare: Bool = false
     ) async {
         // Trim runs on the fully-restored final string, before the trailing suffix is appended, so a
         // command/subject-line mode never ends in a stray "." or "?" — enforcement the rewrite prompt
         // can only request, not guarantee. Applied here so the trimmed text is what the fingerprint,
-        // no-speech outcome, insert, and history all see.
-        let transcript = (activeMode?.trimTrailingPunctuation ?? false)
+        // no-speech outcome, insert, and history all see. A `bare` whole-utterance replacement is
+        // already the exact value to insert — skip trim (and the trailing suffix below).
+        let transcript = (!bare && (activeMode?.trimTrailingPunctuation ?? false))
             ? OutputCleanup.trimTrailingPunctuation(rawTranscript)
             : rawTranscript
         clearRewriteEscapeHatch()
@@ -723,7 +725,7 @@ final class DictationController {
             // Trailing text rides inside the atomic insert (still one ⌘Z). The submit keystroke lands
             // OUTSIDE that atom and only on a verified insert — never .copied, where a synthesized Return
             // would hit whatever app is now focused instead of the target the text reached.
-            let trailing = activeMode?.trailing ?? .none
+            let trailing = bare ? .none : (activeMode?.trailing ?? .none)
             let insertStart = DispatchTime.now()
             await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix)
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
@@ -828,7 +830,8 @@ final class DictationController {
     }
 
     private enum FinalText {
-        case insert(String)
+        // `bare` ⇒ a whole-utterance replacement: insert verbatim, suppress trim + trailing.
+        case insert(String, bare: Bool)
         // leave the target untouched; surface this message, optionally with a repair action
         case abort(String, HUDErrorAction?)
     }
@@ -869,6 +872,15 @@ final class DictationController {
         pipeline.forward(&ctx)
         let tokenized = ctx.text
 
+        // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
+        // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the
+        // trailing/trim shaping. Detected at the replacements stage and reported on the context.
+        if let bare = ctx.bareReplacement {
+            building.stageMillis[.localProcess] = elapsedMs(since: localStart)
+            building.fingerprints[.localProcessed] = .of(bare)
+            return (.insert(bare, bare: true), nil, bare != transcript ? bare : nil)
+        }
+
         // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
         // insert when no rewrite runs or it falls back.
         var localCtx = PipelineContext(text: tokenized)
@@ -882,12 +894,12 @@ final class DictationController {
 
         guard let resolved,
               !tokenized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return (.insert(localProcessed), nil, transformed)
+            return (.insert(localProcessed, bare: false), nil, transformed)
         }
         let result = await rewriteTokenized(
             pipeline: pipeline, tokenized: tokenized, localProcessed: localProcessed,
             instruction: "", mode: resolved.mode, connection: resolved.connection)
-        return (.insert(result.text), result.details, transformed)
+        return (.insert(result.text, bare: false), result.details, transformed)
     }
 
     // Edit-in-place: capture the selection, transform it per the spoken instruction. Any failure —
@@ -922,7 +934,7 @@ final class DictationController {
         let result = await rewriteTokenized(
             pipeline: pipeline, tokenized: tokenized, localProcessed: selection,
             instruction: instruction, mode: mode, connection: connection)
-        let final: FinalText = result.ok ? .insert(result.text) : .abort("Rewrite failed — selection unchanged", nil)
+        let final: FinalText = result.ok ? .insert(result.text, bare: false) : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
     }
 

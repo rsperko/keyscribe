@@ -30,6 +30,10 @@ public enum StageOrder {
 
 public struct PipelineContext: Sendable {
     public var text: String
+    // Set by the replacements stage when one rule owned the entire utterance: the verbatim value to
+    // insert, bypassing the LLM and the trailing/trim shaping. nil on the normal path. Reported here
+    // (not via a return) so the host reads it after `forward`, the same way it reads `issuedTokens`.
+    public var bareReplacement: String?
     public init(text: String) { self.text = text }
 }
 
