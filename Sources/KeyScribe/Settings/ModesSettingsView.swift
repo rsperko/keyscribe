@@ -529,7 +529,7 @@ private struct ModeEditorView: View {
                 }
                 SettingRow(
                     title: "Turn spoken commands into edits",
-                    help: "Turns phrases you say into edits: \u{201C}new line\u{201D}, \u{201C}line break\u{201D}, \u{201C}new paragraph\u{201D}, \u{201C}scratch that\u{201D}, \u{201C}strike that\u{201D}, \u{201C}tab key\u{201D}, \u{201C}insert tab\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
+                    help: "Turns phrases you say into edits: \u{201C}new line\u{201D}, \u{201C}newline\u{201D}, \u{201C}line break\u{201D}, \u{201C}new paragraph\u{201D}, \u{201C}scratch that\u{201D}, \u{201C}strike that\u{201D}, \u{201C}tab key\u{201D}, \u{201C}insert tab\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: commandsBinding(\.liveEdits)).labelsHidden()
                 }

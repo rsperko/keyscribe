@@ -98,6 +98,7 @@ Modes can turn spoken commands into local text edits before insertion.
 Useful phrases:
 
 - `new line`
+- `newline`
 - `line break`
 - `new paragraph`
 - `scratch that`

@@ -94,6 +94,14 @@ struct LiveEditsStageTests {
         #expect(run("alpha line break beta") == "alpha\nbeta")
     }
 
+    @Test func singleWordNewlineCommand() {
+        #expect(run("alpha newline beta") == "alpha\nbeta")
+    }
+
+    @Test func singleWordNewlineAtStart() {
+        #expect(run("newline alpha beta") == "\nalpha beta")
+    }
+
     @Test func scratchThatAliases() {
         #expect(run("I like dogs, strike that. I like fish") == "I like fish")
     }
