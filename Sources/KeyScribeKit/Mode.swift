@@ -423,8 +423,8 @@ public enum ModeStore {
         prompt.enabled = false
         prompt.commands.liveEdits = true
         prompt.trailing = .space
-        prompt.triggerPhrases = ["(?i)\\bas a prompt$"]
-        prompt.seedVersion = 2
+        prompt.triggerPhrases = ["as prompt"]
+        prompt.seedVersion = 3
         prompt.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself.")

@@ -137,9 +137,9 @@ struct ModeTests {
     @Test func starterAIPromptSuffixRoutesAndStaysDisabled() {
         let aiPrompt = try! #require(ModeStore.starterModes().first { $0.id == "ai-prompt" })
         #expect(aiPrompt.enabled == false)
-        #expect(aiPrompt.triggerPhrases == [#"(?i)\bas a prompt$"#])
+        #expect(aiPrompt.triggerPhrases == ["as prompt"])
         let result = ModeResolver.resolvePhaseB(
-            eligibleModes: [aiPrompt], transcript: "summarize this thread as a prompt.")
+            eligibleModes: [aiPrompt], transcript: "summarize this thread as prompt.")
         #expect(result.routedModeId == "ai-prompt")
         #expect(result.transcript == "summarize this thread")
     }

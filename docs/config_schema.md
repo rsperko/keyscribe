@@ -74,9 +74,15 @@ enabled = true
 source = "dictation"
 output = "cursor"
 
-# Trigger phrases (Phase B). One or more regexes matched against the transcript suffix
-# (raw-suffix routing). Optional.
-trigger_phrases = ['(?i)\bas an email$']
+# Trigger phrases (Phase B). One or more spoken phrases matched at the END of the transcript
+# (raw-suffix routing). Matching is case-insensitive, tolerates trailing punctuation/whitespace
+# that STT appends, and honors word boundaries — so a bare phrase just works:
+trigger_phrases = ['as an email']
+# A phrase is itself a regex, so power users can write one for alternation/optional words:
+trigger_phrases = ['as (a |an )?(draft|note)']
+# Do NOT add (?i), \b, or a trailing $ — the matcher already supplies case-insensitivity, word
+# boundaries, and end-anchoring AFTER trimming the punctuation/spaces STT appends (so a literal $
+# would match anyway, but it is redundant). Use (?-i) only to force case-sensitivity. Optional.
 
 insertion = "paste"          # "paste" (default) | "insert" | "type"
 trailing = "space"           # "none" | "space" (new-mode default) | "newline" — appended INSIDE the atomic insert
@@ -152,7 +158,7 @@ context = { app = true, preceding_text = false }
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
 | `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
-| `trigger_phrases` | string[] | Regexes, suffix-matched post-STT. Zero or more. |
+| `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection`. |

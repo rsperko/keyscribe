@@ -347,10 +347,13 @@ auto-start — they are reachable by **key or voice only**. When a key is presse
 to it is eligible here**, the press also falls to Direct — it still dictates, just plainly.
 
 **Phase B — known only after STT (trigger-phrase routing):**
-- **Trigger phrase(s) (regex):** a mode may have **multiple** phrase regexes (e.g. *"as pig latin"*
+- **Trigger phrase(s):** a mode may have **multiple** spoken phrases (e.g. *"as pig latin"*
   or *"pig latinize"* both route to the same mode). Because they depend on STT output they **cannot
-  run pre-STT**. If the transcript suffix matches an eligible mode's phrase, KeyScribe **adopts that
-  mode's remaining post-STT pipeline** and strips the matched suffix (raw-suffix routing). When
+  run pre-STT**. A phrase is matched at the **end** of the transcript — case-insensitively, on a word
+  boundary, and after trailing punctuation/whitespace that STT appends is trimmed — so a bare phrase
+  routes without any regex syntax; each phrase is also a regex for power users (`(?-i)` opts back into
+  case-sensitivity). If the transcript suffix matches an eligible mode's phrase, KeyScribe **adopts
+  that mode's remaining post-STT pipeline** and strips the matched suffix (raw-suffix routing). When
   several eligible modes match the same suffix, the **specificity → declaration-order** rule above
   picks the winner.
 - **Routing adopts only the *post-STT* pipeline.** The base mode's pre-STT stages already ran and are

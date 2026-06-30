@@ -296,4 +296,56 @@ struct ModeResolverTests {
         let r = ModeResolver.resolvePhaseB(eligibleModes: [d1, d2], transcript: "x as search")
         #expect(r.routedModeId == "d1")
     }
+
+    // A bare spoken phrase (no (?i), \b, or $) must route on every common STT output ending: the
+    // matcher supplies case-insensitivity, the end anchor, and trailing-cruft tolerance itself.
+    @Test(arguments: [
+        "summarize this thread as prompt",        // no punctuation
+        "summarize this thread as prompt.",       // trailing period (Parakeet/Whisper default)
+        "summarize this thread as prompt!",        // exclamation
+        "summarize this thread as prompt?",        // question mark
+        "summarize this thread as prompt...",      // ellipsis
+        "summarize this thread as prompt. ",       // period + trailing space
+        "summarize this thread as prompt ",        // trailing space only
+        "summarize this thread as prompt,\n",      // comma + newline
+        "summarize this thread As Prompt.",        // capitalized (case-insensitive)
+        "summarize this thread AS PROMPT",         // upper-cased
+    ])
+    func bareLiteralPhraseToleratesCommonSTTEndings(_ transcript: String) {
+        let ai = mode("ai-prompt", phrases: ["as prompt"])
+        let r = ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: transcript)
+        #expect(r.routedModeId == "ai-prompt")
+        #expect(r.transcript == "summarize this thread")
+    }
+
+    @Test func bareLiteralPhraseHonorsLeadingWordBoundary() {
+        // "as prompt" must not fire inside "has prompt" / "gas prompt" — that would split a word.
+        let ai = mode("ai-prompt", phrases: ["as prompt"])
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "this has prompt").routedModeId == nil)
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "increase the gas prompt").routedModeId == nil)
+        let r = ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "rewrite this as prompt")
+        #expect(r.routedModeId == "ai-prompt")
+        #expect(r.transcript == "rewrite this")
+    }
+
+    @Test func bareLiteralPhraseMustBeAtEndNotMiddle() {
+        let ai = mode("ai-prompt", phrases: ["as prompt"])
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "as prompt summarize this").routedModeId == nil)
+    }
+
+    @Test func regexPhraseStillSupported() {
+        // A genuine regex (alternation + optional group) routes "as a note" and "as note" alike,
+        // and tolerates the same trailing STT period.
+        let note = mode("note", phrases: [#"(?i)\bas (a |an )?note$"#])
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [note], transcript: "jot this as a note.").transcript == "jot this")
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [note], transcript: "jot this as note").transcript == "jot this")
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [note], transcript: "jot this down").routedModeId == nil)
+    }
+
+    @Test func caseSensitivityCanBeOptedBackIn() {
+        // Phrases are case-insensitive by default; (?-i) restores case sensitivity when needed.
+        let m = mode("cs", phrases: [#"(?-i)as prompt"#])
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this as prompt").routedModeId == "cs")
+        #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this As Prompt").routedModeId == nil)
+    }
 }

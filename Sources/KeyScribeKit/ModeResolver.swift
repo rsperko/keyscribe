@@ -144,16 +144,35 @@ public enum ModeResolver {
     }
 
     // Returns the transcript with the matched suffix removed (trimmed), or nil if the phrase does
-    // not match at the end. STT engines commonly capitalize and append a period, so trailing
-    // whitespace/punctuation is trimmed before matching — only the phrase itself is then stripped.
+    // not match at the end. The phrase is a regex (a plain spoken phrase like "as prompt" is itself a
+    // valid regex), so power users can write `(?i)\bas (a |an )?note$` while the common case stays a
+    // bare phrase. Three guarantees make a bare phrase route reliably without any regex syntax:
+    //   1. case-insensitive by default ((?-i) opts back in), as replacement rules are;
+    //   2. anchored to the *end* — STT commonly capitalizes and appends a period, so trailing
+    //      whitespace/punctuation is trimmed first, then the matched span must reach the end (a bare
+    //      phrase carries no `$`, so the first match may sit earlier — scan for the one at the end);
+    //   3. a leading word boundary, so "as prompt" does not fire inside "has prompt".
     private static func matchSuffix(_ pattern: String, in transcript: String) -> String? {
         let trimmed = trimTrailingNoise(transcript)
-        guard let re = RegexCache.regex(pattern) else { return nil }
+        guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
         let full = NSRange(trimmed.startIndex..., in: trimmed)
-        guard let match = re.firstMatch(in: trimmed, range: full),
+        guard let match = re.matches(in: trimmed, range: full).last,
+              match.range.length > 0,
               match.range.location + match.range.length == full.length,
-              let r = Range(match.range, in: trimmed) else { return nil }
+              let r = Range(match.range, in: trimmed),
+              startsOnWordBoundary(r, in: trimmed) else { return nil }
         return String(trimmed[trimmed.startIndex..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+    }
+
+    // A `\b`-style boundary at the match start: reject only when a word character would be split —
+    // i.e. the match begins with a word char that is glued to a word char before it ("h|as prompt").
+    // A match that begins on whitespace/punctuation needs no boundary (there is no word to split).
+    private static func startsOnWordBoundary(_ r: Range<String.Index>, in s: String) -> Bool {
+        guard r.lowerBound > s.startIndex else { return true }
+        let first = s[r.lowerBound]
+        let before = s[s.index(before: r.lowerBound)]
+        let isWord: (Character) -> Bool = { $0.isLetter || $0.isNumber }
+        return !(isWord(first) && isWord(before))
     }
 
     private static func trimTrailingNoise(_ s: String) -> String {

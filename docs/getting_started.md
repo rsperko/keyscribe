@@ -371,13 +371,26 @@ The Settings UI covers the normal path. The files under
 `~/Library/Application Support/KeyScribe/` expose the rest. See the full schema in
 [docs/config_schema.md](config_schema.md).
 
-### Spoken suffix as a regex
+### Spoken suffix routing
 
-Mode files store spoken suffixes as regexes. This catches common casing and punctuation differences:
+A spoken suffix is just the phrase you say at the end. It is matched at the end of the transcript,
+case-insensitively, ignoring the casing and trailing punctuation STT adds, and on word boundaries
+(so "as an email" does not fire inside "has an email"):
 
 ```toml
-trigger_phrases = ['(?i)\bas an email$']
+trigger_phrases = ['as an email']
 ```
+
+Each phrase is also a regex, so you can write one when you need alternation or optional words:
+
+```toml
+trigger_phrases = ['as (a |an )?(draft|note)']
+```
+
+You do not need `(?i)`, `\b`, or a trailing `$` — the matcher already supplies case-insensitivity,
+word boundaries, and end-anchoring, and it trims the trailing punctuation/space STT adds before
+matching. (A `$` would still match because of that trimming; it is just redundant.) Use `(?-i)`
+only when you specifically want case-sensitive matching.
 
 ### Auto-submit after insertion
 
