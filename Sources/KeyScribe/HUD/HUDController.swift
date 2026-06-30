@@ -17,6 +17,7 @@ final class HUDLevel: ObservableObject {
 
 @MainActor
 final class HUDController: HUDPresenting {
+    private static let panelWidth: CGFloat = 280
     private let model = HUDModel()
     private let levelModel = HUDLevel()
     private var panel: NSPanel?
@@ -46,6 +47,9 @@ final class HUDController: HUDPresenting {
             panel?.orderOut(nil)
         } else {
             showPanelIfNeeded()
+            if let panel {
+                resize(panel, to: state)
+            }
             // Each dictation can target a window on a different display, so move the HUD to the screen
             // holding the focused window — it should appear where the user is dictating, not where it last
             // sat. Only on the hidden→visible edge so per-frame level updates during recording do not hop it.
@@ -84,7 +88,7 @@ final class HUDController: HUDPresenting {
                 }
             }))
         let panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 92),
+            contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: HUDState.hidden.contentHeight),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -100,6 +104,18 @@ final class HUDController: HUDPresenting {
         observeMoves(panel)
         reposition(panel)
         installLocalKeyMonitor()
+    }
+
+    private func resize(_ panel: NSPanel, to state: HUDState) {
+        let size = CGSize(width: Self.panelWidth, height: state.contentHeight)
+        guard panel.frame.size != size else { return }
+        isRepositioning = true
+        let screen = panel.screen ?? NSScreen.main
+        let origin = screen.map { anchor.origin(in: $0.visibleFrame, size: size) } ?? panel.frame.origin
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.isRepositioning = false }
+        }
     }
 
     func relinquishKeyFocus() {
@@ -222,12 +238,13 @@ private struct HUDView: View {
                 icon
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primary).font(.system(size: 13, weight: .semibold))
+                    if let secondary {
+                        Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
                     if !model.state.dataBoundaryBadges.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(model.state.dataBoundaryBadges, id: \.self) { DataBoundaryBadge(label: $0) }
                         }
-                    } else if let secondary {
-                        Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -239,7 +256,7 @@ private struct HUDView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .frame(width: 280, height: hasAction ? 92 : 64, alignment: .leading)
+        .frame(width: 280, height: model.state.contentHeight, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
         .accessibilityElement(children: .contain)
@@ -293,7 +310,12 @@ private struct HUDView: View {
     private var secondary: String? { model.state.secondaryText }
 
     private var accessibilityLabel: String {
-        [primary, secondary].compactMap { $0 }.joined(separator: ". ")
+        var parts = [primary]
+        if let secondary { parts.append(secondary) }
+        if !model.state.dataBoundaryBadges.isEmpty {
+            parts.append(contentsOf: model.state.dataBoundaryBadges)
+        }
+        return parts.joined(separator: ". ")
     }
 
     private func outcomeSymbol(_ outcome: DictationOutcome) -> String {

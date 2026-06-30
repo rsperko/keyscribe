@@ -45,16 +45,44 @@ struct HUDStateTests {
         #expect(state.holdsKeyFocus)
     }
 
+    @Test func transcribingLeadsWithTheResolvedModeName() {
+        let state = HUDState.transcribing(mode: "Email")
+        #expect(state.primaryText == "Email")
+        #expect(state.secondaryText == "Transcribing")
+    }
+
     @Test func rewritingBadgesListEachBoundaryCategorySeparately() {
         let state = HUDState.rewriting(
-            connection: "Gemini", redacted: false,
+            connection: "Gemini", mode: "Email", redacted: false,
             contextCategories: ["app", "preceding text"], offerLocalTranscript: false)
         #expect(state.dataBoundaryBadges == ["Cloud rewrite", "App shared", "Preceding text shared"])
     }
 
+    @Test func rewritingCarriesTheResolvedModeName() {
+        let state = HUDState.rewriting(
+            connection: "Gemini", mode: "Email", redacted: false,
+            contextCategories: [], offerLocalTranscript: false)
+        #expect(state.primaryText == "Email")
+        #expect(state.secondaryText == "Rewriting with Gemini")
+    }
+
+    @Test func rewritingWithBadgesUsesTheTallerProcessingHUD() {
+        let state = HUDState.rewriting(
+            connection: "Gemini", mode: "Email", redacted: false,
+            contextCategories: ["app"], offerLocalTranscript: false)
+        #expect(state.contentHeight == 78)
+    }
+
+    @Test func rewritingEscapeWithBadgesUsesTheTallestProcessingHUD() {
+        let state = HUDState.rewriting(
+            connection: "Gemini", mode: "Email", redacted: false,
+            contextCategories: ["app"], offerLocalTranscript: true)
+        #expect(state.contentHeight == 104)
+    }
+
     @Test func redactionReplacesContextWithTheRedactionBadge() {
         let state = HUDState.rewriting(
-            connection: "Gemini", redacted: true,
+            connection: "Gemini", mode: "Private Note", redacted: true,
             contextCategories: [], offerLocalTranscript: false)
         #expect(state.dataBoundaryBadges == ["Cloud rewrite", "Best-effort redaction"])
     }

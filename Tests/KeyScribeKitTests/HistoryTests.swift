@@ -43,6 +43,23 @@ struct HistoryEntryCodecTests {
         #expect(decoded.transformed == nil)
     }
 
+    @Test func sttEngineRoundTrips() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Plain", engine: "Parakeet TDT v3", heard: "hello", result: "Hello.",
+            outcome: .inserted, cloudInvolved: false, redaction: false, contextCategories: [])
+        let decoded = try HistoryEntry(jsonLine: try entry.jsonLine())
+        #expect(decoded.engine == "Parakeet TDT v3")
+        #expect(decoded == entry)
+    }
+
+    @Test func olderLinesWithoutEngineDecodeToNil() throws {
+        let line = """
+        {"cloud_involved":false,"context_categories":[],"heard":"hello","mode":"Plain","outcome":"inserted","redaction":false,"result":"hello","timestamp":"2023-11-14T22:13:20Z"}
+        """
+        #expect(try HistoryEntry(jsonLine: line).engine == nil)
+    }
+
     @Test func multilineContentStaysOnOneLine() throws {
         let entry = sampleEntry(heard: "first line\nsecond line", result: "A\n\nB")
         let line = try entry.jsonLine()

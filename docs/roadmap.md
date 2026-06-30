@@ -78,3 +78,15 @@
 - **Per-mode few-shot examples** on a mode's AI rewrite (à la Superwhisper's "Examples of correct
   behavior"). Measured benefit on the ship floor is modest — consistency/output-only polish for
   formatting-heavy modes (Markdown), not correctness rescue. Consider, do not assume.
+- **Fuzzy-corrector common-word guard.** `FuzzyCorrector`'s only harmful failure mode is overwriting a
+  *correct* common word that shares a dictionary term's consonant skeleton within 2 edits
+  (`cloud`→`Claude`, `cube`→`Kube`); the phonetic gate already blocks the rest (`lava`→`Java` survives).
+  Measured risk is low for normal dictionaries — ~0.02% WER harm on non-term speech with a ~50-term dict,
+  net WER *improvement* on real STT — and only grows with dictionary size (~1.5% harm at ~1k terms,
+  upper-bound). A guard that skips the *fuzzy* snap when the source token is itself a common English word
+  (the exact/spacing-merge path stays) would drop harm to ~zero while keeping the wins (`sellery`→`Celery`,
+  `charge bee`→`ChargeBee` are non-words, untouched). **Deferred because the obvious implementation needs a
+  bundled frequency-ranked word list (~top 10–50k), which we do not want to ship unless forced.** Revisit
+  if telemetry-free signals (user reports, larger default dictionaries) show real over-correction, or if a
+  no-bundle source for "is this a common word" appears (e.g. a system lexicon API). Harness to re-measure
+  exists in session notes (drive the real corrector over the corpus with controlled dictionaries).

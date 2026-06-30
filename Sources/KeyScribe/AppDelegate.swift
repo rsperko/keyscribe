@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         speechModels = SpeechModelsModel(
             activeId: settings.stt.engine,
-            dictionaryRecoveryEngines: settings.stt.dictionaryRecoveryEngines,
+            stt: settings.stt,
             download: { [weak self] id, progress in
                 guard let engine = self?.provider.engine(id) else { throw EngineUnavailable.notWired(id) }
                 try await engine.load(progress: progress)
@@ -145,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self.controller.evictEngineForSettings(engine)
             },
             onActiveChange: { [weak self] id in self?.setEngine(id) },
-            onDictionaryRecoveryChange: { [weak self] ids in self?.setDictionaryRecovery(ids) })
+            onDictionaryMatchingChange: { [weak self] stt in self?.setDictionaryMatching(stt) })
 
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels,
@@ -333,10 +333,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applySettings(updated)
     }
 
-    private func setDictionaryRecovery(_ ids: [String]) {
-        guard ids != settings.stt.dictionaryRecoveryEngines else { return }
+    private func setDictionaryMatching(_ stt: Settings.STT) {
+        guard stt != settings.stt else { return }
         var updated = settings
-        updated.stt.dictionaryRecoveryEngines = ids
+        updated.stt = stt
         applySettings(updated)
     }
 

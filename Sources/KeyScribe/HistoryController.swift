@@ -520,7 +520,7 @@ private struct HistoryDetailView: View {
                 Text("Privacy & processing").font(.headline)
                 detailRow("AI rewrite", rewriteSummary)
                 detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
-                detailRow("Speech", "On-device")
+                detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")
                 detailRow("Context sent", entry.contextLabels.isEmpty ? "None" : entry.contextLabels.joined(separator: ", "))
             }
             if let prompt = entry.prompt {

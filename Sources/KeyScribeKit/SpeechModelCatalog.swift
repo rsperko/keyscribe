@@ -84,8 +84,6 @@ public enum SpeechModelCatalog {
         all.first(where: \.isDefaultEnglish)?.id ?? all[0].id
     }
 
-    // Engines with no on-device recognition bias. These are the models that earn dictionary-term
-    // recovery from the post-STT fuzzy stage instead (Settings.stt.dictionaryRecoveryEngines).
     public static var biasExemptIds: [String] {
         all.filter { !$0.supportsRecognitionBias }.map(\.id)
     }

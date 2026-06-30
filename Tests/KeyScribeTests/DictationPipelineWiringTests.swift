@@ -15,12 +15,18 @@ struct DictationPipelineWiringTests {
         let displayName = "Fixed"
         let supportsRecognitionBias: Bool
         private let text: String
+        private let lock = NSLock()
+        private var _lastBiasTerms: [String] = []
+        var lastBiasTerms: [String] { lock.withLock { _lastBiasTerms } }
         init(text: String, supportsRecognitionBias: Bool = false) {
             self.text = text
             self.supportsRecognitionBias = supportsRecognitionBias
         }
         func loadIfNeeded() async throws {}
-        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
+        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+            lock.withLock { _lastBiasTerms = biasTerms }
+            return text
+        }
         func evict() async {}
     }
 
@@ -85,20 +91,23 @@ struct DictationPipelineWiringTests {
         let llm: any LLMClient
         let historyEntry: HistoryEntry?
         let lastHUD: HUDState?
+        let recordedBiasTerms: [String]
     }
 
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
-        dictionaryRecoveryEngines: [String]? = nil,
+        dictionaryRecoveryEnabled: Bool? = nil,
+        recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         await run(transcript: transcript, modes: [mode], defaultModeId: mode.id,
                   connection: connection, llm: llm, accessibility: accessibility,
                   captureSelection: captureSelection,
-                  dictionaryRecoveryEngines: dictionaryRecoveryEngines,
+                  dictionaryRecoveryEnabled: dictionaryRecoveryEnabled,
+                  recognitionBiasEnabled: recognitionBiasEnabled,
                   engineSupportsRecognitionBias: engineSupportsRecognitionBias,
                   updateSettingsAfterStart: updateSettingsAfterStart)
     }
@@ -107,7 +116,8 @@ struct DictationPipelineWiringTests {
         transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
-        dictionaryRecoveryEngines: [String]? = nil,
+        dictionaryRecoveryEnabled: Bool? = nil,
+        recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
@@ -123,14 +133,23 @@ struct DictationPipelineWiringTests {
         }
 
         var settings = Settings.defaults
-        settings.stt = .init(
-            engine: "fixed", eviction: .frugal,
-            dictionaryRecoveryEngines: dictionaryRecoveryEngines ?? Settings.defaults.stt.dictionaryRecoveryEngines)
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        if let dictionaryRecoveryEnabled {
+            if dictionaryRecoveryEnabled {
+                settings.stt.dictionaryRecoveryEnabledEngines = ["fixed"]
+                settings.stt.dictionaryRecoveryDisabledEngines = []
+            } else {
+                settings.stt.dictionaryRecoveryEnabledEngines = []
+                settings.stt.dictionaryRecoveryDisabledEngines = ["fixed"]
+            }
+        }
+        if let recognitionBiasEnabled {
+            settings.stt.recognitionBiasDisabledEngines = recognitionBiasEnabled ? [] : ["fixed"]
+        }
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
 
-        let provider = try! SpeechEngineProvider(
-            engines: [FixedEngine(text: transcript, supportsRecognitionBias: engineSupportsRecognitionBias)],
-            activeId: "fixed")
+        let engine = FixedEngine(text: transcript, supportsRecognitionBias: engineSupportsRecognitionBias)
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "fixed")
         let history = HistoryStore(supportDir: supportDir)
         let insertSpy = InsertSpy()
         let submitSpy = SubmitSpy()
@@ -162,7 +181,7 @@ struct DictationPipelineWiringTests {
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
             insertedModifier: await insertSpy.modifier,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
-            lastHUD: hudSpy.states.last)
+            lastHUD: hudSpy.states.last, recordedBiasTerms: engine.lastBiasTerms)
     }
 
     private func firstHistoryEntry(in history: HistoryStore) async -> HistoryEntry? {
@@ -233,7 +252,7 @@ struct DictationPipelineWiringTests {
         m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
         let out = await run(
             transcript: "charge bee", mode: m,
-            dictionaryRecoveryEngines: ["fixed"])
+            dictionaryRecoveryEnabled: true)
         #expect(out.lastResult == "ChargeBee")
     }
 
@@ -242,21 +261,59 @@ struct DictationPipelineWiringTests {
         m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
         let out = await run(
             transcript: "charge bee", mode: m,
-            dictionaryRecoveryEngines: ["fixed"],
+            dictionaryRecoveryEnabled: true,
             updateSettingsAfterStart: { settings in
-                settings.stt.dictionaryRecoveryEngines = []
+                settings.stt.dictionaryRecoveryEnabledEngines = []
+                settings.stt.dictionaryRecoveryDisabledEngines = ["fixed"]
             })
         #expect(out.lastResult == "ChargeBee")
     }
 
-    @Test func dictionaryRecoveryDoesNotRunForBiasCapableEngine() async {
+    @Test func recognitionBiasReachesBiasCapableEngineByDefault() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "hello", mode: m,
+            engineSupportsRecognitionBias: true)
+        #expect(out.recordedBiasTerms == ["ChargeBee"])
+    }
+
+    @Test func disablingRecognitionBiasSuppressesBiasTermsForBiasCapableEngine() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "hello", mode: m,
+            recognitionBiasEnabled: false,
+            engineSupportsRecognitionBias: true)
+        #expect(out.recordedBiasTerms.isEmpty)
+    }
+
+    @Test func biaslessEngineNeverReceivesBiasTerms() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "hello", mode: m,
+            engineSupportsRecognitionBias: false)
+        #expect(out.recordedBiasTerms.isEmpty)
+    }
+
+    @Test func dictionaryRecoveryDefaultsOffForBiasCapableEngine() async {
         var m = mode(id: "plain")
         m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
         let out = await run(
             transcript: "charge bee", mode: m,
-            dictionaryRecoveryEngines: ["fixed"],
             engineSupportsRecognitionBias: true)
         #expect(out.lastResult == "charge bee")
+    }
+
+    @Test func dictionaryRecoveryCanRunForBiasCapableEngine() async {
+        var m = mode(id: "plain")
+        m.dictionary = .init(includeGlobal: false, words: ["ChargeBee"])
+        let out = await run(
+            transcript: "charge bee", mode: m,
+            dictionaryRecoveryEnabled: true,
+            engineSupportsRecognitionBias: true)
+        #expect(out.lastResult == "ChargeBee")
     }
 
     // Privacy mode forces every context channel off, even when the mode explicitly opts into all of

@@ -690,19 +690,19 @@ private struct ModeEditorView: View {
 
                 Text("Choose by spoken phrase")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack {
+                    TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitPhrase)
+                    Button("Add", action: commitPhrase)
+                        .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
                 ForEach(mode.triggerPhrases, id: \.self) { phrase in
                     HStack {
                         Text(phrase).font(.callout)
                         Spacer()
                         Button("Remove", role: .destructive) { removePhrase(phrase) }
                     }
-                }
-                HStack {
-                    TextField("Trailing phrase, e.g. as a note", text: $newPhrase)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(commitPhrase)
-                    Button("Add", action: commitPhrase)
-                        .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 Text("Routing rules choose a mode before recording. App rules match bundle IDs, URL and window title rules are regular expressions, and each is checked only when a mode uses it. URLs are local routing keys and are never sent to a rewrite provider. A spoken phrase said at the end can reroute the result after transcription.")

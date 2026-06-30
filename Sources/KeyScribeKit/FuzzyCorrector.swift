@@ -8,8 +8,7 @@ import Foundation
 // requires phonetic agreement as a NECESSARY gate, not a bonus — otherwise a common word one edit
 // from a term but distinct in sound ("lava"→"Java", "dust"→"Rust") gets swallowed, the classic
 // edit-distance false-positive band. Agreement then buys one edit beyond the bare cap (ceiling 2),
-// so a plausible mishearing ("sellery"→"Celery") still recovers. Bias-less engines benefit most;
-// bias-capable engines use recognition bias instead.
+// so a plausible mishearing ("sellery"→"Celery") still recovers.
 public enum FuzzyCorrector {
     // Canonicalized dictionary, with each term's phonetic key precomputed once. Built when the stage
     // is constructed (per mode/config generation) so a dictation never re-normalizes or re-keys the

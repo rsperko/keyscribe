@@ -106,9 +106,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         public var liveEdits: Bool
         public var privacy: Bool
         public var numbers: Bool          // inverse text normalization ("twenty five" → "25")
-        // Dictionary recovery (formerly `fuzzy_correction`) moved off the mode: it is now a per-engine
-        // property of bias-less speech models (Settings.stt.dictionaryRecoveryEngines), not a mode
-        // command. An old mode TOML's `fuzzy_correction` key is simply ignored on decode.
+        // Dictionary recovery (formerly `fuzzy_correction`) moved off the mode. An old mode TOML's
+        // `fuzzy_correction` key is simply ignored on decode.
         enum CodingKeys: String, CodingKey {
             case liveEdits = "live_edits"; case privacy
             case numbers
@@ -424,6 +423,8 @@ public enum ModeStore {
         prompt.enabled = false
         prompt.commands.liveEdits = true
         prompt.trailing = .space
+        prompt.triggerPhrases = ["(?i)\\bas a prompt$"]
+        prompt.seedVersion = 2
         prompt.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself.")
@@ -456,7 +457,7 @@ public enum ModeStore {
         return [polish, message, email, selection, prompt, code, markdown, shell].map {
             var mode = $0
             mode.seedId = mode.id
-            mode.seedVersion = 1
+            mode.seedVersion = mode.seedVersion ?? 1
             return mode
         }
     }

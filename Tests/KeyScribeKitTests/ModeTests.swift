@@ -130,8 +130,18 @@ struct ModeTests {
     @Test func starterModesAreStampedWithSeedProvenance() {
         for mode in ModeStore.starterModes() {
             #expect(mode.seedId == mode.id)
-            #expect(mode.seedVersion == 1)
+            #expect((mode.seedVersion ?? 0) >= 1)
         }
+    }
+
+    @Test func starterAIPromptSuffixRoutesAndStaysDisabled() {
+        let aiPrompt = try! #require(ModeStore.starterModes().first { $0.id == "ai-prompt" })
+        #expect(aiPrompt.enabled == false)
+        #expect(aiPrompt.triggerPhrases == [#"(?i)\bas a prompt$"#])
+        let result = ModeResolver.resolvePhaseB(
+            eligibleModes: [aiPrompt], transcript: "summarize this thread as a prompt.")
+        #expect(result.routedModeId == "ai-prompt")
+        #expect(result.transcript == "summarize this thread")
     }
 
     @Test func roundTripsThroughEncode() throws {

@@ -1,3 +1,4 @@
+import CoreGraphics
 import KeyScribeKit
 
 // A single repair action an error HUD can offer (ui_design.md §5: an error state gives one clear next
@@ -21,7 +22,7 @@ enum HUDState: Equatable {
     case arming(mode: String?)
     case recording(mode: String?, level: Float)
     case transcribing(mode: String)
-    case rewriting(connection: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
+    case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)
     case complete(outcome: DictationOutcome, mode: String)
     case error(message: String, action: HUDErrorAction?)
@@ -38,10 +39,10 @@ extension HUDState {
             return mode
         case .recording(let mode, _):
             return mode
-        case .transcribing:
-            return "Transcribing"
-        case .rewriting(let connection, _, _, _):
-            return "Rewriting with \(connection)"
+        case .transcribing(let mode):
+            return mode
+        case .rewriting(_, let mode, _, _, _):
+            return mode
         case .localFallback(let outcome, _):
             if case .copied = outcome { return "Copied without rewriting" }
             return "Inserted without rewriting"
@@ -65,12 +66,10 @@ extension HUDState {
             return "Starting"
         case .recording:
             return "Listening"
-        case .transcribing(let mode):
-            return mode
-        case .rewriting(_, let redacted, let contextCategories, _):
-            if redacted { return "Best-effort redaction" }
-            let labels = contextCategories.compactMap(HistoryEntry.contextLabel)
-            return labels.isEmpty ? "Cloud rewrite" : labels.joined(separator: " · ")
+        case .transcribing:
+            return "Transcribing"
+        case .rewriting(let connection, _, _, _, _):
+            return "Rewriting with \(connection)"
         case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _):
             return Self.copiedSecondary(reason)
         case .complete(_, let mode):
@@ -86,7 +85,7 @@ extension HUDState {
     // collapsed text line (ui_components.md). A rewrite is always cloud; redaction forces context off,
     // mirroring HistoryEntry.dataBoundaryLabels.
     var dataBoundaryBadges: [String] {
-        guard case .rewriting(_, let redacted, let contextCategories, _) = self else { return [] }
+        guard case .rewriting(_, _, let redacted, let contextCategories, _) = self else { return [] }
         var labels = ["Cloud rewrite"]
         if redacted { labels.append("Best-effort redaction") }
         labels.append(contentsOf: contextCategories.compactMap(HistoryEntry.contextLabel))
@@ -116,8 +115,15 @@ extension HUDState {
     }
 
     var offersLocalTranscript: Bool {
-        if case .rewriting(_, _, _, let offer) = self { return offer }
+        if case .rewriting(_, _, _, _, let offer) = self { return offer }
         return false
+    }
+
+    var contentHeight: CGFloat {
+        if offersLocalTranscript || offersPasteLast || errorAction != nil {
+            return dataBoundaryBadges.isEmpty ? 92 : 104
+        }
+        return dataBoundaryBadges.isEmpty ? 64 : 78
     }
 
     // The cancellable states (mirrors DictationController.isCancellable, which keeps machine.state at

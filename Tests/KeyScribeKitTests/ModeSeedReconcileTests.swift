@@ -206,7 +206,7 @@ struct ModeSeedReconcileTests {
             "message": (1, "3d5e80682ee60696"),
             "email": (1, "6a39d5592cb100d"),
             "edit-selection": (1, "224ed44b73fd1efb"),
-            "ai-prompt": (1, "1d2a6ddd622432ac"),
+            "ai-prompt": (2, "a3897d1caa016ae1"),
             "code": (1, "9443bc91a7b665d7"),
             "markdown": (1, "77433d0d01ef487e"),
             "shell": (1, "debf79feb745f80b"),

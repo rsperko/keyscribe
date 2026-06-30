@@ -81,6 +81,7 @@ private struct EngineRow: View {
                             SpeechBadge(text: "No recognition bias")
                                 .help("Dictionary recovery can still fix close matches after transcription.")
                         }
+                        SpeechBadge(text: row.dictionaryMatchingRecommended ? "Dictionary recommended" : "Dictionary custom")
                         Spacer(minLength: 0)
                         if row.isActive {
                             Label("In use", systemImage: "checkmark.circle.fill")
@@ -95,22 +96,41 @@ private struct EngineRow: View {
                 }
             }
 
-            if !row.info.supportsRecognitionBias {
-                VStack(alignment: .leading, spacing: 3) {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: recognitionBiasBinding) {
+                        Text("Use recognition hints while transcribing").font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(!row.info.supportsRecognitionBias)
+                    if !row.info.supportsRecognitionBias {
+                        Text("This model cannot use recognition hints.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Toggle(isOn: dictionaryRecoveryBinding) {
-                        Text("Dictionary recovery").font(.caption)
+                        Text("Recover close dictionary matches after transcription").font(.caption)
                     }
                     .toggleStyle(.checkbox)
                     Text("Uses your dictionary after transcription to fix close matches, like "
-                         + "\"charge bee\" to \"ChargeBee\". Best effort; turn this off if it "
-                         + "changes ordinary words.")
+                         + "\"charge bee\" to \"ChargeBee\". Best effort; turn this off if it changes ordinary words.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Reset to Recommended") { model.resetDictionaryMatching(for: row.id) }
+                        .disabled(row.dictionaryMatchingRecommended)
                 }
-                .padding(.leading, 36)
-                .help("This model cannot bias recognition toward your dictionary, so recovery runs after transcription.")
+                .padding(.top, 2)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.badge.checkmark")
+                    Text("Dictionary Matching").font(.caption)
+                    Text(row.dictionaryMatchingRecommended ? "Recommended" : "Custom")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .padding(.leading, 36)
 
             if let frac = row.downloadFraction {
                 VStack(alignment: .leading, spacing: 2) {
@@ -164,6 +184,12 @@ private struct EngineRow: View {
         Binding(
             get: { row.dictionaryRecoveryOn },
             set: { model.setDictionaryRecovery($0, for: row.id) })
+    }
+
+    private var recognitionBiasBinding: Binding<Bool> {
+        Binding(
+            get: { row.recognitionBiasOn },
+            set: { model.setRecognitionBias($0, for: row.id) })
     }
 
     private var icon: String {

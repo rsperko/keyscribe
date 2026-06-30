@@ -15,6 +15,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
 
     public var timestamp: Date
     public var modeName: String
+    // The on-device STT engine that produced `heard` (display name, e.g. "Parakeet TDT v3"). nil on
+    // entries written before this was captured, in which case the History detail shows just "On-device".
+    public var engine: String?
     public var heard: String
     // The local text after replacements and spoken edits, before any AI rewrite — the middle of the
     // Heard → Transformed → Result model (ui_design.md §8). nil when nothing local changed the
@@ -32,6 +35,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case timestamp
         case modeName = "mode"
+        case engine
         case heard
         case transformed
         case result
@@ -45,13 +49,14 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     }
 
     public init(
-        timestamp: Date, modeName: String, heard: String, transformed: String? = nil,
+        timestamp: Date, modeName: String, engine: String? = nil, heard: String, transformed: String? = nil,
         result: String, outcome: Outcome,
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
         connection: String? = nil, model: String? = nil, prompt: String? = nil
     ) {
         self.timestamp = timestamp
         self.modeName = modeName
+        self.engine = engine
         self.heard = heard
         self.transformed = transformed
         self.result = result

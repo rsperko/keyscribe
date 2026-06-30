@@ -325,8 +325,8 @@ final class DictationController {
         building.targetBundleId = capturedSnapshot?.bundleId
         capturedPlan = config.resolved
         capturedEngine = provider.active
-        capturedDictionaryRecovery = !activeEngine.supportsRecognitionBias
-            && settings.stt.dictionaryRecoveryEngines.contains(activeEngine.id)
+        capturedDictionaryRecovery = settings.stt.dictionaryRecoveryEnabled(
+            engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
         captureStarted = false
         activeMode = nil
         eligibleModes = []
@@ -590,7 +590,8 @@ final class DictationController {
     // stable order; this trims and drops blanks) so engines consume clean terms. Engines without
     // bias ignore these.
     private func recognitionBiasTerms() -> [String] {
-        guard activeEngine.supportsRecognitionBias else { return [] }
+        guard settings.stt.recognitionBiasEnabled(
+            engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias) else { return [] }
         return plan.recognitionBiasTerms(for: activeMode)
     }
 
@@ -788,7 +789,8 @@ final class DictationController {
         case .failed: outcome = .failed
         }
         let entry = HistoryEntry(
-            timestamp: Date(), modeName: currentModeName, heard: heard, transformed: transformed,
+            timestamp: Date(), modeName: currentModeName, engine: activeEngine.displayName,
+            heard: heard, transformed: transformed,
             result: result, outcome: outcome,
             cloudInvolved: rewrite != nil, redaction: rewrite?.redaction ?? false,
             contextCategories: rewrite?.contextCategories ?? [],
@@ -979,7 +981,7 @@ final class DictationController {
             scheduleRewriteEscapeHatch(connection: connection, mode: mode)
         }
         hud?.render(.rewriting(
-            connection: connection.name, redacted: mode.commands.privacy,
+            connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
             contextCategories: mode.effectiveContextCategories, offerLocalTranscript: false))
 
         // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus
@@ -1014,11 +1016,11 @@ final class DictationController {
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
     private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
-        // Dictionary recovery is the post-STT substitute for recognition bias: apply it only when the
-        // engine that transcribed this dictation cannot bias and the user left it enabled for that engine.
+        // Dictionary recovery is captured at record start so a settings change mid-dictation cannot
+        // change which post-STT stages run.
         let dictionaryRecovery = capturedDictionaryRecovery
-            ?? (!activeEngine.supportsRecognitionBias
-                && settings.stt.dictionaryRecoveryEngines.contains(activeEngine.id))
+            ?? settings.stt.dictionaryRecoveryEnabled(
+                engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
         var stages = plan.postSTTTextStages(for: mode, dictionaryRecovery: dictionaryRecovery)
         if mode?.commands.liveEdits ?? true { stages.append(TokenizingStage.verbatim()) }
         if (mode?.commands.privacy ?? false) && willRewrite { stages.append(TokenizingStage.redaction()) }
@@ -1082,7 +1084,7 @@ final class DictationController {
             guard let self, !Task.isCancelled, self.pendingLocalTranscript != nil,
                   self.machine.state == .transcribing else { return }
             self.hud?.render(.rewriting(
-                connection: connection.name, redacted: mode.commands.privacy,
+                connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
                 contextCategories: mode.effectiveContextCategories, offerLocalTranscript: true))
         }
     }

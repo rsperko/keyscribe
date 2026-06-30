@@ -158,7 +158,7 @@ struct HotkeyMonitorChordTests {
         #expect(HUDState.recording(mode: nil, level: 0).holdsKeyFocus)
         #expect(HUDState.transcribing(mode: "m").holdsKeyFocus)
         #expect(HUDState.rewriting(
-            connection: "c", redacted: false, contextCategories: [], offerLocalTranscript: false).holdsKeyFocus)
+            connection: "c", mode: "m", redacted: false, contextCategories: [], offerLocalTranscript: false).holdsKeyFocus)
         #expect(HUDState.arming(mode: "m").holdsKeyFocus)
         #expect(!HUDState.ready(mode: "m").holdsKeyFocus)
         #expect(!HUDState.error(message: "x", action: nil).holdsKeyFocus)

@@ -111,8 +111,9 @@ privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
 numbers    = false          # inverse text normalization: "twenty five" -> "25"
                             #   (leaves year idioms like "twenty twenty six" as words)
-# (Dictionary recovery is no longer a mode command — it is a per-engine setting,
-#  settings.toml [stt].dictionary_recovery_engines.)
+# (Dictionary recovery is no longer a mode command — it is a per-engine "Dictionary Matching"
+#  setting under settings.toml [stt]; see recognition_bias_disabled_engines /
+#  dictionary_recovery_enabled_engines / dictionary_recovery_disabled_engines.)
 
 # ── Vocabulary (mode-local; may exclude the global sets) ─────────────────────
 [dictionary]
@@ -355,6 +356,13 @@ load_on_login = true
 engine = "parakeet-tdt-ctc-110m"  # the single active engine (default: the compact 110M tier)
 eviction = "frugal"             # "fastest" | "balanced" | "frugal" (default: frugal)
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
+# Per-engine "Dictionary Matching" overrides. Defaults follow model capability (recognition bias on
+# where supported, dictionary recovery on where not), so only deviations are recorded — a fresh
+# install writes all three empty. Each list holds engine ids:
+# recognition_bias_disabled_engines    = []  # bias-capable engines with recognition bias turned OFF
+# dictionary_recovery_enabled_engines  = []  # engines with post-STT dictionary recovery turned ON
+# dictionary_recovery_disabled_engines = []  # bias-less engines with dictionary recovery turned OFF
+# (Legacy `dictionary_recovery_engines` is read once and migrated into the lists above, then dropped.)
 
 [during_dictation]
 mute_system_audio = true        # mute lands after the start sound (else it is swallowed); instant when sounds = false

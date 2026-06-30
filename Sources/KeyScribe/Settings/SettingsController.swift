@@ -124,7 +124,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func update(settings: Settings) {
         model.apply(settings)
         speechModels.syncActive(settings.stt.engine)
-        speechModels.syncDictionaryRecovery(settings.stt.dictionaryRecoveryEngines)
+        speechModels.syncSTT(settings.stt)
     }
 
     func refreshProblems() { problems.update(detectProblems()) }

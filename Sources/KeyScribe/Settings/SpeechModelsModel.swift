@@ -15,8 +15,9 @@ final class SpeechModelsModel: ObservableObject {
         let testPassed: Bool
         let errorText: String?
         let installedBytes: Int64?
-        // Only meaningful for bias-less engines: whether they recover dictionary terms post-STT.
+        let recognitionBiasOn: Bool
         let dictionaryRecoveryOn: Bool
+        let dictionaryMatchingRecommended: Bool
     }
 
     @Published private(set) var rows: [Row] = []
@@ -39,29 +40,29 @@ final class SpeechModelsModel: ObservableObject {
     private var installedSizes: [String: Int64] = [:]
     private var sizeRefreshGeneration = 0
 
-    private var dictionaryRecoveryEngines: Set<String>
+    private var stt: Settings.STT
 
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let verify: (String) async -> Bool?
     private let evictEngine: (String) async -> Void
     private let onActiveChange: (String) -> Void
-    private let onDictionaryRecoveryChange: ([String]) -> Void
+    private let onDictionaryMatchingChange: (Settings.STT) -> Void
 
     init(
         activeId: String,
-        dictionaryRecoveryEngines: [String],
+        stt: Settings.STT,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         verify: @escaping (String) async -> Bool?,
         evictEngine: @escaping (String) async -> Void,
         onActiveChange: @escaping (String) -> Void,
-        onDictionaryRecoveryChange: @escaping ([String]) -> Void
+        onDictionaryMatchingChange: @escaping (Settings.STT) -> Void
     ) {
-        self.dictionaryRecoveryEngines = Set(dictionaryRecoveryEngines)
+        self.stt = stt
         self.download = download
         self.verify = verify
         self.evictEngine = evictEngine
         self.onActiveChange = onActiveChange
-        self.onDictionaryRecoveryChange = onDictionaryRecoveryChange
+        self.onDictionaryMatchingChange = onDictionaryMatchingChange
         set = SpeechModelSet(
             catalog: EngineRegistry.availableCatalog,
             installed: ModelInstallStore.installedIds(),
@@ -108,18 +109,37 @@ final class SpeechModelsModel: ObservableObject {
         rebuild()
     }
 
-    // Keep the in-memory opt-in set aligned with a settings reload from elsewhere (no persist callback).
-    func syncDictionaryRecovery(_ ids: [String]) {
-        let incoming = Set(ids)
-        guard incoming != dictionaryRecoveryEngines else { return }
-        dictionaryRecoveryEngines = incoming
+    func syncSTT(_ stt: Settings.STT) {
+        guard stt != self.stt else { return }
+        self.stt = stt
         rebuild()
     }
 
-    // Toggle post-STT dictionary recovery for a bias-less engine, then persist the opted-in set.
+    func setRecognitionBias(_ on: Bool, for id: String) {
+        guard let info = SpeechModelCatalog.entry(for: id) else { return }
+        var updated = stt
+        updated.setRecognitionBias(on, for: info)
+        applySTTUpdate(updated)
+    }
+
     func setDictionaryRecovery(_ on: Bool, for id: String) {
-        if on { dictionaryRecoveryEngines.insert(id) } else { dictionaryRecoveryEngines.remove(id) }
-        onDictionaryRecoveryChange(dictionaryRecoveryEngines.sorted())
+        guard let info = SpeechModelCatalog.entry(for: id) else { return }
+        var updated = stt
+        updated.setDictionaryRecovery(on, for: info)
+        applySTTUpdate(updated)
+    }
+
+    func resetDictionaryMatching(for id: String) {
+        guard let info = SpeechModelCatalog.entry(for: id) else { return }
+        var updated = stt
+        updated.resetDictionaryMatching(for: info)
+        applySTTUpdate(updated)
+    }
+
+    private func applySTTUpdate(_ updated: Settings.STT) {
+        guard updated != stt else { return }
+        stt = updated
+        onDictionaryMatchingChange(updated)
         rebuild()
     }
 
@@ -290,6 +310,8 @@ final class SpeechModelsModel: ObservableObject {
             testPassed: verifiedOk.contains(info.id),
             errorText: errors[info.id],
             installedBytes: installed ? installedSizes[info.id] : nil,
-            dictionaryRecoveryOn: dictionaryRecoveryEngines.contains(info.id))
+            recognitionBiasOn: stt.recognitionBiasEnabled(for: info),
+            dictionaryRecoveryOn: stt.dictionaryRecoveryEnabled(for: info),
+            dictionaryMatchingRecommended: stt.dictionaryMatchingUsesRecommendedSettings(for: info))
     }
 }

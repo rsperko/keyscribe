@@ -55,25 +55,38 @@ public struct Settings: Codable, Equatable, Sendable {
         public var engine: String
         public var eviction: Eviction
         public var evictionIdleSeconds: Int?
-        // Bias-less engine ids that recover dictionary terms via the post-STT fuzzy stage. Only the
-        // active engine's membership matters (it gates that engine's pipeline); listed per id so the
-        // choice persists independently across engines. Defaults to every bias-exempt engine on.
-        public var dictionaryRecoveryEngines: [String]
+        public var recognitionBiasDisabledEngines: [String]
+        public var dictionaryRecoveryEnabledEngines: [String]
+        public var dictionaryRecoveryDisabledEngines: [String]
 
         enum CodingKeys: String, CodingKey {
             case engine, eviction
             case evictionIdleSeconds = "eviction_idle_seconds"
-            case dictionaryRecoveryEngines = "dictionary_recovery_engines"
+            case recognitionBiasDisabledEngines = "recognition_bias_disabled_engines"
+            case dictionaryRecoveryEnabledEngines = "dictionary_recovery_enabled_engines"
+            case dictionaryRecoveryDisabledEngines = "dictionary_recovery_disabled_engines"
+            case legacyDictionaryRecoveryEngines = "dictionary_recovery_engines"
         }
 
         public init(
             engine: String, eviction: Eviction, evictionIdleSeconds: Int? = nil,
-            dictionaryRecoveryEngines: [String] = SpeechModelCatalog.biasExemptIds
+            recognitionBiasDisabledEngines: [String] = [],
+            dictionaryRecoveryEnabledEngines: [String] = [],
+            dictionaryRecoveryDisabledEngines: [String] = [],
+            dictionaryRecoveryEngines legacyDictionaryRecoveryEngines: [String]? = nil
         ) {
             self.engine = engine
             self.eviction = eviction
             self.evictionIdleSeconds = evictionIdleSeconds
-            self.dictionaryRecoveryEngines = dictionaryRecoveryEngines
+            self.recognitionBiasDisabledEngines = Self.normalized(recognitionBiasDisabledEngines)
+            if let legacyDictionaryRecoveryEngines {
+                let overrides = Self.recoveryOverrides(fromLegacyEnabled: legacyDictionaryRecoveryEngines)
+                self.dictionaryRecoveryEnabledEngines = overrides.enabled
+                self.dictionaryRecoveryDisabledEngines = overrides.disabled
+            } else {
+                self.dictionaryRecoveryEnabledEngines = Self.normalized(dictionaryRecoveryEnabledEngines)
+                self.dictionaryRecoveryDisabledEngines = Self.normalized(dictionaryRecoveryDisabledEngines)
+            }
         }
 
         public init(from decoder: Decoder) throws {
@@ -82,8 +95,92 @@ public struct Settings: Codable, Equatable, Sendable {
             engine = try c.decodeIfPresent(String.self, forKey: .engine) ?? d.engine
             eviction = try c.decodeIfPresent(Eviction.self, forKey: .eviction) ?? d.eviction
             evictionIdleSeconds = try c.decodeIfPresent(Int.self, forKey: .evictionIdleSeconds)
-            dictionaryRecoveryEngines = try c.decodeIfPresent(
-                [String].self, forKey: .dictionaryRecoveryEngines) ?? d.dictionaryRecoveryEngines
+            recognitionBiasDisabledEngines = Self.normalized(try c.decodeIfPresent(
+                [String].self, forKey: .recognitionBiasDisabledEngines) ?? d.recognitionBiasDisabledEngines)
+            let enabled = try c.decodeIfPresent([String].self, forKey: .dictionaryRecoveryEnabledEngines)
+            let disabled = try c.decodeIfPresent([String].self, forKey: .dictionaryRecoveryDisabledEngines)
+            if enabled != nil || disabled != nil {
+                dictionaryRecoveryEnabledEngines = Self.normalized(enabled ?? [])
+                dictionaryRecoveryDisabledEngines = Self.normalized(disabled ?? [])
+            } else if let legacy = try c.decodeIfPresent([String].self, forKey: .legacyDictionaryRecoveryEngines) {
+                let overrides = Self.recoveryOverrides(fromLegacyEnabled: legacy)
+                dictionaryRecoveryEnabledEngines = overrides.enabled
+                dictionaryRecoveryDisabledEngines = overrides.disabled
+            } else {
+                dictionaryRecoveryEnabledEngines = d.dictionaryRecoveryEnabledEngines
+                dictionaryRecoveryDisabledEngines = d.dictionaryRecoveryDisabledEngines
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(engine, forKey: .engine)
+            try c.encode(eviction, forKey: .eviction)
+            try c.encodeIfPresent(evictionIdleSeconds, forKey: .evictionIdleSeconds)
+            try c.encode(recognitionBiasDisabledEngines, forKey: .recognitionBiasDisabledEngines)
+            try c.encode(dictionaryRecoveryEnabledEngines, forKey: .dictionaryRecoveryEnabledEngines)
+            try c.encode(dictionaryRecoveryDisabledEngines, forKey: .dictionaryRecoveryDisabledEngines)
+        }
+
+        public func recognitionBiasEnabled(for info: SpeechModelInfo) -> Bool {
+            recognitionBiasEnabled(engineId: info.id, supportsRecognitionBias: info.supportsRecognitionBias)
+        }
+
+        public func recognitionBiasEnabled(engineId: String, supportsRecognitionBias: Bool) -> Bool {
+            supportsRecognitionBias && !recognitionBiasDisabledEngines.contains(engineId)
+        }
+
+        public func dictionaryRecoveryEnabled(for info: SpeechModelInfo) -> Bool {
+            dictionaryRecoveryEnabled(engineId: info.id, supportsRecognitionBias: info.supportsRecognitionBias)
+        }
+
+        public func dictionaryRecoveryEnabled(engineId: String, supportsRecognitionBias: Bool) -> Bool {
+            if dictionaryRecoveryEnabledEngines.contains(engineId) { return true }
+            if dictionaryRecoveryDisabledEngines.contains(engineId) { return false }
+            return !supportsRecognitionBias
+        }
+
+        public func dictionaryMatchingUsesRecommendedSettings(for info: SpeechModelInfo) -> Bool {
+            recognitionBiasEnabled(for: info) == info.supportsRecognitionBias
+                && dictionaryRecoveryEnabled(for: info) == !info.supportsRecognitionBias
+        }
+
+        public mutating func setRecognitionBias(_ on: Bool, for info: SpeechModelInfo) {
+            if !info.supportsRecognitionBias { return }
+            Self.setMembership(!on, id: info.id, in: &recognitionBiasDisabledEngines)
+        }
+
+        public mutating func setDictionaryRecovery(_ on: Bool, for info: SpeechModelInfo) {
+            let recommended = !info.supportsRecognitionBias
+            Self.setMembership(on && !recommended, id: info.id, in: &dictionaryRecoveryEnabledEngines)
+            Self.setMembership(!on && recommended, id: info.id, in: &dictionaryRecoveryDisabledEngines)
+        }
+
+        public mutating func resetDictionaryMatching(for info: SpeechModelInfo) {
+            Self.setMembership(false, id: info.id, in: &recognitionBiasDisabledEngines)
+            Self.setMembership(false, id: info.id, in: &dictionaryRecoveryEnabledEngines)
+            Self.setMembership(false, id: info.id, in: &dictionaryRecoveryDisabledEngines)
+        }
+
+        private static func recoveryOverrides(fromLegacyEnabled ids: [String]) -> (enabled: [String], disabled: [String]) {
+            let enabled = Set(ids)
+            let enabledOverrides = SpeechModelCatalog.all
+                .filter { $0.supportsRecognitionBias && enabled.contains($0.id) }
+                .map(\.id)
+            let disabledOverrides = SpeechModelCatalog.all
+                .filter { !$0.supportsRecognitionBias && !enabled.contains($0.id) }
+                .map(\.id)
+            return (normalized(enabledOverrides), normalized(disabledOverrides))
+        }
+
+        private static func normalized(_ ids: [String]) -> [String] {
+            Array(Set(ids)).sorted()
+        }
+
+        private static func setMembership(_ included: Bool, id: String, in ids: inout [String]) {
+            var set = Set(ids)
+            if included { set.insert(id) } else { set.remove(id) }
+            ids = set.sorted()
         }
     }
 
