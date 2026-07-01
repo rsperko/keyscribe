@@ -77,13 +77,25 @@ extension Tokenizer {
     // Spans must be ordered by start and non-overlapping. Used only by command stages (verbatim,
     // clipboard); redaction keeps plain `splice` so it never disturbs punctuation around a sensitive
     // span. `dedup: false` (clipboard) mints a distinct token per site — see `splice`.
+    //
+    // Bracketed-terminator FOLD: an aggressively-punctuating STT (Whisper Small) inserts a sentence
+    // terminator (. ! ?) right before an inline paste even without a pause, so "the directory. <paste>.
+    // Decide" leaves a spurious period before the pasted value. When the content is bracketed by a
+    // terminator on BOTH sides, the leading one is treated as a pause artifact: it is dropped (the
+    // content folds into the preceding clause) and RELOCATED to the trailing boundary, keeping its type
+    // (a "?" stays a "?"). Requiring a terminator on both sides leaves a paste that genuinely starts the
+    // next sentence ("It's broken. <paste> fixes it" — no trailing terminator) untouched.
     func spliceAbsorbing(
         _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true
     ) -> String {
         guard !spans.isEmpty else { return text }
         let absorb: Set<Character> = [" ", "\t", ","]
+        let terminators: Set<Character> = [".", "!", "?"]
         var result = ""
         var cursor = text.startIndex
+        func token(_ value: String) -> String {
+            dedup ? tokenize(value, type: type) : tokenizeUnique(value, type: type)
+        }
         for span in spans {
             let hadLeftSeparator = span.range.lowerBound > text.startIndex
                 && absorb.contains(text[text.index(before: span.range.lowerBound)])
@@ -97,10 +109,22 @@ extension Tokenizer {
             var end = span.range.upperBound
             while end < text.endIndex, absorb.contains(text[end]) { end = text.index(after: end) }
             result += text[cursor..<start]
+
+            let leadingTerminator = result.last.flatMap { terminators.contains($0) ? $0 : nil }
+            let bracketed = end < text.endIndex && terminators.contains(text[end])
+            if let leading = leadingTerminator, bracketed {
+                result.removeLast()   // drop the artifact leading terminator
+                if let last = result.last, last != " ", last != "\n", last != "\t" { result += " " }
+                result += token(span.value)
+                result.append(leading)   // relocate it to the true clause end (replacing the trailing one)
+                cursor = text.index(after: end)
+                continue
+            }
+
             if hadLeftSeparator, let last = result.last, last != " ", last != "\n", last != "\t" {
                 result += " "
             }
-            result += dedup ? tokenize(span.value, type: type) : tokenizeUnique(span.value, type: type)
+            result += token(span.value)
             if hadRightSeparator, end < text.endIndex, text[end] != "\n" {
                 result += " "
             }

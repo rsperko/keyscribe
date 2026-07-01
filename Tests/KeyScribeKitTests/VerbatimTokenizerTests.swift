@@ -56,6 +56,14 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == ".config")
     }
 
+    // Bracketed-terminator fold applies to verbatim too: a spurious leading period is dropped and
+    // relocated past the (untouched) protected content.
+    @Test func bracketedTerminatorFolds() {
+        let (out, t) = tokenize("the config. begin verbatim foo end verbatim. Next")
+        #expect(out == "the config ⟦SN:VERB:1⟧. Next")
+        #expect(t.restore(out) == "the config foo. Next")
+    }
+
     // A wall of pause commas around the markers must resolve (and not backtrack pathologically).
     @Test func manyCommasAroundMarkersResolve() {
         let (out, t) = tokenize("begin verbatim ,,, X ,,, end verbatim")

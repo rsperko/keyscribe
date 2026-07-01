@@ -57,10 +57,54 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "the value X done")
     }
 
-    // A preceding sentence period is kept — only whitespace/commas are absorbed.
+    // A preceding period with NO trailing terminator is kept (the paste is not bracketed — it may
+    // start a new sentence, so we must not fold it into the previous clause).
     @Test func precedingPeriodIsPreserved() {
         let (out, _) = tokenize("done. insert clipboard contents", clipboard: "X")
         #expect(out == "done. ⟦SN:CLIP:1⟧")
+    }
+
+    // Bracketed-terminator fold: Whisper's spurious period before the paste ("directory. <paste>.
+    // Decide") is dropped and relocated to the true clause end.
+    @Test func bracketedTerminatorFolds() {
+        let (out, t) = tokenize("read the directory. insert clipboard contents. decide", clipboard: "agent_notes/foo/")
+        #expect(out == "read the directory ⟦SN:CLIP:1⟧. decide")
+        #expect(t.restore(out) == "read the directory agent_notes/foo/. decide")
+    }
+
+    // The relocated terminator keeps its TYPE — a detected question stays a question.
+    @Test func foldPreservesTerminatorType() {
+        let (out, t) = tokenize("is this the right directory? insert clipboard contents. yes", clipboard: "P")
+        #expect(out == "is this the right directory ⟦SN:CLIP:1⟧? yes")
+        #expect(t.restore(out) == "is this the right directory P? yes")
+    }
+
+    // Risk 1 — content on its own at the end (no trailing terminator): NOT bracketed → no fold.
+    @Test func pasteAtEndAfterSentenceIsNotFolded() {
+        let (out, _) = tokenize("here's the path. insert clipboard contents", clipboard: "P")
+        #expect(out == "here's the path. ⟦SN:CLIP:1⟧")
+    }
+
+    // Risk 2 — content starts the next sentence (no trailing terminator): NOT bracketed → no fold.
+    @Test func pasteStartingNextSentenceIsNotFolded() {
+        let (out, t) = tokenize("it's broken. insert clipboard contents fixes it", clipboard: "P")
+        #expect(out == "it's broken. ⟦SN:CLIP:1⟧ fixes it")
+        #expect(t.restore(out) == "it's broken. P fixes it")
+    }
+
+    // The singular aliases fire too.
+    @Test func singularAliasFires() {
+        let (out, t) = tokenize("insert clipboard content", clipboard: "P")
+        #expect(out == "⟦SN:CLIP:1⟧")
+        #expect(t.restore(out) == "P")
+    }
+
+    // Parakeet TDT v3 sometimes punctuates mid-phrase ("insert clipboard, contents"); the command
+    // still fires (verified by the wav-based clipboard-check across engines).
+    @Test func internalCommaFromSTTStillFires() {
+        let (out, t) = tokenize("read the directory insert clipboard, contents now", clipboard: "P")
+        #expect(out == "read the directory ⟦SN:CLIP:1⟧ now")
+        #expect(t.restore(out) == "read the directory P now")
     }
 
     @Test func commandAtStartAbsorbsFollowingComma() {

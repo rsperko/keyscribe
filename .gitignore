@@ -25,6 +25,8 @@ benchmark/voices/*.wav
 benchmark/voices/manifest.json
 benchmark/voices/.ttsenv
 benchmark/voices/.tmpwav
+# clipboard/ command-verification corpus: recorded/TTS clips stay local; clipboard.json IS committed
+benchmark/clipboard/*.wav
 
 
 # direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead

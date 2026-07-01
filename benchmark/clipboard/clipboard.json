@@ -1,0 +1,12 @@
+{
+  "clipboard": "agent_notes/foo/",
+  "note": "Utterances that contain the spoken 'insert clipboard contents' command. The clipboard VALUE above is inserted by the pipeline (never spoken). Record <id>.wav for each case (real voice reproduces Whisper's spurious punctuation best; `say` gives a quick TTS smoke test). Verified by `KeyScribe --clipboard-check benchmark/clipboard`.",
+  "cases": [
+    { "id": "cb01", "say": "read through the directory insert clipboard contents decide whether this makes any sense" },
+    { "id": "cb02", "say": "the config file is insert clipboard contents and it looks correct to me" },
+    { "id": "cb03", "say": "please compare insert clipboard contents against the previous version" },
+    { "id": "cb04", "say": "is the path insert clipboard contents the one you meant" },
+    { "id": "cb05", "say": "please insert clipboard content into the notes for later" },
+    { "id": "cb06", "say": "double check that insert clipboard contents matches what we expect" }
+  ]
+}

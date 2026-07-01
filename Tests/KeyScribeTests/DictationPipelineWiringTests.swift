@@ -315,6 +315,15 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "insert clipboard contents")
     }
 
+    // Regression for the Whisper-Small report: it puts a spurious period before the paste
+    // ("directory. <paste>"), which the bracketed-fold removes end-to-end.
+    @Test func whisperPeriodBeforePasteIsFoldedEndToEnd() async {
+        let out = await run(
+            transcript: "Read through the directory. insert clipboard contents. Decide whether this makes any sense.",
+            mode: mode(id: "plain", liveEdits: true), clipboard: "agent_notes/foo/")
+        #expect(out.lastResult == "Read through the directory agent_notes/foo/. Decide whether this makes any sense.")
+    }
+
     // Two clipboard pastes in one AI-rewrite dictation get DISTINCT tokens, so a faithful rewrite is
     // accepted by the exactly-once gate instead of being rejected into a local fallback.
     @Test func twoClipboardCommandsSurviveTheGateInARewrite() async {

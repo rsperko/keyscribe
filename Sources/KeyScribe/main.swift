@@ -25,6 +25,9 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
         --engines <a,b,...>     Limit the benchmark run to these engine ids.
         --raw                   Emit raw per-clip benchmark output.
         --fuzzy                 Apply the post-STT fuzzy corrector (dict = clip bias terms) before scoring.
+      --clipboard-check <dir> Verify the "insert clipboard contents" command + fold across every
+                              installed engine on the recordings in <dir> (clipboard.json), then exit.
+                              Honors --engines.
       --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                               (downloaded models stay shared). Pair with --first-run to test
                               onboarding without touching your real configuration.
@@ -82,6 +85,23 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
     let done = DispatchSemaphore(value: 0)
     Task.detached {
         await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
+        done.signal()
+    }
+    done.wait()
+    exit(0)
+}
+
+// Headless dev mode: `KeyScribe --clipboard-check <dir>` verifies the "insert clipboard contents"
+// command + fold across every installed engine on recorded audio, then exits.
+if let i = CommandLine.arguments.firstIndex(of: "--clipboard-check"), i + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    var only: Set<String>?
+    if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
+        only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
+    }
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await ClipboardCheckRunner.run(dir: dir, only: only)
         done.signal()
     }
     done.wait()
