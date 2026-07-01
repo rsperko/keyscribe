@@ -41,11 +41,12 @@ struct RewriteServiceTests {
     }
 
     @Test func retriesOnceThenSucceeds() async {
-        // first output drops the token (gate fail) → retry → second output is clean
+        // first output drops the token (gate fail) → retry → second output is clean. Content carries the
+        // token (as the tokenized transcript does in production) so the gate requires it.
         let client = FakeClient([.success("dropped it"), .success("kept ⟦SN:REDACT:1⟧")])
         let svc = RewriteService(client: client)
         let out = await svc.rewrite(
-            localText: "kept ⟦SN:REDACT:1⟧", inputs: inputs(), connection: conn,
+            localText: "kept ⟦SN:REDACT:1⟧", inputs: inputs(content: "kept ⟦SN:REDACT:1⟧"), connection: conn,
             issuedTokens: ["⟦SN:REDACT:1⟧"])
         #expect(out == .rewritten("kept ⟦SN:REDACT:1⟧"))
         #expect(await client.calls == 2)
@@ -55,10 +56,24 @@ struct RewriteServiceTests {
         let client = FakeClient([.success("no token"), .success("still no token")])
         let svc = RewriteService(client: client)
         let out = await svc.rewrite(
-            localText: "orig ⟦SN:REDACT:1⟧", inputs: inputs(), connection: conn,
+            localText: "orig ⟦SN:REDACT:1⟧", inputs: inputs(content: "orig ⟦SN:REDACT:1⟧"), connection: conn,
             issuedTokens: ["⟦SN:REDACT:1⟧"])
         #expect(out == .localFallback(localText: "orig ⟦SN:REDACT:1⟧"))
         #expect(await client.calls == 2)   // initial + one stricter retry, no more
+    }
+
+    // W4/H2: an issued token that was swallowed upstream (a verbatim token captured inside a redaction
+    // span) is absent from the sent content, so the model never sees it. The gate must NOT require it —
+    // a clean output that reproduces only the tokens actually present passes on the first call, no doomed
+    // retry, no spurious fallback for the privacy+verbatim users this targets.
+    @Test func passesWhenIssuedTokenAbsentFromSentContent() async {
+        let client = FakeClient([.success("The ⟦SN:REDACT:1⟧ please.")])
+        let svc = RewriteService(client: client)
+        let out = await svc.rewrite(
+            localText: "the ⟦SN:REDACT:1⟧ please", inputs: inputs(content: "the ⟦SN:REDACT:1⟧ please"),
+            connection: conn, issuedTokens: ["⟦SN:VERB:1⟧", "⟦SN:REDACT:1⟧"])
+        #expect(out == .rewritten("The ⟦SN:REDACT:1⟧ please."))
+        #expect(await client.calls == 1)
     }
 
     @Test func emptyOutputFallsBack() async {

@@ -167,7 +167,7 @@ struct DictationCancellationTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: micStatus,
             accessibilityGranted: accessibilityGranted)
@@ -202,7 +202,7 @@ struct DictationCancellationTests {
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), audio: audio,
-            insert: { _, _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -241,7 +241,7 @@ struct DictationCancellationTests {
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud, audio: audio,
-            insert: { _, _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -296,7 +296,7 @@ struct DictationCancellationTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -334,7 +334,7 @@ struct DictationCancellationTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -568,7 +568,7 @@ struct DictationCaptureStartTests {
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
-            insert: { _, _, _, _ in await insertSpy.record() },
+            insert: { _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
     }

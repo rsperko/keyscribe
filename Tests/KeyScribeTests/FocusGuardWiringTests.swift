@@ -55,7 +55,7 @@ struct FocusGuardWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: nil, hud: nil,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { decision, _, _, _ in result.decision = decision },
+            insert: { decision, _, _, _ in result.decision = decision; return true },
             snapshot: {
                 let n = calls.next()
                 return TargetSnapshot(

@@ -81,6 +81,27 @@ struct DictationPipelineWiringTests {
         func render(_ state: HUDState) { states.append(state) }
     }
 
+    // Returns the captured target's bundle for the first two snapshot() reads (handleStart capture +
+    // finishInsertion entry), then a different bundle for the pre-submit re-snapshot — simulating the
+    // user switching apps during the paste-settle window.
+    @MainActor private final class FocusSequence {
+        private var calls = 0
+        func next() -> TargetSnapshot {
+            defer { calls += 1 }
+            return TargetSnapshot(bundleId: calls < 2 ? "test.bundle" : "other.bundle")
+        }
+    }
+
+    // Same app throughout, but the focused window changes for the pre-submit snapshot — a same-app
+    // window switch during the paste-settle window that a bundle-only check would miss.
+    @MainActor private final class WindowSwitchSequence {
+        private var calls = 0
+        func next() -> TargetSnapshot {
+            defer { calls += 1 }
+            return TargetSnapshot(bundleId: "test.bundle", focusedWindowId: calls < 2 ? "w1" : "w2")
+        }
+    }
+
     // Counts how many times the host read the clipboard seam (all on the main actor).
     @MainActor private final class ClipboardReads { var count = 0 }
 
@@ -125,6 +146,8 @@ struct DictationPipelineWiringTests {
         dictionaryRecoveryEnabled: Bool? = nil,
         recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
+        insertSucceeds: Bool = true,
+        snapshotProvider: (@MainActor () -> TargetSnapshot)? = nil,
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         let supportDir = FileManager.default.temporaryDirectory
@@ -165,11 +188,11 @@ struct DictationPipelineWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hudSpy,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, method, modifier, text in await insertSpy.record(method, modifier, text) },
+            insert: { _, method, modifier, text in await insertSpy.record(method, modifier, text); return insertSucceeds },
             submitKey: { await submitSpy.record($0) },
             captureSelection: captureSelection,
             clipboard: { clipboardReads.count += 1; return clipboard },
-            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            snapshot: snapshotProvider ?? { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },
             accessibilityGranted: { accessibility },
             llmClient: llm)
@@ -560,6 +583,39 @@ struct DictationPipelineWiringTests {
         #expect(out.outcome == .copied)
         #expect(out.submits.isEmpty)
         #expect(out.insertedText == "send it")       // trailing/insert still happens; only submit is gated
+    }
+
+    // W5/H1: the paste silently failed (writeScratchVerified false) — the outcome must NOT claim
+    // "inserted" and the submit Return must not fire (it would send a stale draft in a chat app).
+    @Test func silentPasteFailureReportsFailedAndSkipsSubmit() async {
+        let out = await run(
+            transcript: "send it", modes: [mode(id: "s", submit: .return)], defaultModeId: "s",
+            insertSucceeds: false)
+        #expect(out.outcome == .failed)
+        #expect(out.submits.isEmpty)
+        #expect(out.lastResult == "send it")   // still recoverable via "Paste last dictation"
+    }
+
+    // W5/H4: focus moved between the paste-settle window and the submit — the frontmost app at submit
+    // time differs from the captured target, so the Return is skipped (it would fire into the wrong app).
+    @Test func submitSkippedWhenFocusMovesBeforeReturn() async {
+        let focus = FocusSequence()   // "test.bundle" for capture + finishInsertion, then "other.bundle"
+        let out = await run(
+            transcript: "send it", modes: [mode(id: "s", submit: .return)], defaultModeId: "s",
+            snapshotProvider: { focus.next() })
+        #expect(out.outcome == .inserted)   // the text DID land; only the submit is suppressed
+        #expect(out.submits.isEmpty)
+    }
+
+    // W5/H4, same-app window switch: bundle id is unchanged but the focused window moved, so the submit
+    // must still be suppressed (the insertion focus guard, reused here, compares window id too).
+    @Test func submitSkippedWhenWindowSwitchesWithinSameApp() async {
+        let focus = WindowSwitchSequence()
+        let out = await run(
+            transcript: "send it", modes: [mode(id: "s", submit: .return)], defaultModeId: "s",
+            snapshotProvider: { focus.next() })
+        #expect(out.outcome == .inserted)
+        #expect(out.submits.isEmpty)
     }
 
     @Test func insertionMethodIsHonoredAndTrailingAndSubmitCompose() async {

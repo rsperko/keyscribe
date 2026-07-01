@@ -9,9 +9,10 @@ import WhisperKit
 // footprint.
 //
 // Not an actor: WhisperKit's class isn't Sendable, so an actor can't await its nonisolated methods
-// without "sending" the instance off-actor. Access is serialized by the commit-on-release dictation
-// state machine (load/evict happen between dictations, never during one), so `nonisolated(unsafe)`
-// storage is the proven SDK-edge pattern here, not a race.
+// without "sending" the instance off-actor. Every access to the `pipe` handle is serialized by the
+// SerializedEngine actor decorator that wraps this engine at EngineRegistry.makeAll (load is single-
+// flight; load/transcribe/evict never overlap), so `nonisolated(unsafe)` storage is safe here — that
+// decorator, not an informal "loads happen between dictations" assumption, is the guarantee.
 // Per-model identity bundled so adding a Whisper model is adding a profile constant, not editing
 // the engine. Each profile owns its own install subdir under modelsDir so reconcile/delete treats
 // the variants independently (the Large v3 Turbo keeps the original "whisper" dir for back-compat).
@@ -58,12 +59,36 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         // Reserve a tail of the bar for the opaque CoreML load/compile step, which has no progress
         // callback — so the download doesn't prematurely show 100% while WhisperKit loads ~632 MB.
         let downloadShare = 0.9
+        // Load an already-downloaded model with ZERO network (SpeechEngine contract). WhisperKit.download
+        // ALWAYS makes a Hugging Face metadata round trip (getFilenames) before consulting the local
+        // cache, so calling it on every cold load is an unconsented outbound request that also stalls or
+        // fails offline with a fully valid model on disk. When the variant folder is already present we
+        // build the config against it directly (download:false is already set below); we only reach for
+        // WhisperKit.download when the model is genuinely absent, or as a repair if an on-disk copy turns
+        // out to be partial/corrupt (the download path snapshots the missing files, healing it).
+        let local = localModelFolder(in: modelsDir)
+        if modelFilesPresent(at: local) {
+            do {
+                pipe = try await loadPipe(folder: local, progress: progress, downloadShare: downloadShare)
+                progress?(.init(phase: "Ready", fraction: 1))
+                return
+            } catch {
+                Log.models.notice("whisper: offline load from present folder failed (\(error.localizedDescription, privacy: .public)); re-downloading")
+            }
+        }
         let base = modelsDir.appendingPathComponent(installDir, isDirectory: true)
         let folder = try await WhisperKit.download(
             variant: variant, downloadBase: base,
             progressCallback: { p in
                 progress?(.init(phase: "Downloading speech model…", fraction: p.fractionCompleted * downloadShare))
             })
+        pipe = try await loadPipe(folder: folder, progress: progress, downloadShare: downloadShare)
+        progress?(.init(phase: "Ready", fraction: 1))
+    }
+
+    private func loadPipe(
+        folder: URL, progress: (@Sendable (ModelLoadProgress) -> Void)?, downloadShare: Double
+    ) async throws -> WhisperKit {
         progress?(.init(phase: "Compiling speech model…", fraction: downloadShare))
         // Run on the GPU, not the Neural Engine. WhisperKit defaults the audio encoder and text decoder to
         // .cpuAndNeuralEngine, whose first-load ANE device-compile of this 632 MB model takes ~140 s — and
@@ -76,8 +101,37 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         let config = WhisperKitConfig(
             modelFolder: folder.path, computeOptions: compute,
             verbose: false, prewarm: false, load: true, download: false)
-        pipe = try await WhisperKit(config)
-        progress?(.init(phase: "Ready", fraction: 1))
+        return try await WhisperKit(config)
+    }
+
+    // WhisperKit.download snapshots the whisperkit-coreml repo under downloadBase, so the variant's
+    // CoreML bundles land at <installDir>/models/argmaxinc/whisperkit-coreml/<variant>.
+    private func localModelFolder(in modelsDir: URL) -> URL {
+        modelsDir
+            .appendingPathComponent(installDir, isDirectory: true)
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("argmaxinc", isDirectory: true)
+            .appendingPathComponent("whisperkit-coreml", isDirectory: true)
+            .appendingPathComponent(variant, isDirectory: true)
+    }
+
+    // WhisperKit loads three CoreML bundles by name (MelSpectrogram, AudioEncoder, TextDecoder). Require
+    // ALL of them: a partial cache (an interrupted download that landed only one) must NOT be adopted as
+    // "installed" — offline load would then fail and reconcile could keep a broken install.
+    private static let requiredBundles = ["MelSpectrogram", "AudioEncoder", "TextDecoder"]
+
+    private func modelFilesPresent(at folder: URL) -> Bool {
+        let fm = FileManager.default
+        return Self.requiredBundles.allSatisfy { name in
+            fm.fileExists(atPath: folder.appendingPathComponent("\(name).mlmodelc").path)
+                || fm.fileExists(atPath: folder.appendingPathComponent("\(name).mlpackage").path)
+        }
+    }
+
+    // The CoreML bundles are a checkable install footprint, so reconcile does not need the marker to
+    // know the model is present — a completed-but-unmarked download is adopted rather than deleted.
+    func verifyInstalled(in modelsDir: URL) -> Bool? {
+        modelFilesPresent(at: localModelFolder(in: modelsDir))
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {

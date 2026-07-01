@@ -7,6 +7,11 @@ public protocol SpeechEngine: Sendable {
     // Sample rate (Hz) the capture path should record at for this engine, so the WAV needs no
     // resample before transcription. 16 kHz suits every engine except Qwen3-ASR (24 kHz).
     var captureSampleRate: Int { get }
+    // Contract: once a model is installed (its files are on disk — verifyInstalled true, or the install
+    // marker records it), load/loadIfNeeded MUST complete with ZERO network. Only a genuinely-absent
+    // model (first install) may reach the network. STT is always on-device; a per-cold-load metadata
+    // fetch would both break offline dictation and violate the "only the BYOK rewrite leaves the machine"
+    // invariant.
     func loadIfNeeded() async throws
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String

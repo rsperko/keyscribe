@@ -82,14 +82,18 @@ public struct ReplacementsStage: PipelineStage {
             : nil
     }
 
+    // Transform only the plain runs between ⟦SN:…⟧ tokens so a rule (literal `verb`, regex `\d+`) can
+    // never rewrite a verbatim/clipboard token body minted upstream at position 20 (design.md §4.2).
     private func transform(_ text: String) -> String {
-        var result = text
-        for rule in prepared {
-            let range = NSRange(result.startIndex..., in: result)
-            guard rule.regex.firstMatch(in: result, range: range) != nil else { continue }
-            result = rule.regex.stringByReplacingMatches(in: result, range: range, withTemplate: rule.template)
+        SentinelText.mappingOutsideSentinels(text) { run in
+            var result = run
+            for rule in prepared {
+                let range = NSRange(result.startIndex..., in: result)
+                guard rule.regex.firstMatch(in: result, range: range) != nil else { continue }
+                result = rule.regex.stringByReplacingMatches(in: result, range: range, withTemplate: rule.template)
+            }
+            return result
         }
-        return result
     }
 
     // The verbatim value to insert when one rule owns the WHOLE utterance, else nil. A rule "owns"
@@ -101,6 +105,10 @@ public struct ReplacementsStage: PipelineStage {
     public func bareReplacement(for input: String, transformedInput: String? = nil) -> String? {
         let core = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
+        // A whole-utterance replacement is inserted verbatim, bypassing the LLM; if the utterance
+        // carries a protected token (verbatim/clipboard), no single rule cleanly "owns" it — fall
+        // through to the normal path rather than let a rule match across the opaque token.
+        guard !SentinelText.containsSentinel(core) else { return nil }
         let coreRange = NSRange(core.startIndex..., in: core)
         for rule in prepared {
             guard let match = rule.regex.firstMatch(in: core, range: coreRange), match.range == coreRange else { continue }

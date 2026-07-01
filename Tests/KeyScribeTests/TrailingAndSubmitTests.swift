@@ -58,7 +58,7 @@ struct TrailingAndSubmitTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: nil, hud: nil,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, text in captured.insertedText = text },
+            insert: { _, _, _, text in captured.insertedText = text; return true },
             submitKey: { submit in captured.submits.append(submit) },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },

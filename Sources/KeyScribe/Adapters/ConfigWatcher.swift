@@ -1,23 +1,36 @@
 import CoreServices
 import Foundation
+import KeyScribeKit
 
-// Watches the config directory tree (FSEvents) and fires `onChange` — coalesced — whenever any
-// file changes, so the in-memory ConfigCache can invalidate. Event-driven: no polling, no hot-path
-// I/O. External edits (and, later, the Settings UI's writes) are picked up automatically.
+// Watches the config directory tree (FSEvents) and fires `onChange` — coalesced — whenever a
+// CONFIG file changes, so the in-memory ConfigCache can invalidate. Event-driven: no polling, no
+// hot-path I/O. External edits (and, later, the Settings UI's writes) are picked up automatically.
+// The callback filters the delivered event paths through ConfigWatchFilter so writes under
+// `history/` (every dictation) and `lkg/` (normal saves) do NOT trigger a spurious full reload.
 final class ConfigWatcher {
     private final class Box: Sendable {
         let onChange: @Sendable () -> Void
-        init(onChange: @escaping @Sendable () -> Void) { self.onChange = onChange }
+        let supportDir: String
+        init(supportDir: String, onChange: @escaping @Sendable () -> Void) {
+            self.supportDir = supportDir
+            self.onChange = onChange
+        }
     }
 
     private var stream: FSEventStreamRef?
     private let box: Box
 
     init?(path: String, onChange: @escaping @Sendable () -> Void) {
-        box = Box(onChange: onChange)
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        box = Box(supportDir: path, onChange: onChange)
+        // kFSEventStreamCreateFlagUseCFTypes makes `eventPaths` a CFArray of CFString we can read;
+        // without it the paths are delivered as a raw C string array and cannot be filtered.
+        let callback: FSEventStreamCallback = { _, info, numEvents, eventPaths, _, _ in
             guard let info else { return }
-            Unmanaged<Box>.fromOpaque(info).takeUnretainedValue().onChange()
+            let box = Unmanaged<Box>.fromOpaque(info).takeUnretainedValue()
+            let paths = (unsafeBitCast(eventPaths, to: NSArray.self) as? [String]) ?? []
+            guard ConfigWatchFilter.batchIsConfigRelevant(changedPaths: paths, supportDir: box.supportDir)
+            else { return }
+            box.onChange()
         }
         var context = FSEventStreamContext(
             version: 0,
@@ -28,7 +41,7 @@ final class ConfigWatcher {
             nil, callback, &context, [path] as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.2,  // coalescing latency (seconds)
-            FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer))
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes))
         else { return nil }
 
         self.stream = stream

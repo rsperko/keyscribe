@@ -282,4 +282,31 @@ struct HistoryStoreTests {
         #expect(store.delete(sampleEntry(heard: "absent", at: 99)) == false)
         #expect(store.entries().count == 1)
     }
+
+    // Two byte-identical dictations in the same whole second are equal after round-trip (the timestamp
+    // encodes at second precision). Deleting one must leave the other, not wipe both.
+    @Test func deleteRemovesOnlyOneOfTwoIdenticalSameSecondEntries() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let dup = sampleEntry(heard: "same", result: "Same.", at: 0)
+        try store.append(dup, today: "2026-06-20")
+        try store.append(dup, today: "2026-06-20")
+        #expect(store.delete(dup) == true)
+        #expect(store.entries().count == 1)
+        #expect(store.entries().first?.heard == "same")
+    }
+
+    // A crash can leave the last line without its trailing newline; the next append must not glue onto
+    // it (which fuses two entries into one undecodable blob, losing both).
+    @Test func appendHealsMissingTrailingNewline() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        try store.append(sampleEntry(heard: "first", at: 0), today: "2026-06-20")
+        let file = store.dir.appendingPathComponent("2026-06-20.jsonl")
+        var content = try String(contentsOf: file, encoding: .utf8)
+        while content.hasSuffix("\n") { content.removeLast() }   // simulate a crash-truncated line
+        try Data(content.utf8).write(to: file)
+        try store.append(sampleEntry(heard: "second", at: 10), today: "2026-06-20")
+        #expect(Set(store.entries().map(\.heard)) == ["first", "second"])
+    }
 }

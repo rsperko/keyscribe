@@ -25,10 +25,10 @@ struct Qwen3ModelProfile {
 // terms are passed as the decoder `context`, an LLM-style prompt prefix that nudges recognition
 // toward those spellings (proven: "KeyScribe" misheard as "Stan word" without context, correct with).
 //
-// Not an actor: Qwen3ASRModel isn't Sendable (and is documented not thread-safe). Access is
-// serialized by the commit-on-release dictation state machine — load/evict happen between
-// dictations, never during one — so `nonisolated(unsafe)` storage is the SDK-edge pattern, not a
-// race. Same shape as WhisperEngine.
+// Not an actor: Qwen3ASRModel isn't Sendable (and is documented not thread-safe). Access to the
+// `model` handle is serialized by the SerializedEngine actor decorator wrapping this engine at
+// EngineRegistry.makeAll (single-flight load; load/transcribe/evict never overlap), so
+// `nonisolated(unsafe)` storage is safe. Same shape as WhisperEngine.
 //
 // Requires `mlx.metallib` next to the executable inside the .app: without it MLX hard-fails at the
 // first GPU op ("Failed to load the default metallib"). make-app.sh builds and bundles it.
@@ -74,9 +74,25 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         // per-variant isolation has to come from basePath, not cacheDirName.
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(
             for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
+        // Load an already-downloaded model with ZERO network (SpeechEngine contract): when the weights
+        // are on disk, pass offlineMode so fromPretrained skips the Hugging Face metadata round trip
+        // that fromPretrained otherwise makes on every cold load — an unconsented outbound request that
+        // also stalls/fails offline with a fully valid model present. offlineMode:false still downloads
+        // a genuinely-absent model (first install).
+        let offline = HuggingFaceDownloader.weightsExist(in: cacheDir)
         model = try await Qwen3ASRModel.fromPretrained(
-            modelId: modelId, cacheDir: cacheDir, progressHandler: bridge)
+            modelId: modelId, cacheDir: cacheDir, offlineMode: offline, progressHandler: bridge)
         progress?(.init(phase: "Ready", fraction: 1))
+    }
+
+    // Qwen weights (safetensors) are a checkable install footprint, so reconcile does not need the
+    // marker to know the model is present — a completed-but-unmarked download (crash before the marker
+    // wrote) is adopted rather than deleted.
+    nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? {
+        guard let cacheDir = try? HuggingFaceDownloader.getCacheDirectory(
+            for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
+        else { return nil }
+        return HuggingFaceDownloader.weightsExist(in: cacheDir)
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {

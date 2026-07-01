@@ -179,6 +179,12 @@ final class SpeechModelsModel: ObservableObject {
             }
             Log.models.notice("download complete: \(id, privacy: .public)")
             downloading[id] = nil
+            // Record the install marker the instant the bytes are on disk. The self-test below is a
+            // full model load + transcribe that can take seconds to minutes; a crash/quit in that
+            // window would otherwise leave a complete download that next-launch reconcile could delete
+            // as an orphan (Whisper/Qwen now report verifyInstalled, but Moonshine still defers to the
+            // marker as its only "installed" signal). A failed self-test un-marks it in runVerification.
+            ModelInstallStore.markInstalled(id)
             await runVerification(id, markInstalledOnPass: true)
         }
     }

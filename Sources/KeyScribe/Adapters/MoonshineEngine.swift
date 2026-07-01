@@ -11,9 +11,10 @@ import KeyScribeKit
 // supportsRecognitionBias=false and ignores biasTerms. DictationController skips assembling terms
 // for it, and the Settings models list badges it as no-local-bias.
 //
-// Not an actor: MoonshineVoice.Transcriber is a non-Sendable class; access is serialized by the
-// commit-on-release dictation state machine (load/evict between dictations), so nonisolated(unsafe)
-// storage is the SDK-edge pattern, like WhisperEngine/Qwen3ASREngine.
+// Not an actor: MoonshineVoice.Transcriber is a non-Sendable class; access to the `transcriber` handle
+// is serialized by the SerializedEngine actor decorator wrapping this engine at EngineRegistry.makeAll,
+// whose evict() waits for the transcribe lock — so evict()'s transcriber.close() can never fire under a
+// running transcribe (the ONNX use-after-close this engine is most exposed to). Like WhisperEngine/Qwen.
 final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     let id = "moonshine-base-en"
     let displayName = "Moonshine Base (English)"

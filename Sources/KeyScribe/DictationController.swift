@@ -17,7 +17,7 @@ final class DictationController {
     // or reorder appends within a day file.
     private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
     private let audio: AudioCapturing
-    private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void
+    private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Bool
     private let submitKey: (Mode.Submit) async -> Void
     private let captureSelection: (Mode.ClipboardModifier) async -> String?
     private let clipboard: @MainActor () -> String?
@@ -103,18 +103,6 @@ final class DictationController {
     // surfaces an error without wedging the next dictation.
     private static let modelLoadDeadlineSeconds: Double = 300
 
-    // An engine the user switched away from while a dictation was in flight. Evicting it immediately
-    // would race the in-flight transcribe (the non-actor engines close their transcriber under it), so
-    // we hold it until the dictation reaches a terminal state and evict it then.
-    private var deferredEvictionEngine: (any SpeechEngine)?
-
-    // Settings model delete/reinstall must evict an engine and then delete its files; doing either while
-    // a dictation is using that engine is a use-after-free (engines tear their model down synchronously,
-    // or across an actor await). These callers suspend here until the dictation reaches its terminal
-    // state, drained in releaseCapturedPlan, so the eviction AND the caller's subsequent file delete run
-    // while idle. See evictEngineForSettings.
-    private var idleEvictionWaiters: [(engine: any SpeechEngine, resume: @Sendable () -> Void)] = []
-
     // Last HUD level rendered while recording (quantized). The mic level callback fires per audio
     // buffer; forwarding only on a meaningful change keeps the HUD from re-rendering its whole tree at
     // buffer rate (the indicator animates between steps anyway). Reset at the start of each recording.
@@ -159,7 +147,7 @@ final class DictationController {
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
         audio: AudioCapturing? = nil,
-        insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void = TextInserter.perform,
+        insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Bool = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
@@ -216,32 +204,21 @@ final class DictationController {
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
     }
 
-    // The active engine changed (Settings). Evict the one we switched away from — but never while a
-    // dictation is mid-flight on it: the non-actor engines close their transcriber synchronously, so
-    // evicting under a live transcribe is a use-after-close. Defer to the terminal state instead.
+    // The active engine changed (Settings). Evict the one we switched away from. SerializedEngine.evict
+    // waits for any in-flight load and the transcribe lock to settle before tearing the SDK handle down,
+    // so evicting mid-dictation is safe now — no controller-side deferral needed.
     func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
         invalidateWarm(engine.id)
-        if isBusy {
-            deferredEvictionEngine = engine
-        } else {
-            Task { await engine.evict() }
-        }
+        Task { await engine.evict() }
     }
 
     // Evict an engine on behalf of a Settings delete/reinstall, then return so the caller can delete its
-    // files. Only the in-flight dictation's own engine is unsafe to tear down — any other engine, or
-    // when idle, evicts immediately. When it is the captured engine, suspend until the dictation is done
-    // (drained in releaseCapturedPlan) so neither the evict nor the caller's file delete races the live
-    // transcribe.
+    // files. SerializedEngine.evict awaits load + transcribe settlement, so the await completes only once
+    // the engine is truly idle — neither the evict nor the caller's subsequent file delete can race a
+    // live transcribe.
     func evictEngineForSettings(_ engine: any SpeechEngine) async {
         invalidateWarm(engine.id)
-        if !isBusy || capturedEngine?.id != engine.id {
-            await engine.evict()
-            return
-        }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            idleEvictionWaiters.append((engine, { continuation.resume() }))
-        }
+        await engine.evict()
     }
 
     // A Settings self-test transcribes on the SAME non-actor engine instance a live dictation uses, so it
@@ -509,22 +486,6 @@ final class DictationController {
         capturedPlan = nil
         capturedEngine = nil
         capturedDictionaryRecovery = nil
-        // An engine the user switched away from mid-dictation was held back from eviction to avoid
-        // racing the in-flight call; now that we're idle it is safe to free.
-        if let deferred = deferredEvictionEngine {
-            deferredEvictionEngine = nil
-            Task { await deferred.evict() }
-        }
-        if !idleEvictionWaiters.isEmpty {
-            let waiters = idleEvictionWaiters
-            idleEvictionWaiters.removeAll()
-            Task {
-                for waiter in waiters {
-                    await waiter.engine.evict()
-                    waiter.resume()
-                }
-            }
-        }
         scheduleCaptureRefresh()
         onBecameIdle?()
     }
@@ -804,8 +765,12 @@ final class DictationController {
         building.targetBundleId = current.bundleId ?? capturedSnapshot?.bundleId
         if case .clipboardFallback(let reason) = decision { building.fallbackReason = String(describing: reason) }
         building.fingerprints[.final] = .of(transcript)
-        let outcome = DictationMachine.outcomeForTranscript(finalText: transcript, heard: heard, decision: decision)
-        switch outcome {
+        let initialOutcome = DictationMachine.outcomeForTranscript(finalText: transcript, heard: heard, decision: decision)
+        // May downgrade to .failed if the actuation (paste) silently fails — success is OBSERVED, not
+        // assumed (H1): a clipboard manager racing our scratch write skips ⌘V, so a reported "inserted"
+        // with a submit Return would fire into the target with nothing pasted.
+        var outcome = initialOutcome
+        switch initialOutcome {
         case .noSpeech:
             machine.finish(.noSpeech)
         case .inserted, .copied:
@@ -815,9 +780,14 @@ final class DictationController {
             // would hit whatever app is now focused instead of the target the text reached.
             let trailing = bare ? .none : (activeMode?.trailing ?? .none)
             let insertStart = DispatchTime.now()
-            await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix(after: transcript))
+            let actuated = await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix(after: transcript))
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
-            if outcome == .inserted, let submit = activeMode?.submit, submit != .none {
+            if !actuated {
+                // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"
+                // (lastResult is set). Never fire submit against a paste that did not happen.
+                outcome = .failed("The text could not be inserted")
+            } else if initialOutcome == .inserted, let submit = activeMode?.submit, submit != .none,
+                      submitTargetStillFocused() {
                 await submitKey(submit)
             }
             machine.finish(outcome)
@@ -850,6 +820,20 @@ final class DictationController {
         applyEvictionAfterDictation(engine: activeEngine)
         releaseCapturedPlan()
         onDictationCompleted?(outcome)
+    }
+
+    // The submit Return fires AFTER the ~250 ms paste-settle window — long enough for the user to ⌘-tab
+    // (or switch windows within the same app) away — and lands outside the insert atom, so a stale
+    // target sends the keystroke into the wrong place (H4). Re-run the SAME focus-race decision the
+    // insert used (`decideInsertion`), against a fresh snapshot, right before submitting: it compares
+    // bundle id AND focused window id AND secure-field state, so a same-app window switch or a moved
+    // focus is caught, not just an app change. Submit only on a clean `.insert`.
+    private func submitTargetStillFocused() -> Bool {
+        let decision = decideInsertion(
+            captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: snapshot())
+        if decision == .insert { return true }
+        log.notice("submit skipped: focus moved before Return (\(String(describing: decision), privacy: .public))")
+        return false
     }
 
     // Local history (design.md §4.7): one append per dictation that produced text, unless history is
@@ -925,6 +909,20 @@ final class DictationController {
         case abort(String, HUDErrorAction?)
     }
 
+    // Defense-in-depth before insert (design.md §4.2): after the LIFO restore pass, no ISSUED nonce
+    // should survive — one that does means a token-opacity/restore bug corrupted the text, which would
+    // otherwise paste a literal `⟦SN:VERB:1⟧` or (worse) leak a redacted span. Fail safely and visibly
+    // instead. A sentinel-SHAPED substring that is NOT an issued token is legitimate user content (a
+    // clipboard/verbatim value that literally contains the sentinel, which restore deliberately leaves
+    // as-is) and is passed through untouched.
+    private func guardedInsert(_ text: String, issuedTokens: [String]) -> FinalText {
+        if issuedTokens.contains(where: { text.contains($0) }) {
+            log.error("insert aborted: unrestored sentinel token survived the restore pass")
+            return .abort("Dictation could not be completed — please try again", nil)
+        }
+        return .insert(text, bare: false)
+    }
+
     // What a cloud rewrite involved, captured for the History detail view. Built only when a rewrite
     // actually ran; the prompt carries the ⟦SN:…⟧ tokens, never their originals.
     private struct RewriteDetails {
@@ -985,12 +983,12 @@ final class DictationController {
 
         guard let resolved,
               !tokenized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return (.insert(localProcessed, bare: false), nil, transformed)
+            return (guardedInsert(localProcessed, issuedTokens: pipeline.issuedTokens), nil, transformed)
         }
         let result = await rewriteTokenized(
             pipeline: pipeline, tokenized: tokenized, localProcessed: localProcessed,
             instruction: "", mode: resolved.mode, connection: resolved.connection)
-        return (.insert(result.text, bare: false), result.details, transformed)
+        return (guardedInsert(result.text, issuedTokens: pipeline.issuedTokens), result.details, transformed)
     }
 
     // Edit-in-place: capture the selection, transform it per the spoken instruction. Any failure —
@@ -1025,7 +1023,9 @@ final class DictationController {
         let result = await rewriteTokenized(
             pipeline: pipeline, tokenized: tokenized, localProcessed: selection,
             instruction: instruction, mode: mode, connection: connection)
-        let final: FinalText = result.ok ? .insert(result.text, bare: false) : .abort("Rewrite failed — selection unchanged", nil)
+        let final: FinalText = result.ok
+            ? guardedInsert(result.text, issuedTokens: pipeline.issuedTokens)
+            : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
     }
 

@@ -50,21 +50,27 @@ enum TextInserter {
     // targets that prefer them; both proved unreliable in the M0 survey, so each degrades to paste
     // when it can't act. The focus-race safety decision is authoritative — a clipboardFallback
     // diverts to the clipboard regardless of the mode's preferred method.
-    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String) async {
+    // Returns whether the text was actually ACTUATED as the decision intended: paste/type/AX landed, or
+    // the clipboard fallback copied it. `false` means the paste could not be verified and nothing was
+    // inserted — the caller must not then claim "inserted" nor fire a submit keystroke (H1).
+    @discardableResult
+    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String) async -> Bool {
         switch insertionAction(decision: decision, method: method) {
-        case .paste: await insertViaPaste(text, modifier: modifier)
-        case .ax: await insertViaAX(text, modifier: modifier)
-        case .type: await insertViaTyping(text)
+        case .paste: return await insertViaPaste(text, modifier: modifier)
+        case .ax: return await insertViaAX(text, modifier: modifier)
+        case .type: return await insertViaTyping(text)
         case .clipboard:
             // A secure-field divert conceals the copy so clipboard managers do not retain the password;
             // every other fallback is a normal copy the user can paste back.
             if case .clipboardFallback(.secureField) = decision { copyToClipboard(text, concealed: true) }
             else { copyToClipboard(text) }
+            return true
         }
     }
 
-    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command) async {
-        guard !text.isEmpty else { return }
+    @discardableResult
+    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command) async -> Bool {
+        guard !text.isEmpty else { return true }
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
         // Confirm the dictated text is actually the pasteboard's string before synthesizing ⌘V. Without
@@ -75,7 +81,7 @@ enum TextInserter {
         guard writeScratchVerified(text) else {
             snapshot.restore()
             Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
-            return
+            return false
         }
         // clearContents()/writeObjects() bump changeCount synchronously, so the verified write is already
         // reflected here — stamp it now. The old fixed 30ms sleep added latency and risked stamping a
@@ -88,6 +94,7 @@ enum TextInserter {
         // observable pasteboard event, so we wait out a bounded window, but bail early if anything wrote
         // after our scratch (target or clipboard manager) — then we must not restore over it.
         if await scratchSurvived(stamp, timeoutMs: 250, stepMs: 25) { snapshot.restore() }
+        return true
     }
 
     private static func scratchSurvived(_ stamp: Int, timeoutMs: Int, stepMs: Int) async -> Bool {
@@ -137,13 +144,14 @@ enum TextInserter {
     // no-op it, silently dropping the text. Instead we only take the AX path when we can read the
     // field's value back and confirm it actually changed; otherwise we fall back to paste, which
     // lands everywhere. So `insert` uses AX on native fields and paste on web/Electron, never losing text.
-    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command) async {
+    @discardableResult
+    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command) async -> Bool {
         if axInsertVerified(text) {
             Log.insertion.notice("ax-insert: succeeded")
-            return
+            return true
         }
         Log.insertion.notice("ax-insert: unverified here, falling back to paste")
-        await insertViaPaste(text, modifier: modifier)
+        return await insertViaPaste(text, modifier: modifier)
     }
 
     private static func axInsertVerified(_ text: String) -> Bool {
@@ -167,7 +175,8 @@ enum TextInserter {
     // Synthesized typing: post each character as a Unicode key event (no keycode mapping, so it
     // covers any glyph). Unlike AX, posting always "succeeds" — there is no signal that the target
     // accepted it — so there is no automatic fallback; a mode opts into this knowing it is best-effort.
-    static func insertViaTyping(_ text: String) async {
+    @discardableResult
+    static func insertViaTyping(_ text: String) async -> Bool {
         let src = CGEventSource(stateID: .combinedSessionState)
         for character in text {
             let units = Array(String(character).utf16)
@@ -178,6 +187,8 @@ enum TextInserter {
             }
             try? await Task.sleep(for: .milliseconds(2))
         }
+        // Synthesized typing has no acceptance signal, so this is best-effort "actuated" by contract.
+        return true
     }
 
     // A mode's post-insert `submit` keystroke: a synthesized Return (optionally with ⇧ or ⌘) that

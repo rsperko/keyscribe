@@ -41,6 +41,9 @@ public enum FuzzyCorrector {
             var replaced = false
             for span in stride(from: min(2, tokens.count - i), through: 1, by: -1) {
                 let window = Array(tokens[i..<i + span])
+                // A ⟦SN:…⟧ nonce is opaque (design.md §4.2): never fuzzy-snap a window touching one, else a
+                // token fragment ("VERB") could be rewritten to a dictionary term and corrupt the span.
+                if window.contains(where: { $0.contains(SentinelText.open) }) { continue }
                 let core = window.map(stripPunct).joined()
                 let norm = normalize(core)
                 guard norm.count >= 4 else { continue }

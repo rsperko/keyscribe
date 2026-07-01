@@ -208,6 +208,7 @@ public struct NumbersStage: PipelineStage {
     public let order = StageOrder.numbers
     public init() {}
     public func apply(_ context: inout PipelineContext) {
-        context.text = InverseTextNormalizer.apply(context.text)
+        // Between-sentinel runs only, so a token's index digit (⟦SN:VERB:1⟧) is never normalized.
+        context.text = SentinelText.mappingOutsideSentinels(context.text) { InverseTextNormalizer.apply($0) }
     }
 }
