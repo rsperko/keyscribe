@@ -41,8 +41,10 @@ struct HUDStateTests {
     @Test func armingDictationIsCancellable() {
         let state = HUDState.arming(mode: "Plain Dictation")
         #expect(state.primaryText == "Plain Dictation")
-        #expect(state.secondaryText == "Starting")
+        #expect(state.secondaryText == "Preparing dictation")
         #expect(state.holdsKeyFocus)
+        #expect(state.indicator == .preparing)
+        #expect(HUDState.recording(mode: "Plain Dictation", level: 0).indicator == .recording)
     }
 
     @Test func transcribingLeadsWithTheResolvedModeName() {

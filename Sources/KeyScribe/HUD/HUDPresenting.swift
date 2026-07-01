@@ -28,7 +28,39 @@ enum HUDState: Equatable {
     case error(message: String, action: HUDErrorAction?)
 }
 
+enum HUDIndicator: Equatable {
+    case none
+    case ready
+    case preparing
+    case recording
+    case processing
+    case complete
+    case warning
+    case error
+}
+
 extension HUDState {
+    var indicator: HUDIndicator {
+        switch self {
+        case .hidden:
+            return .none
+        case .ready:
+            return .ready
+        case .arming:
+            return .preparing
+        case .recording:
+            return .recording
+        case .transcribing, .rewriting:
+            return .processing
+        case .complete:
+            return .complete
+        case .localFallback:
+            return .warning
+        case .error:
+            return .error
+        }
+    }
+
     var primaryText: String? {
         switch self {
         case .hidden:
@@ -63,7 +95,7 @@ extension HUDState {
         case .ready:
             return "Next dictation"
         case .arming:
-            return "Starting"
+            return "Preparing dictation"
         case .recording:
             return "Listening"
         case .transcribing:

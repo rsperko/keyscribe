@@ -105,6 +105,20 @@ private final class DrainTrackingAudio: AudioCapturing, @unchecked Sendable {
     private func markDrained() { lock.lock(); _drained = true; lock.unlock() }
 }
 
+// start() that resolves only after a delay — stands in for a bring-up that lands late (a resident engine
+// re-realizing a stale binding on the hot path). AudioCapture's own grace window adopts it internally;
+// the controller must also impose no competing deadline and adopt whatever start() eventually returns.
+private final class SlowStartAudio: AudioCapturing, @unchecked Sendable {
+    private let url: URL
+    private let delay: Duration
+    init(url: URL, delay: Duration) { self.url = url; self.delay = delay }
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        try? await Task.sleep(for: delay)
+        return url
+    }
+    func stop() -> URL? { url }
+}
+
 private actor InsertSpy {
     private(set) var calls = 0
     func record() { calls += 1 }
@@ -202,6 +216,46 @@ struct DictationCancellationTests {
         #expect(audio.drained)
         #expect(audio.immediateStops == 0)
         #expect(await insertSpy.calls == 1)
+    }
+
+    // Fix 2, controller side: a bring-up that lands late must be ADOPTED — the dictation reaches live
+    // recording and inserts — not pre-empted by any controller-side timeout. Guards against a future
+    // controller watchdog that would fail a slow-but-successful start.
+    @Test func aSlowButSuccessfulBringUpIsAdoptedAndRecords() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let started = Signal(), release = Signal()
+        let engine = GatedEngine(started: started, release: release, text: "hello world")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "gated")
+        let insertSpy = InsertSpy()
+        let hud = HUDSpy()
+        let history = HistoryStore(supportDir: supportDir)
+        let audio = SlowStartAudio(url: supportDir.appendingPathComponent("capture.wav"), delay: .milliseconds(300))
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "gated", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: history, hud: hud, audio: audio,
+            insert: { _, _, _, _ in await insertSpy.record() },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value   // waits out the late bring-up
+        controller.handleCommit()
+        await started.wait()
+        release.fire()
+        await controller.dictationTask?.value
+
+        #expect(await insertSpy.calls == 1)
+        #expect(controller.lastResult == "hello world")
+        #expect(hud.states.contains { if case .recording = $0 { true } else { false } })
+        #expect(!hud.states.contains { if case .error = $0 { true } else { false } })
     }
 
     @Test func cancellingDuringTranscriptionInsertsNothingAndWritesNoHistory() async {

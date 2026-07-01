@@ -41,6 +41,10 @@ final class DictationController {
     private var routingContext = RoutingContext()
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
+    // Re-realizes the audio input binding while idle so the first dictation after a long idle (or a system
+    // sleep) does not pay a stale unit-realization on the hot path. See scheduleCaptureRefresh.
+    private var captureRefreshTask: Task<Void, Never>?
+    private static let captureRefreshIdleSeconds: Double = 240
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private(set) var dictationTask: Task<Void, Never>?
     private var lastUsedAt: Double = 0
@@ -321,6 +325,31 @@ final class DictationController {
     func prewarmCapture() {
         guard micStatus() == .granted else { return }
         audio.prewarm()
+        scheduleCaptureRefresh()
+    }
+
+    // Wake-from-sleep / long-idle staleness recovery: a resident engine's cached CoreAudio binding rots
+    // while the app sits idle or the system sleeps, with no device-topology change to trip the adapter's
+    // own listeners. Proactively rebuild + re-prewarm the binding WHILE IDLE so the next dictation's hot
+    // path finds a fresh one instead of realizing a rotted unit. Never touches an in-flight dictation.
+    func refreshCaptureBinding() {
+        guard micStatus() == .granted, !isBusy else { return }
+        audio.refreshBinding()
+        scheduleCaptureRefresh()
+    }
+
+    // Single-shot: refresh the binding once it has sat idle for captureRefreshIdleSeconds, then STOP —
+    // binding rot is rare, so a perpetual every-N-min rebuild would be churn for a rare event. Re-armed on
+    // every return-to-idle (releaseCapturedPlan) and on wake, and cancelled at handleStart, so active use
+    // and sleep/wake each re-arm it; a long unbroken idle past one refresh falls back to the non-destructive
+    // bring-up watchdog (which adopts the slightly-slow first dictation) rather than more idle rebuilds.
+    private func scheduleCaptureRefresh() {
+        captureRefreshTask?.cancel()
+        captureRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.captureRefreshIdleSeconds))
+            guard let self, !Task.isCancelled, !self.isBusy, self.micStatus() == .granted else { return }
+            self.audio.refreshBinding()
+        }
     }
 
     func setNextModeOverride(id: String?) {
@@ -342,6 +371,7 @@ final class DictationController {
         guard machine.beginRecording() else { return }
         hideTask?.cancel()
         idleEvictionTask?.cancel()
+        captureRefreshTask?.cancel()
         building = DictationRecord(modeName: currentModeName)
         // A denied mic does NOT make AVAudioEngine throw — it starts and captures silence, which would
         // surface as a misleading "No speech detected". Catch the real cause up front and point the user
@@ -496,6 +526,7 @@ final class DictationController {
                 }
             }
         }
+        scheduleCaptureRefresh()
         onBecameIdle?()
     }
 

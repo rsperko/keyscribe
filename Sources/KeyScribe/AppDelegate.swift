@@ -26,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // which the OS releases on process exit, so it needs no recovery — except a one-time unmute of a marker
     // left by an older, pre-duck build; see reconcile().)
     private var audioRestorer: SystemAudioStateRestorer!
+    // System sleep suspends CoreAudio, so the resident capture engine's cached device binding is stale on
+    // wake. Refresh it while idle (off the hot path) so the first post-wake dictation binds cleanly.
+    private var wakeObserver: NSObjectProtocol?
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
     // launch. With neither set, lifecycle and bootstrap behave exactly as without them.
@@ -194,6 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hud.prewarm()
             self?.controller.prewarmCapture()
             _ = self?.config.resolved
+        }
+
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.controller.refreshCaptureBinding() }
         }
     }
 

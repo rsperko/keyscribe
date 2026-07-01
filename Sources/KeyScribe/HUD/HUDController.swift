@@ -286,22 +286,24 @@ private struct HUDView: View {
     }
 
     @ViewBuilder private var icon: some View {
-        switch model.state {
+        switch model.state.indicator {
         case .ready:
             Image(systemName: "mic").foregroundStyle(.secondary)
-        case .arming:
-            ProgressView().controlSize(.small)
+        case .preparing:
+            PreparingIcon()
         case .recording:
             RecordingIcon(level: level)
-        case .transcribing, .rewriting:
+        case .processing:
             ProgressView().controlSize(.small)
-        case .complete(let outcome, _):
-            Image(systemName: outcomeSymbol(outcome)).foregroundStyle(.secondary)
+        case .complete:
+            if case .complete(let outcome, _) = model.state {
+                Image(systemName: outcomeSymbol(outcome)).foregroundStyle(.secondary)
+            }
         case .error:
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-        case .hidden:
+        case .none:
             EmptyView()
-        case .localFallback:
+        case .warning:
             Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(.orange)
         }
     }
@@ -325,6 +327,27 @@ private struct HUDView: View {
         case .noSpeech: return "mic.slash"
         case .failed: return "xmark.circle"
         }
+    }
+}
+
+private struct PreparingIcon: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.orange.opacity(pulse ? 0.52 : 0.24), lineWidth: 2)
+                .frame(width: pulse ? 30 : 24, height: pulse ? 30 : 24)
+            Circle().fill(.orange.opacity(0.12))
+                .frame(width: 22, height: 22)
+            Image(systemName: "mic")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.orange)
+        }
+        .frame(width: 30, height: 30)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+        .onAppear { pulse = true }
+        .accessibilityLabel("Preparing dictation")
     }
 }
 

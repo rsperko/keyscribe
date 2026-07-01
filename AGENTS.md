@@ -83,11 +83,26 @@ This file is the entry point. Read the design docs before writing code — they 
   time (or indefinitely) on a transitioning device — classically a Bluetooth headset forced from A2DP
   into HFP the moment capture opens an input stream — and doing that on the main thread froze the whole
   app *and* (via the event tap) global input. `AudioCapture` confines every engine control call to a
-  private serial `controlQueue`; `start()` is `async` and bounded by a ~2 s watchdog (`runWithDeadline`).
-  On a timeout it marks the engine *suspect*, abandons the wedged call on its (now-orphaned) queue, and
-  the next dictation rebuilds a fresh engine + queue — so the healthy path keeps reusing the prewarmed
-  engine (no fresh build per dictation) and a wedge degrades to a graceful "Could not start the
-  microphone" instead of a hang. A tap buffer carries the engine `generation` so a wedged engine that
+  private serial `controlQueue`; `start()` is `async` and bounded by a watchdog (`runWithDeadline`). The
+  watchdog is **non-destructive**: the interactive `start()` path waits `bringUpTimeout` (2 s) **plus**
+  `bringUpGrace` (2 s) and **adopts** a bring-up that lands anywhere in that ~4 s window rather than
+  discarding it — a resident engine whose cached binding went stale over idle can need ~2 s to re-realize
+  the input unit on the hot path, and a tight 2 s watchdog used to throw that late success on the floor as
+  a spurious "Could not start the microphone". Only after the full window (a genuinely wedged device) does
+  it mark the engine *suspect*, abandon the wedged call on its (now-orphaned) queue, and let the next
+  dictation rebuild a fresh engine + queue — so the healthy path keeps reusing the prewarmed engine (no
+  fresh build per dictation) and a true wedge degrades to a graceful "Could not start the microphone"
+  instead of a hang. Waiting the grace window cannot reintroduce the freeze — bring-up is off-main, so the
+  main actor only `await`s. (`prewarm` keeps the tight `bringUpTimeout` — it is background work.) A
+  complementary idle/wake **binding refresh** attacks the same staleness proactively: `refreshBinding()`
+  rebuilds + re-prewarms the idle engine (no topology change fires while idle/asleep), driven by
+  `DictationController` on a ~4 min idle timer and by an `NSWorkspace.didWakeNotification` observer, so the
+  first post-idle/post-wake dictation usually finds a fresh binding and never enters the grace path. To
+  diagnose the next occurrence rather than infer it, `start()` logs `bringUp=<ms>ms` on the `audio`
+  category (`Log.audio`, `.debug`): a healthy prewarmed start is a few ms; a value **past `bringUpTimeout`
+  is tagged ` grace-adopted`** — proof the input unit was re-realized on the hot path and only the grace
+  window saved the dictation (subject to the same `log show` unreliability footgun below — capture it live
+  or via a `.debug`-level `log stream --predicate 'category == "audio"'` while reproducing). A tap buffer carries the engine `generation` so a wedged engine that
   finally unblocks can't write into a newer recording. Because bring-up is async, `handleCommit` before
   `captureStarted` cancels the not-yet-live attempt rather than queueing a commit against audio that was
   not recording yet. A `kAudioHardwarePropertyDefaultInputDevice` listener re-prewarms on a device change
@@ -156,7 +171,7 @@ keyscribe/
   `nonisolated(unsafe)`, `@MainActor`, `MainActor.assumeIsolated` — see the adapters in
   `Sources/KeyScribe/Adapters/`.
 - **Logging:** `os.Logger` under subsystem `com.keyscribe.app` (categories in
-  `Sources/KeyScribe/Log.swift`: `bias`, `context`, `models`, `insertion`). Footgun: `log show` /
+  `Sources/KeyScribe/Log.swift`: `bias`, `context`, `models`, `insertion`, `audio`). Footgun: `log show` /
   `log stream` do **not** reliably surface these on this machine even when the strings are compiled
   in — don't trust "no log output" as "the code path didn't run." The reliable ground-truth for
   verifying insertion is a **clipboard-marker probe**: `printf MARKER | pbcopy`, dictate, then

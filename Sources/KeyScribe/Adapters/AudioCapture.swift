@@ -3,6 +3,7 @@ import AVFoundation
 import CoreAudio
 import Foundation
 import KeyScribeKit
+import os
 
 protocol AudioCapturing: AnyObject, Sendable {
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL
@@ -11,6 +12,10 @@ protocol AudioCapturing: AnyObject, Sendable {
     // the engine down, so the tail is not clipped. Falls back to an immediate stop for test fakes.
     func finishDraining() async -> URL?
     func prewarm()
+    // Rebuild + re-prewarm the idle engine's device binding without any topology change having fired.
+    // A resident engine's cached CoreAudio binding can rot in place while the app sits idle (or the
+    // system sleeps), so the caller drives this on wake / after long idle to refresh the hot path.
+    func refreshBinding()
     // The user's preferred capture device UID (empty/nil = follow the system default). The adapter holds
     // it standing — the idle device listener consults it independently of any start()/prewarm() call.
     func setPreferredInputUID(_ uid: String?)
@@ -18,6 +23,7 @@ protocol AudioCapturing: AnyObject, Sendable {
 
 extension AudioCapturing {
     func prewarm() {}
+    func refreshBinding() {}
     func finishDraining() async -> URL? { stop() }
     func setPreferredInputUID(_ uid: String?) {}
 }
@@ -89,6 +95,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // slow Bluetooth profile switch can take several hundred ms; an indefinite wedge is the failure we
     // abandon. Set generously so a slow-but-real device is not falsely failed.
     private static let bringUpTimeout: Double = 2.0
+
+    // Extra window the INTERACTIVE start() path waits past `bringUpTimeout` before hard-failing, so a
+    // bring-up that lands just late is ADOPTED rather than discarded. Motivating incident: a resident
+    // engine whose cached CoreAudio binding had gone stale during idle needed ~1.9 s to re-realize the
+    // input unit on the hot path — a hair past a tight 2 s watchdog, whose late success was thrown on the
+    // floor and surfaced as "Could not start the microphone". Waiting longer here CANNOT reintroduce the
+    // original main-thread freeze: bring-up runs on the off-main control queue, so the main actor only
+    // `await`s (never blocks); the deadline exists solely to surface a TRULY wedged device as a clean
+    // failure instead of hanging forever. prewarm keeps the tight `bringUpTimeout` — it is background work.
+    private static let bringUpGrace: Double = 2.0
 
     // Layer 5: two listeners on the system's input topology. While idle the prewarmed engine caches a
     // device binding that no AVAudioEngineConfigurationChange refreshes (none fires while stopped), so a
@@ -170,18 +186,33 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
         rebuildEngineIfNeeded()
+        let started = DispatchTime.now()
         do {
-            return try await runWithDeadline(seconds: Self.bringUpTimeout) { [self] in
+            // Non-destructive watchdog: adopt a bring-up that lands within the grace window; only the
+            // DeadlineExceeded branch below (a genuinely wedged device) tears the half-open capture down.
+            let url = try await runWithDeadline(seconds: Self.bringUpTimeout + Self.bringUpGrace) { [self] in
                 try await bringUp(sampleRate: sampleRate, levelHandler: levelHandler)
             }
+            // Confirms/refutes the stale-binding hypothesis on the next incident: a healthy prewarmed start
+            // is a few ms; anything past bringUpTimeout means the input unit was re-realized on the hot path
+            // and only the grace window saved the dictation (a spurious failure before Fix 2's grace window).
+            let ms = Self.elapsedMs(since: started)
+            let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
+            Log.audio.debug("bringUp=\(ms, privacy: .public)ms\(band, privacy: .public)")
+            return url
         } catch is DeadlineExceeded {
             // The bring-up wedged. The main thread was never blocked — the stuck CoreAudio call is
             // abandoned on the (now unusable) control queue. Flag a rebuild so the next dictation gets a
             // fresh engine on a fresh queue, drop the half-open capture file, and surface a clean failure.
+            Log.audio.error("bringUp timed out after \(Self.elapsedMs(since: started), privacy: .public)ms")
             markRebuild()
             discardPendingCapture()
             throw AudioCaptureError.bringUpTimedOut
         }
+    }
+
+    private static func elapsedMs(since start: DispatchTime) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
     }
 
     private func bringUp(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
@@ -847,6 +878,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let current = effectiveDeviceID()
         guard current != lastEffectiveDeviceID else { return }
         lastEffectiveDeviceID = current
+        markRebuild()
+        prewarm()
+    }
+
+    // Idle-staleness refresh (mirrors applyTopologyChange's tail, minus the device-changed short-circuit).
+    // No topology change fires here: the resident engine's cached binding just rots in place over a long
+    // idle or a system sleep (a dead HAL proxy), so the FIRST dictation afterward would otherwise pay a
+    // stale unit-realization on the hot path — or, at the watchdog edge, fail. Rebuild + re-prewarm while
+    // idle so the hot path finds a fresh binding. No-op while recording: a live engine owns its own
+    // ConfigurationChange, and stomping its binding mid-capture would truncate the dictation.
+    func refreshBinding() {
+        let recording = lock.withLock { currentURL != nil }
+        guard !recording else { return }
         markRebuild()
         prewarm()
     }
