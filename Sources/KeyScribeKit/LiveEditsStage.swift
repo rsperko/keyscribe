@@ -18,9 +18,11 @@ import Foundation
 // longest-first, so a multi-word command can never be shadowed by a shorter one. The additive
 // commands all use an explicit "insert …" carrier phrase (with an optional "a") so a bare
 // "new line" or "tab" spoken as prose is left as text. Matching tolerates a trailing terminator/comma
-// on the phrase, and an additive command absorbs a pause comma the STT hung on the neighbouring word
-// ("blah, insert new line, foo" → "blah\nfoo") — commas only, so a preceding sentence period survives.
-// Verbatim tokenization happens later in the rewrite path (design.md §4.2).
+// on the phrase's last word, a pause comma INSIDE the phrase — whether hung on a word ("insert, new
+// line") or as a standalone token ("insert , new line") — and a pause comma the STT hung on the
+// neighbouring word ("blah, insert new line, foo" → "blah\nfoo"). Commas only in every case, so a
+// preceding OR interior sentence period survives ("insert new. Paragraph two" is not eaten by the
+// command). Verbatim tokenization happens later in the rewrite path (design.md §4.2).
 public struct LiveEditsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.liveEdits
@@ -81,11 +83,11 @@ public struct LiveEditsStage: PipelineStage {
         func resetSegment() { segmentStart = parts.count }
 
         while i < tokens.count {
-            if let (action, length) = match(lowered, at: i) {
+            if let (action, consumed) = match(lowered, at: i) {
                 let fires: Bool
                 if action == .scratch {
-                    let atUtteranceEnd = i + length >= tokens.count
-                    fires = atUtteranceEnd || Self.hasBoundaryPunct(tokens[i + length - 1])
+                    let atUtteranceEnd = i + consumed >= tokens.count
+                    fires = atUtteranceEnd || Self.hasBoundaryPunct(tokens[i + consumed - 1])
                 } else {
                     fires = true
                 }
@@ -120,7 +122,7 @@ public struct LiveEditsStage: PipelineStage {
                         }
                         absorbLeading = false
                     }
-                    i += length
+                    i += consumed
                     continue
                 }
             }
@@ -140,17 +142,37 @@ public struct LiveEditsStage: PipelineStage {
         context.text = join(parts)
     }
 
-    private func match(_ lowered: [String], at i: Int) -> (Action, Int)? {
+    // Returns the matched action and the number of transcript tokens it consumes — which can exceed the
+    // phrase's word count, because a pause between the operator's own words can surface as either a
+    // comma hung on a word ("insert, new line") OR a standalone comma token ("insert , new line"). Both
+    // are prosody artifacts of the same pause and are absorbed into the command, mirroring the
+    // commas-only absorption already applied to a command's neighbours. Interior periods are left to
+    // block a match on purpose, so a real sentence boundary ("insert new. Paragraph two…") survives
+    // rather than being eaten by the command.
+    private func match(_ lowered: [String], at start: Int) -> (Action, Int)? {
         for phrase in phrases {
-            let length = phrase.words.count
-            guard i + length <= lowered.count else { continue }
-            let matches = (0..<length).allSatisfy { k in
-                let candidate = k == length - 1 ? Self.stripBoundaryPunct(lowered[i + k]) : lowered[i + k]
-                return candidate == phrase.words[k]
+            var j = start
+            var matched = true
+            for (k, word) in phrase.words.enumerated() {
+                if k > 0 {
+                    while j < lowered.count, Self.isStandaloneComma(lowered[j]) { j += 1 }
+                }
+                guard j < lowered.count else { matched = false; break }
+                // The command's LAST word tolerates a trailing terminator/comma/`;`/`:` (the boundary
+                // punct that sits AFTER the whole operator); an INTERIOR word tolerates only a trailing
+                // comma (a pause artifact).
+                let candidate = k == phrase.words.count - 1 ? Self.stripBoundaryPunct(lowered[j]) : Self.stripTrailingComma(lowered[j])
+                if candidate != word { matched = false; break }
+                j += 1
             }
-            if matches { return (phrase.action, length) }
+            if matched { return (phrase.action, j - start) }
         }
         return nil
+    }
+
+    // A token that is nothing but commas — the STT's rendering of a bare pause between words.
+    private static func isStandaloneComma(_ token: String) -> Bool {
+        !token.isEmpty && token.allSatisfy { $0 == "," }
     }
 
     // A trailing separator on the command's OWN last word is tolerated for matching and consumed with

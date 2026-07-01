@@ -34,7 +34,7 @@ struct TrailingAndSubmitTests {
 
     private func run(
         transcript: String, trailing: Mode.Trailing, submit: Mode.Submit,
-        accessibilityGranted: Bool = true
+        liveEdits: Bool = false, accessibilityGranted: Bool = true
     ) async -> Captured {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-trailing-\(UUID().uuidString)", isDirectory: true)
@@ -45,6 +45,7 @@ struct TrailingAndSubmitTests {
         var mode = Mode(id: "m", name: "M")
         mode.trailing = trailing
         mode.submit = submit
+        mode.commands.liveEdits = liveEdits
         try? ModeStore.write(mode, to: modesDir)
 
         var settings = Settings.defaults
@@ -85,6 +86,25 @@ struct TrailingAndSubmitTests {
     @Test func noTrailingLeavesTextUntouched() async {
         let out = await run(transcript: "hello", trailing: .none, submit: .none)
         #expect(out.insertedText == "hello")
+    }
+
+    // A command-only utterance ends in a control char; the trailing SPACE separator is suppressed so
+    // the insert is a clean "\n" (next dictation at column 0), not "\n ".
+    @Test func trailingSpaceSuppressedAfterNewlineCommand() async {
+        let out = await run(transcript: "insert new line", trailing: .space, submit: .none, liveEdits: true)
+        #expect(out.insertedText == "\n")
+    }
+
+    // A trailing SPACE still follows word content that ends in a newline command mid-utterance.
+    @Test func trailingSpaceSuppressedAfterTrailingNewlineCommand() async {
+        let out = await run(transcript: "hello insert new line", trailing: .space, submit: .none, liveEdits: true)
+        #expect(out.insertedText == "hello\n")
+    }
+
+    // A trailing NEWLINE is an explicit choice — appended even onto a spoken newline (blank line).
+    @Test func trailingNewlineStillAppendsAfterNewlineCommand() async {
+        let out = await run(transcript: "insert new line", trailing: .newline, submit: .none, liveEdits: true)
+        #expect(out.insertedText == "\n\n")
     }
 
     @Test func submitFiresAfterAVerifiedInsert() async {

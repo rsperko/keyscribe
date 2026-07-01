@@ -105,7 +105,8 @@ Useful phrases:
 - `begin verbatim ... end verbatim`
 
 The insert commands use a deliberate carrier phrase so a stray "new line" spoken in prose stays as
-text. Speaking is forgiving: `insert new line` and `insert a new line` both work.
+text. Speaking is forgiving: `insert new line` and `insert a new line` both work, and a short pause
+mid-command (which your Mac may hear as `insert, new line`) still triggers it.
 
 Example:
 

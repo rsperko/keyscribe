@@ -31,14 +31,20 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
 
-    // Literal text appended to the transcript, INSIDE the atomic insert (one ⌘Z still undoes it all).
+    // Literal text appended to the transcript, INSIDE the atomic insert (one ⌘Z still undoes it all),
+    // given what the text already ends with. A trailing SPACE is only a word separator for the next
+    // dictation, so it is pointless when the insert already ends in whitespace — a newline/paragraph/
+    // tab command ("insert new line" → "\n") would otherwise land a stray "\n " and start the next
+    // dictation indented instead of at column 0. A trailing NEWLINE is an explicit per-mode choice and
+    // is always appended (a line-break-per-dictation mode may legitimately double a spoken "insert new
+    // line" into a blank line).
     public enum Trailing: String, Codable, Sendable {
         case none, space, newline
-        public var suffix: String {
+        public func suffix(after finalText: String) -> String {
             switch self {
             case .none: return ""
-            case .space: return " "
             case .newline: return "\n"
+            case .space: return finalText.last?.isWhitespace == true ? "" : " "
             }
         }
     }

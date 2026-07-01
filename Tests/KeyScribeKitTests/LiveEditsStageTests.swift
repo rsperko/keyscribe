@@ -49,6 +49,46 @@ struct LiveEditsStageTests {
         #expect(run("def foo, insert tab character, bar") == "def foo\tbar")
     }
 
+    // A pause comma the STT hangs INSIDE a command ("insert, new line") is a prosody artifact, not
+    // content — the command still fires and the comma is consumed with it.
+    @Test func interiorPauseCommaStillFires() {
+        #expect(run("insert, new line") == "\n")
+        #expect(run("alpha insert, new line beta") == "alpha\nbeta")
+    }
+
+    @Test func interiorPauseCommaOnLaterWordFires() {
+        #expect(run("insert new, paragraph") == "\n\n")
+        #expect(run("insert tab, character here") == "\there")
+    }
+
+    // Same pause, tokenized as a standalone comma ("insert , new line") instead of hung on a word.
+    @Test func interiorStandaloneCommaTokenStillFires() {
+        #expect(run("insert , new line") == "\n")
+        #expect(run("alpha insert , new line beta") == "alpha\nbeta")
+        #expect(run("insert new , paragraph") == "\n\n")
+    }
+
+    @Test func interiorMultipleStandaloneCommaTokensStillFire() {
+        #expect(run("insert , , new line") == "\n")
+    }
+
+    @Test func interiorPauseCommaScratchFiresAtBoundary() {
+        #expect(run("drop this scratch, that") == "")
+        #expect(run("drop this scratch , that") == "")
+    }
+
+    // A standalone comma inside a scratch phrase does not override the clause-boundary gate: a
+    // continuing word after "that" still means literal text.
+    @Test func standaloneCommaScratchWithTrailingWordIsLiteral() {
+        #expect(run("scratch , that lottery ticket") == "scratch , that lottery ticket")
+    }
+
+    // Interior PERIODS are left to block a match on purpose: a real sentence boundary must survive
+    // rather than be eaten by the command ("insert new." ends a sentence; "Paragraph two…" begins one).
+    @Test func interiorPeriodDoesNotFireCommand() {
+        #expect(run("insert new. paragraph two covers") == "insert new. paragraph two covers")
+    }
+
     // A preceding sentence period is real punctuation, not a pause artifact — keep it.
     @Test func preservesPrecedingPeriod() {
         #expect(run("done. insert new paragraph next") == "done.\n\nnext")

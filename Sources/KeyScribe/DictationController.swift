@@ -815,7 +815,7 @@ final class DictationController {
             // would hit whatever app is now focused instead of the target the text reached.
             let trailing = bare ? .none : (activeMode?.trailing ?? .none)
             let insertStart = DispatchTime.now()
-            await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix)
+            await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix(after: transcript))
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
             if outcome == .inserted, let submit = activeMode?.submit, submit != .none {
                 await submitKey(submit)

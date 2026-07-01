@@ -270,10 +270,29 @@ struct ModeTests {
         }
     }
 
-    @Test func trailingSuffixMapping() {
-        #expect(Mode.Trailing.none.suffix == "")
-        #expect(Mode.Trailing.space.suffix == " ")
-        #expect(Mode.Trailing.newline.suffix == "\n")
+    @Test func trailingSuffixMappingAfterWord() {
+        #expect(Mode.Trailing.none.suffix(after: "hello") == "")
+        #expect(Mode.Trailing.space.suffix(after: "hello") == " ")
+        #expect(Mode.Trailing.space.suffix(after: "done.") == " ")
+        #expect(Mode.Trailing.newline.suffix(after: "hello") == "\n")
+    }
+
+    // A separator space is pointless once the insert already ends in whitespace — suppress it so a
+    // command like "insert new line" ("\n") does not land a stray "\n " (next dictation at column 0).
+    @Test func trailingSpaceSuppressedAfterWhitespace() {
+        #expect(Mode.Trailing.space.suffix(after: "\n") == "")
+        #expect(Mode.Trailing.space.suffix(after: "\n\n") == "")
+        #expect(Mode.Trailing.space.suffix(after: "\t") == "")
+        #expect(Mode.Trailing.space.suffix(after: "text\n") == "")
+        #expect(Mode.Trailing.space.suffix(after: "trailing ") == "")
+    }
+
+    // A trailing NEWLINE is an explicit per-mode choice: always appended, even onto a break (a
+    // line-break-per-dictation mode may legitimately double a spoken newline into a blank line).
+    @Test func trailingNewlineAlwaysAppends() {
+        #expect(Mode.Trailing.newline.suffix(after: "hello") == "\n")
+        #expect(Mode.Trailing.newline.suffix(after: "\n") == "\n")
+        #expect(Mode.Trailing.none.suffix(after: "\n") == "")
     }
 
     @Test func trailingAndSubmitDecodeAndRoundTrip() throws {
