@@ -41,9 +41,25 @@ struct DictationMachineTests {
     }
 
     @Test func emptyTranscriptIsNoSpeech() {
-        #expect(DictationMachine.outcomeForTranscript("", decision: .insert) == .noSpeech)
-        #expect(DictationMachine.outcomeForTranscript("   ", decision: .insert) == .noSpeech)
-        #expect(DictationMachine.outcomeForTranscript("hello", decision: .insert) == .inserted)
+        #expect(DictationMachine.outcomeForTranscript(finalText: "", heard: "", decision: .insert) == .noSpeech)
+        #expect(DictationMachine.outcomeForTranscript(finalText: "   ", heard: "   ", decision: .insert) == .noSpeech)
+        #expect(DictationMachine.outcomeForTranscript(finalText: "hello", heard: "hello", decision: .insert) == .inserted)
+    }
+
+    @Test(arguments: [
+        ("insert new line", "\n"),
+        ("insert new paragraph", "\n\n"),
+        ("insert tab character", "\t"),
+    ])
+    func controlOnlyUtteranceIsNotNoSpeech(phrase: String, control: String) {
+        var ctx = PipelineContext(text: phrase)
+        LiveEditsStage().apply(&ctx)
+        #expect(ctx.text == control)
+        #expect(DictationMachine.outcomeForTranscript(finalText: control, heard: phrase, decision: .insert) == .inserted)
+    }
+
+    @Test func heardSpeechButEmptyFinalIsNoSpeech() {
+        #expect(DictationMachine.outcomeForTranscript(finalText: "", heard: "switch to email mode", decision: .insert) == .noSpeech)
     }
 
     @Test func cancelReturnsToIdle() {

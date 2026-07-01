@@ -43,8 +43,14 @@ public struct DictationMachine: Sendable {
         }
     }
 
-    public static func outcomeForTranscript(_ transcript: String, decision: InsertionDecision) -> DictationOutcome {
-        guard transcript.contains(where: { !$0.isWhitespace }) else { return .noSpeech }
+    // "Did the user speak?" keys off the HEARD (raw, post annotation-blanking) transcript — never the
+    // finalText — so whitespace-only silence (or a blanked "[BLANK_AUDIO]") is noSpeech, while a
+    // command-only utterance ("insert new line") whose finalText is a bare control char ("\n") is real
+    // content, not silence. There must also be something to insert: a finalText the pipeline stripped
+    // to empty (e.g. a spoken trigger phrase it consumed) is noSpeech, not a phantom insert.
+    public static func outcomeForTranscript(finalText: String, heard: String, decision: InsertionDecision) -> DictationOutcome {
+        let spoke = heard.contains { !$0.isWhitespace }
+        guard spoke, !finalText.isEmpty else { return .noSpeech }
         return outcome(for: decision)
     }
 }

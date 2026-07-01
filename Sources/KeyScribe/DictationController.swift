@@ -804,7 +804,7 @@ final class DictationController {
         building.targetBundleId = current.bundleId ?? capturedSnapshot?.bundleId
         if case .clipboardFallback(let reason) = decision { building.fallbackReason = String(describing: reason) }
         building.fingerprints[.final] = .of(transcript)
-        let outcome = DictationMachine.outcomeForTranscript(transcript, decision: decision)
+        let outcome = DictationMachine.outcomeForTranscript(finalText: transcript, heard: heard, decision: decision)
         switch outcome {
         case .noSpeech:
             machine.finish(.noSpeech)

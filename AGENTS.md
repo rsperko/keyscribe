@@ -294,9 +294,12 @@ benchmark rank — a single-voice ranking can't carry that authority and would f
 
 **Every STT model added to the catalog must be exercised against silent/near-silent audio before it
 ships**, because engines disagree wildly on what they emit for "nothing was said" and KeyScribe's
-`.noSpeech` guard (`DictationMachine.outcomeForTranscript`) only short-circuits a **whitespace-empty**
-transcript — any non-empty artifact gets pasted, atomically-undoable, and (worse) is indistinguishable
-from a real short dictation. Reproduce with the `--raw` benchmark over generated silence:
+`.noSpeech` guard (`DictationMachine.outcomeForTranscript`) keys off the **heard (raw) transcript**, not
+the final text: silence short-circuits only because its heard transcript is whitespace-empty, so any
+non-empty artifact an engine emits gets pasted, atomically-undoable, and (worse) is indistinguishable
+from a real short dictation. (The guard deliberately does **not** whitespace-test the final text — that
+would drop a command-only utterance whose output is a bare control char like `"\n"`; it checks the final
+text only for emptiness.) Reproduce with the `--raw` benchmark over generated silence:
 
 ```bash
 # 16k mono clips: pure silence at several durations + quiet hiss + a faint blip
