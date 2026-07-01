@@ -9,7 +9,10 @@ import Foundation
 // stages), sorted AFTER verbatim so a clipboard phrase inside a verbatim span stays literal. Empty
 // or absent clipboard leaves the phrase as text rather than silently deleting it.
 public enum ClipboardTokenizer {
-    public static let defaultPhrases = ["insert clipboard contents", "insert the clipboard contents"]
+    public static let defaultPhrases = [
+        "insert clipboard contents", "insert the clipboard contents",
+        "insert clipboard content", "insert the clipboard content",
+    ]
 
     // Cheap presence check the host uses to read the clipboard ONLY when the command was spoken, so an
     // ordinary dictation never touches the user's clipboard.

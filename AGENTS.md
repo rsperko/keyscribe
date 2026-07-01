@@ -345,6 +345,35 @@ This repo has a **normal git origin** (it is *not* shop/world) — plain `git`/`
 
 ---
 
+## Feature flags
+
+Ship in-development features behind an opt-in toggle, exercise them, then roll them out by deleting
+the flag. The single source of truth is the **`Feature`** enum (`Sources/KeyScribeKit/Features.swift`);
+state lives in the global `settings.toml` `[features]` table as **deviations only** — it stores just
+the ids the user turned on, so an absent (or unknown, or pruned) id means **off**. Flags are strictly
+opt-in (no per-flag default-on) and appear in every build under **Settings → Advanced → Experimental
+Features** (the section hides itself when there are no flags).
+
+- **Read a flag (code):** `settings.features.isEnabled(.myFlag)` — enum-checked, so a typo won't
+  compile. `Settings` is already threaded through `AppDelegate` → `DictationController`; just gate at
+  the seam: `if settings.features.isEnabled(.myFlag) { … }`. **Never branch the pipeline on flag
+  identity beyond the single gate** — same rule as modes (`principles.md` §2).
+- **Set a flag (tests):** build the state type-safely, no strings —
+  `var s = Settings.defaults; s.features.setEnabled(true, for: .myFlag)`, or construct directly with
+  `Settings.Features([.myFlag: true])`. Then assert `s.features.isEnabled(.myFlag)` or drive the gated
+  code path.
+- **Add a flag:** add one `case` to `Feature` with its `id` (stable, unique snake_case TOML key — never
+  rename once shipped; `FeaturesTests.featureIdsAreUnique` guards collisions), `title`, and `summary`.
+  The Advanced toggle renders automatically; no UI code to touch.
+- **Roll out / retire:** delete the `case` and make the gate unconditional (or delete the dead branch).
+  A stale id left in a user's `settings.toml` is ignored and dropped on the next write.
+
+The enum ships with **zero cases** until the first real flag; that empty state is intentional (the
+`switch self {}` bodies become exhaustive as soon as a case exists). When you add the first flag, also
+add per-flag tests — default-off fallback, override persistence, and off-elision.
+
+---
+
 ## Working discipline
 
 - **No commits, branches pushed, or PRs without explicit user instruction.** No AI self-references

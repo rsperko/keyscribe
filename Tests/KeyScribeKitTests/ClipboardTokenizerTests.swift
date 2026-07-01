@@ -19,6 +19,18 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "X")
     }
 
+    @Test func singularVariantFires() {
+        let (out, t) = tokenize("insert clipboard content", clipboard: "X")
+        #expect(out == "⟦SN:CLIP:1⟧")
+        #expect(t.restore(out) == "X")
+    }
+
+    @Test func singularArticleVariantFires() {
+        let (out, t) = tokenize("insert the clipboard content", clipboard: "X")
+        #expect(out == "⟦SN:CLIP:1⟧")
+        #expect(t.restore(out) == "X")
+    }
+
     @Test func caseInsensitive() {
         let (out, t) = tokenize("Insert Clipboard Contents", clipboard: "X")
         #expect(out == "⟦SN:CLIP:1⟧")
@@ -129,6 +141,8 @@ struct ClipboardTokenizerTests {
         #expect(ClipboardTokenizer.mentions("please insert clipboard contents now"))
         #expect(ClipboardTokenizer.mentions("insert the clipboard contents"))
         #expect(ClipboardTokenizer.mentions("INSERT CLIPBOARD CONTENTS"))
+        #expect(ClipboardTokenizer.mentions("please insert clipboard content now"))
+        #expect(ClipboardTokenizer.mentions("insert the clipboard content"))
     }
 
     @Test func mentionsIsFalseWithoutTheCommand() {

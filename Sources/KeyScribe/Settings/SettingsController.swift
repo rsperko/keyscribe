@@ -304,6 +304,23 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if !Feature.allCases.isEmpty {
+                Section("Experimental Features") {
+                    ForEach(Feature.allCases, id: \.self) { feature in
+                        Toggle(isOn: model.binding(for: feature)) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(feature.title)
+                                Text(feature.summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Text("Opt in to features still under development. They default off and may change or be removed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section("Erase Data") {
                 Button("Erase All \(Branding.appName) Data…", role: .destructive) { confirmingErase = true }
                 Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")
@@ -333,6 +350,9 @@ final class SettingsModel: ObservableObject {
     @Published var eviction: String { didSet { persist() } }
     @Published var addVocabularyShortcut: String { didSet { persist() } }
     @Published var pasteLastShortcut: String { didSet { persist() } }
+    // Enabled state for each in-development feature flag, keyed by Feature.id and always populated
+    // for every Feature.allCases. Bound one-per-toggle by the Experimental Features section.
+    @Published var featureStates: [String: Bool] { didSet { persist() } }
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
     @Published var inputDeviceUID: String { didSet { persist() } }
     // The friendly name last seen for `inputDeviceUID`, so a disconnected preferred device still reads as
@@ -442,6 +462,17 @@ final class SettingsModel: ObservableObject {
         pasteLastShortcut = settings.shortcuts.pasteLastDictation
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
+        featureStates = Self.featureStates(from: settings.features)
+    }
+
+    static func featureStates(from features: Settings.Features) -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: Feature.allCases.map { ($0.id, features.isEnabled($0)) })
+    }
+
+    func binding(for feature: Feature) -> Binding<Bool> {
+        Binding(
+            get: { self.featureStates[feature.id] ?? false },
+            set: { self.featureStates[feature.id] = $0 })
     }
 
     func apply(_ settings: Settings) {
@@ -458,6 +489,7 @@ final class SettingsModel: ObservableObject {
         pasteLastShortcut = settings.shortcuts.pasteLastDictation
         inputDeviceUID = settings.audio.inputDeviceUID ?? ""
         storedInputDeviceName = settings.audio.inputDeviceName
+        featureStates = Self.featureStates(from: settings.features)
         loading = false
     }
 
@@ -488,6 +520,11 @@ final class SettingsModel: ObservableObject {
         settings.audio = .init(
             inputDeviceUID: inputDeviceUID.isEmpty ? nil : inputDeviceUID,
             inputDeviceName: inputDeviceUID.isEmpty ? nil : storedInputDeviceName)
+        var features = Settings.Features()
+        for feature in Feature.allCases {
+            features.setEnabled(featureStates[feature.id] ?? false, for: feature)
+        }
+        settings.features = features
         onChange(settings)
     }
 }

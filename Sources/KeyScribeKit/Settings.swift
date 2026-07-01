@@ -13,6 +13,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var history: History
     public var shortcuts: Shortcuts
     public var audio: Audio
+    public var features: Features
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -22,6 +23,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case history
         case shortcuts
         case audio
+        case features
     }
 
     public init(from decoder: Decoder) throws {
@@ -35,12 +37,13 @@ public struct Settings: Codable, Equatable, Sendable {
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? Settings.defaults.history
         shortcuts = try c.decodeIfPresent(Shortcuts.self, forKey: .shortcuts) ?? Settings.defaults.shortcuts
         audio = try c.decodeIfPresent(Audio.self, forKey: .audio) ?? Settings.defaults.audio
+        features = try c.decodeIfPresent(Features.self, forKey: .features) ?? Settings.defaults.features
     }
 
     public init(
         schemaVersion: Int, loadOnLogin: Bool,
         stt: STT, duringDictation: DuringDictation, history: History,
-        shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio()
+        shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio(), features: Features = Features()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -49,6 +52,7 @@ public struct Settings: Codable, Equatable, Sendable {
         self.history = history
         self.shortcuts = shortcuts
         self.audio = audio
+        self.features = features
     }
 
     public struct STT: Codable, Equatable, Sendable {
@@ -298,6 +302,46 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
+    // Opt-in flags for in-development features (see Feature). Strictly deviations-only: it stores just
+    // the ids the user turned on, so an absent id means off. Ids no longer backed by a `Feature` case
+    // are pruned on decode, so a retired flag self-cleans on the next write.
+    public struct Features: Codable, Equatable, Sendable {
+        private var overrides: [String: Bool]
+
+        public init(overrides: [String: Bool] = [:]) {
+            self.overrides = Self.pruned(overrides)
+        }
+
+        // Type-safe construction for tests and programmatic setup, e.g. `.init([.someFlag: true])`.
+        public init(_ states: [Feature: Bool]) {
+            overrides = [:]
+            for (feature, enabled) in states { setEnabled(enabled, for: feature) }
+        }
+
+        public init(from decoder: Decoder) throws {
+            overrides = try Self.pruned([String: Bool](from: decoder))
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            try overrides.encode(to: encoder)
+        }
+
+        public func isEnabled(_ feature: Feature) -> Bool {
+            overrides[feature.id] ?? false
+        }
+
+        public mutating func setEnabled(_ enabled: Bool, for feature: Feature) {
+            overrides[feature.id] = enabled ? true : nil
+        }
+
+        // Off deviations carry no information (absent already means off), so drop them along with any
+        // unknown ids — keeps the table minimal and makes equality track observable state.
+        private static func pruned(_ overrides: [String: Bool]) -> [String: Bool] {
+            let known = Set(Feature.allCases.map(\.id))
+            return overrides.filter { known.contains($0.key) && $0.value }
+        }
+    }
+
     public static let defaults = Settings(
         schemaVersion: 1,
         loadOnLogin: false,
@@ -305,7 +349,8 @@ public struct Settings: Codable, Equatable, Sendable {
         duringDictation: DuringDictation(muteSystemAudio: true, keepDisplayAwake: true, sounds: true),
         history: History(enabled: true, retentionDays: 7),
         shortcuts: Shortcuts(),
-        audio: Audio()
+        audio: Audio(),
+        features: Features()
     )
 
     func validate() throws {

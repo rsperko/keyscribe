@@ -80,7 +80,11 @@ struct VocabularyComposer: View {
             }
             HStack {
                 Spacer()
-                Button("Add", action: commit)
+                Button(action: commit) {
+                    Label("Add", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                     .disabled(!canAdd)
             }
         }
