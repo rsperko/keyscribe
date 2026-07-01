@@ -27,10 +27,11 @@ public enum ClipboardTokenizer {
             guard let r = Range(m.range, in: text) else { return nil }
             return (r, clipboard)
         }
-        // dedup: false — two "insert clipboard contents" both wrap the SAME clipboard value, so a
-        // deduped token would appear twice and trip the exactly-once gate (forcing a needless local
-        // fallback). Distinct tokens per site keep a faithful rewrite valid.
-        return tokenizer.splice(text, spans: spans, type: .clipboard, dedup: false)
+        // spliceAbsorbing cleans the pause commas the STT hangs around the command; dedup: false —
+        // two "insert clipboard contents" both wrap the SAME clipboard value, so a deduped token would
+        // appear twice and trip the exactly-once gate (forcing a needless local fallback). Distinct
+        // tokens per site keep a faithful rewrite valid.
+        return tokenizer.spliceAbsorbing(text, spans: spans, type: .clipboard, dedup: false)
     }
 
     private static func commandRegex(_ phrases: [String]) -> NSRegularExpression? {

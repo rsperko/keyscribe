@@ -65,4 +65,48 @@ extension Tokenizer {
         result += text[cursor...]
         return result
     }
+
+    // Like `splice`, but each COMMAND span also absorbs the whitespace/comma run that directly hugs it
+    // on either side, then re-normalizes to exactly one space on any side that still borders content. A
+    // spoken command is an invisible operator; the punctuation the STT attaches when the speaker pauses
+    // around it ("the begin verbatim, new line, end verbatim, change" → the commas) is an artifact, not
+    // content. Only spaces, tabs, and commas are absorbed — never sentence terminators (. ! ?),
+    // semicolons, or colons, which are usually intended. `hadLeftSeparator`/`hadRightSeparator` capture
+    // whether the ORIGINAL boundary was a separator, so attached punctuation like "(cmd)" or "cmd."
+    // stays attached (no spurious space) while "a cmd b" and "a, cmd, b" both collapse to "a <tok> b".
+    // Spans must be ordered by start and non-overlapping. Used only by command stages (verbatim,
+    // clipboard); redaction keeps plain `splice` so it never disturbs punctuation around a sensitive
+    // span. `dedup: false` (clipboard) mints a distinct token per site — see `splice`.
+    func spliceAbsorbing(
+        _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true
+    ) -> String {
+        guard !spans.isEmpty else { return text }
+        let absorb: Set<Character> = [" ", "\t", ","]
+        var result = ""
+        var cursor = text.startIndex
+        for span in spans {
+            let hadLeftSeparator = span.range.lowerBound > text.startIndex
+                && absorb.contains(text[text.index(before: span.range.lowerBound)])
+            let hadRightSeparator = span.range.upperBound < text.endIndex
+                && absorb.contains(text[span.range.upperBound])
+            var start = span.range.lowerBound
+            while start > cursor {
+                let prev = text.index(before: start)
+                if absorb.contains(text[prev]) { start = prev } else { break }
+            }
+            var end = span.range.upperBound
+            while end < text.endIndex, absorb.contains(text[end]) { end = text.index(after: end) }
+            result += text[cursor..<start]
+            if hadLeftSeparator, let last = result.last, last != " ", last != "\n", last != "\t" {
+                result += " "
+            }
+            result += dedup ? tokenize(span.value, type: type) : tokenizeUnique(span.value, type: type)
+            if hadRightSeparator, end < text.endIndex, text[end] != "\n" {
+                result += " "
+            }
+            cursor = end
+        }
+        result += text[cursor...]
+        return result
+    }
 }

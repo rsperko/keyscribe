@@ -262,6 +262,22 @@ struct DictationPipelineWiringTests {
         #expect(!sent.contains("alice@example.com"))
     }
 
+    // Regression for the reported bug: pausing around the verbatim markers made the STT insert commas
+    // that leaked into and around the protected span ("the , new line,, change"). They are now absorbed
+    // as pause artifacts, end to end through the real controller and an LLM rewrite.
+    @Test func pauseCommasAroundVerbatimAreCleanedEndToEnd() async {
+        let m = mode(id: "polish", liveEdits: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "make sure the begin verbatim, new line, end verbatim, change is in place",
+            mode: m, connection: conn, llm: EchoLLM())
+
+        #expect(out.lastResult == "make sure the new line change is in place")
+        let sent = await (out.llm as! EchoLLM).lastUser
+        #expect(sent.contains("⟦SN:VERB:1⟧"))
+        #expect(!sent.contains("new line"))
+    }
+
     // "insert clipboard contents" pastes the clipboard as a distinct CLIP token: the LLM sees only the
     // token (the pasted content never crosses the cloud boundary) and the original is restored after.
     @Test func clipboardContentsAreTokenizedBeforeTheLLMThenRestored() async {

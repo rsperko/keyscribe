@@ -12,7 +12,9 @@ import Foundation
 // longest-first, so a multi-word command can never be shadowed by a shorter one. The additive
 // commands all use an explicit "insert …" carrier phrase (with an optional "a") so a bare
 // "new line" or "tab" spoken as prose is left as text. Matching tolerates a trailing terminator/comma
-// on the phrase. Verbatim tokenization happens later in the rewrite path (design.md §4.2).
+// on the phrase, and an additive command absorbs a pause comma the STT hung on the neighbouring word
+// ("blah, insert new line, foo" → "blah\nfoo") — commas only, so a preceding sentence period survives.
+// Verbatim tokenization happens later in the rewrite path (design.md §4.2).
 public struct LiveEditsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.liveEdits
@@ -64,32 +66,52 @@ public struct LiveEditsStage: PipelineStage {
         var parts: [String] = []
         var segmentStart = 0
         var i = 0
+        // An additive command absorbs a comma the STT hung on the preceding word when the speaker
+        // paused ("blah, insert new line" → "blah\n…") and on the following word (`absorbLeading`),
+        // mirroring spliceAbsorbing for the token-based stage. Commas only — a preceding "." is a real
+        // sentence end and is preserved ("done. insert new paragraph next" → "done.\n\nnext").
+        var absorbLeading = false
 
         func resetSegment() { segmentStart = parts.count }
 
         while i < tokens.count {
             if let (action, length) = match(lowered, at: i) {
+                let fires: Bool
                 if action == .scratch {
                     let atUtteranceEnd = i + length >= tokens.count
-                    let endsClause = Self.hasBoundaryPunct(tokens[i + length - 1])
-                    guard atUtteranceEnd || endsClause else {
-                        parts.append(tokens[i])
-                        i += 1
-                        continue
+                    fires = atUtteranceEnd || Self.hasBoundaryPunct(tokens[i + length - 1])
+                } else {
+                    fires = true
+                }
+                if fires {
+                    let control: String?
+                    switch action {
+                    case .newline: control = Self.newline
+                    case .paragraph: control = Self.paragraph
+                    case .tab: control = Self.tab
+                    case .scratch: control = nil
                     }
+                    if let control {
+                        if !parts.isEmpty { parts[parts.count - 1] = Self.stripTrailingComma(parts[parts.count - 1]) }
+                        parts.append(control)
+                        if action != .tab { resetSegment() }
+                        absorbLeading = true
+                    } else {
+                        if segmentStart < parts.count { parts.removeSubrange(segmentStart..<parts.count) }
+                        absorbLeading = false
+                    }
+                    i += length
+                    continue
                 }
-                switch action {
-                case .newline: parts.append(Self.newline); resetSegment()
-                case .paragraph: parts.append(Self.paragraph); resetSegment()
-                case .tab: parts.append(Self.tab)
-                case .scratch: if segmentStart < parts.count { parts.removeSubrange(segmentStart..<parts.count) }
-                }
-                i += length
-                continue
             }
 
-            parts.append(tokens[i])
-            if let last = tokens[i].last, last == "." || last == "!" || last == "?" {
+            var token = tokens[i]
+            if absorbLeading {
+                token = Self.stripLeadingComma(token)
+                if !token.isEmpty { absorbLeading = false }
+            }
+            parts.append(token)
+            if let last = token.last, last == "." || last == "!" || last == "?" {
                 resetSegment()
             }
             i += 1
@@ -111,8 +133,12 @@ public struct LiveEditsStage: PipelineStage {
         return nil
     }
 
+    // A trailing separator on the command's OWN last word is tolerated for matching and consumed with
+    // the command (it is part of the operator, never emitted), so "insert new line," / ";" / "." all
+    // fire. Broader than the comma-only NEIGHBOR absorption below, because here the punctuation sits on
+    // the command itself, not on dictated content.
     private static func isBoundaryPunct(_ c: Character) -> Bool {
-        c == "." || c == "!" || c == "?" || c == ","
+        c == "." || c == "!" || c == "?" || c == "," || c == ";" || c == ":"
     }
 
     private static func hasBoundaryPunct(_ word: String) -> Bool {
@@ -126,11 +152,24 @@ public struct LiveEditsStage: PipelineStage {
         return word
     }
 
+    private static func stripTrailingComma(_ word: String) -> String {
+        var word = word
+        while word.last == "," { word.removeLast() }
+        return word
+    }
+
+    private static func stripLeadingComma(_ word: String) -> String {
+        var word = word
+        while word.first == "," { word.removeFirst() }
+        return word
+    }
+
     private func join(_ parts: [String]) -> String {
         var out = ""
         out.reserveCapacity(parts.reduce(0) { $0 + $1.count + 1 })
         var endsWithBreak = true
         for part in parts {
+            if part.isEmpty { continue }
             let isControl = part == Self.newline || part == Self.paragraph || part == Self.tab
             if !isControl && !endsWithBreak { out += " " }
             out += part

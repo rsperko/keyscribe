@@ -13,6 +13,78 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "the function is ProcessData okay")
     }
 
+    // The reported bug: pausing around the markers made the STT insert commas, which leaked into the
+    // protected content and stranded outside the markers. Pause commas are now absorbed on both sides.
+    @Test func pauseCommasAroundMarkersAreAbsorbed() {
+        let (out, t) = tokenize("make sure that the begin verbatim, new line, end verbatim, change is in place")
+        #expect(out == "make sure that the ⟦SN:VERB:1⟧ change is in place")
+        #expect(t.restore(out) == "make sure that the new line change is in place")
+    }
+
+    // Content edges keep intended terminators/semicolons — only pause whitespace/commas are trimmed.
+    @Test func contentTerminatorIsPreserved() {
+        let (out, t) = tokenize("say begin verbatim Hello! end verbatim done")
+        #expect(t.restore(out) == "say Hello! done")
+    }
+
+    @Test func contentSemicolonIsPreserved() {
+        let (out, t) = tokenize("code begin verbatim foo(); end verbatim done")
+        #expect(t.restore(out) == "code foo(); done")
+    }
+
+    // A period after the end marker is a real sentence end — keep it attached, do not absorb it.
+    @Test func periodAfterEndMarkerIsPreserved() {
+        let (out, t) = tokenize("begin verbatim note end verbatim. Next")
+        #expect(out == "⟦SN:VERB:1⟧. Next")
+        #expect(t.restore(out) == "note. Next")
+    }
+
+    @Test func commaBeforeBeginMarkerIsAbsorbed() {
+        let (out, t) = tokenize("note, begin verbatim X end verbatim done")
+        #expect(out == "note ⟦SN:VERB:1⟧ done")
+        #expect(t.restore(out) == "note X done")
+    }
+
+    // Commas INSIDE the content (not at the edges) are part of the protected literal — keep them.
+    @Test func internalCommasInContentPreserved() {
+        let (out, t) = tokenize("begin verbatim a, b, c end verbatim")
+        #expect(t.restore(out) == "a, b, c")
+    }
+
+    @Test func leadingPeriodInContentPreserved() {
+        let (out, t) = tokenize("begin verbatim .config end verbatim")
+        #expect(t.restore(out) == ".config")
+    }
+
+    // A wall of pause commas around the markers must resolve (and not backtrack pathologically).
+    @Test func manyCommasAroundMarkersResolve() {
+        let (out, t) = tokenize("begin verbatim ,,, X ,,, end verbatim")
+        #expect(out == "⟦SN:VERB:1⟧")
+        #expect(t.restore(out) == "X")
+    }
+
+    @Test func unterminatedTrimsLeadingCommaAndPrecedingComma() {
+        let (out, t) = tokenize("the note, begin verbatim my secret")
+        #expect(out == "the note ⟦SN:VERB:1⟧")
+        #expect(t.restore(out) == "the note my secret")
+    }
+
+    @Test func commaDirectlyAttachedToMarkersIsAbsorbed() {
+        let (out, t) = tokenize("say begin verbatim,X,end verbatim done")
+        #expect(t.restore(out) == "say X done")
+    }
+
+    @Test func multilineContentIsPreserved() {
+        let (out, t) = tokenize("begin verbatim line1\nline2 end verbatim")
+        #expect(t.restore(out) == "line1\nline2")
+    }
+
+    @Test func multipleSpansWithCommasBetweenAbsorb() {
+        let (out, t) = tokenize("begin verbatim A end verbatim, and, begin verbatim B end verbatim")
+        #expect(out == "⟦SN:VERB:1⟧ and ⟦SN:VERB:2⟧")
+        #expect(t.restore(out) == "A and B")
+    }
+
     @Test func multipleSpansDistinctTokens() {
         let (out, _) = tokenize("begin verbatim A end verbatim then begin verbatim B end verbatim")
         #expect(out == "⟦SN:VERB:1⟧ then ⟦SN:VERB:2⟧")

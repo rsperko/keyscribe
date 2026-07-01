@@ -36,6 +36,72 @@ struct LiveEditsStageTests {
         #expect(run("alpha Insert New Line beta") == "alpha\nbeta")
     }
 
+    // Pause commas the STT hangs around a command are absorbed with it (commas only).
+    @Test func absorbsPauseCommasAroundNewline() {
+        #expect(run("blah, insert new line, foo") == "blah\nfoo")
+    }
+
+    @Test func absorbsPauseCommasAroundParagraph() {
+        #expect(run("blah, insert new paragraph, foo") == "blah\n\nfoo")
+    }
+
+    @Test func absorbsPauseCommasAroundTab() {
+        #expect(run("def foo, insert tab character, bar") == "def foo\tbar")
+    }
+
+    // A preceding sentence period is real punctuation, not a pause artifact — keep it.
+    @Test func preservesPrecedingPeriod() {
+        #expect(run("done. insert new paragraph next") == "done.\n\nnext")
+    }
+
+    @Test func absorbsStandaloneCommaTokenBeforeCommand() {
+        #expect(run("blah , insert new line foo") == "blah\nfoo")
+    }
+
+    @Test func absorbsMultipleStandaloneCommasAfterCommand() {
+        #expect(run("insert new line , , foo") == "\nfoo")
+    }
+
+    @Test func commandAtStartAbsorbsLeadingComma() {
+        #expect(run(", insert new line foo") == "\nfoo")
+    }
+
+    @Test func commandAtEndAbsorbsTrailingComma() {
+        #expect(run("foo insert new line,") == "foo\n")
+    }
+
+    @Test func multipleCommandsWithPauseCommas() {
+        #expect(run("a, insert new line, b, insert new paragraph, c") == "a\nb\n\nc")
+    }
+
+    // Only commas are absorbed as pause artifacts — colon, semicolon, and terminators on a preceding
+    // word are real punctuation and are preserved.
+    @Test func preservesPrecedingColon() {
+        #expect(run("note: insert new line body") == "note:\nbody")
+    }
+
+    @Test func preservesPrecedingSemicolon() {
+        #expect(run("foo; insert new line bar") == "foo;\nbar")
+    }
+
+    @Test func preservesPrecedingQuestionMark() {
+        #expect(run("really? insert new paragraph yes") == "really?\n\nyes")
+    }
+
+    // Two commands back to back (a comma between them) still both fire.
+    @Test func adjacentCommandsWithCommaBetween() {
+        #expect(run("insert new line, insert new paragraph foo") == "\n\n\nfoo")
+    }
+
+    // Preceding pause comma absorbed AND the command's own trailing period consumed with it.
+    @Test func absorbsPrecedingCommaAndCommandOwnPeriod() {
+        #expect(run("he left, insert new line. home") == "he left\nhome")
+    }
+
+    @Test func trailingSeparatorOnCommandWordStillFires() {
+        #expect(run("alpha insert new line; beta") == "alpha\nbeta")
+    }
+
     @Test func multipleCommandsInSequence() {
         #expect(run("one insert new line two insert new paragraph three") == "one\ntwo\n\nthree")
     }
