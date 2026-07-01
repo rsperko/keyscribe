@@ -1,12 +1,18 @@
 import Foundation
 
 // Post-STT text stage, runs before replacements (design.md §4.2.1). Handles spoken editing
-// commands: insert a newline / paragraph break / tab, and "scratch that" (deletes the current
-// segment — the words since the last sentence terminator or newline command). Sentence/newline
-// aware. "scratch that" only fires when it sits at a clause boundary — its phrase ends with a
-// terminator (. ! ?) or comma, or it ends the utterance — so literal usage like "scratch that
-// lottery ticket" (a continuing word follows) is left as text. This relies on the STT punctuating
-// a spoken correction; engines that do not (e.g. Apple) will under-fire rather than corrupt. The
+// commands: insert a newline / paragraph break / tab, and "scratch that" (deletes what was just
+// said). Sentence/newline aware. When there is dictated text since the last sentence terminator or
+// newline command, scratch removes that current segment; when the segment is empty (a punctuating
+// STT like Whisper ended the clause with its own terminator, so nothing sits between it and the
+// command), scratch falls back to removing the one previous clause — back to the nearest
+// terminator/comma/semicolon/colon — and stops at a newline/paragraph break so it never crosses a
+// structural boundary. Removing a clause rather than a whole sentence bounds the damage of a
+// mis-fire: under-deleting is re-issuable, over-deleting is silent. "scratch that" only fires when it
+// sits at a clause boundary — its phrase ends with a terminator (. ! ?) or comma, or it ends the
+// utterance — so literal usage like "scratch that lottery ticket" (a continuing word follows) is
+// left as text. This relies on the STT punctuating a spoken correction; engines that do not (e.g.
+// Apple) will under-fire rather than corrupt. The
 // other (additive) commands fire inline regardless of boundary. The trigger phrases are
 // configurable per command (LiveEditsStage.Commands) with sensible defaults; phrases match
 // longest-first, so a multi-word command can never be shadowed by a shorter one. The additive
@@ -97,7 +103,21 @@ public struct LiveEditsStage: PipelineStage {
                         if action != .tab { resetSegment() }
                         absorbLeading = true
                     } else {
-                        if segmentStart < parts.count { parts.removeSubrange(segmentStart..<parts.count) }
+                        if segmentStart < parts.count {
+                            parts.removeSubrange(segmentStart..<parts.count)
+                        } else if segmentStart > 0,
+                                  parts[segmentStart - 1] != Self.newline,
+                                  parts[segmentStart - 1] != Self.paragraph {
+                            var prevStart = segmentStart - 1
+                            while prevStart > 0 {
+                                let before = parts[prevStart - 1]
+                                if before == Self.newline || before == Self.paragraph { break }
+                                if Self.hasBoundaryPunct(before) { break }
+                                prevStart -= 1
+                            }
+                            parts.removeSubrange(prevStart..<segmentStart)
+                            resetSegment()
+                        }
                         absorbLeading = false
                     }
                     i += length
@@ -111,7 +131,7 @@ public struct LiveEditsStage: PipelineStage {
                 if !token.isEmpty { absorbLeading = false }
             }
             parts.append(token)
-            if let last = token.last, last == "." || last == "!" || last == "?" {
+            if Self.endsWithSentenceTerminator(token) {
                 resetSegment()
             }
             i += 1
@@ -144,6 +164,11 @@ public struct LiveEditsStage: PipelineStage {
     private static func hasBoundaryPunct(_ word: String) -> Bool {
         guard let last = word.last else { return false }
         return isBoundaryPunct(last)
+    }
+
+    private static func endsWithSentenceTerminator(_ word: String) -> Bool {
+        guard let last = word.last else { return false }
+        return last == "." || last == "!" || last == "?"
     }
 
     private static func stripBoundaryPunct(_ word: String) -> String {

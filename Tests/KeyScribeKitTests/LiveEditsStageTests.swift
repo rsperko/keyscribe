@@ -125,15 +125,45 @@ struct LiveEditsStageTests {
         #expect(run("scratch that. hello") == "hello")
     }
 
-    @Test func scratchThatDoesNotEatThePreviousSentence() {
-        // the segment after a sentence boundary is empty, so "scratch that" removes nothing
-        #expect(run("done. scratch that. more") == "done. more")
+    @Test func scratchThatEmptySegmentEatsPreviousSentence() {
+        // nothing dictated since the last terminator: fall back to the one previous sentence
+        #expect(run("done. scratch that. more") == "more")
+    }
+
+    @Test func scratchThatEatsPreviousSentenceAcrossPeriod() {
+        // a punctuating STT (e.g. Whisper) ends the clause with a period, leaving an empty
+        // segment; scratch still removes the sentence just spoken, and only that one
+        #expect(run("blah blah. I don't know what I am saying here. scratch that. blah blah blah")
+            == "blah blah. blah blah blah")
+    }
+
+    @Test func scratchThatPreviousSentenceDoesNotCrossNewline() {
+        // the empty-segment fallback stops at a structural break instead of removing across it
+        #expect(run("keep this insert new line scratch that. final")
+            == "keep this\nfinal")
+    }
+
+    @Test func scratchThatEmptySegmentStopsAtComma() {
+        // the fallback removes one clause, not the whole comma-spliced sentence
+        #expect(run("eggs, milk, bread. scratch that. done")
+            == "eggs, milk, done")
+    }
+
+    @Test func scratchThatEmptySegmentStopsAtSemicolon() {
+        #expect(run("first part; second part. scratch that. rest")
+            == "first part; rest")
     }
 
     @Test func scratchThatFollowedByWordIsLiteral() {
         // a continuing word means it is not a clause boundary — leave it as text
         #expect(run("I told her to scratch that lottery ticket and see if we won")
             == "I told her to scratch that lottery ticket and see if we won")
+    }
+
+    @Test func scratchThatDogIsLiteral() {
+        // a continuing word after "that" is not a boundary — the trigger never fires
+        #expect(run("I told them to scratch that dog")
+            == "I told them to scratch that dog")
     }
 
     @Test func scratchThatRunOnWithoutBoundaryIsLiteral() {
