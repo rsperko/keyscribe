@@ -1,6 +1,6 @@
 # KeyScribe — UX & UI Design Contract
 
-> Canonical UX specification for the macOS app. Read with `design.md`, `config_schema.md`,
+> Canonical UX specification for the macOS app. Read with `design.md`, `../reference/config_schema.md`,
 > `ui_components.md`, and `icon_design.md`. This document defines the user-facing product
 > contract; implementation details do not override it.
 

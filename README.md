@@ -29,8 +29,6 @@ Superwhisper, Wispr Flow, Aqua, and MacWhisper without giving up serious workflo
   preserve your clipboard when safe, and avoid inserting into the wrong app if focus changes.
 - **The files are yours.** Config, modes, replacements, prompt fragments, and history are plain files
   under `~/Library/Application Support/KeyScribe/`; secrets live in macOS Keychain.
-  Advanced mode features that are not exposed in Settings are documented in the
-  [TOML schema](docs/config_schema.md).
 
 Full privacy details are in [PRIVACY.md](PRIVACY.md).
 
@@ -113,9 +111,7 @@ app you're already using.
 v3, Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech,
 Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base (English). Apple Speech appears only on
 macOS 26+; the other models are downloadable on supported Apple silicon Macs.
-Trade accuracy, speed, and footprint without sending audio to a server — see
-[docs/stt_benchmarks.md](docs/stt_benchmarks.md) for reference numbers (and how to benchmark your
-own voice).
+Trade accuracy, speed, and footprint without sending audio to a server.
 
 **Optional cleanup on your terms.** BYOK LLM cleanup can strip filler, fix grammar, or reformat text
 using OpenAI, Anthropic, Gemini, or an OpenAI-compatible endpoint. Hosted providers use a key saved
@@ -148,12 +144,13 @@ KeyScribe is open source under GPLv3. Bug reports, fixes, and new built-in modes
 ## Documentation
 
 - [docs/getting_started.md](docs/getting_started.md) — a progressive tutorial from first dictation
-  through advanced modes, privacy controls, history, and TOML-only automation.
-- [BUILD.md](BUILD.md) — building, signing, and prerequisites from source.
+  through modes, privacy controls, and history.
 - [PRIVACY.md](PRIVACY.md) — exactly what stays local and what (optionally) leaves.
 - [FAQ.md](FAQ.md) — permissions, key conflicts, engine choice, troubleshooting.
-- [docs/config_schema.md](docs/config_schema.md) — hand-editable TOML schema for modes,
-  connections, shortcuts, and advanced file-only options.
-- [docs/stt_benchmarks.md](docs/stt_benchmarks.md) — reference speech-model accuracy/speed numbers
-  and how to benchmark your own voice.
-- [`docs/`](docs/) — the full design spec (architecture, pipeline, modes, storage).
+- [BUILD.md](BUILD.md) — building, signing, and prerequisites from source.
+- [docs/reference/advanced_configuration.md](docs/reference/advanced_configuration.md) — file-level
+  examples for advanced mode setup.
+- [docs/reference/stt_benchmarks.md](docs/reference/stt_benchmarks.md) — speech-model benchmarks and
+  the local benchmark workflow.
+- [docs/development/](docs/development/) and [docs/reference/config_schema.md](docs/reference/config_schema.md)
+  — implementation specs for contributors.

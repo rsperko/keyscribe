@@ -15,7 +15,7 @@ private func oneLine(_ s: String, _ max: Int) -> String {
 }
 
 // Opt-in probe — the M5/M6 token-sentinel survival question (prompt_design.md "Open questions",
-// docs/roadmap.md M5). The redaction wedge's whole premise is that a nonce token survives the LLM
+// docs/development/roadmap.md M5). The redaction wedge's whole premise is that a nonce token survives the LLM
 // rewrite verbatim; until now that was only verified against the local oMLX proxy. This runs the
 // real production rewrite path against the floor model (Gemini 2.5 Flash) over a battery of
 // realistic rewrite shapes and reports survival.

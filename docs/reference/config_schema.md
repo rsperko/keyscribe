@@ -1,8 +1,8 @@
 # KeyScribe — Mode & Config TOML Schema
 
-> Companion to `design.md` (§4.3 modes, §4.6 settings, §5 storage, §5.1 versioning).
+> Companion to `../development/design.md` (§4.3 modes, §4.6 settings, §5 storage, §5.1 versioning).
 > Defines the on-disk config: one TOML file per mode plus the shared config files modes
-> reference. Every file carries `schema_version` and migrates forward (`design.md` §5.1).
+> reference. Every file carries `schema_version` and migrates forward (`../development/design.md` §5.1).
 
 ---
 

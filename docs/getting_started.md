@@ -2,7 +2,7 @@
 
 This guide is a ramp. Start at the top, stop when KeyScribe already fits your workflow, and come
 back later for the deeper pieces. The early steps keep everything local. The later steps add optional
-AI cleanup, mode routing, context controls, history, and file-level automation.
+AI cleanup, mode routing, context controls, history, and advanced setup.
 
 ## The ramp
 
@@ -16,7 +16,7 @@ AI cleanup, mode routing, context controls, history, and file-level automation.
 | 6. AI rewrite | Add your own provider key for optional cleanup. | You want polished messages, email, Markdown, or selected-text edits. |
 | 7. Modes | Route dictation by key, app, URL, window title, or spoken suffix. | One trigger does the right thing in different places. |
 | 8. Privacy and history | See exactly what happened and control what is stored or sent. | You understand the local/cloud boundary. |
-| 9. Advanced TOML | Hand-edit modes, fragments, submit keys, mouse buttons, and replacements. | You want KeyScribe to behave like a programmable writing tool. |
+| 9. Advanced setup | Combine modes, routing, privacy controls, and reusable instructions. | KeyScribe fits the way you write in different apps. |
 
 ## 1. Make the first dictation boring
 
@@ -157,7 +157,7 @@ different tradeoff:
   your voice.
 
 The reference numbers and the local benchmark workflow are in
-[docs/stt_benchmarks.md](stt_benchmarks.md).
+[Speech Model Benchmarks](reference/stt_benchmarks.md).
 
 Checkpoint: choose one model for a full day before switching again. Short A/B tests can overvalue a
 single lucky or unlucky sentence.
@@ -379,106 +379,6 @@ Fragments live as Markdown files under `~/Library/Application Support/KeyScribe/
 Checkpoint: move repeated prompt text into a fragment only after you have copied it into two modes.
 One-off instructions can stay inside the mode prompt.
 
-## 13. Advanced TOML examples
-
-The Settings UI covers the normal path. The files under
-`~/Library/Application Support/KeyScribe/` expose the rest. See the full schema in
-[docs/config_schema.md](config_schema.md).
-
-### Spoken suffix routing
-
-A spoken suffix is just the phrase you say at the end. It is matched at the end of the transcript,
-case-insensitively, ignoring the casing and trailing punctuation STT adds, and on word boundaries
-(so "as an email" does not fire inside "has an email"):
-
-```toml
-trigger_phrases = ['as an email']
-```
-
-Each phrase is also a regex, so you can write one when you need alternation or optional words:
-
-```toml
-trigger_phrases = ['as (a |an )?(draft|note)']
-```
-
-You do not need `(?i)`, `\b`, or a trailing `$` — the matcher already supplies case-insensitivity,
-word boundaries, and end-anchoring, and it trims the trailing punctuation/space STT adds before
-matching. (A `$` would still match because of that trimming; it is just redundant.) Use `(?-i)`
-only when you specifically want case-sensitive matching.
-
-### Auto-submit after insertion
-
-Use this only for deliberate automation modes. The submit key fires after a verified insert and never
-fires when KeyScribe copied to the clipboard instead.
-
-```toml
-submit = "cmd_return"
-```
-
-Other values: `return`, `shift_return`, `none`.
-
-### Remove trailing punctuation for commands
-
-For command-like modes, strip a final period before adding any trailing space or line break.
-
-```toml
-trim_trailing_punctuation = true
-```
-
-### Target a guest VM clipboard
-
-If a target uses `Control-C` and `Control-V` instead of Mac command shortcuts, set:
-
-```toml
-clipboard_modifier = "control"
-```
-
-This is best-effort because host clipboard sync timing is outside KeyScribe's control.
-
-### Use an extra mouse button as a trigger
-
-Mouse button descriptors are TOML key descriptors:
-
-```toml
-[[trigger_keys]]
-key = "mouse4"
-press_style = "hold-only"
-```
-
-Bound mouse buttons are consumed globally while KeyScribe runs, so they will not also perform their
-normal Back or Forward action.
-
-### Whole-utterance replacements as commands
-
-A replacement that consumes the entire dictation inserts exactly, skipping AI rewrite and trailing
-text. This makes spoken commands deterministic:
-
-```toml
-[[rules]]
-heard = "slash (\\w+)"
-replace = "/$1"
-regex = true
-```
-
-Say `slash resume` and the output is `/resume`.
-
-### Mode-local vocabulary
-
-Mode-local dictionary and replacements apply only in that mode, on top of the global sets:
-
-```toml
-[dictionary]
-include_global = true
-words = ["KeyScribe", "Parakeet"]
-
-[replacements]
-include_global = true
-[[replacements.rules]]
-heard = "at example dot com"
-replace = "@example.com"
-regex = false
-```
-
 ## Capstone workflows
 
 Use these as templates for your own setup.
@@ -519,6 +419,6 @@ Use these as templates for your own setup.
 
 - [FAQ.md](../FAQ.md) for permissions, Globe-key conflicts, engine choice, and troubleshooting.
 - [PRIVACY.md](../PRIVACY.md) for the exact local/cloud boundary.
-- [docs/stt_benchmarks.md](stt_benchmarks.md) for speech-model benchmarks and the local benchmark
+- [Speech Model Benchmarks](reference/stt_benchmarks.md) for speech-model benchmarks and the local benchmark
   workflow.
-- [docs/config_schema.md](config_schema.md) for every supported TOML field.
+- [Advanced Configuration](reference/advanced_configuration.md) for file-level mode examples.

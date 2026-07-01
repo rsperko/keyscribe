@@ -20,14 +20,19 @@ This file is the entry point. Read the design docs before writing code — they 
 - **Dictation is batch (commit-on-release) and inserts atomically** — one ⌘Z undoes the whole
   dictation.
 - **No app/mode identity in source.** No `if app == "Slack"`, no per-app presets. A Mode is a
-  named bag of config a generic pipeline executes (`principles.md` §2). Adding a mode = adding
+  named bag of config a generic pipeline executes (`docs/development/principles.md` §2). Adding a mode = adding
   data, never code.
+- **Public docs are for users first.** `README.md`, `FAQ.md`, `PRIVACY.md`, and
+  `docs/getting_started.md` should explain outcomes, setup, and tradeoffs in plain language.
+  Implementation details, schemas, benchmark methodology, prompt internals, architecture, and
+  contributor-only rationale belong under `docs/reference/` or `docs/development/`, with links from
+  user docs only when they help an advanced reader continue.
 
 ---
 
 ## Footguns (read the cited section before touching the area — these silently corrupt or leak)
 
-- **Pipeline order is fixed and load-bearing** (`design.md` §4.2.1): **verbatim tokenizes FIRST**
+- **Pipeline order is fixed and load-bearing** (`docs/development/design.md` §4.2.1): **verbatim tokenizes FIRST**
   (before the text stages, so a verbatim span is protected from everything except STT), the text
   stages run, **redaction tokenizes LAST** (just before the LLM), and restore is each command's
   `post` in strict **reverse/LIFO**, on every path (incl. no-LLM). Stages are commands with
@@ -37,25 +42,25 @@ This file is the entry point. Read the design docs before writing code — they 
   logged or written to history**, and the **post-LLM validation gate** (every issued `⟦SN:…⟧`
   returns exactly once; non-empty) is a hard check, not normalization: a dropped redaction token
   leaks the protected span, a dropped verbatim token corrupts the insert. On failure → one
-  stricter retry → else local fallback + HUD notice (`design.md` §4.2).
+  stricter retry → else local fallback + HUD notice (`docs/development/design.md` §4.2).
 - **Privacy mode and context are mutually exclusive.** When a mode's privacy toggle is on, the
   context checkboxes are **forced off and locked** — the redacted transcript is the only user
-  content that may leave the machine (`design.md` §4.4).
+  content that may leave the machine (`docs/development/design.md` §4.4).
 - **Dictionary is a hint, replacements are not protected.** Dictionary terms only tell the LLM
   "valid, not a misspelling" (it may still transform them); replacements flow into the LLM and
-  can be rewritten. Only **nonce tokens** are guaranteed to survive the rewrite (`design.md` §4.2).
+  can be rewritten. Only **nonce tokens** are guaranteed to survive the rewrite (`docs/development/design.md` §4.2).
   **One exception:** a replacement that consumes the **entire** utterance (a "whole-utterance
   replacement" like `slash resume`→`/resume`) is inserted verbatim and **bypasses the LLM, trailing,
   and trim** — detected at `ReplacementsStage` (reported via `PipelineContext.bareReplacement`) and
   short-circuited in `DictationController.produceDictationText`. Regex/literal replacements both match
   **case-insensitively** by default (STT output is engine-cased; `(?-i)` opts back in). See
-  `config_schema.md` *Replacement matching & output*.
+  `docs/reference/config_schema.md` *Replacement matching & output*.
 - **Credential material is never persisted in config.** Saved API keys live in Keychain and TOML
   stores only `key_ref`; command-generated bearer tokens are in-memory only. `token_command` stores
-  the command to run, not the token material itself (`config_schema.md`).
+  the command to run, not the token material itself (`docs/reference/config_schema.md`).
 - **Edit-in-place is a capability, not a special mode** — any mode can be `source=selection` /
   `output=replace_selection`; ⌘C→pasteboard is the selection capture, AX is a native-only bonus
-  (`design.md` §4.3).
+  (`docs/development/design.md` §4.3).
 - **Commit-on-release drains the tail before stopping — do not revert to an immediate stop.** The
   AVAudioEngine tap accumulates `bufferSize` frames before each callback, so at release the buffer
   holding the final word is still filling and undelivered; tearing the engine down right then clips
@@ -93,20 +98,20 @@ This file is the entry point. Read the design docs before writing code — they 
 
 ---
 
-## Read order (design docs live in `docs/`)
+## Read order
 
-1. `principles.md` — the 9 engineering/product principles. Govern every decision.
-2. `design.md` — the architecture: vision, invariants, pipeline (§4.2 ordering is load-bearing),
+1. `docs/development/principles.md` — the 9 engineering/product principles. Govern every decision.
+2. `docs/development/design.md` — the architecture: vision, invariants, pipeline (§4.2 ordering is load-bearing),
    modes & two-phase routing (§4.3), context (§4.4), insertion (§4.5), storage/versioning (§5).
-3. `roadmap.md` — build status and the remaining (unbuilt) work.
-4. `ui_design.md` — the UX contract (first run §2, HUD §5, menu §6, Settings §7, History §8).
+3. `docs/development/roadmap.md` — build status and the remaining (unbuilt) work.
+4. `docs/development/ui_design.md` — the UX contract (first run §2, HUD §5, menu §6, Settings §7, History §8).
    User-facing behavior here is normative; implementation does not override it.
-5. `ui_components.md` — the shared widget/semantic-term vocabulary. Reuse it; don't invent
+5. `docs/development/ui_components.md` — the shared widget/semantic-term vocabulary. Reuse it; don't invent
    competing badges or status words.
-6. `config_schema.md` — on-disk TOML/file formats, the seeded starter modes.
-7. `prompt_design.md` — LLM rewrite prompt structure (Gemini 2.5 Flash floor).
-8. `icon_design.md` — app icon / menu-bar glyph direction.
-9. `competitors.md` — competitive landscape and STT-engine survey.
+6. `docs/reference/config_schema.md` — on-disk TOML/file formats, the seeded starter modes.
+7. `docs/development/prompt_design.md` — LLM rewrite prompt structure (Gemini 2.5 Flash floor).
+8. `docs/development/icon_design.md` — app icon / menu-bar glyph direction.
+9. `docs/development/competitors.md` — competitive landscape and STT-engine survey.
 
 ---
 
@@ -126,7 +131,7 @@ keyscribe/
   release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major)
   scripts/             # dev helpers: setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
                        #   render_app_icon.swift (all reachable via make targets)
-  docs/                # the design docs (tracked product spec)
+  docs/                # user docs, plus development/reference specs
   benchmark/           # STT benchmark kit: manifest.json + record.sh + compare.sh + README (committed);
                        #   *.wav recordings + results.json are gitignored (your own voice).
                        #   Record: bash benchmark/record.sh; rank engines: bash benchmark/compare.sh
@@ -246,7 +251,7 @@ KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorde
 107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
 Small) cluster around 5.7–6.0% biased WER; bias is decisive (Moonshine without recognition bias
 ~15%). These numbers are speaker/mic/room dependent — reference table + caveats in
-`docs/stt_benchmarks.md`, reproduction in `benchmark/README.md`. The shipped list order is
+`docs/reference/stt_benchmarks.md`, reproduction in `benchmark/README.md`. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
 "Recommended" badge on the small default.
@@ -317,8 +322,8 @@ Config lives under `~/Library/Application Support/<KeyScribe|KeyScribeDev>/` (pe
 `models/` weights cache is shared), loaded once into `ConfigCache` and invalidated by an FSEvents
 watcher (no per-dictation I/O). File-based storage, **no SQLite**: config
 as TOML (modes/connections/dictionary/replacements), fragments as markdown+YAML, history as
-JSONL-per-day, downloaded STT weights consolidated in `models/` (`config_schema.md`). Every persisted
-*config* file carries `schema_version` and migrates forward (`design.md` §5.1); `models/` is
+JSONL-per-day, downloaded STT weights consolidated in `models/` (`docs/reference/config_schema.md`). Every persisted
+*config* file carries `schema_version` and migrates forward (`docs/development/design.md` §5.1); `models/` is
 runtime-downloaded, never committed.
 
 **Config migrations — there is no migration *framework*, so don't assume one.** `ConfigDecode.table`
@@ -350,7 +355,7 @@ This repo has a **normal git origin** (it is *not* shop/world) — plain `git`/`
   `RegexCache`, config models) test-first; OS edges (AVAudioEngine, paste, CGEvent hotkeys, SwiftUI)
   are thin adapters in `Sources/KeyScribe`.
 - **File-based storage, no SQLite** — everything under `~/Library/Application Support/KeyScribe/`.
-- **Reuse the UI vocabulary** in `ui_components.md`; never overstate privacy (no "secure/safe/
+- **Reuse the UI vocabulary** in `docs/development/ui_components.md`; never overstate privacy (no "secure/safe/
   private" for best-effort redaction — say what actually happens).
 - **Never hardcode the product name in user-facing copy — use `Branding.appName`** (resolves from the
   running bundle: "KeyScribe" prod, "KeyScribeDev" dev, the bundle name for a `custom` rebrand). The

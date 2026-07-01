@@ -104,7 +104,7 @@ Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Sp
 Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base (English)). Here is the state of each family as of
 2026. A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on the
 current KeyScribe 107-clip single-speaker benchmark, Whisper Large v3 Turbo, Qwen3-ASR 1.7B, and
-Whisper Small are effectively the top accuracy cluster. See `docs/stt_benchmarks.md` instead of
+Whisper Small are effectively the top accuracy cluster. See `../reference/stt_benchmarks.md` instead of
 treating this table as a personal ranking.
 
 | Engine | Speed (Apple Silicon) | Accuracy (English WER) | Languages | Notes |

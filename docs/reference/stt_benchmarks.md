@@ -5,7 +5,7 @@
 > room-dependent — your ranking *will* differ, and the top models here are close enough that the
 > order flips easily. Treat this as a sanity check and a reproduction baseline, **not** a
 > leaderboard. To get numbers that reflect *your* setup, record your own corpus — see
-> [`benchmark/README.md`](../benchmark/README.md).
+> [`benchmark/README.md`](../../benchmark/README.md).
 
 **Corpus:** 107 clips (the committed `manifest.json` corpus, Tiers 1–3).
 **Recorded:** 2026-06-30, single speaker, quiet room, built-in mic, normal pace.
@@ -51,4 +51,4 @@ bash benchmark/compare.sh            # ranked report over the engines you have i
 `compare.sh` writes the raw per-engine numbers to `benchmark/results.json` (gitignored — it's
 your voice) and prints a ranking plus best-accuracy / lightest-that-stays-close / fastest picks.
 Full methodology, corpus tiers, and recording guidance are in
-[`benchmark/README.md`](../benchmark/README.md).
+[`benchmark/README.md`](../../benchmark/README.md).
