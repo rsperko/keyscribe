@@ -62,9 +62,11 @@ enum AudioInputDevices {
             || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
-    // Set the system default *input* device. Returns true on success. This is a GLOBAL change that affects
-    // every app on the machine, so a caller must save the prior default and restore it (see AudioCapture's
-    // temporary-default swap) — leaving it changed would hijack every other app's microphone.
+    // Set the system default *input* device. Returns true on success. This is a GLOBAL change that hijacks
+    // every other app's microphone, which is why capture NEVER calls it — device-pinned capture goes through
+    // HALInputUnit's own CurrentDevice with no global side effect. This exists SOLELY for the legacy
+    // crash-recovery reconcile (SystemAudioStateRestorer), to undo a default overridden by a pre-AUHAL
+    // build that crashed mid-swap. Do not call it from the capture path.
     @discardableResult
     static func setSystemDefaultInput(_ id: AudioDeviceID) -> Bool {
         var deviceID = id

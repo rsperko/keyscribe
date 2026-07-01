@@ -2,13 +2,13 @@ import CoreAudio
 import Foundation
 import KeyScribeKit
 
-// Crash-safe restoration of global macOS audio state KeyScribe temporarily changes during a dictation:
-// the system default INPUT device (overridden to honor a preferred mic the AUHAL cannot pin). The change
-// is recorded to a durable marker BEFORE it is applied and cleared AFTER it is restored in-process; if a
-// crash/SIGKILL/force-quit lands between the two, the marker survives and reconcile() undoes it on the next
-// start — the gap that left 0.1.7's crash with a hijacked default mic. Devices are resolved by UID, never
-// by transient AudioDeviceID. (Output silencing no longer needs a marker: it uses process-scoped ducking,
-// which the OS releases automatically when our process exits — see SystemOutputAudio.duck.)
+// Legacy crash-recovery reconcile ONLY. Current builds never change global macOS audio state during a
+// dictation: capture pins the chosen device on a raw AUHAL unit (HALInputUnit) with no system-default
+// change, and output silencing uses process-scoped ducking the OS releases on exit. This type exists so a
+// user UPGRADING from a flip-era build that crashed while it had overridden the system default input (the
+// old 0.1.7-class strand: a hijacked default mic) has that marker undone once on the next launch. It is
+// never written by this build — reconcile() reads any surviving marker, restores it, and clears it.
+// Devices are resolved by UID, never by transient AudioDeviceID.
 final class SystemAudioStateRestorer: Sendable {
     private let store: PendingSystemRestoreStore
     private let resolveInputDevice: @Sendable (String) -> AudioDeviceID?
@@ -28,16 +28,6 @@ final class SystemAudioStateRestorer: Sendable {
         self.resolveOutputDevice = resolveOutputDevice
         self.setDefaultInput = setDefaultInput
         self.setOutputMute = setOutputMute
-    }
-
-    // MARK: - Record / clear (called around each in-process mutation)
-
-    func recordDefaultInputOverride(originalUID: String) {
-        store.update { $0.defaultInputUID = originalUID }
-    }
-
-    func clearDefaultInputOverride() {
-        store.update { $0.defaultInputUID = nil }
     }
 
     // MARK: - Reconcile

@@ -158,7 +158,6 @@ final class DictationController {
     init(
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
-        restorer: SystemAudioStateRestorer? = nil,
         audio: AudioCapturing? = nil,
         insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
@@ -177,7 +176,7 @@ final class DictationController {
         self.config = config
         self.history = history
         self.hud = hud
-        self.audio = audio ?? AudioCapture(restorer: restorer)
+        self.audio = audio ?? AudioCapture()
         self.effects = DuringDictationEffects()
         self.insert = insert
         self.submitKey = submitKey

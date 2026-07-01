@@ -84,8 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             history.applyRetention(retentionDays: settings.history.retentionDays)
         }
         controller = DictationController(
-            settings: settings, provider: provider, config: config, history: history, hud: hud,
-            restorer: audioRestorer)
+            settings: settings, provider: provider, config: config, history: history, hud: hud)
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }

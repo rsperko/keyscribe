@@ -18,49 +18,74 @@ struct AudioCaptureFormatGuardTests {
     }
 }
 
-// Pinning the input AUHAL breaks engine.start() with -10868 unless the preferred device truly differs
-// from both the system default and what is already pinned.
-struct PreferredDevicePinTests {
-    @Test func noPreferredDeviceSkips() {
-        #expect(AudioCapture.pinDecision(preferred: nil, systemDefault: 5, currentlyPinned: nil) == .skip)
+// Capture-device resolution: a present preferred device wins; else the system default; else nothing is
+// available. `isPreferredPresent` drives the error policy — a failed PRESENT preferred device is surfaced
+// (don't silently record from a different mic), while a default-follow failure is retried. The AUHAL binds
+// whichever device this resolves to on its OWN CurrentDevice, so there is no system-default flip.
+struct CaptureDeviceResolutionTests {
+    private func resolve(_ map: [String: AudioDeviceID]) -> (String) -> AudioDeviceID? { { map[$0] } }
+
+    @Test func noPreferredFollowsSystemDefault() {
+        let target = AudioCapture.captureTarget(
+            preferredUID: nil, resolvePreferred: resolve([:]), systemDefault: 5)
+        #expect(target == .systemDefault(5))
+        #expect(!target.isPreferredPresent)
+        #expect(target.deviceID == 5)
     }
 
-    @Test func preferredEqualToSystemDefaultSkips() {
-        // The built-in-mic regression: preferred == default, so follow it instead of pinning.
-        #expect(AudioCapture.pinDecision(preferred: 5, systemDefault: 5, currentlyPinned: nil) == .skip)
+    @Test func emptyPreferredFollowsSystemDefault() {
+        let target = AudioCapture.captureTarget(
+            preferredUID: "", resolvePreferred: resolve(["": 9]), systemDefault: 5)
+        #expect(target == .systemDefault(5))
     }
 
-    @Test func preferredAlreadyPinnedSkips() {
-        // prewarm pinned it; arm must not re-set the now-initialized unit.
-        #expect(AudioCapture.pinDecision(preferred: 7, systemDefault: 5, currentlyPinned: 7) == .skip)
+    @Test func presentPreferredWins() {
+        let target = AudioCapture.captureTarget(
+            preferredUID: "DeskMic", resolvePreferred: resolve(["DeskMic": 7]), systemDefault: 5)
+        #expect(target == .preferred(7))
+        #expect(target.isPreferredPresent)
+        #expect(target.deviceID == 7)
     }
 
-    @Test func preferredDifferentFromDefaultAndUnpinnedPins() {
-        #expect(AudioCapture.pinDecision(preferred: 7, systemDefault: 5, currentlyPinned: nil) == .pin(7))
+    @Test func disconnectedPreferredFallsBackToDefaultAndIsRetryable() {
+        // Preferred configured but not connected: follow the default, and a failure there is retried
+        // (isPreferredPresent == false) rather than surfaced as "Could not start <mic>".
+        let target = AudioCapture.captureTarget(
+            preferredUID: "DeskMic", resolvePreferred: resolve([:]), systemDefault: 5)
+        #expect(target == .systemDefault(5))
+        #expect(!target.isPreferredPresent)
     }
 
-    @Test func preferredDifferentFromADifferentPinRepins() {
-        #expect(AudioCapture.pinDecision(preferred: 7, systemDefault: 5, currentlyPinned: 9) == .pin(7))
+    @Test func noDeviceAtAllIsUnavailable() {
+        let target = AudioCapture.captureTarget(
+            preferredUID: "DeskMic", resolvePreferred: resolve([:]), systemDefault: nil)
+        #expect(target == .unavailable)
+        #expect(target.deviceID == nil)
+    }
+}
+
+// The client format we set on the AUHAL after binding the device must match the device's OWN native rate
+// and channel count — matching (never forcing an unsupported rate/channels) is exactly how -10868 is
+// avoided. A degenerate native format yields nil so the caller fails the bring-up cleanly.
+struct ClientStreamFormatTests {
+    @Test func matchesNativeRateAndChannels() throws {
+        let format = try #require(AudioCapture.clientStreamFormat(nativeSampleRate: 48_000, nativeChannels: 2))
+        #expect(format.sampleRate == 48_000)
+        #expect(format.channelCount == 2)
+        #expect(format.commonFormat == .pcmFormatFloat32)
+        #expect(!format.isInterleaved)
     }
 
-    @Test func systemDefaultFallbackAllowedWhenNoPreferredDeviceIsConfigured() {
-        #expect(AudioCapture.allowsSystemDefaultFallback(
-            preferredUID: nil, preferredDevice: nil, systemDefault: 5))
+    @Test func bluetoothHFPMonoIsAccepted() throws {
+        let format = try #require(AudioCapture.clientStreamFormat(nativeSampleRate: 16_000, nativeChannels: 1))
+        #expect(format.sampleRate == 16_000)
+        #expect(format.channelCount == 1)
     }
 
-    @Test func systemDefaultFallbackAllowedWhenPreferredDeviceIsDisconnected() {
-        #expect(AudioCapture.allowsSystemDefaultFallback(
-            preferredUID: "DeskMic", preferredDevice: nil, systemDefault: 5))
-    }
-
-    @Test func systemDefaultFallbackAllowedWhenPreferredDeviceIsAlreadyDefault() {
-        #expect(AudioCapture.allowsSystemDefaultFallback(
-            preferredUID: "BuiltInMic", preferredDevice: 5, systemDefault: 5))
-    }
-
-    @Test func systemDefaultFallbackRejectedWhenPreferredDeviceIsAvailableButDifferent() {
-        #expect(!AudioCapture.allowsSystemDefaultFallback(
-            preferredUID: "BuiltInMic", preferredDevice: 7, systemDefault: 5))
+    @Test func degenerateNativeFormatIsRejected() {
+        #expect(AudioCapture.clientStreamFormat(nativeSampleRate: 0, nativeChannels: 0) == nil)
+        #expect(AudioCapture.clientStreamFormat(nativeSampleRate: 48_000, nativeChannels: 0) == nil)
+        #expect(AudioCapture.clientStreamFormat(nativeSampleRate: 0, nativeChannels: 2) == nil)
     }
 }
 

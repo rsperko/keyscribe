@@ -65,49 +65,64 @@ This file is the entry point. Read the design docs before writing code — they 
 - **Edit-in-place is a capability, not a special mode** — any mode can be `source=selection` /
   `output=replace_selection`; ⌘C→pasteboard is the selection capture, AX is a native-only bonus
   (`docs/development/design.md` §4.3).
-- **Commit-on-release drains the tail before stopping — do not revert to an immediate stop.** The
-  AVAudioEngine tap accumulates `bufferSize` frames before each callback, so at release the buffer
-  holding the final word is still filling and undelivered; tearing the engine down right then clips
-  it. `handleCommit` flips the HUD to *transcribing* and then `await`s
-  `AudioCapture.finishDraining()`, which keeps the engine running until a delivered buffer's host
-  time covers the release instant (`TailDrainGate`, with a buffer-count fallback for invalid
-  timestamps and a 300 ms backstop), and only then tears the engine down (`teardownAndFinalize`, which
-  closes the WAV only after the tap is removed so no in-flight write races the finalize). **`stop()` is
-  the immediate, audio-discarding teardown** — keep it for `cancel()`/over-limit abort only; the commit
-  path must use `finishDraining()`. `stop()` also force-resumes any pending drain so a direct stop never
-  strands the awaiter. `bufferSize` is 1024 (~64 ms @16k) to keep the worst-case undelivered tail
-  short. The `wav … drain=Xms` debug log reports the actual flush time (≈300 ms means the backstop
-  fired). Don't reorder the HUD flip after the await — the drain latency must stay invisible.
-- **AVAudioEngine bring-up/teardown run off the main thread on a serial queue, watchdogged — never move
-  them back onto `@MainActor`.** `engine.start()`/`stop()`/`installTap`/`removeTap` can block for a long
-  time (or indefinitely) on a transitioning device — classically a Bluetooth headset forced from A2DP
-  into HFP the moment capture opens an input stream — and doing that on the main thread froze the whole
-  app *and* (via the event tap) global input. `AudioCapture` confines every engine control call to a
-  private serial `controlQueue`; `start()` is `async` and bounded by a watchdog (`runWithDeadline`). The
-  watchdog is **non-destructive**: the interactive `start()` path waits `bringUpTimeout` (2 s) **plus**
-  `bringUpGrace` (2 s) and **adopts** a bring-up that lands anywhere in that ~4 s window rather than
-  discarding it — a resident engine whose cached binding went stale over idle can need ~2 s to re-realize
-  the input unit on the hot path, and a tight 2 s watchdog used to throw that late success on the floor as
-  a spurious "Could not start the microphone". Only after the full window (a genuinely wedged device) does
-  it mark the engine *suspect*, abandon the wedged call on its (now-orphaned) queue, and let the next
-  dictation rebuild a fresh engine + queue — so the healthy path keeps reusing the prewarmed engine (no
-  fresh build per dictation) and a true wedge degrades to a graceful "Could not start the microphone"
-  instead of a hang. Waiting the grace window cannot reintroduce the freeze — bring-up is off-main, so the
-  main actor only `await`s. (`prewarm` keeps the tight `bringUpTimeout` — it is background work.) A
-  complementary idle/wake **binding refresh** attacks the same staleness proactively: `refreshBinding()`
-  rebuilds + re-prewarms the idle engine (no topology change fires while idle/asleep), driven by
-  `DictationController` on a ~4 min idle timer and by an `NSWorkspace.didWakeNotification` observer, so the
-  first post-idle/post-wake dictation usually finds a fresh binding and never enters the grace path. To
-  diagnose the next occurrence rather than infer it, `start()` logs `bringUp=<ms>ms` on the `audio`
-  category (`Log.audio`, `.debug`): a healthy prewarmed start is a few ms; a value **past `bringUpTimeout`
-  is tagged ` grace-adopted`** — proof the input unit was re-realized on the hot path and only the grace
-  window saved the dictation (subject to the same `log show` unreliability footgun below — capture it live
-  or via a `.debug`-level `log stream --predicate 'category == "audio"'` while reproducing). A tap buffer carries the engine `generation` so a wedged engine that
-  finally unblocks can't write into a newer recording. Because bring-up is async, `handleCommit` before
-  `captureStarted` cancels the not-yet-live attempt rather than queueing a commit against audio that was
-  not recording yet. A `kAudioHardwarePropertyDefaultInputDevice` listener re-prewarms on a device change
-  while idle (no `AVAudioEngineConfigurationChange` fires while stopped), keeping the prewarmed engine's
-  binding fresh.
+- **Capture pins the chosen device on a raw AUHAL unit — it NEVER changes the macOS system default
+  input.** Device-pinned capture goes through `HALInputUnit` (`kAudioUnitSubType_HALOutput`): set the
+  unit's `CurrentDevice`, read the device's **native** `StreamFormat`, then set the client format to
+  match it (Float32 non-interleaved at the device's own rate/channels) — matching the client format to
+  the device is exactly how the **-10868 (`kAudioUnitErr_FormatNotSupported`)** that plagued the old
+  `AVAudioEngine.inputNode` path is avoided, so there is no reason to touch the global default. The prior
+  implementation temporarily flipped `kAudioHardwarePropertyDefaultInputDevice` to dodge -10868; that is
+  a confirmed antipattern (every reputable recorder pins the device instance-locally; AudioKit shipped
+  and then removed a default-flip as a bug) and it caused a user-visible side effect (every dictation
+  briefly hijacked the system mic) plus intermittent `preferredInputFailed`. **Do not reintroduce any
+  `setSystemDefaultInput` call on the capture path** — that function survives ONLY for the legacy
+  crash-reconcile that undoes a default a pre-AUHAL build may have stranded. A **present** preferred
+  device that fails to bring up surfaces `preferredInputFailed` (don't silently record from a different
+  mic); a default-follow failure retries once after 250 ms, then `formatUnavailable`.
+- **Commit-on-release drains the tail before stopping — do not revert to an immediate stop.** The AUHAL
+  IO proc delivers a buffer once per hardware period, so at release the in-progress period holding the
+  final word is undelivered; tearing the unit down right then clips it. `handleCommit` flips the HUD to
+  *transcribing* and then `await`s `AudioCapture.finishDraining()`, which keeps the unit running until a
+  delivered buffer's host time (`inTimeStamp.mHostTime`) covers the release instant (`TailDrainGate`,
+  with a buffer-count fallback for invalid timestamps and a 300 ms backstop), and only then tears it down
+  (`teardownAndFinalize`, which `stop()`s a non-Bluetooth unit but **disposes** a Bluetooth one to free
+  HFP, and closes the WAV only after that so no in-flight write races the finalize). **`stop()` is the
+  immediate, audio-discarding teardown** (disposes the unit) — keep it for `cancel()`/over-limit abort
+  only; the commit path must use `finishDraining()`. `stop()` also force-resumes any pending drain so a
+  direct stop never strands the awaiter. The `wav … drain=Xms` `DictationController` debug log reports
+  the actual flush time (≈300 ms means the backstop fired). Don't reorder the HUD flip after the await —
+  the drain latency must stay invisible.
+- **HAL unit bring-up/teardown run off the main thread on a serial queue, watchdogged — never move them
+  back onto `@MainActor`.** `AudioUnitInitialize`/`AudioOutputUnitStart`/`Stop`/`AudioComponentInstanceDispose`
+  can block for a long time (or indefinitely) on a transitioning device — classically a Bluetooth headset
+  forced from A2DP into HFP the moment capture opens an input stream — and doing that on the main thread
+  froze the whole app *and* (via the event tap) global input. `AudioCapture` confines every `HALInputUnit`
+  control call to a private serial `controlQueue`; `start()` is `async` and bounded by a watchdog
+  (`runWithDeadline`). The watchdog is **non-destructive**: the interactive `start()` path waits
+  `bringUpTimeout` (2 s) **plus** `bringUpGrace` (2 s) and **adopts** a bring-up that lands anywhere in
+  that ~4 s window rather than discarding it — a resident unit whose cached binding went stale over idle
+  can need ~2 s to re-realize the input unit on the hot path, and a tight 2 s watchdog used to throw that
+  late success on the floor as a spurious "Could not start the microphone". Only after the full window (a
+  genuinely wedged device) does it abandon the wedged call on its (now-orphaned) queue and let the next
+  dictation rebuild a fresh unit + queue — so the healthy path keeps reusing the prewarmed unit (no fresh
+  build per dictation) and a true wedge degrades to a graceful "Could not start the microphone" instead of
+  a hang. Waiting the grace window cannot reintroduce the freeze — bring-up is off-main, so the main actor
+  only `await`s. (`prewarm` keeps the tight `bringUpTimeout` — it configures/initializes the unit but does
+  NOT start the IOProc, so the mic indicator never lights; it is skipped for Bluetooth so idle never forces
+  HFP.) A complementary idle/wake **binding refresh** attacks the same staleness proactively:
+  `refreshBinding()` rebuilds + re-prewarms the idle unit, driven by `DictationController` on a ~4 min idle
+  timer and by an `NSWorkspace.didWakeNotification` observer. To diagnose the next occurrence rather than
+  infer it, `start()` logs `bringUp=<ms>ms` on the `audio` category (`Log.audio`, `.debug`): a healthy
+  prewarmed start is a few ms; a value **past `bringUpTimeout` is tagged ` grace-adopted`** (subject to the
+  `log show` unreliability footgun below — capture it live or via `log stream --predicate 'category ==
+  "audio"'`). A disposed unit's render callback cannot fire (`AudioOutputUnitStop` is synchronous), and a
+  stray late buffer is a no-op because `handle()` guards on `recordFormat != nil` (nil'd by `finalizeCapture`).
+  Because bring-up is async, `handleCommit` before `captureStarted` cancels the not-yet-live attempt rather
+  than queueing a commit against audio that was not recording yet. Two idle HAL listeners
+  (`kAudioHardwarePropertyDefaultInputDevice` + the device list) re-prewarm on a device change while idle;
+  **while recording**, raw AUHAL posts no `AVAudioEngineConfigurationChange`, so a per-capture listener on
+  the BOUND device (`DeviceIsAlive` + `NominalSampleRate`, for disconnect and a Bluetooth A2DP↔HFP flip)
+  restarts capture into the same file on the control queue, bounded by `maxConfigRestarts`.
 - **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs at the top of `transcribeAndInsert`, in
@@ -438,7 +453,7 @@ add per-flag tests — default-off fallback, override persistence, and off-elisi
 - **ZERO code comments** unless explicitly requested — self-documenting names and structure.
 - **TDD red→green** for pure logic; thin adapters + integration tests for OS edges. Keep building
   the OS-free core in `KeyScribeKit` (pipeline, mode resolution, tokenization, gate, regex via
-  `RegexCache`, config models) test-first; OS edges (AVAudioEngine, paste, CGEvent hotkeys, SwiftUI)
+  `RegexCache`, config models) test-first; OS edges (AUHAL capture, paste, CGEvent hotkeys, SwiftUI)
   are thin adapters in `Sources/KeyScribe`.
 - **File-based storage, no SQLite** — everything under `~/Library/Application Support/KeyScribe/`.
 - **Reuse the UI vocabulary** in `docs/development/ui_components.md`; never overstate privacy (no "secure/safe/
