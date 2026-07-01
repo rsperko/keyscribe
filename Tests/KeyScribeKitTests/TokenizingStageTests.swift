@@ -78,6 +78,50 @@ struct TokenizingStageTests {
         #expect(p.issuedTokens.isEmpty)
     }
 
+    // "insert clipboard contents" pulls the clipboard into a verbatim token before the text stages,
+    // so the pasted content is opaque to replacements/numbers and to the LLM, then restored.
+    @Test func clipboardContentSurvivesTextStages() {
+        let p = Pipeline([
+            TokenizingStage.clipboard("twenty five"),
+            NumbersStage(),
+        ])
+        var ctx = PipelineContext(text: "count twenty five insert clipboard contents")
+        p.forward(&ctx)
+        #expect(p.issuedTokens.count == 1)
+        p.reverse(&ctx)
+        #expect(ctx.text == "count 25 twenty five")   // loose number converted, pasted one preserved
+    }
+
+    // A verbatim span and a clipboard paste in the SAME dictation must not collide: verbatim mints a
+    // VERB token and clipboard a CLIP token, so restore keeps them independent (a shared token string
+    // would let the clipboard's reverse pass overwrite the verbatim span, leaking clipboard content).
+    @Test func verbatimAndClipboardDoNotCollide() {
+        let p = Pipeline([
+            TokenizingStage.verbatim(),
+            TokenizingStage.clipboard("B"),
+        ])
+        var ctx = PipelineContext(text: "begin verbatim A end verbatim and insert clipboard contents")
+        p.forward(&ctx)
+        #expect(p.issuedTokens.count == 2)
+        #expect(Set(p.issuedTokens).count == 2)   // two DISTINCT tokens, not one string reused
+        p.reverse(&ctx)
+        #expect(ctx.text == "A and B")
+    }
+
+    // A clipboard phrase INSIDE a verbatim span is literal text, not a paste: verbatim sorts before
+    // clipboard, so it swallows the phrase first and clipboard never fires.
+    @Test func clipboardPhraseInsideVerbatimStaysLiteral() {
+        let p = Pipeline([
+            TokenizingStage.verbatim(),
+            TokenizingStage.clipboard("PASTED"),
+        ])
+        var ctx = PipelineContext(text: "begin verbatim insert clipboard contents end verbatim")
+        p.forward(&ctx)
+        #expect(p.issuedTokens.count == 1)
+        p.reverse(&ctx)
+        #expect(ctx.text == "insert clipboard contents")
+    }
+
     // The gate's issuedTokens survive an LLM that preserves them; reverse then restores the originals.
     @Test func tokensSurviveAPreservingRewriteThenRestore() {
         let v = Tokenizer()

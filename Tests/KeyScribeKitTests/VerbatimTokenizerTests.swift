@@ -30,20 +30,16 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "the password is hunter2 and more")
     }
 
-    @Test func startStopTriggerAliases() {
-        for (begin, end) in [("start verbatim", "end verbatim"),
-                             ("begin verbatim", "stop verbatim"),
-                             ("start verbatim", "stop verbatim")] {
-            let (out, t) = tokenize("say \(begin) KeepThis \(end) done")
-            #expect(out == "say ⟦SN:VERB:1⟧ done")
-            #expect(t.restore(out) == "say KeepThis done")
-        }
+    // Only "begin verbatim" / "end verbatim" are triggers now — the start/stop aliases are dropped
+    // and pass through as ordinary text.
+    @Test func droppedStartStopAliasesAreLiteral() {
+        let (out, _) = tokenize("say start verbatim KeepThis stop verbatim done")
+        #expect(out == "say start verbatim KeepThis stop verbatim done")
     }
 
-    @Test func unterminatedStartTokenizesToEnd() {
-        let (out, t) = tokenize("the password is start verbatim hunter2 and more")
-        #expect(out == "the password is ⟦SN:VERB:1⟧")
-        #expect(t.restore(out) == "the password is hunter2 and more")
+    @Test func droppedStartVerbatimDoesNotTokenize() {
+        let (out, _) = tokenize("the password is start verbatim hunter2 and more")
+        #expect(out == "the password is start verbatim hunter2 and more")
     }
 
     @Test func noVerbatimLeavesTextUnchanged() {

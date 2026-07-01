@@ -111,7 +111,9 @@ bundle_id = "com.apple.mail"
 
 # ── Pipeline commands (spoken-command / pipeline features, opt-in per mode) ──
 [commands]
-live_edits = true           # spoken commands: new line / paragraph / scratch that / tab /
+live_edits = true           # spoken commands: "insert new line" / "insert new paragraph" /
+                            #   "insert tab character" / "scratch that" / "insert clipboard contents"
+                            #   (pastes the clipboard, protected like verbatim) /
                             #   "begin verbatim".."end verbatim" (verbatim is a live edit)
 privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
@@ -162,7 +164,7 @@ context = { app = true, preceding_text = false }
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection`. |
-| `commands.live_edits` | bool | Opt-in to the spoken-command list (new line, paragraph, scratch that, **tab**, **begin/end verbatim**). |
+| `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
 | `dictionary` | table | `include_global` + `words[]`. |
@@ -412,6 +414,10 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 ## Notes & conventions
 - **Verbatim is a live edit** — gated by `commands.live_edits` (no separate toggle); triggered
   by "begin verbatim" / "end verbatim".
+- **"Insert clipboard contents" is a live edit** — same `commands.live_edits` gate; triggered by
+  "insert clipboard contents"; pastes the
+  clipboard at that point, tokenized like a verbatim span so it is inserted as-is and never sent to
+  the LLM. Dictation only (not edit-in-place). Empty/absent clipboard leaves the phrase as text.
 - **`include_global` is per-set** — dictionary and replacements each carry their own flag.
 - **Key descriptor format** — lowercase tokens joined by `+`: modifiers (`control` `option`
   `command` `shift`) plus a key, or a named single key (`fn`/`globe`, `right_option`,

@@ -97,8 +97,9 @@ to the clipboard instead of pasting into the wrong place.
 Use one trigger key across multiple contexts, pick a one-shot mode from the menu bar, or end a
 dictation with a phrase like "as an email" to route the text through another mode before insertion.
 
-**Edit while speaking.** Say "new line", "new paragraph", "scratch that", or "begin verbatim ... end
-verbatim" and KeyScribe applies those instructions before the text lands.
+**Edit while speaking.** Say "insert new line", "insert new paragraph", "insert tab character",
+"scratch that", "insert clipboard contents", or "begin verbatim ... end verbatim" and KeyScribe
+applies those instructions before the text lands.
 
 **Fix it once, and it sticks.** Add a dictionary entry or replacement from a global shortcut, a
 selection, or a history item. Dictionary entries bias supported engines; replacements auto-substitute

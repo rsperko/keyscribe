@@ -1,13 +1,12 @@
 import Foundation
 
 // Verbatim is a live edit (design.md §4.2): a span delimited by the spoken triggers
-// "begin"/"start verbatim" … "end"/"stop verbatim" is pulled into a single nonce token so the LLM
-// cannot touch it, then restored verbatim. Gated by the mode's live-edits opt-in at the call site.
-// Runs as the first tokenization step (before redaction), so it is the last text mutation before
-// the LLM.
+// "begin verbatim" … "end verbatim" is pulled into a single nonce token so the LLM cannot touch it,
+// then restored verbatim. Gated by the mode's live-edits opt-in at the call site. Runs as the first
+// tokenization step (before redaction), so it is the last text mutation before the LLM.
 public enum VerbatimTokenizer {
-    private static let beginTrigger = #"\b(?:begin|start) verbatim\b"#
-    private static let endTrigger = #"\b(?:end|stop) verbatim\b"#
+    private static let beginTrigger = #"\bbegin verbatim\b"#
+    private static let endTrigger = #"\bend verbatim\b"#
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
         guard text.range(of: "verbatim", options: .caseInsensitive) != nil else { return text }

@@ -34,19 +34,32 @@ public struct TokenizingStage: PipelineStage {
     public static func redaction(tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
         TokenizingStage(position: .postSTTMark, tokenizer: tokenizer) { RedactionTokenizer.apply($0, into: $1) }
     }
+
+    // "insert clipboard contents" — the third protector the machinery above anticipated. Sorts with
+    // verbatim (before the text stages) but at a later order, so a verbatim span swallows a clipboard
+    // phrase before it can fire. The clipboard string is captured per-dictation by the host.
+    public static func clipboard(_ clipboard: String?, tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
+        TokenizingStage(position: .verbatimMark, order: 1, tokenizer: tokenizer) {
+            ClipboardTokenizer.apply($0, clipboard: clipboard, into: $1)
+        }
+    }
 }
 
 extension Tokenizer {
     // Rebuild `text` with each span replaced by its nonce token, in one left-to-right pass. The spans
     // must be ordered by start and non-overlapping (the scanners guarantee this). Shared by the
     // verbatim and redaction scanners so the cursor/splice accumulation lives in exactly one place.
-    func splice(_ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType) -> String {
+    // `dedup: false` mints a distinct token per site even for equal values (clipboard), so N identical
+    // paste sites stay N distinct tokens and each survives the exactly-once gate.
+    func splice(
+        _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true
+    ) -> String {
         guard !spans.isEmpty else { return text }
         var result = ""
         var cursor = text.startIndex
         for span in spans {
             result += text[cursor..<span.range.lowerBound]
-            result += tokenize(span.value, type: type)
+            result += dedup ? tokenize(span.value, type: type) : tokenizeUnique(span.value, type: type)
             cursor = span.range.upperBound
         }
         result += text[cursor...]

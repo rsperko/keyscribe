@@ -11,7 +11,7 @@ AI cleanup, mode routing, context controls, history, and file-level automation.
 | 1. First dictation | Hold a key, speak, release, undo once. | Plain local dictation works in your usual apps. |
 | 2. Reliability | Pick a trigger, recover from focus changes, paste the last result. | Dictation feels safe enough to use all day. |
 | 3. Vocabulary | Fix names, jargon, and repeated mishearings. | KeyScribe spells the words you care about. |
-| 4. Live edits | Say line breaks, tabs, scratch-that, and verbatim spans. | You can dictate structured text without stopping. |
+| 4. Live edits | Say line breaks, tabs, scratch-that, clipboard paste, and verbatim spans. | You can dictate structured text without stopping. |
 | 5. Speech models | Choose the local engine that fits your voice and Mac. | Accuracy and latency feel right. |
 | 6. AI rewrite | Add your own provider key for optional cleanup. | You want polished messages, email, Markdown, or selected-text edits. |
 | 7. Modes | Route dictation by key, app, URL, window title, or spoken suffix. | One trigger does the right thing in different places. |
@@ -97,22 +97,22 @@ Modes can turn spoken commands into local text edits before insertion.
 
 Useful phrases:
 
-- `new line`
-- `newline`
-- `line break`
-- `new paragraph`
+- `insert new line`
+- `insert new paragraph`
+- `insert tab character`
+- `insert clipboard contents`
 - `scratch that`
-- `strike that`
-- `tab key`
-- `insert tab`
 - `begin verbatim ... end verbatim`
+
+The insert commands use a deliberate carrier phrase so a stray "new line" spoken in prose stays as
+text. Speaking is forgiving: `insert new line` and `insert a new line` both work.
 
 Example:
 
 Say:
 
 ```text
-first item new line second item scratch that revised second item new paragraph final note
+first item insert new line second item scratch that revised second item insert new paragraph final note
 ```
 
 With live edits on, KeyScribe inserts line breaks and removes the scratched segment.
@@ -120,10 +120,23 @@ With live edits on, KeyScribe inserts line breaks and removes the scratched segm
 Use verbatim spans when the words sound like commands but should stay literal:
 
 ```text
-begin verbatim new line scratch that end verbatim
+begin verbatim insert new line scratch that end verbatim
 ```
 
-That inserts the words `new line scratch that` instead of treating them as edits.
+That inserts the words `insert new line scratch that` instead of treating them as edits.
+
+Say `insert clipboard contents` to drop whatever is on your clipboard into the dictation at that
+point. Two guarantees:
+
+- **It never goes to the AI.** Even in a mode with an AI rewrite on, the pasted text is not sent to
+  the cloud and is not rewritten — the model only ever sees a placeholder token (the same protection
+  a verbatim span gets). Your clipboard can hold passwords, tokens, or private URLs; those stay on
+  your machine.
+- **It is inserted exactly as you copied it** — character for character, no cleanup. Rich text pastes
+  as plain text (dictation inserts plain text, so formatting is dropped, but the words are exact).
+
+If the clipboard has no text — for example you copied an image or files — nothing is pasted and the
+words "insert clipboard contents" are left in place so you can see it and fix it.
 
 To control this per mode, open Settings > Modes, choose a mode, and toggle **Turn spoken commands into
 edits**.

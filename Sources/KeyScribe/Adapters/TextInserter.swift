@@ -29,6 +29,22 @@ enum TextInserter {
         return copied
     }
 
+    // The user's current clipboard as text, for the "insert clipboard contents" live edit. Read at
+    // pipeline time — before any ⌘C/⌘V machinery stages a value — so it is the real clipboard the user
+    // copied. The plain-text flavor covers plain text and the plain rendering of rich text (formatting
+    // is dropped — dictation inserts plain text); the NSAttributedString fallback recovers text from
+    // apps that put only RTF/HTML with no plain flavor. Non-text clipboards (images, copied files) and
+    // an empty clipboard yield nil, which leaves the spoken phrase as literal text (ClipboardTokenizer).
+    static func currentClipboardText() -> String? {
+        let pb = NSPasteboard.general
+        if let s = pb.string(forType: .string), !s.isEmpty { return s }
+        if let attributed = pb.readObjects(forClasses: [NSAttributedString.self], options: nil)?.first
+            as? NSAttributedString, !attributed.string.isEmpty {
+            return attributed.string
+        }
+        return nil
+    }
+
     // Paste is the spike-confirmed default (lands across native/Electron/Chromium with a single ⌘Z
     // undo). AX-insert and synthesized typing are opt-in per mode (mode.insertion) for the few
     // targets that prefer them; both proved unreliable in the M0 survey, so each degrades to paste

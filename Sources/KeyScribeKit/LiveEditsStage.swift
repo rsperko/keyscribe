@@ -9,10 +9,10 @@ import Foundation
 // a spoken correction; engines that do not (e.g. Apple) will under-fire rather than corrupt. The
 // other (additive) commands fire inline regardless of boundary. The trigger phrases are
 // configurable per command (LiveEditsStage.Commands) with sensible defaults; phrases match
-// longest-first, so a multi-word command can never be shadowed by a shorter one. Bare single words
-// like "tab" or "paragraph" are intentionally NOT defaults (too easily spoken literally). Matching
-// tolerates a trailing terminator/comma on the phrase. Verbatim tokenization happens later in the
-// rewrite path (design.md §4.2).
+// longest-first, so a multi-word command can never be shadowed by a shorter one. The additive
+// commands all use an explicit "insert …" carrier phrase (with an optional "a") so a bare
+// "new line" or "tab" spoken as prose is left as text. Matching tolerates a trailing terminator/comma
+// on the phrase. Verbatim tokenization happens later in the rewrite path (design.md §4.2).
 public struct LiveEditsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.liveEdits
@@ -23,10 +23,10 @@ public struct LiveEditsStage: PipelineStage {
         public var scratchThat: [String]
         public var tab: [String]
         public init(
-            newLine: [String] = ["new line", "line break", "newline"],
-            newParagraph: [String] = ["new paragraph"],
-            scratchThat: [String] = ["scratch that", "strike that"],
-            tab: [String] = ["tab key", "insert tab"]
+            newLine: [String] = ["insert new line", "insert a new line"],
+            newParagraph: [String] = ["insert new paragraph", "insert a new paragraph"],
+            scratchThat: [String] = ["scratch that"],
+            tab: [String] = ["insert tab character", "insert a tab character"]
         ) {
             self.newLine = newLine
             self.newParagraph = newParagraph

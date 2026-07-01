@@ -9,15 +9,35 @@ private func run(_ text: String) -> String {
 
 struct LiveEditsStageTests {
     @Test func newLineCommand() {
-        #expect(run("alpha new line beta") == "alpha\nbeta")
+        #expect(run("alpha insert new line beta") == "alpha\nbeta")
+    }
+
+    @Test func newLineArticleVariant() {
+        #expect(run("alpha insert a new line beta") == "alpha\nbeta")
     }
 
     @Test func newParagraphCommand() {
-        #expect(run("alpha new paragraph beta") == "alpha\n\nbeta")
+        #expect(run("alpha insert new paragraph beta") == "alpha\n\nbeta")
+    }
+
+    @Test func newParagraphArticleVariant() {
+        #expect(run("alpha insert a new paragraph beta") == "alpha\n\nbeta")
+    }
+
+    @Test func tabCommandInsertsTab() {
+        #expect(run("def foo insert tab character bar") == "def foo\tbar")
+    }
+
+    @Test func tabArticleVariant() {
+        #expect(run("def foo insert a tab character bar") == "def foo\tbar")
     }
 
     @Test func commandsAreCaseInsensitive() {
-        #expect(run("alpha New Line beta") == "alpha\nbeta")
+        #expect(run("alpha Insert New Line beta") == "alpha\nbeta")
+    }
+
+    @Test func multipleCommandsInSequence() {
+        #expect(run("one insert new line two insert new paragraph three") == "one\ntwo\n\nthree")
     }
 
     @Test func scratchThatRemovesCurrentSentence() {
@@ -27,16 +47,12 @@ struct LiveEditsStageTests {
 
     @Test func scratchThatBackToNewline() {
         // a newline command also bounds a segment
-        #expect(run("keep this new line drop this scratch that. final")
+        #expect(run("keep this insert new line drop this scratch that. final")
             == "keep this\nfinal")
     }
 
     @Test func plainTextPassesThrough() {
         #expect(run("just a normal sentence") == "just a normal sentence")
-    }
-
-    @Test func multipleCommandsInSequence() {
-        #expect(run("one new line two new paragraph three") == "one\ntwo\n\nthree")
     }
 
     @Test func scratchThatAtStartIsNoOp() {
@@ -81,29 +97,19 @@ struct LiveEditsStageTests {
         #expect(stage.order < StageOrder.replacements)
     }
 
-    @Test func tabCommandInsertsTab() {
-        #expect(run("def foo tab key bar") == "def foo\tbar")
-        #expect(run("insert tab value") == "\tvalue")
+    // The carrier-less phrases spoken as prose are left as text — they are no longer defaults.
+    @Test func droppedBarePhrasesAreLiteral() {
+        #expect(run("a new line b") == "a new line b")
+        #expect(run("alpha newline beta") == "alpha newline beta")
+        #expect(run("alpha line break beta") == "alpha line break beta")
+        #expect(run("write a new paragraph now") == "write a new paragraph now")
+        #expect(run("press the tab key now") == "press the tab key now")
+        #expect(run("insert tab value") == "insert tab value")
+        #expect(run("I like dogs, strike that. I like fish") == "I like dogs, strike that. I like fish")
     }
 
     @Test func bareTabIsNotACommand() {
         #expect(run("press the tab to indent") == "press the tab to indent")
-    }
-
-    @Test func newLineAliases() {
-        #expect(run("alpha line break beta") == "alpha\nbeta")
-    }
-
-    @Test func singleWordNewlineCommand() {
-        #expect(run("alpha newline beta") == "alpha\nbeta")
-    }
-
-    @Test func singleWordNewlineAtStart() {
-        #expect(run("newline alpha beta") == "\nalpha beta")
-    }
-
-    @Test func scratchThatAliases() {
-        #expect(run("I like dogs, strike that. I like fish") == "I like fish")
     }
 
     @Test func customCommandPhrases() {

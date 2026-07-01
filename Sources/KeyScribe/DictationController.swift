@@ -20,6 +20,7 @@ final class DictationController {
     private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void
     private let submitKey: (Mode.Submit) async -> Void
     private let captureSelection: (Mode.ClipboardModifier) async -> String?
+    private let clipboard: @MainActor () -> String?
     private let snapshot: @MainActor () -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
@@ -158,6 +159,7 @@ final class DictationController {
         insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Void = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
+        clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
@@ -176,6 +178,7 @@ final class DictationController {
         self.insert = insert
         self.submitKey = submitKey
         self.captureSelection = captureSelection
+        self.clipboard = clipboard
         self.snapshot = snapshot
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
@@ -898,7 +901,7 @@ final class DictationController {
     // except STT. On no/failed rewrite we still insert the locally-processed text — you want your words.
     private func produceDictationText(transcript: String, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
         let resolved = mode.flatMap { m in connection(for: m).map { (mode: m, connection: $0) } }
-        let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil)
+        let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil, transcript: transcript)
 
         let localStart = DispatchTime.now()
         var ctx = PipelineContext(text: transcript)
@@ -1044,21 +1047,32 @@ final class DictationController {
     // tokenizing the fully-transformed text just before the LLM. Pipeline sorts by position/order, so
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
-    private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
+    private func dictationPipeline(for mode: Mode?, willRewrite: Bool, transcript: String) -> Pipeline {
         // Dictionary recovery is captured at record start so a settings change mid-dictation cannot
         // change which post-STT stages run.
         let dictionaryRecovery = capturedDictionaryRecovery
             ?? settings.stt.dictionaryRecoveryEnabled(
                 engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
         var stages = plan.postSTTTextStages(for: mode, dictionaryRecovery: dictionaryRecovery)
-        if mode?.commands.liveEdits ?? true { stages.append(TokenizingStage.verbatim()) }
+        if mode?.commands.liveEdits ?? true {
+            stages.append(TokenizingStage.verbatim())
+            // Read the clipboard ONLY when the command will actually fire — an ordinary dictation never
+            // touches the user's clipboard (privacy + no needless copy of large clipboards). The check
+            // runs on the transcript AFTER verbatim tokenization, so a phrase deliberately wrapped in a
+            // verbatim span ("begin verbatim insert clipboard contents end verbatim") stays literal and
+            // does not trigger a read.
+            let afterVerbatim = VerbatimTokenizer.apply(transcript, into: Tokenizer())
+            let clip = ClipboardTokenizer.mentions(afterVerbatim) ? clipboard() : nil
+            stages.append(TokenizingStage.clipboard(clip))
+        }
         if (mode?.commands.privacy ?? false) && willRewrite { stages.append(TokenizingStage.redaction()) }
         return Pipeline(stages)
     }
 
     // Edit-in-place pipeline: the selection IS the content, so no post-STT text stages run — only the
     // tokenization commands (verbatim if live edits, redaction if privacy; a selection rewrite always
-    // calls the LLM).
+    // calls the LLM). No clipboard stage: the selection-capture ⌘C has already clobbered the clipboard
+    // with the selection, so "insert clipboard contents" here would be meaningless.
     private func selectionPipeline(for mode: Mode) -> Pipeline {
         var stages: [any PipelineStage] = []
         if mode.commands.liveEdits { stages.append(TokenizingStage.verbatim()) }

@@ -8,6 +8,16 @@ struct TokenizerTests {
         #expect(t.tokenize("hello world", type: .verbatim) == "⟦SN:VERB:1⟧")
     }
 
+    // An external value (a clipboard paste) can map a token to an original that re-contains that same
+    // token — a cycle the acyclic fixpoint assumption does not hold for. restore must terminate (the
+    // pass cap) and leave the self-referential span as the literal pasted text, never hang.
+    @Test func selfReferentialOriginalDoesNotHang() {
+        let t = Tokenizer()
+        let token = t.tokenize("⟦SN:VERB:1⟧", type: .verbatim)   // value equals the token it is assigned
+        #expect(token == "⟦SN:VERB:1⟧")
+        #expect(t.restore("x \(token) y") == "x ⟦SN:VERB:1⟧ y")
+    }
+
     @Test func sameValueSameTokenWithinDictation() {
         let t = Tokenizer()
         let a = t.tokenize("secret", type: .redact)

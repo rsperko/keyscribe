@@ -81,8 +81,12 @@ struct DictationPipelineWiringTests {
         func render(_ state: HUDState) { states.append(state) }
     }
 
+    // Counts how many times the host read the clipboard seam (all on the main actor).
+    @MainActor private final class ClipboardReads { var count = 0 }
+
     private struct Result {
         let lastResult: String?
+        let clipboardReadCount: Int
         let outcome: HistoryEntry.Outcome?
         let insertedText: String?
         let insertionMethod: Mode.Insertion?
@@ -98,6 +102,7 @@ struct DictationPipelineWiringTests {
         transcript: String, mode: Mode, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
+        clipboard: String? = nil,
         dictionaryRecoveryEnabled: Bool? = nil,
         recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
@@ -105,7 +110,7 @@ struct DictationPipelineWiringTests {
     ) async -> Result {
         await run(transcript: transcript, modes: [mode], defaultModeId: mode.id,
                   connection: connection, llm: llm, accessibility: accessibility,
-                  captureSelection: captureSelection,
+                  captureSelection: captureSelection, clipboard: clipboard,
                   dictionaryRecoveryEnabled: dictionaryRecoveryEnabled,
                   recognitionBiasEnabled: recognitionBiasEnabled,
                   engineSupportsRecognitionBias: engineSupportsRecognitionBias,
@@ -116,6 +121,7 @@ struct DictationPipelineWiringTests {
         transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
+        clipboard: String? = nil,
         dictionaryRecoveryEnabled: Bool? = nil,
         recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
@@ -154,6 +160,7 @@ struct DictationPipelineWiringTests {
         let insertSpy = InsertSpy()
         let submitSpy = SubmitSpy()
         let hudSpy = HUDSpy()
+        let clipboardReads = ClipboardReads()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hudSpy,
@@ -161,6 +168,7 @@ struct DictationPipelineWiringTests {
             insert: { _, method, modifier, text in await insertSpy.record(method, modifier, text) },
             submitKey: { await submitSpy.record($0) },
             captureSelection: captureSelection,
+            clipboard: { clipboardReads.count += 1; return clipboard },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },
             accessibilityGranted: { accessibility },
@@ -177,7 +185,7 @@ struct DictationPipelineWiringTests {
         await controller.dictationTask?.value
         let entry = await firstHistoryEntry(in: history)
         return Result(
-            lastResult: controller.lastResult, outcome: entry?.outcome,
+            lastResult: controller.lastResult, clipboardReadCount: clipboardReads.count, outcome: entry?.outcome,
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
             insertedModifier: await insertSpy.modifier,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
@@ -252,6 +260,70 @@ struct DictationPipelineWiringTests {
         #expect(sent.contains("⟦SN:REDACT:1⟧"))
         #expect(!sent.contains("Mr Smith"))
         #expect(!sent.contains("alice@example.com"))
+    }
+
+    // "insert clipboard contents" pastes the clipboard as a distinct CLIP token: the LLM sees only the
+    // token (the pasted content never crosses the cloud boundary) and the original is restored after.
+    @Test func clipboardContentsAreTokenizedBeforeTheLLMThenRestored() async {
+        let m = mode(id: "polish", liveEdits: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "the token is insert clipboard contents thanks",
+            mode: m, connection: conn, llm: EchoLLM(), clipboard: "sk-secret-123")
+
+        #expect(out.lastResult == "the token is sk-secret-123 thanks")
+        #expect(out.outcome == .inserted)
+        let sent = await (out.llm as! EchoLLM).lastUser
+        #expect(sent.contains("⟦SN:CLIP:1⟧"))
+        #expect(!sent.contains("sk-secret-123"))
+        #expect(out.clipboardReadCount == 1)
+    }
+
+    // Privacy: an ordinary live-edits dictation never reads the clipboard — only when the command is
+    // actually spoken. Guards against silently capturing clipboard text on every dictation.
+    @Test func clipboardNotReadWhenCommandAbsent() async {
+        let out = await run(
+            transcript: "just some ordinary dictated words",
+            mode: mode(id: "plain", liveEdits: true), clipboard: "SECRET")
+        #expect(out.clipboardReadCount == 0)
+        #expect(out.lastResult == "just some ordinary dictated words")
+    }
+
+    // A clipboard phrase deliberately wrapped in a verbatim span is literal, so it must not read the
+    // clipboard either (the read gate runs after verbatim tokenization).
+    @Test func clipboardNotReadWhenPhraseIsInsideVerbatim() async {
+        let out = await run(
+            transcript: "begin verbatim insert clipboard contents end verbatim",
+            mode: mode(id: "plain", liveEdits: true), clipboard: "SECRET")
+        #expect(out.clipboardReadCount == 0)
+        #expect(out.lastResult == "insert clipboard contents")
+    }
+
+    // Two clipboard pastes in one AI-rewrite dictation get DISTINCT tokens, so a faithful rewrite is
+    // accepted by the exactly-once gate instead of being rejected into a local fallback.
+    @Test func twoClipboardCommandsSurviveTheGateInARewrite() async {
+        let m = mode(id: "polish", liveEdits: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "first insert clipboard contents then insert clipboard contents",
+            mode: m, connection: conn, llm: EchoLLM(), clipboard: "PASTE")
+        #expect(out.outcome == .inserted)
+        #expect(out.lastResult == "first PASTE then PASTE")
+    }
+
+    // No-LLM mode: the paste is literal, no rewrite involved.
+    @Test func clipboardContentsInsertLiterallyOnTheNoLLMPath() async {
+        let m = mode(id: "plain", liveEdits: true)
+        let out = await run(
+            transcript: "paste it insert clipboard contents done", mode: m, clipboard: "https://ex.com/a?b=c")
+        #expect(out.lastResult == "paste it https://ex.com/a?b=c done")
+    }
+
+    // Empty clipboard leaves the spoken phrase as literal text rather than silently deleting it.
+    @Test func emptyClipboardLeavesThePhraseLiteral() async {
+        let m = mode(id: "plain", liveEdits: true)
+        let out = await run(transcript: "insert clipboard contents", mode: m, clipboard: nil)
+        #expect(out.lastResult == "insert clipboard contents")
     }
 
     @Test func droppedTokensFallBackToRestoredLocalText() async {
