@@ -22,4 +22,26 @@ public enum OutputCleanup {
         }
         return String(text[text.startIndex..<end])
     }
+
+    // Bracketed/parenthesized non-lexical annotation, e.g. `[BLANK_AUDIO]`, `[Music]`, `(water running)`.
+    private static let nonSpeechAnnotation = try! NSRegularExpression(pattern: "\\[[^\\]]*\\]|\\([^)]*\\)")
+
+    // Some STT engines render a no-speech clip not as "" but as a whole-utterance non-lexical annotation:
+    // WhisperKit emits `[BLANK_AUDIO]` for a silent clip and a sound-tag like `(water running)` for faint
+    // noise (verified empirically — see AGENTS.md "Silence / no-speech behavior"). Left intact these get
+    // pasted as if dictated. Collapse an utterance that is *nothing but* such annotations (the only
+    // speech-bearing characters live inside brackets/parens) to "", so the no-speech guard
+    // (`DictationMachine.outcomeForTranscript`) short-circuits it into the .noSpeech outcome.
+    //
+    // Deliberately whole-utterance only: a real transcript that merely *contains* an annotation
+    // ("the array[0] value", "(laughs) that was funny") is returned unchanged — partial stripping would
+    // corrupt legitimate text. Lexical silence hallucinations ("Thank you.", "No", "嗯。") are out of
+    // scope: they are indistinguishable from a real one-word dictation and need an audio-side VAD gate,
+    // not a string denylist. An utterance with no annotation at all (e.g. a bare "...") is untouched.
+    public static func blankingNonSpeechAnnotation(_ text: String) -> String {
+        let range = NSRange(text.startIndex..., in: text)
+        let stripped = nonSpeechAnnotation.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+        guard stripped != text else { return text }
+        return stripped.contains(where: { $0.isLetter || $0.isNumber }) ? text : ""
+    }
 }

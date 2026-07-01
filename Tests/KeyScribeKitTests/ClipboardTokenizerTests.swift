@@ -100,7 +100,7 @@ struct ClipboardTokenizerTests {
     }
 
     // Parakeet TDT v3 sometimes punctuates mid-phrase ("insert clipboard, contents"); the command
-    // still fires (verified by the wav-based clipboard-check across engines).
+    // still fires (verified by the wav-based commands-check across engines).
     @Test func internalCommaFromSTTStillFires() {
         let (out, t) = tokenize("read the directory insert clipboard, contents now", clipboard: "P")
         #expect(out == "read the directory ⟦SN:CLIP:1⟧ now")

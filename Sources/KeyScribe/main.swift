@@ -25,9 +25,10 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
         --engines <a,b,...>     Limit the benchmark run to these engine ids.
         --raw                   Emit raw per-clip benchmark output.
         --fuzzy                 Apply the post-STT fuzzy corrector (dict = clip bias terms) before scoring.
-      --clipboard-check <dir> Verify the "insert clipboard contents" command + fold across every
-                              installed engine on the recordings in <dir> (clipboard.json), then exit.
-                              Honors --engines.
+      --commands-check <dir>  Exercise every spoken command (scratch that, verbatim, insert new
+                              line/paragraph/tab, insert clipboard contents, whole-utterance
+                              replacements) across every installed engine on the recordings in <dir>
+                              (commands.json), then exit. Honors --engines.
       --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                               (downloaded models stay shared). Pair with --first-run to test
                               onboarding without touching your real configuration.
@@ -91,9 +92,9 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
     exit(0)
 }
 
-// Headless dev mode: `KeyScribe --clipboard-check <dir>` verifies the "insert clipboard contents"
-// command + fold across every installed engine on recorded audio, then exits.
-if let i = CommandLine.arguments.firstIndex(of: "--clipboard-check"), i + 1 < CommandLine.arguments.count {
+// Headless dev mode: `KeyScribe --commands-check <dir>` exercises every spoken command across every
+// installed engine on recorded audio, then exits.
+if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?
     if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
@@ -101,7 +102,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--clipboard-check"), i + 1 < Co
     }
     let done = DispatchSemaphore(value: 0)
     Task.detached {
-        await ClipboardCheckRunner.run(dir: dir, only: only)
+        await CommandCheckRunner.run(dir: dir, only: only)
         done.signal()
     }
     done.wait()

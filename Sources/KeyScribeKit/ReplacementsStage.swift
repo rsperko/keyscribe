@@ -51,8 +51,16 @@ public struct ReplacementsStage: PipelineStage {
                       let re = RegexCache.regex(rule.heard, options: [.caseInsensitive]) else { return nil }
                 return (re, rule.replace)
             }
-            guard !rule.heard.isEmpty else { return nil }
-            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: rule.heard))\\b"
+            guard let first = rule.heard.first, let last = rule.heard.last else { return nil }
+            // A `\b` word boundary only exists between a word and a non-word character, so wrapping a
+            // term whose edge is already punctuation (a slash-command "/resume", "c++") in `\b` makes
+            // it unmatchable — `\b/` can never anchor at an utterance edge. Anchor the whole-word
+            // boundary only on a word-character edge; a punctuation-or-space edge is left as a plain
+            // substring boundary. So "pipe" still skips "pipeline", and a leading-space glue term
+            // (" at gmail dot com") still matches — both of which `(?<!\w)…(?!\w)` would get wrong.
+            let lead = Self.isWordCharacter(first) ? #"\b"# : ""
+            let trail = Self.isWordCharacter(last) ? #"\b"# : ""
+            let pattern = "\(lead)\(NSRegularExpression.escapedPattern(for: rule.heard))\(trail)"
             guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
             return (re, NSRegularExpression.escapedTemplate(for: rule.replace))
         }
@@ -104,6 +112,11 @@ public struct ReplacementsStage: PipelineStage {
             return coreTransformed == generated ? generated : nil
         }
         return nil
+    }
+
+    // Matches regex `\w` closely enough for boundary placement: ASCII/Unicode letters, digits, "_".
+    private static func isWordCharacter(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "_"
     }
 
     private func utteranceCore(of input: String) -> String {

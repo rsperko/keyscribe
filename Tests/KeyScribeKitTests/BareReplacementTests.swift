@@ -15,6 +15,15 @@ struct BareReplacementTests {
         #expect(detect(rules, on: "slash replace") == "/replace")
     }
 
+    // An engine that runs its own inverse-text-normalization emits the slashed form directly (Apple:
+    // "slash resume" → "/Resume."). A literal rule keyed on that slashed form normalizes the casing —
+    // the whole utterance clamps to the rule's generated value.
+    @Test func wholeUtteranceLiteralNormalizesSlashedInput() {
+        let rules = [ReplacementRule(heard: "/resume", replace: "/resume", isRegex: false)]
+        #expect(detect(rules, on: "/Resume.") == "/resume")
+        #expect(detect(rules, on: "  /RESUME  ") == "/resume")
+    }
+
     // A stray STT period or surrounding whitespace must not defeat the clamp — that residue is
     // exactly the "trailing cruft" the predicate ignores.
     @Test func toleratesTrailingPunctuationAndSurroundingWhitespace() {

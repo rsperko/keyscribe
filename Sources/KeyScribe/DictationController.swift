@@ -685,9 +685,9 @@ final class DictationController {
         }
 
         let transcribeStart = DispatchTime.now()
-        let raw: String
+        let rawFromEngine: String
         do {
-            raw = try await transcribeBounded(
+            rawFromEngine = try await transcribeBounded(
                 audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url)
         } catch is SingleFlightDeadline.Busy {
             try? FileManager.default.removeItem(at: url)
@@ -712,6 +712,10 @@ final class DictationController {
         }
         try? FileManager.default.removeItem(at: url)
         building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
+        // A no-speech clip that an engine renders as a whole-utterance annotation (Whisper's
+        // `[BLANK_AUDIO]` / `(water running)`) collapses to "" here, so routing, history, and the
+        // outcome all see empty and short-circuit to .noSpeech instead of pasting the marker.
+        let raw = OutputCleanup.blankingNonSpeechAnnotation(rawFromEngine)
         building.fingerprints[.raw] = .of(raw)
 
         // Cancelled during STT: bail before routing, rewrite, insertion, or history. cancel() already

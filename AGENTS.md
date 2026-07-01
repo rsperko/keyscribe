@@ -27,6 +27,10 @@ This file is the entry point. Read the design docs before writing code — they 
   Implementation details, schemas, benchmark methodology, prompt internals, architecture, and
   contributor-only rationale belong under `docs/reference/` or `docs/development/`, with links from
   user docs only when they help an advanced reader continue.
+- **Distribution docs are feature-facing.** `agent_notes/distribution_docs/feature-inventory.md`
+  is a user-visible feature inventory: keep what users can do, why they care, and relative marketing
+  value. Do not turn it into implementation notes, verification details, benchmark harness notes, or
+  GIF/storyboard scripts; those belong in development/reference docs or the distribution GIF scripts.
 
 ---
 
@@ -255,6 +259,44 @@ Small) cluster around 5.7–6.0% biased WER; bias is decisive (Moonshine without
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
 "Recommended" badge on the small default.
+
+### Silence / no-speech behavior — exercise every new model
+
+**Every STT model added to the catalog must be exercised against silent/near-silent audio before it
+ships**, because engines disagree wildly on what they emit for "nothing was said" and KeyScribe's
+`.noSpeech` guard (`DictationMachine.outcomeForTranscript`) only short-circuits a **whitespace-empty**
+transcript — any non-empty artifact gets pasted, atomically-undoable, and (worse) is indistinguishable
+from a real short dictation. Reproduce with the `--raw` benchmark over generated silence:
+
+```bash
+# 16k mono clips: pure silence at several durations + quiet hiss + a faint blip
+for d in 1 2 3 5; do ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t $d -c:a pcm_s16le sil_${d}s.wav; done
+ffmpeg -f lavfi -i "anoisesrc=r=16000:a=0.02:d=3:seed=33" -c:a pcm_s16le hiss.wav
+# manifest.json: one { "id": "<wav-basename>", "text": "", "biasTerms": [] } per clip (text ignored in --raw)
+./KeyScribeDev.app/Contents/MacOS/KeyScribe --benchmark <dir> --engines <new-id> --raw   # RAW\t<engine>\t<clip>\t<literal output>
+```
+
+Empirically observed no-speech output (2026-07-01, one machine — deterministic per fixed input, but
+**content-dependent** across different silences, so treat as representative, not exhaustive):
+
+| Engine | Output on silence/near-silence |
+|---|---|
+| Parakeet TDT v3 / TDT-CTC 110M | `""` (clean empty — greedy TDT discards blanks) |
+| Qwen3-ASR 0.6B | `""` |
+| Moonshine Base (en) | `""` (but upstream can loop-repeat on short audio) |
+| Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
+| Whisper Large v3 Turbo | lexical hallucinations: `Thank you.`, `.`, `...` |
+| Qwen3-ASR 1.7B | rare lexical, e.g. `嗯。` (CJK) |
+| Apple SpeechAnalyzer | rare lexical, e.g. `No` |
+
+**Load-bearing conclusion: a string denylist cannot solve this.** The only *safe* strings to strip are
+non-lexical annotations no user dictates — bracketed/parenthetical tags like `[BLANK_AUDIO]`,
+`(water running)`, `[Music]` (note WhisperKit **does** emit `[BLANK_AUDIO]` here despite upstream docs
+calling it a whisper.cpp-only construct — verified empirically, do not trust the docs). The dangerous
+outputs (`Thank you.`, `No`, `.`) are real words and must **not** be denylisted — filtering them would
+silently drop legitimate one-word dictations. The robust guard for those is an **energy/VAD pre-gate**
+(was there speech in the audio?) upstream of the transcript, not string matching. Re-run this the moment
+a model is added or an STT dep is bumped — the marker set is engine- and version-specific.
 
 ### Forked / pinned STT deps
 

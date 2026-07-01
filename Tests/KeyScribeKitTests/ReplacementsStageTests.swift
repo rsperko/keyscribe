@@ -36,6 +36,26 @@ struct ReplacementsStageTests {
             == "A | and a PIPELINE")
     }
 
+    // A `\b` word boundary cannot anchor next to a non-word character, so a literal term whose edge is
+    // punctuation (a slash-command "/resume", "c++") would never match with `\b` wrapped on that edge.
+    // The boundary is applied only on word-character edges; a punctuation edge is left unwrapped.
+    @Test func literalPunctuationLeadingEdgeMatchesCaseInsensitively() {
+        let rule = ReplacementRule(heard: "/resume", replace: "/resume", isRegex: false)
+        #expect(run([rule], on: "/Resume.") == "/resume.")
+        #expect(run([rule], on: "please /Resume now") == "please /resume now")
+    }
+
+    // The word-character edge still enforces whole-word matching: "/resume" must not fire inside "/resumes".
+    @Test func literalPunctuationLeadingEdgeStillGuardsWordEdge() {
+        let rule = ReplacementRule(heard: "/resume", replace: "/RESUME", isRegex: false)
+        #expect(run([rule], on: "the /resumes list") == "the /resumes list")
+    }
+
+    @Test func literalPunctuationTrailingEdgeMatches() {
+        let rule = ReplacementRule(heard: "c++", replace: "cpp", isRegex: false)
+        #expect(run([rule], on: "i love c++ a lot") == "i love cpp a lot")
+    }
+
     // A literal replacement is inserted verbatim — $ / \\ in the replacement are not template refs.
     @Test func literalReplacementIsNotATemplate() {
         #expect(run([ReplacementRule(heard: "money", replace: "$5", isRegex: false)], on: "give me money")

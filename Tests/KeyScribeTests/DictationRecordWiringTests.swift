@@ -126,4 +126,12 @@ struct DictationRecordWiringTests {
         let record = await run(transcript: "   ", mode: mode(id: "plain"), historyEnabled: false)
         #expect(record?.outcome == .noSpeech)
     }
+
+    // A whole-utterance non-lexical annotation (Whisper renders a silent clip as "[BLANK_AUDIO]") is
+    // blanked at the transcript seam, so it routes to noSpeech end-to-end through the real controller
+    // instead of pasting the marker — proving the call-site wiring, not just the pure cleanup.
+    @Test func wholeUtteranceAnnotationRoutesToNoSpeech() async {
+        let record = await run(transcript: "[BLANK_AUDIO]", mode: mode(id: "plain"), historyEnabled: false)
+        #expect(record?.outcome == .noSpeech)
+    }
 }

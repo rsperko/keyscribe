@@ -55,4 +55,55 @@ struct OutputCleanupTests {
     @Test func handlesEmptyString() {
         #expect(OutputCleanup.trimTrailingPunctuation("") == "")
     }
+
+    @Test func blanksBlankAudioMarker() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("[BLANK_AUDIO]") == "")
+    }
+
+    @Test func blanksBlankAudioDisplayCasing() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("[Blank audio]") == "")
+    }
+
+    @Test func blanksParentheticalSoundTags() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("(water running)") == "")
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("[Music]") == "")
+    }
+
+    @Test func blanksRepeatedMarkers() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("[BLANK_AUDIO] [BLANK_AUDIO]") == "")
+    }
+
+    @Test func blanksMarkerWithSurroundingWhitespace() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("  [BLANK_AUDIO]  ") == "")
+    }
+
+    @Test func blanksMarkerWithStrayPunctuation() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("[BLANK_AUDIO].") == "")
+    }
+
+    @Test func keepsRealTextContainingParenthetical() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("(laughs) that was funny") == "(laughs) that was funny")
+    }
+
+    @Test func keepsRealTextContainingBrackets() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("the array[0] value") == "the array[0] value")
+    }
+
+    @Test func keepsLexicalHallucinationForVADLayer() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("Thank you.") == "Thank you.")
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("No") == "No")
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("\u{55EF}\u{3002}") == "\u{55EF}\u{3002}")
+    }
+
+    @Test func keepsBarePunctuationUntouched() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("...") == "...")
+    }
+
+    @Test func keepsNormalTranscript() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("open the pod bay doors") == "open the pod bay doors")
+    }
+
+    @Test func annotationBlankingHandlesEmptyString() {
+        #expect(OutputCleanup.blankingNonSpeechAnnotation("") == "")
+    }
 }
