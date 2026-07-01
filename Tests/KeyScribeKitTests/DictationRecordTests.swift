@@ -106,6 +106,31 @@ struct DictationRecordTests {
         #expect(e.humanSummary().contains("Transcription timed out"))
     }
 
+    @Test func humanSummaryReportsColdStartDiagnostics() {
+        var r = DictationRecord(modeName: "M")
+        r.outcome = .failed
+        r.error = "Transcription timed out"
+        r.idleSeconds = 16342
+        r.warmMillis = 47120
+        r.rewarmedAfterIdle = true
+        r.transcribeDeadline = 60
+        let summary = r.humanSummary()
+        #expect(summary.contains("idle 16342s"))
+        #expect(summary.contains("warm 47120ms"))
+        #expect(summary.contains("rewarmed"))
+        #expect(summary.contains("deadline 60s"))
+    }
+
+    @Test func humanSummaryOmitsColdStartDiagnosticsWhenAbsent() {
+        var r = DictationRecord(modeName: "M")
+        r.outcome = .inserted
+        let summary = r.humanSummary()
+        #expect(!summary.contains("idle"))
+        #expect(!summary.contains("warm"))
+        #expect(!summary.contains("rewarmed"))
+        #expect(!summary.contains("deadline"))
+    }
+
     @Test func recordRoundTripsThroughCodable() throws {
         let r = sampleRecord()
         let data = try JSONEncoder().encode(r)

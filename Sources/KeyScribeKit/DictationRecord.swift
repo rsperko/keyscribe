@@ -73,6 +73,17 @@ public struct DictationRecord: Codable, Equatable, Sendable {
     public var targetBundleId: String?
     public var fallbackReason: String?
 
+    // Cold-start diagnostics. `idleSeconds` is the gap since the last transcribe attempt (a long gap lets
+    // MLX/Metal GPU state and the model's unified-memory weights go cold even while the model stays
+    // resident); `warmMillis` is how long the commit-time model-load/warm await actually took (near-zero
+    // when hot, large when a cold engine had to fault weights back in / recompile); `rewarmedAfterIdle`
+    // records that the idle gate forced a fresh first-inference warm-up; `transcribeDeadline` is the bound
+    // the transcribe ran under, so a timeout row shows the threshold it blew. All numeric — safe to log.
+    public var idleSeconds: Double?
+    public var warmMillis: Double?
+    public var rewarmedAfterIdle: Bool?
+    public var transcribeDeadline: Double?
+
     public init(modeName: String) {
         self.modeName = modeName
         self.outcome = nil
@@ -87,6 +98,10 @@ public struct DictationRecord: Codable, Equatable, Sendable {
         self.error = nil
         self.targetBundleId = nil
         self.fallbackReason = nil
+        self.idleSeconds = nil
+        self.warmMillis = nil
+        self.rewarmedAfterIdle = nil
+        self.transcribeDeadline = nil
     }
 
     // Real-time factor: how long STT took relative to the audio it transcribed (< 1 is faster than
@@ -115,6 +130,13 @@ public struct DictationRecord: Codable, Equatable, Sendable {
             if let rtf { av += String(format: " rtf %.2f", rtf) }
             parts.append(av)
         }
+
+        if let idleSeconds { parts.append(String(format: "idle %.0fs", idleSeconds)) }
+        var warm: [String] = []
+        if let warmMillis { warm.append("warm \(Int(warmMillis.rounded()))ms") }
+        if rewarmedAfterIdle == true { warm.append("rewarmed") }
+        if !warm.isEmpty { parts.append(warm.joined(separator: " ")) }
+        if let transcribeDeadline { parts.append(String(format: "deadline %.0fs", transcribeDeadline)) }
 
         if cloudInvolved {
             var cloud = "cloud conn=\(connection ?? "?") model=\(model ?? "?") tokens=\(issuedTokenCount)"

@@ -54,6 +54,16 @@ enum KeyScribePaths {
             "\(variant.supportFolderName)-model-load-diagnostics.log", isDirectory: false)
     }
 
+    // Durable, textless one-line-per-dictation trace (the DictationRecord summary: hashes/counts/ms plus
+    // idle/warm/deadline cold-start fields). Like modelLoadDiagFile it is diagnostics, not user config, so
+    // it sits as a sibling FILE of supportDir (outside the FSEvents-watched config tree) and is keyed by
+    // variant. Captures failures/timeouts too, which history never records — the reliable ground truth
+    // given os.Logger / `log show` does not surface on this machine (AGENTS).
+    static var dictationDiagFile: URL {
+        appSupportBase.appendingPathComponent(
+            "\(variant.supportFolderName)-dictation-diagnostics.log", isDirectory: false)
+    }
+
     static var modesDir: URL {
         supportDir.appendingPathComponent("modes", isDirectory: true)
     }

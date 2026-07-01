@@ -48,6 +48,12 @@ final class DictationController {
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private(set) var dictationTask: Task<Void, Never>?
     private var lastUsedAt: Double = 0
+    // systemUptime of the last transcribe ATTEMPT (success or timeout), used to decide when a resident
+    // engine has gone cold enough to warrant a fresh warm-up. Gating re-warm on a long gap since the last
+    // ATTEMPT (not the last success) also guarantees no abandoned transcribe from a prior timeout is still
+    // running — MLX calls settle in well under rewarmIdleThreshold — so re-warming can never reenter the
+    // non-thread-safe engine. See handleStart's re-warm block and transcribeAndInsert.
+    private var lastTranscribeAttemptAt: Double = 0
     private(set) var lastResult: String?
     // One structured, in-memory diagnostics record for the most recent dictation, kept UNCONDITIONALLY
     // (never gated on history). `building` accumulates stage timings + boundary fingerprints as the
@@ -102,6 +108,13 @@ final class DictationController {
     // load — and, because loading runs OUTSIDE the transcribe single-flight gate, a load that trips it
     // surfaces an error without wedging the next dictation.
     private static let modelLoadDeadlineSeconds: Double = 300
+
+    // Idle (since the last transcribe attempt) beyond which a resident engine is treated as cold and the
+    // press-time warm re-runs the first-inference warm-up instead of reusing the stale cached task. Kept
+    // comfortably above any active-use cadence so it never fires between back-to-back dictations, and well
+    // above the transcribe deadline so any abandoned prior call has settled (the reentry guard). The
+    // re-warm cost lands on the load path (300 s bound), not the transcribe deadline where it can't be paid.
+    private static let rewarmIdleThreshold: Double = 300
 
     // An engine the user switched away from while a dictation was in flight. Evicting it immediately
     // would race the in-flight transcribe (the non-actor engines close their transcriber under it), so
@@ -282,15 +295,26 @@ final class DictationController {
         // otherwise compile mid-dictation on the first biased transcribe. Empty dictionary ⇒ [] ⇒ Parakeet
         // keeps skipping the CTC load entirely, preserving that optimization for users who never bias.
         let biasTerms = plan.recognitionBiasTerms(for: nil)
-        let task = Task {
+        let engineId = engine.id
+        let task = Task { [weak self] in
+            let loadStart = DispatchTime.now()
             try await engine.loadIfNeeded()
+            let loadMs = Self.millis(since: loadStart)
             // Warm the inference graph on a throwaway clip so the user's first real dictation isn't the one
             // that pays the one-time first-predict compile (MLX kernel JIT / CoreML graph specialization) —
             // Qwen's first transcribe measured ~3 s cold vs ~50 ms warm. Started at launch/press, it overlaps
             // the user's speech, so the cost is usually invisible. Best-effort: a warmup failure (e.g. the
             // clip is absent under `swift run`) must never fail the load. The commit-time await of this same
             // task serializes warmup before the real transcribe, so the non-actor engines are never reentered.
+            let warmupStart = DispatchTime.now()
             if let clip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
+            let warmupMs = Self.millis(since: warmupStart)
+            // Split trace: loadIfNeeded ~0 with a large warmup ⇒ the model was RESIDENT but its GPU/graph
+            // state went cold (the cold-idle hypothesis); a large loadIfNeeded ⇒ weights were actually
+            // reloaded. Textless — safe to persist.
+            let summary = String(format: "warm %@ load %.0fms warmup %.0fms", engineId, loadMs, warmupMs)
+            self?.log.debug("\(summary, privacy: .public)")
+            self?.historyWriteQueue.async { DictationDiagnosticsWriter.record(summary: summary) }
         }
         warmEngineId = engine.id
         warmTask = task
@@ -410,6 +434,25 @@ final class DictationController {
             applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
         }
 
+        // Cold-start guard. With eviction=fastest the model stays resident, so `warm()` short-circuits on
+        // its cached (long-completed) task and NOTHING re-runs the one-time first-inference warm-up. But a
+        // resident model whose engine has sat idle for hours goes cold anyway — MLX/Metal pipeline state is
+        // torn down and its unified-memory weights get compressed/swapped — so the first real transcribe
+        // re-pays that cold cost INSIDE the bounded transcribe (deadline max(30, audio*20)) and can blow it
+        // ("Transcription timed out", the reported symptom). When the gap since the last transcribe attempt
+        // is large, drop the cached warm so warmActiveEngine rebuilds it: loadIfNeeded is a no-op (model
+        // resident) and the warm-up transcribe faults the weights back in / recompiles the pipeline, paid on
+        // the load path (300 s bound) where the design puts it, not the transcribe deadline. The same idle
+        // gate guarantees no abandoned transcribe from a prior timeout is still running, so the rebuilt
+        // warm-up cannot reenter the non-thread-safe engine.
+        let idleSinceAttempt = lastTranscribeAttemptAt > 0
+            ? ProcessInfo.processInfo.systemUptime - lastTranscribeAttemptAt : nil
+        building.idleSeconds = idleSinceAttempt
+        if let idleSinceAttempt, idleSinceAttempt > Self.rewarmIdleThreshold,
+           warmEngineId == activeEngine.id, warmTask != nil {
+            invalidateWarm(activeEngine.id)
+            building.rewarmedAfterIdle = true
+        }
         warmActiveEngine()
 
         // Option A cue gating: the start cue plays now and CAPTURE comes up only after it finishes, so the
@@ -664,15 +707,37 @@ final class DictationController {
     // (throws `Busy`) until the wedged one truly settles, so two transcribes never run at once.
     private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL) async throws -> String {
         let timeout = max(30, audioSeconds * 20)
-        return try await transcribeGate.run(seconds: timeout) {
+        // Forensics for the still-unreproduced timeout: capture how long the call TRULY ran, even when it
+        // overran the deadline (the `run` call already threw by then, so this is the only place to see it).
+        // A settle at ~timeout+ε ⇒ a genuinely slow transcribe (e.g. a swapped-weight fault-in under memory
+        // pressure); no settle line at all for a timed-out dictation ⇒ a true wedge that never returned.
+        // Only the overrun case is written to the durable log, to keep it low-noise on the happy path.
+        let start = DispatchTime.now()
+        let queue = historyWriteQueue
+        let logger = log
+        let engineId = engine.id
+        return try await transcribeGate.run(seconds: timeout, operation: {
             try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
-        }
+        }, onSettled: {
+            let ms = DictationController.millis(since: start)
+            let summary = String(format: "transcribe-settled %@ %.0fms deadline %.0fs", engineId, ms, timeout)
+            logger.debug("\(summary, privacy: .public)")
+            if ms > timeout * 1000 {
+                queue.async { DictationDiagnosticsWriter.record(summary: summary) }
+            }
+        })
     }
 
     private func transcribeAndInsert(url: URL, audioSeconds: Double?) async {
         await modeResolveTask?.value
         let engine = activeEngine
         building.audioSeconds = audioSeconds
+        // Stamp the attempt up front (before the load/transcribe) so a timeout still advances it — the
+        // re-warm idle gate and its reentry guarantee both key off "since the last attempt", not the last
+        // success. A rapid retry after a timeout then sees a tiny gap and won't re-warm into the still-
+        // abandoned call.
+        lastTranscribeAttemptAt = ProcessInfo.processInfo.systemUptime
+        let warmStart = DispatchTime.now()
 
         // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a legitimate one-time
         // cost — a 632 MB model measured ~140 s to load even from a compiled cache — so counting it
@@ -714,6 +779,12 @@ final class DictationController {
             }
         }
 
+        // How long the commit-time model-load/warm await actually took: ~0 when the engine was hot,
+        // large when a cold (or re-warmed) engine had to fault weights back in / recompile. On a cold-idle
+        // dictation this is where the cost now lands (load path), not the transcribe deadline.
+        building.warmMillis = elapsedMs(since: warmStart)
+
+        building.transcribeDeadline = max(30, (audioSeconds ?? 0) * 20)
         let transcribeStart = DispatchTime.now()
         let rawFromEngine: String
         do {
@@ -1193,6 +1264,10 @@ final class DictationController {
     }
 
     private func elapsedMs(since start: DispatchTime) -> Double {
+        Self.millis(since: start)
+    }
+
+    nonisolated static func millis(since start: DispatchTime) -> Double {
         Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
     }
 
@@ -1204,7 +1279,12 @@ final class DictationController {
         building.outcome = outcome
         if let error { building.error = error }
         lastRecord = building
-        log.debug("\(self.building.humanSummary(), privacy: .public)")
+        let summary = building.humanSummary()
+        log.debug("\(summary, privacy: .public)")
+        // Persist the textless summary so failures/timeouts (which never reach history) leave a durable,
+        // readable trace — os.Logger does not reliably surface on this machine (AGENTS). Off-main on the
+        // existing serial write queue; a diagnostics write must never delay the user-perceptible "done".
+        historyWriteQueue.async { DictationDiagnosticsWriter.record(summary: summary) }
     }
 
     private func finishError(_ message: String, action: HUDErrorAction? = nil) {

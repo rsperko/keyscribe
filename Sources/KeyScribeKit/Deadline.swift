@@ -92,12 +92,17 @@ public actor SingleFlightDeadline {
 
     private func release() { inFlight = false }
 
+    // `onSettled` fires when the operation TRULY finishes — on a deadline overrun that is long after `run`
+    // already threw `DeadlineExceeded`, so it is the only place to observe the real duration of an
+    // abandoned (slow-or-wedged) call. Fires on both the happy path and the overrun path.
     public func run<T: Sendable>(
-        seconds: Double, operation: @escaping @Sendable () async throws -> T
+        seconds: Double, operation: @escaping @Sendable () async throws -> T,
+        onSettled: (@Sendable () -> Void)? = nil
     ) async throws -> T {
         if inFlight { throw Busy() }
         inFlight = true
         return try await runWithDeadline(seconds: seconds, operation: operation) {
+            onSettled?()
             Task { await self.release() }
         }
     }

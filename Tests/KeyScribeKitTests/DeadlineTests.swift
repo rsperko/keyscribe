@@ -114,4 +114,22 @@ struct SingleFlightDeadlineTests {
         let value = try await gate.run(seconds: 5) { "ok" }
         #expect(value == "ok")
     }
+
+    // The forensics hook: onSettled fires with the TRUE duration even when the gate already threw at the
+    // deadline — the only way to observe how long an abandoned (slow/wedged) transcribe really ran.
+    @Test func runOnSettledFiresAfterAbandonedOperationTrulyFinishes() async {
+        let gate = SingleFlightDeadline()
+        let settled = Counter()
+        await #expect(throws: DeadlineExceeded.self) {
+            try await gate.run(seconds: 0.1, operation: {
+                nonCooperativeBlock(seconds: 0.5)
+                return "late"
+            }, onSettled: {
+                Task { await settled.bump() }
+            })
+        }
+        #expect(await settled.value == 0)
+        try? await Task.sleep(for: .seconds(1))
+        #expect(await settled.value == 1)
+    }
 }
