@@ -241,6 +241,25 @@ final class DictationController {
         }
     }
 
+    // A Settings self-test transcribes on the SAME non-actor engine instance a live dictation uses, so it
+    // runs through the dictation transcribe gate — two transcribes at once would race a non-Sendable SDK
+    // object. Dictation always wins: the test is skipped while a dictation is in flight, and a residual
+    // mid-test collision surfaces as a skip (nil), never a failed model.
+    func selfTestForSettings(_ engine: any SpeechEngine) async -> Bool? {
+        guard !isBusy else { return nil }
+        let gate = transcribeGate
+        return await ModelSelfTestRunner.verify(engine) { url, biasTerms in
+            do {
+                return try await gate.run(seconds: Self.selfTestTimeoutSeconds) {
+                    try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
+                }
+            } catch is SingleFlightDeadline.Busy {
+                throw ModelSelfTestRunner.Skipped()
+            }
+        }
+    }
+    private static let selfTestTimeoutSeconds: Double = 30
+
     // Warm the active STT engine the instant a press begins, overlapping model load (CoreML/MLX
     // compile, ANE warmup) with the user's speech instead of paying it after key-release. Idempotent
     // — a no-op once loaded — and never blocks recording: failures surface later at transcribe time.

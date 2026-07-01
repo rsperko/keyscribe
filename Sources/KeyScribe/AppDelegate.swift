@@ -140,8 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try await engine.load(progress: progress)
             },
             verify: { [weak self] id in
-                guard let engine = self?.provider.engine(id) else { return false }
-                return await ModelSelfTestRunner.verify(engine)
+                guard let self, let engine = self.provider.engine(id) else { return false }
+                return await self.controller.selfTestForSettings(engine)
             },
             evictEngine: { [weak self] id in
                 guard let self, let engine = self.provider.engine(id) else { return }
