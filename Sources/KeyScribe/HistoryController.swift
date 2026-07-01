@@ -646,11 +646,6 @@ private struct ComparisonSection: Identifiable {
     let to: Side
 }
 
-private enum ComparisonSide {
-    case left
-    case right
-}
-
 // One source of truth for diff styling so the text rendering and the legend never diverge. Meaning is
 // never carried by color alone (ui_components.md §semantic colors): each changed kind also gets a
 // background tint and a typographic mark, so removed/added/changed stay distinguishable in grayscale
@@ -723,13 +718,11 @@ private struct ComparisonSectionView: View {
                 title: section.from.title,
                 role: section.from.role,
                 spans: comparison.left,
-                side: .left,
                 onSelect: onSelect)
             ComparisonPane(
                 title: section.to.title,
                 role: section.to.role,
                 spans: comparison.right,
-                side: .right,
                 onSelect: onSelect)
             DiffLegend(kinds: legendKinds(comparison))
         }
@@ -778,11 +771,92 @@ private struct DiffLegend: View {
     }
 }
 
+struct DiffTextPresentation {
+    let attributed: NSAttributedString
+    private let original: NSString
+    private let displayRanges: [NSRange?]
+
+    static func render(spans: [TextComparison.Span]) -> DiffTextPresentation {
+        let font = NSFont.preferredFont(forTextStyle: .body)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        let base: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
+
+        guard !spans.isEmpty else {
+            var placeholder = base
+            placeholder[.foregroundColor] = NSColor.tertiaryLabelColor
+            return DiffTextPresentation(
+                attributed: NSAttributedString(string: "(empty)", attributes: placeholder),
+                original: "",
+                displayRanges: Array(repeating: nil, count: "(empty)".utf16.count))
+        }
+
+        let out = NSMutableAttributedString()
+        var original = ""
+        var displayRanges: [NSRange?] = []
+
+        for span in spans {
+            var attributes = base
+            let color = DiffStyle.foreground(span.kind)
+            attributes[.foregroundColor] = color
+            if let background = DiffStyle.background(span.kind) {
+                attributes[.backgroundColor] = background
+            }
+            switch DiffStyle.mark(span.kind) {
+            case .none:
+                break
+            case .strikethrough:
+                attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                attributes[.strikethroughColor] = color
+            case .underline:
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                attributes[.underlineColor] = color
+            }
+
+            let reveal = span.kind != .unchanged
+            for character in span.text {
+                let originalRange = NSRange(location: original.utf16.count, length: String(character).utf16.count)
+                original.append(character)
+                let displayed = reveal ? visible(character) : String(character)
+                out.append(NSAttributedString(string: displayed, attributes: attributes))
+                for _ in 0..<displayed.utf16.count {
+                    displayRanges.append(originalRange)
+                }
+            }
+        }
+
+        return DiffTextPresentation(attributed: out, original: original as NSString, displayRanges: displayRanges)
+    }
+
+    func originalText(for displayRange: NSRange) -> String {
+        guard displayRange.length > 0 else { return "" }
+        let start = max(0, displayRange.location)
+        let end = min(displayRanges.count, displayRange.location + displayRange.length)
+        guard start < end else { return "" }
+        let ranges = displayRanges[start..<end].compactMap { $0 }
+        guard var combined = ranges.first else { return "" }
+        for range in ranges.dropFirst() {
+            combined = NSUnionRange(combined, range)
+        }
+        return original.substring(with: combined)
+    }
+
+    private static func visible(_ character: Character) -> String {
+        switch character {
+        case "\n": return "\u{21B5}\n"
+        case "\r": return "\u{240D}"
+        case "\t": return "\u{21E5}"
+        case " ": return "\u{00B7}"
+        case "\u{00A0}": return "\u{237D}"
+        default: return String(character)
+        }
+    }
+}
+
 private struct ComparisonPane: View {
     let title: String
     let role: ComparisonTextRole
     let spans: [TextComparison.Span]
-    let side: ComparisonSide
     let onSelect: (ComparisonTextRole, String) -> Void
 
     var body: some View {
@@ -798,7 +872,7 @@ private struct ComparisonPane: View {
                 }
                 Spacer()
             }
-            SelectableComparisonText(spans: spans, side: side) { onSelect(role, $0) }
+            SelectableComparisonText(spans: spans) { onSelect(role, $0) }
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
@@ -813,7 +887,6 @@ private struct ComparisonPane: View {
 
 private struct SelectableComparisonText: NSViewRepresentable {
     let spans: [TextComparison.Span]
-    let side: ComparisonSide
     let onSelect: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect) }
@@ -846,10 +919,12 @@ private struct SelectableComparisonText: NSViewRepresentable {
         // pure attribute change (same text, different highlight); reset it on a real text change.
         guard context.coordinator.renderedSpans != spans else { return }
         let previousString = textView.string
-        let attributed = Self.attributed(spans: spans, side: side)
+        let rendered = DiffTextPresentation.render(spans: spans)
+        let attributed = rendered.attributed
         let selected = textView.selectedRange()
         textView.textStorage?.setAttributedString(attributed)
         context.coordinator.renderedSpans = spans
+        context.coordinator.presentation = rendered
         if previousString == attributed.string,
             selected.location + selected.length <= attributed.string.utf16.count {
             textView.setSelectedRange(selected)
@@ -858,50 +933,16 @@ private struct SelectableComparisonText: NSViewRepresentable {
         }
     }
 
-    private static func attributed(spans: [TextComparison.Span], side: ComparisonSide) -> NSAttributedString {
-        let font = NSFont.preferredFont(forTextStyle: .body)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byWordWrapping
-        let base: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
-
-        guard !spans.isEmpty else {
-            var placeholder = base
-            placeholder[.foregroundColor] = NSColor.tertiaryLabelColor
-            return NSAttributedString(string: "(empty)", attributes: placeholder)
-        }
-
-        let out = NSMutableAttributedString()
-        for span in spans {
-            var attributes = base
-            let color = DiffStyle.foreground(span.kind)
-            attributes[.foregroundColor] = color
-            if let background = DiffStyle.background(span.kind) {
-                attributes[.backgroundColor] = background
-            }
-            switch DiffStyle.mark(span.kind) {
-            case .none:
-                break
-            case .strikethrough:
-                attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
-                attributes[.strikethroughColor] = color
-            case .underline:
-                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-                attributes[.underlineColor] = color
-            }
-            out.append(NSAttributedString(string: span.text, attributes: attributes))
-        }
-        return out
-    }
-
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var onSelect: (String) -> Void
         var renderedSpans: [TextComparison.Span]?
+        var presentation: DiffTextPresentation?
         init(onSelect: @escaping (String) -> Void) { self.onSelect = onSelect }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            onSelect((textView.string as NSString).substring(with: textView.selectedRange()))
+            onSelect(presentation?.originalText(for: textView.selectedRange()) ?? "")
         }
     }
 }
