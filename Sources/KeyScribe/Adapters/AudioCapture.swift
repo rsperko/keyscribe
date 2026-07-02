@@ -532,19 +532,28 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return backstopID == currentDrainID
     }
 
-    // Commit path: tear the capture down on the control queue (unit stop/dispose can block on a transitioning
-    // device), watchdogged so a wedge can't hang the commit. The WAV is finalized/closed BEFORE the unit
-    // stop (see tearDownSession), so even if the watchdog fires while the unit stop is wedged, the URL we
-    // return points at a complete, closed file the caller can transcribe. A non-Bluetooth unit is STOPPED
-    // but kept resident (fast to restart next dictation); a Bluetooth unit is DISPOSED to free HFP.
+    // Commit path. Steps 1–3 (sever the RT → ring → writer → file path, join the writer, CLOSE the WAV) run
+    // SYNCHRONOUSLY here — they touch no HAL unit (`capturing` is atomic, `session`/`writer` are lock-guarded,
+    // `writer.finish` is thread-safe), so the file is finalized and closed BEFORE this returns regardless of
+    // what the unit teardown does. That closes two cross-generation hazards the old fully-queued teardown had:
+    //   • V2 — a control queue wedged AHEAD of the queued block let the watchdog return an OPEN, still-being-
+    //     written WAV to transcription. Now the close is done before the watchdog even arms.
+    //   • V1 — the queued block read the CURRENT global `session` at execution time, so after a watchdog
+    //     generation swap it stole whichever capture was then live (flipping its `capturing`, joining its
+    //     writer, closing its file). Nil'ing `session` synchronously at the call site means the queued step
+    //     can no longer touch a newer generation's session.
+    // Step 4 — the potentially-blocking unit stop (non-Bluetooth, kept resident) or dispose (Bluetooth, to
+    // free HFP) — is what we queue and watchdog, generation-guarded so a stale block can't stop a newer unit.
     private func teardownAndFinalize() async -> URL? {
         let queue = currentQueue()
+        let generation = currentGeneration()
         let url = lock.withLock { session?.url }
+        finishWriterAndCloseFile(flushConverter: true)
         do {
             try await runWithDeadline(seconds: Self.bringUpTimeout) {
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     queue.async { [self] in
-                        tearDownSession(flushConverter: true)
+                        teardownUnit(generation: generation)
                         cont.resume()
                     }
                 }
@@ -556,22 +565,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return url
     }
 
-    // End the live capture on the control queue. Ordering is load-bearing:
-    //   1. drop the session + flip `capturing` off — the RT callback stops pushing (a mid-recording restart
-    //      queued behind us reads `session` and bails — the H1 stranded-mic close), which SEVERS the
-    //      RT → ring → writer → file path: no further buffer can reach the file after this point;
-    //   2. `writer.finish` drains the slots already in the ring, flushes the resampler tail (commit) and
-    //      JOINS the writer thread, which drops the writer's own reference to the file;
-    //   3. drop `s` — the last strong reference to the session — which closes the `AVAudioFile`. This happens
-    //      BEFORE the unit teardown, so a wedged unit stop (a transitioning device) can NOT leave the file
-    //      open when the watchdog returns the URL for transcription. Because `capturing` already severed the
-    //      write path in step 1, closing before stopping the unit cannot race an in-flight write;
-    //   4. stop (non-Bluetooth) or dispose (Bluetooth) the unit — the step that may block on a bad device.
-    private func tearDownSession(flushConverter: Bool) {
-        // Steps 1–3: sever the write path, join the writer, and CLOSE the file (the session ref is confined to
-        // this call, so it is released — and the WAV finalized — at its return, before the unit teardown).
-        finishWriterAndCloseFile(flushConverter: flushConverter)
-        // Step 4: the potentially-blocking unit teardown, now safely AFTER the file is closed.
+    // Step 4 of teardown — the potentially-blocking unit stop/dispose, on the control queue and
+    // generation-guarded: a block whose generation was superseded by a watchdog swap must NEVER stop or
+    // dispose a newer generation's live unit (V1). The swap already disposes the superseded unit itself, so
+    // skipping here leaks nothing. Non-Bluetooth: stop but keep the unit resident (fast to restart next
+    // dictation). Bluetooth: dispose to release HFP.
+    private func teardownUnit(generation: Int) {
+        guard lock.withLock({ Self.shouldTeardownUnit(generation: generation, currentGeneration: self.generation) })
+        else { return }
         if effectiveInputIsBluetooth() {
             disposeUnitInline()
         } else {
@@ -579,6 +580,22 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
+    // Pure guard for the queued step-4 unit teardown: it may stop/dispose the stored unit only while its
+    // scheduling generation is still current. A superseded block (its generation bumped by a watchdog swap)
+    // no-ops, so it can never tear down a newer generation's live unit (V1).
+    static func shouldTeardownUnit(generation: Int, currentGeneration: Int) -> Bool {
+        generation == currentGeneration
+    }
+
+    // Steps 1–3 of teardown, thread-safe and HAL-free so the commit/cancel paths run them synchronously.
+    // Ordering is load-bearing:
+    //   1. drop the session + flip `capturing` off — the RT callback stops pushing (a mid-recording restart
+    //      queued behind us reads `session` and bails — the H1 stranded-mic close), which SEVERS the
+    //      RT → ring → writer → file path: no further buffer can reach the file after this point;
+    //   2. `writer.finish` drains the slots already in the ring, flushes the resampler tail (commit) and
+    //      JOINS the writer thread, which drops the writer's own reference to the file;
+    //   3. drop `s` — the last strong reference to the session — which closes the `AVAudioFile`. Because
+    //      `capturing` already severed the write path in step 1, closing here cannot race an in-flight write.
     private func finishWriterAndCloseFile(flushConverter: Bool) {
         let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
         capturing.store(false, ordering: .releasing)
@@ -598,17 +615,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         (ring.droppedCount, overloadCount.load(ordering: .relaxed))
     }
 
-    // Immediate, audio-discarding teardown for cancel()/over-limit abort: the caller deletes the WAV. Flip
-    // `capturing` off synchronously so the RT callback stops at once, force-resume any pending drain so the
-    // awaiter is never stranded, then tear the session/unit/writer down off-main so a bad device can't block.
-    // The caller may delete the returned WAV immediately: the writer keeps writing into the now-unlinked file
-    // (POSIX unlink-while-open) and closes it harmlessly on join.
+    // Immediate, audio-discarding teardown for cancel()/over-limit abort: the caller may delete the returned
+    // WAV. Sever + close SYNCHRONOUSLY (thread-safe, no HAL): flips `capturing` off at once so the RT callback
+    // stops, nils `session` at the call site so a stale queued unit-teardown can't steal a newer capture (V1),
+    // and finalizes the WAV before returning (so the caller's delete can't race an open file). Then queue only
+    // the generation-guarded, potentially-blocking unit teardown so a bad device can't block the caller.
+    // force-resume any pending drain first so its awaiter is never stranded.
     func stop() -> URL? {
         resumeDrain()
         let queue = currentQueue()
+        let generation = currentGeneration()
         let url = lock.withLock { session?.url }
-        capturing.store(false, ordering: .releasing)
-        queue.async { [self] in tearDownSession(flushConverter: false) }
+        finishWriterAndCloseFile(flushConverter: false)
+        queue.async { [self] in teardownUnit(generation: generation) }
         return url
     }
 

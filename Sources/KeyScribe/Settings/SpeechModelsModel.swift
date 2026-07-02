@@ -47,6 +47,12 @@ final class SpeechModelsModel: ObservableObject {
     private let evictEngine: (String) async -> Void
     private let onActiveChange: (String) -> Void
     private let onDictionaryMatchingChange: (Settings.STT) -> Void
+    private let removeFiles: (String) -> Void
+    private let markInstalled: (String) -> Void
+    private let markRemoved: (String) -> Void
+    // Runs `work` immediately when the controller is idle, else parks it until the current dictation
+    // finishes. Used so a model delete never removes files an in-flight dictation is about to reload (V4).
+    private let deferWhileBusy: (@escaping () -> Void) -> Void
 
     init(
         activeId: String,
@@ -55,7 +61,12 @@ final class SpeechModelsModel: ObservableObject {
         verify: @escaping (String) async -> Bool?,
         evictEngine: @escaping (String) async -> Void,
         onActiveChange: @escaping (String) -> Void,
-        onDictionaryMatchingChange: @escaping (Settings.STT) -> Void
+        onDictionaryMatchingChange: @escaping (Settings.STT) -> Void,
+        deferWhileBusy: @escaping (@escaping () -> Void) -> Void = { $0() },
+        initialInstalledIds: Set<String>? = nil,
+        removeFiles: @escaping (String) -> Void = { ModelInstallStore.removeFiles(for: $0) },
+        markInstalled: @escaping (String) -> Void = { ModelInstallStore.markInstalled($0) },
+        markRemoved: @escaping (String) -> Void = { ModelInstallStore.markRemoved($0) }
     ) {
         self.stt = stt
         self.download = download
@@ -63,9 +74,13 @@ final class SpeechModelsModel: ObservableObject {
         self.evictEngine = evictEngine
         self.onActiveChange = onActiveChange
         self.onDictionaryMatchingChange = onDictionaryMatchingChange
+        self.deferWhileBusy = deferWhileBusy
+        self.removeFiles = removeFiles
+        self.markInstalled = markInstalled
+        self.markRemoved = markRemoved
         set = SpeechModelSet(
             catalog: EngineRegistry.availableCatalog,
-            installed: ModelInstallStore.installedIds(),
+            installed: initialInstalledIds ?? ModelInstallStore.installedIds(),
             activeId: activeId)
         refreshSizes()
         rebuild()
@@ -97,7 +112,7 @@ final class SpeechModelsModel: ObservableObject {
     // store and this model never learned the model is present — it kept reading "not installed" until a
     // redundant re-download in Settings. Mark it installed and refresh so onboarding's download sticks.
     func noteInstalled(_ id: String) {
-        ModelInstallStore.markInstalled(id)
+        markInstalled(id)
         set.markInstalled(id)
         refreshSizes()
         rebuild()
@@ -184,7 +199,7 @@ final class SpeechModelsModel: ObservableObject {
             // window would otherwise leave a complete download that next-launch reconcile could delete
             // as an orphan (Whisper/Qwen now report verifyInstalled, but Moonshine still defers to the
             // marker as its only "installed" signal). A failed self-test un-marks it in runVerification.
-            ModelInstallStore.markInstalled(id)
+            markInstalled(id)
             await runVerification(id, markInstalledOnPass: true)
         }
     }
@@ -201,8 +216,8 @@ final class SpeechModelsModel: ObservableObject {
         let wasActive = set.activeId == id
         Task {
             await evictEngine(id)
-            ModelInstallStore.removeFiles(for: id)
-            ModelInstallStore.markRemoved(id)
+            removeFiles(id)
+            markRemoved(id)
             set.delete(id)
             verifyFailed.remove(id)
             if wasActive { onActiveChange(set.activeId) }
@@ -222,17 +237,24 @@ final class SpeechModelsModel: ObservableObject {
         if result == false {
             verifyFailed.insert(id)
             errors[id] = "This model failed its self-test — reinstall it."
-            // A model that can't transcribe the known clip must not stay selectable.
+            // A model that can't transcribe the known clip must not stay selectable — AND its files must be
+            // removed, not just un-marked. Un-marking alone leaves a COMPLETE install on disk that the next
+            // launch's reconcile re-adopts as Installed (verifyInstalled is true — completeness is not what
+            // failed), silently reversing the quarantine (V5). Evict first so the loaded handle is torn down
+            // before its files vanish, then delete — making the "reinstall it" message literal and
+            // reconcile-proof.
             if SpeechModelCatalog.entry(for: id)?.systemManaged == false {
                 let wasActive = set.activeId == id
-                ModelInstallStore.markRemoved(id)
+                await evictEngine(id)
+                removeFiles(id)
+                markRemoved(id)
                 set.delete(id)
                 if wasActive { onActiveChange(set.activeId) }
             }
         } else {
             // Passed, or skipped because no clip is bundled (dev runs) — treat as installed.
             verifyFailed.remove(id)
-            ModelInstallStore.markInstalled(id)
+            markInstalled(id)
             set.markInstalled(id)
             // Only a manual re-test of a confirmed pass shows the transient acknowledgement;
             // a fresh install already shows its "Installed" status.
@@ -280,8 +302,13 @@ final class SpeechModelsModel: ObservableObject {
         let wasActive = set.activeId == id
         Task {
             await evictEngine(id)
-            ModelInstallStore.removeFiles(for: id)
-            ModelInstallStore.markRemoved(id)
+            // Defer the actual file removal until the controller is idle. Deleting the files mid-dictation
+            // would let the in-flight dictation's commit-time reload find the folder gone and re-download
+            // the model over the network, mid-dictation (V4). The marker + set updates happen immediately
+            // for the UI; the in-flight dictation keeps running on its already-frozen, loaded engine and
+            // the files disappear the moment it finishes.
+            deferWhileBusy { [removeFiles] in removeFiles(id) }
+            markRemoved(id)
             set.delete(id)
             verifyFailed.remove(id)
             if wasActive { onActiveChange(set.activeId) }

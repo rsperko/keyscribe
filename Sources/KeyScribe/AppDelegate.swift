@@ -158,7 +158,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self.controller.evictEngineForSettings(engine)
             },
             onActiveChange: { [weak self] id in self?.setEngine(id) },
-            onDictionaryMatchingChange: { [weak self] stt in self?.setDictionaryMatching(stt) })
+            onDictionaryMatchingChange: { [weak self] stt in self?.setDictionaryMatching(stt) },
+            deferWhileBusy: { [weak self] work in
+                guard let self else { work(); return }
+                self.controller.runWhenIdle(work)
+            })
 
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels, repository: configRepository,

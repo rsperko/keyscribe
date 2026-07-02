@@ -1,4 +1,5 @@
 import XCTest
+import AudioCommon
 @testable import KeyScribe
 import KeyScribeKit
 
@@ -60,5 +61,45 @@ final class EngineInstallDetectionTests: XCTestCase {
     func testQwenUnverifiedWhenAbsent() {
         let engine = Qwen3ASREngine(profile: .large, modelsDir: dir)
         XCTAssertEqual(engine.verifyInstalled(in: dir), false)
+    }
+
+    private func writeFiles(_ names: [String], into folder: URL) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in names { try Data().write(to: folder.appendingPathComponent(name)) }
+    }
+
+    private func qwenCacheDir(profile: Qwen3ModelProfile) throws -> URL {
+        return try HuggingFaceDownloader.getCacheDirectory(
+            for: profile.modelId, basePath: dir.appendingPathComponent(profile.subdir, isDirectory: true))
+    }
+
+    func testQwenVerifiedWhenFullInstallPresent() throws {
+        let cacheDir = try qwenCacheDir(profile: .large)
+        try writeFiles(
+            ["model.safetensors", "config.json", "vocab.json", "merges.txt", "tokenizer_config.json"],
+            into: cacheDir)
+        XCTAssertEqual(Qwen3ASREngine(profile: .large, modelsDir: dir).verifyInstalled(in: dir), true)
+    }
+
+    // A partial install that landed weights but not the tokenizer must NOT be adopted — loading it would
+    // paste raw token IDs into the user's document.
+    func testQwenUnverifiedWhenTokenizerMissing() throws {
+        let cacheDir = try qwenCacheDir(profile: .large)
+        try writeFiles(
+            ["model.safetensors", "config.json", "merges.txt", "tokenizer_config.json"],
+            into: cacheDir)
+        XCTAssertEqual(Qwen3ASREngine(profile: .large, modelsDir: dir).verifyInstalled(in: dir), false)
+    }
+
+    func testQwenUnverifiedWhenTokenizerSidecarMissing() throws {
+        let cacheDir = try qwenCacheDir(profile: .large)
+        try writeFiles(["model.safetensors", "config.json", "vocab.json", "tokenizer_config.json"], into: cacheDir)
+        XCTAssertEqual(Qwen3ASREngine(profile: .large, modelsDir: dir).verifyInstalled(in: dir), false)
+    }
+
+    func testQwenUnverifiedWhenWeightsMissing() throws {
+        let cacheDir = try qwenCacheDir(profile: .large)
+        try writeFiles(["config.json", "vocab.json", "merges.txt", "tokenizer_config.json"], into: cacheDir)
+        XCTAssertEqual(Qwen3ASREngine(profile: .large, modelsDir: dir).verifyInstalled(in: dir), false)
     }
 }

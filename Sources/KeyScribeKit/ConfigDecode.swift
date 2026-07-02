@@ -8,9 +8,13 @@ enum ConfigDecode {
     ) throws -> T {
         let table: TOMLTable
         do {
-            let migrated = try MigrationRunner.migrate(
-                toml: toml, target: supportedVersion, steps: migrations)
-            table = try TOMLTable(string: migrated.toml)
+            // With no migration steps, preserve the historical "gate only" contract: reject a NEWER file
+            // but let an older-or-equal one fall through to additive decode. Running an empty chain through
+            // `migrate` would throw on every schema_version < supportedVersion (W23 regression, V6).
+            let source = migrations.isEmpty
+                ? try MigrationRunner.gate(toml: toml, target: supportedVersion)
+                : try MigrationRunner.migrate(toml: toml, target: supportedVersion, steps: migrations).toml
+            table = try TOMLTable(string: source)
         } catch let e as ConfigError {
             throw e
         } catch {

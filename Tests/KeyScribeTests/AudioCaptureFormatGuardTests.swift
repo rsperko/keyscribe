@@ -51,6 +51,17 @@ struct CaptureReplacementUnitStartTests {
     }
 }
 
+// V1: the queued step-4 unit teardown may only touch the unit while its scheduling generation is current.
+struct CaptureUnitTeardownGuardTests {
+    @Test func currentGenerationTearsDownUnit() {
+        #expect(AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 3))
+    }
+
+    @Test func supersededGenerationSkipsTeardown() {
+        #expect(!AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 4))
+    }
+}
+
 // Capture-device resolution: a present preferred device wins; else the system default; else nothing is
 // available. `isPreferredPresent` drives the error policy — a failed PRESENT preferred device is surfaced
 // (don't silently record from a different mic), while a default-follow failure is retried. The AUHAL binds

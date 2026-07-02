@@ -211,6 +211,25 @@ final class DictationController {
 
     var isBusy: Bool { machine.isBusy }
     var hasResult: Bool { lastResult != nil }
+
+    // Work parked by `runWhenIdle` while a dictation is in flight, drained at the next terminal.
+    private var pendingIdleWork: [() -> Void] = []
+
+    // Run `work` now if idle, else defer it until the current dictation reaches a terminal state. Settings
+    // model deletion uses this so removing a model's files never yanks them out from under an in-flight
+    // dictation whose commit-time reload would otherwise re-download the just-deleted model over the
+    // network, mid-dictation (V4). Main-actor confined, so the parked closures need no synchronization.
+    func runWhenIdle(_ work: @escaping () -> Void) {
+        guard isBusy else { work(); return }
+        pendingIdleWork.append(work)
+    }
+
+    private func drainIdleWork() {
+        guard !pendingIdleWork.isEmpty else { return }
+        let work = pendingIdleWork
+        pendingIdleWork.removeAll()
+        for item in work { item() }
+    }
     var nextModeOverrideName: String? {
         nextModeOverrideID.flatMap { id in config.modes.first { $0.id == id }?.name }
     }
@@ -570,6 +589,9 @@ final class DictationController {
         session = nil
         scheduleCaptureRefresh()
         onBecameIdle?()
+        // The dictation is fully terminal (reload + transcribe + insert are done), so any deferred idle
+        // work — e.g. a Settings model-file deletion parked while this dictation ran — is now safe.
+        drainIdleWork()
     }
 
     func handleCommit() {

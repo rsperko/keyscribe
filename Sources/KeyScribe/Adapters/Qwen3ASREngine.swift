@@ -74,25 +74,53 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         // per-variant isolation has to come from basePath, not cacheDirName.
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(
             for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
-        // Load an already-downloaded model with ZERO network (SpeechEngine contract): when the weights
-        // are on disk, pass offlineMode so fromPretrained skips the Hugging Face metadata round trip
-        // that fromPretrained otherwise makes on every cold load — an unconsented outbound request that
-        // also stalls/fails offline with a fully valid model present. offlineMode:false still downloads
-        // a genuinely-absent model (first install).
-        let offline = HuggingFaceDownloader.weightsExist(in: cacheDir)
-        model = try await Qwen3ASRModel.fromPretrained(
-            modelId: modelId, cacheDir: cacheDir, offlineMode: offline, progressHandler: bridge)
+        // Load an already-downloaded model with ZERO network (SpeechEngine contract): when the FULL
+        // install is on disk, pass offlineMode so fromPretrained skips the Hugging Face metadata round
+        // trip it otherwise makes on every cold load — an unconsented outbound request that also
+        // stalls/fails offline with a valid model present. offlineMode:false still downloads a
+        // genuinely-absent OR partial model, healing an interrupted install (downloadWeights skips
+        // present files and fetches the missing ones) instead of loading a tokenizer-less model.
+        let offline = fullInstallPresent(in: cacheDir)
+        do {
+            model = try await Qwen3ASRModel.fromPretrained(
+                modelId: modelId, cacheDir: cacheDir, offlineMode: offline, progressHandler: bridge)
+        } catch {
+            // Repair fallback (mirrors WhisperEngine): a present-but-corrupt cache that fails the offline
+            // load (e.g. a truncated .safetensors) is re-fetched with the network enabled. Only when we
+            // attempted offline — a genuinely-absent model already used offlineMode:false, so re-running
+            // it would just repeat the same failure.
+            guard offline else { throw error }
+            Log.models.notice("qwen3asr: offline load failed (\(error.localizedDescription, privacy: .public)); re-downloading")
+            model = try await Qwen3ASRModel.fromPretrained(
+                modelId: modelId, cacheDir: cacheDir, offlineMode: false, progressHandler: bridge)
+        }
         progress?(.init(phase: "Ready", fraction: 1))
     }
 
-    // Qwen weights (safetensors) are a checkable install footprint, so reconcile does not need the
-    // marker to know the model is present — a completed-but-unmarked download (crash before the marker
-    // wrote) is adopted rather than deleted.
+    // A Qwen install is multi-file: the safetensors weights PLUS the tokenizer/config sidecars. A plain
+    // weightsExist check is satisfied by ANY single .safetensors, so an interrupted download that landed
+    // a weight shard but not vocab.json passes it — then fromPretrained silently skips the absent tokenizer
+    // (a fileExists check with no else) and transcribe falls back to space-joined raw token IDs pasted into
+    // the user's document. Require the whole set so a partial is treated as absent (re-downloaded / not
+    // adopted), never loaded.
+    private static let requiredSidecars = ["config.json", "vocab.json", "merges.txt", "tokenizer_config.json"]
+
+    func fullInstallPresent(in cacheDir: URL) -> Bool {
+        guard HuggingFaceDownloader.weightsExist(in: cacheDir) else { return false }
+        let fm = FileManager.default
+        return Self.requiredSidecars.allSatisfy {
+            fm.fileExists(atPath: cacheDir.appendingPathComponent($0).path)
+        }
+    }
+
+    // Qwen weights are a checkable install footprint, so reconcile does not need the marker to know the
+    // model is present — a completed-but-unmarked download (crash before the marker wrote) is adopted
+    // rather than deleted. A partial install (missing tokenizer/config) reports false so it is NOT adopted.
     nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? {
         guard let cacheDir = try? HuggingFaceDownloader.getCacheDirectory(
             for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
         else { return nil }
-        return HuggingFaceDownloader.weightsExist(in: cacheDir)
+        return fullInstallPresent(in: cacheDir)
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
