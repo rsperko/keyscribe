@@ -4,7 +4,7 @@ import KeyScribeKit
 
 // Private AX SPI: the CGWindowID backing an AXUIElement window, stable for the window's lifetime.
 // Used to tell two windows of the same app apart so a focus move during an LLM round-trip diverts to
-// the clipboard instead of pasting blind into the wrong window (design.md §4.5 focus race).
+// the clipboard instead of pasting into the wrong window.
 @_silgen_name("_AXUIElementGetWindow")
 private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
@@ -22,11 +22,8 @@ enum ContextProbe {
             isSecureField: focusedIsSecure())
     }
 
-    // Whether the system-wide focused element is a secure (password) text field. Used to force a
-    // dictation fully local and divert its insert to a concealed clipboard copy (design.md §4.4).
-    // Best-effort and fail-open: any AX failure/timeout returns false (treated as a normal field), and
-    // some Chromium/Electron password inputs do not expose the AXSecureTextField subrole, so this is a
-    // best-effort guard, not a guarantee. A tight messaging timeout bounds a wedged AX server.
+    // Best-effort secure-field detection. AX failures return false, and some browser password inputs do
+    // not expose the AXSecureTextField subrole, so this is a guard rather than a guarantee.
     static func focusedIsSecure() -> Bool {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.1)
@@ -41,11 +38,8 @@ enum ContextProbe {
         return subrole == (kAXSecureTextFieldSubrole as String)
     }
 
-    // A stable id for the frontmost app's focused window, so decideInsertion can catch a same-app
-    // window switch between capture and insertion (the realistic way dictated text lands in the wrong
-    // window during an LLM round-trip). Best-effort and fail-open: any failure/timeout returns nil, and
-    // a nil id never blocks insertion — decideInsertion only diverts to the clipboard when BOTH the
-    // captured and current ids are known and differ.
+    // A stable id for the frontmost app's focused window, so decideInsertion can catch a same-app window
+    // switch between capture and insertion. Best-effort: a nil id never blocks insertion.
     //
     // Synchronous on purpose: snapshot() is read on the hot key-down path (handleStart) and again at
     // insertion, both @MainActor, so it cannot await. A tight per-element messaging timeout (mirrors
@@ -93,10 +87,8 @@ enum ContextProbe {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName
     }
 
-    // The focused window's title for a window-title-constrained mode (design.md §4.3). Synchronous AX
-    // read with a tight messaging timeout (like focusedWindowId), called only when a mode actually uses a
-    // window_title constraint (ModeResolver.requiresWindowTitleContext). Best-effort: nil if AX exposes
-    // no title.
+    // The focused window's title for a window-title-constrained mode. Best-effort: nil if AX exposes no
+    // title.
     static func focusedWindowTitle(bundleId: String) -> String? {
         guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?.processIdentifier else { return nil }
@@ -113,11 +105,8 @@ enum ContextProbe {
         return title
     }
 
-    // Bounded text immediately before the caret in the focused field, for a mode that opted into
-    // preceding-text context (design.md §4.4). Read straight from the focused element's selected range
-    // via AX — precise and native-only: Chromium/Electron expose no caret range, so this returns nil
-    // there (best-effort). Privacy mode forces the opt-in off upstream
-    // (Mode.effectiveContext), so this is never called when redaction is active.
+    // Bounded text immediately before the caret in the focused field. Chromium/Electron expose no caret
+    // range through AX, so this returns nil there.
     static func precedingText(forBundleId bundleId: String, maxChars: Int = 600) async -> String? {
         // Scope to the captured app. precedingText is read at rewrite time — after STT
         // and partway into the LLM round trip — so resolving the live system-wide focused element would
@@ -156,18 +145,12 @@ enum ContextProbe {
         return text
     }
 
-    // Browser URL for URL-constrained modes (design.md §4.4): AppleScript/Apple Events, never AX
-    // (AX returns nil on Chromium — M0 fact). "Is it a browser" comes from Launch Services (any app
-    // registered to open https), so no bundle-id list. The URL itself uses one of two AppleScript
-    // dialects (WebKit document- vs Chromium tab-based); we try both against the same app rather
-    // than map which one it speaks. A non-browser sends no Apple event, so the Automation prompt
-    // only appears for an actual browser, and only once (permission is per source→target pair).
+    // Browser URL for URL-constrained modes: AppleScript/Apple Events, never AX. Browser identity comes
+    // from Launch Services rather than a bundle-id list, and the URL read tries both common script dialects.
     //
     // The Apple Event is a synchronous cross-process round trip with no per-call timeout (NSAppleScript
-    // uses kAEDefaultTimeout, ~2 min), so it suspends rather than parking the main thread — the dictation
-    // flow (cue, capture, HUD) is never blocked while a URL-routed mode resolves. The AppleScript runs on
-    // a global queue (not the cooperative pool, which a 2-min beachball would starve); whichever of the
-    // fetch or the 0.6s timeout fires first wins, and a late fetch result is dropped.
+    // uses kAEDefaultTimeout, ~2 min), so it runs off the main actor. The serial AppleScript queue avoids
+    // starving the cooperative pool; whichever of the fetch or the 0.6s timeout fires first wins.
     static func browserURLAsync(forBundleId bundleId: String) async -> String? {
         guard handlesHTTPS(bundleId) else { return nil }
         return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in

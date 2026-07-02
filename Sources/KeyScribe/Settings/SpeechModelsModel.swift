@@ -51,7 +51,7 @@ final class SpeechModelsModel: ObservableObject {
     private let markInstalled: (String) -> Void
     private let markRemoved: (String) -> Void
     // Runs `work` immediately when the controller is idle, else parks it until the current dictation
-    // finishes. Used so a model delete never removes files an in-flight dictation is about to reload (V4).
+    // finishes. Used so a model delete never removes files an in-flight dictation may still need.
     private let deferWhileBusy: (@escaping () -> Void) -> Void
 
     init(
@@ -237,12 +237,8 @@ final class SpeechModelsModel: ObservableObject {
         if result == false {
             verifyFailed.insert(id)
             errors[id] = "This model failed its self-test — reinstall it."
-            // A model that can't transcribe the known clip must not stay selectable — AND its files must be
-            // removed, not just un-marked. Un-marking alone leaves a COMPLETE install on disk that the next
-            // launch's reconcile re-adopts as Installed (verifyInstalled is true — completeness is not what
-            // failed), silently reversing the quarantine (V5). Evict first so the loaded handle is torn down
-            // before its files vanish, then delete — making the "reinstall it" message literal and
-            // reconcile-proof.
+            // A model that can't transcribe the known clip must not stay selectable. Remove files, not just
+            // the marker, so launch reconcile cannot re-adopt the failed install.
             if SpeechModelCatalog.entry(for: id)?.systemManaged == false {
                 let wasActive = set.activeId == id
                 await evictEngine(id)
@@ -302,11 +298,8 @@ final class SpeechModelsModel: ObservableObject {
         let wasActive = set.activeId == id
         Task {
             await evictEngine(id)
-            // Defer the actual file removal until the controller is idle. Deleting the files mid-dictation
-            // would let the in-flight dictation's commit-time reload find the folder gone and re-download
-            // the model over the network, mid-dictation (V4). The marker + set updates happen immediately
-            // for the UI; the in-flight dictation keeps running on its already-frozen, loaded engine and
-            // the files disappear the moment it finishes.
+            // Defer file removal until idle so an in-flight dictation can keep using its frozen engine.
+            // The marker and set update immediately for the UI.
             deferWhileBusy { [removeFiles] in removeFiles(id) }
             markRemoved(id)
             set.delete(id)

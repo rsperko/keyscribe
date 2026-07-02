@@ -3,10 +3,7 @@ import KeyScribeKit
 
 // Assembles everything the LLM rewrite needs from a dictation's frozen state: the mode prompt +
 // shared fragments, the dictionary "valid term" hints, the opted-in context channels (app identity,
-// preceding text), and the sized connection. This
-// is the cohesive, change-prone half of the old rewriteTokenized; pulling it out of DictationController
-// keeps the controller to orchestration (HUD, state machine, restore, history) and isolates prompt
-// construction. @MainActor because the context probes are (ContextProbe is main-actor isolated).
+// preceding text), and the sized connection. @MainActor because the context probes are main-actor isolated.
 @MainActor
 struct RewriteRequestBuilder {
     let mode: Mode

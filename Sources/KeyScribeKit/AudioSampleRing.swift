@@ -1,16 +1,14 @@
 import Synchronization
 
 // Lock-free single-producer / single-consumer ring of audio buffer records. The realtime CoreAudio IO
-// thread is the sole PRODUCER (copies each delivered buffer's planar Float samples into the next slot); a
-// dedicated writer thread is the sole CONSUMER (drains slots to disk). Neither side takes a lock, allocates,
-// or makes a syscall on its hot path, so the RT thread can never stall on the writer (the priority
-// inversion that overran the device IO cycle in the old per-buffer-lock/file-write callback).
+// thread is the sole producer and the writer thread is the sole consumer. Neither side takes a lock,
+// allocates, or makes a syscall on its hot path.
 //
 // Each slot carries the frames plus the metadata the writer needs: the delivered frame/channel count, the
 // device-native sample rate (so the writer builds/rebuilds its resampler), and the buffer's mach host time
 // (so the tail-drain gate can decide when the release-covering buffer has reached the writer). Slots are a
-// fixed, preallocated geometry; a buffer that exceeds the frame limit, or that arrives when the ring is
-// full, is dropped and counted (an overrun) rather than blocking the RT thread.
+// fixed, preallocated geometry; invalid or overflow buffers are dropped and counted rather than blocking
+// the RT thread.
 //
 // Correctness rests on the classic SPSC discipline: the producer publishes a slot by a RELEASING store to
 // `tail` after filling it, and the consumer reads a slot only after an ACQUIRING load of `tail` — the
@@ -67,11 +65,8 @@ public final class AudioSampleRing: @unchecked Sendable {
         (slot * maxChannels + channel) * maxFramesPerSlot
     }
 
-    // PRODUCER (realtime thread). Copies one delivered buffer into the next free slot via `fill`, which is
-    // handed a per-channel destination of exactly `frameCount` Float samples. Returns false (and increments
-    // the overrun count) when the buffer exceeds the fixed geometry or the ring is full — the RT thread
-    // drops an invalid/too-large buffer instead of ever blocking. Extra channels are truncated to the fixed
-    // storage geometry because the writer downmixes to mono. Allocation-free and lock-free.
+    // Producer side. Extra channels are truncated to the fixed storage geometry because the writer
+    // downmixes to mono.
     @discardableResult
     public func write(
         channelCount: Int, frameCount: Int, sampleRate: Double, hostTime: UInt64,
@@ -97,10 +92,7 @@ public final class AudioSampleRing: @unchecked Sendable {
         return true
     }
 
-    // CONSUMER (writer thread). If a published slot is available, invokes `body` with its metadata and a
-    // per-channel sample accessor (valid only for the duration of the call), then advances past it. Returns
-    // false when the ring is empty. The slot's storage is stable during `body` because the producer's
-    // full-check guarantees it will not overwrite an unread slot.
+    // Consumer side. The channel accessor is valid only during `body`.
     @discardableResult
     public func read(
         _ body: (SlotInfo, _ channel: (Int) -> UnsafeBufferPointer<Float>) -> Void

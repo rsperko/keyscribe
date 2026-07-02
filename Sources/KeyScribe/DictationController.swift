@@ -226,10 +226,8 @@ final class DictationController {
     // Work parked by `runWhenIdle` while a dictation is in flight, drained at the next terminal.
     private var pendingIdleWork: [() -> Void] = []
 
-    // Run `work` now if idle, else defer it until the current dictation reaches a terminal state. Settings
-    // model deletion uses this so removing a model's files never yanks them out from under an in-flight
-    // dictation whose commit-time reload would otherwise re-download the just-deleted model over the
-    // network, mid-dictation (V4). Main-actor confined, so the parked closures need no synchronization.
+    // Run `work` now if idle, else defer it until the current dictation reaches a terminal state. Main-actor
+    // confined, so the parked closures need no synchronization.
     func runWhenIdle(_ work: @escaping () -> Void) {
         guard isBusy else { work(); return }
         pendingIdleWork.append(work)
@@ -687,7 +685,7 @@ final class DictationController {
             let drainMs = self.elapsedMs(since: drainStart)
             self.building.stageMillis[.drain] = drainMs
             // Open the freshly-written capture once here, for both the debug log and the audioSeconds the
-            // transcribe deadline scales from — transcribeAndInsert no longer re-opens it.
+            // transcribe deadline scales from.
             var audioSeconds: Double?
             if let f = try? AVAudioFile(forReading: url) {
                 audioSeconds = Double(f.length) / f.fileFormat.sampleRate
@@ -922,24 +920,20 @@ final class DictationController {
             ? OutputCleanup.trimTrailingPunctuation(rawTranscript)
             : rawTranscript
         clearRewriteEscapeHatch()
-        // Guarded transition: if we are no longer transcribing, another terminal (escape hatch racing the
-        // in-flight task, a cancel) already ran — bail rather than double-insert.
+        // Guarded transition: another terminal path may already have won the race.
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
         let current = snapshot()
         let targetDecision = decideInsertion(
             captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: current)
-        // Without Accessibility every synthetic insertion path is silently dropped by the OS (the M0
-        // false-`.success` data-loss footgun). Divert to the clipboard so the text survives and the
-        // outcome reports "copied" truthfully instead of a phantom "inserted".
+        // Without Accessibility every synthetic insertion path is silently dropped by the OS. Divert to
+        // the clipboard so the text survives and the outcome reports "copied" truthfully.
         let decision = accessibilityGranted() ? targetDecision : .clipboardFallback(reason: .accessibilityDenied)
         building.targetBundleId = current.bundleId ?? capturedSnapshot?.bundleId
         if case .clipboardFallback(let reason) = decision { building.fallbackReason = String(describing: reason) }
         building.fingerprints[.final] = .of(transcript)
         let initialOutcome = DictationMachine.outcomeForTranscript(finalText: transcript, heard: heard, decision: decision)
-        // May downgrade to .failed if the actuation (paste) silently fails — success is OBSERVED, not
-        // assumed (H1): a clipboard manager racing our scratch write skips ⌘V, so a reported "inserted"
-        // with a submit Return would fire into the target with nothing pasted.
+        // May downgrade to .failed if paste silently fails; insertion success is observed, not assumed.
         var outcome = initialOutcome
         switch initialOutcome {
         case .noSpeech:
@@ -993,12 +987,8 @@ final class DictationController {
         onDictationCompleted?(outcome)
     }
 
-    // The submit Return fires AFTER the ~250 ms paste-settle window — long enough for the user to ⌘-tab
-    // (or switch windows within the same app) away — and lands outside the insert atom, so a stale
-    // target sends the keystroke into the wrong place (H4). Re-run the SAME focus-race decision the
-    // insert used (`decideInsertion`), against a fresh snapshot, right before submitting: it compares
-    // bundle id AND focused window id AND secure-field state, so a same-app window switch or a moved
-    // focus is caught, not just an app change. Submit only on a clean `.insert`.
+    // The submit Return fires after the paste-settle window and lands outside the insert atom. Re-run the
+    // same focus-race decision against a fresh snapshot before submitting.
     private func submitTargetStillFocused() -> Bool {
         let decision = decideInsertion(
             captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: snapshot())

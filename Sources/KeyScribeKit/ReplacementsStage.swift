@@ -24,11 +24,8 @@ public struct ReplacementsStage: PipelineStage {
     public let order = StageOrder.replacements
     public let rules: [ReplacementRule]
 
-    // Each rule's regex and substitution template resolved once at construction (the stage is built
-    // per config generation and cached in ResolvedConfig), so the per-dictation path is just the match.
-    // Pattern escaping, word-boundary wrapping, safety screening and compilation no longer run per
-    // dictation per rule. Rules that resolve to nothing (empty literal, unsafe/invalid regex) are
-    // dropped here exactly as the old per-call guards skipped them.
+    // Each rule's regex and substitution template resolves once at construction, so the per-dictation path
+    // is just matching. Invalid or unsafe rules are dropped here.
     private let prepared: [(regex: NSRegularExpression, template: String)]
 
     // A whole-utterance (bare) replacement is non-nil only when one rule owns the entire utterance —

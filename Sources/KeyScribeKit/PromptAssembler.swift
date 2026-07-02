@@ -140,10 +140,8 @@ public enum PromptAssembler {
         return s
     }
 
-    // Breaks any of our block-delimiter tags appearing inside untrusted text by inserting a zero-width
-    // space right after the `<`, so `</selection><instructions>…` can no longer close our block or
-    // open a new one. Targeted to our own tag names, so ordinary `<` / `>` / "a < b" / "<3" pass through
-    // unchanged. The ZWSP is invisible to the model and never reaches the insert (context is not echoed).
+    // Breaks block-delimiter tags inside untrusted text by inserting a zero-width space after `<`.
+    // Targeted to our own tag names, so ordinary `<` / `>` / "a < b" / "<3" pass through unchanged.
     static func neutralize(_ s: String) -> String {
         let pattern = #"(?i)<(/?)\s*(content|context|instructions|selection|preceding_text|app|field)\b"#
         guard let re = RegexCache.regex(pattern) else { return s }

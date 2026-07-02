@@ -211,11 +211,8 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // The system consent dialog is the single grant action: its "Open System Settings" button does the
-    // navigation and registers KeyScribe in the Accessibility list. Do NOT also open System Settings here —
-    // a second window stealing focus leaves the consent dialog stranded behind it, which the user then has
-    // to dismiss with "Deny" after granting. The deep-link is the row's separate "Open System Settings"
-    // button instead (used when a prior denial means the prompt no longer fires).
+    // Let the system consent dialog drive the grant action. Opening System Settings here can steal focus
+    // from the consent dialog; the row has a separate deep-link for manual repair.
     func requestAccessibility() {
         _ = Permissions.accessibilityStatus(prompt: true)
         refreshStatuses()

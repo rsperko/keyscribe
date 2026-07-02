@@ -27,9 +27,8 @@ public actor RewriteService {
         payload: TokenizedPayload, inputs: PromptInputs, connection: Connection,
         allowDeletion: Bool = false, prompt: RewritePrompt? = nil
     ) async -> RewriteOutcome {
-        // The tokens and the fallback text both come from the sealed `payload` a real forward pass
-        // produced — the gate can no longer be handed a forged/empty token set. On any failure we fall
-        // back to the tokenized text; the caller's `restore` pass unwinds it.
+        // Tokens and fallback text both come from the sealed payload produced by a real forward pass. On
+        // failure, fall back to tokenized text; the caller's restore pass unwinds it.
         let localText = payload.text
         let base = prompt ?? PromptAssembler.assemble(inputs)
         let required = payload.issuedTokens.filter { payload.text.contains($0) }

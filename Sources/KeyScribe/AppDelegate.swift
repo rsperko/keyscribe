@@ -21,10 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var historyController: HistoryController!
     private var correctionPanel: CorrectionPanelController!
     private var configRepository: ConfigRepository!
-    // Crash-safe restoration of the temporary default-input override that a crash/SIGKILL/force-quit could
-    // otherwise strand system-wide. Reconciled at launch and on terminate. (Output silencing uses ducking,
-    // which the OS releases on process exit, so it needs no recovery — except a one-time unmute of a marker
-    // left by an older, pre-duck build; see reconcile().)
+    // Legacy crash recovery for audio state markers written by earlier builds.
     private var audioRestorer: SystemAudioStateRestorer!
     // System sleep suspends CoreAudio, so the resident capture engine's cached device binding is stale on
     // wake. Refresh it while idle (off the hot path) so the first post-wake dictation binds cleanly.
@@ -42,19 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // A graceful Cmd-Q during an active dictation tears the app down without running the dictation-end
     // restore paths, leaving the default input overridden (the output duck releases itself on process exit).
     // Run the SAME ordered in-process teardown a cancel uses — it disposes the realized engine BEFORE
-    // restoring the default (via AudioCapture.stop's dispose-first path), rather than a raw default-device
-    // change against a still-live engine (which would reopen the AVAudioIOUnit UAF). Whatever its async
-    // engine dispose cannot finish during process exit is covered by reconcile() at the next launch — the
-    // same backstop as a hard crash / SIGKILL (which skips this entirely). cancel() is a no-op when idle,
-    // and a stale marker from a prior crash was already cleared by reconcile() at launch.
     func applicationWillTerminate(_: Notification) {
         controller?.cancel()
     }
 
     func applicationDidFinishLaunching(_: Notification) {
-        // Undo any global audio state a prior run died without restoring (a hijacked default mic, or an
-        // output muted by an older pre-duck build) BEFORE anything touches audio — prewarm, dictation, or
-        // the mic permission flow.
         audioRestorer = SystemAudioStateRestorer(
             store: PendingSystemRestoreStore(persistence: FilePendingSystemRestorePersistence(
                 url: KeyScribePaths.pendingSystemRestoreFile)))
@@ -387,9 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
                 controller.evictSwitchedAwayEngine(previous)
-                // Selecting an engine is intent to use it — start loading + warming it now (if installed) so
-                // the first dictation isn't the one that pays a cold load. Without this the newly-selected
-                // model stayed cold until first press (a big model like Whisper made that very visible).
+                // Selecting an engine is intent to use it, so start loading and warming it now if installed.
                 controller.preloadActiveEngineIfNeeded()
             }
         }
@@ -507,9 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !(hotkey?.isTapActive ?? true) {
             menu.setStatus("Relaunch to finish setup")
         } else {
-            // Collapse the old "Next dictation:" row into the status line: the mode portion names the mode
-            // the next dictation will use — a one-shot override if one is pending, otherwise the default
-            // mode that Automatic resolves to. Falls back to just the model when no mode is configured.
+            // The mode portion names the one-shot override if one is pending, otherwise Automatic's default.
             let enabledModes = config.modes.filter(\.enabled)
             let automatic = enabledModes.first { $0.id == Mode.directId } ?? enabledModes.first
             let nextMode = controller.nextModeOverrideName ?? automatic?.name

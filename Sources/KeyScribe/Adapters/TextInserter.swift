@@ -9,16 +9,8 @@ enum TextInserter {
     private static let cKeyCode: CGKeyCode = 8
     private static let returnKeyCode: CGKeyCode = 36
 
-    // Capture the target app's current selection via a synthesized ⌘C, then restore the user's
-    // clipboard. Universal (spike-verified across native/Electron/Chromium). Returns nil if nothing
-    // was copied (no selection). The selection stays highlighted, so a later paste replaces it.
-    //
-    // The full pasteboard (every item type — images, RTF, file URLs, not just plain text) is snapshot
-    // and restored, so a dictation never destroys a non-text clipboard. The ⌘C settle is polled on
-    // the changeCount instead of a blind sleep (the M0 survey hit a settle race that dropped a leading
-    // character). We only restore once our ⌘C has actually overwritten the clipboard — if nothing was
-    // copied (no selection) the clipboard is untouched, so an unconditional restore would be a redundant
-    // rewrite that could clobber whatever another app wrote during the settle window.
+    // Captures the target app's current selection via ⌘C, then restores the user's clipboard only if
+    // that copy actually changed the pasteboard.
     static func captureSelection(modifier: Mode.ClipboardModifier = .command) async -> String? {
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
@@ -45,14 +37,8 @@ enum TextInserter {
         return nil
     }
 
-    // Paste is the spike-confirmed default (lands across native/Electron/Chromium with a single ⌘Z
-    // undo). AX-insert and synthesized typing are opt-in per mode (mode.insertion) for the few
-    // targets that prefer them; both proved unreliable in the M0 survey, so each degrades to paste
-    // when it can't act. The focus-race safety decision is authoritative — a clipboardFallback
-    // diverts to the clipboard regardless of the mode's preferred method.
-    // Returns whether the text was actually ACTUATED as the decision intended: paste/type/AX landed, or
-    // the clipboard fallback copied it. `false` means the paste could not be verified and nothing was
-    // inserted — the caller must not then claim "inserted" nor fire a submit keystroke (H1).
+    // Returns whether the chosen insertion path actually acted. A false paste result means nothing was
+    // inserted, so the caller must not report success or fire a submit keystroke.
     @discardableResult
     static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String) async -> Bool {
         switch insertionAction(decision: decision, method: method) {
@@ -74,26 +60,17 @@ enum TextInserter {
         guard !text.isEmpty else { return true }
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
-        // Confirm the dictated text is actually the pasteboard's string before synthesizing ⌘V. Without
-        // this, a failed or raced write (writeObjects returning false, or a clipboard manager re-owning the
-        // board) left the user's PREVIOUS clipboard in place and ⌘V pasted that instead of the dictation.
-        // If we cannot verify the write, restore the user's clipboard and fire nothing — never paste stale
-        // data. The dictation is still recoverable via "Paste last dictation".
+        // Never synthesize ⌘V unless the scratch write is visible; otherwise stale clipboard content
+        // could be pasted into the target.
         guard writeScratchVerified(text) else {
             snapshot.restore()
             Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
             return false
         }
-        // clearContents()/writeObjects() bump changeCount synchronously, so the verified write is already
-        // reflected here — stamp it now. The old fixed 30ms sleep added latency and risked stamping a
-        // pre-write count (then scratchSurvived misreads our own write as a foreign one and skips the
-        // restore, leaving the dictated text on the clipboard).
         let stamp = pb.changeCount
         postKey(vKeyCode, flags: eventFlags(modifier))
-        // Give the target time to consume ⌘V before we touch the clipboard again — restoring too early
-        // clobbers the paste (M0 proved ~200ms is needed; restore is best-effort). A paste produces no
-        // observable pasteboard event, so we wait out a bounded window, but bail early if anything wrote
-        // after our scratch (target or clipboard manager) — then we must not restore over it.
+        // Give the target a bounded window to consume ⌘V; if anything else writes to the pasteboard,
+        // leave it alone.
         if await scratchSurvived(stamp, timeoutMs: 250, stepMs: 25) { snapshot.restore() }
         return true
     }
@@ -126,9 +103,6 @@ enum TextInserter {
         return false
     }
 
-    // Polls the general pasteboard's changeCount until it bumps past `since`, up to ~500ms. A
-    // synthesized ⌘C settles asynchronously; the M0 survey saw a fixed sleep miss it and drop a
-    // leading character, so we wait for the actual change instead of guessing a duration.
     private static func waitForChange(since: Int, timeoutMs: Int = 500, stepMs: Int = 10) async -> Bool {
         let pb = NSPasteboard.general
         var waited = 0
@@ -140,11 +114,8 @@ enum TextInserter {
         return pb.changeCount != since
     }
 
-    // AX-insert: set the focused element's selected text, which replaces the selection or inserts at
-    // the cursor. We do NOT trust the set's `.success` return — Chromium/Electron return success but
-    // no-op it, silently dropping the text. Instead we only take the AX path when we can read the
-    // field's value back and confirm it actually changed; otherwise we fall back to paste, which
-    // lands everywhere. So `insert` uses AX on native fields and paste on web/Electron, never losing text.
+    // AX can report success while doing nothing in some targets, so use it only when a read-back proves
+    // the value changed.
     @discardableResult
     static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command) async -> Bool {
         if axInsertVerified(text) {
@@ -173,9 +144,7 @@ enum TextInserter {
         return value as? String
     }
 
-    // Synthesized typing: post each character as a Unicode key event (no keycode mapping, so it
-    // covers any glyph). Unlike AX, posting always "succeeds" — there is no signal that the target
-    // accepted it — so there is no automatic fallback; a mode opts into this knowing it is best-effort.
+    // Best-effort Unicode key events; there is no acceptance signal to drive fallback.
     @discardableResult
     static func insertViaTyping(_ text: String) async -> Bool {
         let src = CGEventSource(stateID: .combinedSessionState)
@@ -188,13 +157,9 @@ enum TextInserter {
             }
             try? await Task.sleep(for: .milliseconds(2))
         }
-        // Synthesized typing has no acceptance signal, so this is best-effort "actuated" by contract.
         return true
     }
 
-    // A mode's post-insert `submit` keystroke: a synthesized Return (optionally with ⇧ or ⌘) that
-    // submits/sends in the target. The caller only invokes this after a VERIFIED insert — never on a
-    // clipboard fallback — so the keystroke always reaches the app that received the text.
     static func submit(_ submit: Mode.Submit) async {
         let flags: CGEventFlags
         switch submit {
@@ -222,8 +187,8 @@ enum TextInserter {
         return pb.writeObjects([item]) && pb.string(forType: .string) == text
     }
 
-    // A full snapshot of every pasteboard item and type, so restore reproduces images / RTF / file
-    // lists, not just plain text (the prior code saved only `.string` and silently destroyed the rest).
+    // Captures all pasteboard item types up to a size cap; oversized clipboards fall back to plain text
+    // so image/file-heavy clipboards do not stall the main actor.
     struct PasteboardSnapshot {
         let changeCount: Int
         private let storage: Storage

@@ -26,12 +26,9 @@ public enum OutputCleanup {
     // Bracketed/parenthesized non-lexical annotation, e.g. `[BLANK_AUDIO]`, `[Music]`, `(water running)`.
     private static let nonSpeechAnnotation = try! NSRegularExpression(pattern: "\\[[^\\]]*\\]|\\([^)]*\\)")
 
-    // Some STT engines render a no-speech clip not as "" but as a whole-utterance non-lexical annotation:
-    // WhisperKit emits `[BLANK_AUDIO]` for a silent clip and a sound-tag like `(water running)` for faint
-    // noise (verified empirically — see AGENTS.md "Silence / no-speech behavior"). Left intact these get
-    // pasted as if dictated. Collapse an utterance that is *nothing but* such annotations (the only
-    // speech-bearing characters live inside brackets/parens) to "", so the no-speech guard
-    // (`DictationMachine.outcomeForTranscript`) short-circuits it into the .noSpeech outcome.
+    // Some STT engines render a no-speech clip as a whole-utterance non-lexical annotation, such as
+    // `[BLANK_AUDIO]` or `(water running)`. Collapse an utterance that is nothing but such annotations so
+    // the no-speech guard short-circuits it into the .noSpeech outcome.
     //
     // Deliberately whole-utterance only: a real transcript that merely *contains* an annotation
     // ("the array[0] value", "(laughs) that was funny") is returned unchanged — partial stripping would

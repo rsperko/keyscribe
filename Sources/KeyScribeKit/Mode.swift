@@ -112,8 +112,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         public var liveEdits: Bool
         public var privacy: Bool
         public var numbers: Bool          // inverse text normalization ("twenty five" → "25")
-        // Dictionary recovery (formerly `fuzzy_correction`) moved off the mode. An old mode TOML's
-        // `fuzzy_correction` key is simply ignored on decode.
         enum CodingKeys: String, CodingKey {
             case liveEdits = "live_edits"; case privacy
             case numbers
@@ -379,9 +377,8 @@ public enum ModeStore {
         try TOMLEncoder().encode(mode)
     }
 
-    // The original Plain Dictation seed, kept only so the one-time migration can recognize an
-    // unmodified copy on disk and replace it with the Direct floor (it is no longer a starter — Direct
-    // fills the plain-dictation-on-Fn role). Trigger is compared separately, so it is omitted here.
+    // Legacy Plain Dictation seed used only to recognize an unmodified file for the Direct migration.
+    // Trigger is compared separately, so it is omitted here.
     static var legacyPlainDictationSeed: Mode {
         var plain = Mode(id: "plain-dictation", name: "Plain Dictation")
         plain.commands.liveEdits = true
@@ -570,8 +567,7 @@ public enum ModeStore {
     // carried onto Direct (so Fn — or wherever the user rebound it — keeps doing plain dictation).
     // Anything else (a customized or disabled Plain Dictation, a promoted different mode) is left
     // untouched, and Direct takes Fn only if no enabled mode already holds it. NOTE: `_direct.toml`'s
-    // presence IS the migration marker, so this migration runs at most once — see AGENTS.md
-    // "Config migrations" before adding another that needs to re-run.
+    // presence IS the migration marker, so this migration runs at most once.
     public static func ensureSystemModes(in dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = fileURL(for: .direct, in: dir)

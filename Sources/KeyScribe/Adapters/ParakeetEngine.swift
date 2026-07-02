@@ -55,12 +55,9 @@ actor ParakeetEngine: SpeechEngine {
     private var manager: AsrManager?
     private let audioConverter = AudioConverter()
 
-    // Recognition bias for Parakeet is FluidAudio's constrained-CTC vocabulary boosting (NeMo
-    // CTC-WS): TDT transcribes, then a CTC keyword spotter re-scores bias terms against the
-    // acoustic frames, swapping a TDT word for a dictionary term only when the CTC evidence and
-    // string similarity clear confidence thresholds. This is decode-adjacent, not the old blind
-    // post-STT span substitution. Fails soft to plain TDT text — bias terms still reach the
-    // post-STT LLM "valid term" hint.
+    // Recognition bias for Parakeet is FluidAudio's constrained-CTC vocabulary boosting: TDT transcribes,
+    // then a CTC keyword spotter re-scores bias terms against the acoustic frames, swapping only when the
+    // CTC evidence and string similarity clear confidence thresholds. Fails soft to plain TDT text.
     //
     // `spotterRescue` gates FluidAudio's spotter-anchored rescue pass (acoustic-only replacement,
     // no similarity gate). It's safe only with an accurate CTC model: on by default (ctc06b/v3),

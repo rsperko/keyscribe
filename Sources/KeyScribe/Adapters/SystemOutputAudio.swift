@@ -1,12 +1,8 @@
 import CoreAudio
 import Foundation
 
-// The system default OUTPUT device and the ducking control KeyScribe uses to silence other audio while
-// dictating. Ducking is the private CoreAudio `AudioDeviceDuck` (the same call FaceTime/Siri use): it is
-// process-scoped, so the OS releases it the instant our process exits — a crash/SIGKILL/force-quit
-// mid-dictation cannot strand the device, unlike the output mute flag it replaces. Weak-linked via dlsym
-// and feature-detected: if the symbol is ever absent on a future macOS, duck() reports failure and the
-// caller no-ops rather than crashing. All calls are fast, non-blocking HAL operations — safe from any thread.
+// Default-output helpers. Ducking uses CoreAudio's process-scoped `AudioDeviceDuck`, so the OS releases it
+// when the process exits. The symbol is weak-linked through dlsym; if absent, duck() reports failure.
 enum SystemOutputAudio {
     static func defaultOutputDeviceID() -> AudioDeviceID? {
         var deviceID = AudioDeviceID(0)
@@ -30,9 +26,7 @@ enum SystemOutputAudio {
 
     private static let rampSeconds: Float32 = 0.3
 
-    // Legacy-only: clear the device mute flag. KeyScribe no longer mutes (it ducks), but an OLDER build
-    // could have crashed while output was muted and left a recovery marker; launch reconcile uses this once
-    // to undo such a pre-duck strand. Safe to remove once no pre-duck markers remain in the wild.
+    // Legacy-only recovery for mute markers written by earlier builds.
     @discardableResult
     static func setMute(_ value: UInt32, on device: AudioDeviceID) -> Bool {
         var addr = AudioObjectPropertyAddress(

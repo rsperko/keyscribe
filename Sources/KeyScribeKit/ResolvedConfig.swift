@@ -67,11 +67,8 @@ public final class ResolvedConfig: @unchecked Sendable {
         return terms
     }
 
-    // Post-STT TEXT stages for a mode (live edits → replacements → numbers → dictionary recovery),
-    // memoized per (mode, dictionaryRecovery). Dictionary recovery (FuzzyStage) is no longer a mode
-    // command: it is the post-STT substitute for recognition bias, gated by the host on the active
-    // engine's dictionary-matching settings. Verbatim/redaction tokenizers are per-dictation and added
-    // separately by the host; these stages are pure config so they compile once and are reused.
+    // Post-STT text stages for a mode, memoized per (mode, dictionaryRecovery). Verbatim/redaction
+    // tokenizers are per-dictation and added separately by the host; these stages are pure config.
     public func postSTTTextStages(for mode: Mode?, dictionaryRecovery: Bool) -> [any PipelineStage] {
         let key = "\(mode?.id ?? Self.nilModeKey)|\(dictionaryRecovery)"
         lock.lock(); defer { lock.unlock() }

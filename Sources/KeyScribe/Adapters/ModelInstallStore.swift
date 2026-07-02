@@ -3,8 +3,7 @@ import KeyScribeKit
 
 // Tracks which downloadable engines are installed via a small marker file, decoupled from each SDK's
 // on-disk layout. The active engine and rules live in KeyScribeKit's SpeechModelSet; this is durable
-// install bookkeeping plus best-effort file removal. Per-engine footprint/integrity now lives on the
-// engines themselves (installDirNames / verifyInstalled), so this stays generic — no hardcoded dir maps.
+// install bookkeeping plus best-effort file removal. Engines report their own footprint and integrity.
 enum ModelInstallStore {
     private static var markerURL: URL {
         KeyScribePaths.modelsDir.appendingPathComponent(markerFile)

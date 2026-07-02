@@ -10,11 +10,8 @@ final class FeedOnce: @unchecked Sendable {
     var consumed = false
 }
 
-// The single CONSUMER of an `AudioSampleRing`, running on its own dedicated thread — the writer half of the
-// RT-thread ring-buffer split (audio-capture.md H4). Every heavy operation that used to run on the CoreAudio
-// realtime IO thread now runs here: building/reusing the resampler, converting native → 16 kHz mono, and
-// the actual `AVAudioFile` write. The RT thread only copies frames into the ring; this thread drains it, so
-// a disk stall or a lock can never overrun the device IO cycle.
+// The single consumer of an `AudioSampleRing`, running on its own dedicated thread. Resampling and file I/O
+// stay off the CoreAudio realtime thread.
 //
 // The thread polls the ring on a short interval (no wakeup is ever signalled FROM the RT thread — the RT
 // path stays syscall-free). The ring holds several hardware periods of buffering, more than the poll
@@ -28,11 +25,7 @@ final class CaptureWriter: @unchecked Sendable {
     private static let pollInterval: Double = 0.005
 
     private let ring: AudioSampleRing
-    // Held only while the thread runs; RELEASED the instant the thread exits (see run()), so the writer never
-    // keeps the capture file open after it is done. That matters because `AudioCapture.lastWriter` retains
-    // this writer until the next capture arms — if the writer also held the file, a committed WAV would stay
-    // open (its data-chunk size unfinalized) and transcription could read an incomplete file. With the writer
-    // dropping it, the session's own reference is the last one, and closing it stays ordered before the read.
+    // Released when the writer thread exits; the session owns final file-close ordering.
     private var file: AVAudioFile?
     private let recordFormat: AVAudioFormat
     // Called after each written slot with the slot's host time (nil when the RT layer had no valid host
@@ -52,7 +45,7 @@ final class CaptureWriter: @unchecked Sendable {
     // Retains the running thread for its lifetime; cleared implicitly when this writer is released.
     private var thread: Thread?
 
-    // Writer-thread-only resampling state (mirrors the old per-capture fields; touched by nothing else).
+    // Writer-thread-only resampling state.
     private var inBuffer: AVAudioPCMBuffer?
     private var inputFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
@@ -87,8 +80,7 @@ final class CaptureWriter: @unchecked Sendable {
             _ = shutdown.wait(timeout: .now() + Self.pollInterval)
         }
         if !sealed && flushOnStop.load(ordering: .acquiring) { flushConverterTail() }
-        // The thread is done writing: drop the file (finalize/close is now the session's sole responsibility)
-        // and the resampler scratch, so nothing heavy lingers while `lastWriter` retains this writer.
+        // Drop heavy resources before `lastWriter` keeps the writer around for the next arm.
         file = nil
         converter = nil
         inBuffer = nil

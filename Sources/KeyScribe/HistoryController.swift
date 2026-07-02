@@ -74,7 +74,7 @@ final class HistoryController {
     }
 }
 
-private struct HistoryRow: Identifiable {
+private struct HistoryRow: Identifiable, Sendable {
     let id: String
     let entry: HistoryEntry
     let day: String
@@ -222,19 +222,22 @@ private final class HistoryViewModel: ObservableObject {
     }
 
     private func recomputeGroups() {
+        searchTask?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             applyFilteredRows(rows)
             return
         }
         let store = self.store
-        let formatter = self.dayFormatter
         searchTask = Task.detached { [weak self] in
+            let formatter = DateFormatter()
+            formatter.dateStyle = .full
+            formatter.timeStyle = .none
             let filtered = store.entries(limit: nil)
                 .filter { HistorySearch.matches($0, query: trimmed) }
                 .map { HistoryRow(entry: $0, day: formatter.string(from: $0.timestamp)) }
             if Task.isCancelled { return }
-            await MainActor.run { self?.applyFilteredRows(filtered) }
+            await self?.applyFilteredRows(filtered)
         }
     }
 

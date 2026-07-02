@@ -12,12 +12,8 @@ public struct MigrationStep {
 }
 
 public enum MigrationRunner {
-    // Version gate ONLY — reject a file newer than we support and require schema_version present, but
-    // perform NO transformation. This is the contract when a store ships no migration steps: the
-    // AGENTS.md §Config migrations pattern is additive `decodeIfPresent ?? default` re-derived from
-    // `schema_version` on every read, so an older-or-equal file must pass straight through to the
-    // type-specific decode. Routing an empty step chain through `migrate` would instead hard-fail every
-    // older-than-target file with "no migration step from schema_version N".
+    // Version gate only: reject files newer than this build supports and require `schema_version`, but
+    // perform no transformation. Stores with no migration steps rely on additive decode for older files.
     public static func gate(toml: String, target: Int) throws -> String {
         _ = try parseAndCheck(toml: toml, target: target)
         return toml

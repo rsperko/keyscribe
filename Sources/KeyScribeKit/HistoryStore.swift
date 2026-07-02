@@ -7,10 +7,8 @@ import Foundation
 public struct HistoryStore: Sendable {
     public let dir: URL
 
-    // Every file mutation (append, delete-rewrite) serializes here so a background append and a
-    // main-actor delete can never interleave a read against each other's write — which previously
-    // dropped a fresh entry (append landing between delete's read and rewrite) or corrupted the day
-    // file. HistoryStore is a value type shared by both writers, so the queue is a shared static.
+    // Serializes append and delete-rewrite so a background append and main-actor delete cannot interleave.
+    // HistoryStore is a value type shared by both writers, so the queue is a shared static.
     private static let mutationQueue = DispatchQueue(label: "com.keyscribe.history.mutation")
 
     public init(supportDir: URL) {
@@ -76,12 +74,9 @@ public struct HistoryStore: Sendable {
         return "\(files.count)|\(latest)|\(size)|\(mtime)"
     }
 
-    // Newest entry first. Reads day files newest-first and stops once `limit` entries are collected,
-    // so a paged list never materializes older days. Within a day, lines are appended chronologically,
-    // so we scan the mapped bytes backward for newlines and decode only the last `limit` lines — a
-    // high-volume current day no longer splits the whole file into a per-line slice array just to keep
-    // the last page. Files are memory-mapped; malformed lines (e.g. a future schema) are skipped, not
-    // fatal, and do not consume a page slot.
+    // Newest entry first. Reads day files newest-first and stops once `limit` entries are collected. Within
+    // a day, it scans mapped bytes backward so paged reads do not split the whole file into line slices.
+    // Malformed lines are skipped and do not consume a page slot.
     public func entries(limit: Int? = nil) -> [HistoryEntry] {
         var all: [HistoryEntry] = []
         for file in dayFiles().reversed() {

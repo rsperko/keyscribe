@@ -1,24 +1,12 @@
 import Foundation
 
-// A durable record of GLOBAL macOS state KeyScribe has temporarily changed for the duration of a
-// dictation and MUST put back: the system default input device (while we override it to honor a preferred
-// mic the AUHAL cannot pin). Restore normally runs in-process on the dictation's teardown path — but a
-// crash (the 0.1.7 SIGSEGV), SIGKILL, force-quit, or panic kills the process first, stranding the change
-// system-wide: a hijacked default mic, with no recovery. This marker is written BEFORE the change and
-// cleared AFTER the restore, so the next launch can reconcile — any field still present means we died
-// dirty. (Output silencing is NOT recorded here: it uses process-scoped ducking, which the OS releases
-// automatically on process exit, so a crash cannot strand it — no marker needed.)
-//
-// Identity is by device UID (stable across reconnect/reboot), never AudioDeviceID (transient, so a stored
-// AudioDeviceID could resolve to a different device after a reboot).
+// Legacy marker for global macOS audio state that earlier builds changed during dictation and might have
+// stranded after a crash. Current builds only decode, reconcile, and clear it. Identity is by stable device
+// UID, never transient AudioDeviceID.
 public struct PendingSystemRestore: Codable, Equatable, Sendable {
-    // The user's original system default INPUT device UID, saved while we override it. nil = not overridden.
+    // The user's original system default input device UID from a legacy marker.
     public var defaultInputUID: String?
-    // Set ONLY when decoding an OLDER build's marker that recorded an output-MUTE strand (the common legacy
-    // shape, since most runs override no input). This build silences via ducking, which the OS releases on
-    // exit and never strands — so it never writes this. It exists so launch reconcile can unmute a
-    // pre-upgrade strand once, then clear the marker. Never encoded: a clean run stays clean.
-    // Remove once no pre-duck markers remain in the wild.
+    // Output mute marker decoded from earlier builds. Never encoded by current builds.
     public var legacyMutedOutputUID: String?
 
     public init(defaultInputUID: String? = nil, legacyMutedOutputUID: String? = nil) {

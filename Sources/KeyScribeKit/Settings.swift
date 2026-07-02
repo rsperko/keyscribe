@@ -30,8 +30,6 @@ public struct Settings: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
         loadOnLogin = try c.decodeIfPresent(Bool.self, forKey: .loadOnLogin) ?? Settings.defaults.loadOnLogin
-        // `default_mode_id` was removed when the Direct floor took over the primary role; an old file's
-        // key is simply ignored here and dropped on the next write (see AGENTS.md "Config migrations").
         stt = try c.decodeIfPresent(STT.self, forKey: .stt) ?? Settings.defaults.stt
         duringDictation = try c.decodeIfPresent(DuringDictation.self, forKey: .duringDictation) ?? Settings.defaults.duringDictation
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? Settings.defaults.history
@@ -302,9 +300,7 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
-    // Opt-in flags for in-development features (see Feature). Strictly deviations-only: it stores just
-    // the ids the user turned on, so an absent id means off. Ids no longer backed by a `Feature` case
-    // are pruned on decode, so a retired flag self-cleans on the next write.
+    // Opt-in flags for in-development features. Stores only enabled ids; retired ids are pruned on decode.
     public struct Features: Codable, Equatable, Sendable {
         private var overrides: [String: Bool]
 

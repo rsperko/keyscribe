@@ -159,8 +159,7 @@ extension ModeStore {
     }
 
     // Reconcile the on-disk seeded modes against the current starter catalog. Idempotent: a second run
-    // changes nothing. Returns what it did (for logging). (`settingsDir` is retained for call-site
-    // compatibility; it is no longer patched now that there is no `default_mode_id` to follow.)
+    // changes nothing. `settingsDir` is retained for call-site compatibility.
     @discardableResult
     public static func reconcileSeeds(modesDir: URL, ledgerDir: URL, settingsDir: URL?,
                                       catalog: [Mode] = starterModes()) -> ReconcileOutcome {

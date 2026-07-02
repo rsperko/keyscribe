@@ -54,12 +54,8 @@ public struct SpeechModelSet: Equatable, Sendable {
         return .routine
     }
 
-    // Deleting the last usable model is allowed (the UI narrates "leaves no model to dictate with" and
-    // confirms first). It removes the id from `installed`; if it was active and something usable remains,
-    // active reassigns to the default-English fallback, otherwise activeId stays at the just-uninstalled
-    // id — the honest "no model installed" state the download path recovers from. Throwing here (as it
-    // used to) let the caller delete the files but leave `installed` desynced, so the row kept reading
-    // "Installed" and the next dictation silently re-downloaded.
+    // Deleting the active last usable model leaves activeId pointing at an unusable id; callers surface
+    // that as the explicit "no installed model" state until the user installs one.
     public mutating func delete(_ id: String) {
         guard let entry = info(id), !entry.systemManaged, installed.contains(id) else { return }
         installed.remove(id)
