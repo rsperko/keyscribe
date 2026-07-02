@@ -16,6 +16,14 @@ struct LiveEditsStageTests {
         #expect(run("alpha insert a new line beta") == "alpha\nbeta")
     }
 
+    @Test func newLineCompoundVariant() {
+        #expect(run("alpha insert a newline beta") == "alpha\nbeta")
+    }
+
+    @Test func newLineShortCompoundVariant() {
+        #expect(run("alpha insert newline beta") == "alpha\nbeta")
+    }
+
     @Test func newParagraphCommand() {
         #expect(run("alpha insert new paragraph beta") == "alpha\n\nbeta")
     }

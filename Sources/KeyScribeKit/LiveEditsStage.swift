@@ -33,7 +33,7 @@ public struct LiveEditsStage: PipelineStage {
         public var scratchThat: [String]
         public var tab: [String]
         public init(
-            newLine: [String] = ["insert new line", "insert a new line"],
+            newLine: [String] = ["insert new line", "insert a new line", "insert a newline", "insert newline"],
             newParagraph: [String] = ["insert new paragraph", "insert a new paragraph"],
             scratchThat: [String] = ["scratch that"],
             tab: [String] = ["insert tab character", "insert a tab character"]
