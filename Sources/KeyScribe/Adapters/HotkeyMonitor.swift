@@ -92,6 +92,10 @@ final class HotkeyMonitor {
         }
     }
 
+    var hasPhysicallyDownGesture: Bool {
+        bindings.contains { $0.gesture.isPhysicallyDown }
+    }
+
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
     // Once Accessibility is granted, a `.listenOnly` session tap that only observes modifiers runs on
     // Accessibility — KeyScribe never requests Input Monitoring. But the authorization is one-directional:

@@ -101,6 +101,18 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
+    @Test func heldGestureIsReportedWhilePhysicalKeyIsDown() async {
+        let fake = FakeChordRegistrar()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in }, onCommit: { _ in }, carbon: fake)
+        m.update(bindings: [chordBinding("control+option+e", style: .holdOnly)])
+
+        fake.lastRegistrations[0].onPressed()
+        #expect(m.hasPhysicallyDownGesture)
+        fake.lastRegistrations[0].onReleased?()
+        #expect(!m.hasPhysicallyDownGesture)
+    }
+
     // W9: a rebuild (Settings toggle / config reload) mid-hold must NOT strand an in-progress gesture.
     // With an identical descriptor + style, update() carries the live gesture over, so the release edge
     // still delivers its commit. Without the carry-over the fresh PressGesture never saw the .down and

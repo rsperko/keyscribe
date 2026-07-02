@@ -136,7 +136,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // an idle machine (a no-op) and their first post-error dictation silently does nothing. Safe at
             // idle: any legitimate in-progress gesture means the machine is still recording (never idle),
             // and a cancelled held key returns .none on its eventual release (guard recording).
-            self.hotkey.cancelGestures()
+            if !self.hotkey.hasPhysicallyDownGesture {
+                self.hotkey.cancelGestures()
+            }
             guard self.pendingHotkeyRebuild else { return }
             self.pendingHotkeyRebuild = false
             self.buildHotkeyMonitor()

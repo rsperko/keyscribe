@@ -80,7 +80,10 @@ private final class EvictRecordingEngine: SpeechEngine, @unchecked Sendable {
     struct Boom: Error {}
     private let started: Signal
     private let release: Signal
+    private let lock = NSLock()
+    private var _evictions = 0
     let evicted = Signal()
+    var evictions: Int { lock.withLock { _evictions } }
     init(started: Signal, release: Signal) { self.started = started; self.release = release }
     func loadIfNeeded() async throws {}
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
@@ -88,7 +91,10 @@ private final class EvictRecordingEngine: SpeechEngine, @unchecked Sendable {
         await release.wait()
         throw Boom()
     }
-    func evict() async { evicted.fire() }
+    func evict() async {
+        lock.withLock { _evictions += 1 }
+        evicted.fire()
+    }
 }
 
 // Returns immediately with a fixed text — stands in for a second, different engine.
@@ -159,7 +165,11 @@ private final class SlowStartAudio: AudioCapturing, @unchecked Sendable {
 
 private actor InsertSpy {
     private(set) var calls = 0
-    func record() { calls += 1 }
+    private(set) var lastText: String?
+    func record(_ text: String? = nil) {
+        calls += 1
+        lastText = text
+    }
 }
 
 @MainActor
@@ -434,6 +444,49 @@ struct DictationCancellationTests {
         #expect(didEvict)
     }
 
+    @Test func switchedAwayCapturedEngineEvictionWaitsForIdle() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let started = Signal(), release = Signal()
+        let engine = EvictRecordingEngine(started: started, release: release)
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "evicting")
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "evicting", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _ in return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.evictSwitchedAwayEngine(engine)
+
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(engine.evictions == 0)
+
+        controller.handleCommit()
+        await started.wait()
+        release.fire()
+        await controller.dictationTask?.value
+
+        let evictedAfterIdle = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await engine.evicted.wait(); return true }
+            group.addTask { try? await Task.sleep(for: .seconds(2)); return false }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        #expect(evictedAfterIdle)
+    }
+
     @Test func aMidDictationEngineSwitchStillUsesTheCapturedEngine() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -485,6 +538,40 @@ struct DictationCancellationTests {
         #expect(h.controller.lastResult == "hello world")
         _ = await awaitFirstHistoryEntry(h.history)
         #expect(h.history.entries().count == 1)
+    }
+
+    @Test func clipboardSentinelLiteralIsInsertedAsContent() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let started = Signal(), release = Signal()
+        let insertSpy = InsertSpy()
+        let engine = GatedEngine(started: started, release: release, text: "insert clipboard contents")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "gated")
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "gated", eviction: .fastest)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, text in await insertSpy.record(text); return true },
+            clipboard: { "⟦SN:CLIP:1⟧" },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await started.wait()
+        release.fire()
+        await controller.dictationTask?.value
+
+        #expect(await insertSpy.calls == 1)
+        #expect(await insertSpy.lastText == "⟦SN:CLIP:1⟧ ")
     }
 
     @Test func cancellingDuringRecordingDeletesTheCaptureFile() async {

@@ -28,9 +28,13 @@ public final class Tokenizer: @unchecked Sendable {
         defer { lock.unlock() }
         let key = "\(type.rawValue)\u{1}\(value)"
         if let existing = byValue[key] { return existing }
-        let n = (counters[type] ?? 0) + 1
+        var n = (counters[type] ?? 0) + 1
+        var token = Self.token(type: type, n: n)
+        while value.contains(token) {
+            n += 1
+            token = Self.token(type: type, n: n)
+        }
         counters[type] = n
-        let token = "⟦SN:\(type.rawValue):\(n)⟧"
         originals[token] = value
         byValue[key] = token
         order.append(token)
@@ -45,9 +49,13 @@ public final class Tokenizer: @unchecked Sendable {
     public func tokenizeUnique(_ value: String, type: TokenType) -> String {
         lock.lock()
         defer { lock.unlock() }
-        let n = (counters[type] ?? 0) + 1
+        var n = (counters[type] ?? 0) + 1
+        var token = Self.token(type: type, n: n)
+        while value.contains(token) {
+            n += 1
+            token = Self.token(type: type, n: n)
+        }
         counters[type] = n
-        let token = "⟦SN:\(type.rawValue):\(n)⟧"
         originals[token] = value
         order.append(token)
         return token
@@ -103,4 +111,5 @@ public final class Tokenizer: @unchecked Sendable {
 
     private static let tokenOpen = "⟦SN:"
     private static let tokenClose = "⟧"
+    private static func token(type: TokenType, n: Int) -> String { "⟦SN:\(type.rawValue):\(n)⟧" }
 }

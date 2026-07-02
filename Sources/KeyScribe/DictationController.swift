@@ -161,6 +161,7 @@ final class DictationController {
     // model. Invalidated whenever that engine is evicted (its model goes back to nil).
     private var warmTask: Task<Void, Error>?
     private var warmEngineId: String?
+    private var protectedEngineIds: Set<String> = []
     // Backstop for a wedged model load. Real cold loads are slow (a 632 MB CoreML model measured ~140 s
     // to load even from a compiled cache), so this only fires on a genuine hang — far above any real
     // load — and, because loading runs OUTSIDE the transcribe single-flight gate, a load that trips it
@@ -300,21 +301,41 @@ final class DictationController {
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
     }
 
-    // The active engine changed (Settings). Evict the one we switched away from. SerializedEngine.evict
-    // waits for any in-flight load and the transcribe lock to settle before tearing the SDK handle down,
-    // so evicting mid-dictation is safe now — no controller-side deferral needed.
+    // The active engine changed (Settings). Evict the one we switched away from.
     func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
+        guard !isProtectedFromEviction(engine) else {
+            runWhenIdle { [weak self] in
+                guard let self else { return }
+                self.invalidateWarm(engine.id)
+                Task { await engine.evict() }
+            }
+            return
+        }
         invalidateWarm(engine.id)
         Task { await engine.evict() }
     }
 
-    // Evict an engine on behalf of a Settings delete/reinstall, then return so the caller can delete its
-    // files. SerializedEngine.evict awaits load + transcribe settlement, so the await completes only once
-    // the engine is truly idle — neither the evict nor the caller's subsequent file delete can race a
-    // live transcribe.
+    // Evict an engine on behalf of a Settings delete/reinstall, then return so the caller can delete its files.
     func evictEngineForSettings(_ engine: any SpeechEngine) async {
+        guard !isProtectedFromEviction(engine) else {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                runWhenIdle { [weak self] in
+                    guard let self else { cont.resume(); return }
+                    self.invalidateWarm(engine.id)
+                    Task {
+                        await engine.evict()
+                        cont.resume()
+                    }
+                }
+            }
+            return
+        }
         invalidateWarm(engine.id)
         await engine.evict()
+    }
+
+    private func isProtectedFromEviction(_ engine: any SpeechEngine) -> Bool {
+        protectedEngineIds.contains(engine.id)
     }
 
     // A Settings self-test transcribes on the SAME non-actor engine instance a live dictation uses, so it
@@ -462,6 +483,7 @@ final class DictationController {
         building.targetBundleId = capturedSnapshot?.bundleId
         capturedPlan = config.resolved
         capturedEngine = engine
+        protectedEngineIds.insert(engine.id)
         capturedDictionaryRecovery = settings.stt.dictionaryRecoveryEnabled(
             engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
         activeMode = nil
@@ -586,6 +608,8 @@ final class DictationController {
         captureStartTask?.cancel()
         captureBringUpTask?.cancel()
         levelPollTask?.cancel()
+        rewriteEscapeTask?.cancel()
+        protectedEngineIds.removeAll()
         session = nil
         scheduleCaptureRefresh()
         onBecameIdle?()
@@ -841,8 +865,8 @@ final class DictationController {
             // A selection rewrite that failed (or had nothing to do) leaves the target untouched —
             // a destructive op must never overwrite the user's text on failure.
             log.info("aborted: \(message, privacy: .public)")
-            finishError(message, action: action)   // applies eviction internally
             clearRewriteEscapeHatch()
+            finishError(message, action: action)   // applies eviction internally
 
         case .insert(let transcript, let bare):
             await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare)

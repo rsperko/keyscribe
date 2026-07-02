@@ -22,6 +22,7 @@ public struct PressGesture: Sendable {
     private var latched = false
     private var downAt: Double?
     private var physicallyDown = false
+    public var isPhysicallyDown: Bool { physicallyDown }
 
     public init(style: PressStyle, tapThreshold: Double) {
         self.style = style

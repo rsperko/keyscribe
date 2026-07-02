@@ -49,6 +49,26 @@ struct CaptureReplacementUnitStartTests {
         #expect(!AudioCapture.shouldStartReplacementUnit(
             generation: 4, currentGeneration: 4, captureActive: false))
     }
+
+    @Test func staleRestartRetryDoesNotEnterNextCapture() {
+        #expect(!AudioCapture.shouldRetryRestart(
+            generation: 4, currentGeneration: 5, sameSession: false))
+    }
+
+    @Test func currentRestartRetryCanContinueSameCapture() {
+        #expect(AudioCapture.shouldRetryRestart(
+            generation: 4, currentGeneration: 4, sameSession: true))
+    }
+
+    @Test func oldUnitCannotWriteIntoNewCapture() {
+        #expect(!AudioCapture.shouldAcceptRealtimeBuffer(
+            capturing: true, producerGeneration: 5, unitGeneration: 4))
+    }
+
+    @Test func currentUnitCanWriteDuringCapture() {
+        #expect(AudioCapture.shouldAcceptRealtimeBuffer(
+            capturing: true, producerGeneration: 5, unitGeneration: 5))
+    }
 }
 
 // V1: the queued step-4 unit teardown may only touch the unit while its scheduling generation is current.

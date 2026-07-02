@@ -99,6 +99,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var configuredGeneration: Int?
     private var controlQueue = DispatchQueue(label: "com.keyscribe.audio.0")
     private var generation = 0
+    private let producerGeneration = Atomic<Int>(-1)
     // Set when a bring-up wedged (watchdog) or a device change invalidated the binding. Consumed by
     // rebuildIfNeeded() before the next bring-up: a fresh unit re-resolves the current effective device; a
     // fresh queue escapes a possibly-wedged old one.
@@ -306,7 +307,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         outgoing.dispose?.dispose()
         if outgoing.keep { return }
-        let candidate = makeUnit()
+        let candidate = makeUnit(generation: generation)
         do {
             try candidate.configure(deviceID: deviceID)
             let stored = lock.withLock { () -> Bool in
@@ -345,6 +346,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // Gate the RT producer OFF and JOIN any previous writer before touching the shared ring: with the
         // producer gated, that writer's ring drains and its finish() (idempotent, multi-waiter) returns, so
         // the reset below cannot race a still-draining consumer from a prior capture's async teardown.
+        producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         lock.withLock { lastWriter }?.finish(flushConverter: false)
         ring.reset()
@@ -367,6 +369,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try? FileManager.default.removeItem(at: url)
             throw AudioCaptureError.bringUpTimedOut
         }
+        producerGeneration.store(generation, ordering: .releasing)
         capturing.store(true, ordering: .releasing)
         writer.start()
 
@@ -438,7 +441,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try resident.start()
             return
         }
-        let fresh = makeUnit()
+        let fresh = makeUnit(generation: generation)
         try fresh.configure(deviceID: deviceID)
         guard isGeneration(generation) else { fresh.dispose(); throw AudioCaptureError.bringUpTimedOut }
         do {
@@ -457,12 +460,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         outgoing.dispose?.dispose()
     }
 
-    private func makeUnit() -> HALInputUnit {
+    private func makeUnit(generation: Int) -> HALInputUnit {
         HALInputUnit(handler: { [weak self] buffer, hostTime in
             // On the CoreAudio realtime IO thread. Do ONLY lock-free, allocation-free, syscall-free work:
             // gate on `capturing`, copy the frames into the ring, publish the meter level. Everything heavy
             // (resample, file write, drain-gate arbitration) runs on the writer thread draining the ring.
-            guard let self, self.capturing.load(ordering: .acquiring) else { return }
+            guard let self,
+                  Self.shouldAcceptRealtimeBuffer(
+                    capturing: self.capturing.load(ordering: .acquiring),
+                    producerGeneration: self.producerGeneration.load(ordering: .acquiring),
+                    unitGeneration: generation
+                  ) else { return }
             self.handle(buffer, hostTime: hostTime)
         })
     }
@@ -598,6 +606,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     //      `capturing` already severed the write path in step 1, closing here cannot race an in-flight write.
     private func finishWriterAndCloseFile(flushConverter: Bool) {
         let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
+        producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         removeActiveDeviceListener()
         s?.writer.finish(flushConverter: flushConverter)
@@ -635,6 +644,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // written file. Never touches the unit — a wedged one is abandoned via the rebuild flag.
     private func discardPendingCapture() {
         let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
+        producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         s?.writer.finish(flushConverter: false)
         if let s { try? FileManager.default.removeItem(at: s.url) }
@@ -646,7 +656,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // syscall-free: the ring drop-on-full and the atomic level store are the only operations, and both are
     // bounded. All resampling and file I/O happen on the writer thread draining the ring, so a disk stall or
     // a lock contended by the main actor can never overrun the device IO cycle (the H4 fix). A degenerate or
-    // over-capacity buffer is dropped by the ring; the meter still updates from whatever channel 0 carries.
+    // too-large frame buffer is dropped by the ring; the meter still updates from whatever channel 0 carries.
     private func handle(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
         guard let channels = buffer.floatChannelData else { return }
         let channelCount = Int(buffer.format.channelCount)
@@ -926,15 +936,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         deviceListenerQueue.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    private func requestMidRecordingRestart() {
+    private func requestMidRecordingRestart(expectedSession: CaptureSession? = nil, expectedGeneration: Int? = nil) {
         let queue = currentQueue()
         queue.async { [self] in
             // Bump the live session's restart counter (and bail if the capture already ended) in one
             // critical section, so the cap is enforced against exactly this capture's attempts.
-            guard let (attempts, generation) = lock.withLock({ () -> (Int, Int)? in
+            guard let (attempts, generation, sessionForRetry) = lock.withLock({ () -> (Int, Int, CaptureSession)? in
                 guard let session else { return nil }
+                if let expectedSession, session !== expectedSession { return nil }
+                if let expectedGeneration, !Self.shouldRetryRestart(
+                    generation: expectedGeneration, currentGeneration: self.generation, sameSession: true
+                ) { return nil }
                 session.configRestartCount += 1
-                return (session.configRestartCount, self.generation)
+                return (session.configRestartCount, self.generation, session)
             }) else { return }
             guard attempts <= Self.maxConfigRestarts else {
                 Log.audio.error("mid-recording restart gave up after \(Self.maxConfigRestarts, privacy: .public) attempts — capture may be truncated")
@@ -944,7 +958,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             Log.audio.debug("mid-recording device change → restart attempt \(attempts, privacy: .public)")
             disposeUnitInline()
             do {
-                let fresh = makeUnit()
+                let fresh = makeUnit(generation: generation)
                 try fresh.configure(deviceID: deviceID)
                 guard Self.shouldStartReplacementUnit(
                     generation: generation,
@@ -976,12 +990,22 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 // maxConfigRestarts via configRestartCount — so a device that settles a beat later is picked
                 // back up; only after the cap does the partial capture finalize on release.
                 disposeUnitInline()
-                queue.asyncAfter(deadline: .now() + 0.25) { [self] in requestMidRecordingRestart() }
+                queue.asyncAfter(deadline: .now() + 0.25) { [self] in
+                    requestMidRecordingRestart(expectedSession: sessionForRetry, expectedGeneration: generation)
+                }
             }
         }
     }
 
     static func shouldStartReplacementUnit(generation: Int, currentGeneration: Int, captureActive: Bool) -> Bool {
         generation == currentGeneration && captureActive
+    }
+
+    static func shouldRetryRestart(generation: Int, currentGeneration: Int, sameSession: Bool) -> Bool {
+        generation == currentGeneration && sameSession
+    }
+
+    static func shouldAcceptRealtimeBuffer(capturing: Bool, producerGeneration: Int, unitGeneration: Int) -> Bool {
+        capturing && producerGeneration == unitGeneration
     }
 }

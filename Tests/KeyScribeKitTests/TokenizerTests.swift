@@ -14,8 +14,15 @@ struct TokenizerTests {
     @Test func selfReferentialOriginalDoesNotHang() {
         let t = Tokenizer()
         let token = t.tokenize("⟦SN:VERB:1⟧", type: .verbatim)   // value equals the token it is assigned
-        #expect(token == "⟦SN:VERB:1⟧")
+        #expect(token == "⟦SN:VERB:2⟧")
         #expect(t.restore("x \(token) y") == "x ⟦SN:VERB:1⟧ y")
+    }
+
+    @Test func uniqueTokenSkipsNonceAlreadyPresentInOriginal() {
+        let t = Tokenizer()
+        #expect(t.tokenizeUnique("⟦SN:CLIP:1⟧", type: .clipboard) == "⟦SN:CLIP:2⟧")
+        #expect(t.restore("⟦SN:CLIP:2⟧") == "⟦SN:CLIP:1⟧")
+        #expect(t.issuedTokens == ["⟦SN:CLIP:2⟧"])
     }
 
     @Test func sameValueSameTokenWithinDictation() {

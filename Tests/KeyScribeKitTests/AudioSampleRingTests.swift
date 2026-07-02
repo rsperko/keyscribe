@@ -59,10 +59,25 @@ struct AudioSampleRingTests {
     @Test func geometryExceedingBuffersAreDroppedNotStored() {
         let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 4, maxChannels: 2)
         #expect(!push(ring, base: 1, channels: 1, frames: 5, host: 1))   // too many frames
-        #expect(!push(ring, base: 1, channels: 3, frames: 2, host: 1))   // too many channels
         #expect(!push(ring, base: 1, channels: 1, frames: 0, host: 1))   // empty buffer
-        #expect(ring.droppedCount == 3)
+        #expect(ring.droppedCount == 2)
         #expect(ring.isEmpty)
+    }
+
+    @Test func channelsAboveStorageCapacityAreTruncatedNotDropped() {
+        let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 4, maxChannels: 2)
+        #expect(push(ring, base: 10, channels: 4, frames: 2, host: 1))
+        var seen: AudioSampleRing.SlotInfo?
+        var ch0 = [Float](); var ch1 = [Float]()
+        #expect(ring.read { info, channel in
+            seen = info
+            ch0 = Array(channel(0))
+            ch1 = Array(channel(1))
+        })
+        #expect(seen == .init(frameCount: 2, channelCount: 2, sampleRate: 48_000, hostTime: 1))
+        #expect(ch0 == [10, 10])
+        #expect(ch1 == [11, 11])
+        #expect(ring.droppedCount == 0)
     }
 
     @Test func wraparoundReusesSlotsCorrectly() {

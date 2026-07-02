@@ -9,8 +9,8 @@ import Synchronization
 // Each slot carries the frames plus the metadata the writer needs: the delivered frame/channel count, the
 // device-native sample rate (so the writer builds/rebuilds its resampler), and the buffer's mach host time
 // (so the tail-drain gate can decide when the release-covering buffer has reached the writer). Slots are a
-// fixed, preallocated geometry; a buffer that exceeds it, or that arrives when the ring is full, is dropped
-// and counted (an overrun) rather than blocking the RT thread.
+// fixed, preallocated geometry; a buffer that exceeds the frame limit, or that arrives when the ring is
+// full, is dropped and counted (an overrun) rather than blocking the RT thread.
 //
 // Correctness rests on the classic SPSC discipline: the producer publishes a slot by a RELEASING store to
 // `tail` after filling it, and the consumer reads a slot only after an ACQUIRING load of `tail` — the
@@ -70,26 +70,27 @@ public final class AudioSampleRing: @unchecked Sendable {
     // PRODUCER (realtime thread). Copies one delivered buffer into the next free slot via `fill`, which is
     // handed a per-channel destination of exactly `frameCount` Float samples. Returns false (and increments
     // the overrun count) when the buffer exceeds the fixed geometry or the ring is full — the RT thread
-    // drops the buffer instead of ever blocking. Allocation-free and lock-free.
+    // drops an invalid/too-large buffer instead of ever blocking. Extra channels are truncated to the fixed
+    // storage geometry because the writer downmixes to mono. Allocation-free and lock-free.
     @discardableResult
     public func write(
         channelCount: Int, frameCount: Int, sampleRate: Double, hostTime: UInt64,
         fill: (_ channel: Int, _ dest: UnsafeMutableBufferPointer<Float>) -> Void
     ) -> Bool {
-        guard frameCount > 0, frameCount <= maxFramesPerSlot,
-              channelCount > 0, channelCount <= maxChannels else {
+        guard frameCount > 0, frameCount <= maxFramesPerSlot, channelCount > 0 else {
             overruns.add(1, ordering: .relaxed); return false
         }
+        let storedChannelCount = min(channelCount, maxChannels)
         let t = tail.load(ordering: .relaxed)
         let h = head.load(ordering: .acquiring)
         guard t - h < slotCount else { overruns.add(1, ordering: .relaxed); return false }
         let slot = t % slotCount
-        for c in 0..<channelCount {
+        for c in 0..<storedChannelCount {
             let base = storage.baseAddress! + slotBase(slot, c)
             fill(c, UnsafeMutableBufferPointer(start: base, count: frameCount))
         }
         frameCounts[slot] = frameCount
-        channelCounts[slot] = channelCount
+        channelCounts[slot] = storedChannelCount
         sampleRates[slot] = sampleRate
         hostTimes[slot] = hostTime
         tail.store(t + 1, ordering: .releasing)

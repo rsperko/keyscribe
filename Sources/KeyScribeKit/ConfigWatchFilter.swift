@@ -7,7 +7,7 @@ import Foundation
 // every settings write re-reads all config, recompiles stages, and rebuilds the hotkey monitor
 // (~200 ms later), defeating the "a normal dictation does zero config I/O" design.
 public enum ConfigWatchFilter {
-    public static let ignoredSubdirectories: Set<String> = ["history", "lkg"]
+    public static let ignoredSubdirectories: Set<String> = ["history", "lkg", "models"]
 
     // True if a change at `changedPath` (absolute) is relevant to configuration, given the watched
     // `supportDir` (absolute). A path under an ignored first-level subdirectory is not relevant.
