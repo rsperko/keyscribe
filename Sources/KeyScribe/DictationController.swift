@@ -24,6 +24,7 @@ final class DictationController {
     private let snapshot: @MainActor () -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
+    private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let llmClient: any LLMClient
     // Durable sink for a model-load failure that survives both automatic retries (engine id + error).
     // Injected so tests assert the failure was recorded without touching the real diagnostics file.
@@ -154,6 +155,10 @@ final class DictationController {
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
+        activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
+            guard let entry = SpeechModelCatalog.entry(for: engine.id) else { return true }
+            return entry.systemManaged || ModelInstallStore.installedIds().contains(engine.id)
+        },
         llmClient: any LLMClient = HTTPLLMClient(),
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
@@ -173,6 +178,7 @@ final class DictationController {
         self.snapshot = snapshot
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
+        self.activeEngineUsable = activeEngineUsable
         self.llmClient = llmClient
         self.recordModelLoadFailure = recordModelLoadFailure
         levelCoalescer.onLevel = { [weak self] level in self?.renderLevel(level) }
@@ -356,10 +362,15 @@ final class DictationController {
             finishError("Microphone access is off", action: .openMicrophoneSettings)
             return
         }
+        let engine = provider.active
+        guard activeEngineUsable(engine) else {
+            finishError("The selected speech model is not installed", action: nil)
+            return
+        }
         capturedSnapshot = snapshot()
         building.targetBundleId = capturedSnapshot?.bundleId
         capturedPlan = config.resolved
-        capturedEngine = provider.active
+        capturedEngine = engine
         capturedDictionaryRecovery = settings.stt.dictionaryRecoveryEnabled(
             engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
         captureStarted = false
@@ -467,7 +478,11 @@ final class DictationController {
         hud?.render(.error(message: "Recording stopped after \(Int(Self.maxRecordingSeconds / 60)) min", action: nil))
         scheduleHide(after: 4)
         clearRewriteEscapeHatch()
+        // Release the press-time-warmed model on Balanced/Frugal (this terminal does not route through
+        // finishError). Capture before releaseCapturedPlan nils capturedEngine.
+        let engineUsed = activeEngine
         releaseCapturedPlan()
+        applyEvictionAfterDictation(engine: engineUsed)
     }
 
     // Release the frozen config once a dictation reaches a terminal state, so an idle app doesn't pin a
@@ -729,11 +744,9 @@ final class DictationController {
         case .abort(let message, let action):
             // A selection rewrite that failed (or had nothing to do) leaves the target untouched —
             // a destructive op must never overwrite the user's text on failure.
-            let engineUsed = activeEngine
             log.info("aborted: \(message, privacy: .public)")
-            finishError(message, action: action)
+            finishError(message, action: action)   // applies eviction internally
             clearRewriteEscapeHatch()
-            applyEvictionAfterDictation(engine: engineUsed)
 
         case .insert(let transcript, let bare):
             await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare)
@@ -1213,7 +1226,14 @@ final class DictationController {
         hud?.render(.error(message: message, action: action))
         scheduleHide(after: action == nil ? 2 : 8)
         finalizeRecord(outcome: .failed, error: message)
+        // A failed dictation must release the model on Balanced/Frugal just like a successful one —
+        // otherwise a transcribe timeout/failure (or a mic/bring-up error after the press-time warm load)
+        // pins the model resident until quit, since no other terminal re-arms the idle check. Capture the
+        // engine before releaseCapturedPlan nils capturedEngine; eviction awaits any abandoned transcribe's
+        // settlement via SerializedEngine, so this can't race the in-flight call.
+        let engineUsed = activeEngine
         releaseCapturedPlan()
+        applyEvictionAfterDictation(engine: engineUsed)
     }
 
     private func scheduleHide(after seconds: Double = 2) {

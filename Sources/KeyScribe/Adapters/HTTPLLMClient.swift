@@ -6,6 +6,7 @@ enum LLMClientError: Error, CustomStringConvertible {
     case http(Int)
     case badResponse
     case missingBaseURL
+    case truncated
 
     var description: String {
         switch self {
@@ -13,6 +14,7 @@ enum LLMClientError: Error, CustomStringConvertible {
         case .http(let code): return "The model service returned an error (\(code))."
         case .badResponse: return "The model service returned an unexpected response."
         case .missingBaseURL: return "This connection needs a base URL."
+        case .truncated: return "The model service cut the response off at its length limit."
         }
     }
 }
@@ -73,16 +75,23 @@ struct HTTPLLMClient: LLMClient {
 
         switch connection.provider {
         case .openai, .openaiCompatible:
-            let base = connection.baseUrl ?? (connection.provider == .openai ? "https://api.openai.com/v1" : nil)
-            guard let base, let url = URL(string: base + "/chat/completions") else { throw LLMClientError.missingBaseURL }
+            let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines).removingTrailingSlash
+                ?? (connection.provider == .openai ? "https://api.openai.com/v1" : nil)
+            guard let base, !base.isEmpty, let url = URL(string: base + "/chat/completions") else {
+                throw LLMClientError.missingBaseURL
+            }
             var req = jsonRequest(url)
             if let key, !key.isEmpty {
                 req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             }
+            // Hosted OpenAI deprecated `max_tokens` for `max_completion_tokens` (o-series reject the old
+            // key outright). OpenAI-*compatible* servers (local oMLX, OpenRouter, …) overwhelmingly still
+            // speak `max_tokens`, so keep the old key there for the widest reach.
+            let tokenLimitKey = connection.provider == .openai ? "max_completion_tokens" : "max_tokens"
             req.httpBody = try body([
                 "model": connection.model,
                 "temperature": temp,
-                "max_tokens": maxTokens,
+                tokenLimitKey: maxTokens,
                 "messages": [
                     ["role": "system", "content": system],
                     ["role": "user", "content": user],
@@ -106,10 +115,11 @@ struct HTTPLLMClient: LLMClient {
 
         case .gemini:
             let base = "https://generativelanguage.googleapis.com/v1beta/models"
-            guard let key, let url = URL(string: "\(base)/\(connection.model):generateContent?key=\(key)") else {
+            guard let key, let url = URL(string: "\(base)/\(connection.model):generateContent") else {
                 throw LLMClientError.badResponse
             }
             var req = jsonRequest(url)
+            req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
             req.httpBody = try body([
                 "systemInstruction": ["parts": [["text": system]]],
                 "contents": [["role": "user", "parts": [["text": user]]]],
@@ -126,18 +136,26 @@ struct HTTPLLMClient: LLMClient {
         switch provider {
         case .openai, .openaiCompatible:
             guard let choices = json["choices"] as? [[String: Any]],
-                  let message = choices.first?["message"] as? [String: Any],
+                  let choice = choices.first,
+                  let message = choice["message"] as? [String: Any],
                   let content = message["content"] as? String else { throw LLMClientError.badResponse }
+            // A response cut off at max_tokens passes the gate when no sentinels were issued (the common
+            // privacy-off case), and half a sentence would be pasted as final text. Treat truncation as an
+            // error so RewriteService falls back to the local transcript instead.
+            if (choice["finish_reason"] as? String) == "length" { throw LLMClientError.truncated }
             return content
         case .anthropic:
+            if (json["stop_reason"] as? String) == "max_tokens" { throw LLMClientError.truncated }
             guard let content = json["content"] as? [[String: Any]],
                   let text = content.first?["text"] as? String else { throw LLMClientError.badResponse }
             return text
         case .gemini:
             guard let candidates = json["candidates"] as? [[String: Any]],
-                  let content = candidates.first?["content"] as? [String: Any],
+                  let candidate = candidates.first,
+                  let content = candidate["content"] as? [String: Any],
                   let parts = content["parts"] as? [[String: Any]],
                   let text = parts.first?["text"] as? String else { throw LLMClientError.badResponse }
+            if (candidate["finishReason"] as? String) == "MAX_TOKENS" { throw LLMClientError.truncated }
             return text
         }
     }

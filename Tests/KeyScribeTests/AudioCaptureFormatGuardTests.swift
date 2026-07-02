@@ -18,6 +18,39 @@ struct AudioCaptureFormatGuardTests {
     }
 }
 
+// The tail-drain backstop must not resume a drain that has already been superseded by a newer dictation —
+// otherwise dictation N's stale 300 ms timer resumes dictation N+1's drain early and clips its final word.
+struct TailDrainResumeArbitrationTests {
+    @Test func currentBackstopResumes() {
+        #expect(AudioCapture.shouldResumeDrain(backstopID: 7, currentDrainID: 7))
+    }
+
+    @Test func staleBackstopDoesNotResume() {
+        #expect(!AudioCapture.shouldResumeDrain(backstopID: 7, currentDrainID: 8))
+    }
+
+    @Test func wildcardAlwaysResumes() {
+        #expect(AudioCapture.shouldResumeDrain(backstopID: nil, currentDrainID: 8))
+    }
+}
+
+struct CaptureReplacementUnitStartTests {
+    @Test func currentActiveCaptureCanStartReplacementUnit() {
+        #expect(AudioCapture.shouldStartReplacementUnit(
+            generation: 4, currentGeneration: 4, captureActive: true))
+    }
+
+    @Test func staleGenerationCannotStartReplacementUnit() {
+        #expect(!AudioCapture.shouldStartReplacementUnit(
+            generation: 4, currentGeneration: 5, captureActive: true))
+    }
+
+    @Test func endedCaptureCannotStartReplacementUnit() {
+        #expect(!AudioCapture.shouldStartReplacementUnit(
+            generation: 4, currentGeneration: 4, captureActive: false))
+    }
+}
+
 // Capture-device resolution: a present preferred device wins; else the system default; else nothing is
 // available. `isPreferredPresent` drives the error policy — a failed PRESENT preferred device is surfaced
 // (don't silently record from a different mic), while a default-follow failure is retried. The AUHAL binds

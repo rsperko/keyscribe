@@ -71,6 +71,26 @@ private final class ThrowAfterReleaseEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
+// Throws on transcribe and fires a signal when evicted — proves an error terminal still releases the
+// model on Frugal/Balanced instead of pinning it resident (W14 §2.1).
+private final class EvictRecordingEngine: SpeechEngine, @unchecked Sendable {
+    let id = "evicting"
+    let displayName = "Evicting"
+    let supportsRecognitionBias = true
+    struct Boom: Error {}
+    private let started: Signal
+    private let release: Signal
+    let evicted = Signal()
+    init(started: Signal, release: Signal) { self.started = started; self.release = release }
+    func loadIfNeeded() async throws {}
+    func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+        started.fire()
+        await release.wait()
+        throw Boom()
+    }
+    func evict() async { evicted.fire() }
+}
+
 // Returns immediately with a fixed text — stands in for a second, different engine.
 private final class InstantEngine: SpeechEngine, @unchecked Sendable {
     let id: String
@@ -83,10 +103,28 @@ private final class InstantEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
+private final class LoadCountingEngine: SpeechEngine, @unchecked Sendable {
+    let id = "missing"
+    let displayName = "Missing"
+    let supportsRecognitionBias = true
+    private let lock = NSLock()
+    private var _loads = 0
+    var loads: Int { lock.lock(); defer { lock.unlock() }; return _loads }
+    func loadIfNeeded() async throws { lock.withLock { _loads += 1 } }
+    func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { "unexpected" }
+    func evict() async {}
+}
+
 private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
+    private let lock = NSLock()
+    private var _starts = 0
+    var starts: Int { lock.lock(); defer { lock.unlock() }; return _starts }
     init(url: URL) { self.url = url }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { url }
+    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        lock.withLock { _starts += 1 }
+        return url
+    }
     func stop() -> URL? { url }
 }
 
@@ -182,6 +220,36 @@ struct DictationCancellationTests {
         var mode = try #require(ModeStore.loadAll(in: modesDir).first { $0.id == id })
         mode.enabled = true
         try ModeStore.write(mode, to: modesDir)
+    }
+
+    @Test func unavailableActiveModelDoesNotLoadOrStartCapture() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let engine = LoadCountingEngine()
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "missing")
+        let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "missing", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let hud = HUDSpy()
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            insert: { _, _, _, _ in return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true },
+            activeEngineUsable: { _ in false })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+
+        #expect(engine.loads == 0)
+        #expect(audio.starts == 0)
+        #expect(hud.states.last == .error(message: "The selected speech model is not installed", action: nil))
     }
 
     @Test func commitDrainsTheTailInsteadOfStoppingImmediately() async {
@@ -313,6 +381,46 @@ struct DictationCancellationTests {
         #expect(history.entries().isEmpty)
         #expect(controller.lastResult == nil)
         #expect(hud.states.last == .hidden)
+    }
+
+    // W14 §2.1: a dictation that fails in transcribe must still release the model on Frugal — otherwise
+    // the model stays resident until quit because no other terminal re-arms eviction.
+    @Test func aFailedTranscribeStillEvictsOnFrugal() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let started = Signal(), release = Signal()
+        let engine = EvictRecordingEngine(started: started, release: release)
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "evicting")
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "evicting", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _ in return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await started.wait()
+        release.fire()            // engine throws → finishError terminal
+        await controller.dictationTask?.value
+
+        let didEvict = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await engine.evicted.wait(); return true }
+            group.addTask { try? await Task.sleep(for: .seconds(2)); return false }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        #expect(didEvict)
     }
 
     @Test func aMidDictationEngineSwitchStillUsesTheCapturedEngine() async {

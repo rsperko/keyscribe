@@ -52,6 +52,20 @@ struct DeadlineTests {
         }
     }
 
+    // A success that lands just before the deadline cancels the timer — the cancelled timer must NOT
+    // then resume DeadlineExceeded. With the old `try?`-swallowed sleep, timeout.cancel() woke the
+    // sleep and the timer proceeded to resume failure anyway, racing the success and intermittently
+    // reporting a spurious "timed out" on a transcription that finished in time. Run many close-races.
+    @Test func cancelledTimerNeverResumesFailureAfterFastSuccess() async throws {
+        for _ in 0..<200 {
+            let value = try await runWithDeadline(seconds: 0.05) {
+                nonCooperativeBlock(seconds: 0.02)
+                return "in-time"
+            }
+            #expect(value == "in-time")
+        }
+    }
+
     // onSettled fires when the operation TRULY finishes, even on a wedged op that the deadline already
     // abandoned — so it lands after the DeadlineExceeded throw, not at the deadline.
     @Test func onSettledFiresAfterAbandonedOperationTrulyFinishes() async {

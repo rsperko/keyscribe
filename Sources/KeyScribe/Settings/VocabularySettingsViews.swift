@@ -203,17 +203,21 @@ final class DictionarySettingsModel: ObservableObject {
     }
 
     func add(_ word: String) {
-        save(DictionarySet(words: words).adding(word: word))
+        mutate { $0.adding(word: word) }
     }
 
     func remove(_ word: String) {
-        save(DictionarySet(words: words).removing(word: word))
+        mutate { $0.removing(word: word) }
     }
 
-    private func save(_ set: DictionarySet) {
+    // Read-modify-write from disk on every mutation, not from `@Published words` (refreshed only on
+    // .onAppear). The global Add-to-Vocabulary hotkey writes through ConfigRepository while this pane is
+    // open; mutating stale in-memory state would silently drop that just-added word.
+    private func mutate(_ transform: (DictionarySet) -> DictionarySet) {
+        let updated = transform(DictionaryStore.loadOrDefault(supportDir: supportDir))
         do {
-            try DictionaryStore.write(set, to: supportDir)
-            words = set.words
+            try DictionaryStore.write(updated, to: supportDir)
+            words = updated.words
             error = nil
         } catch {
             self.error = "Could not save the dictionary: \(error.localizedDescription)"
@@ -241,25 +245,32 @@ final class ReplacementsSettingsModel: ObservableObject {
     func add(heard: String, replace: String, regex: Bool) {
         let trimmed = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var set = ReplacementsSet(rules: rules)
-        if regex {
-            set.rules.append(.init(heard: trimmed, replace: replace, regex: true))
-        } else {
-            set = set.addingLiteral(heard: trimmed, replace: replace)
+        mutate { set in
+            if regex {
+                set.rules.append(.init(heard: trimmed, replace: replace, regex: true))
+            } else {
+                set = set.addingLiteral(heard: trimmed, replace: replace)
+            }
         }
-        rules = set.rules
-        persist()
     }
 
     func remove(at index: Int) {
         guard rules.indices.contains(index) else { return }
-        rules.remove(at: index)
-        persist()
+        let target = rules[index]
+        mutate { set in
+            if let i = set.rules.firstIndex(of: target) { set.rules.remove(at: i) }
+        }
     }
 
-    private func persist() {
+    // Read-modify-write from disk (see DictionarySettingsModel.mutate). A `remove(at:)` resolves the
+    // displayed row to a rule value first, then removes the matching rule from the freshly-read set, so
+    // a rule the global hotkey appended concurrently is preserved.
+    private func mutate(_ transform: (inout ReplacementsSet) -> Void) {
+        var set = ReplacementsStore.loadOrDefault(supportDir: supportDir)
+        transform(&set)
         do {
-            try ReplacementsStore.write(ReplacementsSet(rules: rules), to: supportDir)
+            try ReplacementsStore.write(set, to: supportDir)
+            rules = set.rules
             error = nil
         } catch {
             self.error = "Could not save replacements: \(error.localizedDescription)"

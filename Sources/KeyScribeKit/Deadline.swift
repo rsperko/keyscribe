@@ -61,7 +61,7 @@ public func runWithDeadline<T: Sendable>(
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
             gate.set(cont)
             let timeout = Task {
-                try? await Task.sleep(for: .seconds(seconds))
+                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
                 work.cancel()
                 gate.resume(.failure(DeadlineExceeded()))
             }

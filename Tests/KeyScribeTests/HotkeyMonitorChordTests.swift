@@ -101,6 +101,46 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
+    // W9: a rebuild (Settings toggle / config reload) mid-hold must NOT strand an in-progress gesture.
+    // With an identical descriptor + style, update() carries the live gesture over, so the release edge
+    // still delivers its commit. Without the carry-over the fresh PressGesture never saw the .down and
+    // the .up would be dropped.
+    @Test func updatePreservesInProgressGestureForIdenticalDescriptor() async {
+        let fake = FakeChordRegistrar()
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+        m.update(bindings: [chordBinding("control+option+e")])
+
+        fake.lastRegistrations[0].onPressed()
+        await drainMain()
+        #expect(starts == 1)
+
+        // Rebuild with the same binding (as a Settings toggle would) while the key is still held.
+        m.update(bindings: [chordBinding("control+option+e")])
+
+        fake.lastRegistrations[0].onReleased?()
+        await drainMain()
+        #expect(commits == 1)
+    }
+
+    // A changed descriptor gets a fresh gesture — no stale state carried onto a different key.
+    @Test func updateGivesAChangedDescriptorAFreshGesture() async {
+        let fake = FakeChordRegistrar()
+        var commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in }, onCommit: { _ in commits += 1 }, carbon: fake)
+        m.update(bindings: [chordBinding("control+option+e", style: .tapToToggle)])
+
+        fake.lastRegistrations[0].onPressed()   // tap-to-toggle start; gesture now "recording"
+        await drainMain()
+
+        m.update(bindings: [chordBinding("control+option+r", style: .tapToToggle)])  // different key
+        fake.lastRegistrations[0].onPressed()   // fresh gesture → start, not commit
+        await drainMain()
+        #expect(commits == 0)
+    }
+
     @Test func unboundMouseButtonEdgeIsIgnored() async {
         let mouse = FakeMouseTap()
         var starts = 0

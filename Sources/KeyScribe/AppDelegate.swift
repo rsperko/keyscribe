@@ -129,7 +129,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !active { self?.updater?.dictationDidFinish() }
         }
         controller.onBecameIdle = { [weak self] in
-            guard let self, self.pendingHotkeyRebuild else { return }
+            guard let self else { return }
+            // Resync gesture state with the machine on every return to idle. A controller-side abort
+            // (over-limit, mic/bring-up error) drops the machine to idle while a PressGesture still thinks
+            // it is recording/latched — without this the user's next tap-to-toggle press emits .commit into
+            // an idle machine (a no-op) and their first post-error dictation silently does nothing. Safe at
+            // idle: any legitimate in-progress gesture means the machine is still recording (never idle),
+            // and a cancelled held key returns .none on its eventual release (guard recording).
+            self.hotkey.cancelGestures()
+            guard self.pendingHotkeyRebuild else { return }
             self.pendingHotkeyRebuild = false
             self.buildHotkeyMonitor()
         }
@@ -316,10 +324,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
         config.invalidate()
-        if controller.isBusy {
-            pendingHotkeyRebuild = true
+        // Absorb an external settings.toml edit (the Advanced pane promises edits are detected). Adopting
+        // it into `settings` also means a later in-app toggle merges against the current on-disk value
+        // instead of silently overwriting the externally-changed field. On a malformed/unreadable file
+        // keep the running settings rather than reverting to defaults.
+        if let fresh = Self.externallyEditedSettings(current: settings, supportDir: KeyScribePaths.supportDir) {
+            applySettingsEffects(fresh)   // rebuilds the hotkey monitor for us
         } else {
-            buildHotkeyMonitor()
+            rebuildHotkeyMonitor()        // modes/shortcuts may have changed even if settings.toml did not
         }
         refreshStatus()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
@@ -334,6 +346,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Accessibility, and we never poke tapCreate before the grant.
         _ = hotkey.start()
         refreshStatus()
+    }
+
+    static func externallyEditedSettings(current: Settings, supportDir: URL) -> Settings? {
+        guard let fresh = try? SettingsStore.loadOrCreate(supportDir: supportDir), fresh != current else { return nil }
+        return fresh
     }
 
     private func setEngine(_ id: String) {
@@ -351,6 +368,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings(_ updated: Settings) {
+        applySettingsEffects(updated)
+        do { try SettingsStore.write(updated, to: KeyScribePaths.supportDir) }
+        catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
+    }
+
+    // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
+    // this then persists; `reloadConfig` calls it after re-reading an external edit off disk (no write,
+    // so an externally-changed field isn't round-tripped and clobbered).
+    private func applySettingsEffects(_ updated: Settings) {
         if updated.stt.engine != settings.stt.engine {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
@@ -363,12 +389,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settings = updated
         controller.updateSettings(updated)
-        buildHotkeyMonitor()
+        rebuildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)
-        do { try SettingsStore.write(updated, to: KeyScribePaths.supportDir) }
-        catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
         settingsController.update(settings: updated)
         refreshStatus()
+    }
+
+    // Rebuilding the hotkey monitor replaces its bindings and clears gesture state; doing that while a
+    // key is held/latched would drop the pending release edge, so defer to the next idle moment
+    // (DictationController.onBecameIdle drains `pendingHotkeyRebuild`).
+    private func rebuildHotkeyMonitor() {
+        if controller.isBusy { pendingHotkeyRebuild = true }
+        else { buildHotkeyMonitor() }
     }
 
     // Keep the stored friendly name for the preferred input device fresh: if it is connected now and its

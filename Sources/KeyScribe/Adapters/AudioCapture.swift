@@ -68,6 +68,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // fresh unit) when a wedge is detected, so the next dictation never queues behind the stuck call.
     private var unit: HALInputUnit?
     private var configuredDeviceID: AudioDeviceID?
+    // The generation the currently-stored unit belongs to. A bring-up that was abandoned by the watchdog
+    // (its generation superseded) keeps running on its now-orphaned queue; when it finally stores its unit
+    // it stamps this with its OWN generation, so the eager-rebuild cleanup queued behind it can dispose that
+    // late unit without touching a newer generation's live unit.
+    private var configuredGeneration: Int?
     private var controlQueue = DispatchQueue(label: "com.keyscribe.audio.0")
     private var generation = 0
     // Set when a bring-up wedged (watchdog) or a device change invalidated the binding. Consumed by
@@ -96,6 +101,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // continuation is resumed once a buffer covers the release instant (or a backstop timeout fires).
     private var drainGate: TailDrainGate?
     private var drainContinuation: CheckedContinuation<Void, Never>?
+    // Monotonic id for the in-flight drain. The 300 ms backstop captures the id of the drain it was armed
+    // for and is ignored if a newer drain has since started — otherwise a backstop from dictation N could
+    // resume dictation N+1's drain early and clip its final word (the exact bug the gate prevents).
+    private var drainSequence = 0
+    private var currentDrainID = 0
 
     // Bound for a single bring-up. A healthy prewarmed unit starts in a few ms; a legitimately slow
     // Bluetooth profile switch can take several hundred ms; an indefinite wedge is the failure we abandon.
@@ -173,23 +183,28 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
         rebuildIfNeeded()
+        let queue = currentQueue()
+        let generation = currentGeneration()
         let started = DispatchTime.now()
         do {
             // Non-destructive watchdog: adopt a bring-up that lands within the grace window; only the
             // DeadlineExceeded branch below (a genuinely wedged device) tears the half-open capture down.
             let url = try await runWithDeadline(seconds: Self.bringUpTimeout + Self.bringUpGrace) { [self] in
-                try await bringUp(sampleRate: sampleRate, levelHandler: levelHandler)
+                try await bringUp(sampleRate: sampleRate, levelHandler: levelHandler, queue: queue, generation: generation)
             }
             let ms = Self.elapsedMs(since: started)
             let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
             Log.audio.debug("bringUp=\(ms, privacy: .public)ms\(band, privacy: .public)")
             return url
         } catch is DeadlineExceeded {
-            // The bring-up wedged. The main thread was never blocked — the stuck CoreAudio call is
-            // abandoned on the (now unusable) control queue. Flag a rebuild so the next dictation gets a
-            // fresh unit on a fresh queue, drop the half-open capture file, and surface a clean failure.
+            // The bring-up wedged. The main thread was never blocked — the stuck CoreAudio call is abandoned
+            // on the (now unusable) control queue. Swap to a fresh generation + queue EAGERLY (not just a
+            // flag consumed by the next dictation): the bump makes the wedged bring-up superseded RIGHT NOW,
+            // so if it later un-wedges, every shared-state mutation in armSync/armUnit/bringUpUnit is gated on
+            // its generation and no-ops — no stranded hot mic, no clobber of a newer capture. Then drop the
+            // half-open file and surface a clean failure.
             Log.audio.error("bringUp timed out after \(Self.elapsedMs(since: started), privacy: .public)ms")
-            markRebuild()
+            swapToFreshGeneration()
             discardPendingCapture()
             throw AudioCaptureError.bringUpTimedOut
         }
@@ -199,12 +214,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
     }
 
-    private func bringUp(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
-        let queue = currentQueue()
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
+    private func bringUp(
+        sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void,
+        queue: DispatchQueue, generation: Int
+    ) async throws -> URL {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
             queue.async { [self] in
-                do { cont.resume(returning: try armSync(sampleRate: sampleRate, levelHandler: levelHandler)) }
-                catch { cont.resume(throwing: error) }
+                do {
+                    cont.resume(returning: try armSync(
+                        sampleRate: sampleRate, levelHandler: levelHandler, generation: generation))
+                } catch { cont.resume(throwing: error) }
             }
         }
     }
@@ -227,7 +246,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 try await runWithDeadline(seconds: Self.bringUpTimeout) {
                     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                         queue.async { [self] in
-                            if isGeneration(generation) { prewarmUnit() }
+                            if isGeneration(generation) { prewarmUnit(generation: generation) }
                             cont.resume()
                         }
                     }
@@ -239,22 +258,37 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     // MUST run on the control queue. Configure (but do not start) a unit bound to the current effective
-    // device, reusing an already-warm one for that device.
-    private func prewarmUnit() {
+    // device, reusing an already-warm one for that device. Generation-checked at the store: a rebuild that
+    // lands DURING the slow configure() supersedes this prewarm, so the freshly-configured candidate is
+    // disposed instead of clobbering (and leaking) the new generation's live unit.
+    private func prewarmUnit(generation: Int) {
         guard let deviceID = effectiveDeviceID() else { return }
-        if lock.withLock({ unit != nil && configuredDeviceID == deviceID }) { return }
-        disposeUnitInline()
+        let outgoing = lock.withLock { () -> (keep: Bool, dispose: HALInputUnit?) in
+            guard self.generation == generation else { return (true, nil) }
+            if unit != nil && configuredDeviceID == deviceID { return (true, nil) }
+            let old = unit; unit = nil; configuredDeviceID = nil; configuredGeneration = nil
+            return (false, old)
+        }
+        outgoing.dispose?.dispose()
+        if outgoing.keep { return }
         let candidate = makeUnit()
         do {
             try candidate.configure(deviceID: deviceID)
-            lock.withLock { unit = candidate; configuredDeviceID = deviceID }
+            let stored = lock.withLock { () -> Bool in
+                guard self.generation == generation else { return false }
+                unit = candidate; configuredDeviceID = deviceID; configuredGeneration = generation
+                return true
+            }
+            if !stored { candidate.dispose() }
         } catch {
             candidate.dispose()
         }
     }
 
     // Sets up the capture file + recording state, then brings the unit up — all on the control queue.
-    private func armSync(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) throws -> URL {
+    private func armSync(
+        sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void, generation: Int
+    ) throws -> URL {
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
@@ -274,11 +308,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lock.unlock()
 
         do {
-            try armUnit()
+            try armUnit(generation: generation)
         } catch {
-            removeActiveDeviceListener()
-            disposeUnitInline()
-            discardPendingCapture()
+            // Only unwind shared capture state if this bring-up still owns the current generation. A
+            // watchdog-abandoned armSync that finally un-wedges is superseded, and the newer generation may
+            // already be recording — clearing its unit/listener/currentURL here would corrupt it.
+            if isGeneration(generation) {
+                removeActiveDeviceListener()
+                disposeUnitInline()
+                discardPendingCapture()
+            }
             throw error
         }
         return url
@@ -288,36 +327,62 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // live; if a PRESENT preferred device fails, surface that (do not silently record from a different mic).
     // When following the system default, retry once after a beat (a just-connected device can fail the first
     // bring-up while its HAL proxy initializes) before giving up.
-    private func armUnit() throws {
+    private func armUnit(generation: Int) throws {
         let target = captureTarget()
         guard let deviceID = target.deviceID else { throw AudioCaptureError.formatUnavailable }
         do {
-            try bringUpUnit(deviceID: deviceID)
+            try bringUpUnit(deviceID: deviceID, generation: generation)
         } catch {
+            // Superseded (watchdog-abandoned, generation bumped): do not clobber the newer generation's unit
+            // and do not retry — just propagate. The retry path below owns shared state and must only run for
+            // the current generation.
+            guard isGeneration(generation) else { throw error }
             disposeUnitInline()
             if target.isPreferredPresent { throw AudioCaptureError.preferredInputFailed }
             Thread.sleep(forTimeInterval: 0.25)
             guard let retryID = AudioInputDevices.systemDefaultInputID() else {
                 throw AudioCaptureError.formatUnavailable
             }
-            do { try bringUpUnit(deviceID: retryID) }
-            catch { disposeUnitInline(); throw AudioCaptureError.formatUnavailable }
+            do { try bringUpUnit(deviceID: retryID, generation: generation) }
+            catch {
+                if isGeneration(generation) { disposeUnitInline() }
+                throw AudioCaptureError.formatUnavailable
+            }
         }
+        guard isGeneration(generation) else { return }
         if let id = lock.withLock({ configuredDeviceID }) { installActiveDeviceListener(deviceID: id) }
     }
 
-    // Reuse a resident/prewarmed unit already bound to `deviceID` (just start it); otherwise dispose any
-    // stale unit and configure + start a fresh one. On the control queue.
-    private func bringUpUnit(deviceID: AudioDeviceID) throws {
-        if let resident = lock.withLock({ unit != nil && configuredDeviceID == deviceID ? unit : nil }) {
+    // Reuse a resident/prewarmed unit already bound to `deviceID` (just start it); otherwise configure +
+    // start a fresh one, swapping it in under the lock ONLY if this bring-up still owns the current
+    // generation. A superseded bring-up disposes its own freshly-built unit and throws without ever starting
+    // it or touching shared state — so a watchdog-abandoned call can't strand a hot mic. On the control queue.
+    private func bringUpUnit(deviceID: AudioDeviceID, generation: Int) throws {
+        guard isGeneration(generation) else { throw AudioCaptureError.bringUpTimedOut }
+        if let resident = lock.withLock({
+            self.generation == generation && unit != nil && configuredDeviceID == deviceID ? unit : nil
+        }) {
+            guard isGeneration(generation) else { throw AudioCaptureError.bringUpTimedOut }
             try resident.start()
             return
         }
-        disposeUnitInline()
         let fresh = makeUnit()
         try fresh.configure(deviceID: deviceID)
-        lock.withLock { unit = fresh; configuredDeviceID = deviceID }
-        try fresh.start()
+        guard isGeneration(generation) else { fresh.dispose(); throw AudioCaptureError.bringUpTimedOut }
+        do {
+            try fresh.start()
+        } catch {
+            fresh.dispose()
+            throw error
+        }
+        let outgoing = lock.withLock { () -> (stored: Bool, dispose: HALInputUnit?) in
+            guard self.generation == generation else { return (false, nil) }
+            let old = unit
+            unit = fresh; configuredDeviceID = deviceID; configuredGeneration = generation
+            return (true, old)
+        }
+        guard outgoing.stored else { fresh.dispose(); throw AudioCaptureError.bringUpTimedOut }
+        outgoing.dispose?.dispose()
     }
 
     private func makeUnit() -> HALInputUnit {
@@ -338,13 +403,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private func drainTail() async {
         let releaseHostTime = mach_absolute_time()
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            lock.lock()
-            drainGate = TailDrainGate(releaseHostTime: releaseHostTime)
-            drainContinuation = cont
-            lock.unlock()
+            let id = lock.withLock { () -> Int in
+                drainSequence += 1
+                currentDrainID = drainSequence
+                drainGate = TailDrainGate(releaseHostTime: releaseHostTime)
+                drainContinuation = cont
+                return drainSequence
+            }
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(300))
-                self?.resumeDrain()
+                self?.resumeDrain(id: id)
             }
         }
     }
@@ -358,13 +426,25 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         if outcome == .stop { resumeDrain() }
     }
 
-    private func resumeDrain() {
-        lock.lock()
-        let cont = drainContinuation
-        drainContinuation = nil
-        drainGate = nil
-        lock.unlock()
+    // `id == nil` is the wildcard resume (gate-covered, or the forced resume from stop()) and always fires.
+    // A non-nil id is the backstop's own drain id: it resumes only if it is still the current drain, so a
+    // stale backstop cannot resume a newer drain.
+    private func resumeDrain(id: Int? = nil) {
+        let cont = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            guard Self.shouldResumeDrain(backstopID: id, currentDrainID: currentDrainID) else { return nil }
+            let c = drainContinuation
+            drainContinuation = nil
+            drainGate = nil
+            return c
+        }
         cont?.resume()
+    }
+
+    // Pure resume-arbitration for the tail drain: a nil id (gate/forced) always resumes; a backstop's own id
+    // resumes only while it is still the current drain. Keeps a stale backstop from clipping a newer drain.
+    static func shouldResumeDrain(backstopID: Int?, currentDrainID: Int) -> Bool {
+        guard let backstopID else { return true }
+        return backstopID == currentDrainID
     }
 
     // Commit path: tear the unit down on the control queue (stop/dispose can block on a transitioning
@@ -378,6 +458,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try await runWithDeadline(seconds: Self.bringUpTimeout) {
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     queue.async { [self] in
+                        // Make "capture is over" visible ON the control queue BEFORE the unit teardown, so a
+                        // mid-recording restart already queued behind us (its guard reads currentURL) sees the
+                        // capture ended and bails instead of starting a fresh ownerless unit. finalizeCapture()
+                        // on the caller afterward clears the remaining recording state idempotently.
+                        lock.withLock { currentURL = nil }
                         removeActiveDeviceListener()
                         if effectiveInputIsBluetooth() {
                             disposeUnitInline()
@@ -521,27 +606,33 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // clear the binding, so the next bring-up configures fresh.
     private func disposeUnitInline() {
         let outgoing = lock.withLock { () -> HALInputUnit? in
-            let u = unit; unit = nil; configuredDeviceID = nil; return u
+            let u = unit; unit = nil; configuredDeviceID = nil; configuredGeneration = nil; return u
         }
         outgoing?.dispose()
     }
 
     private func rebuildIfNeeded() {
+        guard lock.withLock({ mustRebuild }) else { return }
+        swapToFreshGeneration()
+    }
+
+    // Bump to a fresh generation on a fresh serial control queue, abandoning the outgoing unit's queue. Used
+    // both for a flagged rebuild (rebuildIfNeeded) and eagerly on a watchdog timeout, so the wedged bring-up
+    // is superseded immediately. Dispose the outgoing unit on its OWN (outgoing) queue, async and
+    // fire-and-forget: a HEALTHY outgoing unit gets an orderly dispose serialized off the caller; a WEDGED
+    // one simply never disposes on the abandoned queue and the dead unit is left behind — the intended
+    // abandonment, with no dealloc on the caller's thread.
+    private func swapToFreshGeneration() {
         lock.lock()
-        guard mustRebuild else { lock.unlock(); return }
         mustRebuild = false
         let outgoing = unit
         let outgoingQueue = controlQueue
         unit = nil
         configuredDeviceID = nil
+        configuredGeneration = nil
         generation &+= 1
         controlQueue = DispatchQueue(label: "com.keyscribe.audio.\(generation)")
         lock.unlock()
-        // Dispose the outgoing unit on its OWN (outgoing) queue, async and fire-and-forget, rather than
-        // inline on the caller's thread. A HEALTHY outgoing unit gets an orderly dispose serialized off the
-        // caller; a WEDGED one (the reason we escaped to a fresh queue) simply never disposes on the
-        // abandoned queue and the dead unit is left behind — the intended abandonment, with no dealloc on
-        // the caller's thread.
         if let outgoing {
             let box = UnitBox(outgoing)
             outgoingQueue.async { box.unit.dispose() }
@@ -698,11 +789,15 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func removeActiveDeviceListener() {
-        let (block, deviceID) = lock.withLock { () -> (AudioObjectPropertyListenerBlock?, AudioDeviceID?) in
-            let b = activeDeviceListenerBlock; let d = activeListenedDeviceID
-            activeDeviceListenerBlock = nil; activeListenedDeviceID = nil
-            return (b, d)
+        let (block, deviceID, pending) = lock.withLock {
+            () -> (AudioObjectPropertyListenerBlock?, AudioDeviceID?, DispatchWorkItem?) in
+            let b = activeDeviceListenerBlock; let d = activeListenedDeviceID; let p = activeDeviceDebounce
+            activeDeviceListenerBlock = nil; activeListenedDeviceID = nil; activeDeviceDebounce = nil
+            return (b, d, p)
         }
+        // Cancel a debounced restart already scheduled at +150 ms — otherwise it survives teardown and can
+        // start a fresh, ownerless capture unit after the mic was supposed to be released (a stranded hot mic).
+        pending?.cancel()
         guard let block, let deviceID else { return }
         for selector in Self.activeDeviceSelectors {
             var addr = AudioObjectPropertyAddress(
@@ -714,10 +809,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private func handleActiveDeviceChanged() {
         // The bound device disconnected or changed its sample rate (a Bluetooth A2DP↔HFP flip). Coalesce a
-        // storm into one restart.
-        activeDeviceDebounce?.cancel()
+        // storm into one restart. The debounce work item is now also cancellable from the control queue
+        // (teardown), so guard the reference under the lock.
         let work = DispatchWorkItem { [weak self] in self?.requestMidRecordingRestart() }
-        activeDeviceDebounce = work
+        let previous = lock.withLock { () -> DispatchWorkItem? in
+            let p = activeDeviceDebounce; activeDeviceDebounce = work; return p
+        }
+        previous?.cancel()
         deviceListenerQueue.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
@@ -725,22 +823,55 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let queue = currentQueue()
         queue.async { [self] in
             guard lock.withLock({ currentURL != nil }) else { return }
-            let attempts = lock.withLock { () -> Int in configRestartCount += 1; return configRestartCount }
-            guard attempts <= Self.maxConfigRestarts else { return }
+            let (attempts, generation) = lock.withLock { () -> (Int, Int) in
+                configRestartCount += 1; return (configRestartCount, self.generation)
+            }
+            guard attempts <= Self.maxConfigRestarts else {
+                Log.audio.error("mid-recording restart gave up after \(Self.maxConfigRestarts, privacy: .public) attempts — capture may be truncated")
+                return
+            }
             guard let deviceID = effectiveDeviceID() else { return }
+            Log.audio.debug("mid-recording device change → restart attempt \(attempts, privacy: .public)")
             disposeUnitInline()
             do {
                 let fresh = makeUnit()
                 try fresh.configure(deviceID: deviceID)
-                lock.withLock { unit = fresh; configuredDeviceID = deviceID }
-                try fresh.start()
+                guard Self.shouldStartReplacementUnit(
+                    generation: generation,
+                    currentGeneration: lock.withLock { self.generation },
+                    captureActive: lock.withLock { currentURL != nil }) else {
+                    fresh.dispose()
+                    return
+                }
+                do {
+                    try fresh.start()
+                } catch {
+                    fresh.dispose()
+                    throw error
+                }
+                let stored = lock.withLock { () -> Bool in
+                    guard self.generation == generation, currentURL != nil else { return false }
+                    unit = fresh; configuredDeviceID = deviceID; configuredGeneration = generation
+                    return true
+                }
+                if !stored {
+                    fresh.dispose()
+                    return
+                }
                 installActiveDeviceListener(deviceID: deviceID)
             } catch {
-                // Could not restart into the new device; leave the unit down and let release→finishDraining
-                // finalize the partial capture. handle() rebuilds the converter automatically if a later
-                // restart delivers a different native format.
+                // A restart can fail transiently precisely because the device is mid-transition (the Bluetooth
+                // A2DP↔HFP case that triggered it). Giving up here left the rest of the dictation recording
+                // dead air with no signal. Instead schedule a bounded retry — still governed by
+                // maxConfigRestarts via configRestartCount — so a device that settles a beat later is picked
+                // back up; only after the cap does the partial capture finalize on release.
                 disposeUnitInline()
+                queue.asyncAfter(deadline: .now() + 0.25) { [self] in requestMidRecordingRestart() }
             }
         }
+    }
+
+    static func shouldStartReplacementUnit(generation: Int, currentGeneration: Int, captureActive: Bool) -> Bool {
+        generation == currentGeneration && captureActive
     }
 }

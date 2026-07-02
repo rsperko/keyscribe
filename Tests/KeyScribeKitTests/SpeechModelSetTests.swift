@@ -80,29 +80,35 @@ struct SpeechModelSetTests {
     }
 
     // Deletion effects
-    @Test func deletingActiveReassignsToDefaultEnglishWhenUsable() throws {
+    @Test func deletingActiveReassignsToDefaultEnglishWhenUsable() {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "whisper")
-        try s.delete("whisper")
+        s.delete("whisper")
         #expect(!s.installed.contains("whisper"))
         #expect(s.activeId == "parakeet")   // default-English fallback
     }
 
-    @Test func deletingActiveFallsBackToAppleFloor() throws {
+    @Test func deletingActiveFallsBackToAppleFloor() {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "parakeet")
-        try s.delete("parakeet")
+        s.delete("parakeet")
         #expect(s.activeId == "apple")      // system-managed floor remains usable
     }
 
-    @Test func deletingInactiveLeavesActiveUnchanged() throws {
+    @Test func deletingInactiveLeavesActiveUnchanged() {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "parakeet")
-        try s.delete("whisper")
+        s.delete("whisper")
         #expect(s.activeId == "parakeet")
     }
 
-    @Test func deletingTheOnlyUsableEngineThrows() {
+    // Deleting the last usable model must actually remove it from `installed` (into the "no model
+    // installed" state the UI narrates) — not desync the set so the row still reads "Installed" and the
+    // next dictation silently re-downloads.
+    @Test func deletingTheOnlyUsableEngineRemovesItIntoANoUsableState() {
         let cat = [info("only", system: false, defaultEnglish: true)]
         var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
-        #expect(throws: ModelSelectionError.wouldLeaveNoUsableEngine) { try s.delete("only") }
+        s.delete("only")
+        #expect(!s.installed.contains("only"))
+        #expect(s.usableIds.isEmpty)
+        #expect(!s.isUsable(s.activeId))
     }
 
     @Test func markInstalledMakesUsable() {

@@ -80,7 +80,9 @@ struct ModelDiscoveryTests {
 
     @Test func geminiListsOnlyGenerateContentModelsByBaseModelId() async throws {
         StubURLProtocol.handler = { request in
-            #expect(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models?key=gemini-key")
+            // The Gemini key now travels in the x-goog-api-key header, not the URL query string.
+            #expect(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models")
+            #expect(request.value(forHTTPHeaderField: "x-goog-api-key") == "gemini-key")
             let body = """
             {
               "models": [

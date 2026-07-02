@@ -63,7 +63,23 @@ final class HotkeyMonitor {
     }
 
     func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
-        self.bindings = bindings
+        // Carry live gesture state across a rebuild for any binding whose descriptor + press style are
+        // unchanged. A Settings toggle (or a watcher-driven reload) rebuilds the monitor with fresh
+        // PressGestures; without this, a key that is currently held/latched loses its in-progress gesture
+        // and its release edge is dropped (a tap-to-toggle "stop" tap would be misread as a new "start"),
+        // stranding the recording. Only a binding whose key or style actually changed gets a fresh gesture.
+        let previous = self.bindings
+        self.bindings = bindings.map { incoming in
+            guard let match = previous.first(where: {
+                $0.descriptor == incoming.descriptor
+                    && $0.gesture.style == incoming.gesture.style
+                    && $0.gesture.tapThreshold == incoming.gesture.tapThreshold
+            }) else { return incoming }
+            var carried = incoming
+            carried.gesture = match.gesture
+            carried.hyperEngaged = match.hyperEngaged
+            return carried
+        }
         self.actionBindings = actionBindings
         rebuildCarbon()
         rebuildMouse()

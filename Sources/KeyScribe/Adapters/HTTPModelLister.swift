@@ -86,7 +86,9 @@ struct HTTPModelLister {
             req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             return req
         case .gemini:
-            return URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(key)")!)
+            var req = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!)
+            req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+            return req
         case .openaiCompatible:
             throw ModelListError.missingBaseURL
         }
@@ -112,12 +114,6 @@ struct HTTPModelLister {
                 return nil
             }.orderedUnique
         }
-    }
-}
-
-private extension String {
-    var removingTrailingSlash: String {
-        hasSuffix("/") ? String(dropLast()) : self
     }
 }
 

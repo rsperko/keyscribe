@@ -203,7 +203,7 @@ final class SpeechModelsModel: ObservableObject {
             await evictEngine(id)
             ModelInstallStore.removeFiles(for: id)
             ModelInstallStore.markRemoved(id)
-            try? set.delete(id)
+            set.delete(id)
             verifyFailed.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             rebuild()
@@ -226,7 +226,7 @@ final class SpeechModelsModel: ObservableObject {
             if SpeechModelCatalog.entry(for: id)?.systemManaged == false {
                 let wasActive = set.activeId == id
                 ModelInstallStore.markRemoved(id)
-                try? set.delete(id)
+                set.delete(id)
                 if wasActive { onActiveChange(set.activeId) }
             }
         } else {
@@ -282,7 +282,7 @@ final class SpeechModelsModel: ObservableObject {
             await evictEngine(id)
             ModelInstallStore.removeFiles(for: id)
             ModelInstallStore.markRemoved(id)
-            try? set.delete(id)
+            set.delete(id)
             verifyFailed.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             refreshSizes()
