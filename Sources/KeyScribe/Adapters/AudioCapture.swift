@@ -210,8 +210,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     func start(sampleRate: Int) async throws -> URL {
         rebuildIfNeeded()
-        let queue = currentQueue()
-        let generation = currentGeneration()
+        let (queue, generation) = currentQueueAndGeneration()
         let started = DispatchTime.now()
         do {
             // Non-destructive watchdog: adopt a bring-up that lands within the grace window; only the
@@ -264,8 +263,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // realization there and pay the one-time cost on the next dictation instead. Wired/built-in inputs
         // have no A2DP/HFP penalty, so they keep fast prewarm.
         guard !effectiveInputIsBluetooth() else { return }
-        let queue = currentQueue()
-        let generation = currentGeneration()
+        let (queue, generation) = currentQueueAndGeneration()
         Task.detached { [self] in
             do {
                 try await runWithDeadline(seconds: Self.bringUpTimeout) {
@@ -528,8 +526,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Finalize and close the WAV before queuing the potentially-blocking unit teardown. The queued step is
     // generation-guarded so it cannot stop or dispose a newer capture's unit.
     private func teardownAndFinalize() async -> URL? {
-        let queue = currentQueue()
-        let generation = currentGeneration()
+        let (queue, generation) = currentQueueAndGeneration()
         let url = lock.withLock { session?.url }
         finishWriterAndCloseFile(flushConverter: true)
         do {
@@ -598,8 +595,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // can delete it, then queue only the potentially-blocking unit teardown.
     func stop() -> URL? {
         resumeDrain()
-        let queue = currentQueue()
-        let generation = currentGeneration()
+        let (queue, generation) = currentQueueAndGeneration()
         let url = lock.withLock { session?.url }
         finishWriterAndCloseFile(flushConverter: false)
         queue.async { [self] in teardownUnit(generation: generation) }
@@ -656,6 +652,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private func currentQueue() -> DispatchQueue { lock.withLock { controlQueue } }
     private func currentGeneration() -> Int { lock.withLock { generation } }
+    private func currentQueueAndGeneration() -> (queue: DispatchQueue, generation: Int) {
+        lock.withLock { (controlQueue, generation) }
+    }
     private func isGeneration(_ g: Int) -> Bool { lock.withLock { generation == g } }
     private func markRebuild() { lock.withLock { mustRebuild = true } }
 

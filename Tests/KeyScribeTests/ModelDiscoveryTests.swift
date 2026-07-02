@@ -80,8 +80,7 @@ struct ModelDiscoveryTests {
 
     @Test func geminiListsOnlyGenerateContentModelsByBaseModelId() async throws {
         StubURLProtocol.handler = { request in
-            // The Gemini key now travels in the x-goog-api-key header, not the URL query string.
-            #expect(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models")
+            #expect(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000")
             #expect(request.value(forHTTPHeaderField: "x-goog-api-key") == "gemini-key")
             let body = """
             {
@@ -123,5 +122,78 @@ struct ModelDiscoveryTests {
         let models = try await lister.listModels(for: connection, apiKey: nil)
 
         #expect(models == ["gemini-2.5-flash", "gemini-2.5-pro"])
+    }
+
+    @Test func anthropicRequestsTheFullModelListInOnePage() async throws {
+        StubURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "https://api.anthropic.com/v1/models?limit=1000")
+            #expect(request.value(forHTTPHeaderField: "x-api-key") == "anthropic-key")
+            #expect(request.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
+            let body = """
+            {"data": [{"id": "claude-opus-4-6"}, {"id": "claude-sonnet-4-6"}]}
+            """.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "anthropic-key" })
+        let connection = Connection(
+            id: "anthropic", name: "Anthropic", provider: .anthropic, model: "", keyRef: "k")
+
+        let models = try await lister.listModels(for: connection, apiKey: nil)
+
+        #expect(models == ["claude-opus-4-6", "claude-sonnet-4-6"])
+    }
+
+    @Test func anthropicWalksPagesUntilHasMoreIsFalse() async throws {
+        nonisolated(unsafe) var requestedURLs: [String] = []
+        StubURLProtocol.handler = { request in
+            let url = request.url!.absoluteString
+            requestedURLs.append(url)
+            let body: String
+            if url.contains("after_id") {
+                #expect(url == "https://api.anthropic.com/v1/models?limit=1000&after_id=claude-2")
+                body = #"{"data": [{"id": "claude-3"}], "has_more": false}"#
+            } else {
+                body = #"{"data": [{"id": "claude-1"}, {"id": "claude-2"}], "has_more": true, "last_id": "claude-2"}"#
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    body.data(using: .utf8)!)
+        }
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "anthropic-key" })
+        let connection = Connection(
+            id: "anthropic", name: "Anthropic", provider: .anthropic, model: "", keyRef: "k")
+
+        let models = try await lister.listModels(for: connection, apiKey: nil)
+
+        #expect(models == ["claude-1", "claude-2", "claude-3"])
+        #expect(requestedURLs.count == 2)
+    }
+
+    @Test func geminiWalksPagesUntilNextPageTokenIsAbsent() async throws {
+        nonisolated(unsafe) var requestedURLs: [String] = []
+        StubURLProtocol.handler = { request in
+            let url = request.url!.absoluteString
+            requestedURLs.append(url)
+            let body: String
+            if url.contains("pageToken") {
+                #expect(url == "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&pageToken=abc/%3D%3D")
+                body = """
+                {"models": [{"name": "models/gemini-2.5-pro", "baseModelId": "gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]}]}
+                """
+            } else {
+                body = """
+                {"models": [{"name": "models/gemini-2.5-flash", "baseModelId": "gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]}], "nextPageToken": "abc/=="}
+                """
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    body.data(using: .utf8)!)
+        }
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "gemini-key" })
+        let connection = Connection(
+            id: "gemini", name: "Gemini", provider: .gemini, model: "", keyRef: "k")
+
+        let models = try await lister.listModels(for: connection, apiKey: nil)
+
+        #expect(models == ["gemini-2.5-flash", "gemini-2.5-pro"])
+        #expect(requestedURLs.count == 2)
     }
 }

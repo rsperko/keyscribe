@@ -37,6 +37,15 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
 
     private var modelDir: URL { modelsDir.appendingPathComponent(Self.subdir, isDirectory: true) }
 
+    private func modelFilesPresent(at folder: URL) -> Bool {
+        let fm = FileManager.default
+        return Self.files.allSatisfy { fm.fileExists(atPath: folder.appendingPathComponent($0.name).path) }
+    }
+
+    func verifyInstalled(in modelsDir: URL) -> Bool? {
+        modelFilesPresent(at: modelsDir.appendingPathComponent(Self.subdir, isDirectory: true))
+    }
+
     func loadIfNeeded() async throws {
         try await load(progress: nil)
     }

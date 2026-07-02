@@ -18,9 +18,6 @@ public protocol SpeechEngine: Sendable {
 
     // Install footprint owned by this engine, used by reconcile/delete. The subdirectory names
     // (under modelsDir) the engine downloads into; empty for system-managed engines.
-    // `verifyInstalled` reports whether those files are confirmed on disk: `true`/`false` when the
-    // SDK can check integrity, `nil` ("can't verify") to defer to the install marker rather than risk
-    // deleting a valid install. Only Parakeet can verify; the rest return the default `nil`.
     var installDirNames: [String] { get }
     func verifyInstalled(in modelsDir: URL) -> Bool?
 }

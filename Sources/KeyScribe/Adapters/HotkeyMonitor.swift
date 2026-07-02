@@ -1,6 +1,7 @@
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import IOKit.hidsystem
 import KeyScribeKit
 import os
 
@@ -269,14 +270,15 @@ final class HotkeyMonitor {
 
         case .named(let named):
             guard type == .flagsChanged, keyCode == Int64(descriptor.triggerKeyCode) else { return nil }
-            let bit: CGEventFlags
             switch named {
-            case .fn: bit = .maskSecondaryFn
-            case .rightOption: bit = .maskAlternate
-            case .rightCommand: bit = .maskCommand
+            case .fn:
+                return flags.contains(.maskSecondaryFn) ? .down : .up
+            case .rightOption:
+                return flags.rawValue & UInt64(NX_DEVICERALTKEYMASK) != 0 ? .down : .up
+            case .rightCommand:
+                return flags.rawValue & UInt64(NX_DEVICERCMDKEYMASK) != 0 ? .down : .up
             case .hyper: return nil
             }
-            return flags.contains(bit) ? .down : .up
 
         case .chord, .mouseButton:
             return nil

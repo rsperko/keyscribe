@@ -568,16 +568,24 @@ public enum ModeStore {
     // Anything else (a customized or disabled Plain Dictation, a promoted different mode) is left
     // untouched, and Direct takes Fn only if no enabled mode already holds it. NOTE: `_direct.toml`'s
     // presence IS the migration marker, so this migration runs at most once.
-    public static func ensureSystemModes(in dir: URL) {
+    public static func ensureSystemModes(in dir: URL, lkgDir: URL? = nil) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = fileURL(for: .direct, in: dir)
-        if let current = try? String(contentsOf: url, encoding: .utf8) {
-            let resolved = (try? decode(from: current, id: Mode.directId))?.systemNormalized() ?? .direct
-            guard let encoded = try? encode(resolved), encoded != current else { return }
-            try? encoded.write(to: url, atomically: true, encoding: .utf8)
+        guard let current = try? String(contentsOf: url, encoding: .utf8) else {
+            try? encode(migratedDirect(in: dir)).write(to: url, atomically: true, encoding: .utf8)
             return
         }
-        try? encode(migratedDirect(in: dir)).write(to: url, atomically: true, encoding: .utf8)
+
+        let resolved: Mode?
+        do {
+            resolved = try decode(from: current, id: Mode.directId).systemNormalized()
+        } catch ConfigError.newerSchemaVersion {
+            return
+        } catch {
+            resolved = lkgDir.flatMap { loadLKG(id: Mode.directId, in: $0) }?.systemNormalized()
+        }
+        guard let resolved, let encoded = try? encode(resolved), encoded != current else { return }
+        try? encoded.write(to: url, atomically: true, encoding: .utf8)
     }
 
     // First-run Direct profile + Plain-Dictation migration (see ensureSystemModes).

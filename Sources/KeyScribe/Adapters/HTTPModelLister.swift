@@ -30,13 +30,24 @@ struct HTTPModelLister {
     var tokenCache: TokenCommandCache = .shared
     var now: @Sendable () -> Date = { Date() }
 
+    private static let maxPages = 20
+
     func listModels(for connection: Connection, apiKey: String?) async throws -> [String] {
         let storedKey = try await credential(for: connection, apiKey: apiKey)
-        let request = try request(for: connection, key: storedKey)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ModelListError.badResponse }
-        guard (200..<300).contains(http.statusCode) else { throw ModelListError.http(http.statusCode) }
-        return try parse(data, provider: connection.provider)
+        var ids: [String] = []
+        var pageToken: String?
+        var pages = 0
+        repeat {
+            let request = try request(for: connection, key: storedKey, pageToken: pageToken)
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw ModelListError.badResponse }
+            guard (200..<300).contains(http.statusCode) else { throw ModelListError.http(http.statusCode) }
+            let page = try parsePage(data, provider: connection.provider)
+            ids.append(contentsOf: page.ids)
+            pageToken = page.nextPageToken
+            pages += 1
+        } while pageToken != nil && pages < Self.maxPages
+        return ids.orderedUnique
     }
 
     private func credential(for connection: Connection, apiKey: String?) async throws -> String? {
@@ -56,11 +67,11 @@ struct HTTPModelLister {
         }
     }
 
-    private func request(for connection: Connection, key: String?) throws -> URLRequest {
+    private func request(for connection: Connection, key: String?, pageToken: String?) throws -> URLRequest {
         switch connection.provider {
         case .openai, .anthropic, .gemini:
             guard let key, !key.isEmpty else { throw ModelListError.missingKey(connection.keyRef) }
-            return try hostedRequest(for: connection.provider, key: key)
+            return try hostedRequest(for: connection.provider, key: key, pageToken: pageToken)
         case .openaiCompatible:
             let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !base.isEmpty, let url = URL(string: base.removingTrailingSlash + "/models") else {
@@ -74,19 +85,31 @@ struct HTTPModelLister {
         }
     }
 
-    private func hostedRequest(for provider: Connection.Provider, key: String) throws -> URLRequest {
+    private func hostedRequest(for provider: Connection.Provider, key: String, pageToken: String?) throws -> URLRequest {
         switch provider {
         case .openai:
             var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             return req
         case .anthropic:
-            var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/models")!)
+            var components = URLComponents(string: "https://api.anthropic.com/v1/models")!
+            components.queryItems = [URLQueryItem(name: "limit", value: "1000")]
+            if let pageToken {
+                components.queryItems?.append(URLQueryItem(name: "after_id", value: pageToken))
+            }
+            guard let url = components.url else { throw ModelListError.badResponse }
+            var req = URLRequest(url: url)
             req.setValue(key, forHTTPHeaderField: "x-api-key")
             req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             return req
         case .gemini:
-            var req = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!)
+            var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models")!
+            components.queryItems = [URLQueryItem(name: "pageSize", value: "1000")]
+            if let pageToken {
+                components.queryItems?.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            guard let url = components.url else { throw ModelListError.badResponse }
+            var req = URLRequest(url: url)
             req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
             return req
         case .openaiCompatible:
@@ -94,17 +117,29 @@ struct HTTPModelLister {
         }
     }
 
-    private func parse(_ data: Data, provider: Connection.Provider) throws -> [String] {
+    private struct Page {
+        let ids: [String]
+        let nextPageToken: String?
+    }
+
+    private func parsePage(_ data: Data, provider: Connection.Provider) throws -> Page {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ModelListError.badResponse
         }
         switch provider {
-        case .openai, .openaiCompatible, .anthropic:
+        case .openai, .openaiCompatible:
             guard let data = json["data"] as? [[String: Any]] else { throw ModelListError.badResponse }
-            return data.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }.orderedUnique
+            let ids = data.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+            return Page(ids: ids, nextPageToken: nil)
+        case .anthropic:
+            guard let data = json["data"] as? [[String: Any]] else { throw ModelListError.badResponse }
+            let ids = data.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+            let hasMore = json["has_more"] as? Bool ?? false
+            let lastId = (json["last_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return Page(ids: ids, nextPageToken: hasMore ? lastId : nil)
         case .gemini:
             guard let models = json["models"] as? [[String: Any]] else { throw ModelListError.badResponse }
-            return models.compactMap { model -> String? in
+            let ids = models.compactMap { model -> String? in
                 let methods = model["supportedGenerationMethods"] as? [String]
                 guard methods?.contains("generateContent") == true else { return nil }
                 if let base = model["baseModelId"] as? String, !base.isEmpty { return base }
@@ -112,7 +147,9 @@ struct HTTPModelLister {
                     return name.replacingOccurrences(of: "models/", with: "")
                 }
                 return nil
-            }.orderedUnique
+            }
+            let nextPageToken = (json["nextPageToken"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return Page(ids: ids, nextPageToken: nextPageToken)
         }
     }
 }

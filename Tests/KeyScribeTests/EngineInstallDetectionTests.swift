@@ -108,4 +108,25 @@ final class EngineInstallDetectionTests: XCTestCase {
         try writeFiles(["config.json", "vocab.json", "merges.txt", "tokenizer_config.json"], into: cacheDir)
         XCTAssertEqual(Qwen3ASREngine(profile: .large, modelsDir: dir).verifyInstalled(in: dir), false)
     }
+
+    private static let moonshineFiles = ["encoder_model.ort", "decoder_model_merged.ort", "tokenizer.bin"]
+
+    private func moonshineDir() -> URL {
+        dir.appendingPathComponent("moonshine-base-en", isDirectory: true)
+    }
+
+    func testMoonshineUnverifiedWhenAbsent() {
+        let engine = MoonshineEngine(modelsDir: dir)
+        XCTAssertEqual(engine.verifyInstalled(in: dir), false)
+    }
+
+    func testMoonshineVerifiedWhenAllRequiredFilesPresent() throws {
+        try writeFiles(Self.moonshineFiles, into: moonshineDir())
+        XCTAssertEqual(MoonshineEngine(modelsDir: dir).verifyInstalled(in: dir), true)
+    }
+
+    func testMoonshineUnverifiedWhenCacheIsPartial() throws {
+        try writeFiles(["encoder_model.ort"], into: moonshineDir())
+        XCTAssertEqual(MoonshineEngine(modelsDir: dir).verifyInstalled(in: dir), false)
+    }
 }

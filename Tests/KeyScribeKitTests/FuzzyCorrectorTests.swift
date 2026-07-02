@@ -84,4 +84,8 @@ struct FuzzyCorrectorTests {
     @Test func recoversLeadingConsonantHomophone() {
         #expect(fix("run the sellery worker", ["Celery"]) == "run the Celery worker")
     }
+
+    @Test func doesNotSnapDistanceTwoOnAShortWord() {
+        #expect(fix("please install mane now", ["Mono"]) == "please install mane now")
+    }
 }

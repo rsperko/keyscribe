@@ -22,9 +22,10 @@ public struct TailDrainGate: Sendable {
     }
 
     public mutating func observe(bufferStartHostTime: UInt64?) -> Outcome {
-        buffersSeen += 1
-        if let start = bufferStartHostTime, start >= releaseHostTime { return .stop }
-        if buffersSeen >= maxBuffersBeforeStop { return .stop }
-        return .keepDraining
+        guard let start = bufferStartHostTime else {
+            buffersSeen += 1
+            return buffersSeen >= maxBuffersBeforeStop ? .stop : .keepDraining
+        }
+        return start >= releaseHostTime ? .stop : .keepDraining
     }
 }

@@ -84,7 +84,7 @@ final class CorrectionPanelController {
         window?.orderOut(nil)
         Task { @MainActor in
             target.activate()
-            guard await waitUntilFrontmost(target) else {
+            guard await TextInserter.waitUntilFrontmost(target) else {
                 status.message = "Saved to your vocabulary. \(Branding.appName) could not return to the app, so the selected text was not changed."
                 NSApp.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)
@@ -94,18 +94,6 @@ final class CorrectionPanelController {
             await TextInserter.insertViaPaste(pasteText)
             window?.close()
         }
-    }
-
-    // Poll for the source app to actually become frontmost before we paste. activate() is asynchronous,
-    // so a single check races it; if it never lands we bail rather than paste into the wrong target.
-    private func waitUntilFrontmost(_ target: NSRunningApplication, timeoutMs: Int = 600, stepMs: Int = 50) async -> Bool {
-        var waited = 0
-        while waited < timeoutMs {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier { return true }
-            try? await Task.sleep(for: .milliseconds(stepMs))
-            waited += stepMs
-        }
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
     }
 }
 

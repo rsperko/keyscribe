@@ -34,7 +34,11 @@ final class DictationController {
     private let effects: DuringDictationEffects
     // Serialises the STT call: a deadline only abandons a wedged transcribe, so this keeps a second
     // dictation from starting a concurrent transcribe on the same engine until the first truly settles.
-    private let transcribeGate = SingleFlightDeadline()
+    private var transcribeGate = SingleFlightDeadline()
+    private var transcribeBusyStreak = 0
+    private var transcribeBusyStreakStartedAt: Double?
+    private static let transcribeBusyStreakLimit = 3
+    private static let transcribeBusyBackstopSeconds: Double = 600
     private weak var hud: HUDPresenting?
 
     private var machine = DictationMachine()
@@ -58,6 +62,7 @@ final class DictationController {
         var pendingLocalTranscript: String?
         var pendingLocalIssuedTokens: [String] = []
         var pendingHeardTranscript: String?
+        var pendingLocalRewriteDetails: RewriteDetails?
         var dictationTask: Task<Void, Never>?
         var rewriteEscapeTask: Task<Void, Never>?
         var recordingLimitTask: Task<Void, Never>?
@@ -97,6 +102,9 @@ final class DictationController {
     private var pendingHeardTranscript: String? {
         get { session?.pendingHeardTranscript } set { session?.pendingHeardTranscript = newValue }
     }
+    private var pendingLocalRewriteDetails: RewriteDetails? {
+        get { session?.pendingLocalRewriteDetails } set { session?.pendingLocalRewriteDetails = newValue }
+    }
     private var rewriteEscapeTask: Task<Void, Never>? {
         get { session?.rewriteEscapeTask } set { session?.rewriteEscapeTask = newValue }
     }
@@ -127,6 +135,7 @@ final class DictationController {
 
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
+    private var idleEvictionEngine: (any SpeechEngine)?
     // Re-realizes the audio input binding while idle so the first dictation after a long idle (or a system
     // sleep) does not pay a stale unit-realization on the hot path. See scheduleCaptureRefresh.
     private var captureRefreshTask: Task<Void, Never>?
@@ -310,6 +319,9 @@ final class DictationController {
     func updateSettings(_ settings: Settings) {
         self.settings = settings
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
+        if !isBusy, let engine = idleEvictionEngine {
+            scheduleIdleEviction(after: 0, engine: engine)
+        }
     }
 
     // The active engine changed (Settings). Evict the one we switched away from.
@@ -673,6 +685,7 @@ final class DictationController {
         dictationTask = Task { @MainActor [weak self] in
             guard let self else { return }
             guard let url = await self.audio.finishDraining() else {
+                if Task.isCancelled { return }
                 self.machine.cancel()
                 self.effects.end(self.settings.duringDictation, cue: .cancel)
                 self.hud?.render(.hidden)
@@ -799,6 +812,23 @@ final class DictationController {
         }
     }
 
+    private func noteTranscribeBusyRejection() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let streakStart = transcribeBusyStreakStartedAt ?? now
+        transcribeBusyStreakStartedAt = streakStart
+        transcribeBusyStreak += 1
+        let backstopElapsed = now - streakStart >= Self.transcribeBusyBackstopSeconds
+        guard transcribeBusyStreak >= Self.transcribeBusyStreakLimit || backstopElapsed else { return }
+        log.error("transcribe gate wedged for \(now - streakStart, privacy: .public)s after \(self.transcribeBusyStreak, privacy: .public) rejection(s) — rebuilding the gate")
+        transcribeGate = SingleFlightDeadline()
+        resetTranscribeBusyStreak()
+    }
+
+    private func resetTranscribeBusyStreak() {
+        transcribeBusyStreak = 0
+        transcribeBusyStreakStartedAt = nil
+    }
+
     private func transcribeAndInsert(url: URL, audioSeconds: Double?) async {
         await modeResolveTask?.value
         let engine = activeEngine
@@ -849,8 +879,10 @@ final class DictationController {
         do {
             rawFromEngine = try await transcribeBounded(
                 audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url)
+            resetTranscribeBusyStreak()
         } catch is SingleFlightDeadline.Busy {
             try? FileManager.default.removeItem(at: url)
+            noteTranscribeBusyRejection()
             if Task.isCancelled { return }
             log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
             finishError("Still finishing the previous dictation")
@@ -910,17 +942,9 @@ final class DictationController {
     }
 
     private func finishInsertion(
-        transcript rawTranscript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?,
+        transcript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?,
         bare: Bool = false
     ) async {
-        // Trim runs on the fully-restored final string, before the trailing suffix is appended, so a
-        // command/subject-line mode never ends in a stray "." or "?" — enforcement the rewrite prompt
-        // can only request, not guarantee. Applied here so the trimmed text is what the fingerprint,
-        // no-speech outcome, insert, and history all see. A `bare` whole-utterance replacement is
-        // already the exact value to insert — skip trim (and the trailing suffix below).
-        let transcript = (!bare && (activeMode?.trimTrailingPunctuation ?? false))
-            ? OutputCleanup.trimTrailingPunctuation(rawTranscript)
-            : rawTranscript
         clearRewriteEscapeHatch()
         // Guarded transition: another terminal path may already have won the race.
         guard machine.beginInserting() else { return }
@@ -1052,6 +1076,7 @@ final class DictationController {
 
     private func scheduleIdleEviction(after: Double, engine active: any SpeechEngine) {
         idleEvictionTask?.cancel()
+        idleEvictionEngine = active
         let mode = settings.stt.eviction
         let idle = settings.stt.evictionIdleSeconds.map(Double.init)
         let usedAt = lastUsedAt
@@ -1063,8 +1088,9 @@ final class DictationController {
             case .evictNow:
                 self.invalidateWarm(active.id)
                 await active.evict()
+                self.idleEvictionEngine = nil
             case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again, engine: active)
-            case .keepLoaded: break
+            case .keepLoaded: self.idleEvictionEngine = nil
             }
         }
     }
@@ -1108,6 +1134,11 @@ final class DictationController {
     // Dictation mode → the spoken text is the content (pipeline + optional rewrite); we always
     // insert something. Selection mode (edit-in-place) → the selection is the content and speech is
     // the instruction; on any failure we abort rather than touch the selection.
+    private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
+        guard mode?.trimTrailingPunctuation ?? false else { return tokenizedText }
+        return OutputCleanup.trimTrailingPunctuation(tokenizedText)
+    }
+
     private func produceFinalText(routed: PhaseBResult, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
         if mode?.source == .selection {
             let (final, details) = await rewriteSelection(instruction: routed.transcript, mode: mode)
@@ -1140,7 +1171,7 @@ final class DictationController {
 
         // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
         // insert when no rewrite runs or it falls back.
-        let localProcessed = pipeline.restore(tokenized)
+        let localProcessed = pipeline.restore(trimmedIfNeeded(tokenized, mode: mode))
         building.stageMillis[.localProcess] = elapsedMs(since: localStart)
         building.fingerprints[.localProcessed] = .of(localProcessed)
         // Record the on-device intermediate unconditionally — the local pipeline runs on every
@@ -1257,6 +1288,12 @@ final class DictationController {
             mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
             capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection).build()
 
+        if mode.source != .selection {
+            pendingLocalRewriteDetails = RewriteDetails(
+                connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
+                contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true)
+        }
+
         let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(
             payload: payload, inputs: request.inputs, connection: request.sized,
@@ -1271,7 +1308,7 @@ final class DictationController {
         }
         // Restore runs only on the gate-approved text (or the fallback), never before the gate — the
         // ordering is structural now that `rewrite` owns the gate and returns the vetted string.
-        let text = pipeline.restore(gateApproved)
+        let text = pipeline.restore(trimmedIfNeeded(gateApproved, mode: mode))
         let details = RewriteDetails(
             connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
             contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack)
@@ -1354,13 +1391,14 @@ final class DictationController {
         guard let transcript = pendingLocalTranscript, let heard = pendingHeardTranscript,
               machine.state == .transcribing else { return }
         let issuedTokens = pendingLocalIssuedTokens
+        let rewrite = pendingLocalRewriteDetails
         dictationTask?.cancel()
         clearRewriteEscapeHatch()
         switch guardedInsert(transcript, issuedTokens: issuedTokens) {
         case .abort(let message, let action):
             finishError(message, action: action)
         case .insert(let final, let bare):
-            Task { await self.finishInsertion(transcript: final, heard: heard, rewrite: nil, bare: bare) }
+            Task { await self.finishInsertion(transcript: final, heard: heard, transformed: transcript, rewrite: rewrite, bare: bare) }
         }
     }
 
@@ -1382,6 +1420,7 @@ final class DictationController {
         pendingLocalTranscript = nil
         pendingLocalIssuedTokens = []
         pendingHeardTranscript = nil
+        pendingLocalRewriteDetails = nil
     }
 
     private func elapsedMs(since start: DispatchTime) -> Double {

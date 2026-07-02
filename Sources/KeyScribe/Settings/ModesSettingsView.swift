@@ -31,8 +31,9 @@ final class ModesSettingsModel: ObservableObject {
     // redundant reload on the next visit.
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
-        ModeStore.ensureSystemModes(in: modesDir)
-        let result = ModeStore.load(in: modesDir, previous: modes)
+        let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
+        ModeStore.ensureSystemModes(in: modesDir, lkgDir: lkgModesDir)
+        let result = ModeStore.load(in: modesDir, previous: modes, lkgDir: lkgModesDir)
         modes = result.modes
         loadFailures = result.failures
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
@@ -224,6 +225,13 @@ struct ModesSettingsView: View {
         VStack(spacing: 0) {
             if !model.loadFailures.isEmpty {
                 ModeLoadFailureBanner(failures: model.loadFailures)
+                Divider()
+            }
+            if let error = model.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
                 Divider()
             }
             paneBody

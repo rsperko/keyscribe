@@ -32,9 +32,17 @@ struct TailDrainGateTests {
         #expect(gate.observe(bufferStartHostTime: 2000) == .stop)
     }
 
-    @Test func countCapBoundsAStuckClockThatNeverCrossesRelease() {
+    @Test func countCapBoundsOnlyInvalidTimestampsWithAStuckClock() {
         var gate = TailDrainGate(releaseHostTime: .max, maxBuffersBeforeStop: 2)
-        #expect(gate.observe(bufferStartHostTime: 5) == .keepDraining)
-        #expect(gate.observe(bufferStartHostTime: 6) == .stop)
+        #expect(gate.observe(bufferStartHostTime: nil) == .keepDraining)
+        #expect(gate.observe(bufferStartHostTime: nil) == .stop)
+    }
+
+    @Test func validPreReleaseBuffersNeverTripTheCountCap() {
+        var gate = TailDrainGate(releaseHostTime: 1000, maxBuffersBeforeStop: 2)
+        #expect(gate.observe(bufferStartHostTime: 10) == .keepDraining)
+        #expect(gate.observe(bufferStartHostTime: 20) == .keepDraining)
+        #expect(gate.observe(bufferStartHostTime: 30) == .keepDraining)
+        #expect(gate.observe(bufferStartHostTime: 1000) == .stop)
     }
 }

@@ -237,6 +237,19 @@ struct AIServiceSettingsView: View {
     @State private var pendingDelete: Connection?
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let error = model.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                Divider()
+            }
+            paneBody
+        }
+    }
+
+    private var paneBody: some View {
         HStack(spacing: 0) {
             List(selection: $model.selectedID) {
                 ForEach(model.connections) { connection in

@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ModelInstallStore.reconcile(engines: engines)
         provider = resolveProvider(engines: engines)
         ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
+        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
         let reconciled = ModeStore.reconcileSeeds(
             modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
             settingsDir: KeyScribePaths.supportDir)
@@ -220,6 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadSettings() {
         do {
             settings = try SettingsStore.loadOrCreate(supportDir: KeyScribePaths.supportDir)
+            configError = nil
         } catch {
             settings = Settings.defaults
             configError = "Using defaults — \(error)"
@@ -316,16 +317,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func reloadConfig() {
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
+        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
         config.invalidate()
         // Absorb an external settings.toml edit (the Advanced pane promises edits are detected). Adopting
         // it into `settings` also means a later in-app toggle merges against the current on-disk value
-        // instead of silently overwriting the externally-changed field. On a malformed/unreadable file
-        // keep the running settings rather than reverting to defaults.
-        if let fresh = Self.externallyEditedSettings(current: settings, supportDir: KeyScribePaths.supportDir) {
+        switch Self.settingsFileState(current: settings, supportDir: KeyScribePaths.supportDir) {
+        case .unchanged:
+            configError = nil
+            rebuildHotkeyMonitor()
+        case .updated(let fresh):
+            configError = nil
             applySettingsEffects(fresh)   // rebuilds the hotkey monitor for us
-        } else {
-            rebuildHotkeyMonitor()        // modes/shortcuts may have changed even if settings.toml did not
+        case .invalid(let message):
+            configError = "Settings file has errors — \(message)"
+            rebuildHotkeyMonitor()
         }
         refreshStatus()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
@@ -342,9 +347,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshStatus()
     }
 
-    static func externallyEditedSettings(current: Settings, supportDir: URL) -> Settings? {
-        guard let fresh = try? SettingsStore.loadOrCreate(supportDir: supportDir), fresh != current else { return nil }
-        return fresh
+    enum SettingsFileState: Equatable {
+        case unchanged
+        case updated(Settings)
+        case invalid(String)
+    }
+
+    static func settingsFileState(current: Settings, supportDir: URL) -> SettingsFileState {
+        do {
+            let fresh = try SettingsStore.loadOrCreate(supportDir: supportDir)
+            return fresh == current ? .unchanged : .updated(fresh)
+        } catch {
+            return .invalid("\(error)")
+        }
+    }
+
+    nonisolated static func hotkeyConflictDetected(shadowed: Set<String>) -> Bool {
+        shadowed.contains(GlobalHotkey.vocabularyId) || shadowed.contains(GlobalHotkey.pasteLastId)
     }
 
     private func setEngine(_ id: String) {
@@ -363,6 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettings(_ updated: Settings) {
         applySettingsEffects(updated)
+        guard configError == nil else { return }
         do { try SettingsStore.write(updated, to: KeyScribePaths.supportDir) }
         catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
     }
@@ -533,9 +553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
             modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
             modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
-            hotkeyConflict: shadowedHotkeyIds().contains {
-                $0 == GlobalHotkey.vocabularyId
-            })
+            hotkeyConflict: Self.hotkeyConflictDetected(shadowed: shadowedHotkeyIds()))
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {

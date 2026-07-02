@@ -82,11 +82,7 @@ public enum FuzzyCorrector {
         if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
         guard allowFuzzy else { return nil }
         let normKey = phoneticKey(norm)
-        // Phonetic agreement is mandatory for a fuzzy snap and buys one edit beyond the bare cap,
-        // ceilinged at 2. distance ≤ allowed ≤ 2 implies the lengths differ by at most 2, so only those
-        // length buckets can hold a match. Indices are gathered ascending so equal-distance ties
-        // resolve to the earliest-declared term.
-        let allowed = min((norm.count >= 8 ? 2 : 1) + 1, 2)
+        let allowed = norm.count >= 6 ? 2 : 1
         var candidateIndices: [Int] = []
         for len in (norm.count - allowed)...(norm.count + allowed) where len >= 0 {
             if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }

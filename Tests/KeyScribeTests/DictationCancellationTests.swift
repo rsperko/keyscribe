@@ -149,6 +149,27 @@ private final class DrainTrackingAudio: AudioCapturing, @unchecked Sendable {
     private func markDrained() { lock.lock(); _drained = true; lock.unlock() }
 }
 
+private final class CancelDuringDrainAudio: AudioCapturing, @unchecked Sendable {
+    private let url: URL
+    private let drainStarted: Signal
+    private let drainRelease: Signal
+    init(url: URL, drainStarted: Signal, drainRelease: Signal) {
+        self.url = url
+        self.drainStarted = drainStarted
+        self.drainRelease = drainRelease
+    }
+    func start(sampleRate: Int) async throws -> URL { url }
+    func stop() -> URL? {
+        drainRelease.fire()
+        return nil
+    }
+    func finishDraining() async -> URL? {
+        drainStarted.fire()
+        await drainRelease.wait()
+        return nil
+    }
+}
+
 // start() that resolves only after a delay — stands in for a bring-up that lands late (a resident engine
 // re-realizing a stale binding on the hot path). AudioCapture's own grace window adopts it internally;
 // the controller must also impose no competing deadline and adopt whatever start() eventually returns.
@@ -305,6 +326,44 @@ struct DictationCancellationTests {
         #expect(audio.drained)
         #expect(audio.immediateStops == 0)
         #expect(await insertSpy.calls == 1)
+    }
+
+    @Test func cancelDuringTailDrainDoesNotReplayTheCancelTerminalTwice() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let drainStarted = Signal(), drainRelease = Signal()
+        let engine = InstantEngine(id: "instant", text: "unreached")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
+        let hud = HUDSpy()
+        let audio = CancelDuringDrainAudio(
+            url: supportDir.appendingPathComponent("capture.wav"),
+            drainStarted: drainStarted, drainRelease: drainRelease)
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "instant", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            insert: { _, _, _, _ in return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+        var idleCount = 0
+        controller.onBecameIdle = { idleCount += 1 }
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await drainStarted.wait()
+        let task = controller.dictationTask
+        controller.cancel()
+        await task?.value
+
+        #expect(idleCount == 1)
+        #expect(hud.states.filter { $0 == .hidden }.count == 1)
     }
 
     // Fix 2, controller side: a bring-up that lands late must be ADOPTED — the dictation reaches live

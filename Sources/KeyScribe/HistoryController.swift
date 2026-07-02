@@ -68,7 +68,14 @@ final class HistoryController {
         window?.orderOut(nil)
         target.activate()
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(150))
+            guard await TextInserter.waitUntilFrontmost(target) else {
+                TextInserter.copyToClipboard(text)
+                NSApp.activate(ignoringOtherApps: true)
+                window?.makeKeyAndOrderFront(nil)
+                model.flash("Could not return to the app — copied to clipboard instead.")
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(120))
             await TextInserter.insertViaPaste(text)
         }
     }

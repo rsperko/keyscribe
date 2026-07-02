@@ -134,6 +134,70 @@ struct ModeStoreSeedTests {
         #expect(healed.triggerKeys == [.init(key: "right_option")])
     }
 
+    @Test func ensureSystemModesLeavesAnUndecodableDirectFileUntouchedWithNoLKG() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-undecodable-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("\(Mode.directId).toml")
+        let garbage = "this is not [[[ valid toml"
+        try garbage.write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.ensureSystemModes(in: dir)
+
+        let onDisk = try String(contentsOf: url, encoding: .utf8)
+        #expect(onDisk == garbage)
+    }
+
+    @Test func ensureSystemModesRecoversAnUndecodableDirectFileFromLKG() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-undecodable-lkg-\(UUID().uuidString)")
+        let lkgDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-undecodable-lkg-store-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.removeItem(at: lkgDir)
+        }
+
+        var lastGood = Mode.direct
+        lastGood.triggerKeys = [.init(key: "right_option")]
+        lastGood.excludeFromHistory = true
+        try ModeStore.write(lastGood, to: lkgDir)
+
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(Mode.directId).toml")
+        try "this is not [[[ valid toml".write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.ensureSystemModes(in: dir, lkgDir: lkgDir)
+
+        let onDisk = try String(contentsOf: url, encoding: .utf8)
+        let recovered = try ModeStore.decode(from: onDisk, id: Mode.directId)
+        #expect(recovered.triggerKeys == [.init(key: "right_option")])
+        #expect(recovered.excludeFromHistory)
+        #expect(recovered.aiRewrite == nil)
+    }
+
+    @Test func ensureSystemModesLeavesANewerSchemaDirectFileUntouched() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-newer-schema-\(UUID().uuidString)")
+        let lkgDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-newer-schema-lkg-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.removeItem(at: lkgDir)
+        }
+
+        var lastGood = Mode.direct
+        lastGood.triggerKeys = [.init(key: "fn")]
+        try ModeStore.write(lastGood, to: lkgDir)
+
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(Mode.directId).toml")
+        let newerSchema = "schema_version = 5\nname = \"Plain Dictation\""
+        try newerSchema.write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.ensureSystemModes(in: dir, lkgDir: lkgDir)
+
+        let onDisk = try String(contentsOf: url, encoding: .utf8)
+        #expect(onDisk == newerSchema)
+    }
+
     @Test func migrationRemovesStockPlainDictationAndDirectInheritsItsTrigger() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-mig-stock-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }

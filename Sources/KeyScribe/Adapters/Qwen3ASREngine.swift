@@ -74,22 +74,14 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         // per-variant isolation has to come from basePath, not cacheDirName.
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(
             for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
-        // Load an already-downloaded model without re-fetching model files: when the FULL install is on
-        // disk, pass offlineMode so fromPretrained skips the Hugging Face metadata round trip it otherwise
-        // makes on every cold load. offlineMode:false still downloads a
-        // genuinely-absent OR partial model, healing an interrupted install (downloadWeights skips
-        // present files and fetches the missing ones) instead of loading a tokenizer-less model.
         let offline = fullInstallPresent(in: cacheDir)
         do {
             model = try await Qwen3ASRModel.fromPretrained(
                 modelId: modelId, cacheDir: cacheDir, offlineMode: offline, progressHandler: bridge)
         } catch {
-            // Repair fallback (mirrors WhisperEngine): a present-but-corrupt cache that fails the offline
-            // load (e.g. a truncated .safetensors) is re-fetched with the network enabled. Only when we
-            // attempted offline — a genuinely-absent model already used offlineMode:false, so re-running
-            // it would just repeat the same failure.
             guard offline else { throw error }
             Log.models.notice("qwen3asr: offline load failed (\(error.localizedDescription, privacy: .public)); re-downloading")
+            try? FileManager.default.removeItem(at: cacheDir)
             model = try await Qwen3ASRModel.fromPretrained(
                 modelId: modelId, cacheDir: cacheDir, offlineMode: false, progressHandler: bridge)
         }

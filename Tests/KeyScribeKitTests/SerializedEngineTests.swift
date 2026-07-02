@@ -30,6 +30,8 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     private var _transcribing = false
     private var _evictOverlappedTranscribe = false
     private var _failNextLoad = false
+    private var _concurrentTranscribes = 0
+    private var _maxConcurrentTranscribes = 0
 
     private let loadGate: Gate?
     private let transcribeGate: Gate?
@@ -43,6 +45,7 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     var loaded: Bool { lock.withLock { _loaded } }
     var evicted: Bool { lock.withLock { _evicted } }
     var evictOverlappedTranscribe: Bool { lock.withLock { _evictOverlappedTranscribe } }
+    var maxConcurrentTranscribes: Int { lock.withLock { _maxConcurrentTranscribes } }
 
     func loadIfNeeded() async throws { try await load(progress: nil) }
 
@@ -62,9 +65,16 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
-        lock.withLock { _transcribing = true }
+        lock.withLock {
+            _transcribing = true
+            _concurrentTranscribes += 1
+            _maxConcurrentTranscribes = max(_maxConcurrentTranscribes, _concurrentTranscribes)
+        }
         if let transcribeGate { await transcribeGate.wait() }
-        lock.withLock { _transcribing = false }
+        lock.withLock {
+            _transcribing = false
+            _concurrentTranscribes -= 1
+        }
         return "text"
     }
 
@@ -197,6 +207,20 @@ struct SerializedEngineTests {
         #expect(text == "text")                         // the transcribe ran
         #expect(!spy.evictOverlappedTranscribe)         // evict landed strictly after, never mid-transcribe
         #expect(spy.evicted)
+    }
+
+    @Test func concurrentTranscribesOnTheSameEngineNeverRunSimultaneously() async throws {
+        let gate = Gate()
+        let spy = SpyEngine(transcribeGate: gate)
+        let engine = SerializedEngine(spy)
+        try await engine.loadIfNeeded()
+        async let first: String = try engine.transcribe(wavURL: URL(fileURLWithPath: "/a"), biasTerms: [])
+        try await Task.sleep(for: .milliseconds(20))
+        async let second: String = try engine.transcribe(wavURL: URL(fileURLWithPath: "/b"), biasTerms: [])
+        try await Task.sleep(for: .milliseconds(20))
+        await gate.fire()
+        _ = try await (first, second)
+        #expect(spy.maxConcurrentTranscribes == 1)
     }
 
     @Test func evictOnUnloadedEngineIsANoOp() async {

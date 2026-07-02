@@ -62,6 +62,39 @@ struct DictationPipelineWiringTests {
         }
     }
 
+    private final class Signal: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var fired = false
+        func wait() async {
+            await withCheckedContinuation { c in
+                lock.lock()
+                if fired { lock.unlock(); c.resume(); return }
+                continuation = c
+                lock.unlock()
+            }
+        }
+        func fire() {
+            lock.lock()
+            fired = true
+            let c = continuation
+            continuation = nil
+            lock.unlock()
+            c?.resume()
+        }
+    }
+
+    private final class HangingLLM: LLMClient, @unchecked Sendable {
+        let started: Signal
+        let release: Signal
+        init(started: Signal, release: Signal) { self.started = started; self.release = release }
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            started.fire()
+            await release.wait()
+            return user
+        }
+    }
+
     // Reads the ⟦SN:REDACT:…⟧ token out of the <instructions> block and inserts it into the rewritten
     // content — simulating a faithful edit that needs the redacted instruction value in its output
     // (e.g. "change the recipient to jane@example.com").
@@ -271,6 +304,20 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "a dog a cat")
     }
 
+    @Test func trimTrailingPunctuationDoesNotEatARestoredVerbatimSpan() async {
+        var m = mode(id: "cmd", liveEdits: true)
+        m.trimTrailingPunctuation = true
+        let out = await run(transcript: "run begin verbatim ls -la. end verbatim", mode: m)
+        #expect(out.lastResult == "run ls -la.")
+    }
+
+    @Test func trimTrailingPunctuationStillTrimsUnprotectedText() async {
+        var m = mode(id: "cmd")
+        m.trimTrailingPunctuation = true
+        let out = await run(transcript: "list the files.", mode: m)
+        #expect(out.lastResult == "list the files")
+    }
+
     // The local pipeline runs on EVERY dictation, so history records the on-device intermediate even
     // when local processing changed nothing. Otherwise a no-op leaves no artifact, and the JSONL (or
     // anything mining it) reads "the local pipeline was skipped" — the exact misread that prompted this.
@@ -421,6 +468,51 @@ struct DictationPipelineWiringTests {
 
         #expect(out.lastResult == "Mr Smith email alice@example.com")
         #expect(out.outcome == .localFallback)
+    }
+
+    @Test func escapeHatchInsertReportsCloudInvolvementTruthfully() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+
+        let m = mode(id: "polish", connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        try? ModeStore.write(m, to: modesDir)
+        try? ConnectionStore.write(ConnectionSet(connections: [conn]), to: supportDir)
+
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+
+        let engine = FixedEngine(text: "draft the memo")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "fixed")
+        let history = HistoryStore(supportDir: supportDir)
+        let insertSpy = InsertSpy()
+        let started = Signal(), release = Signal()
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: history, hud: HUDSpy(),
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, method, modifier, text in await insertSpy.record(method, modifier, text); return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true },
+            llmClient: HangingLLM(started: started, release: release))
+
+        controller.setNextModeOverride(id: "polish")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await started.wait()
+        controller.insertLocalTranscriptNow()
+        release.fire()
+        await controller.dictationTask?.value
+
+        let entry = await firstHistoryEntry(in: history)
+        #expect(entry?.cloudInvolved == true)
+        #expect(entry?.outcome == .localFallback)
+        #expect(await insertSpy.text == "draft the memo")
     }
 
     @Test func dictionaryRecoveryCorrectsBiaslessEngineWhenEnabled() async {

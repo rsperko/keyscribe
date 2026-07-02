@@ -114,6 +114,22 @@ enum TextInserter {
         return pb.changeCount != since
     }
 
+    static func waitUntilFrontmost(_ target: NSRunningApplication, timeoutMs: Int = 600, stepMs: Int = 50) async -> Bool {
+        await poll(timeoutMs: timeoutMs, stepMs: stepMs) {
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
+        }
+    }
+
+    static func poll(timeoutMs: Int, stepMs: Int, condition: () -> Bool) async -> Bool {
+        var waited = 0
+        while waited < timeoutMs {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(stepMs))
+            waited += stepMs
+        }
+        return condition()
+    }
+
     // AX can report success while doing nothing in some targets, so use it only when a read-back proves
     // the value changed.
     @discardableResult

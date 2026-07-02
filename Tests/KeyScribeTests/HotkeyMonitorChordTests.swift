@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import KeyScribeKit
 import Testing
@@ -151,6 +152,44 @@ struct HotkeyMonitorChordTests {
         fake.lastRegistrations[0].onPressed()   // fresh gesture → start, not commit
         await drainMain()
         #expect(commits == 0)
+    }
+
+    private func namedBinding(_ named: NamedKey, style: PressStyle = .holdOnly) -> HotkeyMonitor.Binding {
+        .init(triggerKey: nil, descriptor: .named(named), style: style, tapThreshold: 0.25)
+    }
+
+    @Test func rightOptionReleaseFiresEvenWhenLeftOptionStillHeld() async {
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightOption)])
+
+        m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | 0x40))
+        await drainMain()
+        #expect(starts == 1)
+        #expect(commits == 0)
+
+        m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | 0x20))
+        await drainMain()
+        #expect(commits == 1)
+    }
+
+    @Test func rightCommandReleaseFiresEvenWhenLeftCommandStillHeld() async {
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightCommand)])
+
+        m.handle(type: .flagsChanged, keyCode: 54, flags: CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x10))
+        await drainMain()
+        #expect(starts == 1)
+        #expect(commits == 0)
+
+        m.handle(type: .flagsChanged, keyCode: 54, flags: CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x08))
+        await drainMain()
+        #expect(commits == 1)
     }
 
     @Test func unboundMouseButtonEdgeIsIgnored() async {
