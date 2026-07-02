@@ -106,4 +106,20 @@ struct OutputCleanupTests {
     @Test func annotationBlankingHandlesEmptyString() {
         #expect(OutputCleanup.blankingNonSpeechAnnotation("") == "")
     }
+
+    @Test func boundaryLayoutRestoresOriginalNewlinesAndTabs() {
+        #expect(OutputCleanup.preserveBoundaryLayout(from: "\n\tHello\n\n", in: "Hello.") == "\n\tHello.\n\n")
+    }
+
+    @Test func boundaryLayoutReplacesChangedOutputBoundaryRuns() {
+        #expect(OutputCleanup.preserveBoundaryLayout(from: "\nHello\t", in: "\tHello.\n") == "\nHello.\t")
+    }
+
+    @Test func boundaryLayoutDoesNotPreserveSpaces() {
+        #expect(OutputCleanup.preserveBoundaryLayout(from: "  Hello  ", in: "Hello.") == "Hello.")
+    }
+
+    @Test func boundaryLayoutPreservesOnlyOuterLayoutCharacters() {
+        #expect(OutputCleanup.preserveBoundaryLayout(from: "\nA\n\nB\t", in: "A\nB") == "\nA\nB\t")
+    }
 }

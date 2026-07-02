@@ -25,7 +25,8 @@ public actor RewriteService {
 
     public func rewrite(
         payload: TokenizedPayload, inputs: PromptInputs, connection: Connection,
-        allowDeletion: Bool = false, prompt: RewritePrompt? = nil
+        allowDeletion: Bool = false, prompt: RewritePrompt? = nil,
+        preserveBoundaryLayout: Bool = false
     ) async -> RewriteOutcome {
         // Tokens and fallback text both come from the sealed payload produced by a real forward pass. On
         // failure, fall back to tokenized text; the caller's restore pass unwinds it.
@@ -43,7 +44,10 @@ public actor RewriteService {
             }
             switch ValidationGate.check(output: output, issuedTokens: required, allowDeletion: allowDeletion) {
             case .pass:
-                return .rewritten(output)
+                let repaired = preserveBoundaryLayout
+                    ? OutputCleanup.preserveBoundaryLayout(from: localText, in: output)
+                    : output
+                return .rewritten(repaired)
             case .fail:
                 guard ValidationGate.recovery(attempt: attempt) == .retryStricter else {
                     return .localFallback(localText: localText)

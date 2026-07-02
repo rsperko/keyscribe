@@ -56,6 +56,12 @@ struct DictationPipelineWiringTests {
         }
     }
 
+    private struct BoundaryTrimmingLLM: LLMClient {
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            "Hello."
+        }
+    }
+
     // Captures the real insertion call (method + the exact string, which includes the trailing suffix).
     private actor InsertSpy {
         private(set) var method: Mode.Insertion?
@@ -357,6 +363,24 @@ struct DictationPipelineWiringTests {
             mode: m, connection: conn, llm: EchoLLM(), clipboard: "PASTE")
         #expect(out.outcome == .inserted)
         #expect(out.lastResult == "first PASTE then PASTE")
+    }
+
+    @Test func liveEditsModeRepairsLLMTrimmedBoundaryNewlinesAndTabs() async {
+        let m = mode(id: "polish", liveEdits: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "\n\thello\n", mode: m, connection: conn, llm: BoundaryTrimmingLLM())
+        #expect(out.lastResult == "\n\tHello.\n")
+        #expect(out.insertedText == "\n\tHello.\n")
+    }
+
+    @Test func nonLiveEditsModeLeavesLLMBoundaryWhitespaceAlone() async {
+        let m = mode(id: "polish", liveEdits: false, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "\n\thello\n", mode: m, connection: conn, llm: BoundaryTrimmingLLM())
+        #expect(out.lastResult == "Hello.")
+        #expect(out.insertedText == "Hello.")
     }
 
     // No-LLM mode: the paste is literal, no rewrite involved.

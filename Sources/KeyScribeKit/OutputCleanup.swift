@@ -4,6 +4,40 @@ import Foundation
 // LLM prompt cannot guarantee (only nonce tokens reliably survive a rewrite). Each is a per-mode toggle
 // applied after token restore and before the trailing suffix is appended.
 public enum OutputCleanup {
+    private static func isBoundaryLayout(_ c: Character) -> Bool {
+        c == "\n" || c == "\r" || c == "\t"
+    }
+
+    public static func preserveBoundaryLayout(from source: String, in output: String) -> String {
+        var sourcePrefixEnd = source.startIndex
+        while sourcePrefixEnd < source.endIndex, isBoundaryLayout(source[sourcePrefixEnd]) {
+            sourcePrefixEnd = source.index(after: sourcePrefixEnd)
+        }
+
+        var sourceSuffixStart = source.endIndex
+        while sourceSuffixStart > sourcePrefixEnd {
+            let previous = source.index(before: sourceSuffixStart)
+            guard isBoundaryLayout(source[previous]) else { break }
+            sourceSuffixStart = previous
+        }
+
+        var outputStart = output.startIndex
+        while outputStart < output.endIndex, isBoundaryLayout(output[outputStart]) {
+            outputStart = output.index(after: outputStart)
+        }
+
+        var outputEnd = output.endIndex
+        while outputEnd > outputStart {
+            let previous = output.index(before: outputEnd)
+            guard isBoundaryLayout(output[previous]) else { break }
+            outputEnd = previous
+        }
+
+        return String(source[..<sourcePrefixEnd])
+            + String(output[outputStart..<outputEnd])
+            + String(source[sourceSuffixStart...])
+    }
+
     // Only sentence terminators, so a quote/paren/backtick/fence at the very end is left untouched
     // (`echo "hi."` ends in `"`, not the period). An ellipsis glyph counts; a run of ASCII dots is
     // handled by dropping them one at a time.

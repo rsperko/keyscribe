@@ -97,4 +97,22 @@ struct RewriteServiceTests {
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .localFallback(localText: "hello"))
     }
+
+    @Test func preservesBoundaryLayoutWhenEnabled() async {
+        let svc = RewriteService(client: FakeClient([.success("Hello.")]))
+        let out = await svc.rewrite(
+            payload: TokenizedPayload(text: "\n\tHello\n", issuedTokens: []),
+            inputs: inputs(content: "\n\tHello\n"), connection: conn,
+            preserveBoundaryLayout: true)
+        #expect(out == .rewritten("\n\tHello.\n"))
+    }
+
+    @Test func leavesBoundaryLayoutAloneWhenDisabled() async {
+        let svc = RewriteService(client: FakeClient([.success("Hello.")]))
+        let out = await svc.rewrite(
+            payload: TokenizedPayload(text: "\n\tHello\n", issuedTokens: []),
+            inputs: inputs(content: "\n\tHello\n"), connection: conn,
+            preserveBoundaryLayout: false)
+        #expect(out == .rewritten("Hello."))
+    }
 }
