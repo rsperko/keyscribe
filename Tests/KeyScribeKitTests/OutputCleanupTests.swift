@@ -107,6 +107,46 @@ struct OutputCleanupTests {
         #expect(OutputCleanup.blankingNonSpeechAnnotation("") == "")
     }
 
+    @Test func stripsTrailingEndMarker() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("real dictated text [END]") == "real dictated text")
+    }
+
+    @Test func stripsLeadingEndMarker() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("[END] real dictated text") == "real dictated text")
+    }
+
+    @Test func stripsTrailingBlankAudioOnRealSpeech() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("hello there [BLANK_AUDIO]") == "hello there")
+    }
+
+    @Test func stripsRepeatedLeadingMarkers() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("[END] [END] hello") == "hello")
+    }
+
+    @Test func stripsMarkersOnBothEdges() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("[Music] the pod bay doors [END]") == "the pod bay doors")
+    }
+
+    @Test func keepsInteriorBracketToken() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("the array[0] value") == "the array[0] value")
+    }
+
+    @Test func keepsAnchoredBracketWithDigit() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("run task [2]") == "run task [2]")
+    }
+
+    @Test func keepsAnchoredBracketWithOperator() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("set the value [i=1]") == "set the value [i=1]")
+    }
+
+    @Test func keepsUnbracketedTranscript() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("open the pod bay doors") == "open the pod bay doors")
+    }
+
+    @Test func boundaryAnnotationHandlesEmptyString() {
+        #expect(OutputCleanup.strippingBoundaryAnnotation("") == "")
+    }
+
     @Test func boundaryLayoutRestoresOriginalNewlinesAndTabs() {
         #expect(OutputCleanup.preserveBoundaryLayout(from: "\n\tHello\n\n", in: "Hello.") == "\n\tHello.\n\n")
     }

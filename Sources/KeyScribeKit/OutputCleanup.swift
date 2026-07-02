@@ -75,4 +75,31 @@ public enum OutputCleanup {
         guard stripped != text else { return text }
         return stripped.contains(where: { $0.isLetter || $0.isNumber }) ? text : ""
     }
+
+    // A bracketed non-lexical marker anchored at the very start or end of the utterance, e.g. the ` [END]`
+    // Whisper Small can append to otherwise-real speech, or a leading `[BLANK_AUDIO]`. The inner content is
+    // restricted to letters, spaces, and underscores so a token carrying a digit or operator (`[0]`, `[i=1]`,
+    // `[HEAD~1]`) is never a match — those are the shapes a real bracket expression takes.
+    private static let leadingBoundaryAnnotation = try! NSRegularExpression(pattern: "^\\s*\\[[A-Za-z_ ]+\\]")
+    private static let trailingBoundaryAnnotation = try! NSRegularExpression(pattern: "\\[[A-Za-z_ ]+\\]\\s*$")
+
+    // Strip a standalone bracketed marker riding the leading or trailing edge of a real transcript, so
+    // "real dictated text [END]" → "real dictated text". Unlike `blankingNonSpeechAnnotation` (whole-utterance
+    // only), this fires when the middle is genuine speech — but ONLY for a whole `[…]` token pinned to a
+    // boundary, so an interior bracket ("the array[0] value") and a token with non-annotation content are
+    // left untouched. Runs on the raw STT transcript, where spoken words essentially never yield literal
+    // square brackets — a boundary `[…]` there is an engine artifact, not dictation.
+    public static func strippingBoundaryAnnotation(_ text: String) -> String {
+        var result = text
+        while let match = leadingBoundaryAnnotation.firstMatch(in: result, range: NSRange(result.startIndex..., in: result)),
+              let range = Range(match.range, in: result) {
+            result = String(result[range.upperBound...])
+        }
+        while let match = trailingBoundaryAnnotation.firstMatch(in: result, range: NSRange(result.startIndex..., in: result)),
+              let range = Range(match.range, in: result) {
+            result = String(result[..<range.lowerBound])
+        }
+        guard result != text else { return text }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

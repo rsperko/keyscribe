@@ -874,8 +874,10 @@ final class DictationController {
         building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
         // A no-speech clip that an engine renders as a whole-utterance annotation (Whisper's
         // `[BLANK_AUDIO]` / `(water running)`) collapses to "" here, so routing, history, and the
-        // outcome all see empty and short-circuit to .noSpeech instead of pasting the marker.
-        let raw = OutputCleanup.blankingNonSpeechAnnotation(rawFromEngine)
+        // outcome all see empty and short-circuit to .noSpeech instead of pasting the marker. A
+        // bracketed marker riding the edge of real speech (Whisper Small's trailing ` [END]`) is then
+        // trimmed off the boundary, leaving the genuine transcript.
+        let raw = OutputCleanup.strippingBoundaryAnnotation(OutputCleanup.blankingNonSpeechAnnotation(rawFromEngine))
         building.fingerprints[.raw] = .of(raw)
 
         // Cancelled during STT: bail before routing, rewrite, insertion, or history. cancel() already
