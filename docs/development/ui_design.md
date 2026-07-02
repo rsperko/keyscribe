@@ -316,8 +316,9 @@ glance and can show simultaneously:
   passively probes the provider** (privacy invariant); the only live AI signal is the
   **user-initiated** Test Connection. (Drawn as a separate colored layer so it survives both the
   template glyph's appearance adaptation and the red recording tint.)
-- **Update badge — small blue dot, top-right.** Shows when an app update is available. Planned
-  alongside the Sparkle update mechanism (not yet built).
+- **Update badge — small amber dot, top-right.** Shows when an app update is available. The
+  update menu item carries a matching amber indicator so opening the menu reveals the same
+  trail without treating the update like an error.
 
 Both are non-modal, dismiss themselves when their condition clears, and never block dictation. Keep
 them subtle — they hint, they don't alarm.

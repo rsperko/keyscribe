@@ -53,6 +53,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     static let statusIcon: NSImage = glyph(color: nil)
+    static let updateTint = NSColor.systemOrange
+    static let updateIndicatorImage: NSImage = {
+        let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            updateTint.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }()
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLine = NSMenuItem(title: "starting…", action: nil, keyEquivalent: "")
@@ -76,13 +86,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let updateDot: NSView = {
         let dot = NSView()
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        dot.layer?.backgroundColor = updateTint.cgColor
         dot.layer?.cornerRadius = 3
         dot.translatesAutoresizingMaskIntoConstraints = false
         dot.isHidden = true
         return dot
     }()
-    private let updateItem = NSMenuItem(title: "Update…", action: nil, keyEquivalent: "")
+    let updateItem: NSMenuItem = {
+        let item = NSMenuItem(title: "Update Available…", action: nil, keyEquivalent: "")
+        item.image = updateIndicatorImage
+        return item
+    }()
     private var appMenu: NSMenu?
 
     var onPasteLast: (() -> Void)?
@@ -98,7 +112,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onUpdate: (() -> Void)?
 
     private let variant = KeyScribePaths.variant
-    private static let devTint = NSColor.systemOrange
+    private static let devTint = NSColor.systemTeal
     private static let recordingIcon = glyph(color: .systemRed)
     private static let devIcon = glyph(color: devTint)
 

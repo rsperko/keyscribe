@@ -18,8 +18,8 @@
 ## Remaining work
 
 ### Distribution & updates
-- **In-app updates (Sparkle)** + the menu-bar **update badge** (blue dot, top-right —
-  `ui_design.md` §6) and the **Check for Updates…** menu item. None built yet.
+- **In-app updates (Sparkle)** + the menu-bar **update badge** (amber dot, top-right —
+  `ui_design.md` §6) and the matching update menu item. None built yet.
 - **Release packaging floor alignment.** The app bundle and `Package.swift` declare macOS 15.0, and
   Apple Speech is availability-gated to macOS 26+, but the Homebrew cask currently declares macOS
   Tahoe. Decide whether the cask should relax to the app floor before the next publish.
