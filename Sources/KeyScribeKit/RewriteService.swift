@@ -24,9 +24,13 @@ public actor RewriteService {
     public init(client: LLMClient) { self.client = client }
 
     public func rewrite(
-        localText: String, inputs: PromptInputs, connection: Connection,
-        issuedTokens: [String], allowDeletion: Bool = false, prompt: RewritePrompt? = nil
+        payload: TokenizedPayload, inputs: PromptInputs, connection: Connection,
+        allowDeletion: Bool = false, prompt: RewritePrompt? = nil
     ) async -> RewriteOutcome {
+        // The tokens and the fallback text both come from the sealed `payload` a real forward pass
+        // produced — the gate can no longer be handed a forged/empty token set. On any failure we fall
+        // back to the tokenized text; the caller's `restore` pass unwinds it.
+        let localText = payload.text
         // Reuse a prompt the caller already assembled (RewriteRequestBuilder builds it for the history
         // record) rather than assembling the same inputs twice. Callers without one (tests) pass nil.
         let base = prompt ?? PromptAssembler.assemble(inputs)
@@ -37,7 +41,7 @@ public actor RewriteService {
         // back (after a doomed stricter retry) for exactly the privacy+verbatim combos this targets;
         // restore still unwinds every real token via the LIFO reverse pass. Stray/duplicate checks are
         // unaffected (they scan the output, not this set).
-        let required = issuedTokens.filter { base.user.contains($0) }
+        let required = payload.issuedTokens.filter { base.user.contains($0) }
         var attempt = 0
         while true {
             let system = attempt == 0 ? base.system : base.system + "\n" + Self.strictReminder

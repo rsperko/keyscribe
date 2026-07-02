@@ -56,8 +56,8 @@ struct TokenizationRoundTripTests {
         // Model paraphrases but keeps both tokens.
         let preserved = "Review \(tokens[1]) and \(tokens[0]) carefully."
         let svc = RewriteService(client: ScriptedClient([preserved]))
-        let outcome = await svc.rewrite(localText: text, inputs: inputs(text, tokens: tokens),
-                                        connection: conn, issuedTokens: tokens)
+        let outcome = await svc.rewrite(payload: TokenizedPayload(text: text, issuedTokens: tokens),
+                                        inputs: inputs(text, tokens: tokens), connection: conn)
 
         let out = try #require(rewrittenText(outcome))
         let final = t.restore(out)
@@ -74,8 +74,8 @@ struct TokenizationRoundTripTests {
         let tokens = t.issuedTokens
 
         let svc = RewriteService(client: ScriptedClient(["email someone now", "still no token"]))
-        let outcome = await svc.rewrite(localText: text, inputs: inputs(text, tokens: tokens),
-                                        connection: conn, issuedTokens: tokens)
+        let outcome = await svc.rewrite(payload: TokenizedPayload(text: text, issuedTokens: tokens),
+                                        inputs: inputs(text, tokens: tokens), connection: conn)
 
         let local = try #require(fallbackText(outcome))
         let final = t.restore(local)

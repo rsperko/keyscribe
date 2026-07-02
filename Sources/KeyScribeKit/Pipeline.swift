@@ -31,8 +31,8 @@ public enum StageOrder {
 public struct PipelineContext: Sendable {
     public var text: String
     // Set by the replacements stage when one rule owned the entire utterance: the verbatim value to
-    // insert, bypassing the LLM and the trailing/trim shaping. nil on the normal path. Reported here
-    // (not via a return) so the host reads it after `forward`, the same way it reads `issuedTokens`.
+    // insert, bypassing the LLM and the trailing/trim shaping. nil on the normal path. `Pipeline.forward`
+    // surfaces it on the returned `TokenizedPayload`.
     public var bareReplacement: String?
     public init(text: String) { self.text = text }
 }
@@ -61,6 +61,26 @@ public extension PipelineStage {
     var issuedTokens: [String] { [] }
 }
 
+// The result of a forward pipeline pass: the fully forward-transformed (tokenized) text plus the exact
+// nonces issued during it. ONLY `Pipeline.forward` can mint one (the initializer is module-internal, so
+// the app target that wires the gate cannot construct it), which is what makes the validation gate's
+// token set unforgeable: a caller can no longer hand the gate an empty `[String]` that silently disables
+// the exactly-once check. `restore` consumes the gate-approved text, so "gate runs on the forward output
+// before restore" stays structural, not conventional (design.md §4.2).
+public struct TokenizedPayload: Sendable {
+    public let text: String
+    public let issuedTokens: [String]
+    // Set when one replacement rule owned the entire utterance (whole-utterance replacement): the
+    // verbatim value to insert, bypassing the LLM and the trailing/trim shaping. nil on the normal path.
+    public let bareReplacement: String?
+
+    init(text: String, issuedTokens: [String], bareReplacement: String? = nil) {
+        self.text = text
+        self.issuedTokens = issuedTokens
+        self.bareReplacement = bareReplacement
+    }
+}
+
 public struct Pipeline: Sendable {
     private let stages: [any PipelineStage]
 
@@ -70,16 +90,22 @@ public struct Pipeline: Sendable {
         }
     }
 
-    public func forward(_ context: inout PipelineContext) {
+    // Forward pass: apply every stage in (position, order). Returns the sealed payload — the tokenized
+    // text plus the exact nonces issued — which is the only token set the validation gate accepts.
+    public func forward(_ text: String) -> TokenizedPayload {
+        var context = PipelineContext(text: text)
         for stage in stages { stage.apply(&context) }
+        return TokenizedPayload(
+            text: context.text,
+            issuedTokens: stages.flatMap { $0.issuedTokens },
+            bareReplacement: context.bareReplacement)
     }
 
-    public func reverse(_ context: inout PipelineContext) {
+    // Restore pass: run every stage's `post` in STRICT REVERSE over `text` (the gate-approved LLM output,
+    // or the tokenized text on fallback). Unwinds tokenization LIFO by construction.
+    public func restore(_ text: String) -> String {
+        var context = PipelineContext(text: text)
         for stage in stages.reversed() { stage.post(&context) }
-    }
-
-    // Tokens issued during `forward`, across every tokenizing stage — fed to the validation gate.
-    public var issuedTokens: [String] {
-        stages.flatMap { $0.issuedTokens }
+        return context.text
     }
 }

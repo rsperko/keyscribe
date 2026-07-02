@@ -14,13 +14,13 @@ final class ModesSettingsModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
 
-    private let modesDir: URL
-    private let supportDir: URL
+    private let repository: ConfigRepository
+    private var modesDir: URL { repository.modesDir }
+    private var supportDir: URL { repository.supportDir }
     private var loadedSignature: String?
 
-    init(modesDir: URL, supportDir: URL) {
-        self.modesDir = modesDir
-        self.supportDir = supportDir
+    init(repository: ConfigRepository) {
+        self.repository = repository
         reload()
     }
 
@@ -99,8 +99,9 @@ final class ModesSettingsModel: ObservableObject {
         var renamed = mode
         renamed.id = newId
         do {
-            try ModeStore.write(renamed, to: modesDir)
-            try? ModeStore.delete(mode, from: modesDir)
+            // One repository operation: write the new file, delete the old, rolling the new file back if the
+            // delete fails — so a failed rename never leaves a duplicate mode on disk.
+            try repository.renameMode(mode, to: newId)
             if let index = modes.firstIndex(where: { $0.id == oldId }) {
                 modes[index] = renamed
             } else {
@@ -117,7 +118,7 @@ final class ModesSettingsModel: ObservableObject {
     func delete(_ mode: Mode) {
         guard !mode.isSystem else { return }
         do {
-            try ModeStore.delete(mode, from: modesDir)
+            try repository.deleteMode(mode)
             if awaitingInitialName == mode.id { awaitingInitialName = nil }
             modes.removeAll { $0.id == mode.id }
             selectedID = modes.first?.id
@@ -200,7 +201,7 @@ final class ModesSettingsModel: ObservableObject {
     private func save(_ mode: Mode) {
         let mode = mode.isSystem ? mode.systemNormalized() : mode
         do {
-            try ModeStore.write(mode, to: modesDir)
+            try repository.writeMode(mode)
             if let index = modes.firstIndex(where: { $0.id == mode.id }) {
                 modes[index] = mode
             } else {

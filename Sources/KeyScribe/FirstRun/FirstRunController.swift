@@ -15,8 +15,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         selectEngine: @escaping (String) -> Void,
         onReadyToDictate: @escaping () -> Void,
         permissionsOnly: Bool = false,
-        supportDir: URL = KeyScribePaths.supportDir,
-        modesDir: URL = KeyScribePaths.modesDir,
+        repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         onRelaunch: @escaping () -> Void = {},
@@ -27,7 +26,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         model = FirstRunModel(
             initialEngineId: initialEngineId, download: download,
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
-            supportDir: supportDir, modesDir: modesDir, saveAPIKey: saveAPIKey,
+            repository: repository, saveAPIKey: saveAPIKey,
             testConnection: testConnection, onComplete: onComplete)
         super.init()
         model.onReadyToDictate = onReadyToDictate
@@ -115,8 +114,9 @@ final class FirstRunModel: ObservableObject {
     let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     private let selectEngine: (String) -> Void
-    private let supportDir: URL
-    private let modesDir: URL
+    private let repository: ConfigRepository
+    private var supportDir: URL { repository.supportDir }
+    private var modesDir: URL { repository.modesDir }
     private let saveAPIKey: (String, String) -> Bool
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
@@ -134,8 +134,7 @@ final class FirstRunModel: ObservableObject {
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
         permissionsOnly: Bool = false,
-        supportDir: URL = KeyScribePaths.supportDir,
-        modesDir: URL = KeyScribePaths.modesDir,
+        repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         listModels: @escaping (Connection, String?) async throws -> [String] = {
@@ -147,8 +146,7 @@ final class FirstRunModel: ObservableObject {
         self.download = download
         self.selectEngine = selectEngine
         self.permissionsOnly = permissionsOnly
-        self.supportDir = supportDir
-        self.modesDir = modesDir
+        self.repository = repository
         self.saveAPIKey = saveAPIKey
         self.testConnection = testConnection
         self.listModels = listModels
@@ -383,8 +381,10 @@ final class FirstRunModel: ObservableObject {
             return
         }
         do {
-            let others = existing.filter { $0.id != id }
-            try ConnectionStore.write(ConnectionSet(connections: others + [connection]), to: supportDir)
+            // Insert-or-replace by id against a FRESH read of disk — never the `existing` snapshot taken
+            // before the async connection test, which may be stale by now (another surface could have
+            // written connections.toml meanwhile).
+            try repository.upsertConnection(connection)
         } catch {
             aiSetupError = "Could not save the AI service: \(error.localizedDescription)"
             return
@@ -435,7 +435,7 @@ final class FirstRunModel: ObservableObject {
             rewrite.connection = connectionId
             mode.aiRewrite = rewrite
             mode.enabled = true
-            do { try ModeStore.write(mode, to: modesDir) }
+            do { try repository.writeMode(mode) }
             catch { failed.append(mode.name) }
         }
         return failed

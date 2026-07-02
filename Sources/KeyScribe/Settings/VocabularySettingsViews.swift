@@ -190,15 +190,15 @@ final class DictionarySettingsModel: ObservableObject {
     @Published private(set) var words: [String] = []
     @Published private(set) var error: String?
 
-    private let supportDir: URL
+    private let repository: ConfigRepository
 
-    init(supportDir: URL) {
-        self.supportDir = supportDir
+    init(repository: ConfigRepository) {
+        self.repository = repository
         reload()
     }
 
     func reload() {
-        words = DictionaryStore.loadOrDefault(supportDir: supportDir).words
+        words = repository.dictionaryWords()
         error = nil
     }
 
@@ -210,14 +210,13 @@ final class DictionarySettingsModel: ObservableObject {
         mutate { $0.removing(word: word) }
     }
 
-    // Read-modify-write from disk on every mutation, not from `@Published words` (refreshed only on
-    // .onAppear). The global Add-to-Vocabulary hotkey writes through ConfigRepository while this pane is
-    // open; mutating stale in-memory state would silently drop that just-added word.
+    // All writes go through ConfigRepository, which read-modify-writes from disk (not from `@Published
+    // words`, refreshed only on .onAppear) and invalidates the ConfigCache immediately. The global
+    // Add-to-Vocabulary hotkey writes through the same repository while this pane is open; mutating stale
+    // in-memory state would silently drop that just-added word.
     private func mutate(_ transform: (DictionarySet) -> DictionarySet) {
-        let updated = transform(DictionaryStore.loadOrDefault(supportDir: supportDir))
         do {
-            try DictionaryStore.write(updated, to: supportDir)
-            words = updated.words
+            words = try repository.mutateDictionary(transform).words
             error = nil
         } catch {
             self.error = "Could not save the dictionary: \(error.localizedDescription)"
@@ -230,15 +229,15 @@ final class ReplacementsSettingsModel: ObservableObject {
     @Published private(set) var rules: [ReplacementsSet.Rule] = []
     @Published private(set) var error: String?
 
-    private let supportDir: URL
+    private let repository: ConfigRepository
 
-    init(supportDir: URL) {
-        self.supportDir = supportDir
+    init(repository: ConfigRepository) {
+        self.repository = repository
         reload()
     }
 
     func reload() {
-        rules = ReplacementsStore.loadOrDefault(supportDir: supportDir).rules
+        rules = repository.replacementRules()
         error = nil
     }
 
@@ -262,15 +261,12 @@ final class ReplacementsSettingsModel: ObservableObject {
         }
     }
 
-    // Read-modify-write from disk (see DictionarySettingsModel.mutate). A `remove(at:)` resolves the
-    // displayed row to a rule value first, then removes the matching rule from the freshly-read set, so
-    // a rule the global hotkey appended concurrently is preserved.
+    // All writes go through ConfigRepository (see DictionarySettingsModel.mutate). A `remove(at:)`
+    // resolves the displayed row to a rule value first, then removes the matching rule from the
+    // freshly-read set, so a rule the global hotkey appended concurrently is preserved.
     private func mutate(_ transform: (inout ReplacementsSet) -> Void) {
-        var set = ReplacementsStore.loadOrDefault(supportDir: supportDir)
-        transform(&set)
         do {
-            try ReplacementsStore.write(set, to: supportDir)
-            rules = set.rules
+            rules = try repository.mutateReplacements(transform).rules
             error = nil
         } catch {
             self.error = "Could not save replacements: \(error.localizedDescription)"

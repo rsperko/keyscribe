@@ -40,11 +40,10 @@ struct SentinelOpacityTests {
             ReplacementsStage(rules: [ReplacementRule(heard: "verb", replace: "X", isRegex: false)]),
             TokenizingStage.verbatim(),
         ])
-        var ctx = PipelineContext(text: "begin verbatim hunter2 end verbatim")
-        pipeline.forward(&ctx)
-        pipeline.reverse(&ctx)
-        #expect(ctx.text.contains("hunter2"))
-        #expect(!ctx.text.contains("⟦SN:"))
+        let payload = pipeline.forward("begin verbatim hunter2 end verbatim")
+        let restored = pipeline.restore(payload.text)
+        #expect(restored.contains("hunter2"))
+        #expect(!restored.contains("⟦SN:"))
     }
 
     @Test func numbersStageLeavesTokenIndexAlone() {

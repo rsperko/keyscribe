@@ -180,6 +180,17 @@ struct DictationCancellationTests {
         let hud: HUDSpy
     }
 
+    // History is appended on a background queue (off the main actor, off the hot path), so a positive
+    // assertion must wait for the write to land rather than read the file the instant the dictation task
+    // returns — otherwise it races the flush.
+    private func awaitFirstHistoryEntry(_ history: HistoryStore) async -> HistoryEntry? {
+        for _ in 0..<50 {
+            if let entry = history.entries().first { return entry }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return history.entries().first
+    }
+
     private func makeHarness(
         micStatus: @escaping @MainActor () -> PermissionStatus = { .granted },
         accessibilityGranted: @escaping @MainActor () -> Bool = { true }
@@ -472,6 +483,7 @@ struct DictationCancellationTests {
 
         #expect(await h.insertSpy.calls == 1)
         #expect(h.controller.lastResult == "hello world")
+        _ = await awaitFirstHistoryEntry(h.history)
         #expect(h.history.entries().count == 1)
     }
 
@@ -524,6 +536,7 @@ struct DictationCancellationTests {
         #expect(h.controller.lastResult == "hello world")   // it dictated via the Direct floor
         // The Direct floor records per the global History setting now (it's the everyday floor, not a
         // silent fallback), so the dictation lands in history under its display name.
+        _ = await awaitFirstHistoryEntry(h.history)
         #expect(h.history.entries().map(\.modeName) == ["Plain Dictation"])
     }
 
@@ -550,7 +563,7 @@ struct DictationCancellationTests {
         await task?.value
 
         #expect(h.controller.lastResult == "hello world")
-        #expect(h.history.entries().first?.outcome == .copied)
+        #expect(await awaitFirstHistoryEntry(h.history)?.outcome == .copied)
         let completeOutcomes = h.hud.states.compactMap { state -> DictationOutcome? in
             if case .complete(let outcome, _) = state { return outcome }
             return nil

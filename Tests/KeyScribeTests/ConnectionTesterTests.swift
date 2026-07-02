@@ -151,7 +151,8 @@ struct AIServiceTestStateTests {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
-            supportDir: dir, tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
         model.create()
         let connection = model.selected!
 
@@ -167,7 +168,7 @@ struct AIServiceTestStateTests {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
-            supportDir: dir,
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))),
             listModels: { connection, apiKey in
                 #expect(connection.provider == .openaiCompatible)
@@ -194,7 +195,7 @@ struct AIServiceTestStateTests {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
-            supportDir: dir,
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))),
             listModels: { _, _ in ["qwen3"] })
         model.create()

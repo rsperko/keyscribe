@@ -36,10 +36,81 @@ final class DictationController {
     private weak var hud: HUDPresenting?
 
     private var machine = DictationMachine()
-    private var capturedSnapshot: TargetSnapshot?
-    private var activeMode: Mode?
-    private var eligibleModes: [Mode] = []
-    private var routingContext = RoutingContext()
+
+    // Everything that lives for exactly one dictation is bundled here and dropped as a unit at every
+    // terminal (releaseCapturedPlan), so a per-dictation field cannot leak into the next dictation by
+    // being forgotten in one of the several reset paths — reset is structural. `building` accumulates
+    // stage timings + boundary fingerprints as the dictation progresses (finalizeRecord publishes it to
+    // `lastRecord`; only token COUNTS and one-way fingerprints, never the token→original map, design.md
+    // §4.2). The frozen `capturedPlan`/`capturedEngine`/`capturedSnapshot`/`capturedDictionaryRecovery`
+    // insulate the in-flight dictation from a mid-dictation config/engine change (see `plan`/`activeEngine`).
+    private struct DictationSession {
+        var building: DictationRecord
+        var capturedSnapshot: TargetSnapshot?
+        var capturedPlan: ResolvedConfig?
+        var capturedEngine: (any SpeechEngine)?
+        var capturedDictionaryRecovery: Bool?
+        var activeMode: Mode?
+        var eligibleModes: [Mode] = []
+        var routingContext = RoutingContext()
+        var pendingLocalTranscript: String?
+        var pendingHeardTranscript: String?
+        var dictationTask: Task<Void, Never>?
+        var rewriteEscapeTask: Task<Void, Never>?
+        var recordingLimitTask: Task<Void, Never>?
+        var modeResolveTask: Task<Void, Never>?
+        var captureStartTask: Task<Void, Never>?
+        var captureBringUpTask: Task<Void, Never>?
+    }
+    // Non-nil only while a dictation is in flight. The historical property names below are thin computed
+    // accessors over it: a nil session reads as "no captured state" and a write outside a dictation
+    // no-ops, matching the pre-extraction semantics at every call site.
+    private var session: DictationSession?
+
+    private var building: DictationRecord {
+        get { session?.building ?? DictationRecord(modeName: Self.fallbackModeName) }
+        set { session?.building = newValue }
+    }
+    private var capturedSnapshot: TargetSnapshot? {
+        get { session?.capturedSnapshot } set { session?.capturedSnapshot = newValue }
+    }
+    private var activeMode: Mode? {
+        get { session?.activeMode } set { session?.activeMode = newValue }
+    }
+    private var eligibleModes: [Mode] {
+        get { session?.eligibleModes ?? [] } set { session?.eligibleModes = newValue }
+    }
+    private var routingContext: RoutingContext {
+        get { session?.routingContext ?? RoutingContext() } set { session?.routingContext = newValue }
+    }
+    private var pendingLocalTranscript: String? {
+        get { session?.pendingLocalTranscript } set { session?.pendingLocalTranscript = newValue }
+    }
+    private var pendingHeardTranscript: String? {
+        get { session?.pendingHeardTranscript } set { session?.pendingHeardTranscript = newValue }
+    }
+    private var rewriteEscapeTask: Task<Void, Never>? {
+        get { session?.rewriteEscapeTask } set { session?.rewriteEscapeTask = newValue }
+    }
+    private var recordingLimitTask: Task<Void, Never>? {
+        get { session?.recordingLimitTask } set { session?.recordingLimitTask = newValue }
+    }
+    private var modeResolveTask: Task<Void, Never>? {
+        get { session?.modeResolveTask } set { session?.modeResolveTask = newValue }
+    }
+    private var captureStartTask: Task<Void, Never>? {
+        get { session?.captureStartTask } set { session?.captureStartTask = newValue }
+    }
+    // Engine bring-up runs async (off the main thread, watchdogged) so a wedging device can never freeze
+    // the app; the machine flips from `.arming` to `.recording` only once the mic is live. Public read
+    // for tests; set only internally through `session`.
+    var captureBringUpTask: Task<Void, Never>? {
+        get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
+    }
+    var dictationTask: Task<Void, Never>? {
+        get { session?.dictationTask } set { session?.dictationTask = newValue }
+    }
+
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
     // Re-realizes the audio input binding while idle so the first dictation after a long idle (or a system
@@ -47,51 +118,39 @@ final class DictationController {
     private var captureRefreshTask: Task<Void, Never>?
     private static let captureRefreshIdleSeconds: Double = 240
     private var memoryPressureSource: DispatchSourceMemoryPressure?
-    private(set) var dictationTask: Task<Void, Never>?
     private var lastUsedAt: Double = 0
     private(set) var lastResult: String?
-    // One structured, in-memory diagnostics record for the most recent dictation, kept UNCONDITIONALLY
-    // (never gated on history). `building` accumulates stage timings + boundary fingerprints as the
-    // in-flight dictation progresses; finalizeRecord publishes it to `lastRecord`. Privacy: only token
-    // COUNTS and one-way fingerprints enter the record — never the token→original map (design.md §4.2).
+    // The published diagnostics record for the most recent COMPLETED dictation (finalizeRecord copies
+    // `building` here at each terminal); survives past the session so the menu/log can read it. Privacy
+    // as above.
     private(set) var lastRecord: DictationRecord?
-    private var building = DictationRecord(modeName: DictationController.fallbackModeName)
     private var nextModeOverrideID: String?
-    private var pendingLocalTranscript: String?
-    private var pendingHeardTranscript: String?
-    private var rewriteEscapeTask: Task<Void, Never>?
-    private var recordingLimitTask: Task<Void, Never>?
-    // Phase-A mode resolution runs async only when a URL probe is needed; transcribeAndInsert awaits it
-    // before reading the mode. captureStartTask defers capture+HUD past the start cue (Option A gating);
-    // captureStarted gates the async mode re-render so it never shows the HUD before the mic is live.
-    private var modeResolveTask: Task<Void, Never>?
-    private var captureStartTask: Task<Void, Never>?
-    // Engine bring-up now runs async (off the main thread, watchdogged) so a wedging device can never
-    // freeze the app. captureStarted flips true only once the mic is actually live.
-    private(set) var captureBringUpTask: Task<Void, Never>?
-    private var captureStarted = false
-    private var captureBringUpCancelling = false
 
     // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
     // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
     // than spike memory. Far longer than any real hold-to-talk dictation.
     private static let maxRecordingSeconds: Double = 300
 
-    // The frozen config snapshot for the in-flight dictation, captured at record-start. A config
-    // reload mid-dictation produces a new ResolvedConfig in ConfigCache without mutating this one, so
-    // a single dictation always observes one coherent config. All config-derived reads during a
-    // dictation (modes, merged dictionary, compiled stages, connection, fragments) go through it; the
-    // ResolvedConfig itself owns the cross-dictation memoization that used to live here.
-    private var capturedPlan: ResolvedConfig?
+    // The frozen config snapshot for the in-flight dictation, captured at record-start (stored on the
+    // session). A config reload mid-dictation produces a new ResolvedConfig in ConfigCache without
+    // mutating this one, so a single dictation always observes one coherent config; between dictations
+    // it is nil and `plan` falls back to the live `config.resolved`.
+    private var capturedPlan: ResolvedConfig? {
+        get { session?.capturedPlan } set { session?.capturedPlan = newValue }
+    }
     private var plan: ResolvedConfig { capturedPlan ?? config.resolved }
 
     // The STT engine frozen for the in-flight dictation, captured at record-start alongside the plan.
     // Reading `provider.active` afresh at transcribe/bias/evict time would let a mid-dictation engine
     // switch (AppDelegate.applySettings) transcribe the WAV with a different engine, or evict the model
     // out from under the active call. One capture, used everywhere for this dictation.
-    private var capturedEngine: (any SpeechEngine)?
+    private var capturedEngine: (any SpeechEngine)? {
+        get { session?.capturedEngine } set { session?.capturedEngine = newValue }
+    }
     private var activeEngine: any SpeechEngine { capturedEngine ?? provider.active }
-    private var capturedDictionaryRecovery: Bool?
+    private var capturedDictionaryRecovery: Bool? {
+        get { session?.capturedDictionaryRecovery } set { session?.capturedDictionaryRecovery = newValue }
+    }
 
     // The in-flight (or completed) model load for `warmEngineId`, so the press-time warm and the
     // commit-time wait share ONE load instead of racing two concurrent compiles of a multi-hundred-MB
@@ -137,7 +196,7 @@ final class DictationController {
     // stranded by a mid-dictation config reload.
     var onBecameIdle: (() -> Void)?
 
-    var isBusy: Bool { machine.isBusy || captureBringUpCancelling }
+    var isBusy: Bool { machine.isBusy }
     var hasResult: Bool { lastResult != nil }
     var nextModeOverrideName: String? {
         nextModeOverrideID.flatMap { id in config.modes.first { $0.id == id }?.name }
@@ -349,12 +408,13 @@ final class DictationController {
     }
 
     func handleStart(triggerKey: String? = nil) {
-        guard !captureBringUpCancelling else { return }
-        guard machine.beginRecording() else { return }
+        guard machine.beginArming() else { return }
         hideTask?.cancel()
         idleEvictionTask?.cancel()
         captureRefreshTask?.cancel()
-        building = DictationRecord(modeName: currentModeName)
+        // Open the per-dictation session. Every captured*/activeMode/task/building field below writes
+        // through it; it is dropped as a unit at the terminal (releaseCapturedPlan).
+        session = DictationSession(building: DictationRecord(modeName: currentModeName))
         // A denied mic does NOT make AVAudioEngine throw — it starts and captures silence, which would
         // surface as a misleading "No speech detected". Catch the real cause up front and point the user
         // at the fix instead of recording nothing.
@@ -373,7 +433,6 @@ final class DictationController {
         capturedEngine = engine
         capturedDictionaryRecovery = settings.stt.dictionaryRecoveryEnabled(
             engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
-        captureStarted = false
         activeMode = nil
         eligibleModes = []
         routingContext = RoutingContext()
@@ -387,9 +446,9 @@ final class DictationController {
             modeResolveTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
-                if self.machine.state == .recording, self.captureStarted {
+                if self.machine.state == .recording {
                     self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel)))
-                } else if self.machine.state == .recording {
+                } else if self.machine.state == .arming {
                     self.hud?.render(.arming(mode: self.activeMode?.name ?? self.currentModeName))
                 }
             }
@@ -409,7 +468,7 @@ final class DictationController {
         if cueDelay > 0 {
             captureStartTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(cueDelay))
-                guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
+                guard let self, !Task.isCancelled, self.machine.state == .arming else { return }
                 self.beginCapture()
             }
         } else {
@@ -428,9 +487,9 @@ final class DictationController {
                 }
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
-                // already moved us on — only report the mic error if we are still trying to record.
-                if Task.isCancelled || self.machine.state != .recording {
-                    if self.captureBringUpCancelling {
+                // already moved us on — only report the mic error if we are still arming.
+                if Task.isCancelled || self.machine.state != .arming {
+                    if self.machine.state == .cancellingBringUp {
                         self.finishCanceledBringUp(stopAudio: false)
                     }
                     return
@@ -449,11 +508,11 @@ final class DictationController {
             }
             // Released or cancelled while the mic was coming up: nothing to record, so tear the capture
             // back down and bail.
-            guard !Task.isCancelled, self.machine.state == .recording else {
+            guard !Task.isCancelled, self.machine.state == .arming else {
                 self.finishCanceledBringUp(stopAudio: true)
                 return
             }
-            self.captureStarted = true
+            self.machine.markRecording()
             self.effects.activateDuck()
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
@@ -489,26 +548,27 @@ final class DictationController {
     // stale ResolvedConfig (fragments + compiled stages) after a config reload until the next recording.
     // `plan` falls back to the live `config.resolved` while nil, so clearing between dictations is safe.
     private func releaseCapturedPlan() {
+        // Cancel the per-dictation tasks first (dropping the session only releases the references, it does
+        // not cancel the Tasks), then drop the whole session as a unit — every captured*/activeMode/
+        // routing/building field resets structurally, so none can leak into the next dictation.
         recordingLimitTask?.cancel()
-        recordingLimitTask = nil
         modeResolveTask?.cancel()
-        modeResolveTask = nil
         captureStartTask?.cancel()
-        captureStartTask = nil
         captureBringUpTask?.cancel()
-        captureBringUpTask = nil
-        captureStarted = false
-        capturedPlan = nil
-        capturedEngine = nil
-        capturedDictionaryRecovery = nil
+        session = nil
         scheduleCaptureRefresh()
         onBecameIdle?()
     }
 
     func handleCommit() {
-        guard machine.state == .recording else { return }
-        guard captureStarted else {
+        switch machine.state {
+        case .arming:
+            // Released before the mic went live — nothing to transcribe; tear the pending bring-up down.
             cancelBeforeCaptureStarted()
+            return
+        case .recording:
+            break
+        default:
             return
         }
         recordingLimitTask?.cancel()
@@ -546,9 +606,11 @@ final class DictationController {
     }
 
     private func cancelBeforeCaptureStarted() {
+        // If a bring-up is still in flight, move to `.cancellingBringUp` and let the bring-up task's
+        // completion run finishCanceledBringUp; otherwise (cue delay still pending, no unit started) we can
+        // return straight to idle.
         let waitForBringUpCleanup = captureBringUpTask != nil
-        captureBringUpCancelling = waitForBringUpCleanup
-        machine.cancel()
+        if waitForBringUpCleanup { machine.beginCancellingBringUp() } else { machine.cancel() }
         effects.end(settings.duringDictation, cue: .cancel)
         hud?.render(.hidden)
         clearRewriteEscapeHatch()
@@ -566,7 +628,7 @@ final class DictationController {
         if stopAudio, let url = audio.stop() {
             try? FileManager.default.removeItem(at: url)
         }
-        captureBringUpCancelling = false
+        machine.cancel()
         releaseCapturedPlan()
     }
 
@@ -766,7 +828,9 @@ final class DictationController {
             ? OutputCleanup.trimTrailingPunctuation(rawTranscript)
             : rawTranscript
         clearRewriteEscapeHatch()
-        machine.beginInserting()
+        // Guarded transition: if we are no longer transcribing, another terminal (escape hatch racing the
+        // in-flight task, a cancel) already ran — bail rather than double-insert.
+        guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
         let current = snapshot()
         let targetDecision = decideInsertion(
@@ -968,14 +1032,13 @@ final class DictationController {
         let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil, transcript: transcript)
 
         let localStart = DispatchTime.now()
-        var ctx = PipelineContext(text: transcript)
-        pipeline.forward(&ctx)
-        let tokenized = ctx.text
+        let payload = pipeline.forward(transcript)
+        let tokenized = payload.text
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
         // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the
-        // trailing/trim shaping. Detected at the replacements stage and reported on the context.
-        if let bare = ctx.bareReplacement {
+        // trailing/trim shaping. Detected at the replacements stage and surfaced on the payload.
+        if let bare = payload.bareReplacement {
             building.stageMillis[.localProcess] = elapsedMs(since: localStart)
             building.fingerprints[.localProcessed] = .of(bare)
             return (.insert(bare, bare: true), nil, bare)
@@ -983,9 +1046,7 @@ final class DictationController {
 
         // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
         // insert when no rewrite runs or it falls back.
-        var localCtx = PipelineContext(text: tokenized)
-        pipeline.reverse(&localCtx)
-        let localProcessed = localCtx.text
+        let localProcessed = pipeline.restore(tokenized)
         building.stageMillis[.localProcess] = elapsedMs(since: localStart)
         building.fingerprints[.localProcessed] = .of(localProcessed)
         // Record the on-device intermediate unconditionally — the local pipeline runs on every
@@ -996,12 +1057,12 @@ final class DictationController {
 
         guard let resolved,
               !tokenized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return (guardedInsert(localProcessed, issuedTokens: pipeline.issuedTokens), nil, transformed)
+            return (guardedInsert(localProcessed, issuedTokens: payload.issuedTokens), nil, transformed)
         }
         let result = await rewriteTokenized(
-            pipeline: pipeline, tokenized: tokenized, localProcessed: localProcessed,
+            pipeline: pipeline, payload: payload, localProcessed: localProcessed,
             instruction: "", mode: resolved.mode, connection: resolved.connection)
-        return (guardedInsert(result.text, issuedTokens: pipeline.issuedTokens), result.details, transformed)
+        return (guardedInsert(result.text, issuedTokens: payload.issuedTokens), result.details, transformed)
     }
 
     // Edit-in-place: capture the selection, transform it per the spoken instruction. Any failure —
@@ -1028,16 +1089,14 @@ final class DictationController {
         // A selection can be large (whole documents), and tokenization is pure CPU — run the forward
         // pass off the main actor so a big selection cannot stutter the HUD.
         let pipeline = selectionPipeline(for: mode)
-        let tokenized = await Task.detached(priority: .userInitiated) {
-            var ctx = PipelineContext(text: selection)
-            pipeline.forward(&ctx)
-            return ctx.text
+        let payload = await Task.detached(priority: .userInitiated) {
+            pipeline.forward(selection)
         }.value
         let result = await rewriteTokenized(
-            pipeline: pipeline, tokenized: tokenized, localProcessed: selection,
+            pipeline: pipeline, payload: payload, localProcessed: selection,
             instruction: instruction, mode: mode, connection: connection)
         let final: FinalText = result.ok
-            ? guardedInsert(result.text, issuedTokens: pipeline.issuedTokens)
+            ? guardedInsert(result.text, issuedTokens: payload.issuedTokens)
             : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
     }
@@ -1056,10 +1115,11 @@ final class DictationController {
     // structurally). Returns (text, ok): ok=false means the model failed and the locally-processed
     // text was restored — dictation inserts it anyway; selection aborts on !ok.
     private func rewriteTokenized(
-        pipeline: Pipeline, tokenized content: String, localProcessed: String,
+        pipeline: Pipeline, payload: TokenizedPayload, localProcessed: String,
         instruction: String, mode: Mode, connection: Connection
     ) async -> (text: String, ok: Bool, details: RewriteDetails) {
-        let issuedTokens = pipeline.issuedTokens
+        let content = payload.text
+        let issuedTokens = payload.issuedTokens
         // Cloud-boundary metadata for the diagnostics record. `content` is exactly what crosses to the
         // LLM (forward-tokenized), so its fingerprint is the sentToLLM boundary for both the dictation
         // and selection paths. The token→original map is never stored — only the count.
@@ -1090,17 +1150,17 @@ final class DictationController {
 
         let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(
-            localText: content, inputs: request.inputs, connection: request.sized,
-            issuedTokens: issuedTokens, prompt: request.prompt)
+            payload: payload, inputs: request.inputs, connection: request.sized, prompt: request.prompt)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
-        var restoreCtx = PipelineContext(text: content)
+        let gateApproved: String
         let fellBack: Bool
         switch outcome {
-        case .rewritten(let out): restoreCtx.text = out; fellBack = false; building.fingerprints[.llmOut] = .of(out)
-        case .localFallback(let local): restoreCtx.text = local; fellBack = true
+        case .rewritten(let out): gateApproved = out; fellBack = false; building.fingerprints[.llmOut] = .of(out)
+        case .localFallback(let local): gateApproved = local; fellBack = true
         }
-        pipeline.reverse(&restoreCtx)
-        let text = restoreCtx.text
+        // Restore runs only on the gate-approved text (or the fallback), never before the gate — the
+        // ordering is structural now that `rewrite` owns the gate and returns the vetted string.
+        let text = pipeline.restore(gateApproved)
         let details = RewriteDetails(
             connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
             contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack)
@@ -1152,18 +1212,18 @@ final class DictationController {
         Task { await TextInserter.insertViaPaste(lastResult) }
     }
 
-    // ESC-cancellable only while recording or transcribing/rewriting — never mid-insert, where the
+    // ESC-cancellable only while arming, recording, or transcribing/rewriting — never mid-insert, where the
     // text is already landing and cancel() would race finishInsertion (conflicting state + double cue).
-    var isCancellable: Bool {
-        machine.state == .recording || machine.state == .transcribing
-    }
+    var isCancellable: Bool { machine.isCancellable }
 
     func cancel() {
         guard machine.isBusy else { return }
-        if machine.state == .recording, !captureStarted, captureBringUpTask != nil {
+        if machine.state == .arming {
             cancelBeforeCaptureStarted()
             return
         }
+        // Already tearing a cancelled bring-up down, or mid-insert — nothing safe to cancel here.
+        guard machine.state == .recording || machine.state == .transcribing else { return }
         onRecordingChanged?(false)
         dictationTask?.cancel()
         dictationTask = nil

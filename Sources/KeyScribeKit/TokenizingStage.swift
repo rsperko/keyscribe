@@ -10,7 +10,10 @@ public struct TokenizingStage: PipelineStage {
     private let tokenizer: Tokenizer
     private let scan: @Sendable (String, Tokenizer) -> String
 
-    public init(
+    // Internal, factories-only: the position that decides where a protector sorts (verbatim BEFORE the
+    // text stages, redaction AFTER — the load-bearing ordering invariant, design.md §4.2.1) must not be
+    // caller-supplied. Construct via `.verbatim` / `.redaction` / `.clipboard`.
+    init(
         position: StagePosition, order: Int = 0, tokenizer: Tokenizer,
         scan: @escaping @Sendable (String, Tokenizer) -> String
     ) {

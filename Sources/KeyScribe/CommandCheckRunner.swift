@@ -89,11 +89,9 @@ enum CommandCheckRunner {
         let clip = ClipboardTokenizer.mentions(afterVerbatim) ? clipboard : nil
         stages.append(TokenizingStage.clipboard(clip))
         let pipeline = Pipeline(stages)
-        var ctx = PipelineContext(text: transcript)
-        pipeline.forward(&ctx)
-        if let bare = ctx.bareReplacement { return bare }
-        pipeline.reverse(&ctx)
-        return ctx.text
+        let payload = pipeline.forward(transcript)
+        if let bare = payload.bareReplacement { return bare }
+        return pipeline.restore(payload.text)
     }
 
     private static func oneLine(_ s: String) -> String {

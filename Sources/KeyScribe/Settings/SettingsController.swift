@@ -98,7 +98,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     let recordingState = HotkeyRecordingState()
 
     init(
-        settings: Settings, speechModels: SpeechModelsModel,
+        settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
         detectProblems: @escaping () -> [SettingsProblem],
@@ -113,11 +113,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
             settings: settings, onChange: onChange, onReload: onReload,
             onResetHUDPosition: onResetHUDPosition, onEraseAllData: onEraseAllData)
         self.speechModels = speechModels
-        dictionary = DictionarySettingsModel(supportDir: KeyScribePaths.supportDir)
-        replacements = ReplacementsSettingsModel(supportDir: KeyScribePaths.supportDir)
-        modes = ModesSettingsModel(
-            modesDir: KeyScribePaths.modesDir, supportDir: KeyScribePaths.supportDir)
-        aiServices = AIServiceSettingsModel(supportDir: KeyScribePaths.supportDir)
+        dictionary = DictionarySettingsModel(repository: repository)
+        replacements = ReplacementsSettingsModel(repository: repository)
+        modes = ModesSettingsModel(repository: repository)
+        aiServices = AIServiceSettingsModel(repository: repository)
         super.init()
     }
 

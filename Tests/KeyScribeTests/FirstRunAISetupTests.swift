@@ -17,8 +17,7 @@ struct FirstRunAISetupTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
-            supportDir: supportDir,
-            modesDir: modesDir,
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             saveAPIKey: saveAPIKey,
             testConnection: testConnection,
             listModels: listModels,
@@ -86,8 +85,7 @@ struct FirstRunAISetupTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { selected = $0 },
-            supportDir: supportDir,
-            modesDir: modesDir,
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             onComplete: { completed += 1 })
 
         model.skipModelDownload()

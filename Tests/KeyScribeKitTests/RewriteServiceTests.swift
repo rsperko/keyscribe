@@ -30,13 +30,13 @@ private func inputs(content: String = "hello") -> PromptInputs {
 struct RewriteServiceTests {
     @Test func returnsRewrittenOnCleanOutput() async {
         let svc = RewriteService(client: FakeClient([.success("Hello.")]))
-        let out = await svc.rewrite(localText: "hello", inputs: inputs(), connection: conn, issuedTokens: [])
+        let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .rewritten("Hello."))
     }
 
     @Test func fallsBackToLocalWhenClientThrows() async {
         let svc = RewriteService(client: FakeClient([.failure(FakeError())]))
-        let out = await svc.rewrite(localText: "hello", inputs: inputs(), connection: conn, issuedTokens: [])
+        let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .localFallback(localText: "hello"))
     }
 
@@ -46,8 +46,8 @@ struct RewriteServiceTests {
         let client = FakeClient([.success("dropped it"), .success("kept ⟦SN:REDACT:1⟧")])
         let svc = RewriteService(client: client)
         let out = await svc.rewrite(
-            localText: "kept ⟦SN:REDACT:1⟧", inputs: inputs(content: "kept ⟦SN:REDACT:1⟧"), connection: conn,
-            issuedTokens: ["⟦SN:REDACT:1⟧"])
+            payload: TokenizedPayload(text: "kept ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
+            inputs: inputs(content: "kept ⟦SN:REDACT:1⟧"), connection: conn)
         #expect(out == .rewritten("kept ⟦SN:REDACT:1⟧"))
         #expect(await client.calls == 2)
     }
@@ -56,8 +56,8 @@ struct RewriteServiceTests {
         let client = FakeClient([.success("no token"), .success("still no token")])
         let svc = RewriteService(client: client)
         let out = await svc.rewrite(
-            localText: "orig ⟦SN:REDACT:1⟧", inputs: inputs(content: "orig ⟦SN:REDACT:1⟧"), connection: conn,
-            issuedTokens: ["⟦SN:REDACT:1⟧"])
+            payload: TokenizedPayload(text: "orig ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
+            inputs: inputs(content: "orig ⟦SN:REDACT:1⟧"), connection: conn)
         #expect(out == .localFallback(localText: "orig ⟦SN:REDACT:1⟧"))
         #expect(await client.calls == 2)   // initial + one stricter retry, no more
     }
@@ -70,15 +70,15 @@ struct RewriteServiceTests {
         let client = FakeClient([.success("The ⟦SN:REDACT:1⟧ please.")])
         let svc = RewriteService(client: client)
         let out = await svc.rewrite(
-            localText: "the ⟦SN:REDACT:1⟧ please", inputs: inputs(content: "the ⟦SN:REDACT:1⟧ please"),
-            connection: conn, issuedTokens: ["⟦SN:VERB:1⟧", "⟦SN:REDACT:1⟧"])
+            payload: TokenizedPayload(text: "the ⟦SN:REDACT:1⟧ please", issuedTokens: ["⟦SN:VERB:1⟧", "⟦SN:REDACT:1⟧"]),
+            inputs: inputs(content: "the ⟦SN:REDACT:1⟧ please"), connection: conn)
         #expect(out == .rewritten("The ⟦SN:REDACT:1⟧ please."))
         #expect(await client.calls == 1)
     }
 
     @Test func emptyOutputFallsBack() async {
         let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]))
-        let out = await svc.rewrite(localText: "hello", inputs: inputs(), connection: conn, issuedTokens: [])
+        let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .localFallback(localText: "hello"))
     }
 }

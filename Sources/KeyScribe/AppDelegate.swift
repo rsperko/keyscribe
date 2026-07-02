@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onDictionaryMatchingChange: { [weak self] stt in self?.setDictionaryMatching(stt) })
 
         settingsController = SettingsController(
-            settings: settings, speechModels: speechModels,
+            settings: settings, speechModels: speechModels, repository: configRepository,
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
@@ -437,6 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.controller.prewarmCapture()
             },
             permissionsOnly: permissionsOnly,
+            repository: configRepository,
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
             tapActive: { [weak self] in self?.hotkey?.isTapActive ?? false }
         ) { [weak self] in

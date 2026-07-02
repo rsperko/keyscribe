@@ -11,7 +11,8 @@ struct ModesSettingsModelTests {
         let modesDir = support.appendingPathComponent("modes")
         try fm.createDirectory(at: modesDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: support.appendingPathComponent("fragments"), withIntermediateDirectories: true)
-        return (ModesSettingsModel(modesDir: modesDir, supportDir: support), support, modesDir)
+        let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
+        return (ModesSettingsModel(repository: repository), support, modesDir)
     }
 
     // User-mode files only — the system Direct floor (`_direct`) is always seeded, so exclude it.

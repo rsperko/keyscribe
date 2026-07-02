@@ -54,6 +54,35 @@ private final class UnitBox: @unchecked Sendable {
     init(_ unit: HALInputUnit) { self.unit = unit }
 }
 
+// All state for ONE in-flight capture, held as a single reference created on the control queue when a
+// dictation arms and dropped (atomically, under `lock`) at teardown. "Is a capture live" becomes
+// `session != nil` decided on the control queue, so a mid-recording restart queued behind a teardown
+// sees the capture as over and bails — the stranded-hot-mic window (H1) closes structurally rather than
+// through a separately-nil'd `currentURL` proxy. The identity fields are immutable; the resampler fields
+// and restart counter are mutated only under `AudioCapture.lock` (the RT callback touches them).
+private final class CaptureSession: @unchecked Sendable {
+    let url: URL
+    let file: AVAudioFile
+    let recordFormat: AVAudioFormat
+    let levelHandler: @Sendable (Float) -> Void
+    // Resamples the mic's native format to the engine's target rate/mono; built lazily from the format the
+    // callback delivers, rebuilt if the hardware format changes mid-stream, reused across callbacks.
+    var converter: AVAudioConverter?
+    var converterInputFormat: AVAudioFormat?
+    var outBuffer: AVAudioPCMBuffer?
+    // Mid-recording restart attempts for THIS capture; bounds a flapping device. Reset to 0 by being a
+    // fresh session per capture.
+    var configRestartCount = 0
+
+    init(url: URL, file: AVAudioFile, recordFormat: AVAudioFormat,
+         levelHandler: @escaping @Sendable (Float) -> Void) {
+        self.url = url
+        self.file = file
+        self.recordFormat = recordFormat
+        self.levelHandler = levelHandler
+    }
+}
+
 // Device-pinned microphone capture over a raw AUHAL input unit (HALInputUnit). The unit binds the chosen
 // device on its own `CurrentDevice` and matches the client format to the device's native format, so
 // selecting a non-default mic has NO global side effect — we NEVER change the macOS system default input
@@ -85,17 +114,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // bring-up: preferred device if present, else system default — so an absent preferred device follows
     // the default, and the device-list listener re-prewarms when it returns.
     private var preferredInputUID: String?
-    private var file: AVAudioFile?
-    private var currentURL: URL?
-    private var levelHandler: (@Sendable (Float) -> Void)?
-    private var recordFormat: AVAudioFormat?
-    // Resamples the mic's native format down to the engine's target rate/mono so the WAV is written at the
-    // rate STT wants — no oversized capture file, no decode-time resample. Built lazily from the format the
-    // callback actually delivers and rebuilt if the hardware format changes mid-stream. Reused across
-    // callbacks (the callback fires serially).
-    private var converter: AVAudioConverter?
-    private var converterInputFormat: AVAudioFormat?
-    private var outBuffer: AVAudioPCMBuffer?
+    // The single per-dictation capture object (file, format, resampler, restart counter). Non-nil only
+    // while a capture is live; created on the control queue in armSync, dropped atomically at teardown.
+    private var session: CaptureSession?
     private let feed = FeedOnce()
     // Set while a commit-on-release drain is in flight: each delivered buffer feeds the gate, and the
     // continuation is resumed once a buffer covers the release instant (or a backstop timeout fires).
@@ -140,9 +161,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var activeDeviceListenerBlock: AudioObjectPropertyListenerBlock?
     private var activeListenedDeviceID: AudioDeviceID?
     private var activeDeviceDebounce: DispatchWorkItem?
-    // Bounds a flapping device: each restart attempt increments this; past the cap we stop retrying and let
-    // the release→finishDraining path finalize the partial capture. Reset when a new capture is armed.
-    private var configRestartCount = 0
+    // Bounds a flapping device: each restart attempt increments the live session's counter; past the cap we
+    // stop retrying and let the release→finishDraining path finalize the partial capture. The counter lives
+    // on the CaptureSession, so it resets to 0 with each fresh capture.
     private static let maxConfigRestarts = 5
     private static let activeDeviceSelectors: [AudioObjectPropertySelector] =
         [kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyNominalSampleRate]
@@ -176,7 +197,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard changed else { return }
         // A new preference re-resolves the effective device. Treat it like a device-topology change:
         // rebuild so the prewarmed unit rebinds, and re-prewarm while idle.
-        let recording = lock.withLock { currentURL != nil }
+        let recording = lock.withLock { session != nil }
         markRebuild()
         if !recording { prewarm() }
     }
@@ -296,23 +317,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             .appendingPathComponent("keyscribe-capture-\(UUID().uuidString).wav")
         let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
 
-        lock.lock()
-        self.file = file
-        self.currentURL = url
-        self.levelHandler = levelHandler
-        self.recordFormat = recordFormat
-        self.converter = nil
-        self.converterInputFormat = nil
-        self.outBuffer = nil
-        self.configRestartCount = 0
-        lock.unlock()
+        lock.withLock {
+            session = CaptureSession(
+                url: url, file: file, recordFormat: recordFormat, levelHandler: levelHandler)
+        }
 
         do {
             try armUnit(generation: generation)
         } catch {
             // Only unwind shared capture state if this bring-up still owns the current generation. A
             // watchdog-abandoned armSync that finally un-wedges is superseded, and the newer generation may
-            // already be recording — clearing its unit/listener/currentURL here would corrupt it.
+            // already be recording — clearing its unit/listener/session here would corrupt it.
             if isGeneration(generation) {
                 removeActiveDeviceListener()
                 disposeUnitInline()
@@ -453,16 +468,18 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // STOPPED but kept resident (fast to restart next dictation); a Bluetooth unit is DISPOSED to free HFP.
     private func teardownAndFinalize() async -> URL? {
         let queue = currentQueue()
-        let url = lock.withLock { currentURL }
+        let url = lock.withLock { session?.url }
         do {
             try await runWithDeadline(seconds: Self.bringUpTimeout) {
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     queue.async { [self] in
-                        // Make "capture is over" visible ON the control queue BEFORE the unit teardown, so a
-                        // mid-recording restart already queued behind us (its guard reads currentURL) sees the
-                        // capture ended and bails instead of starting a fresh ownerless unit. finalizeCapture()
-                        // on the caller afterward clears the remaining recording state idempotently.
-                        lock.withLock { currentURL = nil }
+                        // Drop the session ON the control queue BEFORE the unit teardown, so a mid-recording
+                        // restart already queued behind us (its guard reads `session`) sees the capture ended
+                        // and bails instead of starting a fresh ownerless unit. The tail drain has already
+                        // captured up to the release instant, so dropping the file now only discards
+                        // post-release straggler buffers the gate was designed to exclude. finalizeCapture()
+                        // on the caller afterward is an idempotent no-op.
+                        lock.withLock { session = nil }
                         removeActiveDeviceListener()
                         if effectiveInputIsBluetooth() {
                             disposeUnitInline()
@@ -486,7 +503,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     func stop() -> URL? {
         resumeDrain()
         let queue = currentQueue()
-        let url = lock.withLock { currentURL }
+        let url = lock.withLock { session?.url }
         finalizeCapture()
         queue.async { [self] in
             removeActiveDeviceListener()
@@ -495,22 +512,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return url
     }
 
+    // Drop the live capture as one atomic swap — every file/format/resampler field goes with it, so none
+    // can linger into the next capture.
     private func finalizeCapture() {
-        lock.lock()
-        file = nil
-        currentURL = nil
-        levelHandler = nil
-        recordFormat = nil
-        converter = nil
-        converterInputFormat = nil
-        outBuffer = nil
-        lock.unlock()
+        lock.withLock { session = nil }
     }
 
     // Drop a half-open capture (bring-up threw or timed out): clear recording state and delete the
     // partially-written file. Never touches the unit — a wedged one is abandoned via the rebuild flag.
     private func discardPendingCapture() {
-        let url = lock.withLock { currentURL }
+        let url = lock.withLock { session?.url }
         finalizeCapture()
         if let url { try? FileManager.default.removeItem(at: url) }
     }
@@ -519,15 +530,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private func handle(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
-        let file = self.file
-        let handler = self.levelHandler
-        guard let recordFormat = self.recordFormat else { lock.unlock(); return }
+        guard let session = self.session else { lock.unlock(); return }
+        let file = session.file
+        let handler = session.levelHandler
+        let recordFormat = session.recordFormat
 
         let inputFormat = buffer.format
         if inputFormat.sampleRate == recordFormat.sampleRate
             && inputFormat.channelCount == recordFormat.channelCount {
             lock.unlock()
-            try? file?.write(from: buffer)
+            try? file.write(from: buffer)
             emitLevel(buffer, to: handler)
             return
         }
@@ -538,22 +550,22 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             sampleRate: inputFormat.sampleRate, channelCount: inputFormat.channelCount) else {
             lock.unlock(); return
         }
-        if converter == nil
-            || converterInputFormat?.sampleRate != inputFormat.sampleRate
-            || converterInputFormat?.channelCount != inputFormat.channelCount {
+        if session.converter == nil
+            || session.converterInputFormat?.sampleRate != inputFormat.sampleRate
+            || session.converterInputFormat?.channelCount != inputFormat.channelCount {
             var built: AVAudioConverter?
             try? ObjCException.catching { built = AVAudioConverter(from: inputFormat, to: recordFormat) }
-            converter = built
-            converterInputFormat = inputFormat
-            outBuffer = nil
+            session.converter = built
+            session.converterInputFormat = inputFormat
+            session.outBuffer = nil
         }
         let ratio = recordFormat.sampleRate / inputFormat.sampleRate
         let needed = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        if outBuffer == nil || outBuffer!.frameCapacity < needed {
-            outBuffer = AVAudioPCMBuffer(pcmFormat: recordFormat, frameCapacity: needed)
+        if session.outBuffer == nil || session.outBuffer!.frameCapacity < needed {
+            session.outBuffer = AVAudioPCMBuffer(pcmFormat: recordFormat, frameCapacity: needed)
         }
-        let converter = self.converter
-        let outBuffer = self.outBuffer
+        let converter = session.converter
+        let outBuffer = session.outBuffer
         lock.unlock()
 
         guard let converter, let outBuffer else {
@@ -571,7 +583,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             return feed.buffer
         }
         guard convError == nil, outBuffer.frameLength > 0 else { return }
-        try? file?.write(from: outBuffer)
+        try? file.write(from: outBuffer)
         emitLevel(outBuffer, to: handler)
     }
 
@@ -747,7 +759,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func applyTopologyChange() {
-        let recording = lock.withLock { currentURL != nil }
+        let recording = lock.withLock { session != nil }
         let current = effectiveDeviceID()
         if recording {
             // A NEW preferred device appearing or the default switching (follow mode) changes the effective
@@ -768,7 +780,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // sleep (a dead HAL proxy), so the FIRST dictation afterward would otherwise pay a stale realization on
     // the hot path — or, at the watchdog edge, fail. Rebuild + re-prewarm while idle. No-op while recording.
     func refreshBinding() {
-        let recording = lock.withLock { currentURL != nil }
+        let recording = lock.withLock { session != nil }
         guard !recording else { return }
         markRebuild()
         prewarm()
@@ -822,10 +834,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private func requestMidRecordingRestart() {
         let queue = currentQueue()
         queue.async { [self] in
-            guard lock.withLock({ currentURL != nil }) else { return }
-            let (attempts, generation) = lock.withLock { () -> (Int, Int) in
-                configRestartCount += 1; return (configRestartCount, self.generation)
-            }
+            // Bump the live session's restart counter (and bail if the capture already ended) in one
+            // critical section, so the cap is enforced against exactly this capture's attempts.
+            guard let (attempts, generation) = lock.withLock({ () -> (Int, Int)? in
+                guard let session else { return nil }
+                session.configRestartCount += 1
+                return (session.configRestartCount, self.generation)
+            }) else { return }
             guard attempts <= Self.maxConfigRestarts else {
                 Log.audio.error("mid-recording restart gave up after \(Self.maxConfigRestarts, privacy: .public) attempts — capture may be truncated")
                 return
@@ -839,7 +854,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 guard Self.shouldStartReplacementUnit(
                     generation: generation,
                     currentGeneration: lock.withLock { self.generation },
-                    captureActive: lock.withLock { currentURL != nil }) else {
+                    captureActive: lock.withLock { session != nil }) else {
                     fresh.dispose()
                     return
                 }
@@ -850,7 +865,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                     throw error
                 }
                 let stored = lock.withLock { () -> Bool in
-                    guard self.generation == generation, currentURL != nil else { return false }
+                    guard self.generation == generation, session != nil else { return false }
                     unit = fresh; configuredDeviceID = deviceID; configuredGeneration = generation
                     return true
                 }

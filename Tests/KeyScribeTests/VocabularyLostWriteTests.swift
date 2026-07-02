@@ -20,9 +20,9 @@ struct VocabularyLostWriteTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         try DictionaryStore.write(DictionarySet(words: ["Postgres", "Kubernetes"]), to: dir)
 
-        let model = DictionarySettingsModel(supportDir: dir)   // snapshots [Postgres, Kubernetes]
-
         let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = DictionarySettingsModel(repository: repo)  // snapshots [Postgres, Kubernetes]
+
         repo.addDictionaryWord("Redis")                        // disk now has the third word
 
         model.remove("Postgres")                               // pane removes an unrelated word
@@ -42,9 +42,9 @@ struct VocabularyLostWriteTests {
                 .init(heard: "wont", replace: "won't", regex: false),
             ]), to: dir)
 
-        let model = ReplacementsSettingsModel(supportDir: dir)  // snapshots two rules
-
         let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = ReplacementsSettingsModel(repository: repo)  // snapshots two rules
+
         repo.addReplacement(heard: "recieve", replace: "receive")
 
         model.remove(at: 0)                                    // pane removes the first displayed rule

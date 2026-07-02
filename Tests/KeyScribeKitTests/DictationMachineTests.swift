@@ -5,11 +5,13 @@ struct DictationMachineTests {
     @Test func happyPathProgressesToInserted() {
         var m = DictationMachine()
         #expect(m.state == .idle)
-        #expect(m.beginRecording() == true)
+        #expect(m.beginArming() == true)
+        #expect(m.state == .arming)
+        #expect(m.markRecording() == true)
         #expect(m.state == .recording)
-        m.beginTranscribing()
+        #expect(m.beginTranscribing() == true)
         #expect(m.state == .transcribing)
-        m.beginInserting()
+        #expect(m.beginInserting() == true)
         #expect(m.state == .inserting)
         m.finish(.inserted)
         #expect(m.state == .finished(.inserted))
@@ -17,21 +19,91 @@ struct DictationMachineTests {
 
     @Test func overlappingDictationIsRejectedWhileBusy() {
         var m = DictationMachine()
-        #expect(m.beginRecording() == true)
+        #expect(m.beginArming() == true)
         #expect(m.isBusy == true)
-        #expect(m.beginRecording() == false)
-        m.beginTranscribing()
-        #expect(m.beginRecording() == false)
+        #expect(m.beginArming() == false)
+        _ = m.markRecording()
+        #expect(m.beginArming() == false)
+        _ = m.beginTranscribing()
+        #expect(m.beginArming() == false)
     }
 
     @Test func canStartAgainAfterFinish() {
         var m = DictationMachine()
-        _ = m.beginRecording()
-        m.beginTranscribing()
-        m.beginInserting()
+        _ = m.beginArming()
+        _ = m.markRecording()
+        _ = m.beginTranscribing()
+        _ = m.beginInserting()
         m.finish(.inserted)
         #expect(m.isBusy == false)
-        #expect(m.beginRecording() == true)
+        #expect(m.beginArming() == true)
+    }
+
+    @Test func transitionsAreGuardedToTheirSourceState() {
+        var m = DictationMachine()
+        // markRecording only from arming.
+        #expect(m.markRecording() == false)
+        // beginTranscribing only from recording (not arming).
+        _ = m.beginArming()
+        #expect(m.beginTranscribing() == false)
+        _ = m.markRecording()
+        // beginInserting only from transcribing (not recording).
+        #expect(m.beginInserting() == false)
+        #expect(m.beginTranscribing() == true)
+        #expect(m.beginInserting() == true)
+        // No further transitions out of inserting.
+        #expect(m.markRecording() == false)
+        #expect(m.beginTranscribing() == false)
+    }
+
+    @Test func beginInsertingRejectsASecondInsert() {
+        var m = DictationMachine()
+        _ = m.beginArming()
+        _ = m.markRecording()
+        _ = m.beginTranscribing()
+        #expect(m.beginInserting() == true)
+        #expect(m.beginInserting() == false)
+    }
+
+    @Test func cancellingBringUpIsBusyButNotCancellableAndReturnsToIdle() {
+        var m = DictationMachine()
+        _ = m.beginArming()
+        #expect(m.beginCancellingBringUp() == true)
+        #expect(m.state == .cancellingBringUp)
+        #expect(m.isBusy == true)
+        #expect(m.isCancellable == false)
+        m.cancel()
+        #expect(m.state == .idle)
+        #expect(m.beginArming() == true)
+    }
+
+    @Test func beginCancellingBringUpOnlyFromArming() {
+        var m = DictationMachine()
+        #expect(m.beginCancellingBringUp() == false)
+        _ = m.beginArming()
+        _ = m.markRecording()
+        #expect(m.beginCancellingBringUp() == false)
+    }
+
+    @Test func cancellabilityTracksTheState() {
+        var m = DictationMachine()
+        #expect(m.isCancellable == false)   // idle
+        _ = m.beginArming()
+        #expect(m.isCancellable == true)    // arming
+        _ = m.markRecording()
+        #expect(m.isCancellable == true)    // recording
+        _ = m.beginTranscribing()
+        #expect(m.isCancellable == true)    // transcribing
+        _ = m.beginInserting()
+        #expect(m.isCancellable == false)   // inserting
+    }
+
+    @Test func finishIsReachableFromAnyLiveState() {
+        var m = DictationMachine()
+        _ = m.beginArming()
+        m.finish(.failed("mic off"))
+        #expect(m.state == .finished(.failed("mic off")))
+        #expect(m.isBusy == false)
     }
 
     @Test func outcomeMapsInsertDecision() {
@@ -64,9 +136,10 @@ struct DictationMachineTests {
 
     @Test func cancelReturnsToIdle() {
         var m = DictationMachine()
-        _ = m.beginRecording()
+        _ = m.beginArming()
+        _ = m.markRecording()
         m.cancel()
         #expect(m.state == .idle)
-        #expect(m.beginRecording() == true)
+        #expect(m.beginArming() == true)
     }
 }

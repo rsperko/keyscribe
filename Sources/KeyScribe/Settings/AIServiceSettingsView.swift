@@ -56,20 +56,22 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published var pendingConnectOffer: ConnectModesOffer?
     @Published var lastCreatedId: String?
 
-    private let supportDir: URL
+    private let repository: ConfigRepository
+    private var supportDir: URL { repository.supportDir }
+    private var modesDir: URL { repository.modesDir }
     private var loadedSignature: String?
     private let tester: ConnectionTester
     private let listModels: (Connection, String?) async throws -> [String]
     private(set) var testTask: Task<Void, Never>?
 
     init(
-        supportDir: URL,
+        repository: ConfigRepository,
         tester: ConnectionTester = ConnectionTester(),
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
         }
     ) {
-        self.supportDir = supportDir
+        self.repository = repository
         self.tester = tester
         self.listModels = listModels
         reload()
@@ -164,7 +166,7 @@ final class AIServiceSettingsModel: ObservableObject {
     func consumeCreated() { lastCreatedId = nil }
 
     private func modesNeedingConnection() -> [Mode] {
-        ModeStore.loadAll(in: KeyScribePaths.modesDir).filter { mode in
+        ModeStore.loadAll(in: modesDir).filter { mode in
             guard let rewrite = mode.aiRewrite else { return false }
             return rewrite.connection.isEmpty || !connections.contains { $0.id == rewrite.connection }
         }
@@ -172,11 +174,11 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func applyConnectOffer(_ offer: ConnectModesOffer) {
         var failed: [String] = []
-        for var mode in ModeStore.loadAll(in: KeyScribePaths.modesDir) where offer.modeIds.contains(mode.id) {
+        for var mode in ModeStore.loadAll(in: modesDir) where offer.modeIds.contains(mode.id) {
             guard var rewrite = mode.aiRewrite else { continue }
             rewrite.connection = offer.connectionId
             mode.aiRewrite = rewrite
-            do { try ModeStore.write(mode, to: KeyScribePaths.modesDir) }
+            do { try repository.writeMode(mode) }
             catch { failed.append(mode.name) }
         }
         error = failed.isEmpty ? nil
@@ -197,10 +199,10 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func delete(_ connection: Connection) {
-        var updated = connections
-        updated.removeAll { $0.id == connection.id }
         do {
-            try ConnectionStore.write(ConnectionSet(connections: updated), to: supportDir)
+            // Read-modify-write from disk (not the pane's stale `connections`), so a connection another
+            // surface added concurrently is not dropped by this delete.
+            let updated = try repository.deleteConnection(id: connection.id).connections
             KeychainStore.delete(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
@@ -219,12 +221,10 @@ final class AIServiceSettingsModel: ObservableObject {
     func hasKey(_ connection: Connection) -> Bool { keyedRefs.contains(connection.keyRef) }
 
     private func save(_ connection: Connection) {
-        var updated = connections
-        if let index = updated.firstIndex(where: { $0.id == connection.id }) { updated[index] = connection }
-        else { updated.append(connection) }
         do {
-            try ConnectionStore.write(ConnectionSet(connections: updated), to: supportDir)
-            connections = updated
+            // Read-modify-write from disk (not the pane's stale `connections`): insert-or-replace by id so
+            // a concurrent write from another surface is merged, not clobbered.
+            connections = try repository.upsertConnection(connection).connections
             error = nil
         } catch {
             self.error = "Could not save \(connection.name): \(error.localizedDescription)"

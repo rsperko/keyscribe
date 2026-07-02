@@ -2,7 +2,7 @@ import Testing
 @testable import KeyScribeKit
 
 // Verbatim/redaction as pipeline commands (design.md §4.2.1): verbatim sorts before the text stages
-// so its span is protected from everything except STT; redaction sorts after; reverse() unwinds
+// so its span is protected from everything except STT; redaction sorts after; restore() unwinds
 // both in strict LIFO.
 struct TokenizingStageTests {
     @Test func verbatimContentSurvivesTextStages() {
@@ -11,12 +11,10 @@ struct TokenizingStageTests {
             TokenizingStage.verbatim(),
             ReplacementsStage(rules: [ReplacementRule(heard: "cat", replace: "dog", isRegex: false)]),
         ])
-        var ctx = PipelineContext(text: "a cat begin verbatim a cat end verbatim")
-        p.forward(&ctx)
-        #expect(p.issuedTokens.count == 1)
-        #expect(!ctx.text.contains("end verbatim"))   // markers stripped
-        p.reverse(&ctx)
-        #expect(ctx.text == "a dog a cat")            // loose word replaced, wrapped word preserved
+        let payload = p.forward("a cat begin verbatim a cat end verbatim")
+        #expect(payload.issuedTokens.count == 1)
+        #expect(!payload.text.contains("end verbatim"))   // markers stripped
+        #expect(p.restore(payload.text) == "a dog a cat")  // loose word replaced, wrapped word preserved
     }
 
     @Test func verbatimContentSurvivesNumbersStage() {
@@ -24,10 +22,8 @@ struct TokenizingStageTests {
             TokenizingStage.verbatim(),
             NumbersStage(),
         ])
-        var ctx = PipelineContext(text: "twenty five begin verbatim twenty five end verbatim")
-        p.forward(&ctx)
-        p.reverse(&ctx)
-        #expect(ctx.text == "25 twenty five")
+        let payload = p.forward("twenty five begin verbatim twenty five end verbatim")
+        #expect(p.restore(payload.text) == "25 twenty five")
     }
 
     @Test func redactionTokenizesAfterTextStagesAndRestores() {
@@ -35,27 +31,23 @@ struct TokenizingStageTests {
             ReplacementsStage(rules: []),
             TokenizingStage.redaction(),
         ])
-        var ctx = PipelineContext(text: "email me at alice@example.com")
-        p.forward(&ctx)
-        #expect(!ctx.text.contains("alice@example.com"))
-        #expect(p.issuedTokens.count == 1)
-        p.reverse(&ctx)
-        #expect(ctx.text == "email me at alice@example.com")
+        let payload = p.forward("email me at alice@example.com")
+        #expect(!payload.text.contains("alice@example.com"))
+        #expect(payload.issuedTokens.count == 1)
+        #expect(p.restore(payload.text) == "email me at alice@example.com")
     }
 
-    // Both stages issue tokens; reverse restores redaction (last in) before verbatim (first in).
+    // Both stages issue tokens; restore restores redaction (last in) before verbatim (first in).
     @Test func verbatimAndRedactionUnwindLIFO() {
         let p = Pipeline([
             TokenizingStage.verbatim(),
             TokenizingStage.redaction(),
         ])
-        var ctx = PipelineContext(text: "begin verbatim my note end verbatim contact alice@example.com")
-        p.forward(&ctx)
-        #expect(ctx.text.contains("⟦SN:VERB:1⟧"))
-        #expect(ctx.text.contains("⟦SN:REDACT:1⟧"))
-        #expect(p.issuedTokens.count == 2)
-        p.reverse(&ctx)
-        #expect(ctx.text == "my note contact alice@example.com")
+        let payload = p.forward("begin verbatim my note end verbatim contact alice@example.com")
+        #expect(payload.text.contains("⟦SN:VERB:1⟧"))
+        #expect(payload.text.contains("⟦SN:REDACT:1⟧"))
+        #expect(payload.issuedTokens.count == 2)
+        #expect(p.restore(payload.text) == "my note contact alice@example.com")
     }
 
     // issuedTokens is part of the PipelineStage contract, not an optional downcast: any stage that
@@ -70,12 +62,12 @@ struct TokenizingStageTests {
 
     @Test func anyStageReturningTokensIsCollected() {
         let p = Pipeline([ReplacementsStage(rules: []), TokenIssuingStage()])
-        #expect(p.issuedTokens == ["⟦SN:REDACT:1⟧"])
+        #expect(p.forward("hi").issuedTokens == ["⟦SN:REDACT:1⟧"])
     }
 
     @Test func plainTextStageContributesNoTokens() {
         let p = Pipeline([ReplacementsStage(rules: []), NumbersStage()])
-        #expect(p.issuedTokens.isEmpty)
+        #expect(p.forward("hi").issuedTokens.isEmpty)
     }
 
     // "insert clipboard contents" pulls the clipboard into a verbatim token before the text stages,
@@ -85,11 +77,9 @@ struct TokenizingStageTests {
             TokenizingStage.clipboard("twenty five"),
             NumbersStage(),
         ])
-        var ctx = PipelineContext(text: "count twenty five insert clipboard contents")
-        p.forward(&ctx)
-        #expect(p.issuedTokens.count == 1)
-        p.reverse(&ctx)
-        #expect(ctx.text == "count 25 twenty five")   // loose number converted, pasted one preserved
+        let payload = p.forward("count twenty five insert clipboard contents")
+        #expect(payload.issuedTokens.count == 1)
+        #expect(p.restore(payload.text) == "count 25 twenty five")   // loose number converted, pasted one preserved
     }
 
     // A verbatim span and a clipboard paste in the SAME dictation must not collide: verbatim mints a
@@ -100,12 +90,10 @@ struct TokenizingStageTests {
             TokenizingStage.verbatim(),
             TokenizingStage.clipboard("B"),
         ])
-        var ctx = PipelineContext(text: "begin verbatim A end verbatim and insert clipboard contents")
-        p.forward(&ctx)
-        #expect(p.issuedTokens.count == 2)
-        #expect(Set(p.issuedTokens).count == 2)   // two DISTINCT tokens, not one string reused
-        p.reverse(&ctx)
-        #expect(ctx.text == "A and B")
+        let payload = p.forward("begin verbatim A end verbatim and insert clipboard contents")
+        #expect(payload.issuedTokens.count == 2)
+        #expect(Set(payload.issuedTokens).count == 2)   // two DISTINCT tokens, not one string reused
+        #expect(p.restore(payload.text) == "A and B")
     }
 
     // A clipboard phrase INSIDE a verbatim span is literal text, not a paste: verbatim sorts before
@@ -115,25 +103,21 @@ struct TokenizingStageTests {
             TokenizingStage.verbatim(),
             TokenizingStage.clipboard("PASTED"),
         ])
-        var ctx = PipelineContext(text: "begin verbatim insert clipboard contents end verbatim")
-        p.forward(&ctx)
-        #expect(p.issuedTokens.count == 1)
-        p.reverse(&ctx)
-        #expect(ctx.text == "insert clipboard contents")
+        let payload = p.forward("begin verbatim insert clipboard contents end verbatim")
+        #expect(payload.issuedTokens.count == 1)
+        #expect(p.restore(payload.text) == "insert clipboard contents")
     }
 
-    // The gate's issuedTokens survive an LLM that preserves them; reverse then restores the originals.
+    // The gate's issuedTokens survive an LLM that preserves them; restore then restores the originals.
     @Test func tokensSurviveAPreservingRewriteThenRestore() {
         let v = Tokenizer()
         let p = Pipeline([TokenizingStage.verbatim(tokenizer: v)])
-        var ctx = PipelineContext(text: "begin verbatim keep me end verbatim please")
-        p.forward(&ctx)
-        let token = p.issuedTokens.first!
+        let payload = p.forward("begin verbatim keep me end verbatim please")
+        let token = payload.issuedTokens.first!
         // A faithful rewrite reproduces the token verbatim while editing around it.
-        ctx.text = ctx.text.replacingOccurrences(of: "please", with: "thanks")
-        #expect(ValidationGate.check(output: ctx.text, issuedTokens: p.issuedTokens) == .pass)
-        p.reverse(&ctx)
-        #expect(ctx.text == "keep me thanks")
+        let edited = payload.text.replacingOccurrences(of: "please", with: "thanks")
+        #expect(ValidationGate.check(output: edited, issuedTokens: payload.issuedTokens) == .pass)
+        #expect(p.restore(edited) == "keep me thanks")
         #expect(token == "⟦SN:VERB:1⟧")
     }
 }

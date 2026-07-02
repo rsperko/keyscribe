@@ -22,11 +22,7 @@ private struct WrapStage: PipelineStage {
 }
 
 private extension Pipeline {
-    func applied(_ text: String) -> String {
-        var ctx = PipelineContext(text: text)
-        forward(&ctx)
-        return ctx.text
-    }
+    func applied(_ text: String) -> String { forward(text).text }
 }
 
 struct PipelineTests {
@@ -74,18 +70,15 @@ struct PipelineTests {
             WrapStage(position: .verbatimMark, order: 0, tag: "outer"),
             WrapStage(position: .postSTTMark, order: 0, tag: "inner"),
         ])
-        var ctx = PipelineContext(text: "x")
-        p.forward(&ctx)
-        #expect(ctx.text == "(inner (outer x))")   // outer applies first (innermost), inner wraps it
-        p.reverse(&ctx)
-        #expect(ctx.text == "x")                    // inner.post then outer.post — LIFO
+        let payload = p.forward("x")
+        #expect(payload.text == "(inner (outer x))")   // outer applies first (innermost), inner wraps it
+        #expect(p.restore(payload.text) == "x")        // inner.post then outer.post — LIFO
     }
 
     // A one-way stage's default post is a no-op, so reverse leaves its forward effect intact.
     @Test func oneWayStagePostIsNoOp() {
         let p = Pipeline([AppendStage(position: .postSTTText, order: 0, mark: "!")])
-        var ctx = PipelineContext(text: "hi")
-        p.forward(&ctx); p.reverse(&ctx)
-        #expect(ctx.text == "hi!")
+        let payload = p.forward("hi")
+        #expect(p.restore(payload.text) == "hi!")
     }
 }
