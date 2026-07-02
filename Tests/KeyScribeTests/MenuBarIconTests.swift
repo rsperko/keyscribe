@@ -26,6 +26,31 @@ struct MenuBarIconTests {
         #expect(controller.updateItem.title == "Update Available…")
         #expect(controller.updateItem.image === MenuBarController.updateIndicatorImage)
     }
+
+    // H1: without `autoenablesItems = false`, AppKit force-enables "Paste Last Dictation" at display
+    // time (its target responds to its action), overriding `setHasResult(false)` — clicking it would
+    // call `onPasteLast` with nothing to paste. `NSMenu.update()` runs the same validation pass AppKit
+    // runs before showing the menu, without needing the menu to actually be on screen.
+    @Test func pasteLastDictationStaysDisabledWithNoResultUnderMenuValidation() {
+        let controller = MenuBarController()
+        controller.install()
+        controller.setHasResult(false)
+
+        controller.mainMenu?.update()
+
+        #expect(controller.mainMenu?.autoenablesItems == false)
+        #expect(controller.pasteLastMenuItem.isEnabled == false)
+    }
+
+    @Test func pasteLastDictationEnablesWhenAResultExists() {
+        let controller = MenuBarController()
+        controller.install()
+        controller.setHasResult(true)
+
+        controller.mainMenu?.update()
+
+        #expect(controller.pasteLastMenuItem.isEnabled == true)
+    }
 }
 
 private extension NSColor {

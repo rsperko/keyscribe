@@ -62,6 +62,20 @@ struct DictationPipelineWiringTests {
         }
     }
 
+    // Reads the ⟦SN:REDACT:…⟧ token out of the <instructions> block and inserts it into the rewritten
+    // content — simulating a faithful edit that needs the redacted instruction value in its output
+    // (e.g. "change the recipient to jane@example.com").
+    private struct InstructionValueLLM: LLMClient {
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            guard let start = user.range(of: "<instructions>\n"),
+                  let end = user.range(of: "\n</instructions>"),
+                  let tokenRange = user.range(
+                    of: #"⟦SN:REDACT:\d+⟧"#, options: .regularExpression, range: start.upperBound..<end.lowerBound)
+            else { return "no token found" }
+            return "Dear \(user[tokenRange]),"
+        }
+    }
+
     // Captures the real insertion call (method + the exact string, which includes the trailing suffix).
     private actor InsertSpy {
         private(set) var method: Mode.Insertion?
@@ -554,6 +568,35 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "the original text")
         #expect(out.insertedText == "the original text")
         #expect(out.outcome == .inserted)
+    }
+
+    // H1: privacy mode on a selection mode must also redact the spoken instruction (design.md
+    // §4.4), not just the captured selection.
+    @Test func selectionInstructionIsRedactedBeforeReachingTheLLM() async {
+        let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "change the recipient to jane@example.com", mode: m, connection: conn, llm: EchoLLM(),
+            captureSelection: { _ in "Dear Sir or Madam" })
+
+        #expect(out.outcome == .inserted)
+        let sent = await (out.llm as! EchoLLM).lastUser
+        #expect(!sent.contains("jane@example.com"))
+        #expect(sent.contains("⟦SN:REDACT:"))
+    }
+
+    // Follow-up to H1: an instruction token must also be USABLE, not just kept off the wire — a
+    // faithful edit that inserts the redacted value must pass the gate and restore to the real value.
+    @Test func selectionInstructionTokenCanBeUsedInTheRewrittenSelection() async {
+        let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "change the recipient to jane@example.com", mode: m, connection: conn,
+            llm: InstructionValueLLM(),
+            captureSelection: { _ in "Dear Sir or Madam" })
+
+        #expect(out.outcome == .inserted)
+        #expect(out.lastResult == "Dear jane@example.com,")
     }
 
     // ── clipboard_modifier: the mode's modifier must reach BOTH clipboard keystrokes ───────────────

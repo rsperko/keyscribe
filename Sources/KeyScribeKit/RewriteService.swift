@@ -25,11 +25,12 @@ public actor RewriteService {
 
     public func rewrite(
         payload: TokenizedPayload, inputs: PromptInputs, connection: Connection,
-        allowDeletion: Bool = false, prompt: RewritePrompt? = nil,
+        allowDeletion: Bool = false, allowedTokens: [String] = [], prompt: RewritePrompt? = nil,
         preserveBoundaryLayout: Bool = false
     ) async -> RewriteOutcome {
         // Tokens and fallback text both come from the sealed payload produced by a real forward pass. On
-        // failure, fall back to tokenized text; the caller's restore pass unwinds it.
+        // failure, fall back to tokenized text; the caller's restore pass unwinds it. `allowedTokens` are
+        // minted outside payload.text (selection-mode instruction redaction) — never required.
         let localText = payload.text
         let base = prompt ?? PromptAssembler.assemble(inputs)
         let required = payload.issuedTokens.filter { payload.text.contains($0) }
@@ -42,7 +43,9 @@ public actor RewriteService {
             } catch {
                 return .localFallback(localText: localText)
             }
-            switch ValidationGate.check(output: output, issuedTokens: required, allowDeletion: allowDeletion) {
+            switch ValidationGate.check(
+                output: output, issuedTokens: required, allowedTokens: allowedTokens, allowDeletion: allowDeletion
+            ) {
             case .pass:
                 let repaired = preserveBoundaryLayout
                     ? OutputCleanup.preserveBoundaryLayout(from: localText, in: output)

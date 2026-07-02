@@ -28,7 +28,10 @@ public enum VerbatimTokenizer {
             guard let full = Range(m.range, in: text), let content = Range(m.range(at: 1), in: text) else { return nil }
             return (full, String(text[content]))
         }
-        return tokenizer.spliceAbsorbing(text, spans: spans, type: .verbatim)
+        // dedup: false — two verbatim spans with equal content must stay distinct tokens, or a
+        // faithful rewrite reproducing both occurrences trips the gate's exactly-once check
+        // (mirrors ClipboardTokenizer).
+        return tokenizer.spliceAbsorbing(text, spans: spans, type: .verbatim, dedup: false)
     }
 
     private static func replaceUnterminated(_ text: String, _ tokenizer: Tokenizer) -> String {

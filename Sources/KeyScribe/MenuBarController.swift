@@ -137,6 +137,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         let menu = NSMenu()
         appMenu = menu
+        // Without this, AppKit force-enables any item whose target responds to its action, overriding
+        // `pasteLastItem.isEnabled` below. Each NSMenu tracks the flag independently — covers the submenus too.
+        menu.autoenablesItems = false
+        speechModelsMenu.autoenablesItems = false
+        modesMenu.autoenablesItems = false
         statusLine.isEnabled = false
         menu.addItem(statusLine)
 
@@ -177,6 +182,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
     }
+
+    var mainMenu: NSMenu? { appMenu }
+    var pasteLastMenuItem: NSMenuItem { pasteLastItem }
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
 

@@ -37,9 +37,14 @@ struct RedactionTokenizerTests {
         #expect(out == "⟦SN:REDACT:1⟧ and ⟦SN:REDACT:2⟧")
     }
 
-    @Test func repeatedSecretReusesToken() {
-        let (out, _) = redact("a@b.com then a@b.com again")
-        #expect(out == "⟦SN:REDACT:1⟧ then ⟦SN:REDACT:1⟧ again")
+    // Distinct tokens per site (not deduped): a repeated secret must survive as two occurrences
+    // through the post-LLM gate's exactly-once check (mirrors ClipboardTokenizer) — a single reused
+    // token can never satisfy "each issued token appears exactly once" when it appears twice.
+    @Test func repeatedSecretGetsDistinctTokens() {
+        let (out, t) = redact("a@b.com then a@b.com again")
+        #expect(out == "⟦SN:REDACT:1⟧ then ⟦SN:REDACT:2⟧ again")
+        #expect(t.issuedTokens == ["⟦SN:REDACT:1⟧", "⟦SN:REDACT:2⟧"])
+        #expect(t.restore(out) == "a@b.com then a@b.com again")
     }
 
     @Test func plainTextUntouched() {

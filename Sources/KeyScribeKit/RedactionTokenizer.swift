@@ -104,7 +104,10 @@ public enum RedactionTokenizer {
             kept.append((span.range, span.value))
             lastUpper = span.range.upperBound
         }
-        return tokenizer.splice(text, spans: kept, type: .redact)
+        // dedup: false — a secret repeated verbatim in one dictation must mint distinct tokens per
+        // site, or a faithful rewrite reproducing both occurrences trips the gate's exactly-once
+        // check (mirrors ClipboardTokenizer).
+        return tokenizer.splice(text, spans: kept, type: .redact, dedup: false)
     }
 
     // IBANs allow letters, so a greedy regex over-extends into the following word and the validator

@@ -24,6 +24,17 @@ struct ReplacementSafetyTests {
         #expect(!ReplacementSafety.isSafe(#"((ab)+)+"#))
     }
 
+    @Test func rejectsRepeatWrappedInAnExtraGroup() {
+        #expect(!ReplacementSafety.isSafe(#"((a+))*"#))
+        #expect(!ReplacementSafety.isSafe(#"(?:(a+))+"#))
+        #expect(!ReplacementSafety.isSafe(#"((a+)b?)*"#))
+    }
+
+    @Test func rejectsBoundedCountedRepeatOfAmbiguousGroup() {
+        #expect(!ReplacementSafety.isSafe(#"(a+){2,999}"#))
+        #expect(!ReplacementSafety.isSafe(#"(a+){2}"#))
+    }
+
     @Test func bracketedQuantifierCharsAreLiteral() {
         #expect(ReplacementSafety.isSafe(#"[+*]+"#))             // + and * inside class are literal
     }

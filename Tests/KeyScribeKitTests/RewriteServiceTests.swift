@@ -92,6 +92,19 @@ struct RewriteServiceTests {
         #expect(await client.calls == 1)
     }
 
+    // A token minted for the instruction (not in payload.text, so never `required`) must still be
+    // usable in the output via `allowedTokens` (hotkeys-llm-network H1 follow-up).
+    @Test func allowedTokenFromInstructionMayAppearInOutput() async {
+        let client = FakeClient([.success("send to ⟦SN:REDACT:2⟧")])
+        let svc = RewriteService(client: client)
+        let out = await svc.rewrite(
+            payload: TokenizedPayload(text: "send to", issuedTokens: []),
+            inputs: inputs(content: "send to"), connection: conn,
+            allowedTokens: ["⟦SN:REDACT:2⟧"])
+        #expect(out == .rewritten("send to ⟦SN:REDACT:2⟧"))
+        #expect(await client.calls == 1)
+    }
+
     @Test func emptyOutputFallsBack() async {
         let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)

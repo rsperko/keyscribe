@@ -24,7 +24,11 @@ public enum GateRecovery: Equatable, Sendable {
 public enum ValidationGate {
     private static let sentinelPattern = "⟦SN:[^⟧]*⟧"
 
-    public static func check(output: String, issuedTokens: [String], allowDeletion: Bool = false) -> GateVerdict {
+    // `allowedTokens` (selection-mode instruction redaction) are never required, but one occurrence
+    // must not be rejected as stray — more than one is still ambiguous restore and fails.
+    public static func check(
+        output: String, issuedTokens: [String], allowedTokens: [String] = [], allowDeletion: Bool = false
+    ) -> GateVerdict {
         if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .fail(.empty) }
 
         // One regex pass finds every sentinel-shaped span (issued tokens are sentinel-shaped too), so a
@@ -40,8 +44,11 @@ public enum ValidationGate {
             if count > 1 { return .fail(.duplicatedToken(token)) }
             if count == 0 && !allowDeletion { return .fail(.missingToken(token)) }
         }
+        for token in allowedTokens where (counts[token] ?? 0) > 1 {
+            return .fail(.duplicatedToken(token))
+        }
 
-        let issued = Set(issuedTokens)
+        let issued = Set(issuedTokens).union(allowedTokens)
         for sentinel in found where !issued.contains(sentinel) {
             return .fail(.strayToken(sentinel))
         }

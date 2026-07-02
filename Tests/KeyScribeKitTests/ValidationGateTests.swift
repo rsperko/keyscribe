@@ -45,6 +45,32 @@ struct ValidationGateTests {
             == .fail(.duplicatedToken("⟦SN:VERB:1⟧")))
     }
 
+    // A selection-instruction token isn't required to reappear, but one occurrence must not be
+    // rejected as stray (hotkeys-llm-network H1 follow-up).
+    @Test func allowedTokenMayAppearOnceWithoutFailing() {
+        let v = ValidationGate.check(
+            output: "the value is ⟦SN:REDACT:2⟧", issuedTokens: [], allowedTokens: ["⟦SN:REDACT:2⟧"])
+        #expect(v == .pass)
+    }
+
+    @Test func allowedTokenMayBeAbsentEntirely() {
+        let v = ValidationGate.check(
+            output: "no mention here", issuedTokens: [], allowedTokens: ["⟦SN:REDACT:2⟧"])
+        #expect(v == .pass)
+    }
+
+    @Test func allowedTokenAppearingTwiceStillFails() {
+        let v = ValidationGate.check(
+            output: "⟦SN:REDACT:2⟧ and ⟦SN:REDACT:2⟧", issuedTokens: [], allowedTokens: ["⟦SN:REDACT:2⟧"])
+        #expect(v == .fail(.duplicatedToken("⟦SN:REDACT:2⟧")))
+    }
+
+    @Test func tokenNeitherIssuedNorAllowedIsStillStray() {
+        let v = ValidationGate.check(
+            output: "text ⟦SN:REDACT:9⟧", issuedTokens: [], allowedTokens: ["⟦SN:REDACT:2⟧"])
+        #expect(v == .fail(.strayToken("⟦SN:REDACT:9⟧")))
+    }
+
     @Test func retryAndFallbackDecision() {
         // first failure → retry stricter; second failure → local fallback
         #expect(ValidationGate.recovery(attempt: 0) == .retryStricter)

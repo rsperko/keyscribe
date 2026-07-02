@@ -108,6 +108,17 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "insert clipboard contents")
     }
 
+    // Two verbatim spans with EQUAL content must stay distinct tokens (dedup: false), or a faithful
+    // LLM rewrite that reproduces both occurrences can never satisfy the gate's exactly-once check
+    // (H2: a deduped token appearing twice always fails ValidationGate's `count > 1` rule).
+    @Test func repeatedVerbatimSpanGetsDistinctTokens() {
+        let p = Pipeline([TokenizingStage.verbatim()])
+        let payload = p.forward("begin verbatim hello end verbatim then begin verbatim hello end verbatim")
+        #expect(payload.issuedTokens == ["⟦SN:VERB:1⟧", "⟦SN:VERB:2⟧"])
+        #expect(ValidationGate.check(output: payload.text, issuedTokens: payload.issuedTokens) == .pass)
+        #expect(p.restore(payload.text) == "hello then hello")
+    }
+
     // The gate's issuedTokens survive an LLM that preserves them; restore then restores the originals.
     @Test func tokensSurviveAPreservingRewriteThenRestore() {
         let v = Tokenizer()

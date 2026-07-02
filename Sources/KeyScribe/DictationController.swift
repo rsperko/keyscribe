@@ -1182,13 +1182,25 @@ final class DictationController {
         // The selection IS the content (no post-STT text stages); only the tokenization commands run.
         // A selection can be large (whole documents), and tokenization is pure CPU — run the forward
         // pass off the main actor so a big selection cannot stutter the HUD.
-        let pipeline = selectionPipeline(for: mode)
+        let redactionTokenizer = Tokenizer()
+        let pipeline = selectionPipeline(for: mode, redactionTokenizer: redactionTokenizer)
         let payload = await Task.detached(priority: .userInitiated) {
             pipeline.forward(selection)
         }.value
+        // The dictated instruction is user content too (design.md §4.4): with privacy on, redact it
+        // through the SAME tokenizer as the selection. Unlike `payload.issuedTokens`, these ride as
+        // `instructionTokens` (allowed, not required) — most instructions echo nothing back, but one
+        // that inserts a value ("change the recipient to ⟦SN:REDACT:2⟧") needs that occurrence to
+        // pass the gate rather than fail as stray.
+        let contentTokenCount = redactionTokenizer.issuedTokens.count
+        let redactedInstruction = mode.commands.privacy
+            ? RedactionTokenizer.apply(instruction, into: redactionTokenizer)
+            : instruction
+        let instructionTokens = Array(redactionTokenizer.issuedTokens.dropFirst(contentTokenCount))
         let result = await rewriteTokenized(
             pipeline: pipeline, payload: payload, localProcessed: selection,
-            instruction: instruction, mode: mode, connection: connection)
+            instruction: redactedInstruction, mode: mode, connection: connection,
+            instructionTokens: instructionTokens)
         let final: FinalText = result.ok
             ? guardedInsert(result.text, issuedTokens: payload.issuedTokens)
             : .abort("Rewrite failed — selection unchanged", nil)
@@ -1210,7 +1222,7 @@ final class DictationController {
     // text was restored — dictation inserts it anyway; selection aborts on !ok.
     private func rewriteTokenized(
         pipeline: Pipeline, payload: TokenizedPayload, localProcessed: String,
-        instruction: String, mode: Mode, connection: Connection
+        instruction: String, mode: Mode, connection: Connection, instructionTokens: [String] = []
     ) async -> (text: String, ok: Bool, details: RewriteDetails) {
         let content = payload.text
         let issuedTokens = payload.issuedTokens
@@ -1237,15 +1249,18 @@ final class DictationController {
             connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
             contextCategories: mode.effectiveContextCategories, offerLocalTranscript: false))
 
-        // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus
-        // the size-bumped connection — the change-prone assembly lives in its own builder.
+        // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus the
+        // size-bumped connection — the change-prone assembly lives in its own builder. `issuedTokens`
+        // here also lists `instructionTokens` so the model gets the opaque-marker rule even when the
+        // selection itself issued none.
         let request = await RewriteRequestBuilder(
-            mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens,
+            mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
             capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection).build()
 
         let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(
-            payload: payload, inputs: request.inputs, connection: request.sized, prompt: request.prompt,
+            payload: payload, inputs: request.inputs, connection: request.sized,
+            allowedTokens: instructionTokens, prompt: request.prompt,
             preserveBoundaryLayout: mode.commands.liveEdits)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
         let gateApproved: String
@@ -1294,11 +1309,12 @@ final class DictationController {
     // Edit-in-place pipeline: the selection IS the content, so no post-STT text stages run — only the
     // tokenization commands (verbatim if live edits, redaction if privacy; a selection rewrite always
     // calls the LLM). No clipboard stage: the selection-capture ⌘C has already clobbered the clipboard
-    // with the selection, so "insert clipboard contents" here would be meaningless.
-    private func selectionPipeline(for mode: Mode) -> Pipeline {
+    // with the selection, so "insert clipboard contents" here would be meaningless. `redactionTokenizer`
+    // is exposed so the caller can also redact the spoken instruction through the same tokenizer (H1).
+    private func selectionPipeline(for mode: Mode, redactionTokenizer: Tokenizer = Tokenizer()) -> Pipeline {
         var stages: [any PipelineStage] = []
         if mode.commands.liveEdits { stages.append(TokenizingStage.verbatim()) }
-        if mode.commands.privacy { stages.append(TokenizingStage.redaction()) }
+        if mode.commands.privacy { stages.append(TokenizingStage.redaction(tokenizer: redactionTokenizer)) }
         return Pipeline(stages)
     }
 
