@@ -62,9 +62,10 @@ enum TextInserter {
         case .clipboard:
             // A secure-field divert conceals the copy so clipboard managers do not retain the password;
             // every other fallback is a normal copy the user can paste back.
-            if case .clipboardFallback(.secureField) = decision { copyToClipboard(text, concealed: true) }
-            else { copyToClipboard(text) }
-            return true
+            if case .clipboardFallback(.secureField) = decision {
+                return copyToClipboard(text, concealed: true)
+            }
+            return copyToClipboard(text)
         }
     }
 
@@ -207,18 +208,18 @@ enum TextInserter {
 
     // `concealed` marks the item transient + concealed so clipboard managers do not capture it — used
     // for the secure-field divert, where the copied text is a password.
-    static func copyToClipboard(_ text: String, concealed: Bool = false) {
-        let pb = NSPasteboard.general
+    @discardableResult
+    static func copyToClipboard(_ text: String, concealed: Bool = false, to pb: NSPasteboard = .general) -> Bool {
         pb.clearContents()
         guard concealed else {
-            pb.setString(text, forType: .string)
-            return
+            return pb.setString(text, forType: .string) && pb.string(forType: .string) == text
         }
         let item = NSPasteboardItem()
-        item.setString(text, forType: .string)
-        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
-        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-        pb.writeObjects([item])
+        guard item.setString(text, forType: .string),
+              item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType")),
+              item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        else { return false }
+        return pb.writeObjects([item]) && pb.string(forType: .string) == text
     }
 
     // A full snapshot of every pasteboard item and type, so restore reproduces images / RTF / file

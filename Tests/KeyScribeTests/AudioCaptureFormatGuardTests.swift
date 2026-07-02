@@ -153,6 +153,17 @@ struct ClientStreamFormatTests {
     }
 }
 
+struct HALInputUnitScratchPreallocationTests {
+    @Test func scratchCapacityUsesDeviceFrameSize() {
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 128) == 128)
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 512) == 512)
+    }
+
+    @Test func scratchCapacityHasSafeFallbackForInvalidFrameSize() {
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 0) == 4096)
+    }
+}
+
 // The shim must turn a raised NSException into a Swift error, and stay transparent on a clean block.
 struct ObjCExceptionShimTests {
     @Test func raisedNSExceptionBecomesASwiftError() {

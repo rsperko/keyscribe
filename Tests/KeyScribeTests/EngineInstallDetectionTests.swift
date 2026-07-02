@@ -63,6 +63,12 @@ final class EngineInstallDetectionTests: XCTestCase {
         XCTAssertEqual(engine.verifyInstalled(in: dir), false)
     }
 
+    func testQwenVerifyInstalledDoesNotCreateAbsentCacheDirectory() {
+        let engine = Qwen3ASREngine(profile: .large, modelsDir: dir)
+        XCTAssertEqual(engine.verifyInstalled(in: dir), false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("qwen3-asr-1.7b").path))
+    }
+
     private func writeFiles(_ names: [String], into folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for name in names { try Data().write(to: folder.appendingPathComponent(name)) }

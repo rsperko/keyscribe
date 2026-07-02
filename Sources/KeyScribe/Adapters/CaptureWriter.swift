@@ -17,9 +17,10 @@ final class FeedOnce: @unchecked Sendable {
 // a disk stall or a lock can never overrun the device IO cycle.
 //
 // The thread polls the ring on a short interval (no wakeup is ever signalled FROM the RT thread — the RT
-// path stays syscall-free). The ring holds hundreds of ms of buffering, far more than one poll interval, so
-// nothing is lost. `finish()` from the owner (on the control queue) signals the shutdown gate for a prompt,
-// deterministic join — the owner can then close the file knowing no write is in flight.
+// path stays syscall-free). The ring holds several hardware periods of buffering, more than the poll
+// interval, and drops are counted when writer-thread jitter exceeds that budget. `finish()` from the owner
+// signals the shutdown gate for a prompt, deterministic join — the owner can then close the file knowing no
+// write is in flight.
 final class CaptureWriter: @unchecked Sendable {
     // The device-native buffer delivered per slot is at most a few ms; the ring absorbs many of them, so a
     // 5 ms poll keeps disk latency negligible while the thread is otherwise asleep. The shutdown semaphore's

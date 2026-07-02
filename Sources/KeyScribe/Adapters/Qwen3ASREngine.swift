@@ -74,10 +74,9 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         // per-variant isolation has to come from basePath, not cacheDirName.
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(
             for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
-        // Load an already-downloaded model with ZERO network (SpeechEngine contract): when the FULL
-        // install is on disk, pass offlineMode so fromPretrained skips the Hugging Face metadata round
-        // trip it otherwise makes on every cold load — an unconsented outbound request that also
-        // stalls/fails offline with a valid model present. offlineMode:false still downloads a
+        // Load an already-downloaded model without re-fetching model files: when the FULL install is on
+        // disk, pass offlineMode so fromPretrained skips the Hugging Face metadata round trip it otherwise
+        // makes on every cold load. offlineMode:false still downloads a
         // genuinely-absent OR partial model, healing an interrupted install (downloadWeights skips
         // present files and fetches the missing ones) instead of loading a tokenizer-less model.
         let offline = fullInstallPresent(in: cacheDir)
@@ -113,14 +112,20 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         }
     }
 
+    private func existingCacheDirectory(in modelsDir: URL) -> URL {
+        let base = modelsDir.appendingPathComponent(subdir, isDirectory: true)
+        let old = base.appendingPathComponent(
+            HuggingFaceDownloader.sanitizedCacheKey(for: modelId), isDirectory: true)
+        if HuggingFaceDownloader.weightsExist(in: old) { return old }
+        return base.appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent(modelId, isDirectory: true)
+    }
+
     // Qwen weights are a checkable install footprint, so reconcile does not need the marker to know the
     // model is present — a completed-but-unmarked download (crash before the marker wrote) is adopted
     // rather than deleted. A partial install (missing tokenizer/config) reports false so it is NOT adopted.
     nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? {
-        guard let cacheDir = try? HuggingFaceDownloader.getCacheDirectory(
-            for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
-        else { return nil }
-        return fullInstallPresent(in: cacheDir)
+        fullInstallPresent(in: existingCacheDirectory(in: modelsDir))
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {

@@ -18,6 +18,7 @@ public actor SerializedEngine: SpeechEngine {
     private let base: any SpeechEngine
     private var loaded = false
     private var loadInFlight: Task<Void, Error>?
+    private var loadProgress: LoadProgressFanout?
 
     // A fair async mutex guarding every access to the wrapped engine's non-Sendable state.
     private var busy = false
@@ -47,24 +48,30 @@ public actor SerializedEngine: SpeechEngine {
 
     public func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         if loaded { return }
-        // Share an in-flight load — every caller awaits the same Task, so the model compiles once. The
-        // check+assign runs before any suspension, so a second caller can only observe the set Task.
-        if let task = loadInFlight { try await task.value; return }
-        let task = Task { try await self.performLoad(progress: progress) }
-        loadInFlight = task
-        do {
-            try await task.value
-        } catch {
-            loadInFlight = nil
-            throw error
+        let fanout = loadProgress ?? LoadProgressFanout()
+        loadProgress = fanout
+        let observer = fanout.add(progress)
+        defer {
+            if let observer { fanout.remove(observer) }
         }
-        loadInFlight = nil
+        if let task = loadInFlight { try await task.value; return }
+        let task = Task { try await self.performLoad(progress: fanout.report) }
+        loadInFlight = task
+        try await task.value
     }
 
     private func performLoad(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
-        await acquire()
-        defer { release() }
-        try await ensureLoadedLocked(progress: progress)
+        do {
+            await acquire()
+            defer { release() }
+            try await ensureLoadedLocked(progress: progress)
+            loadInFlight = nil
+            loadProgress = nil
+        } catch {
+            loadInFlight = nil
+            loadProgress = nil
+            throw error
+        }
     }
 
     // Loads the base engine if it isn't already loaded. PRECONDITION: the caller holds the exclusive
@@ -95,5 +102,38 @@ public actor SerializedEngine: SpeechEngine {
         guard loaded else { return }
         await base.evict()
         loaded = false
+    }
+}
+
+private final class LoadProgressFanout: @unchecked Sendable {
+    private let lock = NSLock()
+    private var observers: [UUID: @Sendable (ModelLoadProgress) -> Void] = [:]
+    private var last: ModelLoadProgress?
+
+    func add(_ observer: (@Sendable (ModelLoadProgress) -> Void)?) -> UUID? {
+        guard let observer else { return nil }
+        let id = UUID()
+        let current: ModelLoadProgress?
+        lock.lock()
+        observers[id] = observer
+        current = last
+        lock.unlock()
+        if let current { observer(current) }
+        return id
+    }
+
+    func remove(_ id: UUID) {
+        lock.lock()
+        observers.removeValue(forKey: id)
+        lock.unlock()
+    }
+
+    func report(_ progress: ModelLoadProgress) {
+        let callbacks: [@Sendable (ModelLoadProgress) -> Void]
+        lock.lock()
+        last = progress
+        callbacks = Array(observers.values)
+        lock.unlock()
+        for callback in callbacks { callback(progress) }
     }
 }

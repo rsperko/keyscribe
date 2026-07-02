@@ -43,7 +43,7 @@ final class ConfigRepository {
     // Read-modify-write from disk, then invalidate + notify. Returns the written set.
     @discardableResult
     func mutateDictionary(_ transform: (DictionarySet) -> DictionarySet) throws -> DictionarySet {
-        let updated = transform(DictionaryStore.loadOrDefault(supportDir: supportDir))
+        let updated = transform(try loadDictionaryForMutation())
         try commit { try DictionaryStore.write(updated, to: supportDir) }
         return updated
     }
@@ -64,7 +64,7 @@ final class ConfigRepository {
 
     @discardableResult
     func mutateReplacements(_ transform: (inout ReplacementsSet) -> Void) throws -> ReplacementsSet {
-        var set = ReplacementsStore.loadOrDefault(supportDir: supportDir)
+        var set = try loadReplacementsForMutation()
         transform(&set)
         try commit { try ReplacementsStore.write(set, to: supportDir) }
         return set
@@ -85,6 +85,13 @@ final class ConfigRepository {
     // mode on disk (it leaves the original untouched and surfaces the error) — and it invalidates once, not
     // twice.
     func renameMode(_ mode: Mode, to newId: String) throws {
+        guard newId != mode.id else { return }
+        guard !mode.isSystem else { throw ConfigError.invalid("system modes cannot be renamed") }
+        let fm = FileManager.default
+        let destination = modesDir.appendingPathComponent("\(newId).toml")
+        if fm.fileExists(atPath: destination.path) {
+            throw ConfigError.invalid("mode id already exists")
+        }
         var renamed = mode
         renamed.id = newId
         try commit {
@@ -92,8 +99,10 @@ final class ConfigRepository {
             do {
                 try ModeStore.delete(mode, from: modesDir)
             } catch {
-                try? ModeStore.delete(renamed, from: modesDir)
-                throw error
+                if !Self.isMissingFile(error) {
+                    try? ModeStore.delete(renamed, from: modesDir)
+                    throw error
+                }
             }
         }
     }
@@ -121,7 +130,7 @@ final class ConfigRepository {
 
     @discardableResult
     func mutateConnections(_ transform: (inout ConnectionSet) -> Void) throws -> ConnectionSet {
-        var set = ConnectionStore.loadOrDefault(supportDir: supportDir)
+        var set = try loadConnectionsForMutation()
         transform(&set)
         try commit { try ConnectionStore.write(set, to: supportDir) }
         return set
@@ -133,5 +142,28 @@ final class ConfigRepository {
         try write()
         config.invalidate()
         onChange?()
+    }
+
+    private func loadDictionaryForMutation() throws -> DictionarySet {
+        let file = supportDir.appendingPathComponent(DictionaryStore.fileName)
+        guard FileManager.default.fileExists(atPath: file.path) else { return DictionarySet() }
+        return try DictionaryStore.decode(from: String(contentsOf: file, encoding: .utf8))
+    }
+
+    private func loadReplacementsForMutation() throws -> ReplacementsSet {
+        let file = supportDir.appendingPathComponent(ReplacementsStore.fileName)
+        guard FileManager.default.fileExists(atPath: file.path) else { return ReplacementsSet() }
+        return try ReplacementsStore.decode(from: String(contentsOf: file, encoding: .utf8))
+    }
+
+    private func loadConnectionsForMutation() throws -> ConnectionSet {
+        let file = supportDir.appendingPathComponent(ConnectionStore.fileName)
+        guard FileManager.default.fileExists(atPath: file.path) else { return ConnectionSet() }
+        return try ConnectionStore.decode(from: String(contentsOf: file, encoding: .utf8))
+    }
+
+    private static func isMissingFile(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == NSCocoaErrorDomain && ns.code == NSFileNoSuchFileError
     }
 }

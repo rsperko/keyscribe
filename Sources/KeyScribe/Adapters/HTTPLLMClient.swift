@@ -84,10 +84,9 @@ struct HTTPLLMClient: LLMClient {
             if let key, !key.isEmpty {
                 req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             }
-            // Hosted OpenAI deprecated `max_tokens` for `max_completion_tokens` (o-series reject the old
-            // key outright). OpenAI-*compatible* servers (local oMLX, OpenRouter, …) overwhelmingly still
-            // speak `max_tokens`, so keep the old key there for the widest reach.
-            let tokenLimitKey = connection.provider == .openai ? "max_completion_tokens" : "max_tokens"
+            let tokenLimitKey = usesHostedOpenAIParameterNames(provider: connection.provider, baseURL: base)
+                ? "max_completion_tokens"
+                : "max_tokens"
             req.httpBody = try body([
                 "model": connection.model,
                 "temperature": temp,
@@ -127,6 +126,14 @@ struct HTTPLLMClient: LLMClient {
             ])
             return req
         }
+    }
+
+    private func usesHostedOpenAIParameterNames(provider: Connection.Provider, baseURL: String) -> Bool {
+        if provider == .openai { return true }
+        guard provider == .openaiCompatible, let host = URL(string: baseURL)?.host()?.lowercased() else {
+            return false
+        }
+        return host == "api.openai.com"
     }
 
     private func parse(_ data: Data, provider: Connection.Provider) throws -> String {

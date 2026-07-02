@@ -59,10 +59,10 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         // Reserve a tail of the bar for the opaque CoreML load/compile step, which has no progress
         // callback — so the download doesn't prematurely show 100% while WhisperKit loads ~632 MB.
         let downloadShare = 0.9
-        // Load an already-downloaded model with ZERO network (SpeechEngine contract). WhisperKit.download
-        // ALWAYS makes a Hugging Face metadata round trip (getFilenames) before consulting the local
-        // cache, so calling it on every cold load is an unconsented outbound request that also stalls or
-        // fails offline with a fully valid model on disk. When the variant folder is already present we
+        // Load an already-downloaded model without re-fetching model files. WhisperKit.download ALWAYS
+        // makes a Hugging Face metadata round trip (getFilenames) before consulting the local cache, so
+        // calling it on every cold load is an unconsented outbound request that also stalls or fails
+        // offline with a fully valid model on disk. When the variant folder is already present we
         // build the config against it directly (download:false is already set below); we only reach for
         // WhisperKit.download when the model is genuinely absent, or as a repair if an on-disk copy turns
         // out to be partial/corrupt (the download path snapshots the missing files, healing it).

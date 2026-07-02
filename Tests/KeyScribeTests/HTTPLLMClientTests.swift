@@ -81,6 +81,20 @@ struct HTTPLLMClientTests {
         #expect(body?["max_completion_tokens"] == nil)
     }
 
+    @Test func openAICompatiblePointedAtOpenAIUsesMaxCompletionTokens() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, okBody("OK"))
+        }
+        let connection = Connection(
+            id: "hosted", name: "Hosted", provider: .openaiCompatible,
+            model: "gpt-5.4-mini", keyRef: "k", baseUrl: "https://api.openai.com/v1")
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        #expect(body?["max_completion_tokens"] != nil)
+        #expect(body?["max_tokens"] == nil)
+    }
+
     @Test func lengthTruncatedResponseThrows() async {
         LLMStubProtocol.handler = { request in
             (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,

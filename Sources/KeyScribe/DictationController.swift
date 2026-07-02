@@ -54,6 +54,7 @@ final class DictationController {
         var eligibleModes: [Mode] = []
         var routingContext = RoutingContext()
         var pendingLocalTranscript: String?
+        var pendingLocalIssuedTokens: [String] = []
         var pendingHeardTranscript: String?
         var dictationTask: Task<Void, Never>?
         var rewriteEscapeTask: Task<Void, Never>?
@@ -86,6 +87,9 @@ final class DictationController {
     }
     private var pendingLocalTranscript: String? {
         get { session?.pendingLocalTranscript } set { session?.pendingLocalTranscript = newValue }
+    }
+    private var pendingLocalIssuedTokens: [String] {
+        get { session?.pendingLocalIssuedTokens ?? [] } set { session?.pendingLocalIssuedTokens = newValue }
     }
     private var pendingHeardTranscript: String? {
         get { session?.pendingHeardTranscript } set { session?.pendingHeardTranscript = newValue }
@@ -1051,11 +1055,15 @@ final class DictationController {
     // clipboard/verbatim value that literally contains the sentinel, which restore deliberately leaves
     // as-is) and is passed through untouched.
     private func guardedInsert(_ text: String, issuedTokens: [String]) -> FinalText {
-        if issuedTokens.contains(where: { text.contains($0) }) {
+        if Self.shouldAbortInsertion(text: text, issuedTokens: issuedTokens) {
             log.error("insert aborted: unrestored sentinel token survived the restore pass")
             return .abort("Dictation could not be completed — please try again", nil)
         }
         return .insert(text, bare: false)
+    }
+
+    static func shouldAbortInsertion(text: String, issuedTokens: [String]) -> Bool {
+        issuedTokens.contains { text.contains($0) }
     }
 
     // What a cloud rewrite involved, captured for the History detail view. Built only when a rewrite
@@ -1194,6 +1202,7 @@ final class DictationController {
         // escape hatch is dictation-only — never offer to paste the captured selection back.
         if mode.source != .selection {
             pendingLocalTranscript = localProcessed
+            pendingLocalIssuedTokens = issuedTokens
             scheduleRewriteEscapeHatch(connection: connection, mode: mode)
         }
         hud?.render(.rewriting(
@@ -1299,9 +1308,15 @@ final class DictationController {
     func insertLocalTranscriptNow() {
         guard let transcript = pendingLocalTranscript, let heard = pendingHeardTranscript,
               machine.state == .transcribing else { return }
+        let issuedTokens = pendingLocalIssuedTokens
         dictationTask?.cancel()
         clearRewriteEscapeHatch()
-        Task { await self.finishInsertion(transcript: transcript, heard: heard, rewrite: nil) }
+        switch guardedInsert(transcript, issuedTokens: issuedTokens) {
+        case .abort(let message, let action):
+            finishError(message, action: action)
+        case .insert(let final, let bare):
+            Task { await self.finishInsertion(transcript: final, heard: heard, rewrite: nil, bare: bare) }
+        }
     }
 
     private func scheduleRewriteEscapeHatch(connection: Connection, mode: Mode) {
@@ -1320,6 +1335,7 @@ final class DictationController {
         rewriteEscapeTask?.cancel()
         rewriteEscapeTask = nil
         pendingLocalTranscript = nil
+        pendingLocalIssuedTokens = []
         pendingHeardTranscript = nil
     }
 

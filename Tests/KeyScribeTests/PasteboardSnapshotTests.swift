@@ -55,4 +55,17 @@ struct PasteboardSnapshotTests {
 
         #expect(pb.string(forType: .string) == nil)
     }
+
+    @Test func copyToClipboardReportsVerifiedPlainTextWrite() {
+        let pb = NSPasteboard.withUniqueName()
+        #expect(TextInserter.copyToClipboard("copied", to: pb))
+        #expect(pb.string(forType: .string) == "copied")
+    }
+
+    @Test func concealedCopyToClipboardReportsVerifiedPlainTextWrite() {
+        let pb = NSPasteboard.withUniqueName()
+        #expect(TextInserter.copyToClipboard("secret", concealed: true, to: pb))
+        #expect(pb.string(forType: .string) == "secret")
+        #expect(pb.pasteboardItems?.first?.data(forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")) != nil)
+    }
 }

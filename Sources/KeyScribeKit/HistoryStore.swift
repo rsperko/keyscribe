@@ -50,6 +50,9 @@ public struct HistoryStore: Sendable {
                 }
                 try handle.write(contentsOf: Data(payload.utf8))
             } else {
+                if FileManager.default.fileExists(atPath: file.path) {
+                    throw CocoaError(.fileReadNoPermission)
+                }
                 try Data(payload.utf8).write(to: file)
             }
         }
@@ -158,10 +161,12 @@ public struct HistoryStore: Sendable {
 
     @discardableResult
     public func applyRetention(today: String = HistoryStore.todayString(), retentionDays: Int) -> [String] {
-        let expired = HistoryRetention.expired(dayFiles: dayFiles(), today: today, retentionDays: retentionDays)
-        for file in expired {
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+        Self.mutationQueue.sync {
+            let expired = HistoryRetention.expired(dayFiles: dayFiles(), today: today, retentionDays: retentionDays)
+            for file in expired {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+            }
+            return expired
         }
-        return expired
     }
 }

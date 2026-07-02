@@ -76,6 +76,22 @@ struct RewriteServiceTests {
         #expect(await client.calls == 1)
     }
 
+    @Test func contextOnlySentinelDoesNotBecomeRequired() async {
+        let contextToken = "⟦SN:VERB:1⟧"
+        let client = FakeClient([.success("Clean content.")])
+        let svc = RewriteService(client: client)
+        let out = await svc.rewrite(
+            payload: TokenizedPayload(text: "clean content", issuedTokens: [contextToken]),
+            inputs: PromptInputs(
+                modePrompt: "Rewrite.", dictatedInstructions: "", content: "clean content",
+                tokens: [], validTerms: [], language: "English", modeSystemInstructions: "",
+                appName: nil, bundleId: nil, fieldRole: nil,
+                selectedText: "context mentions \(contextToken) only"),
+            connection: conn)
+        #expect(out == .rewritten("Clean content."))
+        #expect(await client.calls == 1)
+    }
+
     @Test func emptyOutputFallsBack() async {
         let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)

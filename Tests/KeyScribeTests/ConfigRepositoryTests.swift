@@ -61,6 +61,20 @@ struct ConfigRepositoryTests {
         #expect(Set(DictionaryStore.loadOrDefault(supportDir: dir).words) == ["Postgres", "Redis"])
     }
 
+    @Test func mutateDictionaryRefusesMalformedExistingFile() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(DictionaryStore.fileName)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("not = [valid".utf8).write(to: file)
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+
+        #expect(throws: (any Error).self) {
+            try repo.mutateDictionary { $0.adding(word: "Redis") }
+        }
+        #expect((try String(contentsOf: file, encoding: .utf8)) == "not = [valid")
+    }
+
     @Test func deletingAModeRemovesTheFileAndInvalidates() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -112,6 +126,20 @@ struct ConfigRepositoryTests {
         #expect(set.connections.first?.model == "m2")
     }
 
+    @Test func upsertConnectionRefusesNewerSchemaExistingFile() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(ConnectionStore.fileName)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("schema_version = 99\n".utf8).write(to: file)
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+
+        #expect(throws: (any Error).self) {
+            try repo.upsertConnection(Connection(id: "a", name: "A", provider: .gemini, model: "m", keyRef: "ka"))
+        }
+        #expect((try String(contentsOf: file, encoding: .utf8)) == "schema_version = 99\n")
+    }
+
     // A rename is one operation: the new file lands and the old file is gone — never both (no duplicate).
     @Test func renameModeLeavesNoDuplicateFile() throws {
         let dir = tempDir()
@@ -126,5 +154,37 @@ struct ConfigRepositoryTests {
         let ids = ModeStore.loadAll(in: repo.modesDir).map(\.id)
         #expect(ids.contains("new"))
         #expect(!ids.contains("old"))
+    }
+
+    @Test func renameModeRejectsExistingDestination() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        var old = Mode(id: "old", name: "Old")
+        old.aiRewrite = .init(connection: "", prompt: "x")
+        var existing = Mode(id: "new", name: "Existing")
+        existing.aiRewrite = .init(connection: "", prompt: "x")
+        try repo.writeMode(old)
+        try repo.writeMode(existing)
+
+        #expect(throws: (any Error).self) { try repo.renameMode(old, to: "new") }
+
+        let ids = ModeStore.loadAll(in: repo.modesDir).map(\.id)
+        #expect(ids.contains("old"))
+        #expect(ids.contains("new"))
+        #expect(ModeStore.loadAll(in: repo.modesDir).first { $0.id == "new" }?.name == "Existing")
+    }
+
+    @Test func renameModeKeepsNewFileWhenOldFileWasAlreadyGone() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        var old = Mode(id: "old", name: "Old")
+        old.aiRewrite = .init(connection: "", prompt: "x")
+
+        try repo.renameMode(old, to: "new")
+
+        let ids = ModeStore.loadAll(in: repo.modesDir).map(\.id)
+        #expect(ids == ["new"])
     }
 }

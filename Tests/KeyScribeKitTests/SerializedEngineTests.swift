@@ -29,12 +29,14 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     private var _evicted = false
     private var _transcribing = false
     private var _evictOverlappedTranscribe = false
+    private var _failNextLoad = false
 
     private let loadGate: Gate?
     private let transcribeGate: Gate?
-    init(loadGate: Gate? = nil, transcribeGate: Gate? = nil) {
+    init(loadGate: Gate? = nil, transcribeGate: Gate? = nil, failNextLoad: Bool = false) {
         self.loadGate = loadGate
         self.transcribeGate = transcribeGate
+        self._failNextLoad = failNextLoad
     }
 
     var loadBodies: Int { lock.withLock { _loadBodies } }
@@ -47,6 +49,15 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         lock.withLock { _loadBodies += 1 }
         if let loadGate { await loadGate.wait() }
+        let shouldFail = lock.withLock {
+            if _failNextLoad {
+                _failNextLoad = false
+                return true
+            }
+            return false
+        }
+        if shouldFail { throw FakeLoadError() }
+        progress?(ModelLoadProgress(phase: "Ready", fraction: 1))
         lock.withLock { _loaded = true }
     }
 
@@ -66,6 +77,8 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     }
 }
 
+private struct FakeLoadError: Error {}
+
 struct SerializedEngineTests {
     // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.
     @Test func concurrentLoadsRunBaseLoadOnce() async throws {
@@ -79,6 +92,51 @@ struct SerializedEngineTests {
         await gate.fire()
         _ = try await (a, b)
         #expect(spy.loadBodies == 1)
+        #expect(spy.loaded)
+    }
+
+    @Test func concurrentLoadProgressIsDeliveredToEveryCaller() async throws {
+        let gate = Gate()
+        let spy = SpyEngine(loadGate: gate)
+        let engine = SerializedEngine(spy)
+        nonisolated(unsafe) var a: [Double] = []
+        nonisolated(unsafe) var b: [Double] = []
+        async let first: Void = try engine.load { a.append($0.fraction) }
+        try await Task.sleep(for: .milliseconds(20))
+        async let second: Void = try engine.load { b.append($0.fraction) }
+        try await Task.sleep(for: .milliseconds(20))
+        await gate.fire()
+        _ = try await (first, second)
+        #expect(a == [1])
+        #expect(b == [1])
+        #expect(spy.loadBodies == 1)
+    }
+
+    @Test func failedLoadClearsBeforeWaitersReturnSoImmediateRetryReloads() async throws {
+        let gate = Gate()
+        let spy = SpyEngine(loadGate: gate, failNextLoad: true)
+        let engine = SerializedEngine(spy)
+        async let first: Void = try engine.load(progress: nil)
+        try await Task.sleep(for: .milliseconds(20))
+        async let second: Void = try engine.load(progress: nil)
+        try await Task.sleep(for: .milliseconds(20))
+        await gate.fire()
+        do {
+            try await first
+            #expect(Bool(false))
+        } catch is FakeLoadError {
+        } catch {
+            #expect(Bool(false))
+        }
+        do {
+            try await second
+            #expect(Bool(false))
+        } catch is FakeLoadError {
+        } catch {
+            #expect(Bool(false))
+        }
+        try await engine.load(progress: nil)
+        #expect(spy.loadBodies == 2)
         #expect(spy.loaded)
     }
 

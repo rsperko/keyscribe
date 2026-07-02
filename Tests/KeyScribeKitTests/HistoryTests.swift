@@ -309,4 +309,21 @@ struct HistoryStoreTests {
         try store.append(sampleEntry(heard: "second", at: 10), today: "2026-06-20")
         #expect(Set(store.entries().map(\.heard)) == ["first", "second"])
     }
+
+    @Test func appendDoesNotFallbackOverwriteExistingUnreadableFile() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        try store.append(sampleEntry(heard: "first", at: 0), today: "2026-06-20")
+        let file = store.dir.appendingPathComponent("2026-06-20.jsonl")
+        let before = try Data(contentsOf: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o200], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+
+        #expect(throws: (any Error).self) {
+            try store.append(sampleEntry(heard: "second", at: 10), today: "2026-06-20")
+        }
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        #expect((try Data(contentsOf: file)) == before)
+    }
 }

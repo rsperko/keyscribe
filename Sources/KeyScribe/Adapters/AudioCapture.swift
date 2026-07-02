@@ -118,8 +118,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // adapter's lifetime and RESET (never reallocated) per capture, so the RT callback dereferences a stable
     // `let` — no per-session pointer to publish atomically. `capturing` gates the callback (false ⇒ drop the
     // buffer, capture is over/not yet live); `levelBits` holds the latest perceptual level as a Float bit
-    // pattern for the controller's meter poll. Geometry is generous: 8 slots × up to 8192 frames × up to 8
-    // channels comfortably covers any real capture-device buffer size and absorbs writer-thread jitter.
+    // pattern for the controller's meter poll. Geometry is a deliberate persistent allocation of about
+    // 2 MiB: 8 slots × up to 8192 frames × up to 8 channels covers real capture-device buffer sizes and
+    // absorbs writer-thread jitter without publishing new storage to the RT thread.
     private let ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)

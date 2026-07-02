@@ -103,7 +103,9 @@ final class HALInputUnit {
 
             context.unit = au
             context.format = client
-            context.scratch = nil
+            context.scratch = AVAudioPCMBuffer(
+                pcmFormat: client,
+                frameCapacity: Self.scratchFrameCapacity(deviceBufferFrameSize: Self.deviceBufferFrameSize(deviceID)))
             var callback = AURenderCallbackStruct(
                 inputProc: halInputRenderCallback,
                 inputProcRefCon: Unmanaged.passUnretained(context).toOpaque())
@@ -151,6 +153,23 @@ final class HALInputUnit {
 
     private func check(_ status: OSStatus, _ stage: String) throws {
         guard status == noErr else { throw UnitError(status: status, stage: stage) }
+    }
+
+    static func scratchFrameCapacity(deviceBufferFrameSize: UInt32) -> AVAudioFrameCount {
+        deviceBufferFrameSize > 0 ? AVAudioFrameCount(deviceBufferFrameSize) : 4096
+    }
+
+    private static func deviceBufferFrameSize(_ deviceID: AudioDeviceID) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr else {
+            return 0
+        }
+        return value
     }
 }
 
