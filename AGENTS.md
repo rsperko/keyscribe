@@ -86,12 +86,35 @@ This file is the entry point. Read the design docs before writing code — they 
   delivered buffer's host time (`inTimeStamp.mHostTime`) covers the release instant (`TailDrainGate`,
   with a buffer-count fallback for invalid timestamps and a 300 ms backstop), and only then tears it down
   (`teardownAndFinalize`, which `stop()`s a non-Bluetooth unit but **disposes** a Bluetooth one to free
-  HFP, and closes the WAV only after that so no in-flight write races the finalize). **`stop()` is the
-  immediate, audio-discarding teardown** (disposes the unit) — keep it for `cancel()`/over-limit abort
-  only; the commit path must use `finishDraining()`. `stop()` also force-resumes any pending drain so a
-  direct stop never strands the awaiter. The `wav … drain=Xms` `DictationController` debug log reports
+  HFP, then joins the writer thread and closes the WAV — in that order — so no in-flight write races the
+  finalize). **`stop()` is the immediate, audio-discarding teardown** (disposes the unit) — keep it for
+  `cancel()`/over-limit abort only; the commit path must use `finishDraining()`. `stop()` also force-resumes
+  any pending drain so a direct stop never strands the awaiter. The `wav … drain=Xms` `DictationController` debug log reports
   the actual flush time (≈300 ms means the backstop fired). Don't reorder the HUD flip after the await —
   the drain latency must stay invisible.
+- **The realtime IO callback is lock-free / allocation-free / syscall-free — never add file I/O, a lock, a
+  `Task`, or a continuation resume to it.** The AUHAL render callback runs on CoreAudio's realtime IO thread;
+  anything that can block there (a disk stall, a lock the main actor also holds, a `Task` allocation) overruns
+  the device IO cycle → dropped input (audibly missing words) and can glitch the device for other clients. The
+  RT handler (`AudioCapture.handle`) does ONLY three bounded things: gate on the `capturing` atomic, copy the
+  delivered frames into a preallocated lock-free SPSC ring (`AudioSampleRing`, KeyScribeKit), and publish the
+  perceptual level into an atomic (`vDSP_rmsqv`, a Float bit pattern). Everything heavy — resampling
+  (`AVAudioConverter`), the `AVAudioFile` write, and feeding the `TailDrainGate` — runs on a dedicated writer
+  thread (`CaptureWriter`) that polls the ring off-RT (5 ms tick, no wakeup is EVER signalled from the RT
+  thread). The HUD meter is **pulled** at ~30 Hz (`DictationController` polls `AudioCapture.currentLevel`), not
+  pushed per buffer — there is no per-buffer main-actor hop. The ring is owned by `AudioCapture` and reset per
+  capture; the previous capture's writer is JOINED (`CaptureWriter.finish`, multi-waiter via a `DispatchGroup`)
+  before the next arm resets it, so a cancel's async teardown can never race a still-draining consumer. On
+  commit, `finishDraining` awaits the writer join before returning the URL, and the writer drops its `AVAudioFile`
+  reference on exit so the session's is the last one — the WAV is finalized/closed before transcription reads it.
+  Teardown ordering is load-bearing: `capturing` → false (RT stops pushing, which SEVERS RT→ring→writer→file),
+  `writer.finish` (drains remaining + flushes the resampler tail + joins), release the file (WAV closed —
+  before the unit stop, so a wedged unit stop can't return an open file to transcription), then stop/dispose
+  the unit. Because a capture defect here is INAUDIBLE (audio goes straight to STT), validate with
+  **`KeyScribe --capture-probe`** (drives the real capture path over a known tone and scores glitches/SINAD),
+  the teardown `Log.audio` line `ringDropped=N overloads=M` (both must be 0 — the writer-keep-up and
+  CoreAudio-RT-deadline canaries), and `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection.
+  See `agent_notes/fable_review/audio-capture.md` H4 and the W17 entry in `worklist.md`.
 - **HAL unit bring-up/teardown run off the main thread on a serial queue, watchdogged — never move them
   back onto `@MainActor`.** `AudioUnitInitialize`/`AudioOutputUnitStart`/`Stop`/`AudioComponentInstanceDispose`
   can block for a long time (or indefinitely) on a transitioning device — classically a Bluetooth headset
@@ -116,8 +139,8 @@ This file is the entry point. Read the design docs before writing code — they 
   prewarmed start is a few ms; a value **past `bringUpTimeout` is tagged ` grace-adopted`** (subject to the
   `log show` unreliability footgun below — capture it live or via `log stream --predicate 'category ==
   "audio"'`). A disposed unit's render callback cannot fire (`AudioOutputUnitStop` is synchronous), and a
-  stray late buffer is a no-op because `handle()` guards on `recordFormat != nil` (nil'd by `finalizeCapture`).
-  Because bring-up is async, `handleCommit` before `captureStarted` cancels the not-yet-live attempt rather
+  stray late buffer is a no-op because the RT handler guards on the `capturing` atomic (set false at teardown
+  before the unit is stopped). Because bring-up is async, `handleCommit` before `captureStarted` cancels the not-yet-live attempt rather
   than queueing a commit against audio that was not recording yet. Two idle HAL listeners
   (`kAudioHardwarePropertyDefaultInputDevice` + the device list) re-prewarm on a device change while idle;
   **while recording**, raw AUHAL posts no `AVAudioEngineConfigurationChange`, so a per-capture listener on

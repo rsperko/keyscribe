@@ -21,7 +21,7 @@ struct PreferredInputDeviceTests {
         private let lock = NSLock()
         private var _uids: [String?] = []
         var uids: [String?] { lock.withLock { _uids } }
-        func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+        func start(sampleRate: Int) async throws -> URL {
             URL(fileURLWithPath: "/dev/null")
         }
         func stop() -> URL? { nil }

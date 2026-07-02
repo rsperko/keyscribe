@@ -121,7 +121,7 @@ private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     private var _starts = 0
     var starts: Int { lock.lock(); defer { lock.unlock() }; return _starts }
     init(url: URL) { self.url = url }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    func start(sampleRate: Int) async throws -> URL {
         lock.withLock { _starts += 1 }
         return url
     }
@@ -137,7 +137,7 @@ private final class DrainTrackingAudio: AudioCapturing, @unchecked Sendable {
     var drained: Bool { lock.lock(); defer { lock.unlock() }; return _drained }
     var immediateStops: Int { lock.lock(); defer { lock.unlock() }; return _immediateStops }
     init(url: URL) { self.url = url }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { url }
+    func start(sampleRate: Int) async throws -> URL { url }
     func stop() -> URL? { lock.lock(); _immediateStops += 1; lock.unlock(); return url }
     func finishDraining() async -> URL? { markDrained(); return url }
     private func markDrained() { lock.lock(); _drained = true; lock.unlock() }
@@ -150,7 +150,7 @@ private final class SlowStartAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     private let delay: Duration
     init(url: URL, delay: Duration) { self.url = url; self.delay = delay }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    func start(sampleRate: Int) async throws -> URL {
         try? await Task.sleep(for: delay)
         return url
     }
@@ -603,20 +603,20 @@ struct DictationCancellationTests {
 // Bring-up that never succeeds — stands in for a wedged/failed device whose watchdog fired.
 private final class ThrowingStartAudio: AudioCapturing, @unchecked Sendable {
     struct Boom: Error {}
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { throw Boom() }
+    func start(sampleRate: Int) async throws -> URL { throw Boom() }
     func stop() -> URL? { nil }
 }
 
 // Bring-up failing with formatUnavailable (no usable input stream).
 private final class NoInputDeviceAudio: AudioCapturing, @unchecked Sendable {
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    func start(sampleRate: Int) async throws -> URL {
         throw AudioCaptureError.formatUnavailable
     }
     func stop() -> URL? { nil }
 }
 
 private final class PreferredInputFailedAudio: AudioCapturing, @unchecked Sendable {
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    func start(sampleRate: Int) async throws -> URL {
         throw AudioCaptureError.preferredInputFailed
     }
     func stop() -> URL? { nil }
@@ -630,7 +630,7 @@ private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
     private var _stopCalls = 0
     var stopCalls: Int { lock.withLock { _stopCalls } }
     init(url: URL, gate: Signal) { self.url = url; self.gate = gate }
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    func start(sampleRate: Int) async throws -> URL {
         await gate.wait()
         return url
     }
@@ -659,7 +659,7 @@ private final class CountingGatedStartAudio: AudioCapturing, @unchecked Sendable
         await started.wait()
     }
 
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    func start(sampleRate: Int) async throws -> URL {
         lock.withLock { _startCalls += 1 }
         started.fire()
         await gate.wait()

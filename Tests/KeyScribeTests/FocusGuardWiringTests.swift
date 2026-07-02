@@ -22,7 +22,7 @@ struct FocusGuardWiringTests {
     private final class FakeAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
         init(url: URL) { self.url = url }
-        func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL { url }
+        func start(sampleRate: Int) async throws -> URL { url }
         func stop() -> URL? { url }
     }
 

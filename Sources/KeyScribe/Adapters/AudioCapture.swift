@@ -4,9 +4,13 @@ import CoreAudio
 import Foundation
 import KeyScribeKit
 import os
+import Synchronization
 
 protocol AudioCapturing: AnyObject, Sendable {
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL
+    func start(sampleRate: Int) async throws -> URL
+    // Latest perceptual mic level (0…1), published from the RT thread and polled by the controller's HUD
+    // meter while recording — no per-buffer main-actor hop.
+    var currentLevel: Float { get }
     func stop() -> URL?
     // Commit-on-release stop: let the callback deliver the buffer that holds the final word before tearing
     // the unit down, so the tail is not clipped. Falls back to an immediate stop for test fakes.
@@ -26,6 +30,9 @@ extension AudioCapturing {
     func refreshBinding() {}
     func finishDraining() async -> URL? { stop() }
     func setPreferredInputUID(_ uid: String?) {}
+    // Real capture publishes a live meter level from the RT thread into an atomic; the controller polls it
+    // while recording. Fakes have no meter, so default to silence.
+    var currentLevel: Float { 0 }
 }
 
 enum AudioCaptureError: Error {
@@ -36,14 +43,6 @@ enum AudioCaptureError: Error {
     // main thread was never blocked; the dictation fails gracefully and the next attempt rebuilds on a
     // fresh unit + queue.
     case bringUpTimedOut
-}
-
-// Boxes the (non-Sendable) live buffer + a one-shot flag for AVAudioConverter's @Sendable input block.
-// Reused across buffers (the callback delivers serially, like the shared outBuffer it sits beside) so the
-// resampling path does not heap-allocate on every delivered buffer.
-private final class FeedOnce: @unchecked Sendable {
-    var buffer: AVAudioPCMBuffer?
-    var consumed = false
 }
 
 // Carries a specific unit instance into the control queue's @Sendable teardown closure. The instance
@@ -58,28 +57,24 @@ private final class UnitBox: @unchecked Sendable {
 // dictation arms and dropped (atomically, under `lock`) at teardown. "Is a capture live" becomes
 // `session != nil` decided on the control queue, so a mid-recording restart queued behind a teardown
 // sees the capture as over and bails — the stranded-hot-mic window (H1) closes structurally rather than
-// through a separately-nil'd `currentURL` proxy. The identity fields are immutable; the resampler fields
-// and restart counter are mutated only under `AudioCapture.lock` (the RT callback touches them).
+// through a separately-nil'd `currentURL` proxy. The identity fields are immutable; the restart counter is
+// mutated only under `AudioCapture.lock`. The RT callback no longer touches the session at all — it copies
+// into the shared ring — so the file/resampler live entirely on the `writer`'s thread.
 private final class CaptureSession: @unchecked Sendable {
     let url: URL
     let file: AVAudioFile
     let recordFormat: AVAudioFormat
-    let levelHandler: @Sendable (Float) -> Void
-    // Resamples the mic's native format to the engine's target rate/mono; built lazily from the format the
-    // callback delivers, rebuilt if the hardware format changes mid-stream, reused across callbacks.
-    var converter: AVAudioConverter?
-    var converterInputFormat: AVAudioFormat?
-    var outBuffer: AVAudioPCMBuffer?
+    // Drains the shared ring to `file` on its own thread (owns the resampler/converter). See CaptureWriter.
+    let writer: CaptureWriter
     // Mid-recording restart attempts for THIS capture; bounds a flapping device. Reset to 0 by being a
     // fresh session per capture.
     var configRestartCount = 0
 
-    init(url: URL, file: AVAudioFile, recordFormat: AVAudioFormat,
-         levelHandler: @escaping @Sendable (Float) -> Void) {
+    init(url: URL, file: AVAudioFile, recordFormat: AVAudioFormat, writer: CaptureWriter) {
         self.url = url
         self.file = file
         self.recordFormat = recordFormat
-        self.levelHandler = levelHandler
+        self.writer = writer
     }
 }
 
@@ -114,10 +109,28 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // bring-up: preferred device if present, else system default — so an absent preferred device follows
     // the default, and the device-list listener re-prewarms when it returns.
     private var preferredInputUID: String?
-    // The single per-dictation capture object (file, format, resampler, restart counter). Non-nil only
-    // while a capture is live; created on the control queue in armSync, dropped atomically at teardown.
+    // The single per-dictation capture object (file, writer, restart counter). Non-nil only while a capture
+    // is live; created on the control queue in armSync, dropped atomically at teardown.
     private var session: CaptureSession?
-    private let feed = FeedOnce()
+
+    // RT-thread transport, all touched lock-free from the CoreAudio IO thread. The ring is owned for the
+    // adapter's lifetime and RESET (never reallocated) per capture, so the RT callback dereferences a stable
+    // `let` — no per-session pointer to publish atomically. `capturing` gates the callback (false ⇒ drop the
+    // buffer, capture is over/not yet live); `levelBits` holds the latest perceptual level as a Float bit
+    // pattern for the controller's meter poll. Geometry is generous: 8 slots × up to 8192 frames × up to 8
+    // channels comfortably covers any real capture-device buffer size and absorbs writer-thread jitter.
+    private let ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
+    private let capturing = Atomic<Bool>(false)
+    private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
+    // CoreAudio's count of IO-cycle overloads on the bound device for THIS capture (reset at arm). This is the
+    // direct hardware signal for the H4 failure the ring split fixes: if the RT callback ever misses its
+    // deadline, CoreAudio posts `kAudioDeviceProcessorOverload` and this climbs. A healthy capture keeps it 0.
+    private let overloadCount = Atomic<Int>(0)
+    private var overloadListenerBlock: AudioObjectPropertyListenerBlock?
+    // The most recently created writer, kept so the NEXT capture's arm can JOIN it before it resets the
+    // shared ring — closing the narrow window where a cancel's async teardown is still draining the ring on
+    // the outgoing control queue while a new dictation arms on a freshly-swapped one. Touched under `lock`.
+    private var lastWriter: CaptureWriter?
     // Set while a commit-on-release drain is in flight: each delivered buffer feeds the gate, and the
     // continuation is resumed once a buffer covers the release instant (or a backstop timeout fires).
     private var drainGate: TailDrainGate?
@@ -202,7 +215,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         if !recording { prewarm() }
     }
 
-    func start(sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void) async throws -> URL {
+    // Latest perceptual level (0…1), published by the RT callback into an atomic and polled by the HUD meter.
+    var currentLevel: Float { Float(bitPattern: levelBits.load(ordering: .relaxed)) }
+
+    func start(sampleRate: Int) async throws -> URL {
         rebuildIfNeeded()
         let queue = currentQueue()
         let generation = currentGeneration()
@@ -211,7 +227,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             // Non-destructive watchdog: adopt a bring-up that lands within the grace window; only the
             // DeadlineExceeded branch below (a genuinely wedged device) tears the half-open capture down.
             let url = try await runWithDeadline(seconds: Self.bringUpTimeout + Self.bringUpGrace) { [self] in
-                try await bringUp(sampleRate: sampleRate, levelHandler: levelHandler, queue: queue, generation: generation)
+                try await bringUp(sampleRate: sampleRate, queue: queue, generation: generation)
             }
             let ms = Self.elapsedMs(since: started)
             let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
@@ -236,14 +252,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func bringUp(
-        sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void,
-        queue: DispatchQueue, generation: Int
+        sampleRate: Int, queue: DispatchQueue, generation: Int
     ) async throws -> URL {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
             queue.async { [self] in
                 do {
-                    cont.resume(returning: try armSync(
-                        sampleRate: sampleRate, levelHandler: levelHandler, generation: generation))
+                    cont.resume(returning: try armSync(sampleRate: sampleRate, generation: generation))
                 } catch { cont.resume(throwing: error) }
             }
         }
@@ -306,10 +320,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    // Sets up the capture file + recording state, then brings the unit up — all on the control queue.
-    private func armSync(
-        sampleRate: Int, levelHandler: @escaping @Sendable (Float) -> Void, generation: Int
-    ) throws -> URL {
+    // Sets up the capture file + writer thread, then brings the unit up — all on the control queue. The ring
+    // is reset (the previous capture's writer has already joined at teardown, so it is quiescent), the writer
+    // thread is started to drain it, and `capturing` is flipped on so the first RT buffer is copied in — all
+    // BEFORE the unit's IOProc goes live.
+    private func armSync(sampleRate: Int, generation: Int) throws -> URL {
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
@@ -317,21 +332,63 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             .appendingPathComponent("keyscribe-capture-\(UUID().uuidString).wav")
         let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
 
-        lock.withLock {
-            session = CaptureSession(
-                url: url, file: file, recordFormat: recordFormat, levelHandler: levelHandler)
+        // Bail BEFORE touching any shared state if this arm is already superseded (its generation was bumped
+        // by a watchdog swap while it sat queued behind a wedged control queue). A superseded arm that
+        // published `session`/`capturing`/the writer would leave the adapter thinking a dead capture is live
+        // — suppressing idle behavior, leaking the WAV, and letting a spurious restart push into a
+        // consumer-less ring. Everything up to here is a local; drop the file and throw.
+        guard isGeneration(generation) else {
+            try? FileManager.default.removeItem(at: url)
+            throw AudioCaptureError.bringUpTimedOut
         }
+
+        // Gate the RT producer OFF and JOIN any previous writer before touching the shared ring: with the
+        // producer gated, that writer's ring drains and its finish() (idempotent, multi-waiter) returns, so
+        // the reset below cannot race a still-draining consumer from a prior capture's async teardown.
+        capturing.store(false, ordering: .releasing)
+        lock.withLock { lastWriter }?.finish(flushConverter: false)
+        ring.reset()
+        overloadCount.store(0, ordering: .relaxed)
+        levelBits.store(Float(0).bitPattern, ordering: .relaxed)
+        let writer = CaptureWriter(
+            ring: ring, file: file, recordFormat: recordFormat,
+            observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
+        let mySession = CaptureSession(url: url, file: file, recordFormat: recordFormat, writer: writer)
+        // Publish ONLY if still current, atomically with the generation read: a bump between the guard above
+        // and here means a newer generation now owns the capture slot, so do NOT clobber its session — bail
+        // and clean up this arm's own local file (the writer was never started, so there is no thread).
+        let published = lock.withLock { () -> Bool in
+            guard generation == self.generation else { return false }
+            session = mySession
+            lastWriter = writer
+            return true
+        }
+        guard published else {
+            try? FileManager.default.removeItem(at: url)
+            throw AudioCaptureError.bringUpTimedOut
+        }
+        capturing.store(true, ordering: .releasing)
+        writer.start()
 
         do {
             try armUnit(generation: generation)
         } catch {
-            // Only unwind shared capture state if this bring-up still owns the current generation. A
-            // watchdog-abandoned armSync that finally un-wedges is superseded, and the newer generation may
-            // already be recording — clearing its unit/listener/session here would corrupt it.
+            // Only unwind SHARED capture state (unit/listener) if this bring-up still owns the current
+            // generation — a superseded arm must not touch a newer generation's unit/listener. The writer +
+            // session + file are THIS arm's own, so always tear them down: finish the writer thread, and clear
+            // the shared session ONLY if it still points at our capture by identity (a newer generation may
+            // have already published its own, which we must not clobber). `capturing` is intentionally left to
+            // the next arm's reset — flipping it false here could race a newer generation's `capturing = true`.
             if isGeneration(generation) {
                 removeActiveDeviceListener()
                 disposeUnitInline()
-                discardPendingCapture()
+                discardPendingCapture()  // finishes this writer via the session, nils it, deletes the file
+            } else {
+                writer.finish(flushConverter: false)
+                let wasOurs = lock.withLock { () -> Bool in
+                    if session === mySession { session = nil; return true } else { return false }
+                }
+                if wasOurs { try? FileManager.default.removeItem(at: url) }
             }
             throw error
         }
@@ -402,9 +459,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private func makeUnit() -> HALInputUnit {
         HALInputUnit(handler: { [weak self] buffer, hostTime in
-            guard let self else { return }
-            self.handle(buffer)
-            self.feedDrainGate(hostTime: hostTime)
+            // On the CoreAudio realtime IO thread. Do ONLY lock-free, allocation-free, syscall-free work:
+            // gate on `capturing`, copy the frames into the ring, publish the meter level. Everything heavy
+            // (resample, file write, drain-gate arbitration) runs on the writer thread draining the ring.
+            guard let self, self.capturing.load(ordering: .acquiring) else { return }
+            self.handle(buffer, hostTime: hostTime)
         })
     }
 
@@ -432,13 +491,24 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    private func feedDrainGate(hostTime: UInt64?) {
-        lock.lock()
-        guard var gate = drainGate else { lock.unlock(); return }
-        let outcome = gate.observe(bufferStartHostTime: hostTime)
-        drainGate = gate
-        lock.unlock()
-        if outcome == .stop { resumeDrain() }
+    // Called by the WRITER thread once per written slot with that slot's host time (nil ⇒ the RT layer had
+    // no valid host time; the gate has a buffer-count fallback). Advances the drain gate and, if it trips,
+    // resumes the drain awaiter. Returns true on the trip so the writer seals (flush + stop writing). During
+    // normal recording (no drain armed) it is a cheap locked no-op returning false. Off the RT thread.
+    @discardableResult
+    private func feedDrainGate(hostTime: UInt64?) -> Bool {
+        let (tripped, cont) = lock.withLock { () -> (Bool, CheckedContinuation<Void, Never>?) in
+            guard var gate = drainGate else { return (false, nil) }
+            let outcome = gate.observe(bufferStartHostTime: hostTime)
+            drainGate = gate
+            guard outcome == .stop else { return (false, nil) }
+            let c = drainContinuation
+            drainContinuation = nil
+            drainGate = nil
+            return (true, c)
+        }
+        cont?.resume()
+        return tripped
     }
 
     // `id == nil` is the wildcard resume (gate-covered, or the forced resume from stop()) and always fires.
@@ -462,10 +532,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return backstopID == currentDrainID
     }
 
-    // Commit path: tear the unit down on the control queue (stop/dispose can block on a transitioning
-    // device), watchdogged so a wedge can't hang the commit. Finalizing (closing) the WAV happens only
-    // AFTER the callback is stopped, so no in-flight buffer write races the close. A non-Bluetooth unit is
-    // STOPPED but kept resident (fast to restart next dictation); a Bluetooth unit is DISPOSED to free HFP.
+    // Commit path: tear the capture down on the control queue (unit stop/dispose can block on a transitioning
+    // device), watchdogged so a wedge can't hang the commit. The WAV is finalized/closed BEFORE the unit
+    // stop (see tearDownSession), so even if the watchdog fires while the unit stop is wedged, the URL we
+    // return points at a complete, closed file the caller can transcribe. A non-Bluetooth unit is STOPPED
+    // but kept resident (fast to restart next dictation); a Bluetooth unit is DISPOSED to free HFP.
     private func teardownAndFinalize() async -> URL? {
         let queue = currentQueue()
         let url = lock.withLock { session?.url }
@@ -473,19 +544,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try await runWithDeadline(seconds: Self.bringUpTimeout) {
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     queue.async { [self] in
-                        // Drop the session ON the control queue BEFORE the unit teardown, so a mid-recording
-                        // restart already queued behind us (its guard reads `session`) sees the capture ended
-                        // and bails instead of starting a fresh ownerless unit. The tail drain has already
-                        // captured up to the release instant, so dropping the file now only discards
-                        // post-release straggler buffers the gate was designed to exclude. finalizeCapture()
-                        // on the caller afterward is an idempotent no-op.
-                        lock.withLock { session = nil }
-                        removeActiveDeviceListener()
-                        if effectiveInputIsBluetooth() {
-                            disposeUnitInline()
-                        } else {
-                            lock.withLock { unit }?.stop()
-                        }
+                        tearDownSession(flushConverter: true)
                         cont.resume()
                     }
                 }
@@ -493,108 +552,102 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         } catch {
             markRebuild()
         }
-        finalizeCapture()
+        if let url { CaptureArchive.archive(url, tag: "commit") }
         return url
     }
 
-    // Immediate, audio-discarding teardown for cancel()/over-limit abort: the caller deletes the WAV, so
-    // finalize ordering does not matter. Force-resumes any pending drain first so a direct stop never
-    // strands the drain awaiter, and disposes the unit off-main so a bad device can't block.
+    // End the live capture on the control queue. Ordering is load-bearing:
+    //   1. drop the session + flip `capturing` off — the RT callback stops pushing (a mid-recording restart
+    //      queued behind us reads `session` and bails — the H1 stranded-mic close), which SEVERS the
+    //      RT → ring → writer → file path: no further buffer can reach the file after this point;
+    //   2. `writer.finish` drains the slots already in the ring, flushes the resampler tail (commit) and
+    //      JOINS the writer thread, which drops the writer's own reference to the file;
+    //   3. drop `s` — the last strong reference to the session — which closes the `AVAudioFile`. This happens
+    //      BEFORE the unit teardown, so a wedged unit stop (a transitioning device) can NOT leave the file
+    //      open when the watchdog returns the URL for transcription. Because `capturing` already severed the
+    //      write path in step 1, closing before stopping the unit cannot race an in-flight write;
+    //   4. stop (non-Bluetooth) or dispose (Bluetooth) the unit — the step that may block on a bad device.
+    private func tearDownSession(flushConverter: Bool) {
+        // Steps 1–3: sever the write path, join the writer, and CLOSE the file (the session ref is confined to
+        // this call, so it is released — and the WAV finalized — at its return, before the unit teardown).
+        finishWriterAndCloseFile(flushConverter: flushConverter)
+        // Step 4: the potentially-blocking unit teardown, now safely AFTER the file is closed.
+        if effectiveInputIsBluetooth() {
+            disposeUnitInline()
+        } else {
+            lock.withLock { unit }?.stop()
+        }
+    }
+
+    private func finishWriterAndCloseFile(flushConverter: Bool) {
+        let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
+        capturing.store(false, ordering: .releasing)
+        removeActiveDeviceListener()
+        s?.writer.finish(flushConverter: flushConverter)
+        // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
+        // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
+        // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
+        Log.audio.debug(
+            "capture ended: ringDropped=\(self.ring.droppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public)")
+    }  // `s` (the last file reference — the writer dropped its own on join) is released here → WAV closed
+
+    // Snapshot of this capture's RT-health counters, valid from the moment the capture ends until the next
+    // arm resets them. Used by the `--capture-probe` self-test to report drop/overload counts alongside the
+    // WAV analysis.
+    func captureDiagnostics() -> (ringDropped: Int, overloads: Int) {
+        (ring.droppedCount, overloadCount.load(ordering: .relaxed))
+    }
+
+    // Immediate, audio-discarding teardown for cancel()/over-limit abort: the caller deletes the WAV. Flip
+    // `capturing` off synchronously so the RT callback stops at once, force-resume any pending drain so the
+    // awaiter is never stranded, then tear the session/unit/writer down off-main so a bad device can't block.
+    // The caller may delete the returned WAV immediately: the writer keeps writing into the now-unlinked file
+    // (POSIX unlink-while-open) and closes it harmlessly on join.
     func stop() -> URL? {
         resumeDrain()
         let queue = currentQueue()
         let url = lock.withLock { session?.url }
-        finalizeCapture()
-        queue.async { [self] in
-            removeActiveDeviceListener()
-            disposeUnitInline()
-        }
+        capturing.store(false, ordering: .releasing)
+        queue.async { [self] in tearDownSession(flushConverter: false) }
         return url
     }
 
-    // Drop the live capture as one atomic swap — every file/format/resampler field goes with it, so none
-    // can linger into the next capture.
-    private func finalizeCapture() {
-        lock.withLock { session = nil }
-    }
-
-    // Drop a half-open capture (bring-up threw or timed out): clear recording state and delete the
-    // partially-written file. Never touches the unit — a wedged one is abandoned via the rebuild flag.
+    // Drop a half-open capture (bring-up threw or timed out): stop the writer and delete the partially
+    // written file. Never touches the unit — a wedged one is abandoned via the rebuild flag.
     private func discardPendingCapture() {
-        let url = lock.withLock { session?.url }
-        finalizeCapture()
-        if let url { try? FileManager.default.removeItem(at: url) }
+        let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
+        capturing.store(false, ordering: .releasing)
+        s?.writer.finish(flushConverter: false)
+        if let s { try? FileManager.default.removeItem(at: s.url) }
     }
 
-    // MARK: - Buffer handling
+    // MARK: - Buffer handling (realtime IO thread)
 
-    private func handle(_ buffer: AVAudioPCMBuffer) {
-        lock.lock()
-        guard let session = self.session else { lock.unlock(); return }
-        let file = session.file
-        let handler = session.levelHandler
-        let recordFormat = session.recordFormat
-
-        let inputFormat = buffer.format
-        if inputFormat.sampleRate == recordFormat.sampleRate
-            && inputFormat.channelCount == recordFormat.channelCount {
-            lock.unlock()
-            try? file.write(from: buffer)
-            emitLevel(buffer, to: handler)
-            return
+    // Copy the delivered frames into the shared ring and publish the meter level. Lock-free, allocation-free,
+    // syscall-free: the ring drop-on-full and the atomic level store are the only operations, and both are
+    // bounded. All resampling and file I/O happen on the writer thread draining the ring, so a disk stall or
+    // a lock contended by the main actor can never overrun the device IO cycle (the H4 fix). A degenerate or
+    // over-capacity buffer is dropped by the ring; the meter still updates from whatever channel 0 carries.
+    private func handle(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
+        guard let channels = buffer.floatChannelData else { return }
+        let channelCount = Int(buffer.format.channelCount)
+        let frameCount = Int(buffer.frameLength)
+        ring.write(
+            channelCount: channelCount, frameCount: frameCount,
+            sampleRate: buffer.format.sampleRate, hostTime: hostTime ?? 0
+        ) { c, dest in
+            dest.baseAddress!.update(from: channels[c], count: frameCount)
         }
-
-        // A mid-stream device transition can deliver a degenerate buffer; drop it. AVAudioConverter's init
-        // can RAISE on a bad conversion (uncatchable on the callback thread) — the shim is the backstop.
-        guard Self.isUsableInputFormat(
-            sampleRate: inputFormat.sampleRate, channelCount: inputFormat.channelCount) else {
-            lock.unlock(); return
-        }
-        if session.converter == nil
-            || session.converterInputFormat?.sampleRate != inputFormat.sampleRate
-            || session.converterInputFormat?.channelCount != inputFormat.channelCount {
-            var built: AVAudioConverter?
-            try? ObjCException.catching { built = AVAudioConverter(from: inputFormat, to: recordFormat) }
-            session.converter = built
-            session.converterInputFormat = inputFormat
-            session.outBuffer = nil
-        }
-        let ratio = recordFormat.sampleRate / inputFormat.sampleRate
-        let needed = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        if session.outBuffer == nil || session.outBuffer!.frameCapacity < needed {
-            session.outBuffer = AVAudioPCMBuffer(pcmFormat: recordFormat, frameCapacity: needed)
-        }
-        let converter = session.converter
-        let outBuffer = session.outBuffer
-        lock.unlock()
-
-        guard let converter, let outBuffer else {
-            return
-        }
-        outBuffer.frameLength = 0
-        var convError: NSError?
-        let feed = self.feed
-        feed.buffer = buffer
-        feed.consumed = false
-        _ = converter.convert(to: outBuffer, error: &convError) { _, status in
-            if feed.consumed { status.pointee = .noDataNow; return nil }
-            feed.consumed = true
-            status.pointee = .haveData
-            return feed.buffer
-        }
-        guard convError == nil, outBuffer.frameLength > 0 else { return }
-        try? file.write(from: outBuffer)
-        emitLevel(outBuffer, to: handler)
+        storeLevel(channels[0], frameCount: frameCount)
     }
 
-    private func emitLevel(_ buffer: AVAudioPCMBuffer, to handler: (@Sendable (Float) -> Void)?) {
-        guard let handler else { return }
-        guard let channel = buffer.floatChannelData?[0] else { return }
-        let count = Int(buffer.frameLength)
-        guard count > 0 else { return }
+    // Publish the latest perceptual level for the HUD meter poll. RMS over channel 0 is an allocation-free
+    // vDSP reduction; the result is stored as a Float bit pattern in an atomic the main actor reads.
+    private func storeLevel(_ channel: UnsafePointer<Float>, frameCount: Int) {
+        guard frameCount > 0 else { return }
         var rms: Float = 0
-        vDSP_rmsqv(channel, 1, &rms, vDSP_Length(count))
-        handler(Self.perceptualLevel(rms))
+        vDSP_rmsqv(channel, 1, &rms, vDSP_Length(frameCount))
+        levelBits.store(Self.perceptualLevel(rms).bitPattern, ordering: .relaxed)
     }
 
     // RMS is linear, so speech-range energy clusters near zero and a linear meter barely moves. Map to dB
@@ -797,25 +850,48 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 mElement: kAudioObjectPropertyElementMain)
             AudioObjectAddPropertyListenerBlock(deviceID, &addr, deviceListenerQueue, block)
         }
-        lock.withLock { activeDeviceListenerBlock = block; activeListenedDeviceID = deviceID }
+        // Watch the device's IO-overload signal (does NOT trigger a restart — just counts + logs). This is the
+        // ground-truth health check for the RT path: a healthy ring split keeps this at 0 even under load.
+        let overload: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self else { return }
+            let n = self.overloadCount.add(1, ordering: .relaxed).newValue
+            Log.audio.error("CoreAudio processor overload on capture device (count=\(n, privacy: .public))")
+        }
+        var overloadAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDeviceProcessorOverload, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        AudioObjectAddPropertyListenerBlock(deviceID, &overloadAddr, deviceListenerQueue, overload)
+        lock.withLock {
+            activeDeviceListenerBlock = block; activeListenedDeviceID = deviceID; overloadListenerBlock = overload
+        }
     }
 
     private func removeActiveDeviceListener() {
-        let (block, deviceID, pending) = lock.withLock {
-            () -> (AudioObjectPropertyListenerBlock?, AudioDeviceID?, DispatchWorkItem?) in
-            let b = activeDeviceListenerBlock; let d = activeListenedDeviceID; let p = activeDeviceDebounce
-            activeDeviceListenerBlock = nil; activeListenedDeviceID = nil; activeDeviceDebounce = nil
-            return (b, d, p)
+        let (block, overload, deviceID, pending) = lock.withLock {
+            () -> (AudioObjectPropertyListenerBlock?, AudioObjectPropertyListenerBlock?, AudioDeviceID?, DispatchWorkItem?) in
+            let b = activeDeviceListenerBlock; let o = overloadListenerBlock
+            let d = activeListenedDeviceID; let p = activeDeviceDebounce
+            activeDeviceListenerBlock = nil; overloadListenerBlock = nil
+            activeListenedDeviceID = nil; activeDeviceDebounce = nil
+            return (b, o, d, p)
         }
         // Cancel a debounced restart already scheduled at +150 ms — otherwise it survives teardown and can
         // start a fresh, ownerless capture unit after the mic was supposed to be released (a stranded hot mic).
         pending?.cancel()
-        guard let block, let deviceID else { return }
-        for selector in Self.activeDeviceSelectors {
-            var addr = AudioObjectPropertyAddress(
-                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+        guard let deviceID else { return }
+        if let block {
+            for selector in Self.activeDeviceSelectors {
+                var addr = AudioObjectPropertyAddress(
+                    mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain)
+                AudioObjectRemovePropertyListenerBlock(deviceID, &addr, deviceListenerQueue, block)
+            }
+        }
+        if let overload {
+            var overloadAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDeviceProcessorOverload, mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain)
-            AudioObjectRemovePropertyListenerBlock(deviceID, &addr, deviceListenerQueue, block)
+            AudioObjectRemovePropertyListenerBlock(deviceID, &overloadAddr, deviceListenerQueue, overload)
         }
     }
 

@@ -61,6 +61,7 @@ final class DictationController {
         var modeResolveTask: Task<Void, Never>?
         var captureStartTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
+        var levelPollTask: Task<Void, Never>?
     }
     // Non-nil only while a dictation is in flight. The historical property names below are thin computed
     // accessors over it: a nil session reads as "no captured state" and a write outside a dictation
@@ -106,6 +107,9 @@ final class DictationController {
     // for tests; set only internally through `session`.
     var captureBringUpTask: Task<Void, Never>? {
         get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
+    }
+    private var levelPollTask: Task<Void, Never>? {
+        get { session?.levelPollTask } set { session?.levelPollTask = newValue }
     }
     var dictationTask: Task<Void, Never>? {
         get { session?.dictationTask } set { session?.dictationTask = newValue }
@@ -168,12 +172,21 @@ final class DictationController {
     // buffer rate (the indicator animates between steps anyway). Reset at the start of each recording.
     private var lastRenderedLevel: Float = -1
 
-    // The mic level callback fires per audio buffer on a background thread. Rather than hop to the main
-    // actor for each one (which can pile up unbounded if the main actor is busy), the coalescer keeps a
-    // single pending level and at most one in-flight update — late buffers overwrite the pending value.
-    // A `let` (not a lazy var) so the Sendable callback can reach it off the main actor; its render
-    // closure is wired in init once self is available.
-    private let levelCoalescer = LevelCoalescer()
+    // The mic meter is now PULLED, not pushed: the capture adapter publishes the latest perceptual level
+    // into an atomic from the realtime thread (no per-buffer main-actor hop / Task churn), and a ~30 Hz poll
+    // that runs only while recording reads it. Renders are still deduped by `renderLevel`.
+    private static let levelPollInterval: Duration = .milliseconds(33)
+
+    private func pollLevelWhileRecording() {
+        levelPollTask?.cancel()
+        levelPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, case .recording = self.machine.state else { return }
+                self.renderLevel(self.audio.currentLevel)
+                try? await Task.sleep(for: Self.levelPollInterval)
+            }
+        }
+    }
 
     private func renderLevel(_ level: Float) {
         guard case .recording = machine.state else { return }
@@ -240,7 +253,6 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.llmClient = llmClient
         self.recordModelLoadFailure = recordModelLoadFailure
-        levelCoalescer.onLevel = { [weak self] level in self?.renderLevel(level) }
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
     }
@@ -482,9 +494,7 @@ final class DictationController {
         captureBringUpTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.audio.start(sampleRate: sampleRate) { [weak self] level in
-                    self?.levelCoalescer.submit(level)
-                }
+                _ = try await self.audio.start(sampleRate: sampleRate)
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still arming.
@@ -516,6 +526,7 @@ final class DictationController {
             self.effects.activateDuck()
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
+            self.pollLevelWhileRecording()
             self.hud?.render(.recording(mode: self.activeMode?.name, level: 0))
         }
     }
@@ -555,6 +566,7 @@ final class DictationController {
         modeResolveTask?.cancel()
         captureStartTask?.cancel()
         captureBringUpTask?.cancel()
+        levelPollTask?.cancel()
         session = nil
         scheduleCaptureRefresh()
         onBecameIdle?()

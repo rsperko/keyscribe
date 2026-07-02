@@ -29,6 +29,14 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                               line/paragraph/tab, insert clipboard contents, whole-utterance
                               replacements) across every installed engine on the recordings in <dir>
                               (commands.json), then exit. Honors --engines.
+      --capture-probe         Drive the real capture path (record → drain → teardown) and score the
+                              result for dropped/corrupted audio you cannot hear. Feed a pure tone into
+                              the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,
+                              ring-drop and CoreAudio-overload counts. Needs Microphone permission.
+        --seconds <n>           Record for n seconds (default 5).
+        --tone <hz>             Expected input tone in Hz (default 440).
+      KEYSCRIBE_KEEP_CAPTURE=<dir>  Env var: save a copy of each committed capture WAV to <dir> for
+                              offline inspection (off unless set).
       --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                               (downloaded models stay shared). Pair with --first-run to test
                               onboarding without touching your real configuration.
@@ -103,6 +111,26 @@ if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < Com
     let done = DispatchSemaphore(value: 0)
     Task.detached {
         await CommandCheckRunner.run(dir: dir, only: only)
+        done.signal()
+    }
+    done.wait()
+    exit(0)
+}
+
+// Headless dev mode: `KeyScribe --capture-probe` drives the real capture path and scores the recording for
+// dropped/corrupted audio (feed a pure tone into the input via a loopback device), then exits.
+if CommandLine.arguments.contains("--capture-probe") {
+    var seconds = 5.0
+    if let s = CommandLine.arguments.firstIndex(of: "--seconds"), s + 1 < CommandLine.arguments.count {
+        seconds = Double(CommandLine.arguments[s + 1]) ?? seconds
+    }
+    var tone = 440.0
+    if let t = CommandLine.arguments.firstIndex(of: "--tone"), t + 1 < CommandLine.arguments.count {
+        tone = Double(CommandLine.arguments[t + 1]) ?? tone
+    }
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await CaptureProbeRunner.run(seconds: seconds, toneHz: tone)
         done.signal()
     }
     done.wait()
