@@ -656,3 +656,50 @@ struct DictationPipelineWiringTests {
         #expect(out.outcome == .inserted)            // gate passed → a real rewrite was inserted (not fallback)
     }
 }
+
+struct WarmupBiasTermsTests {
+    private struct Engine: SpeechEngine {
+        let id: String
+        let supportsRecognitionBias: Bool
+        var displayName: String { id }
+        func loadIfNeeded() async throws {}
+        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { "" }
+        func evict() async {}
+    }
+
+    @MainActor
+    @Test func warmupBiasRespectsDisabledEngineGate() {
+        var settings = Settings.defaults
+        settings.stt.recognitionBiasDisabledEngines = ["fixed"]
+        let config = ResolvedConfig(
+            modes: [],
+            dictionary: DictionarySet(words: ["Global"]),
+            replacements: ReplacementsSet(),
+            connections: ConnectionSet(),
+            fragments: [:])
+
+        let terms = DictationController.warmupBiasTerms(
+            settings: settings,
+            engine: Engine(id: "fixed", supportsRecognitionBias: true),
+            plan: config)
+
+        #expect(terms == [])
+    }
+
+    @MainActor
+    @Test func warmupBiasUsesGlobalDictionaryWhenEnabled() {
+        let config = ResolvedConfig(
+            modes: [],
+            dictionary: DictionarySet(words: ["Global"]),
+            replacements: ReplacementsSet(),
+            connections: ConnectionSet(),
+            fragments: [:])
+
+        let terms = DictationController.warmupBiasTerms(
+            settings: .defaults,
+            engine: Engine(id: "fixed", supportsRecognitionBias: true),
+            plan: config)
+
+        #expect(terms == ["Global"])
+    }
+}

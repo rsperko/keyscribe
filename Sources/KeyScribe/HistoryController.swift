@@ -75,9 +75,24 @@ final class HistoryController {
 }
 
 private struct HistoryRow: Identifiable {
-    let id = UUID()
+    let id: String
     let entry: HistoryEntry
     let day: String
+
+    init(entry: HistoryEntry, day: String) {
+        self.entry = entry
+        self.day = day
+        id = Self.identity(entry)
+    }
+
+    private static func identity(_ entry: HistoryEntry) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in "\(entry.modeName)\u{1F}\(entry.heard)\u{1F}\(entry.result)\u{1F}\(entry.outcome.rawValue)".utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return "\(entry.timestamp.timeIntervalSince1970)|\(hash)"
+    }
 }
 
 @MainActor
@@ -93,6 +108,7 @@ private final class HistoryViewModel: ObservableObject {
     private var rows: [HistoryRow] = []
     private var entryIndex: [HistoryRow.ID: HistoryEntry] = [:]
     private var recomputeTask: Task<Void, Never>?
+    private var searchTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
@@ -197,6 +213,7 @@ private final class HistoryViewModel: ObservableObject {
     // is wasted work while the user is still typing.
     private func scheduleRecompute() {
         recomputeTask?.cancel()
+        searchTask?.cancel()
         recomputeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
             guard let self, !Task.isCancelled else { return }
@@ -205,9 +222,23 @@ private final class HistoryViewModel: ObservableObject {
     }
 
     private func recomputeGroups() {
-        let filtered = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? rows
-            : rows.filter { HistorySearch.matches($0.entry, query: query) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            applyFilteredRows(rows)
+            return
+        }
+        let store = self.store
+        let formatter = self.dayFormatter
+        searchTask = Task.detached { [weak self] in
+            let filtered = store.entries(limit: nil)
+                .filter { HistorySearch.matches($0, query: trimmed) }
+                .map { HistoryRow(entry: $0, day: formatter.string(from: $0.timestamp)) }
+            if Task.isCancelled { return }
+            await MainActor.run { self?.applyFilteredRows(filtered) }
+        }
+    }
+
+    private func applyFilteredRows(_ filtered: [HistoryRow]) {
         groups = Dictionary(grouping: filtered, by: \.day)
             .map { (day: $0.key, rows: $0.value) }
             .sorted { ($0.rows.first?.entry.timestamp ?? .distantPast) > ($1.rows.first?.entry.timestamp ?? .distantPast) }

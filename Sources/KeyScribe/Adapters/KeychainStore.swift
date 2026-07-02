@@ -31,16 +31,35 @@ enum KeychainStore {
     static func set(_ secret: String, for keyRef: String) -> Bool {
         let data = Data(secret.utf8)
         let query = baseQuery(keyRef)
-        // Always delete + re-add rather than SecItemUpdate: an update keeps the item's existing ACL, so
-        // an item created by an earlier signature (e.g. a pre-cert ad-hoc build) keeps trusting that old
-        // identity and every read prompts. Re-adding gives the item a fresh default ACL owned by the
-        // current code signature, which can then decrypt it silently. Re-entering the key migrates a
-        // stale item in one step.
+        let oldData = existingData(query)
+        let tempRef = "\(keyRef).tmp.\(UUID().uuidString)"
+        var temp = baseQuery(tempRef)
+        temp[kSecValueData as String] = data
+        temp[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+        guard SecItemAdd(temp as CFDictionary, nil) == errSecSuccess else { return false }
         SecItemDelete(query as CFDictionary)
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        let ok = SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        SecItemDelete(baseQuery(tempRef) as CFDictionary)
+        if ok { return true }
+        if let oldData {
+            var restore = query
+            restore[kSecValueData as String] = oldData
+            restore[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+            _ = SecItemAdd(restore as CFDictionary, nil)
+        }
+        return false
+    }
+
+    private static func existingData(_ query: [String: Any]) -> Data? {
+        var q = query
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
     }
 
     // Existence only: returns attributes, never the secret data, so it does not trigger the Keychain

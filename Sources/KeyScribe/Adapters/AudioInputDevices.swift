@@ -23,7 +23,9 @@ enum AudioInputDevices {
 
     // Resolve a saved preferred UID to a currently-connected input device, or nil if it is absent.
     static func deviceID(forUID uid: String) -> AudioDeviceID? {
-        available().first { $0.uid == uid }?.id
+        allDeviceIDs().first { id in
+            hasInputStreams(id) && Self.uid(of: id) == uid
+        }
     }
 
     // Resolve a UID to ANY currently-connected device (input or output), or nil if absent. Used by the

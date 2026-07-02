@@ -77,7 +77,12 @@ final class ConfigRepository {
     }
 
     func deleteMode(_ mode: Mode) throws {
-        try commit { try ModeStore.delete(mode, from: modesDir) }
+        try commit {
+            try ModeStore.delete(mode, from: modesDir)
+            try? FileManager.default.removeItem(
+                at: supportDir.appendingPathComponent("lkg/modes", isDirectory: true)
+                    .appendingPathComponent("\(mode.id).toml"))
+        }
     }
 
     // Re-slug a mode's file (the id is the filename stem). One operation: write the new file, then delete

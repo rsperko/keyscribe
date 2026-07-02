@@ -35,7 +35,7 @@ enum CommandCheckRunner {
             print("error: could not read \(manifestURL.path)")
             return
         }
-        let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
+        let engines = InstalledEngineFilter.filter(EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir))
             .filter { only == nil || only!.contains($0.id) }
         let rules = (manifest.replacements ?? []).map {
             ReplacementRule(heard: $0.heard, replace: $0.replace, isRegex: $0.isRegex ?? false)

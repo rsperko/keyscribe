@@ -56,6 +56,25 @@ struct PasteboardSnapshotTests {
         #expect(pb.string(forType: .string) == nil)
     }
 
+    @Test func oversizedSnapshotFallsBackToPlainText() {
+        let pb = NSPasteboard.withUniqueName()
+        let binaryType = NSPasteboard.PasteboardType("com.keyscribe.test.large")
+        let item = NSPasteboardItem()
+        item.setString("plain fallback", forType: .string)
+        item.setData(Data(repeating: 7, count: 9 * 1024 * 1024), forType: binaryType)
+        pb.clearContents()
+        pb.writeObjects([item])
+
+        let snapshot = TextInserter.PasteboardSnapshot.capture(from: pb)
+
+        pb.clearContents()
+        pb.setString("scratch", forType: .string)
+        snapshot.restore(to: pb)
+
+        #expect(pb.string(forType: .string) == "plain fallback")
+        #expect(pb.data(forType: binaryType) == nil)
+    }
+
     @Test func copyToClipboardReportsVerifiedPlainTextWrite() {
         let pb = NSPasteboard.withUniqueName()
         #expect(TextInserter.copyToClipboard("copied", to: pb))

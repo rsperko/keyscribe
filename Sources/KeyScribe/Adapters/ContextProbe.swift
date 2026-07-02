@@ -10,6 +10,10 @@ private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMut
 
 @MainActor
 enum ContextProbe {
+    static func initialSnapshot() -> TargetSnapshot {
+        TargetSnapshot(bundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+    }
+
     static func snapshot() -> TargetSnapshot {
         let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         return TargetSnapshot(
@@ -168,7 +172,7 @@ enum ContextProbe {
         guard handlesHTTPS(bundleId) else { return nil }
         return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
             let once = OnceResume()
-            DispatchQueue.global(qos: .userInitiated).async {
+            appleScriptQueue.async {
                 let url = fetchBrowserURL(bundleId)
                 if once.claim() { continuation.resume(returning: url) }
             }
@@ -183,6 +187,8 @@ enum ContextProbe {
         private var fired = false
         func claim() -> Bool { lock.lock(); defer { lock.unlock() }; if fired { return false }; fired = true; return true }
     }
+
+    private static let appleScriptQueue = DispatchQueue(label: "com.keyscribe.applescript-url", qos: .userInitiated)
 
     nonisolated private static func fetchBrowserURL(_ bundleId: String) -> String? {
         for property in ["URL of active tab of front window", "URL of front document"] {

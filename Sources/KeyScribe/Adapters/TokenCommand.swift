@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum TokenCommandError: Error, CustomStringConvertible, LocalizedError {
@@ -162,7 +163,13 @@ enum TokenCommandRunner {
         try process.run()
 
         let timedOut = Flag()
-        let killer = DispatchWorkItem { timedOut.set(); process.terminate() }
+        let killer = DispatchWorkItem {
+            timedOut.set()
+            process.terminate()
+            queue.asyncAfter(deadline: .now() + 0.5) {
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            }
+        }
         queue.asyncAfter(deadline: .now() + timeout, execute: killer)
 
         let stderrData = DataBox()

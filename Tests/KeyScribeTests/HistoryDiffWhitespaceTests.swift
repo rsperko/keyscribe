@@ -53,6 +53,17 @@ struct HistoryDiffWhitespaceTests {
         #expect(rendered.originalText(for: NSRange(location: 0, length: 2)) == "\r\u{00A0}")
     }
 
+    @Test func crlfRevealKeepsSelectionAsRawCrlf() {
+        let spans = [
+            TextComparison.Span(id: 0, text: "\r\n", kind: .changed),
+        ]
+
+        let rendered = DiffTextPresentation.render(spans: spans)
+
+        #expect(rendered.attributed.string == "\u{240D}↵\n")
+        #expect(rendered.originalText(for: NSRange(location: 0, length: 3)) == "\r\n")
+    }
+
     @Test func emptySpansRenderPlaceholderAndSelectNothing() {
         let rendered = DiffTextPresentation.render(spans: [])
 

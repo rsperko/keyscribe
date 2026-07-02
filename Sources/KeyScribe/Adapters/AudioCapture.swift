@@ -582,9 +582,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private func teardownUnit(generation: Int) {
         guard lock.withLock({ Self.shouldTeardownUnit(generation: generation, currentGeneration: self.generation) })
         else { return }
-        if effectiveInputIsBluetooth() {
+        let bound = lock.withLock { configuredDeviceID }
+        switch Self.teardownAction(boundDeviceIsBluetooth: bound.map(AudioInputDevices.isBluetooth)) {
+        case .dispose:
             disposeUnitInline()
-        } else {
+        case .stop:
             lock.withLock { unit }?.stop()
         }
     }
@@ -594,6 +596,15 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // no-ops, so it can never tear down a newer generation's live unit (V1).
     static func shouldTeardownUnit(generation: Int, currentGeneration: Int) -> Bool {
         generation == currentGeneration
+    }
+
+    enum TeardownAction: Equatable {
+        case stop
+        case dispose
+    }
+
+    static func teardownAction(boundDeviceIsBluetooth: Bool?) -> TeardownAction {
+        boundDeviceIsBluetooth == false ? .stop : .dispose
     }
 
     // Steps 1–3 of teardown, thread-safe and HAL-free so the commit/cancel paths run them synchronously.

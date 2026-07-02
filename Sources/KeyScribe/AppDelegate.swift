@@ -80,11 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in self?.reloadConfig() }
         }
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
-        if settings.history.enabled {
-            history.applyRetention(retentionDays: settings.history.retentionDays)
-        }
+        history.applyRetention(retentionDays: settings.history.retentionDays)
         controller = DictationController(
-            settings: settings, provider: provider, config: config, history: history, hud: hud)
+            settings: settings, provider: provider, config: config, history: history, hud: hud,
+            pressSnapshot: ContextProbe.initialSnapshot)
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
@@ -383,6 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // this then persists; `reloadConfig` calls it after re-reading an external edit off disk (no write,
     // so an externally-changed field isn't round-tripped and clobbered).
     private func applySettingsEffects(_ updated: Settings) {
+        let previousHistory = settings.history
         if updated.stt.engine != settings.stt.engine {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
@@ -394,6 +394,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         settings = updated
+        if updated.history != previousHistory {
+            history?.applyRetention(retentionDays: updated.history.retentionDays)
+        }
         controller.updateSettings(updated)
         rebuildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)
@@ -526,7 +529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             inertReasons[mode.id] = "needs an AI service"
         }
         menu.setModes(
-            modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideName,
+            modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideID,
             inertReasons: inertReasons)
         menu.setSpeechModels(speechModels.rows)
     }

@@ -102,8 +102,10 @@ extension ModeStore {
         var sorted = ledger
         sorted.entries.sort { $0.seedId < $1.seedId }
         guard let toml = try? TOMLEncoder().encode(sorted) else { return }
+        let url = ledgerURL(in: ledgerDir)
+        if let existing = try? String(contentsOf: url, encoding: .utf8), existing == toml { return }
         try? FileManager.default.createDirectory(at: ledgerDir, withIntermediateDirectories: true)
-        try? toml.write(to: ledgerURL(in: ledgerDir), atomically: true, encoding: .utf8)
+        try? toml.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private static func seedIdsOnDisk(in modesDir: URL) -> Set<String> {

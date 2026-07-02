@@ -134,4 +134,12 @@ struct TokenCommandRunnerTests {
             _ = try await TokenCommandRunner.run("sleep 30", timeout: 0.5)
         }
     }
+
+    @Test func timesOutWhenCommandIgnoresTerminate() async {
+        let start = Date()
+        await #expect(throws: TokenCommandError.self) {
+            _ = try await TokenCommandRunner.run("trap '' TERM; sleep 30", timeout: 0.2)
+        }
+        #expect(Date().timeIntervalSince(start) < 3)
+    }
 }

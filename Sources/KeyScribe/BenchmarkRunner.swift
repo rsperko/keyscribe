@@ -26,7 +26,8 @@ enum BenchmarkRunner {
             print("error: could not read \(manifestURL.path)")
             return
         }
-        let engines = makeEngines().filter { only == nil || only!.contains($0.id) }
+        let engines = InstalledEngineFilter.filter(makeEngines())
+            .filter { only == nil || only!.contains($0.id) }
         if raw {
             await runRaw(dir: dir, manifest: manifest, engines: engines)
             return

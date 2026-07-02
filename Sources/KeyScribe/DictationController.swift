@@ -21,6 +21,8 @@ final class DictationController {
     private let submitKey: (Mode.Submit) async -> Void
     private let captureSelection: (Mode.ClipboardModifier) async -> String?
     private let clipboard: @MainActor () -> String?
+    private let pressSnapshot: @MainActor () -> TargetSnapshot
+    private let shouldAdoptFullSnapshot: Bool
     private let snapshot: @MainActor () -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
@@ -60,6 +62,7 @@ final class DictationController {
         var rewriteEscapeTask: Task<Void, Never>?
         var recordingLimitTask: Task<Void, Never>?
         var modeResolveTask: Task<Void, Never>?
+        var snapshotAdoptionTask: Task<Void, Never>?
         var captureStartTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
         var levelPollTask: Task<Void, Never>?
@@ -103,6 +106,9 @@ final class DictationController {
     private var modeResolveTask: Task<Void, Never>? {
         get { session?.modeResolveTask } set { session?.modeResolveTask = newValue }
     }
+    private var snapshotAdoptionTask: Task<Void, Never>? {
+        get { session?.snapshotAdoptionTask } set { session?.snapshotAdoptionTask = newValue }
+    }
     private var captureStartTask: Task<Void, Never>? {
         get { session?.captureStartTask } set { session?.captureStartTask = newValue }
     }
@@ -132,7 +138,7 @@ final class DictationController {
     // `building` here at each terminal); survives past the session so the menu/log can read it. Privacy
     // as above.
     private(set) var lastRecord: DictationRecord?
-    private var nextModeOverrideID: String?
+    private(set) var nextModeOverrideID: String?
 
     // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
     // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
@@ -248,6 +254,7 @@ final class DictationController {
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
+        pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
@@ -271,6 +278,8 @@ final class DictationController {
         self.submitKey = submitKey
         self.captureSelection = captureSelection
         self.clipboard = clipboard
+        self.pressSnapshot = pressSnapshot ?? snapshot
+        self.shouldAdoptFullSnapshot = pressSnapshot != nil
         self.snapshot = snapshot
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
@@ -379,7 +388,7 @@ final class DictationController {
         // the bias path — notably Parakeet, whose CTC-WS bias model is NOT loaded by loadIfNeeded() and would
         // otherwise compile mid-dictation on the first biased transcribe. Empty dictionary ⇒ [] ⇒ Parakeet
         // keeps skipping the CTC load entirely, preserving that optimization for users who never bias.
-        let biasTerms = plan.recognitionBiasTerms(for: nil)
+        let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
         let task = Task {
             try await engine.loadIfNeeded()
             // Warm the inference graph on a throwaway clip so the user's first real dictation isn't the one
@@ -398,6 +407,12 @@ final class DictationController {
     // Throwaway clip used to warm the inference graph (the bundled self-test recording). Absent under
     // `swift run`/tests, where warmup is simply skipped.
     private static let warmupClipURL = Bundle.main.url(forResource: "model-selftest", withExtension: "wav")
+
+    static func warmupBiasTerms(settings: Settings, engine: any SpeechEngine, plan: ResolvedConfig) -> [String] {
+        guard settings.stt.recognitionBiasEnabled(
+            engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias) else { return [] }
+        return plan.recognitionBiasTerms(for: nil)
+    }
 
     private func invalidateWarm(_ engineId: String) {
         guard warmEngineId == engineId else { return }
@@ -483,7 +498,8 @@ final class DictationController {
             finishError("The selected speech model is not installed", action: nil)
             return
         }
-        capturedSnapshot = snapshot()
+        capturedSnapshot = pressSnapshot()
+        adoptFullSnapshot()
         building.targetBundleId = capturedSnapshot?.bundleId
         capturedPlan = config.resolved
         capturedEngine = engine
@@ -530,6 +546,21 @@ final class DictationController {
             }
         } else {
             beginCapture()
+        }
+    }
+
+    private func adoptFullSnapshot() {
+        guard shouldAdoptFullSnapshot else { return }
+        let captured = capturedSnapshot?.bundleId
+        snapshotAdoptionTask?.cancel()
+        snapshotAdoptionTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled, self.capturedSnapshot?.bundleId == captured else { return }
+            let full = self.snapshot()
+            guard full.bundleId == captured else { return }
+            self.capturedSnapshot = full
+            self.building.targetBundleId = full.bundleId
+            self.activeMode = self.securePolicyApplied(self.activeMode)
         }
     }
 
@@ -609,6 +640,7 @@ final class DictationController {
         // routing/building field resets structurally, so none can leak into the next dictation.
         recordingLimitTask?.cancel()
         modeResolveTask?.cancel()
+        snapshotAdoptionTask?.cancel()
         captureStartTask?.cancel()
         captureBringUpTask?.cancel()
         levelPollTask?.cancel()
@@ -1002,8 +1034,12 @@ final class DictationController {
             contextCategories: rewrite?.contextCategories ?? [],
             connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt)
         guard let history else { return }
+        let retentionDays = settings.history.retentionDays
         historyWriteQueue.async { [log] in
-            do { try history.append(entry) }
+            do {
+                try history.append(entry)
+                history.applyRetention(retentionDays: retentionDays)
+            }
             catch { log.error("history append failed: \(error.localizedDescription, privacy: .public)") }
         }
     }

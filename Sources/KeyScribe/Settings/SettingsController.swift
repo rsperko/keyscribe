@@ -369,7 +369,7 @@ final class SettingsModel: ObservableObject {
     // last-seen name) so the picker can still render the current selection instead of silently snapping.
     var inputDeviceOptions: [InputDeviceOption] {
         var options = [InputDeviceOption(id: "", label: "Follow macOS Input", connected: true)]
-        let live = AudioInputDevices.available()
+        let live = currentAudioSnapshot().devices
         options += live.map { InputDeviceOption(id: $0.uid, label: $0.name, connected: true) }
         if !inputDeviceUID.isEmpty, !live.contains(where: { $0.uid == inputDeviceUID }) {
             let name = storedInputDeviceName ?? "Preferred device"
@@ -379,11 +379,12 @@ final class SettingsModel: ObservableObject {
     }
 
     var microphoneStatusText: String {
-        Self.microphoneStatusText(
+        let snapshot = currentAudioSnapshot()
+        return Self.microphoneStatusText(
             inputDeviceUID: inputDeviceUID,
             storedInputDeviceName: storedInputDeviceName,
-            liveDevices: AudioInputDevices.available(),
-            systemDefault: AudioInputDevices.systemDefaultInput())
+            liveDevices: snapshot.devices,
+            systemDefault: snapshot.systemDefault)
     }
 
     nonisolated static func microphoneStatusText(
@@ -438,6 +439,8 @@ final class SettingsModel: ObservableObject {
     private let onReload: () -> Void
     private let onResetHUDPosition: () -> Void
     private let onEraseAllData: () -> Void
+    private var audioSnapshot: (loadedAt: Date, devices: [AudioInputDevices.Device], systemDefault: AudioInputDevices.Device?)?
+    private static let audioSnapshotTTL: TimeInterval = 1
     private var loading = false
 
     init(
@@ -502,18 +505,28 @@ final class SettingsModel: ObservableObject {
 
     func eraseAllData() { onEraseAllData() }
 
+    private func currentAudioSnapshot() -> (devices: [AudioInputDevices.Device], systemDefault: AudioInputDevices.Device?) {
+        let now = Date()
+        if let audioSnapshot, now.timeIntervalSince(audioSnapshot.loadedAt) < Self.audioSnapshotTTL {
+            return (audioSnapshot.devices, audioSnapshot.systemDefault)
+        }
+        let fresh = (loadedAt: now, devices: AudioInputDevices.available(), systemDefault: AudioInputDevices.systemDefaultInput())
+        audioSnapshot = fresh
+        return (fresh.devices, fresh.systemDefault)
+    }
+
     private func persist() {
         guard !loading else { return }
         settings.duringDictation = .init(muteSystemAudio: muteSystemAudio, keepDisplayAwake: keepDisplayAwake, sounds: sounds)
         settings.loadOnLogin = loadOnLogin
         settings.history = .init(enabled: historyEnabled, retentionDays: retentionDays)
-        settings.stt.eviction = Eviction(rawValue: eviction) ?? .balanced
+        settings.stt.eviction = Eviction(rawValue: eviction) ?? .fastest
         settings.shortcuts = .init(
             addVocabulary: addVocabularyShortcut,
             pasteLastDictation: pasteLastShortcut)
         if inputDeviceUID.isEmpty {
             storedInputDeviceName = nil
-        } else if let live = AudioInputDevices.available().first(where: { $0.uid == inputDeviceUID }) {
+        } else if let live = currentAudioSnapshot().devices.first(where: { $0.uid == inputDeviceUID }) {
             storedInputDeviceName = live.name
         }
         settings.audio = .init(

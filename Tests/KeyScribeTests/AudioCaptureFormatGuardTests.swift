@@ -80,6 +80,18 @@ struct CaptureUnitTeardownGuardTests {
     @Test func supersededGenerationSkipsTeardown() {
         #expect(!AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 4))
     }
+
+    @Test func bluetoothBoundUnitIsDisposedEvenIfTheCurrentDefaultChanged() {
+        #expect(AudioCapture.teardownAction(boundDeviceIsBluetooth: true) == .dispose)
+    }
+
+    @Test func wiredBoundUnitIsStoppedForReuse() {
+        #expect(AudioCapture.teardownAction(boundDeviceIsBluetooth: false) == .stop)
+    }
+
+    @Test func unknownBoundDeviceDisposesRatherThanHoldingAStaleUnit() {
+        #expect(AudioCapture.teardownAction(boundDeviceIsBluetooth: nil) == .dispose)
+    }
 }
 
 // Capture-device resolution: a present preferred device wins; else the system default; else nothing is

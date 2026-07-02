@@ -155,14 +155,16 @@ public struct TextComparison: Equatable, Sendable {
         let leftCount = left.count
         let rightCount = right.count
         guard leftCount > 0, rightCount > 0 else { return [] }
-        var table = Array(repeating: Array(repeating: 0, count: rightCount + 1), count: leftCount + 1)
+        let width = rightCount + 1
+        var table = [Int32](repeating: 0, count: (leftCount + 1) * width)
+        func offset(_ i: Int, _ j: Int) -> Int { i * width + j }
 
         for i in stride(from: leftCount - 1, through: 0, by: -1) {
             for j in stride(from: rightCount - 1, through: 0, by: -1) {
                 if !left[i].isEmpty, left[i] == right[j] {
-                    table[i][j] = table[i + 1][j + 1] + 1
+                    table[offset(i, j)] = table[offset(i + 1, j + 1)] + 1
                 } else {
-                    table[i][j] = max(table[i + 1][j], table[i][j + 1])
+                    table[offset(i, j)] = max(table[offset(i + 1, j)], table[offset(i, j + 1)])
                 }
             }
         }
@@ -175,7 +177,7 @@ public struct TextComparison: Equatable, Sendable {
                 matches.append(Match(left: i, right: j))
                 i += 1
                 j += 1
-            } else if table[i + 1][j] >= table[i][j + 1] {
+            } else if table[offset(i + 1, j)] >= table[offset(i, j + 1)] {
                 i += 1
             } else {
                 j += 1

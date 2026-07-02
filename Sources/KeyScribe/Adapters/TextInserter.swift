@@ -226,20 +226,47 @@ enum TextInserter {
     // lists, not just plain text (the prior code saved only `.string` and silently destroyed the rest).
     struct PasteboardSnapshot {
         let changeCount: Int
-        let items: [[NSPasteboard.PasteboardType: Data]]
+        private let storage: Storage
+        private static let maxSnapshotBytes = 8 * 1024 * 1024
+
+        private enum Storage {
+            case full([[NSPasteboard.PasteboardType: Data]])
+            case plainText(String?)
+        }
 
         static func capture(from pb: NSPasteboard = .general) -> PasteboardSnapshot {
-            let items = (pb.pasteboardItems ?? []).map { item -> [NSPasteboard.PasteboardType: Data] in
+            var total = 0
+            var items: [[NSPasteboard.PasteboardType: Data]] = []
+            for item in pb.pasteboardItems ?? [] {
                 var byType: [NSPasteboard.PasteboardType: Data] = [:]
                 for type in item.types {
-                    if let data = item.data(forType: type) { byType[type] = data }
+                    if let data = item.data(forType: type) {
+                        total += data.count
+                        if total > maxSnapshotBytes {
+                            return PasteboardSnapshot(
+                                changeCount: pb.changeCount,
+                                storage: .plainText(pb.string(forType: .string)))
+                        }
+                        byType[type] = data
+                    }
                 }
-                return byType
+                items.append(byType)
             }
-            return PasteboardSnapshot(changeCount: pb.changeCount, items: items)
+            return PasteboardSnapshot(changeCount: pb.changeCount, storage: .full(items))
         }
 
         func restore(to pb: NSPasteboard = .general) {
+            switch storage {
+            case .full(let items):
+                restoreFull(items, to: pb)
+            case .plainText(let text):
+                guard let text else { return }
+                pb.clearContents()
+                pb.setString(text, forType: .string)
+            }
+        }
+
+        private func restoreFull(_ items: [[NSPasteboard.PasteboardType: Data]], to pb: NSPasteboard) {
             pb.clearContents()
             guard !items.isEmpty else { return }
             let objects = items.map { byType -> NSPasteboardItem in

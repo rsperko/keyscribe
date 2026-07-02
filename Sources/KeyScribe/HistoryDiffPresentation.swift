@@ -20,6 +20,16 @@ struct ComparisonSection: Identifiable {
     let context: String
     let from: Side
     let to: Side
+    let comparison: TextComparison
+
+    init(id: String, title: String, context: String, from: Side, to: Side) {
+        self.id = id
+        self.title = title
+        self.context = context
+        self.from = from
+        self.to = to
+        self.comparison = TextComparison.compare(from.text, to.text)
+    }
 }
 
 // One source of truth for diff styling so the text rendering and the legend never diverge. Meaning is
@@ -76,14 +86,11 @@ struct ComparisonSectionView: View {
     let onSelect: (ComparisonTextRole, String) -> Void
 
     var body: some View {
-        // Compute the diff once per render — it is O(n·m) and was previously recomputed for each of
-        // status, left, and right on every body evaluation (including the user's own text selection).
-        let comparison = TextComparison.compare(section.from.text, section.to.text)
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(section.title).font(.headline)
                 Spacer()
-                Text(status(comparison.summary))
+                Text(status(section.comparison.summary))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -93,14 +100,14 @@ struct ComparisonSectionView: View {
             ComparisonPane(
                 title: section.from.title,
                 role: section.from.role,
-                spans: comparison.left,
+                spans: section.comparison.left,
                 onSelect: onSelect)
             ComparisonPane(
                 title: section.to.title,
                 role: section.to.role,
-                spans: comparison.right,
+                spans: section.comparison.right,
                 onSelect: onSelect)
-            DiffLegend(kinds: legendKinds(comparison))
+            DiffLegend(kinds: legendKinds(section.comparison))
         }
     }
 
@@ -218,6 +225,7 @@ struct DiffTextPresentation {
     }
 
     private static func visible(_ character: Character) -> String {
+        if String(character) == "\r\n" { return "\u{240D}\u{21B5}\n" }
         switch character {
         case "\n": return "\u{21B5}\n"
         case "\r": return "\u{240D}"

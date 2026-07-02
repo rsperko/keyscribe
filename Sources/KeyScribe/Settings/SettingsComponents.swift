@@ -161,6 +161,7 @@ struct PromptEditor: View {
     let commit: (String) -> Void
     @State private var draft: String
     @State private var expanded = false
+    @State private var commitTask: Task<Void, Never>?
     @FocusState private var focused: Bool
 
     init(
@@ -186,18 +187,32 @@ struct PromptEditor: View {
                 .padding(4)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($focused)
-                .onChange(of: draft) { if commitsOnChange { commitIfChanged() } }
-                .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
+                .onChange(of: draft) { if commitsOnChange { scheduleCommit() } }
+                .onChange(of: focused) { _, nowFocused in if !nowFocused { commitNow() } }
                 .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
             Button("Open in a larger editor…") { expanded = true }
                 .font(.caption).buttonStyle(.link)
         }
         .sheet(isPresented: $expanded) {
-            PromptEditorSheet(title: title, placeholder: placeholder, text: $draft) { commitIfChanged() }
+            PromptEditorSheet(title: title, placeholder: placeholder, text: $draft) { commitNow() }
         }
     }
 
     private func commitIfChanged() { if draft != text { commit(draft) } }
+
+    private func scheduleCommit() {
+        commitTask?.cancel()
+        commitTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            commitIfChanged()
+        }
+    }
+
+    private func commitNow() {
+        commitTask?.cancel()
+        commitIfChanged()
+    }
 }
 
 private struct PromptEditorSheet: View {

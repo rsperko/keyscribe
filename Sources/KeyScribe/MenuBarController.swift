@@ -255,7 +255,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.target = self
             item.representedObject = mode.id
             item.isEnabled = reason == nil
-            item.state = overrideName == mode.name ? .on : .off
+            item.state = overrideName == mode.id ? .on : .off
             modesMenu.addItem(item)
         }
         modesMenu.addItem(.separator())
