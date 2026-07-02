@@ -144,6 +144,14 @@ struct ModeTests {
         #expect(result.transcript == "summarize this thread")
     }
 
+    @Test func fragmentStarterPromptsPreserveDocumentBoundaryLineBreaks() throws {
+        let ids = ["polish", "message", "edit-selection", "ai-prompt", "code", "markdown"]
+        for id in ids {
+            let mode = try #require(ModeStore.starterModes().first { $0.id == id })
+            #expect(mode.aiRewrite?.prompt.contains("Preserve any leading or trailing line breaks exactly") == true)
+        }
+    }
+
     @Test func roundTripsThroughEncode() throws {
         let mode = try ModeStore.decode(
             from: "schema_version = 1\nname = \"Email\"\n[commands]\nlive_edits = true", id: "email")

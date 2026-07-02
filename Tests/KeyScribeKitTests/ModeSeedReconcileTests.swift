@@ -123,13 +123,13 @@ struct ModeSeedReconcileTests {
         defer { try? FileManager.default.removeItem(at: d.support) }
         ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
 
-        let v2 = catalog(bumping: "message", prompt: "revised message prompt", to: 2)
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v2)
+        let v3 = catalog(bumping: "message", prompt: "revised message prompt", to: 3)
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v3)
 
         #expect(outcome.updated.contains("message"))
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         #expect(after.aiRewrite?.prompt == "revised message prompt")
-        #expect(ModeStore.loadLedger(in: d.ledger)?.entry("message")?.version == 2)
+        #expect(ModeStore.loadLedger(in: d.ledger)?.entry("message")?.version == 3)
     }
 
     // The headline guarantee: a starter the user connected (and onboarding enabled) is NOT shielded from
@@ -146,8 +146,8 @@ struct ModeSeedReconcileTests {
         message.enabled = true
         try ModeStore.write(message, to: d.modes)
 
-        let v2 = catalog(bumping: "message", prompt: "revised message prompt", to: 2)
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v2)
+        let v3 = catalog(bumping: "message", prompt: "revised message prompt", to: 3)
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v3)
 
         #expect(outcome.updated.contains("message"))
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
@@ -165,8 +165,8 @@ struct ModeSeedReconcileTests {
         message.aiRewrite?.prompt = "my own message prompt"
         try ModeStore.write(message, to: d.modes)
 
-        let v2 = catalog(bumping: "message", prompt: "revised message prompt", to: 2)
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v2)
+        let v3 = catalog(bumping: "message", prompt: "revised message prompt", to: 3)
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v3)
 
         #expect(!outcome.updated.contains("message"))
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
@@ -202,13 +202,13 @@ struct ModeSeedReconcileTests {
     // it. The connection/enabled user-knobs are excluded, so onboarding never trips this.
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
-            "polish": (1, "be068027ccdcbc8f"),
-            "message": (1, "3d5e80682ee60696"),
+            "polish": (2, "b0d8a6fadd55799a"),
+            "message": (2, "9969a0d54481e459"),
             "email": (1, "6a39d5592cb100d"),
-            "edit-selection": (1, "224ed44b73fd1efb"),
-            "ai-prompt": (3, "c65a7098e028c2a6"),
-            "code": (1, "9443bc91a7b665d7"),
-            "markdown": (1, "77433d0d01ef487e"),
+            "edit-selection": (2, "273554b92933a365"),
+            "ai-prompt": (4, "6169c51528e6af0d"),
+            "code": (2, "79d9b345a4e4f542"),
+            "markdown": (2, "846d2bd3aec77421"),
             "shell": (1, "debf79feb745f80b"),
         ]
         let catalog = ModeStore.starterModes()
