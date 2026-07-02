@@ -11,10 +11,21 @@ import KeyScribeKit
 // errSecMissingEntitlement. The login keychain's only downside is the interactive ACL prompt, which
 // fires solely when the *secret data* is decrypted (`get`). Existence checks (`has`) ask for
 // attributes only, never the data, so they never prompt — that is what the Settings UI uses.
+//
+// A `CachingSecretStore` fronts the raw SecItem ops so a key is decrypted at most once per process
+// (get on every rewrite attempt was the hot-path prompt risk). Every mutation routes through the
+// cache; `has` stays a direct pass-through so the Settings badges reflect the live keychain.
 enum KeychainStore {
     // Per-variant service so the KeyScribeDev build keeps its BYOK keys separate and never fights the
     // production app over a shared item's ACL.
     private static let service = AppVariant(bundleID: Bundle.main.bundleIdentifier).keychainService
+
+    private static let cache = CachingSecretStore(backend: CachingSecretStore.Backend(
+        load: { rawGet($0) },
+        save: { rawSet($0, for: $1, cachedOld: $2) },
+        remove: { rawDelete($0) },
+        removeAll: { rawDeleteAll() }
+    ))
 
     private static func baseQuery(_ keyRef: String) -> [String: Any] {
         [
@@ -29,9 +40,41 @@ enum KeychainStore {
     // falls back to local for want of a key.
     @discardableResult
     static func set(_ secret: String, for keyRef: String) -> Bool {
+        cache.set(secret, for: keyRef)
+    }
+
+    static func get(_ keyRef: String) -> String? {
+        cache.get(keyRef)
+    }
+
+    static func delete(_ keyRef: String) {
+        cache.delete(keyRef)
+    }
+
+    // Erase every BYOK secret under this variant's service in one call (no account ⇒ all items match).
+    // Variant-scoped, so the dev build never touches the production app's keys. Backs the "Erase All
+    // KeyScribe Data" action. The count is read with attributes only (no ACL prompt), for an honest
+    // action message; deletion needs no data access either.
+    @discardableResult
+    static func deleteAll() -> Int {
+        cache.deleteAll()
+    }
+
+    // Existence only: returns attributes, never the secret data, so it does not trigger the Keychain
+    // ACL prompt. Use this anywhere you only need "is a key stored?" (e.g. the Settings UI badges).
+    static func has(_ keyRef: String) -> Bool {
+        var query = baseQuery(keyRef)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        return SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess
+    }
+
+    private static func rawSet(_ secret: String, for keyRef: String, cachedOld: String?) -> Bool {
         let data = Data(secret.utf8)
         let query = baseQuery(keyRef)
-        let oldData = existingData(query)
+        // Rollback backup: reuse the cached secret when warm so a re-save skips the decrypt/prompt.
+        let oldData = cachedOld.map { Data($0.utf8) } ?? existingData(query)
         let tempRef = "\(keyRef).tmp.\(UUID().uuidString)"
         var temp = baseQuery(tempRef)
         temp[kSecValueData as String] = data
@@ -62,17 +105,7 @@ enum KeychainStore {
         return item as? Data
     }
 
-    // Existence only: returns attributes, never the secret data, so it does not trigger the Keychain
-    // ACL prompt. Use this anywhere you only need "is a key stored?" (e.g. the Settings UI badges).
-    static func has(_ keyRef: String) -> Bool {
-        var query = baseQuery(keyRef)
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        return SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess
-    }
-
-    static func get(_ keyRef: String) -> String? {
+    private static func rawGet(_ keyRef: String) -> String? {
         var query = baseQuery(keyRef)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -83,16 +116,11 @@ enum KeychainStore {
         return secret
     }
 
-    static func delete(_ keyRef: String) {
+    private static func rawDelete(_ keyRef: String) {
         SecItemDelete(baseQuery(keyRef) as CFDictionary)
     }
 
-    // Erase every BYOK secret under this variant's service in one call (no account ⇒ all items match).
-    // Variant-scoped, so the dev build never touches the production app's keys. Backs the "Erase All
-    // KeyScribe Data" action. The count is read with attributes only (no ACL prompt), for an honest
-    // action message; deletion needs no data access either.
-    @discardableResult
-    static func deleteAll() -> Int {
+    private static func rawDeleteAll() -> Int {
         let countQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

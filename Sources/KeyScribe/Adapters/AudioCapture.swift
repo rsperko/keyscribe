@@ -462,7 +462,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     func finishDraining() async -> URL? {
         await drainTail()
-        return await teardownAndFinalize()
+        return teardownAndFinalize()
     }
 
     private func drainTail() async {
@@ -523,25 +523,30 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return backstopID == currentDrainID
     }
 
-    // Finalize and close the WAV before queuing the potentially-blocking unit teardown. The queued step is
-    // generation-guarded so it cannot stop or dispose a newer capture's unit.
-    private func teardownAndFinalize() async -> URL? {
+    // Finalize and close the WAV, then return its URL immediately — transcription can start the moment
+    // the file is closed and must not wait out the unit teardown (ms wired, 100 ms+ while a Bluetooth unit
+    // releases HFP, up to the deadline when wedged). The teardown runs detached: it is generation-guarded
+    // so it can never stop or dispose a newer capture's unit, and on a wedge it only flags a rebuild for
+    // the next dictation. Mirrors stop()'s fire-and-forget teardown, plus the deadline/markRebuild watchdog.
+    private func teardownAndFinalize() -> URL? {
         let (queue, generation) = currentQueueAndGeneration()
         let url = lock.withLock { session?.url }
         finishWriterAndCloseFile(flushConverter: true)
-        do {
-            try await runWithDeadline(seconds: Self.bringUpTimeout) {
-                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                    queue.async { [self] in
-                        teardownUnit(generation: generation)
-                        cont.resume()
+        if let url { CaptureArchive.archive(url, tag: "commit") }
+        Task { [self] in
+            do {
+                try await runWithDeadline(seconds: Self.bringUpTimeout) {
+                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                        queue.async { [self] in
+                            teardownUnit(generation: generation)
+                            cont.resume()
+                        }
                     }
                 }
+            } catch {
+                markRebuild()
             }
-        } catch {
-            markRebuild()
         }
-        if let url { CaptureArchive.archive(url, tag: "commit") }
         return url
     }
 

@@ -43,6 +43,10 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     private let subdir: String
     private let modelsDir: URL
     nonisolated(unsafe) private var model: Qwen3ASRModel?
+    // MLX inference is a synchronous, whole-clip call; running it on a Swift-concurrency pool thread
+    // parks a cooperative worker (width = core count) for the duration. Hop it to a dedicated queue so
+    // the pool stays free. SerializedEngine still guarantees one transcribe at a time on this instance.
+    private let inferenceQueue = DispatchQueue(label: "com.keyscribe.audio.qwen3asr-inference", qos: .userInitiated)
 
     init(profile: Qwen3ModelProfile, modelsDir: URL) {
         self.id = profile.id
@@ -122,11 +126,15 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
-        guard let model else { throw EngineError.notInitialized }
         let audio = try AudioDecoder.pcmMono(wavURL, sampleRate: 24000)
         let context = biasTerms.isEmpty ? nil : biasTerms.joined(separator: ", ")
         Log.bias.info("qwen3asr terms=\(biasTerms.joined(separator: "|"), privacy: .private) context=\(context != nil, privacy: .public)")
-        let text = model.transcribe(audio: audio, sampleRate: 24000, context: context)
+        let text = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            inferenceQueue.async { [self] in
+                guard let model else { cont.resume(throwing: EngineError.notInitialized); return }
+                cont.resume(returning: model.transcribe(audio: audio, sampleRate: 24000, context: context))
+            }
+        }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

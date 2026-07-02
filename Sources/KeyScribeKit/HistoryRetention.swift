@@ -17,12 +17,19 @@ public enum HistoryRetention {
         file.hasSuffix(".jsonl") ? String(file.dropLast(6)) : file
     }
 
-    private static func date(from ymd: String) -> Date? {
+    // A fully-configured formatter, built once and shared. Retention runs serialized on the history
+    // store's utility queue, and a DateFormatter is thread-safe for parsing once configured, so the
+    // per-file-per-dictation allocation this used to do is pure waste.
+    private static let ymdFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyy-MM-dd"
-        return f.date(from: ymd)
+        return f
+    }()
+
+    private static func date(from ymd: String) -> Date? {
+        ymdFormatter.date(from: ymd)
     }
 }

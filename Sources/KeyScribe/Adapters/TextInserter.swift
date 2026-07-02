@@ -9,6 +9,9 @@ enum TextInserter {
     private static let cKeyCode: CGKeyCode = 8
     private static let returnKeyCode: CGKeyCode = 36
 
+    private static var pendingRestore: Task<Void, Never>?
+    private static var pendingRestoreGeneration = 0
+
     // Captures the target app's current selection via ⌘C, then restores the user's clipboard only if
     // that copy actually changed the pasteboard.
     static func captureSelection(modifier: Mode.ClipboardModifier = .command) async -> String? {
@@ -40,10 +43,10 @@ enum TextInserter {
     // Returns whether the chosen insertion path actually acted. A false paste result means nothing was
     // inserted, so the caller must not report success or fire a submit keystroke.
     @discardableResult
-    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String) async -> Bool {
+    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String, awaitSettle: Bool = true) async -> Bool {
         switch insertionAction(decision: decision, method: method) {
-        case .paste: return await insertViaPaste(text, modifier: modifier)
-        case .ax: return await insertViaAX(text, modifier: modifier)
+        case .paste: return await insertViaPaste(text, modifier: modifier, awaitSettle: awaitSettle)
+        case .ax: return await insertViaAX(text, modifier: modifier, awaitSettle: awaitSettle)
         case .type: return await insertViaTyping(text)
         case .clipboard:
             // A secure-field divert conceals the copy so clipboard managers do not retain the password;
@@ -56,27 +59,67 @@ enum TextInserter {
     }
 
     @discardableResult
-    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command) async -> Bool {
+    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command, awaitSettle: Bool = true) async -> Bool {
         guard !text.isEmpty else { return true }
-        let pb = NSPasteboard.general
-        let snapshot = PasteboardSnapshot.capture()
-        // Never synthesize ⌘V unless the scratch write is visible; otherwise stale clipboard content
-        // could be pasted into the target.
-        guard writeScratchVerified(text) else {
-            snapshot.restore()
+        guard let scratch = await beginScratchPaste(text, on: .general) else {
             Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
             return false
         }
-        let stamp = pb.changeCount
         postKey(vKeyCode, flags: eventFlags(modifier))
-        // Give the target a bounded window to consume ⌘V; if anything else writes to the pasteboard,
-        // leave it alone.
-        if await scratchSurvived(stamp, timeoutMs: 250, stepMs: 25) { snapshot.restore() }
+        await settleScratch(scratch, awaitSettle: awaitSettle)
         return true
     }
 
-    private static func scratchSurvived(_ stamp: Int, timeoutMs: Int, stepMs: Int) async -> Bool {
-        let pb = NSPasteboard.general
+    struct ScratchPaste {
+        let pb: NSPasteboard
+        let snapshot: PasteboardSnapshot
+        let stamp: Int
+    }
+
+    // Snapshots the clipboard and writes the scratch value ⌘V will paste. Drains any in-flight detached
+    // restore first, so the snapshot is the user's real clipboard and never a prior paste's still-present
+    // scratch text (restoring that would leak dictated content into the user's clipboard). nil ⇒ the
+    // scratch write was unverified and the caller must not ⌘V.
+    static func beginScratchPaste(_ text: String, on pb: NSPasteboard) async -> ScratchPaste? {
+        await drainPendingRestore()
+        let snapshot = PasteboardSnapshot.capture(from: pb)
+        guard writeScratchVerified(text, to: pb) else {
+            snapshot.restore(to: pb)
+            return nil
+        }
+        return ScratchPaste(pb: pb, snapshot: snapshot, stamp: pb.changeCount)
+    }
+
+    // Restores the user's clipboard once the scratch survived the settle window. Inline when a submit
+    // Return must land after ⌘V; otherwise detached so the completion cue is not delayed — the next
+    // paste drains it before snapshotting.
+    static func settleScratch(_ scratch: ScratchPaste, awaitSettle: Bool) async {
+        if awaitSettle {
+            if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: 250, stepMs: 25) {
+                scratch.snapshot.restore(to: scratch.pb)
+            }
+            return
+        }
+        pendingRestoreGeneration &+= 1
+        pendingRestore = Task {
+            if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: 250, stepMs: 25) {
+                scratch.snapshot.restore(to: scratch.pb)
+            }
+        }
+    }
+
+    private static func drainPendingRestore() async {
+        while let pending = pendingRestore {
+            let generation = pendingRestoreGeneration
+            await pending.value
+            if pendingRestoreGeneration == generation {
+                pendingRestore = nil
+                break
+            }
+        }
+    }
+
+    private static func scratchSurvived(_ stamp: Int, on pb: NSPasteboard = .general, timeoutMs: Int, stepMs: Int) async -> Bool {
         var waited = 0
         while waited < timeoutMs {
             try? await Task.sleep(for: .milliseconds(stepMs))
@@ -90,8 +133,7 @@ enum TextInserter {
     // clipboard managers do not capture the dictated text (it can contain just-redacted-then-restored
     // sensitive spans). Returns false if, after a few attempts, the pasteboard's string is not the
     // dictated text — so the caller refuses to ⌘V rather than paste whatever stale content is there.
-    private static func writeScratchVerified(_ text: String, attempts: Int = 3) -> Bool {
-        let pb = NSPasteboard.general
+    private static func writeScratchVerified(_ text: String, to pb: NSPasteboard = .general, attempts: Int = 3) -> Bool {
         for _ in 0..<attempts {
             let item = NSPasteboardItem()
             item.setString(text, forType: .string)
@@ -133,13 +175,13 @@ enum TextInserter {
     // AX can report success while doing nothing in some targets, so use it only when a read-back proves
     // the value changed.
     @discardableResult
-    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command) async -> Bool {
+    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command, awaitSettle: Bool = true) async -> Bool {
         if axInsertVerified(text) {
             Log.insertion.notice("ax-insert: succeeded")
             return true
         }
         Log.insertion.notice("ax-insert: unverified here, falling back to paste")
-        return await insertViaPaste(text, modifier: modifier)
+        return await insertViaPaste(text, modifier: modifier, awaitSettle: awaitSettle)
     }
 
     private static func axInsertVerified(_ text: String) -> Bool {

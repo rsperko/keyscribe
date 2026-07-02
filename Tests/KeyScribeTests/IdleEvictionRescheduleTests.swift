@@ -68,7 +68,7 @@ struct IdleEvictionRescheduleTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, _ in return true },
+            insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
@@ -108,7 +108,7 @@ struct IdleEvictionRescheduleTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, _ in return true },
+            insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 

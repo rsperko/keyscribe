@@ -17,7 +17,7 @@ final class DictationController {
     // or reorder appends within a day file.
     private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
     private let audio: AudioCapturing
-    private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Bool
+    private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String, Bool) async -> Bool
     private let submitKey: (Mode.Submit) async -> Void
     private let captureSelection: (Mode.ClipboardModifier) async -> String?
     private let clipboard: @MainActor () -> String?
@@ -257,7 +257,7 @@ final class DictationController {
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
         audio: AudioCapturing? = nil,
-        insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String) async -> Bool = TextInserter.perform,
+        insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String, Bool) async -> Bool = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
@@ -970,8 +970,10 @@ final class DictationController {
             // OUTSIDE that atom and only on a verified insert — never .copied, where a synthesized Return
             // would hit whatever app is now focused instead of the target the text reached.
             let trailing = bare ? .none : (activeMode?.trailing ?? .none)
+            // Await the paste's clipboard settle inline only when a submit Return must land after ⌘V.
+            let submitFollows = initialOutcome == .inserted && (activeMode?.submit ?? .none) != .none
             let insertStart = DispatchTime.now()
-            let actuated = await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix(after: transcript))
+            let actuated = await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix(after: transcript), submitFollows)
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
             if !actuated {
                 // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"

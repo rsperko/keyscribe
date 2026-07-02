@@ -89,6 +89,19 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
 
 private struct FakeLoadError: Error {}
 
+private final class ProgressFractions: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Double] = []
+
+    func append(_ fraction: Double) {
+        lock.withLock { values.append(fraction) }
+    }
+
+    var all: [Double] {
+        lock.withLock { values }
+    }
+}
+
 struct SerializedEngineTests {
     // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.
     @Test func concurrentLoadsRunBaseLoadOnce() async throws {
@@ -109,16 +122,16 @@ struct SerializedEngineTests {
         let gate = Gate()
         let spy = SpyEngine(loadGate: gate)
         let engine = SerializedEngine(spy)
-        nonisolated(unsafe) var a: [Double] = []
-        nonisolated(unsafe) var b: [Double] = []
+        let a = ProgressFractions()
+        let b = ProgressFractions()
         async let first: Void = try engine.load { a.append($0.fraction) }
         try await Task.sleep(for: .milliseconds(20))
         async let second: Void = try engine.load { b.append($0.fraction) }
         try await Task.sleep(for: .milliseconds(20))
         await gate.fire()
         _ = try await (first, second)
-        #expect(a == [1])
-        #expect(b == [1])
+        #expect(a.all == [1])
+        #expect(b.all == [1])
         #expect(spy.loadBodies == 1)
     }
 

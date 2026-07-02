@@ -114,6 +114,10 @@ private final class HistoryViewModel: ObservableObject {
     private static let loadLimit = 1000
     private var rows: [HistoryRow] = []
     private var entryIndex: [HistoryRow.ID: HistoryEntry] = [:]
+    // The full store read that search filters over, cached for the window's lifetime and keyed on the
+    // store signature: re-parsing every day file on each debounced keystroke was the cost this removes.
+    // Dropped by `reload()` so any in-app mutation (delete) re-reads rather than serving a stale row.
+    private var searchCache: (signature: String, entries: [HistoryEntry])?
     private var recomputeTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
@@ -127,7 +131,10 @@ private final class HistoryViewModel: ObservableObject {
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
 
-    private let dayFormatter: DateFormatter = {
+    // Shared across the main-actor load path and the detached search task; `nonisolated` opts out of the
+    // enclosing @MainActor isolation the detached task cannot satisfy (DateFormatter is Sendable and
+    // thread-safe for formatting once configured).
+    nonisolated private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .full
         f.timeStyle = .none
@@ -150,6 +157,7 @@ private final class HistoryViewModel: ObservableObject {
 
     func reload() {
         isLoading = true
+        searchCache = nil
         let store = self.store
         let limit = Self.loadLimit
         reloadTask?.cancel()
@@ -161,7 +169,7 @@ private final class HistoryViewModel: ObservableObject {
     }
 
     private func applyLoaded(_ loaded: [HistoryEntry]) {
-        rows = loaded.map { HistoryRow(entry: $0, day: dayFormatter.string(from: $0.timestamp)) }
+        rows = loaded.map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
         entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
         statsLine = Self.statsSummary(HistoryStats.compute(from: loaded))
         recomputeGroups()
@@ -236,16 +244,26 @@ private final class HistoryViewModel: ObservableObject {
             return
         }
         let store = self.store
+        let signature = store.signature()
+        let cachedEntries = searchCache?.signature == signature ? searchCache?.entries : nil
         searchTask = Task.detached { [weak self] in
-            let formatter = DateFormatter()
-            formatter.dateStyle = .full
-            formatter.timeStyle = .none
-            let filtered = store.entries(limit: nil)
+            let all: [HistoryEntry]
+            if let cachedEntries {
+                all = cachedEntries
+            } else {
+                all = store.entries(limit: nil)
+                await self?.cacheFullEntries(all, signature: signature)
+            }
+            let filtered = all
                 .filter { HistorySearch.matches($0, query: trimmed) }
-                .map { HistoryRow(entry: $0, day: formatter.string(from: $0.timestamp)) }
+                .map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
             if Task.isCancelled { return }
             await self?.applyFilteredRows(filtered)
         }
+    }
+
+    private func cacheFullEntries(_ entries: [HistoryEntry], signature: String) {
+        searchCache = (signature, entries)
     }
 
     private func applyFilteredRows(_ filtered: [HistoryRow]) {

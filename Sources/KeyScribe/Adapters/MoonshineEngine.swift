@@ -30,6 +30,10 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
 
     private let modelsDir: URL
     nonisolated(unsafe) private var transcriber: Transcriber?
+    // ONNX inference is a synchronous, whole-clip call; running it on a Swift-concurrency pool thread
+    // parks a cooperative worker (width = core count) for the duration. Hop it to a dedicated queue so
+    // the pool stays free. SerializedEngine still guarantees one transcribe at a time on this instance.
+    private let inferenceQueue = DispatchQueue(label: "com.keyscribe.audio.moonshine-inference", qos: .userInitiated)
 
     init(modelsDir: URL) {
         self.modelsDir = modelsDir
@@ -93,12 +97,20 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
-        guard let transcriber else { throw EngineError.notInitialized }
         Log.bias.info("moonshine bias unsupported — \(biasTerms.count, privacy: .public) term(s) ignored")
         let audio = try AudioDecoder.pcmMono(wavURL, sampleRate: 16000)
-        let transcript = try transcriber.transcribeWithoutStreaming(audioData: audio, sampleRate: 16000)
-        return transcript.lines.map(\.text).joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            inferenceQueue.async { [self] in
+                guard let transcriber else { cont.resume(throwing: EngineError.notInitialized); return }
+                do {
+                    let transcript = try transcriber.transcribeWithoutStreaming(audioData: audio, sampleRate: 16000)
+                    cont.resume(returning: transcript.lines.map(\.text).joined(separator: " "))
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func evict() async {

@@ -30,6 +30,7 @@ struct TrailingAndSubmitTests {
     private final class Captured: @unchecked Sendable {
         var insertedText: String?
         var submits: [Mode.Submit] = []
+        var awaitSettle: Bool?
     }
 
     private func run(
@@ -58,7 +59,9 @@ struct TrailingAndSubmitTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: nil, hud: nil,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, _, _, text in captured.insertedText = text; return true },
+            insert: { _, _, _, text, awaitSettle in
+                captured.insertedText = text; captured.awaitSettle = awaitSettle; return true
+            },
             submitKey: { submit in captured.submits.append(submit) },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },
@@ -111,6 +114,16 @@ struct TrailingAndSubmitTests {
         let out = await run(transcript: "hello", trailing: .none, submit: .cmdReturn)
         #expect(out.insertedText == "hello")
         #expect(out.submits == [.cmdReturn])
+    }
+
+    @Test func plainPasteDoesNotAwaitTheSettleWindow() async {
+        let out = await run(transcript: "hello", trailing: .none, submit: .none)
+        #expect(out.awaitSettle == false)
+    }
+
+    @Test func submitModeAwaitsTheSettleWindow() async {
+        let out = await run(transcript: "hello", trailing: .none, submit: .return)
+        #expect(out.awaitSettle == true)
     }
 
     // Clipboard fallback means the text never reached the target — a synthesized Return would hit
