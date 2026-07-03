@@ -55,14 +55,6 @@ struct SettingsProblemTests {
         #expect(problems.first?.pane == .speechModels)
     }
 
-    @Test func danglingAIConnectionFlagsAIServices() {
-        let problems = SettingsProblem.detect(
-            hasConfigError: false, microphoneGranted: true,
-            accessibilityGranted: true, aiConnectionMissing: true)
-        #expect(problems == [.aiConnectionMissing])
-        #expect(problems.first?.pane == .aiServices)
-    }
-
     @Test func failedConnectionTestFlagsAIServices() {
         let problems = SettingsProblem.detect(
             hasConfigError: false, microphoneGranted: true,
@@ -99,7 +91,7 @@ struct SettingsProblemTests {
         let problems = SettingsProblem.detect(
             hasConfigError: false, microphoneGranted: true,
             accessibilityGranted: true,
-            activeEngineUsable: true, aiConnectionMissing: false, aiConnectionTestFailed: false)
+            activeEngineUsable: true, aiConnectionTestFailed: false)
         #expect(problems.isEmpty)
     }
 }

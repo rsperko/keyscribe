@@ -1,20 +1,6 @@
 import SwiftUI
 import KeyScribeKit
 
-enum ConnectionTestState: Equatable {
-    case testing
-    case passed
-    case failed(String)
-}
-
-enum ModelDiscoveryState: Equatable {
-    case loading
-    case loaded
-    case failed(String)
-}
-
-// Sends one trivial round-trip through the BYOK client to confirm the key, model, and base URL
-// actually answer. Transport lives in HTTPLLMClient; this only interprets the result.
 struct ConnectionTester {
     var client: any LLMClient = HTTPLLMClient()
 
@@ -33,9 +19,6 @@ struct ConnectionTester {
     }
 }
 
-// Offered once, when the first AI service is added: the starter modes ship an AI rewrite prompt with no
-// connection, so they can't rewrite until one exists. Rather than make the user open each mode, offer to
-// point them all at the new service.
 struct ConnectModesOffer {
     let connectionId: String
     let connectionName: String
@@ -80,8 +63,6 @@ final class AIServiceSettingsModel: ObservableObject {
     func modelSuggestions(for id: String) -> [String] { modelSuggestionsByConnection[id] ?? [] }
     func modelDiscoveryState(for id: String) -> ModelDiscoveryState? { modelDiscoveryStates[id] }
 
-    // Connections (still present) whose last Test Connection failed. Drives the error badge and the
-    // per-mode "uses a broken AI service" flag.
     var failedTestIds: Set<String> {
         let present = Set(connections.map(\.id))
         return Set(testStates.compactMap { id, state -> String? in
@@ -123,9 +104,6 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func reload() {
-        // Skip re-decoding connections.toml when it has not changed since the last load, but always
-        // re-probe the Keychain: a key is saved/removed in the Keychain without touching the file
-        // (the TOML stores only key_ref), so keyedRefs must refresh even when the decode is skipped.
         let signature = FileFingerprint.file(supportDir.appendingPathComponent(ConnectionStore.fileName))
         if signature != loadedSignature {
             connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
@@ -186,21 +164,17 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func update(_ connection: Connection, apiKey: String?) {
         testStates[connection.id] = nil
-        // save() resets `error` on success, so persist the connection first, then let a key-save
-        // failure have the last word on `error`.
         save(connection)
         guard let apiKey, !apiKey.isEmpty else { return }
         if KeychainStore.set(apiKey, for: connection.keyRef), KeychainStore.has(connection.keyRef) {
             keyedRefs.insert(connection.keyRef)
         } else {
-            error = "Could not save the API key for \(connection.name) to the Keychain."
+            error = "Could not save the API key for \(connection.name)."
         }
     }
 
     func delete(_ connection: Connection) {
         do {
-            // Read-modify-write from disk (not the pane's stale `connections`), so a connection another
-            // surface added concurrently is not dropped by this delete.
             let updated = try repository.deleteConnection(id: connection.id).connections
             KeychainStore.delete(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
@@ -221,8 +195,6 @@ final class AIServiceSettingsModel: ObservableObject {
 
     private func save(_ connection: Connection) {
         do {
-            // Read-modify-write from disk (not the pane's stale `connections`): insert-or-replace by id so
-            // a concurrent write from another surface is merged, not clobbered.
             connections = try repository.upsertConnection(connection).connections
             error = nil
         } catch {
@@ -283,10 +255,10 @@ struct AIServiceSettingsView: View {
                         modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
                         autofocusName: model.lastCreatedId == connection.id,
                         onUpdate: model.update,
-                        onFetchModels: { apiKey in
+                        onFetchModels: { connection, apiKey in
                             Task { await model.fetchModels(for: connection, apiKey: apiKey) }
                         },
-                        onTest: { model.test(connection) },
+                        onTest: { if let connection = model.selected { model.test(connection) } },
                         onConsumeFocus: model.consumeCreated,
                         onDelete: { pendingDelete = connection })
                         .id(connection.id)
@@ -330,8 +302,6 @@ struct AIServiceSettingsView: View {
         }
     }
 
-    // A failed Test Connection is the only attention state — a missing key is legitimate for a
-    // local/no-auth endpoint, so it reads neutral, not as an error.
     private func rowStatus(_ connection: Connection) -> (text: String, icon: String, style: AnyShapeStyle) {
         if case .failed = model.testState(for: connection.id) {
             return ("Connection test failed", "exclamationmark.triangle.fill", AnyShapeStyle(.red))
@@ -373,342 +343,90 @@ private struct AIServiceEditor: View {
     let modelDiscoveryState: ModelDiscoveryState?
     var autofocusName = false
     let onUpdate: (Connection, String?) -> Void
-    let onFetchModels: (String?) -> Void
+    let onFetchModels: (Connection, String?) -> Void
     let onTest: () -> Void
     var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
-    @State private var apiKey = ""
+    @State private var draft: AIConnectionDraft
+
+    init(
+        connection: Connection,
+        hasKey: Bool,
+        testState: ConnectionTestState?,
+        modelSuggestions: [String],
+        modelDiscoveryState: ModelDiscoveryState?,
+        autofocusName: Bool = false,
+        onUpdate: @escaping (Connection, String?) -> Void,
+        onFetchModels: @escaping (Connection, String?) -> Void,
+        onTest: @escaping () -> Void,
+        onConsumeFocus: @escaping () -> Void = {},
+        onDelete: @escaping () -> Void
+    ) {
+        self.connection = connection
+        self.hasKey = hasKey
+        self.testState = testState
+        self.modelSuggestions = modelSuggestions
+        self.modelDiscoveryState = modelDiscoveryState
+        self.autofocusName = autofocusName
+        self.onUpdate = onUpdate
+        self.onFetchModels = onFetchModels
+        self.onTest = onTest
+        self.onConsumeFocus = onConsumeFocus
+        self.onDelete = onDelete
+        _draft = State(initialValue: Self.draft(
+            from: connection,
+            apiKey: "",
+            modelSuggestions: modelSuggestions,
+            modelDiscoveryState: modelDiscoveryState))
+    }
 
     var body: some View {
-        Form {
-            Section("Service") {
-                CommittedTextField("Name", text: connection.name, autofocus: autofocusName) { value in
-                    var updated = connection; updated.name = value; onUpdate(updated, nil)
-                }
-                Picker("Provider", selection: providerBinding) {
-                    Text("OpenAI").tag(Connection.Provider.openai)
-                    Text("Anthropic").tag(Connection.Provider.anthropic)
-                    Text("Gemini").tag(Connection.Provider.gemini)
-                    Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
-                }
-            }
-            if connection.provider == .openaiCompatible {
-                Section("Endpoint") {
-                    baseURLField
-                }
-            }
-            Section("Authentication") {
-                if connection.provider == .openaiCompatible {
-                    Picker("Credential", selection: authMethodBinding) {
-                        Text("No Auth").tag(Connection.AuthMethod.none)
-                        Text("API Key").tag(Connection.AuthMethod.apiKey)
-                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
-                    }
-                    .pickerStyle(.segmented)
-                    switch connection.authMethod {
-                    case .none:
-                        Label("No Authorization header", systemImage: "globe")
-                            .font(.caption).foregroundStyle(.secondary)
-                    case .apiKey:
-                        apiKeyFields(optional: true)
-                    case .tokenCommand:
-                        tokenCommandField
-                    }
-                } else {
-                    apiKeyFields(optional: false)
-                }
-            }
-            Section("Model") {
-                modelField
-            }
-            Section("Connection test") {
-                HStack {
-                    Button("Test Connection", action: onTest)
-                        .disabled(testState == .testing || !canTest)
-                    if testState == .testing { ProgressView().controlSize(.small) }
-                    Spacer()
-                    testStatus
-                }
-                if case .failed(let message) = testState {
-                    Text(message).font(.caption).foregroundStyle(.red)
-                }
-                if let reason = testDisabledReason {
-                    Text(reason).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Section {
-                Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Delete AI Service", role: .destructive, action: onDelete)
-            }
-        }
-        .formStyle(.grouped)
-        .padding(16)
-        .onAppear {
-            if autofocusName { onConsumeFocus() }
-            normalizeAuthForProvider()
-        }
+        AIConnectionDraftEditor(
+            presentation: .settings,
+            draft: $draft,
+            hasStoredKey: hasKey,
+            testState: testState,
+            autofocusName: autofocusName,
+            onCommit: commit,
+            onFetchModels: { fetchModels(apiKey: $0) },
+            onTest: onTest,
+            onConsumeFocus: onConsumeFocus,
+            onDelete: onDelete)
+            .onChange(of: connection) { _, connection in refreshDraft(from: connection) }
+            .onChange(of: modelSuggestions) { _, _ in refreshDraft(from: connection) }
+            .onChange(of: modelDiscoveryState) { _, _ in refreshDraft(from: connection) }
     }
 
-    private var providerBinding: Binding<Connection.Provider> {
-        Binding(
-            get: { connection.provider },
-            set: { value in
-                var updated = connection
-                updated.provider = value
-                updated.model = value.defaultModel
-                if value == .openaiCompatible {
-                    updated.authMethod = hasKey ? .apiKey : .none
-                } else {
-                    updated.authMethod = .apiKey
-                    updated.tokenCommand = nil
-                }
-                apiKey = ""
-                onUpdate(updated, nil)
-            })
+    private static func draft(
+        from connection: Connection,
+        apiKey: String,
+        modelSuggestions: [String],
+        modelDiscoveryState: ModelDiscoveryState?
+    ) -> AIConnectionDraft {
+        AIConnectionDraft(
+            connection: connection,
+            apiKey: apiKey,
+            availableModels: modelSuggestions,
+            modelDiscoveryState: modelDiscoveryState)
     }
 
-    private var authMethodBinding: Binding<Connection.AuthMethod> {
-        Binding(
-            get: { connection.authMethod },
-            set: { value in
-                var updated = connection
-                updated.authMethod = value
-                if value != .tokenCommand { updated.tokenCommand = nil }
-                apiKey = ""
-                onUpdate(updated, nil)
-            })
+    private func refreshDraft(from connection: Connection) {
+        draft = Self.draft(
+            from: connection,
+            apiKey: draft.apiKey,
+            modelSuggestions: modelSuggestions,
+            modelDiscoveryState: modelDiscoveryState)
     }
 
-    private var baseURLField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            CommittedTextField("Base URL", text: connection.baseUrl ?? "") { value in
-                var updated = connection
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                updated.baseUrl = trimmed.isEmpty ? nil : trimmed
-                onUpdate(updated, nil)
-            }
-            Text("Example: http://127.0.0.1:11234/v1")
-                .font(.caption).foregroundStyle(.secondary)
-        }
+    private func commit(_ draft: AIConnectionDraft, apiKey: String?) {
+        var updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
+        updated.params = connection.params
+        onUpdate(updated, apiKey)
     }
 
-    private func apiKeyFields(optional: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SecureField(hasKey ? "Enter replacement key" : optional ? "API key" : "API key required", text: $apiKey)
-                .onSubmit(saveKey)
-            HStack {
-                let status = apiKeyStatus
-                Label(status.text, systemImage: status.icon)
-                    .font(.caption).foregroundStyle(status.style)
-                Spacer()
-                Button("Save to Keychain", action: saveKey)
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            Text(optional ? "Use No Auth if this endpoint accepts unauthenticated requests." : "Hosted providers require a saved key.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private var tokenCommandField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            CommittedTextField(
-                "Command", text: connection.tokenCommand ?? "",
-                prompt: "e.g. gcloud auth print-access-token"
-            ) { value in
-                var updated = connection
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                updated.authMethod = .tokenCommand
-                updated.tokenCommand = trimmed.isEmpty ? nil : trimmed
-                onUpdate(updated, nil)
-            }
-            if (connection.tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Label("Enter the command that prints a fresh bearer token.", systemImage: "exclamationmark.circle.fill")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            Text("Runs before requests. stdout can be a raw token or JSON containing access_token, token, id_token, or status.token.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private var modelField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            CommittedTextField("Model ID", text: connection.model) { value in
-                var updated = connection; updated.model = value; onUpdate(updated, nil)
-            }
-            HStack {
-                Button(modelDiscoveryState == .loading ? "Fetching Models" : "Fetch Models") { onFetchModels(nil) }
-                    .disabled(modelDiscoveryState == .loading || !canFetchModels)
-                if modelDiscoveryState == .loading { ProgressView().controlSize(.small) }
-                Spacer()
-                modelDiscoveryStatus
-            }
-            if !modelSuggestions.isEmpty {
-                Picker("Found Model", selection: foundModelBinding) {
-                    Text("Manual / current").tag("")
-                    ForEach(modelSuggestions, id: \.self) { model in
-                        Text(model).tag(model)
-                    }
-                }
-            }
-            if let reason = modelFetchDisabledReason {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder private var modelDiscoveryStatus: some View {
-        switch modelDiscoveryState {
-        case .loaded where !modelSuggestions.isEmpty:
-            Text("\(modelSuggestions.count) found").font(.caption).foregroundStyle(.secondary)
-        case .failed(let message):
-            Text(message).font(.caption).foregroundStyle(.orange)
-                .lineLimit(1)
-        default:
-            EmptyView()
-        }
-    }
-
-    private var foundModelBinding: Binding<String> {
-        Binding(
-            get: { modelSuggestions.contains(connection.model) ? connection.model : "" },
-            set: { value in
-                guard !value.isEmpty else { return }
-                var updated = connection
-                updated.model = value
-                onUpdate(updated, nil)
-            })
-    }
-
-    private var canFetchModels: Bool {
-        if hasUnsavedAPIKey { return false }
-        switch connection.provider {
-        case .openaiCompatible:
-            guard !(connection.baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return false
-            }
-            switch connection.authMethod {
-            case .none:
-                return true
-            case .apiKey:
-                return hasKey
-            case .tokenCommand:
-                return !(connection.tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
-        case .openai, .anthropic, .gemini:
-            return hasKey
-        }
-    }
-
-    private var canTest: Bool {
-        if hasUnsavedAPIKey || connection.configIssue != nil { return false }
-        switch connection.provider {
-        case .openaiCompatible:
-            switch connection.authMethod {
-            case .none:
-                return true
-            case .apiKey:
-                return hasKey
-            case .tokenCommand:
-                return !(connection.tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
-        case .openai, .anthropic, .gemini:
-            return hasKey
-        }
-    }
-
-    private var modelFetchDisabledReason: String? {
-        guard modelDiscoveryState != .loading, !canFetchModels else { return nil }
-        if hasUnsavedAPIKey { return "Save the typed key before fetching models." }
-        switch connection.configIssue {
-        case .missingBaseURL:
-            return "Base URL is required before fetching models."
-        case .missingTokenCommand:
-            return "Token command is required before fetching models."
-        case .missingModel, nil:
-            break
-        }
-        if connection.provider == .openaiCompatible {
-            if connection.authMethod == .apiKey && !hasKey { return "Save an API key or choose No Auth before fetching models." }
-        } else if !hasKey {
-            return "Save an API key before fetching models."
-        }
-        return nil
-    }
-
-    private var testDisabledReason: String? {
-        if hasUnsavedAPIKey { return "Typed key is not saved yet." }
-        switch connection.configIssue {
-        case .missingModel:
-            return "Model ID is required."
-        case .missingBaseURL:
-            return "Base URL is required."
-        case .missingTokenCommand:
-            return "Token command is required."
-        case nil:
-            break
-        }
-        if connection.provider == .openaiCompatible {
-            if connection.authMethod == .apiKey && !hasKey { return "Save an API key or choose No Auth." }
-        } else if !hasKey {
-            return "Save an API key before testing."
-        }
-        return nil
-    }
-
-    private var hasUnsavedAPIKey: Bool {
-        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var apiKeyStatus: (text: String, icon: String, style: AnyShapeStyle) {
-        if hasUnsavedAPIKey {
-            return ("Typed key not saved", "exclamationmark.circle.fill", AnyShapeStyle(.orange))
-        }
-        if hasKey {
-            return ("Saved in Keychain", "key.fill", AnyShapeStyle(.secondary))
-        }
-        return ("No saved key", "key", AnyShapeStyle(.secondary))
-    }
-
-    @ViewBuilder private var testStatus: some View {
-        switch testState {
-        case .testing:
-            Text("Testing…").font(.caption).foregroundStyle(.secondary)
-        case .passed:
-            Label("Connection works", systemImage: "checkmark.circle.fill")
-                .font(.caption).foregroundStyle(.green)
-        case .failed:
-            Label("Could not connect", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption).foregroundStyle(.red)
-        case nil:
-            EmptyView()
-        }
-    }
-
-    private func saveKey() {
-        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        var updated = connection
-        updated.authMethod = .apiKey
-        updated.tokenCommand = nil
-        onUpdate(updated, trimmed)
-        apiKey = ""
-    }
-
-    private func normalizeAuthForProvider() {
-        guard connection.provider != .openaiCompatible, connection.authMethod != .apiKey else { return }
-        var updated = connection
-        updated.authMethod = .apiKey
-        updated.tokenCommand = nil
-        onUpdate(updated, nil)
-    }
-}
-
-private func providerLabel(_ provider: Connection.Provider) -> String {
-    switch provider {
-    case .openai: "OpenAI"
-    case .anthropic: "Anthropic"
-    case .gemini: "Gemini"
-    case .openaiCompatible: "OpenAI-compatible"
+    private func fetchModels(apiKey: String?) {
+        var updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
+        updated.params = connection.params
+        onFetchModels(updated, apiKey)
     }
 }

@@ -9,6 +9,7 @@ struct FirstRunAISetupTests {
         supportDir: URL,
         modesDir: URL,
         saveAPIKey: @escaping (String, String) -> Bool = { _, _ in true },
+        deleteAPIKey: @escaping (String) -> Void = { _ in },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { _ in .passed },
         listModels: @escaping (Connection, String?) async throws -> [String] = { _, _ in [] },
         onComplete: @escaping () -> Void = {}
@@ -19,6 +20,7 @@ struct FirstRunAISetupTests {
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             saveAPIKey: saveAPIKey,
+            deleteAPIKey: deleteAPIKey,
             testConnection: testConnection,
             listModels: listModels,
             onComplete: onComplete)
@@ -111,7 +113,7 @@ struct FirstRunAISetupTests {
         await model.createAIService()
 
         #expect(completed == 0)
-        #expect(model.aiSetupError == "Could not save the API key to the Keychain.")
+        #expect(model.aiSetupError == "Could not save the API key.")
         #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
         let modes = ModeStore.loadAll(in: modesDir)
         #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
@@ -167,12 +169,15 @@ struct FirstRunAISetupTests {
         defer { try? FileManager.default.removeItem(at: supportDir) }
         ModeStore.seedStartersIfEmpty(in: modesDir)
         var completed = 0
+        var deletedKeyRef: String?
         let model = makeModel(
             supportDir: supportDir,
             modesDir: modesDir,
+            deleteAPIKey: { deletedKeyRef = $0 },
             testConnection: { _ in .failed("401 Unauthorized") },
             onComplete: { completed += 1 })
 
+        model.aiServiceName = "Gemini"
         model.aiProvider = .gemini
         model.aiModel = "gemini-2.5-flash"
         model.aiAPIKey = "bad-key"
@@ -180,6 +185,7 @@ struct FirstRunAISetupTests {
 
         #expect(completed == 0)
         #expect(model.aiSetupError == "Connection test failed: 401 Unauthorized")
+        #expect(deletedKeyRef == "keyscribe.llm.gemini")
         #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
         let modes = ModeStore.loadAll(in: modesDir)
         #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
@@ -206,7 +212,7 @@ struct FirstRunAISetupTests {
         model.aiAPIKey = "secret"
         await model.fetchAIModels()
 
-        #expect(model.aiAvailableModels == ["qwen3", "llama"])
+        #expect(model.aiDraft.availableModels == ["qwen3", "llama"])
         #expect(model.aiModel == "qwen3")
         #expect(model.aiModelDiscoveryError == nil)
     }
@@ -233,7 +239,7 @@ struct FirstRunAISetupTests {
         model.aiBaseURL = "http://127.0.0.1:11234/v1"
         await model.fetchAIModels()
 
-        #expect(model.aiAvailableModels == ["qwen3"])
+        #expect(model.aiDraft.availableModels == ["qwen3"])
         #expect(model.aiModel == "qwen3")
         #expect(model.aiModelDiscoveryError == nil)
     }

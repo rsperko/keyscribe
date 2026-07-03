@@ -80,14 +80,14 @@
       position: relative;
       z-index: 2;
       display: grid;
-      gap: 18px;
+      gap: 12px;
       width: 100%;
       height: 100%;
     }
 
     .source {
       position: relative;
-      min-height: 238px;
+      min-height: 232px;
       padding: 20px;
       overflow: hidden;
       border: 1px solid var(--line);
@@ -151,8 +151,8 @@
     .hud {
       --level: 0;
       width: min(300px, 100%);
-      height: 68px;
-      margin: 16px auto 0;
+      height: 64px;
+      margin: 12px auto 0;
       display: flex;
       align-items: center;
       gap: 12px;
@@ -255,8 +255,8 @@
     }
 
     .partial {
-      min-height: 52px;
-      margin-top: 14px;
+      min-height: 42px;
+      margin-top: 12px;
       color: var(--muted);
       font-size: 14.5px;
       line-height: 1.5;
@@ -308,6 +308,24 @@
       opacity: 1;
     }
 
+    .mode-prompt {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 28px;
+      margin: 0 2px -2px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 850;
+      letter-spacing: 0.01em;
+    }
+
+    .mode-prompt span:last-child {
+      color: var(--muted);
+      font-size: 11.5px;
+      font-weight: 750;
+    }
+
     .fan {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -315,7 +333,7 @@
     }
 
     .card {
-      min-height: 300px;
+      min-height: 276px;
       padding: 15px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
@@ -330,17 +348,17 @@
       transform: none;
     }
 
-    .card--message.is-on {
+    .card--plain.is-on {
       border-color: rgba(167, 139, 250, 0.44);
       box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.12), 0 14px 34px rgba(167, 139, 250, 0.11);
     }
 
-    .card--email.is-on {
+    .card--polish.is-on {
       border-color: rgba(86, 182, 240, 0.44);
       box-shadow: 0 0 0 1px rgba(86, 182, 240, 0.12), 0 14px 34px rgba(86, 182, 240, 0.1);
     }
 
-    .card--prompt.is-on {
+    .card--email.is-on {
       border-color: rgba(84, 220, 131, 0.42);
       box-shadow: 0 0 0 1px rgba(84, 220, 131, 0.11), 0 14px 34px rgba(84, 220, 131, 0.1);
     }
@@ -364,7 +382,7 @@
     .glyph {
       display: inline-grid;
       place-items: center;
-      width: 22px;
+      width: 24px;
       height: 22px;
       color: var(--c);
       border: 1px solid color-mix(in srgb, var(--c) 38%, transparent);
@@ -431,30 +449,35 @@
           </div>
         </div>
         <p class="partial" id="partial"></p>
-        <div class="routechip" id="routechip">suffix stripped: as an email</div>
+        <div class="routechip" id="routechip">voice route: as an email</div>
+      </div>
+
+      <div class="mode-prompt">
+        <span>Choose a mode</span>
+        <span>same words, different result</span>
       </div>
 
       <div class="fan">
-        <article class="card card--message" id="message-card">
+        <article class="card card--plain" id="plain-card">
           <header class="card__head">
-            <span class="card__app"><span class="glyph" style="--c: var(--violet)">#</span>Message</span>
-            <span class="badge">concise · friendly</span>
+            <span class="card__app"><span class="glyph" style="--c: var(--violet)">Fn</span>Plain Dictation</span>
+            <span class="badge">local · no LLM</span>
           </header>
-          <div class="card__body" id="message-out"></div>
+          <div class="card__body" id="plain-out"></div>
+        </article>
+        <article class="card card--polish" id="polish-card">
+          <header class="card__head">
+            <span class="card__app"><span class="glyph" style="--c: var(--sky)">⌥</span>Polish</span>
+            <span class="badge">same meaning · cleaner</span>
+          </header>
+          <div class="card__body" id="polish-out"></div>
         </article>
         <article class="card card--email" id="email-card">
           <header class="card__head">
-            <span class="card__app"><span class="glyph" style="--c: var(--sky)">@</span>Email</span>
-            <span class="badge">structured · polished</span>
+            <span class="card__app"><span class="glyph" style="--c: var(--green)">@</span>Email</span>
+            <span class="badge">routed · structured</span>
           </header>
           <div class="card__body" id="email-out"></div>
-        </article>
-        <article class="card card--prompt" id="prompt-card">
-          <header class="card__head">
-            <span class="card__app"><span class="glyph" style="--c: var(--green)">></span>Prompt</span>
-            <span class="badge">clear · actionable</span>
-          </header>
-          <div class="card__body mono" id="prompt-out"></div>
         </article>
       </div>
     </section>
@@ -470,11 +493,11 @@
     const hudDetail = document.querySelector("#hud-detail");
     const partial = document.querySelector("#partial");
     const cards = [
-      ["#message-card", "#message-out", ["Review is wrapped. Can you try the new checkout flow before Friday and send me anything surprising you notice?"]],
-      ["#email-card", "#email-out", ["Hi team,", "", "The review is complete. Please try the new checkout flow before Friday and send over anything unexpected you notice.", "", "Thank you!"]],
-      ["#prompt-card", "#prompt-out", ["Summarize the launch risks, list open questions, and suggest the next three actions before Friday."]]
+      ["#plain-card", "#plain-out", ["uh tell the team the review is done and ask them to try the new checkout flow before friday as an email"]],
+      ["#polish-card", "#polish-out", ["Tell the team the review is done and ask them to try the new checkout flow before Friday."]],
+      ["#email-card", "#email-out", ["Hi,", "", "The review is complete. Please try the new checkout flow before Friday.", "", "Thanks,"]]
     ];
-    const raw = "tell the team the review is done and ask them to try the new checkout flow before friday as an email";
+    const raw = "uh tell the team the review is done and ask them to try the new checkout flow before friday as an email";
     let waveFrame = 0;
 
     function setHud(state, title, detail) {

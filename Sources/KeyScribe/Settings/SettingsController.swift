@@ -13,7 +13,6 @@ enum SettingsProblem: Equatable, CaseIterable {
     case accessibilityPermission
     case accessibilityNeedsRelaunch
     case activeEngineUnavailable
-    case aiConnectionMissing
     case aiConnectionTestFailed
     case aiConnectionMisconfigured
     case modeNeedsAIService
@@ -25,7 +24,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         case .malformedConfig: .advanced
         case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
         case .activeEngineUnavailable: .speechModels
-        case .aiConnectionMissing, .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
+        case .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
         case .modeNeedsAIService, .modeUsesFailedConnection: .modes
         case .hotkeyConflict: .general
         }
@@ -40,7 +39,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         accessibilityGranted: Bool,
         accessibilityTapActive: Bool = true,
         activeEngineUsable: Bool = true,
-        aiConnectionMissing: Bool = false, aiConnectionTestFailed: Bool = false,
+        aiConnectionTestFailed: Bool = false,
         aiConnectionMisconfigured: Bool = false, modeNeedsAIService: Bool = false,
         modeUsesFailedConnection: Bool = false,
         hotkeyConflict: Bool = false
@@ -51,7 +50,6 @@ enum SettingsProblem: Equatable, CaseIterable {
         if !accessibilityGranted { problems.append(.accessibilityPermission) }
         else if !accessibilityTapActive { problems.append(.accessibilityNeedsRelaunch) }
         if !activeEngineUsable { problems.append(.activeEngineUnavailable) }
-        if aiConnectionMissing { problems.append(.aiConnectionMissing) }
         if aiConnectionTestFailed { problems.append(.aiConnectionTestFailed) }
         if aiConnectionMisconfigured { problems.append(.aiConnectionMisconfigured) }
         if modeNeedsAIService { problems.append(.modeNeedsAIService) }

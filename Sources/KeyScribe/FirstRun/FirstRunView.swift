@@ -267,11 +267,14 @@ struct FirstRunView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            aiServiceFields
+            AIConnectionDraftEditor(
+                presentation: .onboarding,
+                draft: $model.aiDraft,
+                hasStoredKey: false,
+                testState: model.aiTesting ? .testing : nil,
+                onCommit: { _, _ in },
+                onFetchModels: { _ in Task { await model.fetchAIModels() } })
 
-            if let error = model.aiModelDiscoveryError {
-                Text(error).font(.callout).foregroundStyle(.orange)
-            }
             if let error = model.aiSetupError {
                 Text(error).font(.callout).foregroundStyle(.red)
             }
@@ -290,157 +293,6 @@ struct FirstRunView: View {
                     .disabled(!model.aiCanConnect || model.aiTesting)
             }
         }
-        .onChange(of: model.aiProvider) { oldProvider, provider in
-            model.changeAIProvider(from: oldProvider, to: provider)
-        }
-    }
-
-    private var aiServiceFields: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            aiTextRow("Name", text: $model.aiServiceName, prompt: "My AI service")
-            aiThinDivider
-            HStack {
-                Text("Provider")
-                Spacer()
-                Picker("", selection: $model.aiProvider) {
-                    Text("OpenAI").tag(Connection.Provider.openai)
-                    Text("Anthropic").tag(Connection.Provider.anthropic)
-                    Text("Gemini").tag(Connection.Provider.gemini)
-                    Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
-                }
-                .labelsHidden()
-                .frame(maxWidth: 230, alignment: .trailing)
-            }
-            if model.aiProvider == .openaiCompatible {
-                aiThinDivider
-                VStack(alignment: .leading, spacing: 4) {
-                    aiTextRow("Base URL", text: $model.aiBaseURL, prompt: "http://127.0.0.1:11234/v1")
-                    Text("Example: http://127.0.0.1:11234/v1")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if model.aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        aiRequiredLabel("Base URL is required.")
-                    }
-                }
-            }
-            aiThinDivider
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Credential")
-                    Spacer()
-                    Picker("Credential", selection: aiCredentialBinding) {
-                        if model.aiProvider == .openaiCompatible {
-                            Text("No Auth").tag(Connection.AuthMethod.none)
-                        }
-                        Text("API Key").tag(Connection.AuthMethod.apiKey)
-                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: model.aiProvider == .openaiCompatible ? 310 : 220)
-                }
-                aiCredentialFields
-            }
-            aiThinDivider
-            aiModelFields
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-    }
-
-    private func aiTextRow(_ title: String, text: Binding<String>, prompt: String? = nil) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            TextField("", text: text, prompt: prompt.map(Text.init))
-                .multilineTextAlignment(.trailing)
-                .textFieldStyle(.plain)
-                .frame(maxWidth: 260)
-        }
-    }
-
-    private var aiThinDivider: some View {
-        Divider().padding(.vertical, 6)
-    }
-
-    private var aiCredentialBinding: Binding<Connection.AuthMethod> {
-        Binding(
-            get: { model.aiEffectiveAuthMethod },
-            set: { value in
-                let next = (model.aiProvider != .openaiCompatible && value == .none) ? .apiKey : value
-                model.aiAuthMethod = next
-                model.resetAIModelDiscovery()
-            })
-    }
-
-    @ViewBuilder private var aiCredentialFields: some View {
-        switch aiCredentialBinding.wrappedValue {
-        case .none:
-            Label("No Authorization header", systemImage: "globe")
-                .font(.caption).foregroundStyle(.secondary)
-        case .apiKey:
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("API key")
-                    Spacer()
-                    SecureField("Paste API key", text: $model.aiAPIKey)
-                        .multilineTextAlignment(.trailing)
-                        .textFieldStyle(.plain)
-                        .frame(maxWidth: 260)
-                }
-                if model.aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    aiRequiredLabel("Enter an API key before connecting.")
-                }
-                Label("Saved to Keychain when you connect", systemImage: "key")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        case .tokenCommand:
-            VStack(alignment: .leading, spacing: 4) {
-                aiTextRow(
-                    "Command", text: $model.aiTokenCommand,
-                    prompt: "Command that prints a token")
-                if model.aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    aiRequiredLabel("Enter the command that prints a fresh token or key.")
-                }
-                Text("stdout: raw token or JSON token fields.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var aiModelFields: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            aiTextRow("Model ID", text: $model.aiModel, prompt: "Choose or type a model ID")
-            if model.aiModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                aiRequiredLabel("Model ID is required.")
-            }
-            HStack {
-                Button(model.aiFetchingModels ? "Fetching Models" : "Fetch Models") {
-                    Task { await model.fetchAIModels() }
-                }
-                .disabled(model.aiFetchingModels || !model.aiCanFetchModels)
-                if model.aiFetchingModels { ProgressView().controlSize(.small) }
-                Spacer()
-                if !model.aiAvailableModels.isEmpty {
-                    Text("\(model.aiAvailableModels.count) found")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Menu("Choose") {
-                        ForEach(model.aiAvailableModels, id: \.self) { id in
-                            Button(id) { model.aiModel = id }
-                        }
-                    }
-                    .menuStyle(.borderlessButton)
-                }
-            }
-            if let reason = model.aiModelFetchDisabledReason {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func aiRequiredLabel(_ text: String) -> some View {
-        Label(text, systemImage: "exclamationmark.circle.fill")
-            .font(.caption).foregroundStyle(.orange)
     }
 
     private var playground: some View {

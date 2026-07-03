@@ -571,7 +571,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityGranted: Permissions.accessibilityStatus() == .granted,
             accessibilityTapActive: hotkey?.isTapActive ?? true,
             activeEngineUsable: speechModels?.activeEngineUsable ?? true,
-            aiConnectionMissing: modes.contains { connectionDangling(for: $0) },
             aiConnectionTestFailed: failedConnectionIds.isEmpty == false,
             aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
             modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
@@ -582,13 +581,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func connectionUnavailable(for mode: Mode) -> Bool {
         guard let rewrite = mode.aiRewrite else { return false }
         return rewrite.connection.isEmpty || config.connections.connection(id: rewrite.connection) == nil
-    }
-
-    // A *dangling* reference: the mode names a non-empty connection that does not exist (it was
-    // deleted). Only a broken pointer is a misconfiguration — an empty connection is not.
-    private func connectionDangling(for mode: Mode) -> Bool {
-        guard let rewrite = mode.aiRewrite, !rewrite.connection.isEmpty else { return false }
-        return config.connections.connection(id: rewrite.connection) == nil
     }
 
     // The mode is wired to an AI connection whose last Test Connection failed — the mode itself won't

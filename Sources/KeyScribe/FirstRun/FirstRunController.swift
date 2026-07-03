@@ -17,6 +17,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         permissionsOnly: Bool = false,
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
+        deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         onRelaunch: @escaping () -> Void = {},
         tapActive: @escaping () -> Bool = { true },
@@ -27,6 +28,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
             initialEngineId: initialEngineId, download: download,
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
             repository: repository, saveAPIKey: saveAPIKey,
+            deleteAPIKey: deleteAPIKey,
             testConnection: testConnection, onComplete: onComplete)
         super.init()
         model.onReadyToDictate = onReadyToDictate
@@ -115,16 +117,7 @@ final class FirstRunModel: ObservableObject {
     @Published private(set) var activePlaygroundLessonId: String?
     @Published private(set) var playgroundReseedToken = 0
     @Published var selectedEngineId: String
-    @Published var aiServiceName = Connection.Provider.openai.defaultName
-    @Published var aiProvider: Connection.Provider = .openai
-    @Published var aiModel = Connection.Provider.openai.defaultModel
-    @Published var aiBaseURL = ""
-    @Published var aiAuthMethod: Connection.AuthMethod = .apiKey
-    @Published var aiAPIKey = ""
-    @Published var aiTokenCommand = ""
-    @Published private(set) var aiAvailableModels: [String] = []
-    @Published private(set) var aiModelDiscoveryError: String?
-    @Published private(set) var aiFetchingModels = false
+    @Published var aiDraft = AIConnectionDraft()
     @Published private(set) var aiSetupError: String?
     @Published private(set) var aiTesting = false
 
@@ -137,6 +130,7 @@ final class FirstRunModel: ObservableObject {
     private var supportDir: URL { repository.supportDir }
     private var modesDir: URL { repository.modesDir }
     private let saveAPIKey: (String, String) -> Bool
+    private let deleteAPIKey: (String) -> Void
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
     private var pendingConnectionId: String?
@@ -148,6 +142,43 @@ final class FirstRunModel: ObservableObject {
     @Published var needsRelaunch = false
     private var pollTask: Task<Void, Never>?
 
+    var aiServiceName: String {
+        get { aiDraft.name }
+        set { aiDraft.name = newValue }
+    }
+
+    var aiProvider: Connection.Provider {
+        get { aiDraft.provider }
+        set { aiDraft.provider = newValue }
+    }
+
+    var aiModel: String {
+        get { aiDraft.model }
+        set { aiDraft.model = newValue }
+    }
+
+    var aiBaseURL: String {
+        get { aiDraft.baseURL }
+        set { aiDraft.baseURL = newValue }
+    }
+
+    var aiAuthMethod: Connection.AuthMethod {
+        get { aiDraft.authMethod }
+        set { aiDraft.authMethod = newValue }
+    }
+
+    var aiAPIKey: String {
+        get { aiDraft.apiKey }
+        set { aiDraft.apiKey = newValue }
+    }
+
+    var aiTokenCommand: String {
+        get { aiDraft.tokenCommand }
+        set { aiDraft.tokenCommand = newValue }
+    }
+
+    var aiModelDiscoveryError: String? { aiDraft.modelDiscoveryError }
+
     init(
         initialEngineId: String,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
@@ -155,6 +186,7 @@ final class FirstRunModel: ObservableObject {
         permissionsOnly: Bool = false,
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
+        deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
@@ -167,6 +199,7 @@ final class FirstRunModel: ObservableObject {
         self.permissionsOnly = permissionsOnly
         self.repository = repository
         self.saveAPIKey = saveAPIKey
+        self.deleteAPIKey = deleteAPIKey
         self.testConnection = testConnection
         self.listModels = listModels
         self.onComplete = onComplete
@@ -292,16 +325,12 @@ final class FirstRunModel: ObservableObject {
         step = .tryIt
     }
 
-    func changeAIProvider(from oldProvider: Connection.Provider, to provider: Connection.Provider) {
-        aiProvider = provider
-        if aiServiceName == oldProvider.defaultName {
-            aiServiceName = provider.defaultName
-        }
-        aiModel = provider.defaultModel
-        if provider != .openaiCompatible && aiAuthMethod == .none {
-            aiAuthMethod = .apiKey
-        }
-        resetAIModelDiscovery()
+    func changeAIProvider(from _: Connection.Provider, to provider: Connection.Provider) {
+        aiDraft.changeProvider(
+            to: provider,
+            defaultOpenAICompatibleAuth: .apiKey,
+            hasStoredKey: false,
+            updateDefaultName: true)
     }
 
     private static let playgroundLessonOrder = ["polish", "edit-selection"]
@@ -393,115 +422,49 @@ final class FirstRunModel: ObservableObject {
     }
 
     var aiCanConnect: Bool {
-        let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty || model.isEmpty { return false }
-        return aiCredentialReady
-    }
-
-    var aiCanFetchModels: Bool {
-        aiCredentialReady
-    }
-
-    var aiModelFetchDisabledReason: String? {
-        guard !aiFetchingModels, !aiCanFetchModels else { return nil }
-        return aiCredentialDisabledReason(action: "fetching models")
-    }
-
-    private var aiCredentialReady: Bool {
-        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if aiProvider == .openaiCompatible, base.isEmpty { return false }
-        switch aiEffectiveAuthMethod {
-        case .none:
-            return true
-        case .apiKey:
-            return !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .tokenCommand:
-            return !aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-    }
-
-    private func aiCredentialDisabledReason(action: String) -> String? {
-        let base = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if aiProvider == .openaiCompatible, base.isEmpty {
-            return "Base URL is required before \(action)."
-        }
-        switch aiEffectiveAuthMethod {
-        case .none:
-            return nil
-        case .apiKey:
-            return aiProvider == .openaiCompatible
-                ? "Enter an API key or choose No Auth before \(action)."
-                : "API key is required before \(action)."
-        case .tokenCommand:
-            return "Token command is required before \(action)."
-        }
-    }
-
-    var aiEffectiveAuthMethod: Connection.AuthMethod {
-        if aiProvider != .openaiCompatible, aiAuthMethod == .none { return .apiKey }
-        return aiAuthMethod
-    }
-
-    private var aiRequestAPIKey: String? {
-        guard aiEffectiveAuthMethod == .apiKey else { return nil }
-        let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty ? nil : key
+        aiDraft.canConnectForSetup
     }
 
     func fetchAIModels() async {
-        aiModelDiscoveryError = nil
-        aiFetchingModels = true
-        defer { aiFetchingModels = false }
+        aiDraft.modelDiscoveryState = .loading
         do {
-            let models = try await listModels(aiDraftConnection(), aiRequestAPIKey)
-            aiAvailableModels = models
-            if !models.isEmpty && !models.contains(aiModel.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                aiModel = models[0]
-            }
+            let models = try await listModels(aiDraftConnection(), aiDraft.requestAPIKey)
+            aiDraft.applyFetchedModels(models)
         } catch {
             let message = (error as? ModelListError)?.description ?? error.localizedDescription
-            aiModelDiscoveryError = "Could not fetch models: \(message)"
+            aiDraft.modelDiscoveryState = .failed("Could not fetch models: \(message)")
         }
-    }
-
-    func resetAIModelDiscovery() {
-        aiAvailableModels = []
-        aiModelDiscoveryError = nil
     }
 
     func createAIService() async {
         aiSetupError = nil
         let existing = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
-        let name = aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Reuse the id across retries so a failure after the connection is written doesn't accumulate
-        // duplicate connections on the next attempt.
+        let name = aiDraft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = pendingConnectionId ?? ConnectionStore.newID(for: name, existing: existing.map(\.id))
         pendingConnectionId = id
         let keyRef = "keyscribe.llm.\(id)"
-        let connection = aiConnection(id: id, keyRef: keyRef)
-        let key = aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let connection = aiDraft.connection(id: id, keyRef: keyRef)
+        let key = aiDraft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if connection.authMethod == .apiKey, key.isEmpty {
             aiSetupError = "API key is required."
             return
         }
         if connection.authMethod == .apiKey, !saveAPIKey(keyRef, key) {
-            aiSetupError = "Could not save the API key to the Keychain."
+            aiSetupError = "Could not save the API key."
             return
         }
         aiTesting = true
         let result = await testConnection(connection)
         aiTesting = false
         if case .failed(let message) = result {
+            if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
             aiSetupError = "Connection test failed: \(message)"
             return
         }
         do {
-            // Insert-or-replace by id against a FRESH read of disk — never the `existing` snapshot taken
-            // before the async connection test, which may be stale by now (another surface could have
-            // written connections.toml meanwhile).
             try repository.upsertConnection(connection)
         } catch {
+            if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
             aiSetupError = "Could not save the AI service: \(error.localizedDescription)"
             return
         }
@@ -515,24 +478,7 @@ final class FirstRunModel: ObservableObject {
 
     private func aiDraftConnection() -> Connection {
         let id = pendingConnectionId ?? "new-ai-service"
-        return aiConnection(id: id, keyRef: "keyscribe.llm.\(id)")
-    }
-
-    private func aiConnection(id: String, keyRef: String) -> Connection {
-        let authMethod = aiEffectiveAuthMethod
-        let command = aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-        var connection = Connection(
-            id: id,
-            name: aiServiceName.trimmingCharacters(in: .whitespacesAndNewlines),
-            provider: aiProvider,
-            model: aiModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            keyRef: keyRef,
-            authMethod: authMethod,
-            tokenCommand: authMethod == .tokenCommand && !command.isEmpty ? command : nil)
-        if aiProvider == .openaiCompatible {
-            connection.baseUrl = aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return connection
+        return aiDraft.connection(id: id, keyRef: "keyscribe.llm.\(id)")
     }
 
     private func modesToConnect() -> [Mode] {
