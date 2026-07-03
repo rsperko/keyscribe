@@ -34,6 +34,18 @@ extension DisclosureSection where Label == Text {
     }
 }
 
+struct DisclosureSummaryLabel: View {
+    let title: String
+    let summary: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(summary).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
 // ui_components.md "Setting row with help": label + one-line result, the control, an inline
 // Learn more disclosure carrying benefit/limit/prerequisite, plus a
 // persistent dependency reason when the control is gated. No hover-only tooltips for anything
