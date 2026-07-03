@@ -302,10 +302,13 @@ private struct HUDView: View {
         case .recording:
             RecordingIcon(level: level)
         case .processing:
-            ProgressView().controlSize(.small)
+            ProcessingIcon()
         case .complete:
             if case .complete(let outcome, _) = model.state {
-                Image(systemName: outcomeSymbol(outcome)).foregroundStyle(.secondary)
+                Image(systemName: outcomeSymbol(outcome))
+                    .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
+                    .foregroundStyle(outcomeStyle(outcome))
+                    .frame(width: 30, height: 30)
             }
         case .error:
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
@@ -330,10 +333,32 @@ private struct HUDView: View {
 
     private func outcomeSymbol(_ outcome: DictationOutcome) -> String {
         switch outcome {
-        case .inserted: return "checkmark.circle"
+        case .inserted: return "checkmark.circle.fill"
         case .copied: return "doc.on.clipboard"
         case .noSpeech: return "mic.slash"
         case .failed: return "xmark.circle"
+        }
+    }
+
+    private func outcomeStyle(_ outcome: DictationOutcome) -> AnyShapeStyle {
+        switch outcome {
+        case .inserted:
+            return AnyShapeStyle(.green)
+        case .copied:
+            return AnyShapeStyle(Color.accentColor)
+        case .noSpeech:
+            return AnyShapeStyle(.secondary)
+        case .failed:
+            return AnyShapeStyle(.orange)
+        }
+    }
+
+    private func outcomeIconSize(_ outcome: DictationOutcome) -> CGFloat {
+        switch outcome {
+        case .inserted:
+            return 19
+        case .copied, .noSpeech, .failed:
+            return 17
         }
     }
 }
@@ -369,6 +394,41 @@ private struct HUDActionButtonStyle: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.18)))
             .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
             .brightness(configuration.isPressed ? -0.08 : 0)
+    }
+}
+
+private struct ProcessingIcon: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var rotation = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.accentColor.opacity(0.08))
+                .frame(width: 22, height: 22)
+            Circle()
+                .stroke(Color.accentColor.opacity(0.18), lineWidth: 2)
+                .frame(width: 28, height: 28)
+            Circle()
+                .trim(from: 0.08, to: 0.74)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            Color.accentColor.opacity(0.18),
+                            Color.accentColor.opacity(0.95),
+                            Color.white.opacity(0.72)
+                        ]),
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 2.6, lineCap: .round)
+                )
+                .frame(width: 28, height: 28)
+                .rotationEffect(.degrees(rotation ? 360 : 0))
+        }
+        .frame(width: 30, height: 30)
+        .animation(reduceMotion ? nil : .linear(duration: 0.85).repeatForever(autoreverses: false), value: rotation)
+        .onAppear { rotation = true }
+        .accessibilityLabel("Processing")
     }
 }
 
