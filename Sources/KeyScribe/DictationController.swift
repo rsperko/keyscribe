@@ -274,8 +274,7 @@ final class DictationController {
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
-            guard let entry = SpeechModelCatalog.entry(for: engine.id) else { return true }
-            return entry.systemManaged || ModelInstallStore.installedIds().contains(engine.id)
+            InstalledEngineFilter.shouldRun(engineId: engine.id)
         },
         llmClient: any LLMClient = HTTPLLMClient(),
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {

@@ -3,19 +3,8 @@ import KeyScribeKit
 
 // Single source of truth pairing each catalog entry with how to construct its adapter. The provider,
 // the download path, install reconcile/delete, and the benchmark all build their engine lists from
-// here, so adding an engine is one descriptor + its catalog entry — never six scattered edits.
-struct EngineDescriptor {
-    let info: SpeechModelInfo
-    let make: @Sendable (URL) -> any SpeechEngine
-}
-
+// here, so adding an engine is one catalog entry + one `construct` case — never six scattered edits.
 enum EngineRegistry {
-    static let descriptors: [EngineDescriptor] = SpeechModelCatalog.all
-        .filter { isAvailable($0.id) }
-        .map { info in
-            EngineDescriptor(info: info, make: { dir in construct(info.id, dir) })
-        }
-
     // Catalog entries available on this OS — the single list the model pickers (first run, Settings)
     // derive from, so an engine that cannot run here is never offered, not just unconstructable.
     static var availableCatalog: [SpeechModelInfo] {
@@ -37,11 +26,11 @@ enum EngineRegistry {
     // never data-race the SDK handle or tear it down under a live transcribe (engines-models.md §1.1,
     // §1.4). The unwrapped `engine(_:)` below stays for install-only queries, which touch no SDK state.
     static func makeAll(modelsDir: URL) -> [any SpeechEngine] {
-        descriptors.map { SerializedEngine($0.make(modelsDir)) }
+        availableCatalog.map { SerializedEngine(construct($0.id, modelsDir)) }
     }
 
     static func engine(_ id: String, modelsDir: URL) -> (any SpeechEngine)? {
-        descriptors.first { $0.info.id == id }?.make(modelsDir)
+        availableCatalog.first { $0.id == id }.map { construct($0.id, modelsDir) }
     }
 
     // The one place per-engine construction lives: maps a catalog id to its adapter. Keyed off the
