@@ -102,9 +102,21 @@ This file is the entry point. Read the design docs before writing code — they 
   (`AVAudioConverter`), the `AVAudioFile` write, and feeding the `TailDrainGate` — runs on a dedicated writer
   thread (`CaptureWriter`) that polls the ring off-RT (5 ms tick, no wakeup is EVER signalled from the RT
   thread). The HUD meter is **pulled** at ~30 Hz (`DictationController` polls `AudioCapture.currentLevel`), not
-  pushed per buffer — there is no per-buffer main-actor hop. The ring is owned by `AudioCapture` and reset per
-  capture; the previous capture's writer is JOINED (`CaptureWriter.finish`, multi-waiter via a `DispatchGroup`)
-  before the next arm resets it, so a cancel's async teardown can never race a still-draining consumer. On
+  pushed per buffer — there is no per-buffer main-actor hop. The ring is owned by `AudioCapture` and reset (or,
+  when the bound device's IO period changed, REALLOCATED) per capture in the quiescent arm window — `armSync`
+  sizes `slotCount` to target ~30 ms of headroom for the device's actual period (`AudioSampleRing.geometry`,
+  clamped to ≤64 slots but always above one writer poll tick), so a small pro-interface buffer can't starve the
+  ring below a poll tick. **The arm order is load-bearing for this: `armSync` CONFIGURES the unit first
+  (`configureCaptureDevice` — bind + initialize, including the default-follow retry, but the IOProc is NOT
+  started), so the device that will actually deliver is known BEFORE the ring is sized; then it sizes the ring
+  for that bound device, arms the writer + `capturing=true`, and calls `startConfiguredUnit` LAST — so the first
+  delivered buffer already lands in a correctly-sized ring with no head clip, and a retry that rebinds a
+  different device cannot leave the ring mis-sized.** The swapped-in ring is published to the RT thread by the
+  same `capturing.store(true, .releasing)` the callback's acquire load pairs with, and is NEVER reassigned while
+  `capturing` is true (the mid-recording restart keeps its ring — the one remaining case where the ring can
+  outlast a device change, bounded by the drain backstop). The previous capture's writer is JOINED
+  (`CaptureWriter.finish`, multi-waiter via a `DispatchGroup`) before the next arm resets/replaces the ring, so
+  a cancel's async teardown can never race a still-draining consumer. On
   commit, `finishDraining` awaits the writer join before returning the URL, and the writer drops its `AVAudioFile`
   reference on exit so the session's is the last one — the WAV is finalized/closed before transcription reads it.
   Teardown ordering is load-bearing: `capturing` → false (RT stops pushing, which SEVERS RT→ring→writer→file),

@@ -19,11 +19,18 @@ import KeyScribeKit
 final class ConfigRepository {
     let supportDir: URL
     private let config: ConfigCache
+    private let selfWriteGate: ConfigSelfWriteGate
     var onChange: (() -> Void)?
 
-    init(supportDir: URL, config: ConfigCache) {
+    init(supportDir: URL, config: ConfigCache, selfWriteGate: ConfigSelfWriteGate = ConfigSelfWriteGate()) {
         self.supportDir = supportDir
         self.config = config
+        self.selfWriteGate = selfWriteGate
+    }
+
+    // For write paths not routed through `commit` (fragment files edited directly by ModesSettingsView).
+    func recordSelfWrite(at url: URL) {
+        selfWriteGate.recordSelfWrite(url: url, supportDir: supportDir)
     }
 
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
@@ -44,7 +51,9 @@ final class ConfigRepository {
     @discardableResult
     func mutateDictionary(_ transform: (DictionarySet) -> DictionarySet) throws -> DictionarySet {
         let updated = transform(try loadDictionaryForMutation())
-        try commit { try DictionaryStore.write(updated, to: supportDir) }
+        try commit(touching: [supportDir.appendingPathComponent(DictionaryStore.fileName)]) {
+            try DictionaryStore.write(updated, to: supportDir)
+        }
         return updated
     }
 
@@ -66,18 +75,20 @@ final class ConfigRepository {
     func mutateReplacements(_ transform: (inout ReplacementsSet) -> Void) throws -> ReplacementsSet {
         var set = try loadReplacementsForMutation()
         transform(&set)
-        try commit { try ReplacementsStore.write(set, to: supportDir) }
+        try commit(touching: [supportDir.appendingPathComponent(ReplacementsStore.fileName)]) {
+            try ReplacementsStore.write(set, to: supportDir)
+        }
         return set
     }
 
     // MARK: Modes
 
     func writeMode(_ mode: Mode) throws {
-        try commit { try ModeStore.write(mode, to: modesDir) }
+        try commit(touching: [modeFileURL(id: mode.id)]) { try ModeStore.write(mode, to: modesDir) }
     }
 
     func deleteMode(_ mode: Mode) throws {
-        try commit {
+        try commit(touching: [modeFileURL(id: mode.id)]) {
             try ModeStore.delete(mode, from: modesDir)
             try? FileManager.default.removeItem(
                 at: supportDir.appendingPathComponent("lkg/modes", isDirectory: true)
@@ -99,7 +110,7 @@ final class ConfigRepository {
         }
         var renamed = mode
         renamed.id = newId
-        try commit {
+        try commit(touching: [modeFileURL(id: newId), modeFileURL(id: mode.id)]) {
             try ModeStore.write(renamed, to: modesDir)
             do {
                 try ModeStore.delete(mode, from: modesDir)
@@ -137,17 +148,23 @@ final class ConfigRepository {
     func mutateConnections(_ transform: (inout ConnectionSet) -> Void) throws -> ConnectionSet {
         var set = try loadConnectionsForMutation()
         transform(&set)
-        try commit { try ConnectionStore.write(set, to: supportDir) }
+        try commit(touching: [supportDir.appendingPathComponent(ConnectionStore.fileName)]) {
+            try ConnectionStore.write(set, to: supportDir)
+        }
         return set
     }
 
-    // Write succeeds → invalidate the cache so the next dictation sees it, then notify the host. On a
-    // throw nothing is invalidated (the on-disk state is unchanged) and the error propagates.
-    private func commit(_ write: () throws -> Void) throws {
+    // Write succeeds → record the touched files (suppresses the watcher's self-write echo), invalidate
+    // the cache so the next dictation sees it, then notify the host. On a throw nothing is invalidated
+    // (the on-disk state is unchanged) and the error propagates.
+    private func commit(touching paths: [URL], _ write: () throws -> Void) throws {
         try write()
+        for path in paths { selfWriteGate.recordSelfWrite(url: path, supportDir: supportDir) }
         config.invalidate()
         onChange?()
     }
+
+    private func modeFileURL(id: String) -> URL { modesDir.appendingPathComponent("\(id).toml") }
 
     private func loadDictionaryForMutation() throws -> DictionarySet {
         let file = supportDir.appendingPathComponent(DictionaryStore.fileName)

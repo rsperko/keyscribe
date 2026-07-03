@@ -40,6 +40,34 @@ struct ModesSettingsModelTests {
         #expect(model.selected?.name == "Email Reply")
     }
 
+    // Adding an EXISTING fragment by name writes nothing, so it must not record a self-write — else an
+    // external edit to that fragment made just before the add would be swallowed (the watcher would see
+    // a stamp the app "wrote" and skip the reload that the real edit needed).
+    @Test func addingAnExistingFragmentByNameDoesNotSwallowAnExternalEdit() throws {
+        let fm = FileManager.default
+        let support = fm.temporaryDirectory.appendingPathComponent("keyscribe-frag-\(UUID().uuidString)")
+        let fragments = support.appendingPathComponent("fragments")
+        try fm.createDirectory(at: fragments, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: support) }
+        let file = fragments.appendingPathComponent("my-voice.md")
+        try "---\nname: My Voice\n---\nOriginal.".write(to: file, atomically: true, encoding: .utf8)
+
+        let gate = ConfigSelfWriteGate()
+        let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support), selfWriteGate: gate)
+        let model = ModesSettingsModel(repository: repository)
+        // Baseline AFTER init: model init's reload() seeds _direct.toml, so capture it here — the ONLY
+        // delta before the final check must be the external fragment edit, or the test could pass for
+        // the wrong reason.
+        gate.adopt(ConfigTreeSnapshot.capture(supportDir: support))
+
+        // External editor rewrites the fragment (longer content) without the app recording it.
+        try "---\nname: My Voice\n---\nExternally rewritten, much longer body.".write(to: file, atomically: true, encoding: .utf8)
+        // User references the SAME fragment by name in-app: no file is written, so no self-write.
+        _ = model.addFragmentFile(named: "My Voice")
+
+        #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: support)) == true)
+    }
+
     @Test func renamingAfterInitialNamingDoesNotReslug() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

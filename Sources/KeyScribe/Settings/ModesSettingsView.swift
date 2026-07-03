@@ -147,7 +147,8 @@ final class ModesSettingsModel: ObservableObject {
     // add to the mode; the caller opens it in the in-app editor to fill in the instruction text.
     func addFragmentFile(named name: String) -> String? {
         do {
-            let id = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
+            let (id, created) = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
+            if created { repository.recordSelfWrite(at: fragmentsDir.appendingPathComponent("\(id).md")) }
             fragmentIds = loadFragmentIds()
             error = nil
             return id
@@ -169,6 +170,7 @@ final class ModesSettingsModel: ObservableObject {
             let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             try FragmentStore.replacingBody(inFile: content, with: body)
                 .write(to: url, atomically: true, encoding: .utf8)
+            repository.recordSelfWrite(at: url)
             error = nil
         } catch {
             self.error = "Could not save the instruction: \(error.localizedDescription)"
@@ -194,7 +196,9 @@ final class ModesSettingsModel: ObservableObject {
         }
         let stillUsed = modes.contains { $0.aiRewrite?.fragments.contains(id) == true }
         if !stillUsed {
-            try? FileManager.default.removeItem(at: fragmentsDir.appendingPathComponent("\(id).md"))
+            let url = fragmentsDir.appendingPathComponent("\(id).md")
+            try? FileManager.default.removeItem(at: url)
+            repository.recordSelfWrite(at: url)
             fragmentIds = loadFragmentIds()
         }
     }

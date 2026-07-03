@@ -76,8 +76,9 @@ struct FragmentStoreTests {
     @Test func createIfNeededWritesAStarterFileAndReturnsTheSlug() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let id = try FragmentStore.createIfNeeded(name: "My Voice", in: dir)
+        let (id, created) = try FragmentStore.createIfNeeded(name: "My Voice", in: dir)
         #expect(id == "my-voice")
+        #expect(created)
         let url = dir.appendingPathComponent("my-voice.md")
         let written = try String(contentsOf: url, encoding: .utf8)
         #expect(written.contains("name: My Voice"))
@@ -93,8 +94,9 @@ struct FragmentStoreTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try "---\nname: Mine\n---\nKeep this.".write(to: url, atomically: true, encoding: .utf8)
 
-        let id = try FragmentStore.createIfNeeded(name: "my-voice", in: dir)
+        let (id, created) = try FragmentStore.createIfNeeded(name: "my-voice", in: dir)
         #expect(id == "my-voice")
+        #expect(!created)
         #expect(try String(contentsOf: url, encoding: .utf8) == "---\nname: Mine\n---\nKeep this.")
     }
 

@@ -91,13 +91,14 @@ public enum FragmentStore {
     /// Resolve `name` to a fragment id, creating `dir/<id>.md` with a header and empty body when no
     /// fragment with that id exists (the editor shows a ghost-text prompt, not seeded content). An
     /// existing file is left untouched so referencing it by name never clobbers its content. Returns
-    /// the id. Throws on a name with no usable characters.
+    /// the id and whether a file was actually written (`created == false` means it already existed, so
+    /// no on-disk change happened). Throws on a name with no usable characters.
     @discardableResult
-    public static func createIfNeeded(name: String, in dir: URL) throws -> String {
+    public static func createIfNeeded(name: String, in dir: URL) throws -> (id: String, created: Bool) {
         let id = slug(for: name)
         guard !id.isEmpty else { throw FragmentError.emptyName }
         let url = dir.appendingPathComponent("\(id).md")
-        guard !FileManager.default.fileExists(atPath: url.path) else { return id }
+        guard !FileManager.default.fileExists(atPath: url.path) else { return (id, false) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let starter = """
@@ -108,6 +109,6 @@ public enum FragmentStore {
 
             """
         try starter.write(to: url, atomically: true, encoding: .utf8)
-        return id
+        return (id, true)
     }
 }

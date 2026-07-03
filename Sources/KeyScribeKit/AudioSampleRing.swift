@@ -40,6 +40,50 @@ public final class AudioSampleRing: @unchecked Sendable {
     private let tail = Atomic<Int>(0)
     private let overruns = Atomic<Int>(0)
 
+    public struct RingGeometry: Equatable, Sendable {
+        public let slotCount: Int
+        public let maxFramesPerSlot: Int
+        public let maxChannels: Int
+        public init(slotCount: Int, maxFramesPerSlot: Int, maxChannels: Int) {
+            self.slotCount = slotCount
+            self.maxFramesPerSlot = maxFramesPerSlot
+            self.maxChannels = maxChannels
+        }
+    }
+
+    // Size the ring for a device delivering `deviceBufferFrames` per IO period at `deviceSampleRate`. A small
+    // device IO buffer (a pro interface at 32-64 frames, well under a millisecond per period) makes a fixed
+    // slot count buffer less than one writer poll tick, dropping a period's worth of speech; slot count scales
+    // inversely with the period to target `minHeadroom` seconds of buffering, clamped to `[minSlots, maxSlots]`.
+    // The common ~10 ms period floors at `minSlots` (baseline — unchanged); only a small period grows it. At
+    // the `maxSlots` cap an extreme buffer may hold below `minHeadroom` but still well above one poll tick.
+    // `maxFramesPerSlot`/`maxChannels` pass through unchanged — shrinking either would newly drop a large or
+    // multichannel buffer the baseline accepts. A 0-frame / non-positive-rate read falls back to safe values.
+    public static func geometry(
+        deviceBufferFrames: Int, deviceSampleRate: Double,
+        minHeadroom: Double, minSlots: Int, maxSlots: Int,
+        maxFramesPerSlot: Int, maxChannels: Int
+    ) -> RingGeometry {
+        let period = max(1, deviceBufferFrames)
+        let rate = deviceSampleRate > 0 ? deviceSampleRate : 48_000
+        let neededSlots = Int((minHeadroom * rate / Double(period)).rounded(.up))
+        let slots = min(maxSlots, max(minSlots, neededSlots))
+        return RingGeometry(slotCount: slots, maxFramesPerSlot: maxFramesPerSlot, maxChannels: maxChannels)
+    }
+
+    public convenience init(_ geometry: RingGeometry) {
+        self.init(
+            slotCount: geometry.slotCount, maxFramesPerSlot: geometry.maxFramesPerSlot,
+            maxChannels: geometry.maxChannels)
+    }
+
+    // True when this ring already has `geometry`'s shape, so the arm path can `reset()` in place instead of
+    // reallocating (the common case, where the bound device did not change period between captures).
+    public func matches(_ geometry: RingGeometry) -> Bool {
+        slotCount == geometry.slotCount && maxFramesPerSlot == geometry.maxFramesPerSlot
+            && maxChannels == geometry.maxChannels
+    }
+
     public init(slotCount: Int, maxFramesPerSlot: Int, maxChannels: Int) {
         precondition(slotCount >= 2 && maxFramesPerSlot >= 1 && maxChannels >= 1)
         self.slotCount = slotCount

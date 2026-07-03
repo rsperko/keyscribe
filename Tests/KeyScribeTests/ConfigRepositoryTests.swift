@@ -61,6 +61,37 @@ struct ConfigRepositoryTests {
         #expect(Set(DictionaryStore.loadOrDefault(supportDir: dir).words) == ["Postgres", "Redis"])
     }
 
+    // A repository write records the touched file, so its echo is suppressed — but an external edit
+    // still reloads.
+    @Test func aRepositoryWriteRecordsIntoTheSelfWriteGate() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gate = ConfigSelfWriteGate(baseline: ConfigTreeSnapshot.capture(supportDir: dir))
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir), selfWriteGate: gate)
+
+        _ = try repo.mutateDictionary { $0.adding(word: "Postgres") }
+        #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) == false)
+
+        try Data("words = [\"Postgres\", \"Redis-external-and-longer\"]\nschema_version = 1\n".utf8)
+            .write(to: dir.appendingPathComponent(DictionaryStore.fileName))
+        #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) == true)
+    }
+
+    // A rename records both the created and the removed file, so neither half echoes.
+    @Test func aModeRenameRecordsBothTheNewAndOldFileIntoTheGate() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        var mode = Mode(id: "old", name: "Old")
+        mode.aiRewrite = .init(connection: "", prompt: "x")
+        try repo.writeMode(mode)
+
+        let gate = ConfigSelfWriteGate(baseline: ConfigTreeSnapshot.capture(supportDir: dir))
+        let repo2 = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir), selfWriteGate: gate)
+        try repo2.renameMode(mode, to: "new")
+        #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) == false)
+    }
+
     @Test func mutateDictionaryRefusesMalformedExistingFile() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

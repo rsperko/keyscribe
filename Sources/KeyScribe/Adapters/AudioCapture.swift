@@ -103,14 +103,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // is live; created on the control queue in armSync, dropped atomically at teardown.
     private var session: CaptureSession?
 
-    // RT-thread transport, all touched lock-free from the CoreAudio IO thread. The ring is owned for the
-    // adapter's lifetime and RESET (never reallocated) per capture, so the RT callback dereferences a stable
-    // `let` — no per-session pointer to publish atomically. `capturing` gates the callback (false ⇒ drop the
-    // buffer, capture is over/not yet live); `levelBits` holds the latest perceptual level as a Float bit
-    // pattern for the controller's meter poll. Geometry is a deliberate persistent allocation of about
-    // 2 MiB: 8 slots × up to 8192 frames × up to 8 channels covers real capture-device buffer sizes and
-    // absorbs writer-thread jitter without publishing new storage to the RT thread.
-    private let ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
+    // RT-thread transport, touched lock-free from the CoreAudio IO thread. `capturing` gates the callback
+    // (false ⇒ drop the buffer); `levelBits` holds the latest perceptual level for the controller's meter poll.
+    //
+    // `ring` is a `var` because `armSync` adapts its geometry to the bound device's IO period (baselineRing for
+    // the common ~10 ms period; more slots for a small pro-interface buffer). It is reset-in-place or REPLACED
+    // ONLY inside the quiescent arm window — after `capturing` is set false and the previous writer joined, and
+    // before `capturing` is set true again. The new pointer is published to the RT thread by that
+    // `capturing.store(true, .releasing)`, paired with the callback's `capturing.load(.acquiring)`; the ring is
+    // never reassigned while `capturing` is true (the mid-recording restart keeps its ring), so the producer
+    // and this assignment never overlap.
+    private var ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
     // CoreAudio's count of IO-cycle overloads on the bound device for this capture. A healthy capture keeps
@@ -328,11 +331,36 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             throw AudioCaptureError.bringUpTimedOut
         }
 
-        // Gate the RT producer off and join any previous writer before resetting the shared ring.
+        // CONFIGURE the capture device FIRST — bind + initialize the unit, but do NOT start its IOProc yet, so
+        // no buffer is delivered until the ring is sized. The retry-to-default lives here because the documented
+        // "just-connected device fails while its HAL proxy initializes" failure is an `AudioUnitInitialize`
+        // (configure) failure; `configureCaptureDevice` returns the device actually bound (post-retry), so the
+        // ring below is sized for EXACTLY the device that will deliver — the geometry can never disagree with
+        // the bound device, even on the retry path.
+        let target = captureTarget()
+        let boundDeviceID: AudioDeviceID
+        do {
+            boundDeviceID = try configureCaptureDevice(target: target, generation: generation)
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+
+        // Gate the RT producer off and join any previous writer before resetting/replacing the shared ring. The
+        // just-configured unit's IOProc is NOT started yet, so no buffer is in flight; this is the sole
+        // quiescent window in which the ring may be reassigned, and the `capturing.store(true, .releasing)`
+        // below publishes the (possibly new) ring to the RT thread.
         producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         lock.withLock { lastWriter }?.finish(flushConverter: false)
-        ring.reset()
+        let desiredRing = Self.ringGeometry(for: boundDeviceID)
+        if ring.matches(desiredRing) {
+            ring.reset()
+        } else {
+            ring = AudioSampleRing(desiredRing)
+            Log.audio.debug(
+                "ring resized: slots=\(desiredRing.slotCount, privacy: .public) framesPerSlot=\(desiredRing.maxFramesPerSlot, privacy: .public)")
+        }
         overloadCount.store(0, ordering: .relaxed)
         levelBits.store(Float(0).bitPattern, ordering: .relaxed)
         let writer = CaptureWriter(
@@ -340,8 +368,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, recordFormat: recordFormat, writer: writer)
         // Publish ONLY if still current, atomically with the generation read: a bump between the guard above
-        // and here means a newer generation now owns the capture slot, so do NOT clobber its session — bail
-        // and clean up this arm's own local file (the writer was never started, so there is no thread).
+        // and here means a newer generation now owns the capture slot, so do NOT clobber its session — bail and
+        // clean up this arm's own local file (the writer was never started, so there is no thread; a bump also
+        // disposed our just-configured unit via swapToFreshGeneration, so it does not leak).
         let published = lock.withLock { () -> Bool in
             guard generation == self.generation else { return false }
             session = mySession
@@ -356,8 +385,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         capturing.store(true, ordering: .releasing)
         writer.start()
 
+        // Start the IOProc LAST: `capturing` is already true and the writer already draining, so the first
+        // delivered buffer lands in the correctly-sized ring with no head clip.
         do {
-            try armUnit(generation: generation)
+            try startConfiguredUnit(generation: generation)
         } catch {
             // Only unwind SHARED capture state (unit/listener) if this bring-up still owns the current
             // generation — a superseded arm must not touch a newer generation's unit/listener. The writer +
@@ -378,18 +409,21 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             }
             throw error
         }
+        guard isGeneration(generation) else { return url }
+        installActiveDeviceListener(deviceID: boundDeviceID)
         return url
     }
 
-    // Bring the unit up on the resolved capture device, escalating on failure. Get the RIGHT microphone
+    // Resolve + CONFIGURE the capture device (bind + initialize the unit; the IOProc is NOT started here),
+    // returning the device actually bound so armSync can size the ring for exactly it. Get the RIGHT microphone
     // live; if a PRESENT preferred device fails, surface that (do not silently record from a different mic).
     // When following the system default, retry once after a beat (a just-connected device can fail the first
-    // bring-up while its HAL proxy initializes) before giving up.
-    private func armUnit(generation: Int) throws {
-        let target = captureTarget()
+    // `AudioUnitInitialize` while its HAL proxy initializes) before giving up. On the control queue.
+    private func configureCaptureDevice(target: CaptureTarget, generation: Int) throws -> AudioDeviceID {
         guard let deviceID = target.deviceID else { throw AudioCaptureError.formatUnavailable }
         do {
-            try bringUpUnit(deviceID: deviceID, generation: generation)
+            try configureUnit(deviceID: deviceID, generation: generation)
+            return deviceID
         } catch {
             // Superseded (watchdog-abandoned, generation bumped): do not clobber the newer generation's unit
             // and do not retry — just propagate. The retry path below owns shared state and must only run for
@@ -401,38 +435,28 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             guard let retryID = AudioInputDevices.systemDefaultInputID() else {
                 throw AudioCaptureError.formatUnavailable
             }
-            do { try bringUpUnit(deviceID: retryID, generation: generation) }
-            catch {
+            do {
+                try configureUnit(deviceID: retryID, generation: generation)
+                return retryID
+            } catch {
                 if isGeneration(generation) { disposeUnitInline() }
                 throw AudioCaptureError.formatUnavailable
             }
         }
-        guard isGeneration(generation) else { return }
-        if let id = lock.withLock({ configuredDeviceID }) { installActiveDeviceListener(deviceID: id) }
     }
 
-    // Reuse a resident/prewarmed unit already bound to `deviceID` (just start it); otherwise configure +
-    // start a fresh one, swapping it in under the lock ONLY if this bring-up still owns the current
-    // generation. A superseded bring-up disposes its own freshly-built unit and throws without ever starting
-    // it or touching shared state — so a watchdog-abandoned call can't strand a hot mic. On the control queue.
-    private func bringUpUnit(deviceID: AudioDeviceID, generation: Int) throws {
+    // Reuse a resident/prewarmed unit already bound to `deviceID` (a no-op — it is already configured);
+    // otherwise configure a fresh one and swap it in under the lock ONLY if this arm still owns the current
+    // generation. Does NOT start the IOProc. A superseded configure disposes its own freshly-built unit and
+    // throws without touching shared state — so a watchdog-abandoned call can't strand a hot mic. On the
+    // control queue.
+    private func configureUnit(deviceID: AudioDeviceID, generation: Int) throws {
         guard isGeneration(generation) else { throw AudioCaptureError.bringUpTimedOut }
-        if let resident = lock.withLock({
-            self.generation == generation && unit != nil && configuredDeviceID == deviceID ? unit : nil
-        }) {
-            guard isGeneration(generation) else { throw AudioCaptureError.bringUpTimedOut }
-            try resident.start()
+        if lock.withLock({ self.generation == generation && unit != nil && configuredDeviceID == deviceID }) {
             return
         }
         let fresh = makeUnit(generation: generation)
         try fresh.configure(deviceID: deviceID)
-        guard isGeneration(generation) else { fresh.dispose(); throw AudioCaptureError.bringUpTimedOut }
-        do {
-            try fresh.start()
-        } catch {
-            fresh.dispose()
-            throw error
-        }
         let outgoing = lock.withLock { () -> (stored: Bool, dispose: HALInputUnit?) in
             guard self.generation == generation else { return (false, nil) }
             let old = unit
@@ -441,6 +465,21 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         guard outgoing.stored else { fresh.dispose(); throw AudioCaptureError.bringUpTimedOut }
         outgoing.dispose?.dispose()
+    }
+
+    // Start the IOProc of the unit `configureUnit` bound. Runs after the ring is sized and the writer is
+    // draining, so the first delivered buffer is captured. Disposes the unit on a start failure (current
+    // generation only) so a configured-but-dead unit does not keep holding the device. On the control queue.
+    private func startConfiguredUnit(generation: Int) throws {
+        guard let liveUnit = lock.withLock({ self.generation == generation ? unit : nil }) else {
+            throw AudioCaptureError.bringUpTimedOut
+        }
+        do {
+            try liveUnit.start()
+        } catch {
+            if isGeneration(generation) { disposeUnitInline() }
+            throw error
+        }
     }
 
     private func makeUnit(generation: Int) -> HALInputUnit {
@@ -698,6 +737,59 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             let box = UnitBox(outgoing)
             outgoingQueue.async { box.unit.dispose() }
         }
+    }
+
+    // MARK: - Ring geometry
+
+    // Target headroom the ring aims to hold so the writer's 5 ms poll plus jitter and a slow write can't
+    // overrun it — 6× the poll tick. The 64-slot cap can hold an extreme tiny-buffer device below this target,
+    // but never below the poll tick (see AudioSampleRing.geometry / its tests). 64 slots caps the worst-case
+    // allocation at ~16.7 MiB.
+    private static let ringMinHeadroom = 0.03
+    private static let ringMinSlots = 8
+    private static let ringMaxSlots = 64
+    private static let ringMaxFramesPerSlot = 8192
+    private static let ringMaxChannels = 8
+
+    private static func baselineRingGeometry() -> AudioSampleRing.RingGeometry {
+        AudioSampleRing.RingGeometry(
+            slotCount: ringMinSlots, maxFramesPerSlot: ringMaxFramesPerSlot, maxChannels: ringMaxChannels)
+    }
+
+    // Geometry for `deviceID` (the device the imminent bring-up will bind). Reads its IO period + native rate
+    // on the control queue (potentially-blocking CoreAudio reads, bounded by the bring-up watchdog). A nil
+    // device or a failed read falls back to the baseline, so it never under-provisions.
+    private static func ringGeometry(for deviceID: AudioDeviceID?) -> AudioSampleRing.RingGeometry {
+        guard let deviceID else { return baselineRingGeometry() }
+        return AudioSampleRing.geometry(
+            deviceBufferFrames: Int(deviceBufferFrameSize(deviceID)),
+            deviceSampleRate: deviceNativeSampleRate(deviceID),
+            minHeadroom: ringMinHeadroom, minSlots: ringMinSlots, maxSlots: ringMaxSlots,
+            maxFramesPerSlot: ringMaxFramesPerSlot, maxChannels: ringMaxChannels)
+    }
+
+    // The device's current IO buffer size in frames (one RT period = one ring slot); 0 on a failed read.
+    private static func deviceBufferFrameSize(_ id: AudioDeviceID) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return 0 }
+        return value
+    }
+
+    // The device's native input sample rate; with the buffer frame size it sets a period's duration. 0 on fail.
+    private static func deviceNativeSampleRate(_ id: AudioDeviceID) -> Double {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: Double = 0
+        var size = UInt32(MemoryLayout<Double>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return 0 }
+        return value
     }
 
     // MARK: - Preferred-device resolution

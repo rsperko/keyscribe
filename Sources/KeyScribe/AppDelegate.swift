@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var provider: SpeechEngineProvider!
     private var config: ConfigCache!
     private var configWatcher: ConfigWatcher?
+    // Lets the watcher tell the app's own config writes (skip) from external edits (reload).
+    private let selfWriteGate = ConfigSelfWriteGate()
     private var speechModels: SpeechModelsModel!
     private let hud = HUDController()
     private let menu = MenuBarController()
@@ -63,9 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             loadSettings()
         }
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
-        configRepository = ConfigRepository(supportDir: KeyScribePaths.supportDir, config: config)
+        configRepository = ConfigRepository(
+            supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate)
         configRepository.onChange = { [weak self] in self?.refreshStatus() }
-        configWatcher = ConfigWatcher(path: KeyScribePaths.supportDir.path) { [weak self] in
+        selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
+        configWatcher = ConfigWatcher(path: KeyScribePaths.supportDir.path) { [weak self, gate = selfWriteGate, dir = KeyScribePaths.supportDir] in
+            // Off-main (FSEvents utility queue): skip the hop entirely on a pure self-write echo.
+            guard gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) else { return }
             Task { @MainActor in self?.reloadConfig() }
         }
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
@@ -318,6 +324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
+        // Adopt the post-heal state BEFORE the reads below, so this reload does not echo into a second
+        // one. Capturing before loading keeps adopt-precedes-load: an edit landing after is caught by
+        // the next fire, never absorbed unread.
+        selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
         config.invalidate()
         // Absorb an external settings.toml edit (the Advanced pane promises edits are detected). Adopting
         // it into `settings` also means a later in-app toggle merges against the current on-disk value
@@ -383,8 +393,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettings(_ updated: Settings) {
         applySettingsEffects(updated)
         guard configError == nil else { return }
-        do { try SettingsStore.write(updated, to: KeyScribePaths.supportDir) }
+        do {
+            try SettingsStore.write(updated, to: KeyScribePaths.supportDir)
+            recordSettingsSelfWrite()
+        }
         catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
+    }
+
+    private func recordSettingsSelfWrite() {
+        selfWriteGate.recordSelfWrite(
+            url: KeyScribePaths.supportDir.appendingPathComponent(SettingsStore.fileName),
+            supportDir: KeyScribePaths.supportDir)
     }
 
     // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
@@ -427,7 +446,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let device = AudioInputDevices.available().first(where: { $0.uid == uid }),
               settings.audio.inputDeviceName != device.name else { return }
         settings.audio = .init(inputDeviceUID: uid, inputDeviceName: device.name)
-        do { try SettingsStore.write(settings, to: KeyScribePaths.supportDir) }
+        do {
+            try SettingsStore.write(settings, to: KeyScribePaths.supportDir)
+            recordSettingsSelfWrite()
+        }
         catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
         settingsController.update(settings: settings)
     }

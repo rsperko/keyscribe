@@ -138,7 +138,17 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // Do NOT reduce this to `model = nil`: MLX recycles a dropped model's buffers into a process-wide
+    // cache pool rather than returning them to the OS, so the GPU working set stays resident (measured:
+    // multi-GB held after a bare nil, 0 after clearCache). unload() frees the parameters, clears MLX's
+    // cache, and restores the cache limit the 1.7B load path lowered.
+    // The cache clear is process-wide, and SerializedEngine only serializes THIS instance — the other
+    // Qwen variant can be loading/transcribing concurrently. That is safe: MLX's MetalAllocator guards
+    // malloc/free/clear_cache with one internal mutex, and clear_cache empties only the reusable-buffer
+    // pool, never a buffer a live MLXArray still holds. Worst case for a concurrent inference is a
+    // transient buffer-reuse miss (re-alloc from the OS), never a race or use-after-free.
     func evict() async {
+        model?.unload()
         model = nil
     }
 }
