@@ -47,7 +47,7 @@ struct ConnectionTesterTests {
     }
 
     @Test func failureCarriesTheProviderMessage() async {
-        let tester = ConnectionTester(client: FakeClient(result: .failure(LLMClientError.http(401))))
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(401))))
         #expect(await tester.test(connection) == .failed("The model service returned an error (401)."))
     }
 
@@ -132,7 +132,7 @@ struct ConnectionTesterTests {
         let connection = Connection(
             id: "openai", name: "OpenAI", provider: .openai, model: "gpt-4o-mini", keyRef: "k")
 
-        await #expect(throws: LLMClientError.self) {
+        await #expect(throws: ProviderTransportError.self) {
             _ = try await client.complete(system: "s", user: "u", connection: connection)
         }
     }
@@ -162,6 +162,28 @@ struct AIServiceTestStateTests {
 
         model.update(connection, apiKey: nil)
         #expect(model.testState(for: connection.id) == nil)
+    }
+
+    @Test func dependentModeNamesListsOnlyModesWiredToTheConnection() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repository = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = AIServiceSettingsModel(
+            repository: repository,
+            tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
+        model.create()
+        let connection = model.selected!
+
+        var email = Mode(id: "email", name: "Email")
+        email.aiRewrite = .init(connection: connection.id, prompt: "rewrite")
+        var polish = Mode(id: "polish", name: "Polish")
+        polish.aiRewrite = .init(connection: connection.id, prompt: "rewrite")
+        var plain = Mode(id: "plain", name: "Plain")
+        plain.aiRewrite = .init(connection: "other", prompt: "rewrite")
+        for mode in [email, polish, plain] { try? repository.writeMode(mode) }
+
+        let names = Set(model.dependentModeNames(of: connection))
+        #expect(names == ["Email", "Polish"])
     }
 
     @Test func fetchingModelsStoresSuggestionsAndUpdatesBlankModel() async {

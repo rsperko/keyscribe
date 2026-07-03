@@ -13,7 +13,7 @@ struct ConnectionTester {
                 ? .failed("The model service returned an empty response.")
                 : .passed
         } catch {
-            let message = (error as? LLMClientError)?.description ?? error.localizedDescription
+            let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
             return .failed(message)
         }
     }
@@ -98,7 +98,7 @@ final class AIServiceSettingsModel: ObservableObject {
                 }
             }
         } catch {
-            let message = (error as? ModelListError)?.description ?? error.localizedDescription
+            let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
             modelDiscoveryStates[id] = .failed(message)
         }
     }
@@ -141,6 +141,12 @@ final class AIServiceSettingsModel: ObservableObject {
     }
 
     func consumeCreated() { lastCreatedId = nil }
+
+    func dependentModeNames(of connection: Connection) -> [String] {
+        ModeStore.loadAll(in: modesDir)
+            .filter { $0.aiRewrite?.connection == connection.id }
+            .map(\.name)
+    }
 
     private func modesNeedingConnection() -> [Mode] {
         ModeStore.loadAll(in: modesDir).filter { mode in
@@ -279,7 +285,9 @@ struct AIServiceSettingsView: View {
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("Its connection settings and API key will be removed. This cannot be undone.")
+            if let connection = pendingDelete {
+                Text(deleteMessage(for: connection))
+            }
         }
         .confirmationDialog(
             "Use this service for AI rewrite?",
@@ -300,6 +308,17 @@ struct AIServiceSettingsView: View {
                 Text("\(offer.modeNames.joined(separator: ", ")) have an AI rewrite but no service yet. Point them at \(offer.connectionName)? You can change any of them later.")
             }
         }
+    }
+
+    private func deleteMessage(for connection: Connection) -> String {
+        let base = "Its connection settings and API key will be removed. This cannot be undone."
+        let dependents = model.dependentModeNames(of: connection)
+        guard !dependents.isEmpty else { return base }
+        let list = dependents.joined(separator: ", ")
+        let lead = dependents.count == 1
+            ? "The \(list) mode uses this service and will stop rewriting until you point it at another service."
+            : "\(dependents.count) modes use this service (\(list)) and will stop rewriting until you point them at another service."
+        return "\(lead) \(base)"
     }
 
     private func rowStatus(_ connection: Connection) -> (text: String, icon: String, style: AnyShapeStyle) {

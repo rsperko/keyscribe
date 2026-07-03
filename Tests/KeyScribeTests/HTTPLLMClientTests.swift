@@ -103,7 +103,7 @@ struct HTTPLLMClientTests {
         let connection = Connection(
             id: "local", name: "Local", provider: .openaiCompatible,
             model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
-        await #expect(throws: LLMClientError.self) {
+        await #expect(throws: ProviderTransportError.self) {
             _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
         }
     }

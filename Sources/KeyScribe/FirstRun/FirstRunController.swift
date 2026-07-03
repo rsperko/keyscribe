@@ -431,7 +431,7 @@ final class FirstRunModel: ObservableObject {
             let models = try await listModels(aiDraftConnection(), aiDraft.requestAPIKey)
             aiDraft.applyFetchedModels(models)
         } catch {
-            let message = (error as? ModelListError)?.description ?? error.localizedDescription
+            let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
             aiDraft.modelDiscoveryState = .failed("Could not fetch models: \(message)")
         }
     }

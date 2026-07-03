@@ -1,24 +1,6 @@
 import Foundation
 import KeyScribeKit
 
-enum LLMClientError: Error, CustomStringConvertible {
-    case missingKey(String)
-    case http(Int)
-    case badResponse
-    case missingBaseURL
-    case truncated
-
-    var description: String {
-        switch self {
-        case .missingKey(let ref): return "No API key stored for \(ref)."
-        case .http(let code): return "The model service returned an error (\(code))."
-        case .badResponse: return "The model service returned an unexpected response."
-        case .missingBaseURL: return "This connection needs a base URL."
-        case .truncated: return "The model service cut the response off at its length limit."
-        }
-    }
-}
-
 // Thin BYOK client over the OpenAI / Anthropic / Gemini HTTP APIs (design.md §5). The key is
 // fetched from the Keychain by the connection's key_ref. Provider-agnostic orchestration
 // (assemble → gate → retry/fallback) lives in KeyScribeKit.RewriteService; this only does transport.
@@ -27,46 +9,25 @@ struct HTTPLLMClient: LLMClient {
     // A bounded session, not URLSession.shared (whose default request timeout is 60s — and the gate's
     // stricter-retry would double that). A hung BYOK endpoint must fall back to the local transcript
     // promptly, so cap each attempt; RewriteService turns the thrown timeout into a local fallback.
-    var session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 45
-        config.waitsForConnectivity = false
-        return URLSession(configuration: config)
-    }()
+    var session: URLSession = ProviderTransport.makeSession(requestTimeout: 30, resourceTimeout: 45)
     var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared
     var now: @Sendable () -> Date = { Date() }
 
-    func complete(system: String, user: String, connection: Connection) async throws -> String {
-        let key = try await credential(for: connection)
-        if connection.provider != .openaiCompatible, key?.isEmpty != false {
-            throw LLMClientError.missingKey(connection.keyRef)
-        }
-        let request = try buildRequest(system: system, user: user, connection: connection, key: key)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw LLMClientError.badResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            throw LLMClientError.http(http.statusCode)
-        }
-        return try parse(data, provider: connection.provider)
+    private var transport: ProviderTransport {
+        ProviderTransport(session: session, keyProvider: keyProvider,
+                          tokenCommandRunner: tokenCommandRunner, tokenCache: tokenCache, now: now)
     }
 
-    private func credential(for connection: Connection) async throws -> String? {
-        switch connection.authMethod {
-        case .none:
-            return nil
-        case .apiKey:
-            return keyProvider(connection.keyRef)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .tokenCommand:
-            guard let command = connection.tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
-                throw TokenCommandError.emptyCommand
-            }
-            return try await tokenCache.token(forKey: command, now: now()) {
-                try await tokenCommandRunner(command)
-            }
+    func complete(system: String, user: String, connection: Connection) async throws -> String {
+        let key = try await transport.credential(for: connection)
+        if connection.provider != .openaiCompatible, key?.isEmpty != false {
+            throw ProviderTransportError.missingKey(connection.keyRef)
         }
+        let request = try buildRequest(system: system, user: user, connection: connection, key: key)
+        let data = try await transport.send(request)
+        return try parse(data, provider: connection.provider)
     }
 
     private func buildRequest(system: String, user: String, connection: Connection, key: String?) throws -> URLRequest {
@@ -78,12 +39,10 @@ struct HTTPLLMClient: LLMClient {
             let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines).removingTrailingSlash
                 ?? (connection.provider == .openai ? "https://api.openai.com/v1" : nil)
             guard let base, !base.isEmpty, let url = URL(string: base + "/chat/completions") else {
-                throw LLMClientError.missingBaseURL
+                throw ProviderTransportError.missingBaseURL
             }
             var req = jsonRequest(url)
-            if let key, !key.isEmpty {
-                req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-            }
+            transport.applyAuth(key, for: connection.provider, to: &req)
             let tokenLimitKey = usesHostedOpenAIParameterNames(provider: connection.provider, baseURL: base)
                 ? "max_completion_tokens"
                 : "max_tokens"
@@ -99,10 +58,9 @@ struct HTTPLLMClient: LLMClient {
             return req
 
         case .anthropic:
-            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { throw LLMClientError.badResponse }
+            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { throw ProviderTransportError.badResponse }
             var req = jsonRequest(url)
-            req.setValue(key, forHTTPHeaderField: "x-api-key")
-            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            transport.applyAuth(key, for: connection.provider, to: &req)
             req.httpBody = try body([
                 "model": connection.model,
                 "max_tokens": maxTokens,
@@ -115,10 +73,10 @@ struct HTTPLLMClient: LLMClient {
         case .gemini:
             let base = "https://generativelanguage.googleapis.com/v1beta/models"
             guard let key, let url = URL(string: "\(base)/\(connection.model):generateContent") else {
-                throw LLMClientError.badResponse
+                throw ProviderTransportError.badResponse
             }
             var req = jsonRequest(url)
-            req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+            transport.applyAuth(key, for: connection.provider, to: &req)
             req.httpBody = try body([
                 "systemInstruction": ["parts": [["text": system]]],
                 "contents": [["role": "user", "parts": [["text": user]]]],
@@ -138,31 +96,31 @@ struct HTTPLLMClient: LLMClient {
 
     private func parse(_ data: Data, provider: Connection.Provider) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw LLMClientError.badResponse
+            throw ProviderTransportError.badResponse
         }
         switch provider {
         case .openai, .openaiCompatible:
             guard let choices = json["choices"] as? [[String: Any]],
                   let choice = choices.first,
                   let message = choice["message"] as? [String: Any],
-                  let content = message["content"] as? String else { throw LLMClientError.badResponse }
+                  let content = message["content"] as? String else { throw ProviderTransportError.badResponse }
             // A response cut off at max_tokens passes the gate when no sentinels were issued (the common
             // privacy-off case), and half a sentence would be pasted as final text. Treat truncation as an
             // error so RewriteService falls back to the local transcript instead.
-            if (choice["finish_reason"] as? String) == "length" { throw LLMClientError.truncated }
+            if (choice["finish_reason"] as? String) == "length" { throw ProviderTransportError.truncated }
             return content
         case .anthropic:
-            if (json["stop_reason"] as? String) == "max_tokens" { throw LLMClientError.truncated }
+            if (json["stop_reason"] as? String) == "max_tokens" { throw ProviderTransportError.truncated }
             guard let content = json["content"] as? [[String: Any]],
-                  let text = content.first?["text"] as? String else { throw LLMClientError.badResponse }
+                  let text = content.first?["text"] as? String else { throw ProviderTransportError.badResponse }
             return text
         case .gemini:
             guard let candidates = json["candidates"] as? [[String: Any]],
                   let candidate = candidates.first,
                   let content = candidate["content"] as? [String: Any],
                   let parts = content["parts"] as? [[String: Any]],
-                  let text = parts.first?["text"] as? String else { throw LLMClientError.badResponse }
-            if (candidate["finishReason"] as? String) == "MAX_TOKENS" { throw LLMClientError.truncated }
+                  let text = parts.first?["text"] as? String else { throw ProviderTransportError.badResponse }
+            if (candidate["finishReason"] as? String) == "MAX_TOKENS" { throw ProviderTransportError.truncated }
             return text
         }
     }
