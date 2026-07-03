@@ -3,15 +3,9 @@ import Foundation
 // Canonical pipeline positions. STT, LLM, and the validation gate are fixed host steps that run between
 // these stage positions.
 public enum StagePosition: Int, Comparable, Sendable {
-    case preSTT = 0
     case verbatimMark = 20
     case postSTTText = 30
     case postSTTMark = 40
-    case assemble = 50
-    case preLLM = 60
-    case postLLM = 80
-    case restore = 100
-    case insertion = 110
 
     public static func < (lhs: StagePosition, rhs: StagePosition) -> Bool {
         lhs.rawValue < rhs.rawValue

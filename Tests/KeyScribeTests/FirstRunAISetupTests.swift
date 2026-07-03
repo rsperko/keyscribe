@@ -60,15 +60,15 @@ struct FirstRunAISetupTests {
         #expect(savedKeyRef == connection.keyRef)
         #expect(savedKey == "secret")
         #expect(completed == 0)
-        #expect(model.step == .aiServiceComplete)
+        #expect(model.step == .playground)
 
         let modes = ModeStore.loadAll(in: modesDir)
-        let connected = modes.filter { ["polish", "message", "email", "edit-selection"].contains($0.id) }
-        #expect(connected.count == 4)
+        let connected = modes.filter { ["polish", "edit-selection"].contains($0.id) }
+        #expect(connected.count == 2)
         #expect(connected.allSatisfy { $0.enabled })
         #expect(connected.allSatisfy { $0.aiRewrite?.connection == connection.id })
-        let examples = modes.filter { ["ai-prompt", "code", "markdown", "shell"].contains($0.id) }
-        #expect(examples.count == 4)
+        let examples = modes.filter { ["message", "email", "ai-prompt", "code", "markdown", "shell"].contains($0.id) }
+        #expect(examples.count == 6)
         #expect(examples.allSatisfy { !$0.enabled })
         #expect(examples.allSatisfy { $0.aiRewrite?.connection == "" })
         #expect(try #require(modes.first { $0.id == "custom" }).aiRewrite?.connection == "")
@@ -77,7 +77,6 @@ struct FirstRunAISetupTests {
     @Test func skippingModelDownloadSelectsAppleSpeechAndContinuesSetup() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
-        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
         var selected: String?
         var completed = 0
@@ -251,7 +250,7 @@ struct FirstRunAISetupTests {
         #expect(connection.authMethod == .none)
         #expect(connection.tokenCommand == nil)
         #expect(saveCalled == false)
-        #expect(model.step == .aiServiceComplete)
+        #expect(model.step == .playground)
     }
 
     @Test func creatingOpenAICompatibleTokenCommandPersistsCommandWithoutSavingKey() async throws {
@@ -283,7 +282,7 @@ struct FirstRunAISetupTests {
         #expect(connection.authMethod == .tokenCommand)
         #expect(connection.tokenCommand == "print-token")
         #expect(saveCalled == false)
-        #expect(model.step == .aiServiceComplete)
+        #expect(model.step == .playground)
     }
 
     @Test func creatingHostedProviderTokenCommandPersistsCommandWithoutSavingKey() async throws {
@@ -316,6 +315,6 @@ struct FirstRunAISetupTests {
         #expect(connection.authMethod == .tokenCommand)
         #expect(connection.tokenCommand == "print-token")
         #expect(saveCalled == false)
-        #expect(model.step == .aiServiceComplete)
+        #expect(model.step == .playground)
     }
 }

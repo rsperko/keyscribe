@@ -202,10 +202,10 @@ struct ModeSeedReconcileTests {
     // it. The connection/enabled user-knobs are excluded, so onboarding never trips this.
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
-            "polish": (2, "b0d8a6fadd55799a"),
+            "polish": (3, "860af5078e3ce64f"),
             "message": (2, "9969a0d54481e459"),
-            "email": (1, "6a39d5592cb100d"),
-            "edit-selection": (2, "273554b92933a365"),
+            "email": (2, "817ac3f600010afb"),
+            "edit-selection": (3, "308d918735608ba2"),
             "ai-prompt": (4, "6169c51528e6af0d"),
             "code": (2, "79d9b345a4e4f542"),
             "markdown": (2, "846d2bd3aec77421"),

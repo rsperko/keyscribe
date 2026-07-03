@@ -14,11 +14,17 @@ enum ContextProbe {
         TargetSnapshot(bundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
     }
 
-    static func snapshot() -> TargetSnapshot {
+    // `excludingWindow` is our own recording HUD's window id. When the target is a *different* app the
+    // HUD (a nonactivating key panel in our process) is invisible to that app's focused-window read, so
+    // this is a no-op. It matters only when we dictate into our OWN window (the onboarding trial): the
+    // HUD becomes our app's key window, so a naive read would flip focusedWindowId to the HUD between
+    // capture and insertion and misfire decideInsertion's same-app focus-change guard → a spurious
+    // clipboard fallback. Excluding it falls back to the app's main window, so captured and current agree.
+    static func snapshot(excludingWindow excluded: CGWindowID? = nil) -> TargetSnapshot {
         let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         return TargetSnapshot(
             bundleId: bundleId,
-            focusedWindowId: bundleId.flatMap(focusedWindowId(bundleId:)),
+            focusedWindowId: bundleId.flatMap { focusedWindowId(bundleId: $0, excluding: excluded) },
             isSecureField: focusedIsSecure())
     }
 
@@ -46,21 +52,35 @@ enum ContextProbe {
     // precedingTextSync, ContextProbe.swift) bounds a wedged AX server so it never stalls the dictation
     // flow. Preferred id is the CGWindowID via the _AXUIElementGetWindow SPI; falls back to a
     // title+position+size composite when the SPI is unavailable.
-    static func focusedWindowId(bundleId: String) -> String? {
+    static func focusedWindowId(bundleId: String, excluding excluded: CGWindowID? = nil) -> String? {
         guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
-              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return nil }
-        let window = focusedRef as! AXUIElement
-        AXUIElementSetMessagingTimeout(window, 0.1)
-
-        var windowID = CGWindowID(0)
-        if _AXUIElementGetWindow(window, &windowID) == .success, windowID != 0 {
-            return "cg:\(windowID)"
+        guard let focused = axWindow(app, attribute: kAXFocusedWindowAttribute) else { return nil }
+        if let excluded, cgWindowID(of: focused) == excluded {
+            guard let main = axWindow(app, attribute: kAXMainWindowAttribute) else { return nil }
+            return windowIdString(of: main)
         }
+        return windowIdString(of: focused)
+    }
+
+    private static func axWindow(_ app: AXUIElement, attribute: String) -> AXUIElement? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, attribute as CFString, &ref) == .success,
+              let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let window = ref as! AXUIElement
+        AXUIElementSetMessagingTimeout(window, 0.1)
+        return window
+    }
+
+    private static func cgWindowID(of window: AXUIElement) -> CGWindowID? {
+        var windowID = CGWindowID(0)
+        return _AXUIElementGetWindow(window, &windowID) == .success && windowID != 0 ? windowID : nil
+    }
+
+    private static func windowIdString(of window: AXUIElement) -> String? {
+        if let windowID = cgWindowID(of: window) { return "cg:\(windowID)" }
 
         var components: [String] = []
         var titleRef: CFTypeRef?

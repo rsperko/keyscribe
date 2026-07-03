@@ -157,7 +157,6 @@ public final class AudioSampleRing: @unchecked Sendable {
         return true
     }
 
-    public var isEmpty: Bool { head.load(ordering: .acquiring) == tail.load(ordering: .acquiring) }
     public var droppedCount: Int { overruns.load(ordering: .relaxed) }
 
     // Return the ring to its empty state. ONLY call when quiescent (no producer or consumer running) —

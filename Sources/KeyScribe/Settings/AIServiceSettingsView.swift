@@ -36,8 +36,7 @@ struct ConnectionTester {
 // Offered once, when the first AI service is added: the starter modes ship an AI rewrite prompt with no
 // connection, so they can't rewrite until one exists. Rather than make the user open each mode, offer to
 // point them all at the new service.
-struct ConnectModesOffer: Identifiable {
-    let id = UUID()
+struct ConnectModesOffer {
     let connectionId: String
     let connectionName: String
     let modeIds: [String]

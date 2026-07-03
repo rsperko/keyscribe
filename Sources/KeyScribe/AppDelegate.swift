@@ -78,7 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         history.applyRetention(retentionDays: settings.history.retentionDays)
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history, hud: hud,
-            pressSnapshot: ContextProbe.initialSnapshot)
+            pressSnapshot: ContextProbe.initialSnapshot,
+            snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) })
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
@@ -486,8 +487,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.startListening()
             self.controller.prewarmCapture()
         }
-        controller.onDictationCompleted = { [weak self] outcome in
-            self?.firstRun?.noteDictation(outcome)
+        controller.onDictationCompleted = { [weak self] completion in
+            self?.firstRun?.noteDictation(completion)
         }
         firstRun?.present()
     }

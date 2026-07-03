@@ -3,6 +3,13 @@ import Foundation
 import KeyScribeKit
 import os
 
+struct DictationCompletion: Sendable {
+    let outcome: DictationOutcome
+    let modeId: String?
+    let heard: String
+    let finalText: String
+}
+
 @MainActor
 final class DictationController {
     static let fallbackModeName = "Plain Dictation"
@@ -217,8 +224,9 @@ final class DictationController {
     }
 
     // Fired after every terminal insertion outcome. First run uses it to require one real successful
-    // dictation before completing onboarding (ui_design.md §2).
-    var onDictationCompleted: ((DictationOutcome) -> Void)?
+    // dictation before completing onboarding (ui_design.md §2), and to attribute a tutorial-playground
+    // lesson to the mode that produced the text and show its before/after.
+    var onDictationCompleted: ((DictationCompletion) -> Void)?
 
     // Fired true when capture starts, false when it ends (commit or a start failure). The menu-bar
     // glyph tints red while true (ui_design.md §Dynamic status).
@@ -262,7 +270,7 @@ final class DictationController {
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
-        snapshot: @escaping @MainActor () -> TargetSnapshot = ContextProbe.snapshot,
+        snapshot: @escaping @MainActor () -> TargetSnapshot = { ContextProbe.snapshot() },
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
@@ -978,7 +986,7 @@ final class DictationController {
             if !actuated {
                 // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"
                 // (lastResult is set). Never fire submit against a paste that did not happen.
-                outcome = .failed("The text could not be inserted")
+                outcome = .failed
             } else if initialOutcome == .inserted, let submit = activeMode?.submit, submit != .none,
                       submitTargetStillFocused() {
                 await submitKey(submit)
@@ -1011,8 +1019,10 @@ final class DictationController {
         finalizeRecord(outcome: recordOutcome)
         recordHistory(heard: heard, transformed: transformed, result: transcript, insertion: outcome, rewrite: rewrite)
         applyEvictionAfterDictation(engine: activeEngine)
+        let completedModeId = activeMode?.id
         releaseCapturedPlan()
-        onDictationCompleted?(outcome)
+        onDictationCompleted?(DictationCompletion(
+            outcome: outcome, modeId: completedModeId, heard: heard, finalText: transcript))
     }
 
     // The submit Return fires after the paste-settle window and lands outside the insert atom. Re-run the
@@ -1441,7 +1451,7 @@ final class DictationController {
     }
 
     private func finishError(_ message: String, action: HUDErrorAction? = nil) {
-        machine.finish(.failed(message))
+        machine.finish(.failed)
         effects.end(settings.duringDictation, cue: .error)
         hud?.render(.error(message: message, action: action))
         scheduleHide(after: action == nil ? 2 : 8)

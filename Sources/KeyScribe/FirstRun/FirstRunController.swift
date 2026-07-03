@@ -35,7 +35,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     }
 
     // Bridges a real dictation outcome from the live pipeline into the trial gate.
-    func noteDictation(_ outcome: DictationOutcome) { model.noteDictation(outcome) }
+    func noteDictation(_ completion: DictationCompletion) { model.noteDictation(completion) }
 
     func present() {
         let hosting = NSHostingController(rootView: FirstRunView(model: model))
@@ -85,7 +85,20 @@ final class FirstRunController: NSObject, NSWindowDelegate {
 
 @MainActor
 final class FirstRunModel: ObservableObject {
-    enum Step { case intro, model, permissions, tryIt, aiService, aiServiceComplete }
+    enum Step { case intro, model, permissions, tryIt, aiService, playground }
+
+    struct PlaygroundLesson: Identifiable, Equatable {
+        let modeId: String
+        let title: String
+        let invocation: String
+        let hint: String
+        var id: String { modeId }
+    }
+
+    struct LessonOutcome: Equatable {
+        let before: String
+        let after: String
+    }
 
     @Published var step: Step = .intro
     @Published var downloading = false
@@ -95,6 +108,14 @@ final class FirstRunModel: ObservableObject {
     @Published var axStatus: PermissionStatus = .notDetermined
     @Published var trialText = ""
     @Published var trialSucceeded = false
+    @Published var playgroundText = ""
+    @Published private(set) var playgroundLessons: [PlaygroundLesson] = []
+    @Published private(set) var completedLessons: [String: LessonOutcome] = [:]
+    @Published private(set) var finishedPlaygroundLessonIds: Set<String> = []
+    @Published private(set) var activePlaygroundLessonId: String?
+    // Bumped whenever the Edit Selection sentence is (re)seeded. The view watches it to reselect the
+    // fresh text even when the lesson id itself did not change (a re-tap of the already-open lesson).
+    @Published private(set) var playgroundReseedToken = 0
     @Published var selectedEngineId: String
     @Published var aiServiceName = Connection.Provider.openai.defaultName
     @Published var aiProvider: Connection.Provider = .openai
@@ -121,7 +142,7 @@ final class FirstRunModel: ObservableObject {
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
     private var pendingConnectionId: String?
-    private let starterModeIdsEnabledOnFirstAIConnection: Set<String> = ["polish", "message", "email", "edit-selection"]
+    private let starterModeIdsEnabledOnFirstAIConnection: Set<String> = ["polish", "edit-selection"]
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
     var onRelaunch: () -> Void = {}
@@ -200,8 +221,102 @@ final class FirstRunModel: ObservableObject {
     }
 
     // ui_design.md §2: onboarding ends after one real successful dictation, not after typing.
-    func noteDictation(_ outcome: DictationOutcome) {
-        if case .inserted = outcome { trialSucceeded = true }
+    func noteDictation(_ completion: DictationCompletion) {
+        guard case .inserted = completion.outcome else { return }
+        trialSucceeded = true
+        guard step == .playground else { return }
+        let completedModeId = completion.modeId ?? (activePlaygroundLessonId == Mode.directId ? Mode.directId : nil)
+        guard let modeId = completedModeId,
+              playgroundLessons.contains(where: { $0.modeId == modeId }) else { return }
+        completedLessons[modeId] = LessonOutcome(before: completion.heard, after: completion.finalText)
+        finishedPlaygroundLessonIds.insert(modeId)
+    }
+
+    func enterPlayground() {
+        playgroundLessons = buildPlaygroundLessons()
+        guard !playgroundLessons.isEmpty else { finish(); return }
+        completedLessons = [:]
+        finishedPlaygroundLessonIds = []
+        playgroundText = ""
+        activePlaygroundLessonId = playgroundLessons.first?.modeId
+        step = .playground
+    }
+
+    private func buildPlaygroundLessons() -> [PlaygroundLesson] {
+        let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+        let modes = ModeStore.loadAll(in: modesDir)
+        let rewriteLessons: [PlaygroundLesson] = Self.playgroundLessonOrder.compactMap { seedId in
+            guard let mode = modes.first(where: { $0.seedId == seedId }), mode.enabled,
+                  let connection = mode.aiRewrite?.connection, !connection.isEmpty,
+                  connections.contains(where: { $0.id == connection }),
+                  let invocation = Self.invocation(for: mode) else { return nil }
+            return PlaygroundLesson(
+                modeId: mode.id, title: mode.name, invocation: invocation,
+                hint: Self.playgroundHints[seedId] ?? "")
+        }
+        guard !rewriteLessons.isEmpty else { return [] }
+        return [
+            PlaygroundLesson(
+                modeId: Mode.directId,
+                title: "Dictation",
+                invocation: "Hold Fn (Globe) and speak",
+                hint: "Say one sentence. Your words appear in the box above."),
+        ] + rewriteLessons
+    }
+
+    func advancePlayground() {
+        guard let activePlaygroundLessonId,
+              let index = playgroundLessons.firstIndex(where: { $0.modeId == activePlaygroundLessonId }) else {
+            finish()
+            return
+        }
+        finishedPlaygroundLessonIds.insert(activePlaygroundLessonId)
+        let nextIndex = playgroundLessons.index(after: index)
+        guard nextIndex < playgroundLessons.endIndex else {
+            self.activePlaygroundLessonId = nil
+            return
+        }
+        self.activePlaygroundLessonId = playgroundLessons[nextIndex].modeId
+        preparePlaygroundTextIfNeeded(for: playgroundLessons[nextIndex].modeId)
+    }
+
+    // Re-opening a lesson is a fresh start: Edit Selection reseeds its sentence (wiping any prior
+    // result — intended) and reselects it, so the "selected for you" hint always holds even on a re-tap.
+    func openPlaygroundLesson(_ id: String) {
+        guard playgroundLessons.contains(where: { $0.modeId == id }) else { return }
+        activePlaygroundLessonId = id
+        preparePlaygroundTextIfNeeded(for: id)
+    }
+
+    func isLastPlaygroundLesson(_ id: String) -> Bool {
+        playgroundLessons.last?.modeId == id
+    }
+
+    func skipAISetup() {
+        step = .tryIt
+    }
+
+    private static let playgroundLessonOrder = ["polish", "edit-selection"]
+
+    private static let playgroundHints: [String: String] = [
+        "polish": "Try: \"Um I think we should maybe send the notes tomorrow because the meeting moved.\" Then hold Right Option and speak.",
+        "edit-selection": "The sentence above is selected for you. Hold Right Command and say \"make this shorter.\"",
+    ]
+
+    private func preparePlaygroundTextIfNeeded(for lessonId: String) {
+        guard lessonId == "edit-selection" else { return }
+        playgroundText = "We need to review the long meeting notes, identify the open questions, and decide the next steps before Friday."
+        playgroundReseedToken &+= 1
+    }
+
+    private static func invocation(for mode: Mode) -> String? {
+        if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
+            return "Hold \(descriptor.displayString) and speak"
+        }
+        if let phrase = mode.triggerPhrases.first {
+            return "End your sentence with \"\(phrase)\""
+        }
+        return nil
     }
 
     func requestMicrophone() {
@@ -253,7 +368,7 @@ final class FirstRunModel: ObservableObject {
     func continueFromPermissions() {
         onReadyToDictate()
         if tapActive() {
-            step = .tryIt
+            step = .aiService
         } else {
             needsRelaunch = true
         }
@@ -267,10 +382,6 @@ final class FirstRunModel: ObservableObject {
     func finish() {
         stopPolling()
         onComplete()
-    }
-
-    var aiModeNames: [String] {
-        modesToConnect().map(\.name)
     }
 
     var aiCanConnect: Bool {
@@ -391,7 +502,7 @@ final class FirstRunModel: ObservableObject {
             aiSetupError = "Connected \(name), but could not link \(unlinked.joined(separator: ", ")). You can link them in Settings."
             return
         }
-        step = .aiServiceComplete
+        enterPlayground()
     }
 
     private func aiDraftConnection() -> Connection {

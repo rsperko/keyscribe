@@ -1,9 +1,11 @@
+import AppKit
 import SwiftUI
 import KeyScribeKit
 
 struct FirstRunView: View {
     @ObservedObject var model: FirstRunModel
     @FocusState private var trialFieldFocused: Bool
+    @FocusState private var playgroundFieldFocused: Bool
     @State private var modelChoiceExpanded = false
 
     var body: some View {
@@ -14,14 +16,23 @@ struct FirstRunView: View {
             case .permissions: permissions
             case .tryIt: tryIt
             case .aiService: aiService
-            case .aiServiceComplete: aiServiceComplete
+            case .playground: playground
             }
         }
         .padding(28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: 480, height: 500, alignment: .topLeading)
         .onChange(of: model.step) { _, step in
             if step == .permissions { model.startPolling() } else { model.stopPolling() }
             if step == .tryIt { trialFieldFocused = true }
+            if step == .playground { playgroundFieldFocused = true }
+        }
+        .onChange(of: model.activePlaygroundLessonId) { _, _ in
+            guard model.step == .playground else { return }
+            focusPlaygroundText(selectAll: false)
+        }
+        .onChange(of: model.playgroundReseedToken) { _, _ in
+            guard model.step == .playground else { return }
+            focusPlaygroundText(selectAll: true)
         }
     }
 
@@ -236,7 +247,7 @@ struct FirstRunView: View {
                 Button("Skip for now") { model.finish() }
                     .buttonStyle(.link)
                 Spacer()
-                Button("Continue") { model.step = .aiService }
+                Button("Done") { model.finish() }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
                     .disabled(!model.trialSucceeded)
             }
@@ -251,9 +262,7 @@ struct FirstRunView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Label("Hosted providers use API keys. Local OpenAI-compatible endpoints can use no auth or a token command.", systemImage: "key")
-                if !model.aiModeNames.isEmpty {
-                    Label("\(Branding.appName) will connect \(formattedModeNames(model.aiModeNames)) to this service.", systemImage: "wand.and.stars")
-                }
+                Label("\(Branding.appName) will connect the starter rewrite modes to this service.", systemImage: "wand.and.stars")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -269,7 +278,7 @@ struct FirstRunView: View {
 
             Spacer()
             HStack {
-                Button("Set Up Later") { model.finish() }
+                Button("Set Up Later") { model.skipAISetup() }
                     .buttonStyle(.link)
                     .disabled(model.aiTesting)
                 Spacer()
@@ -300,7 +309,7 @@ struct FirstRunView: View {
 
     private var aiServiceFields: some View {
         VStack(alignment: .leading, spacing: 0) {
-            aiTextRow("Name", text: $model.aiServiceName)
+            aiTextRow("Name", text: $model.aiServiceName, prompt: "My AI service")
             aiThinDivider
             HStack {
                 Text("Provider")
@@ -317,7 +326,7 @@ struct FirstRunView: View {
             if model.aiProvider == .openaiCompatible {
                 aiThinDivider
                 VStack(alignment: .leading, spacing: 4) {
-                    aiTextRow("Base URL", text: $model.aiBaseURL)
+                    aiTextRow("Base URL", text: $model.aiBaseURL, prompt: "http://127.0.0.1:11234/v1")
                     Text("Example: http://127.0.0.1:11234/v1")
                         .font(.caption).foregroundStyle(.secondary)
                     if model.aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -386,7 +395,7 @@ struct FirstRunView: View {
                 HStack {
                     Text("API key")
                     Spacer()
-                    SecureField("API key", text: $model.aiAPIKey)
+                    SecureField("Paste API key", text: $model.aiAPIKey)
                         .multilineTextAlignment(.trailing)
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 260)
@@ -401,7 +410,7 @@ struct FirstRunView: View {
             VStack(alignment: .leading, spacing: 4) {
                 aiTextRow(
                     "Command", text: $model.aiTokenCommand,
-                    prompt: "e.g. print-token")
+                    prompt: "Command that prints a token")
                 if model.aiTokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     aiRequiredLabel("Enter the command that prints a fresh token or key.")
                 }
@@ -413,7 +422,7 @@ struct FirstRunView: View {
 
     private var aiModelFields: some View {
         VStack(alignment: .leading, spacing: 4) {
-            aiTextRow("Model ID", text: $model.aiModel)
+            aiTextRow("Model ID", text: $model.aiModel, prompt: "Choose or type a model ID")
             if model.aiModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 aiRequiredLabel("Model ID is required.")
             }
@@ -446,26 +455,23 @@ struct FirstRunView: View {
             .font(.caption).foregroundStyle(.orange)
     }
 
-    private var aiServiceComplete: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(.green)
-            Text("AI cleanup is connected").font(.title.bold())
-            Text("\(model.aiServiceName) is ready to clean up dictation, draft messages, and work on selected text in rewrite modes.")
+    private var playground: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Try it now").font(.title.bold())
+            Text("Start with normal dictation. Then try the rewrite modes you just enabled. You can leave anytime.")
                 .foregroundStyle(.secondary)
-            switch model.aiAuthMethod {
-            case .none:
-                Label("No Authorization header is used for this service.", systemImage: "globe")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .apiKey:
-                Label("Your API key is stored in Keychain.", systemImage: "key")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .tokenCommand:
-                Label("Token command saved. Generated tokens are kept in memory only.", systemImage: "terminal")
-                    .font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $model.playgroundText)
+                .font(.body)
+                .ghostText(playgroundPlaceholder, visible: model.playgroundText.isEmpty)
+                .frame(height: 76)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                .focused($playgroundFieldFocused)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(model.playgroundLessons) { lesson in
+                    lessonAccordion(lesson)
+                }
             }
-            Spacer()
+            Spacer(minLength: 0)
             HStack {
                 Spacer()
                 Button("Done") { model.finish() }
@@ -474,16 +480,102 @@ struct FirstRunView: View {
         }
     }
 
-    private func formattedModeNames(_ names: [String]) -> String {
-        switch names.count {
-        case 0:
-            return "the starter rewrite modes"
-        case 1:
-            return names[0]
-        case 2:
-            return "\(names[0]) and \(names[1])"
+    private var playgroundPlaceholder: String {
+        switch model.activePlaygroundLessonId {
+        case Mode.directId:
+            return "Hold Fn (Globe), say one sentence, and release\u{2026}"
+        case .some(let id) where id.contains("edit-selection"):
+            return "Select this text with Command-A, then say \"make this shorter\"\u{2026}"
         default:
-            return names.dropLast().joined(separator: ", ") + ", and \(names.last ?? "")"
+            return "Dictate or paste a rough sentence to polish\u{2026}"
         }
+    }
+
+    private func lessonAccordion(_ lesson: FirstRunModel.PlaygroundLesson) -> some View {
+        let outcome = model.completedLessons[lesson.modeId]
+        let finished = model.finishedPlaygroundLessonIds.contains(lesson.modeId)
+        let expanded = model.activePlaygroundLessonId == lesson.modeId
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                model.openPlaygroundLesson(lesson.modeId)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: finished ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(finished ? .green : .secondary)
+                        .font(.title3)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(lesson.title).font(.headline)
+                        Text(lesson.invocation).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                Divider().padding(.leading, 32)
+                if let outcome {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("You said: \(outcome.before)").font(.caption).foregroundStyle(.secondary)
+                        Text(outcome.after).font(.callout)
+                    }
+                    .padding(.leading, 32)
+                } else {
+                    Text(lesson.hint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 32)
+                }
+                if finished && outcome == nil {
+                    Label("Marked complete", systemImage: "checkmark")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .padding(.leading, 32)
+                }
+                if !model.isLastPlaygroundLesson(lesson.modeId) {
+                    HStack {
+                        Spacer()
+                        Button("Next") { model.advancePlayground() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: expanded ? .controlBackgroundColor : .textBackgroundColor).opacity(expanded ? 0.9 : 0.45)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+    }
+
+    private func focusPlaygroundText(selectAll: Bool) {
+        playgroundFieldFocused = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            playgroundFieldFocused = true
+            guard selectAll else { return }
+            if let textView = findPlaygroundTextView(in: NSApp.keyWindow?.contentView) {
+                textView.selectAll(nil)
+            } else {
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+            }
+        }
+    }
+
+    private func findPlaygroundTextView(in view: NSView?) -> NSTextView? {
+        guard let view else { return nil }
+        if let textView = view as? NSTextView, textView.string == model.playgroundText {
+            return textView
+        }
+        for subview in view.subviews {
+            if let textView = findPlaygroundTextView(in: subview) {
+                return textView
+            }
+        }
+        return nil
     }
 }

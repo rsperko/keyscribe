@@ -33,7 +33,6 @@ struct AudioSampleRingTests {
     @Test func readOnEmptyReturnsFalse() {
         let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 8, maxChannels: 1)
         #expect(!ring.read { _, _ in Issue.record("body must not run on empty ring") })
-        #expect(ring.isEmpty)
     }
 
     @Test func fifoOrderIsPreserved() {
@@ -61,7 +60,7 @@ struct AudioSampleRingTests {
         #expect(!push(ring, base: 1, channels: 1, frames: 5, host: 1))   // too many frames
         #expect(!push(ring, base: 1, channels: 1, frames: 0, host: 1))   // empty buffer
         #expect(ring.droppedCount == 2)
-        #expect(ring.isEmpty)
+        #expect(!ring.read { _, _ in Issue.record("nothing should have been stored") })
     }
 
     @Test func channelsAboveStorageCapacityAreTruncatedNotDropped() {
@@ -96,7 +95,7 @@ struct AudioSampleRingTests {
         _ = push(ring, base: 1, channels: 1, frames: 1, host: 1)
         _ = push(ring, base: 9, channels: 1, frames: 9, host: 1)  // dropped (over capacity)
         ring.reset()
-        #expect(ring.isEmpty)
+        #expect(!ring.read { _, _ in Issue.record("ring must be empty after reset") })
         #expect(ring.droppedCount == 0)
     }
 

@@ -244,7 +244,6 @@ public struct Settings: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey {
             case addVocabulary = "add_vocabulary"
             case legacyAddDictionaryEntry = "add_dictionary_entry"
-            case addReplacement = "add_replacement"
             case pasteLastDictation = "paste_last_dictation"
         }
 

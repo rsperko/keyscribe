@@ -83,8 +83,4 @@ public enum SpeechModelCatalog {
     public static var defaultEnglishId: String {
         all.first(where: \.isDefaultEnglish)?.id ?? all[0].id
     }
-
-    public static var biasExemptIds: [String] {
-        all.filter { !$0.supportsRecognitionBias }.map(\.id)
-    }
 }

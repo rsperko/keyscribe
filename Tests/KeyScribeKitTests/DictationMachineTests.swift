@@ -101,8 +101,8 @@ struct DictationMachineTests {
     @Test func finishIsReachableFromAnyLiveState() {
         var m = DictationMachine()
         _ = m.beginArming()
-        m.finish(.failed("mic off"))
-        #expect(m.state == .finished(.failed("mic off")))
+        m.finish(.failed)
+        #expect(m.state == .finished(.failed))
         #expect(m.isBusy == false)
     }
 

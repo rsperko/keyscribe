@@ -50,10 +50,11 @@ final class MouseEventTap: MouseTapping {
 
     // The thread is created at most once and lives for the app's lifetime — config reloads and
     // suspend/resume only swap the lock-guarded set, never spawn or kill the thread, so there is no
-    // per-change lifecycle to race on. stop() is a TERMINAL teardown (app exit / test seam), not designed
-    // to be followed by a restart.
+    // per-change lifecycle to race on. stop() is a TERMINAL teardown (app exit / test seam); clearing
+    // stopRequested here lets a later restart spawn a live tap instead of one that self-tears-down.
     private func ensureRunning() {
         guard thread == nil else { return }
+        control.withLockUnchecked { $0.stopRequested = false }
         let t = Thread { [weak self] in self?.runTapLoop() }
         t.name = "com.keyscribe.mousetap"
         t.start()

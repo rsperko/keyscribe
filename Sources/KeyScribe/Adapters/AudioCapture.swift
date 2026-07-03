@@ -55,17 +55,15 @@ private final class UnitBox: @unchecked Sendable {
 private final class CaptureSession: @unchecked Sendable {
     let url: URL
     let file: AVAudioFile
-    let recordFormat: AVAudioFormat
     // Drains the shared ring to `file` on its own thread (owns the resampler/converter). See CaptureWriter.
     let writer: CaptureWriter
     // Mid-recording restart attempts for THIS capture; bounds a flapping device. Reset to 0 by being a
     // fresh session per capture.
     var configRestartCount = 0
 
-    init(url: URL, file: AVAudioFile, recordFormat: AVAudioFormat, writer: CaptureWriter) {
+    init(url: URL, file: AVAudioFile, writer: CaptureWriter) {
         self.url = url
         self.file = file
-        self.recordFormat = recordFormat
         self.writer = writer
     }
 }
@@ -81,11 +79,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // fresh unit) when a wedge is detected, so the next dictation never queues behind the stuck call.
     private var unit: HALInputUnit?
     private var configuredDeviceID: AudioDeviceID?
-    // The generation the currently-stored unit belongs to. A bring-up that was abandoned by the watchdog
-    // (its generation superseded) keeps running on its now-orphaned queue; when it finally stores its unit
-    // it stamps this with its OWN generation, so the eager-rebuild cleanup queued behind it can dispose that
-    // late unit without touching a newer generation's live unit.
-    private var configuredGeneration: Int?
     private var controlQueue = DispatchQueue(label: "com.keyscribe.audio.0")
     private var generation = 0
     private let producerGeneration = Atomic<Int>(-1)
@@ -292,7 +285,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let outgoing = lock.withLock { () -> (keep: Bool, dispose: HALInputUnit?) in
             guard self.generation == generation else { return (true, nil) }
             if unit != nil && configuredDeviceID == deviceID { return (true, nil) }
-            let old = unit; unit = nil; configuredDeviceID = nil; configuredGeneration = nil
+            let old = unit; unit = nil; configuredDeviceID = nil
             return (false, old)
         }
         outgoing.dispose?.dispose()
@@ -302,7 +295,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try candidate.configure(deviceID: deviceID)
             let stored = lock.withLock { () -> Bool in
                 guard self.generation == generation else { return false }
-                unit = candidate; configuredDeviceID = deviceID; configuredGeneration = generation
+                unit = candidate; configuredDeviceID = deviceID
                 return true
             }
             if !stored { candidate.dispose() }
@@ -366,7 +359,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let writer = CaptureWriter(
             ring: ring, file: file, recordFormat: recordFormat,
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
-        let mySession = CaptureSession(url: url, file: file, recordFormat: recordFormat, writer: writer)
+        let mySession = CaptureSession(url: url, file: file, writer: writer)
         // Publish ONLY if still current, atomically with the generation read: a bump between the guard above
         // and here means a newer generation now owns the capture slot, so do NOT clobber its session — bail and
         // clean up this arm's own local file (the writer was never started, so there is no thread; a bump also
@@ -460,7 +453,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let outgoing = lock.withLock { () -> (stored: Bool, dispose: HALInputUnit?) in
             guard self.generation == generation else { return (false, nil) }
             let old = unit
-            unit = fresh; configuredDeviceID = deviceID; configuredGeneration = generation
+            unit = fresh; configuredDeviceID = deviceID
             return (true, old)
         }
         guard outgoing.stored else { fresh.dispose(); throw AudioCaptureError.bringUpTimedOut }
@@ -706,7 +699,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // clear the binding, so the next bring-up configures fresh.
     private func disposeUnitInline() {
         let outgoing = lock.withLock { () -> HALInputUnit? in
-            let u = unit; unit = nil; configuredDeviceID = nil; configuredGeneration = nil; return u
+            let u = unit; unit = nil; configuredDeviceID = nil; return u
         }
         outgoing?.dispose()
     }
@@ -729,7 +722,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let outgoingQueue = controlQueue
         unit = nil
         configuredDeviceID = nil
-        configuredGeneration = nil
         generation &+= 1
         controlQueue = DispatchQueue(label: "com.keyscribe.audio.\(generation)")
         lock.unlock()
@@ -1032,7 +1024,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 }
                 let stored = lock.withLock { () -> Bool in
                     guard self.generation == generation, session != nil else { return false }
-                    unit = fresh; configuredDeviceID = deviceID; configuredGeneration = generation
+                    unit = fresh; configuredDeviceID = deviceID
                     return true
                 }
                 if !stored {

@@ -28,11 +28,6 @@ struct SpeechModelSetTests {
         #expect(!s.isUsable("whisper"))
     }
 
-    @Test func usableIdsAreCatalogOrdered() {
-        let s = SpeechModelSet(catalog: realCatalog, installed: ["whisper"], activeId: "apple")
-        #expect(s.usableIds == ["whisper", "apple"])
-    }
-
     // Selection
     @Test func selectUsableSucceeds() throws {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple")
@@ -107,7 +102,7 @@ struct SpeechModelSetTests {
         var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
         s.delete("only")
         #expect(!s.installed.contains("only"))
-        #expect(s.usableIds.isEmpty)
+        #expect(!s.isUsable("only"))
         #expect(!s.isUsable(s.activeId))
     }
 

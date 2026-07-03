@@ -21,6 +21,14 @@ final class HUDController: HUDPresenting {
     private let model = HUDModel()
     private let levelModel = HUDLevel()
     private var panel: NSPanel?
+
+    // The HUD panel's CoreGraphics window id, so the focus-change guard can tell our own overlay apart
+    // from the dictation target when we insert into our own window (the onboarding trial). Nil until the
+    // panel is realized.
+    var hudWindowID: CGWindowID? {
+        guard let number = panel?.windowNumber, number > 0 else { return nil }
+        return CGWindowID(number)
+    }
     var onInsertLocalTranscript: (() -> Void)?
     var onPasteLast: (() -> Void)?
     var onEscapeCancel: (() -> Void)?

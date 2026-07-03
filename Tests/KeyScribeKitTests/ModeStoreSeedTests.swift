@@ -10,16 +10,25 @@ struct ModeStoreSeedTests {
             "markdown", "shell",
         ])
 
-        // Plain Dictation is no longer a starter — the Direct floor fills that role; all starters now
-        // ship disabled and triggerless.
+        // Plain Dictation is no longer a starter — the Direct floor fills that role; all starters ship
+        // disabled. Polish and Edit Selection carry a default trigger key so a first AI connection makes
+        // them reachable; Email carries a voice-routing phrase; the rest stay triggerless.
         #expect(starters.allSatisfy { !$0.enabled })
-        #expect(starters.allSatisfy { $0.triggerKeys.isEmpty })
 
         let polish = starters.first { $0.id == "polish" }
         #expect(polish?.name == "Polish")
+        #expect(polish?.triggerKeys == [.init(key: "right_option")])
+
+        let email = starters.first { $0.id == "email" }
+        #expect(email?.triggerPhrases == ["as an email"])
+        #expect(email?.triggerKeys.isEmpty == true)
 
         let selection = starters.first { $0.id == "edit-selection" }
         #expect(selection?.name == "Edit Selection")
+        #expect(selection?.triggerKeys == [.init(key: "right_command")])
+
+        let triggerless = starters.filter { !["polish", "edit-selection"].contains($0.id) }
+        #expect(triggerless.allSatisfy { $0.triggerKeys.isEmpty })
         #expect(selection?.source == .selection)
         #expect(selection?.output == .replaceSelection)
         #expect(selection?.trailing == Mode.Trailing.none)

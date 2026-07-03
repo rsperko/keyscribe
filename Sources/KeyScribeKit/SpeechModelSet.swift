@@ -31,8 +31,6 @@ public struct SpeechModelSet: Equatable, Sendable {
         return info.systemManaged || installed.contains(id)
     }
 
-    public var usableIds: [String] { catalog.map(\.id).filter(isUsable) }
-
     public mutating func select(_ id: String) throws {
         guard info(id) != nil else { throw ModelSelectionError.unknown(id) }
         guard isUsable(id) else { throw ModelSelectionError.notUsable(id) }

@@ -101,8 +101,8 @@ enum ModelInstallStore {
         }
     }
 
-    // On-disk install directories for an engine that actually exist (for reveal + size display).
-    static func presentInstallURLs(for id: String) -> [URL] {
+    // On-disk install directories for an engine that actually exist.
+    private static func presentInstallURLs(for id: String) -> [URL] {
         guard let engine = EngineRegistry.engine(id, modelsDir: KeyScribePaths.modelsDir) else { return [] }
         let fm = FileManager.default
         return engine.installDirNames

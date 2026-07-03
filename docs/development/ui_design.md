@@ -53,15 +53,23 @@ The sequence is short, and each step states its purpose in plain language:
    asked just before it is first needed:** Microphone to hear you, Accessibility to detect a
    modifier-key trigger and place text. State what still works if one is declined. (A key+modifier
    trigger registers as a system hotkey and needs no permission; Input Monitoring is never requested.)
-4. **Try it now.** Land the user on a focused text field with the hotkey shown and let them
+4. **Optional: connect an AI service (BYOK).** Speech stays local; only a rewrite leaves the
+   machine. Connecting the first service auto-enables and links the everyday rewrite modes. The
+   form uses visible labels plus placeholder examples so editable fields are easy to find. A
+   low-prominence **Set Up Later** route stays available and continues to the basic dictation trial.
+5. **Try it now.** Land the user on a focused text field with the hotkey shown and let them
    produce one real dictation; completion unlocks only after one succeeds. A low-prominence
    **Skip for now** stays available so a hardware or permission snag never traps the user —
-   taking it records setup as complete (a relaunch with all permissions granted would do the
-   same), so an incomplete setup is a supported, not a blocked, state.
+   taking it records setup as complete, so an incomplete setup is a supported, not a blocked, state.
+   If an AI service was connected, this becomes an optional, always-skippable tutorial playground:
+   a focused sandbox inside the onboarding window with a vertical accordion for Dictation, Polish,
+   and Edit Selection. Only one lesson is expanded at a time; each names its trigger and shows the
+   user's own before → after the moment they try it. Email-style spoken routing is not taught in
+   first run because the suffix is hard to observe when it succeeds.
 
-After first run, every other capability — modes, rewrite, dictionary, history — is introduced
-just in time, never as a wall. First run is the only exception, because the everyday loop is
-otherwise impossible to demonstrate.
+After first run, every other capability — dictionary, history, additional modes — is introduced
+just in time, never as a wall. First run is the only exception, because the everyday loop (and the
+one optional taste of rewrite modes) is otherwise impossible to demonstrate.
 
 ---
 

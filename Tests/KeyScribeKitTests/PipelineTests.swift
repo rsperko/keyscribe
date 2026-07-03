@@ -27,10 +27,10 @@ private extension Pipeline {
 
 struct PipelineTests {
     @Test func runsStagesInCanonicalPositionOrder() {
-        // Added out of order; must run preSTT → postSTTText → insertion regardless.
+        // Added out of order; must run verbatimMark → postSTTText → postSTTMark regardless.
         let p = Pipeline([
-            AppendStage(position: .insertion, order: 0, mark: "C"),
-            AppendStage(position: .preSTT, order: 0, mark: "A"),
+            AppendStage(position: .postSTTMark, order: 0, mark: "C"),
+            AppendStage(position: .verbatimMark, order: 0, mark: "A"),
             AppendStage(position: .postSTTText, order: 0, mark: "B"),
         ])
         #expect(p.applied("") == "ABC")
@@ -56,11 +56,8 @@ struct PipelineTests {
     }
 
     @Test func positionsAreCanonicallyOrdered() {
-        #expect(StagePosition.preSTT < StagePosition.verbatimMark)
         #expect(StagePosition.verbatimMark < StagePosition.postSTTText)
         #expect(StagePosition.postSTTText < StagePosition.postSTTMark)
-        #expect(StagePosition.postSTTMark < StagePosition.restore)
-        #expect(StagePosition.restore < StagePosition.insertion)
     }
 
     // forward applies in (position, order); reverse runs post in STRICT REVERSE, so nested wraps

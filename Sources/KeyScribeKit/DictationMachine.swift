@@ -2,7 +2,7 @@ public enum DictationOutcome: Equatable, Sendable {
     case inserted
     case copied(FallbackReason)
     case noSpeech
-    case failed(String)
+    case failed
 }
 
 // The full lifecycle of one dictation. `isBusy`, `isCancellable`, and transition guards derive from
