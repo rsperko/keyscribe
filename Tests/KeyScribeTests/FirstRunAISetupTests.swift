@@ -143,6 +143,23 @@ struct FirstRunAISetupTests {
         #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
     }
 
+    @Test func choosingOpenAICompatibleKeepsAPIKeyAsDefaultCredential() {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        model.aiProvider = .openai
+        model.aiAuthMethod = .apiKey
+        model.aiAPIKey = ""
+        model.changeAIProvider(from: .openai, to: .openaiCompatible)
+
+        #expect(model.aiProvider == .openaiCompatible)
+        #expect(model.aiAuthMethod == .apiKey)
+    }
+
     @Test func failedConnectionTestDoesNotPersistOrFinish() async throws {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)

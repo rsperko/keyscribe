@@ -37,6 +37,7 @@ struct FirstRunPlaygroundTests {
         #expect(model.playgroundLessons.map(\.modeId) == [Mode.directId, "polish", "edit-selection"])
         let dictation = model.playgroundLessons.first { $0.modeId == Mode.directId }
         #expect(dictation?.title == "Dictation")
+        #expect(dictation?.hint.contains("insert new line") == true)
         let polish = model.playgroundLessons.first { $0.modeId == "polish" }
         #expect(polish?.invocation.contains("⌥") == true)
         let selection = model.playgroundLessons.first { $0.modeId == "edit-selection" }

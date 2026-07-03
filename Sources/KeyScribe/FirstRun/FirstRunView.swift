@@ -291,19 +291,7 @@ struct FirstRunView: View {
             }
         }
         .onChange(of: model.aiProvider) { oldProvider, provider in
-            if model.aiServiceName == oldProvider.defaultName {
-                model.aiServiceName = provider.defaultName
-            }
-            model.aiModel = provider.defaultModel
-            if provider == .openaiCompatible {
-                if model.aiAuthMethod == .apiKey,
-                   model.aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    model.aiAuthMethod = .none
-                }
-            } else if model.aiAuthMethod == .none {
-                model.aiAuthMethod = .apiKey
-            }
-            model.resetAIModelDiscovery()
+            model.changeAIProvider(from: oldProvider, to: provider)
         }
     }
 

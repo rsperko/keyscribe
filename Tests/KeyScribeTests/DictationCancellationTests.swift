@@ -170,6 +170,16 @@ private final class CancelDuringDrainAudio: AudioCapturing, @unchecked Sendable 
     }
 }
 
+// finishDraining() returns nil without a preceding cancel — an empty/failed capture, the nil-drain
+// terminal inside handleCommit (distinct from CancelDuringDrainAudio, which is driven by cancel()).
+private final class NilDrainAudio: AudioCapturing, @unchecked Sendable {
+    private let url: URL
+    init(url: URL) { self.url = url }
+    func start(sampleRate: Int) async throws -> URL { url }
+    func stop() -> URL? { url }
+    func finishDraining() async -> URL? { nil }
+}
+
 // start() that resolves only after a delay — stands in for a bring-up that lands late (a resident engine
 // re-realizing a stale binding on the hot path). AudioCapture's own grace window adopts it internally;
 // the controller must also impose no competing deadline and adopt whatever start() eventually returns.
@@ -364,6 +374,79 @@ struct DictationCancellationTests {
 
         #expect(idleCount == 1)
         #expect(hud.states.filter { $0 == .hidden }.count == 1)
+    }
+
+    // An empty/failed capture (finishDraining returns nil) reaches the cancel terminal exactly once — one
+    // .hidden HUD, one onBecameIdle, back to idle — through the unified finish() tail.
+    @Test func nilDrainReachesTheCancelTerminalExactlyOnce() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let engine = InstantEngine(id: "instant", text: "unreached")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
+        let hud = HUDSpy()
+        let audio = NilDrainAudio(url: supportDir.appendingPathComponent("capture.wav"))
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "instant", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            insert: { _, _, _, _, _ in return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+        var idleCount = 0
+        controller.onBecameIdle = { idleCount += 1 }
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+
+        #expect(idleCount == 1)
+        #expect(hud.states.filter { $0 == .hidden }.count == 1)
+        #expect(controller.isBusy == false)
+    }
+
+    // The over-limit abort must finalizeRecord (.failed, "recording limit") and land in a non-busy
+    // terminal — the L1 fix. Before it, the abort used machine.cancel() and skipped the record entirely,
+    // so lastRecord described the PREVIOUS dictation. Driven via the maxRecordingSeconds injection seam.
+    @Test func overLimitAbortRecordsAFailedOutcomeAndReturnsToIdle() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let engine = InstantEngine(id: "instant", text: "unreached")
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
+        let hud = HUDSpy()
+        let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "instant", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            insert: { _, _, _, _, _ in return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true },
+            maxRecordingSeconds: 0.05)
+        var idleCount = 0
+        controller.onBecameIdle = { idleCount += 1 }
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        for _ in 0..<200 where controller.isBusy { try? await Task.sleep(for: .milliseconds(5)) }
+
+        #expect(controller.isBusy == false)
+        #expect(controller.lastRecord?.outcome == .failed)
+        #expect(controller.lastRecord?.error == "recording limit")
+        #expect(idleCount == 1)
+        #expect(hud.states.contains { if case .error = $0 { return true } else { return false } })
     }
 
     // Fix 2, controller side: a bring-up that lands late must be ADOPTED — the dictation reaches live

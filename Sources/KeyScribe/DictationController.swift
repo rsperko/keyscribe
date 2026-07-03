@@ -159,7 +159,7 @@ final class DictationController {
     // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV plus
     // an in-memory PCM buffer at transcribe time (~3.7 MiB/min @16k). Drop it with a HUD notice rather
     // than spike memory. Far longer than any real hold-to-talk dictation.
-    private static let maxRecordingSeconds: Double = 300
+    private let maxRecordingSeconds: Double
 
     // The frozen config snapshot for the in-flight dictation, captured at record-start (stored on the
     // session). A config reload mid-dictation produces a new ResolvedConfig in ConfigCache without
@@ -280,7 +280,8 @@ final class DictationController {
         llmClient: any LLMClient = HTTPLLMClient(),
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
-        }
+        },
+        maxRecordingSeconds: Double = 300
     ) {
         self.settings = settings
         self.provider = provider
@@ -301,6 +302,7 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.llmClient = llmClient
         self.recordModelLoadFailure = recordModelLoadFailure
+        self.maxRecordingSeconds = maxRecordingSeconds
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
     }
@@ -627,8 +629,9 @@ final class DictationController {
 
     private func startRecordingLimit() {
         recordingLimitTask?.cancel()
+        let limit = maxRecordingSeconds
         recordingLimitTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(Self.maxRecordingSeconds))
+            try? await Task.sleep(for: .seconds(limit))
             guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
             self.abortRecordingOverLimit()
         }
@@ -637,16 +640,9 @@ final class DictationController {
     private func abortRecordingOverLimit() {
         onRecordingChanged?(false)
         if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
-        machine.cancel()
-        effects.end(settings.duringDictation, cue: .cancel)
-        hud?.render(.error(message: "Recording stopped after \(Int(Self.maxRecordingSeconds / 60)) min", action: nil))
-        scheduleHide(after: 4)
-        clearRewriteEscapeHatch()
-        // Release the press-time-warmed model on Balanced/Frugal (this terminal does not route through
-        // finishError). Capture before releaseCapturedPlan nils capturedEngine.
-        let engineUsed = activeEngine
-        releaseCapturedPlan()
-        applyEvictionAfterDictation(engine: engineUsed)
+        finish(machine: .finish(.failed), cue: .cancel,
+               state: .error(message: "Recording stopped after \(Int(maxRecordingSeconds / 60)) min", action: nil),
+               hideAfter: 4, record: (.failed, "recording limit"), evict: true)
     }
 
     // Release the frozen config once a dictation reaches a terminal state, so an idle app doesn't pin a
@@ -694,10 +690,7 @@ final class DictationController {
             guard let self else { return }
             guard let url = await self.audio.finishDraining() else {
                 if Task.isCancelled { return }
-                self.machine.cancel()
-                self.effects.end(self.settings.duringDictation, cue: .cancel)
-                self.hud?.render(.hidden)
-                self.releaseCapturedPlan()
+                self.finish(machine: .cancel, cue: .cancel, state: .hidden)
                 return
             }
             // Capture is done — unmute the output now rather than holding it muted across
@@ -723,26 +716,27 @@ final class DictationController {
         // completion run finishCanceledBringUp; otherwise (cue delay still pending, no unit started) we can
         // return straight to idle.
         let waitForBringUpCleanup = captureBringUpTask != nil
-        if waitForBringUpCleanup { machine.beginCancellingBringUp() } else { machine.cancel() }
-        effects.end(settings.duringDictation, cue: .cancel)
-        hud?.render(.hidden)
-        clearRewriteEscapeHatch()
         modeResolveTask?.cancel()
         modeResolveTask = nil
         captureStartTask?.cancel()
         captureStartTask = nil
         guard waitForBringUpCleanup else {
-            releaseCapturedPlan()
+            finish(machine: .cancel, cue: .cancel, state: .hidden)
             return
         }
+        // Surface the cancel now, but defer the release tail to finishCanceledBringUp so the in-flight
+        // bring-up task unwinds first.
+        machine.beginCancellingBringUp()
+        effects.end(settings.duringDictation, cue: .cancel)
+        hud?.render(.hidden)
+        clearRewriteEscapeHatch()
     }
 
     private func finishCanceledBringUp(stopAudio: Bool) {
         if stopAudio, let url = audio.stop() {
             try? FileManager.default.removeItem(at: url)
         }
-        machine.cancel()
-        releaseCapturedPlan()
+        finish(machine: .cancel, cue: nil, state: nil)
     }
 
     // Phase A (design.md §4.3): resolve the mode from routing context before recording. A non-nil
@@ -1004,11 +998,6 @@ final class DictationController {
         case .noSpeech: endCue = .cancel
         case .failed: endCue = .error
         }
-        effects.end(settings.duringDictation, cue: endCue)
-        hud?.render(rewrite?.fellBack == true
-            ? .localFallback(outcome: outcome, mode: currentModeName)
-            : .complete(outcome: outcome, mode: currentModeName))
-        scheduleHide()
         let recordOutcome: DictationRecord.Outcome
         switch outcome {
         case .noSpeech: recordOutcome = .noSpeech
@@ -1016,13 +1005,18 @@ final class DictationController {
         case .copied: recordOutcome = rewrite?.fellBack == true ? .localFallback : .copied
         case .failed: recordOutcome = .failed
         }
-        finalizeRecord(outcome: recordOutcome)
-        recordHistory(heard: heard, transformed: transformed, result: transcript, insertion: outcome, rewrite: rewrite)
-        applyEvictionAfterDictation(engine: activeEngine)
-        let completedModeId = activeMode?.id
-        releaseCapturedPlan()
-        onDictationCompleted?(DictationCompletion(
-            outcome: outcome, modeId: completedModeId, heard: heard, finalText: transcript))
+        // Built here, while the session is still alive, so modeId survives releaseCapturedPlan.
+        let completion = DictationCompletion(
+            outcome: outcome, modeId: activeMode?.id, heard: heard, finalText: transcript)
+        finish(machine: .alreadyTransitioned, cue: endCue,
+               state: rewrite?.fellBack == true
+                   ? .localFallback(outcome: outcome, mode: currentModeName)
+                   : .complete(outcome: outcome, mode: currentModeName),
+               hideAfter: 2,
+               record: (recordOutcome, nil),
+               history: HistoryWrite(heard: heard, transformed: transformed, result: transcript,
+                                     insertion: outcome, rewrite: rewrite),
+               evict: true, completion: completion)
     }
 
     // The submit Return fires after the paste-settle window and lands outside the insert atom. Re-run the
@@ -1392,11 +1386,7 @@ final class DictationController {
         // it here (transcribeAndInsert owns cleanup once a commit has handed the URL off, when stop()
         // returns nil). Otherwise every press-then-cancel leaks a temp WAV until the OS reclaims it.
         if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
-        machine.cancel()
-        effects.end(settings.duringDictation, cue: .cancel)
-        hud?.render(.hidden)
-        clearRewriteEscapeHatch()
-        releaseCapturedPlan()
+        finish(machine: .cancel, cue: .cancel, state: .hidden)
     }
 
     func insertLocalTranscriptNow() {
@@ -1450,20 +1440,63 @@ final class DictationController {
         log.debug("\(self.building.humanSummary(), privacy: .public)")
     }
 
-    private func finishError(_ message: String, action: HUDErrorAction? = nil) {
-        machine.finish(.failed)
-        effects.end(settings.duringDictation, cue: .error)
-        hud?.render(.error(message: message, action: action))
-        scheduleHide(after: action == nil ? 2 : 8)
-        finalizeRecord(outcome: .failed, error: message)
-        // A failed dictation must release the model on Balanced/Frugal just like a successful one —
-        // otherwise a transcribe timeout/failure (or a mic/bring-up error after the press-time warm load)
-        // pins the model resident until quit, since no other terminal re-arms the idle check. Capture the
-        // engine before releaseCapturedPlan nils capturedEngine; eviction awaits any abandoned transcribe's
-        // settlement via SerializedEngine, so this can't race the in-flight call.
+    private enum MachineTerminal {
+        case cancel
+        case finish(DictationOutcome)
+        case alreadyTransitioned
+    }
+
+    private struct HistoryWrite {
+        let heard: String
+        let transformed: String?
+        let result: String
+        let insertion: DictationOutcome
+        let rewrite: RewriteDetails?
+    }
+
+    // The one terminal tail every dictation exits through. The fixed order is load-bearing: finalizeRecord
+    // and recordHistory read session state (activeMode/activeEngine/currentModeName) so they run before
+    // releaseCapturedPlan nils the session; the engine is captured before release so eviction targets the
+    // engine this dictation used; onBecameIdle fires exactly once (only from releaseCapturedPlan). A caller
+    // that already ran its machine transition (finishInsertion) passes .alreadyTransitioned, and one that
+    // must report the mode it used builds `completion` before calling in (activeMode is gone after release).
+    private func finish(
+        machine terminal: MachineTerminal,
+        cue: DuringDictationEffects.EndCue?,
+        state: HUDState?,
+        hideAfter: Double? = nil,
+        record: (outcome: DictationRecord.Outcome, error: String?)? = nil,
+        history: HistoryWrite? = nil,
+        evict: Bool = false,
+        completion: DictationCompletion? = nil
+    ) {
+        switch terminal {
+        case .cancel: machine.cancel()
+        case .finish(let outcome): machine.finish(outcome)
+        case .alreadyTransitioned: break
+        }
+        if let cue { effects.end(settings.duringDictation, cue: cue) }
+        if let state {
+            hud?.render(state)
+            if let hideAfter { scheduleHide(after: hideAfter) }
+        }
+        if let record { finalizeRecord(outcome: record.outcome, error: record.error) }
+        if let history {
+            recordHistory(heard: history.heard, transformed: history.transformed, result: history.result,
+                          insertion: history.insertion, rewrite: history.rewrite)
+        }
         let engineUsed = activeEngine
         releaseCapturedPlan()
-        applyEvictionAfterDictation(engine: engineUsed)
+        if evict { applyEvictionAfterDictation(engine: engineUsed) }
+        if let completion { onDictationCompleted?(completion) }
+    }
+
+    private func finishError(_ message: String, action: HUDErrorAction? = nil) {
+        // Eviction awaits any abandoned transcribe's settlement via SerializedEngine, so releasing the
+        // press-time-warmed model here can't race the in-flight call; without it a transcribe failure/
+        // timeout would pin the model resident until quit (no other terminal re-arms the idle check).
+        finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: action),
+               hideAfter: action == nil ? 2 : 8, record: (.failed, message), evict: true)
     }
 
     private func scheduleHide(after seconds: Double = 2) {

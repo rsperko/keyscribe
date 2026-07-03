@@ -113,8 +113,6 @@ final class FirstRunModel: ObservableObject {
     @Published private(set) var completedLessons: [String: LessonOutcome] = [:]
     @Published private(set) var finishedPlaygroundLessonIds: Set<String> = []
     @Published private(set) var activePlaygroundLessonId: String?
-    // Bumped whenever the Edit Selection sentence is (re)seeded. The view watches it to reselect the
-    // fresh text even when the lesson id itself did not change (a re-tap of the already-open lesson).
     @Published private(set) var playgroundReseedToken = 0
     @Published var selectedEngineId: String
     @Published var aiServiceName = Connection.Provider.openai.defaultName
@@ -260,7 +258,7 @@ final class FirstRunModel: ObservableObject {
                 modeId: Mode.directId,
                 title: "Dictation",
                 invocation: "Hold Fn (Globe) and speak",
-                hint: "Say one sentence. Your words appear in the box above."),
+                hint: "Say one sentence. Try saying \"insert new line\" in the middle to add a line break."),
         ] + rewriteLessons
     }
 
@@ -280,8 +278,6 @@ final class FirstRunModel: ObservableObject {
         preparePlaygroundTextIfNeeded(for: playgroundLessons[nextIndex].modeId)
     }
 
-    // Re-opening a lesson is a fresh start: Edit Selection reseeds its sentence (wiping any prior
-    // result — intended) and reselects it, so the "selected for you" hint always holds even on a re-tap.
     func openPlaygroundLesson(_ id: String) {
         guard playgroundLessons.contains(where: { $0.modeId == id }) else { return }
         activePlaygroundLessonId = id
@@ -294,6 +290,18 @@ final class FirstRunModel: ObservableObject {
 
     func skipAISetup() {
         step = .tryIt
+    }
+
+    func changeAIProvider(from oldProvider: Connection.Provider, to provider: Connection.Provider) {
+        aiProvider = provider
+        if aiServiceName == oldProvider.defaultName {
+            aiServiceName = provider.defaultName
+        }
+        aiModel = provider.defaultModel
+        if provider != .openaiCompatible && aiAuthMethod == .none {
+            aiAuthMethod = .apiKey
+        }
+        resetAIModelDiscovery()
     }
 
     private static let playgroundLessonOrder = ["polish", "edit-selection"]

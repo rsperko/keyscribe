@@ -28,6 +28,16 @@ struct DictationRecordWiringTests {
         func stop() -> URL? { url }
     }
 
+    private final class ThrowingEngine: SpeechEngine, @unchecked Sendable {
+        let id = "throwing"
+        let displayName = "Throwing"
+        let supportsRecognitionBias = false
+        struct Boom: Error {}
+        func loadIfNeeded() async throws {}
+        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { throw Boom() }
+        func evict() async {}
+    }
+
     // Echoes the <content> block verbatim so issued tokens survive the validation gate.
     private struct EchoLLM: LLMClient {
         func complete(system: String, user: String, connection: Connection) async throws -> String {
@@ -133,5 +143,73 @@ struct DictationRecordWiringTests {
     @Test func wholeUtteranceAnnotationRoutesToNoSpeech() async {
         let record = await run(transcript: "[BLANK_AUDIO]", mode: mode(id: "plain"), historyEnabled: false)
         #expect(record?.outcome == .noSpeech)
+    }
+
+    // The completion callback must report the mode that produced the text. modeId is read while the
+    // session is alive and passed into the terminal tail, so it survives releaseCapturedPlan nilling the
+    // session — a non-nil, non-Direct id proves the capture-before-release ordering.
+    @Test func completionReportsTheModeIdThatProducedTheText() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-record-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        try? ModeStore.write(mode(id: "polish-x"), to: modesDir)
+
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: nil, hud: nil,
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _, _ in true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        var fired = false
+        var firedModeId: String?
+        controller.onDictationCompleted = { fired = true; firedModeId = $0.modeId }
+        controller.setNextModeOverride(id: "polish-x")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+
+        #expect(fired)
+        #expect(firedModeId == "polish-x")
+    }
+
+    // A transcribe failure routes through finishError, which finalizeRecords .failed with the message —
+    // the record is the ground truth for a failed terminal too, not just the successful insertion path.
+    @Test func aFailedTranscribeRecordsAFailedOutcomeWithError() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-record-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        try? ModeStore.write(mode(id: "plain"), to: modesDir)
+
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "throwing", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let provider = try! SpeechEngineProvider(engines: [ThrowingEngine()], activeId: "throwing")
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: nil, hud: nil,
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _, _ in true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        controller.setNextModeOverride(id: "plain")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+
+        #expect(controller.lastRecord?.outcome == .failed)
+        #expect(controller.lastRecord?.error != nil)
     }
 }
