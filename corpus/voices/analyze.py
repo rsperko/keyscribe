@@ -4,8 +4,8 @@
 # (engine didn't transcribe the phrase). The LiveEditsStage rule fires the command on TERM/COMMA/END
 # and treats CONT as literal text, so this shows, per engine: command capture (TERM/COMMA/END on
 # command clips) vs. literal safety (anything but CONT on literal clips is a false boundary).
-#   .build/release/KeyScribe --benchmark benchmark/voices --raw > /tmp/raw.txt 2>/dev/null
-#   python benchmark/voices/analyze.py /tmp/raw.txt
+#   .build/release/KeyScribe --benchmark corpus/voices --raw > /tmp/raw.txt 2>/dev/null
+#   python corpus/voices/analyze.py /tmp/raw.txt
 import json
 import re
 import sys
@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-meta = {e["id"]: e for e in json.load(open(HERE / "manifest.json"))["entries"]}
+meta = {c["id"]: c for c in json.load(open(HERE / "manifest.json"))["clips"]}
 raw_path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/raw.txt"
 
 ENG_ORDER = ["parakeet", "parakeet-tdt-ctc-110m", "whisper", "apple",
@@ -39,7 +39,7 @@ for line in open(raw_path):
     _, engine, cid, hyp = line.rstrip("\n").split("\t", 3)
     if cid not in meta:
         continue
-    bucket = cmd if meta[cid]["kind"] == "command" else lit
+    bucket = cmd if meta[cid]["checks"]["command"]["kind"] == "command" else lit
     bucket[engine][classify(hyp)] += 1
 
 

@@ -46,9 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_: Notification) {
-        audioRestorer = SystemAudioStateRestorer(
-            store: PendingSystemRestoreStore(persistence: FilePendingSystemRestorePersistence(
-                url: KeyScribePaths.pendingSystemRestoreFile)))
+        audioRestorer = SystemAudioStateRestorer(markerURL: KeyScribePaths.pendingSystemRestoreFile)
         audioRestorer.reconcile()
         runLegacyImportIfNeeded()
         loadSettings()

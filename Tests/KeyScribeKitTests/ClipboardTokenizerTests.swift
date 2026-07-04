@@ -3,7 +3,7 @@ import Testing
 
 private func tokenize(_ text: String, clipboard: String?) -> (out: String, tok: Tokenizer) {
     let t = Tokenizer()
-    return (ClipboardTokenizer.apply(text, clipboard: clipboard, into: t), t)
+    return (ClipboardTokenizer.apply(text, clipboard: { clipboard }, into: t), t)
 }
 
 struct ClipboardTokenizerTests {
@@ -193,5 +193,23 @@ struct ClipboardTokenizerTests {
         #expect(!ClipboardTokenizer.mentions("just some ordinary dictated words"))
         #expect(!ClipboardTokenizer.mentions("insert the clipboard now"))
         #expect(!ClipboardTokenizer.mentions(""))
+    }
+
+    // apply reads the clipboard lazily: the provider is never invoked when the command is absent, so an
+    // ordinary dictation cannot touch the user's clipboard.
+    @Test func providerNotReadWhenCommandAbsent() {
+        var reads = 0
+        let t = Tokenizer()
+        let out = ClipboardTokenizer.apply("just some ordinary words", clipboard: { reads += 1; return "X" }, into: t)
+        #expect(reads == 0)
+        #expect(out == "just some ordinary words")
+    }
+
+    @Test func providerReadOnceWhenCommandPresent() {
+        var reads = 0
+        let t = Tokenizer()
+        let out = ClipboardTokenizer.apply("insert clipboard contents", clipboard: { reads += 1; return "X" }, into: t)
+        #expect(reads == 1)
+        #expect(t.restore(out) == "X")
     }
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Provision the TTS toolchain and generate the synthetic multi-voice "scratch that" corpus.
-# Idempotent: creates a local venv (benchmark/voices/.ttsenv, override with KEYSCRIBE_TTS_VENV),
+# Idempotent: creates a local venv (corpus/voices/.ttsenv, override with KEYSCRIBE_TTS_VENV),
 # installs mlx-audio + misaki, ensures Homebrew espeak-ng, then runs gen_corpus.py. See README.md.
 #
-#   bash benchmark/voices/gen-corpus.sh
+#   bash corpus/voices/gen-corpus.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -28,5 +28,5 @@ fi
 
 echo
 echo "Now run the raw STT dump + analysis from the repo root:"
-echo "  .build/release/KeyScribe --benchmark benchmark/voices --raw > /tmp/raw.txt 2>/dev/null"
-echo "  benchmark/voices/.ttsenv/bin/python benchmark/voices/analyze.py /tmp/raw.txt"
+echo "  .build/release/KeyScribe --benchmark corpus/voices --raw > /tmp/raw.txt 2>/dev/null"
+echo "  corpus/voices/.ttsenv/bin/python corpus/voices/analyze.py /tmp/raw.txt"

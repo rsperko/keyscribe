@@ -44,15 +44,8 @@ public final class ResolvedConfig: @unchecked Sendable {
 
     // Global ⊕ mode dictionary (VocabularyMerge dedups in stable order), memoized per mode.
     public func mergedDictionary(for mode: Mode?) -> [String] {
-        let key = mode?.id ?? Self.nilModeKey
         lock.lock(); defer { lock.unlock() }
-        if let cached = mergedDictionaryCache[key] { return cached }
-        let words = mode.map { m in
-            VocabularyMerge.words(
-                global: dictionary.words, local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
-        } ?? dictionary.words
-        mergedDictionaryCache[key] = words
-        return words
+        return mergedDictionaryUnlocked(for: mode)
     }
 
     // Merged dictionary trimmed of whitespace with blanks dropped, ready for engine recognition bias.
@@ -93,7 +86,7 @@ public final class ResolvedConfig: @unchecked Sendable {
         return stages
     }
 
-    // mergedDictionary, assuming the lock is already held (buildTextStages runs inside it).
+    // mergedDictionary, assuming the lock is already held (mergedDictionary and buildTextStages both hold it).
     private func mergedDictionaryUnlocked(for mode: Mode?) -> [String] {
         let key = mode?.id ?? Self.nilModeKey
         if let cached = mergedDictionaryCache[key] { return cached }

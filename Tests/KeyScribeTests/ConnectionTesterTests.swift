@@ -181,6 +181,7 @@ struct AIServiceTestStateTests {
         var plain = Mode(id: "plain", name: "Plain")
         plain.aiRewrite = .init(connection: "other", prompt: "rewrite")
         for mode in [email, polish, plain] { try? repository.writeMode(mode) }
+        model.reload()
 
         let names = Set(model.dependentModeNames(of: connection))
         #expect(names == ["Email", "Polish"])

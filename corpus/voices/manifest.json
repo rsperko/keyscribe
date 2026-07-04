@@ -1,0 +1,1092 @@
+{
+  "schemaVersion": 1,
+  "corpus": "voices",
+  "clips": [
+    {
+      "id": "cmd_pause__k_af_heart",
+      "file": "cmd_pause__k_af_heart.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:kokoro:af_heart",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__k_af_heart",
+      "file": "cmd_after__k_af_heart.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:kokoro:af_heart",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__k_af_heart",
+      "file": "lit_ticket__k_af_heart.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:kokoro:af_heart",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__k_af_heart",
+      "file": "lit_itch__k_af_heart.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:kokoro:af_heart",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__k_af_bella",
+      "file": "cmd_pause__k_af_bella.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:kokoro:af_bella",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__k_af_bella",
+      "file": "cmd_runon__k_af_bella.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:kokoro:af_bella",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__k_af_bella",
+      "file": "cmd_after__k_af_bella.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:kokoro:af_bella",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__k_af_bella",
+      "file": "lit_ticket__k_af_bella.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:kokoro:af_bella",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__k_af_bella",
+      "file": "lit_itch__k_af_bella.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:kokoro:af_bella",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__k_am_michael",
+      "file": "cmd_pause__k_am_michael.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:kokoro:am_michael",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__k_am_michael",
+      "file": "cmd_runon__k_am_michael.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:kokoro:am_michael",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__k_am_michael",
+      "file": "cmd_after__k_am_michael.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:kokoro:am_michael",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__k_am_michael",
+      "file": "cmd_end__k_am_michael.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:kokoro:am_michael",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__k_am_michael",
+      "file": "lit_ticket__k_am_michael.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:kokoro:am_michael",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__k_am_michael",
+      "file": "lit_itch__k_am_michael.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:kokoro:am_michael",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__k_am_adam",
+      "file": "cmd_pause__k_am_adam.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:kokoro:am_adam",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__k_am_adam",
+      "file": "cmd_after__k_am_adam.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:kokoro:am_adam",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__k_am_adam",
+      "file": "lit_ticket__k_am_adam.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:kokoro:am_adam",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__k_am_adam",
+      "file": "lit_itch__k_am_adam.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:kokoro:am_adam",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__k_bf_emma",
+      "file": "cmd_pause__k_bf_emma.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:kokoro:bf_emma",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__k_bf_emma",
+      "file": "cmd_runon__k_bf_emma.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:kokoro:bf_emma",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__k_bf_emma",
+      "file": "cmd_after__k_bf_emma.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:kokoro:bf_emma",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__k_bf_emma",
+      "file": "cmd_end__k_bf_emma.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:kokoro:bf_emma",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__k_bf_emma",
+      "file": "lit_ticket__k_bf_emma.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:kokoro:bf_emma",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__k_bf_emma",
+      "file": "lit_itch__k_bf_emma.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:kokoro:bf_emma",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__k_bm_george",
+      "file": "cmd_pause__k_bm_george.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:kokoro:bm_george",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__k_bm_george",
+      "file": "cmd_runon__k_bm_george.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:kokoro:bm_george",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__k_bm_george",
+      "file": "cmd_after__k_bm_george.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:kokoro:bm_george",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__k_bm_george",
+      "file": "cmd_end__k_bm_george.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:kokoro:bm_george",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__k_bm_george",
+      "file": "lit_ticket__k_bm_george.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:kokoro:bm_george",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__say_daniel",
+      "file": "cmd_pause__say_daniel.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:say:Daniel",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__say_daniel",
+      "file": "cmd_runon__say_daniel.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:say:Daniel",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__say_daniel",
+      "file": "cmd_after__say_daniel.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:say:Daniel",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__say_daniel",
+      "file": "cmd_end__say_daniel.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:say:Daniel",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__say_daniel",
+      "file": "lit_ticket__say_daniel.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:say:Daniel",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__say_daniel",
+      "file": "lit_itch__say_daniel.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:say:Daniel",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__say_karen",
+      "file": "cmd_pause__say_karen.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:say:Karen",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__say_karen",
+      "file": "cmd_runon__say_karen.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:say:Karen",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__say_karen",
+      "file": "cmd_after__say_karen.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:say:Karen",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__say_karen",
+      "file": "cmd_end__say_karen.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:say:Karen",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__say_karen",
+      "file": "lit_ticket__say_karen.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:say:Karen",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__say_karen",
+      "file": "lit_itch__say_karen.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:say:Karen",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__say_moira",
+      "file": "cmd_pause__say_moira.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:say:Moira",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__say_moira",
+      "file": "cmd_runon__say_moira.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:say:Moira",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__say_moira",
+      "file": "cmd_after__say_moira.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:say:Moira",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__say_moira",
+      "file": "cmd_end__say_moira.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:say:Moira",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__say_moira",
+      "file": "lit_ticket__say_moira.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:say:Moira",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__say_moira",
+      "file": "lit_itch__say_moira.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:say:Moira",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__say_rishi",
+      "file": "cmd_pause__say_rishi.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:say:Rishi",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__say_rishi",
+      "file": "cmd_runon__say_rishi.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:say:Rishi",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__say_rishi",
+      "file": "cmd_after__say_rishi.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:say:Rishi",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__say_rishi",
+      "file": "cmd_end__say_rishi.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:say:Rishi",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__say_rishi",
+      "file": "lit_ticket__say_rishi.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:say:Rishi",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__say_rishi",
+      "file": "lit_itch__say_rishi.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:say:Rishi",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__say_tessa",
+      "file": "cmd_pause__say_tessa.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:say:Tessa",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__say_tessa",
+      "file": "cmd_runon__say_tessa.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:say:Tessa",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__say_tessa",
+      "file": "cmd_after__say_tessa.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:say:Tessa",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__say_tessa",
+      "file": "cmd_end__say_tessa.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:say:Tessa",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__say_tessa",
+      "file": "lit_ticket__say_tessa.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:say:Tessa",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__say_tessa",
+      "file": "lit_itch__say_tessa.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:say:Tessa",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__say_samantha",
+      "file": "cmd_pause__say_samantha.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "tts:say:Samantha",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__say_samantha",
+      "file": "cmd_runon__say_samantha.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "tts:say:Samantha",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__say_samantha",
+      "file": "cmd_after__say_samantha.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "tts:say:Samantha",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__say_samantha",
+      "file": "cmd_end__say_samantha.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "tts:say:Samantha",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__say_samantha",
+      "file": "lit_ticket__say_samantha.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "tts:say:Samantha",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__say_samantha",
+      "file": "lit_itch__say_samantha.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "tts:say:Samantha",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "cmd_pause__human",
+      "file": "cmd_pause__human.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "human",
+      "note": "Pause briefly where the comma is, as if catching yourself.",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_runon__human",
+      "file": "cmd_runon__human.wav",
+      "text": "We went up the hill scratch that we went down the hill",
+      "source": "human",
+      "note": "Say it in ONE breath, no real pause — correct yourself mid-flow.",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_after__human",
+      "file": "cmd_after__human.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "human",
+      "note": "Full stop after \"hill\", then \"Scratch that.\" as its own beat.",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "cmd_end__human",
+      "file": "cmd_end__human.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "human",
+      "note": "Trail off into \"scratch that\" at the very end, then stop.",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "command",
+          "expectTerminator": "yes"
+        }
+      }
+    },
+    {
+      "id": "lit_ticket__human",
+      "file": "lit_ticket__human.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "human",
+      "note": "Normal sentence — \"scratch that lottery ticket\" flows together.",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    },
+    {
+      "id": "lit_itch__human",
+      "file": "lit_itch__human.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "human",
+      "note": "Normal sentence, no pause (literal use).",
+      "checks": {
+        "stt": {
+          "biasTerms": []
+        },
+        "command": {
+          "kind": "literal",
+          "expectTerminator": "no"
+        }
+      }
+    }
+  ]
+}

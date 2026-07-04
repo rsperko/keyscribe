@@ -29,7 +29,8 @@ struct ModeRoutingSection: View {
                     .foregroundStyle(.secondary)
 
                 Text("Limit by app, URL, or window title")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.top, 4)
                 if !mode.constraints.isEmpty && mode.triggerKeys.isEmpty {
                     Text("An app rule alone doesn’t run a mode automatically — give it the same shortcut as Plain Dictation (Fn) to take over in matching apps, or pick it from the menu.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -80,8 +81,9 @@ struct ModeRoutingSection: View {
                         .disabled(newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
+                Divider().padding(.vertical, 4)
                 Text("Choose by spoken phrase")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.semibold))
                 HStack {
                     TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
                         .textFieldStyle(.roundedBorder)

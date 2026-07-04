@@ -79,4 +79,14 @@ struct ResolvedConfigTests {
         let rc = resolved(dictionary: ["Global"])
         #expect(rc.recognitionBiasTerms(for: nil) == ["Global"])
     }
+
+    // mergedDictionary delegates to the same lock-held path recognitionBias/textStages use, sharing one
+    // cache — priming via bias must not diverge from the public accessor.
+    @Test func mergedDictionaryAndBiasShareCache() {
+        var mode = Mode(id: "m", name: "M")
+        mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["ChargeBee", "Postgres"])
+        let rc = resolved(modes: [mode], dictionary: ["Postgres", "Kubernetes"])
+        _ = rc.recognitionBiasTerms(for: mode)
+        #expect(rc.mergedDictionary(for: mode) == ["Postgres", "Kubernetes", "ChargeBee"])
+    }
 }

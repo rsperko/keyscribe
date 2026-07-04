@@ -458,19 +458,19 @@
           </header>
           <div class="card__body" id="newline-out"></div>
         </article>
+        <article class="card card--scratch" id="scratch-card">
+          <header class="card__head">
+            <span class="card__app"><span class="glyph" style="--c: var(--sky)">⌫</span>Scratch that</span>
+            <span class="badge">replace the last segment</span>
+          </header>
+          <div class="card__body" id="scratch-out"></div>
+        </article>
         <article class="card card--clipboard" id="clipboard-card">
           <header class="card__head">
-            <span class="card__app"><span class="glyph" style="--c: var(--sky)">⌘V</span>Clipboard</span>
+            <span class="card__app"><span class="glyph" style="--c: var(--green)">⌘V</span>Clipboard</span>
             <span class="badge">insert clipboard contents</span>
           </header>
           <div class="card__body" id="clipboard-out"></div>
-        </article>
-        <article class="card card--scratch" id="scratch-card">
-          <header class="card__head">
-            <span class="card__app"><span class="glyph" style="--c: var(--green)">⌫</span>Scratch that</span>
-            <span class="badge">remove the last segment</span>
-          </header>
-          <div class="card__body" id="scratch-out"></div>
         </article>
       </div>
     </section>
@@ -486,11 +486,11 @@
     const hudDetail = document.querySelector("#hud-detail");
     const partial = document.querySelector("#partial");
     const cards = [
-      ["#newline-card", "#newline-out", ["Today's list", "Apples"]],
-      ["#clipboard-card", "#clipboard-out", ["Clipboard:", "bananas", "", "Inserted exactly where you said it."]],
-      ["#scratch-card", "#scratch-out", ["Removed:", "oranges", "", "Final text keeps moving."]]
+      ["#newline-card", "#newline-out", ["Today's list", "apples"]],
+      ["#scratch-card", "#scratch-out", ["Today's list", "oranges"]],
+      ["#clipboard-card", "#clipboard-out", ["Today's list", "oranges", "bananas"]]
     ];
-    const raw = "today's list insert new line apples insert new line insert clipboard contents scratch that oranges final note";
+    const raw = "today's list insert new line apples scratch that oranges insert new line insert clipboard contents";
     let waveFrame = 0;
 
     function setHud(state, title, detail) {

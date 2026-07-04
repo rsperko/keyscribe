@@ -2,12 +2,14 @@ import Foundation
 
 // Post-STT text stage, runs before replacements (design.md §4.2.1). Handles spoken editing
 // commands: insert a newline / paragraph break / tab, and "scratch that" (deletes what was just
-// said). Sentence/newline aware. When there is dictated text since the last sentence terminator or
-// newline command, scratch removes that current segment; when the segment is empty (a punctuating
-// STT like Whisper ended the clause with its own terminator, so nothing sits between it and the
-// command), scratch falls back to removing the one previous clause — back to the nearest
-// terminator/comma/semicolon/colon — and stops at a newline/paragraph break so it never crosses a
-// structural boundary. Removing a clause rather than a whole sentence bounds the damage of a
+// said). Every command — a newline/paragraph/tab control char AND a verbatim/clipboard nonce token
+// that a prior tokenizer already spliced in — is a hard scratch boundary and its own undoable unit.
+// "scratch that" removes the most recent unit and never reaches past a command: dictated words since
+// the last boundary are removed; if nothing was said since the last boundary and it is a command,
+// that command is cancelled (undo the newline / tab / clipboard insert); if it is prose (a punctuating
+// STT like Whisper ended the clause with its own terminator), scratch falls back to removing the one
+// previous clause — back to the nearest terminator/comma/semicolon/colon or command boundary.
+// Removing a clause rather than a whole sentence bounds the damage of a
 // mis-fire: under-deleting is re-issuable, over-deleting is silent. "scratch that" only fires when it
 // sits at a clause boundary — its phrase ends with a terminator (. ! ?) or comma, or it ends the
 // utterance — so literal usage like "scratch that lottery ticket" (a continuing word follows) is
@@ -102,22 +104,25 @@ public struct LiveEditsStage: PipelineStage {
                     if let control {
                         if !parts.isEmpty { parts[parts.count - 1] = Self.stripTrailingComma(parts[parts.count - 1]) }
                         parts.append(control)
-                        if action != .tab { resetSegment() }
+                        resetSegment()
                         absorbLeading = true
                     } else {
                         if segmentStart < parts.count {
                             parts.removeSubrange(segmentStart..<parts.count)
-                        } else if segmentStart > 0,
-                                  parts[segmentStart - 1] != Self.newline,
-                                  parts[segmentStart - 1] != Self.paragraph {
-                            var prevStart = segmentStart - 1
-                            while prevStart > 0 {
-                                let before = parts[prevStart - 1]
-                                if before == Self.newline || before == Self.paragraph { break }
-                                if Self.hasBoundaryPunct(before) { break }
-                                prevStart -= 1
+                        } else if segmentStart > 0 {
+                            let prevIndex = segmentStart - 1
+                            if Self.isCommandPart(parts[prevIndex]) {
+                                parts.remove(at: prevIndex)
+                            } else {
+                                var prevStart = prevIndex
+                                while prevStart > 0 {
+                                    let before = parts[prevStart - 1]
+                                    if Self.isCommandPart(before) { break }
+                                    if Self.hasBoundaryPunct(before) { break }
+                                    prevStart -= 1
+                                }
+                                parts.removeSubrange(prevStart..<segmentStart)
                             }
-                            parts.removeSubrange(prevStart..<segmentStart)
                             resetSegment()
                         }
                         absorbLeading = false
@@ -133,7 +138,7 @@ public struct LiveEditsStage: PipelineStage {
                 if !token.isEmpty { absorbLeading = false }
             }
             parts.append(token)
-            if Self.endsWithSentenceTerminator(token) {
+            if Self.endsWithSentenceTerminator(token) || SentinelText.containsSentinel(token) {
                 resetSegment()
             }
             i += 1
@@ -181,6 +186,10 @@ public struct LiveEditsStage: PipelineStage {
     // the command itself, not on dictated content.
     private static func isBoundaryPunct(_ c: Character) -> Bool {
         c == "." || c == "!" || c == "?" || c == "," || c == ";" || c == ":"
+    }
+
+    private static func isCommandPart(_ part: String) -> Bool {
+        part == newline || part == paragraph || part == tab || SentinelText.containsSentinel(part)
     }
 
     private static func hasBoundaryPunct(_ word: String) -> Bool {

@@ -5,7 +5,7 @@
 > room-dependent — your ranking *will* differ, and the top models here are close enough that the
 > order flips easily. Treat this as a sanity check and a reproduction baseline, **not** a
 > leaderboard. To get numbers that reflect *your* setup, record your own corpus — see
-> [`benchmark/README.md`](../../benchmark/README.md).
+> [`corpus/stt/README.md`](../../corpus/stt/README.md).
 
 **Corpus:** 107 clips (the committed `manifest.json` corpus, Tiers 1–3).
 **Recorded:** 2026-06-30, single speaker, quiet room, built-in mic, normal pace.
@@ -38,17 +38,17 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
   default because it's small (440 MB), fast, English-first, and good enough out of the box — not
   because it tops the table. "Recommended" means *sensible default*, not *highest score*.
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
-  `bash benchmark/compare.sh`, and read its "lightest that stays close" pick.
+  `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 
 ## Reproduce on your own voice
 
 ```bash
-bash benchmark/record.sh --tier T2   # record the ranking-grade tier (record more later for T3 precision)
+bash corpus/record.sh --tier T2   # record the ranking-grade tier (record more later for T3 precision)
 ./make-app.sh release                # bundles the MLX metallib Qwen3 needs
-bash benchmark/compare.sh            # ranked report over the engines you have installed
+bash corpus/compare.sh            # ranked report over the engines you have installed
 ```
 
-`compare.sh` writes the raw per-engine numbers to `benchmark/results.json` (gitignored — it's
+`compare.sh` writes the raw per-engine numbers to `corpus/stt/results.json` (gitignored — it's
 your voice) and prints a ranking plus best-accuracy / lightest-that-stays-close / fastest picks.
 Full methodology, corpus tiers, and recording guidance are in
-[`benchmark/README.md`](../../benchmark/README.md).
+[`corpus/stt/README.md`](../../corpus/stt/README.md).

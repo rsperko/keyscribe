@@ -9,10 +9,9 @@ enum ConfigDecode {
         let table: TOMLTable
         do {
             // With no migration steps, reject newer files but let older-or-equal files use additive decode.
-            let source = migrations.isEmpty
-                ? try MigrationRunner.gate(toml: toml, target: supportedVersion)
-                : try MigrationRunner.migrate(toml: toml, target: supportedVersion, steps: migrations).toml
-            table = try TOMLTable(string: source)
+            table = migrations.isEmpty
+                ? try MigrationRunner.gateTable(toml: toml, target: supportedVersion)
+                : try MigrationRunner.migrateTable(toml: toml, target: supportedVersion, steps: migrations).table
         } catch let e as ConfigError {
             throw e
         } catch {

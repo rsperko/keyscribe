@@ -56,12 +56,50 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == ".config")
     }
 
-    // Bracketed-terminator fold applies to verbatim too: a spurious leading period is dropped and
-    // relocated past the (untouched) protected content.
-    @Test func bracketedTerminatorFolds() {
+    // Verbatim spans are NOT folded into a preceding clause (unlike inline clipboard pastes): a
+    // user-delimited span that the speaker set off stays its own clause. (Previously folded to
+    // "the config foo. Next"; that merge was wrong for a standalone span — see the pause-around-markers
+    // report and standaloneVerbatimWithPausesIsNotMerged below.)
+    @Test func verbatimIsNotFoldedIntoThePrecedingClause() {
         let (out, t) = tokenize("the config. begin verbatim foo end verbatim. Next")
-        #expect(out == "the config ⟦SN:VERB:1⟧. Next")
-        #expect(t.restore(out) == "the config foo. Next")
+        #expect(out == "the config. ⟦SN:VERB:1⟧. Next")
+        #expect(t.restore(out) == "the config. foo. Next")
+    }
+
+    // A terminator GLUED to the begin marker (the STT ending the "begin verbatim" clause on a pause) is
+    // a command artifact and is stripped — distinct from a space-separated content-leading terminal
+    // like ".config" (leadingPeriodInContentPreserved), which survives.
+    @Test func terminatorGluedToBeginMarkerIsStripped() {
+        let (out, t) = tokenize("Begin verbatim. keep this end verbatim")
+        #expect(t.restore(out) == "keep this")
+    }
+
+    // The reported case: pausing around the markers makes the STT terminate each clause with a period
+    // ("…sentence. Begin verbatim. …contents. End verbatim. This…"). The begin-marker-glued period is
+    // stripped, the span is not merged into the previous sentence, and the redundant post-end-marker
+    // period collapses into the content's own — so the whole utterance reads cleanly.
+    @Test func standaloneVerbatimWithPausesReadsCleanly() {
+        let (out, t) = tokenize(
+            "This is the start of the sentence. Begin verbatim. Insert the board contents. End verbatim. This is the end of the sentence.")
+        let restored = t.restore(out)
+        #expect(!restored.contains("sentence . Insert"))   // no floating space-period (was the bug)
+        #expect(!restored.contains("sentence Insert"))      // not merged into the previous clause
+        #expect(!restored.contains("contents.."))           // no double period (was the bug)
+        #expect(restored == "This is the start of the sentence. Insert the board contents. This is the end of the sentence.")
+    }
+
+    // Safe trailing-collapse: the content already ends a clause, so the redundant period the STT put
+    // after the end marker (a pause artifact) is dropped — the content's terminator stands.
+    @Test func redundantPostMarkerTerminatorCollapses() {
+        let (out, t) = tokenize("say begin verbatim done. end verbatim. Next")
+        #expect(t.restore(out) == "say done. Next")
+    }
+
+    // The collapse NEVER strips the content's own terminator: an intended "Hello!" survives, and only
+    // the redundant post-marker period is dropped.
+    @Test func intendedContentTerminatorSurvivesTheCollapse() {
+        let (out, t) = tokenize("say begin verbatim Hello! end verbatim. Next")
+        #expect(t.restore(out) == "say Hello! Next")
     }
 
     // A wall of pause commas around the markers must resolve (and not backtrack pathologically).

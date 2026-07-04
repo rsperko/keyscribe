@@ -166,29 +166,44 @@ struct ModeEditorView: View {
         DisclosureSection(isExpanded: $recognitionExpanded) {
             DisclosureSummaryLabel(title: "Recognition and replacements", summary: recognitionSummary)
         } content: {
+            Text("Add to this mode")
+                .font(.subheadline.weight(.semibold))
             VocabularyComposer(
                 onAddWord: addWord,
                 onAddReplacement: addReplacementRule)
             Text("Mode-only words and replacements apply on top of the global lists for this mode.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            if mode.source != .selection {
-                Toggle("Write numbers as digits", isOn: bind.commandsBinding(\.numbers))
-                Text("Numbers are tidied on this Mac, before any AI rewrite.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
+            Text("Words to recognize")
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 4)
             Text("Mode-only names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.")
                 .font(.caption).foregroundStyle(.secondary)
             DictionaryRows(
                 words: mode.dictionary.words,
                 onRemove: removeWord)
+            if mode.dictionary.words.isEmpty {
+                Text("None yet").font(.caption).foregroundStyle(.tertiary)
+            }
 
+            Text("Automatic replacements")
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 4)
             Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
                 .font(.caption).foregroundStyle(.secondary)
             ReplacementRows(
                 rules: mode.replacements.rules,
                 onRemove: removeReplacement(at:))
+            if mode.replacements.rules.isEmpty {
+                Text("None yet").font(.caption).foregroundStyle(.tertiary)
+            }
+
+            if mode.source != .selection {
+                Divider().padding(.vertical, 4)
+                Toggle("Write numbers as digits", isOn: bind.commandsBinding(\.numbers))
+                Text("Numbers are tidied on this Mac, before any AI rewrite.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

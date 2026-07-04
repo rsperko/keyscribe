@@ -10,6 +10,7 @@ struct AIConnectionDraftEditor: View {
     let presentation: Presentation
     @Binding var draft: AIConnectionDraft
     let hasStoredKey: Bool
+    var dependentModeNames: [String] = []
     let testState: ConnectionTestState?
     var autofocusName = false
     let onCommit: (AIConnectionDraft, String?) -> Void
@@ -48,6 +49,7 @@ struct AIConnectionDraftEditor: View {
         Form {
             Section("Service") {
                 serviceRows
+                usedByRow
             }
             if draft.provider == .openaiCompatible {
                 Section("Endpoint") {
@@ -108,6 +110,16 @@ struct AIConnectionDraftEditor: View {
             }
             .labelsHidden()
             .frame(maxWidth: 230, alignment: .trailing)
+        }
+    }
+
+    @ViewBuilder private var usedByRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Used by")
+            Spacer()
+            Text(dependentModeNames.isEmpty ? "No modes yet" : dependentModeNames.joined(separator: ", "))
+                .foregroundStyle(dependentModeNames.isEmpty ? .tertiary : .secondary)
+                .multilineTextAlignment(.trailing)
         }
     }
 

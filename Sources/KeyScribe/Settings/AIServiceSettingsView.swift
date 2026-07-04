@@ -37,6 +37,7 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published private(set) var keyedRefs: Set<String> = []
     @Published var pendingConnectOffer: ConnectModesOffer?
     @Published var lastCreatedId: String?
+    @Published private(set) var dependentNamesByConnection: [String: [String]] = [:]
 
     private let repository: ConfigRepository
     private var supportDir: URL { repository.supportDir }
@@ -113,7 +114,17 @@ final class AIServiceSettingsModel: ObservableObject {
             loadedSignature = signature
         }
         refreshKeyedRefs()
+        recomputeDependents()
         error = nil
+    }
+
+    private func recomputeDependents() {
+        var map: [String: [String]] = [:]
+        for mode in ModeStore.loadAll(in: modesDir) {
+            guard let id = mode.aiRewrite?.connection, !id.isEmpty else { continue }
+            map[id, default: []].append(mode.name)
+        }
+        dependentNamesByConnection = map
     }
 
     private func refreshKeyedRefs() {
@@ -143,9 +154,7 @@ final class AIServiceSettingsModel: ObservableObject {
     func consumeCreated() { lastCreatedId = nil }
 
     func dependentModeNames(of connection: Connection) -> [String] {
-        ModeStore.loadAll(in: modesDir)
-            .filter { $0.aiRewrite?.connection == connection.id }
-            .map(\.name)
+        dependentNamesByConnection[connection.id] ?? []
     }
 
     private func modesNeedingConnection() -> [Mode] {
@@ -166,6 +175,7 @@ final class AIServiceSettingsModel: ObservableObject {
         }
         error = failed.isEmpty ? nil
             : "Could not connect \(failed.joined(separator: ", ")) to \(offer.connectionName)."
+        recomputeDependents()
     }
 
     func update(_ connection: Connection, apiKey: String?) {
@@ -231,13 +241,20 @@ struct AIServiceSettingsView: View {
             List(selection: $model.selectedID) {
                 ForEach(model.connections) { connection in
                     let status = rowStatus(connection)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(connection.name)
-                        Text("\(providerLabel(connection.provider)) · \(connection.model)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Label(status.text, systemImage: status.icon)
+                    let usage = model.dependentModeNames(of: connection).count
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(connection.name)
+                            Text("\(providerLabel(connection.provider)) · \(connection.model)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Label(status.text, systemImage: status.icon)
+                                .font(.caption2)
+                                .foregroundStyle(status.style)
+                        }
+                        Spacer()
+                        Text(usage == 0 ? "Unused" : "\(usage) mode\(usage == 1 ? "" : "s")")
                             .font(.caption2)
-                            .foregroundStyle(status.style)
+                            .foregroundStyle(usage == 0 ? .tertiary : .secondary)
                     }
                     .tag(connection.id)
                 }
@@ -256,6 +273,7 @@ struct AIServiceSettingsView: View {
                 if let connection = model.selected {
                     AIServiceEditor(
                         connection: connection, hasKey: model.hasKey(connection),
+                        dependentModeNames: model.dependentModeNames(of: connection),
                         testState: model.testState(for: connection.id),
                         modelSuggestions: model.modelSuggestions(for: connection.id),
                         modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
@@ -357,6 +375,7 @@ struct AIServiceSettingsView: View {
 private struct AIServiceEditor: View {
     let connection: Connection
     let hasKey: Bool
+    var dependentModeNames: [String] = []
     let testState: ConnectionTestState?
     let modelSuggestions: [String]
     let modelDiscoveryState: ModelDiscoveryState?
@@ -371,6 +390,7 @@ private struct AIServiceEditor: View {
     init(
         connection: Connection,
         hasKey: Bool,
+        dependentModeNames: [String] = [],
         testState: ConnectionTestState?,
         modelSuggestions: [String],
         modelDiscoveryState: ModelDiscoveryState?,
@@ -383,6 +403,7 @@ private struct AIServiceEditor: View {
     ) {
         self.connection = connection
         self.hasKey = hasKey
+        self.dependentModeNames = dependentModeNames
         self.testState = testState
         self.modelSuggestions = modelSuggestions
         self.modelDiscoveryState = modelDiscoveryState
@@ -404,6 +425,7 @@ private struct AIServiceEditor: View {
             presentation: .settings,
             draft: $draft,
             hasStoredKey: hasKey,
+            dependentModeNames: dependentModeNames,
             testState: testState,
             autofocusName: autofocusName,
             onCommit: commit,

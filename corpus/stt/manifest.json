@@ -1,0 +1,1857 @@
+{
+  "schemaVersion": 1,
+  "corpus": "stt",
+  "clips": [
+    {
+      "id": "01",
+      "file": "01.wav",
+      "text": "The quarterly report is due on Friday afternoon.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "02",
+      "file": "02.wav",
+      "text": "Can you move our meeting to three o'clock tomorrow?",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "03",
+      "file": "03.wav",
+      "text": "I think we should rewrite this paragraph to be more concise.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "04",
+      "file": "04.wav",
+      "text": "Let's deploy the service to Kubernetes before the demo.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Kubernetes"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "05",
+      "file": "05.wav",
+      "text": "I love using KeyScribe for dictation every single day.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "KeyScribe"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "06",
+      "file": "06.wav",
+      "text": "The Postgres query is slow, so check the Grafana dashboard.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Postgres",
+            "Grafana"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "07",
+      "file": "07.wav",
+      "text": "Ask Anthropic whether Claude supports tool use.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Anthropic",
+            "Claude"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "08",
+      "file": "08.wav",
+      "text": "We pinned the WhisperKit and FluidAudio forks in the package.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "WhisperKit",
+            "FluidAudio"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "09",
+      "file": "09.wav",
+      "text": "Run the model through oMLX and Parakeet for comparison.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "oMLX",
+            "Parakeet"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "10",
+      "file": "10.wav",
+      "text": "The patient presented with tachycardia and mild dyspnea.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "tachycardia",
+            "dyspnea"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "11",
+      "file": "11.wav",
+      "text": "Configure OAuth and rotate the JWT signing key.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "OAuth",
+            "JWT"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "12",
+      "file": "12.wav",
+      "text": "Send the subpoena to opposing counsel by end of day.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "subpoena"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "13",
+      "file": "13.wav",
+      "text": "Our GraphQL endpoint needs a new resolver for invoices.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GraphQL"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "14",
+      "file": "14.wav",
+      "text": "Schedule a sync with Rajesh and Anya next Tuesday.",
+      "source": "human",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Rajesh",
+            "Anya"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "15",
+      "file": "15.wav",
+      "text": "The Nginx config proxies requests to the Redis cache layer.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Nginx",
+            "Redis"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "16",
+      "file": "16.wav",
+      "text": "When I dictate long passages I want the engine to keep up without dropping words, handle natural pauses, and still get domain terms like Kubernetes and Prometheus right.",
+      "source": "human",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Kubernetes",
+            "Prometheus"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c01",
+      "file": "c01.wav",
+      "text": "all good. yes.",
+      "source": "human",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c02",
+      "file": "c02.wav",
+      "text": "yep, will do.",
+      "source": "human",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c03",
+      "file": "c03.wav",
+      "text": "gotcha, thanks.",
+      "source": "human",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c04",
+      "file": "c04.wav",
+      "text": "that one is done.",
+      "source": "human",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c05",
+      "file": "c05.wav",
+      "text": "good catch, fixed.",
+      "source": "human",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c06",
+      "file": "c06.wav",
+      "text": "let me push mine first.",
+      "source": "human",
+      "tags": [
+        "cmd"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c07",
+      "file": "c07.wav",
+      "text": "came into a full disk this morning, so i am doing some clean up before i push.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c08",
+      "file": "c08.wav",
+      "text": "my machine is stuck again, still pushing mine, but i can pair whenever you are free.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c09",
+      "file": "c09.wav",
+      "text": "i found a much smaller model that seems to be working well for me so far.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c10",
+      "file": "c10.wav",
+      "text": "i am leaving some robots digging on it overnight and i will see what they find.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "robots"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c11",
+      "file": "c11.wav",
+      "text": "git is not letting me push, naturally, the one time i am in a hurry.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c12",
+      "file": "c12.wav",
+      "text": "We had a solid meeting where we identified the gap and closed it before end of day.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c13",
+      "file": "c13.wav",
+      "text": "I am cranking out the pull requests now, and I am pushing for reviews so we can ship this week.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c14",
+      "file": "c14.wav",
+      "text": "That was my miss. I did not communicate the urgency clearly, and I should have flagged it sooner.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c15",
+      "file": "c15.wav",
+      "text": "I am probably wrong about this, but I think we can remove that step entirely.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c16",
+      "file": "c16.wav",
+      "text": "The rebase failed with merge conflicts, so I will resolve them by hand and push again.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "rebase"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c17",
+      "file": "c17.wav",
+      "text": "Rebaking the primary key means touching every row, so we probably do not want that.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "primary key"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c18",
+      "file": "c18.wav",
+      "text": "The Postgres query is slow, so check the Grafana dashboard before we deploy.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Postgres",
+            "Grafana"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c19",
+      "file": "c19.wav",
+      "text": "Add the label to the pull request to put it in the merge queue.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c20",
+      "file": "c20.wav",
+      "text": "Configure OAuth and rotate the signing key before this goes to production.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "OAuth"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c21",
+      "file": "c21.wav",
+      "text": "The CI run is flaky, so I retried it twice and it is green now.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "CI"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c22",
+      "file": "c22.wav",
+      "text": "I had to fork three projects to get word bias working across the different STT engines.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "STT"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c23",
+      "file": "c23.wav",
+      "text": "It should say FluidAudio, not fluid audio, so the dictionary bias has to catch it.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "FluidAudio"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c24",
+      "file": "c24.wav",
+      "text": "Run the clip through Parakeet and WhisperKit and compare the word error rate.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Parakeet",
+            "WhisperKit"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c25",
+      "file": "c25.wav",
+      "text": "The Qwen model is the speed and accuracy sweet spot, but the larger one wins on recall.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Qwen"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c26",
+      "file": "c26.wav",
+      "text": "I have found Gemini Flash to be good enough for the rewrite pass once the secrets are tokenized out.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Gemini Flash"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c27",
+      "file": "c27.wav",
+      "text": "Can you move our sync with Priya and Marcus to three o'clock tomorrow?",
+      "source": "human",
+      "tags": [
+        "names",
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Priya",
+            "Marcus"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c28",
+      "file": "c28.wav",
+      "text": "I will email Eleanor the notes and loop in Thiago before the review.",
+      "source": "human",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Eleanor",
+            "Thiago"
+          ],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c29",
+      "file": "c29.wav",
+      "text": "Invoice 4072 is due on Friday the 13th, total is $1,284.50.",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c30",
+      "file": "c30.wav",
+      "text": "Meet me at 9:45 a.m. on June 24th, room 218, bring the laptop.",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T1"
+        }
+      }
+    },
+    {
+      "id": "c31",
+      "file": "c31.wav",
+      "text": "i did a spike yesterday that i want to chat about, it is rough but the idea is there.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c32",
+      "file": "c32.wav",
+      "text": "sorry, had to deal with a personal thing, i can meet whenever works for you.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c33",
+      "file": "c33.wav",
+      "text": "once i push mine and compare the two, i should be ready to pair on it.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c34",
+      "file": "c34.wav",
+      "text": "i really do not have much on my plate today, just a personal project i am focused on.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c35",
+      "file": "c35.wav",
+      "text": "the robots are giving me really high estimates, so i want to vet that before i share.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "robots"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c36",
+      "file": "c36.wav",
+      "text": "i cannot ship code to save my life today, third failed build in a row.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c37",
+      "file": "c37.wav",
+      "text": "i started burning my own tokens on this over the weekend and i like where it landed.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c38",
+      "file": "c38.wav",
+      "text": "still pressing the numbers, i feel like that estimate is high, or something like that.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c39",
+      "file": "c39.wav",
+      "text": "i think so, let me double check and get back to you in a few minutes.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c40",
+      "file": "c40.wav",
+      "text": "it broke my computer during the build, but i still love being able to distill a long thread.",
+      "source": "human",
+      "tags": [
+        "casual"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c41",
+      "file": "c41.wav",
+      "text": "I am going to let them dig a bit more before I lock them down on timelines.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c42",
+      "file": "c42.wav",
+      "text": "I worked in the evening because I am fixated on the dictation project, not because anyone asked.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c43",
+      "file": "c43.wav",
+      "text": "You are good, I did not double check the numbers, so the mistake is on me.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c44",
+      "file": "c44.wav",
+      "text": "Is it worse to not remember that, or to start the whole thing over again?",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c45",
+      "file": "c45.wav",
+      "text": "I am obviously relying heavily on the robots, and I am verifying the status as I go.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "robots"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c46",
+      "file": "c46.wav",
+      "text": "I would like to get this change in the queue as soon as possible, I would appreciate some eyes on it.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c47",
+      "file": "c47.wav",
+      "text": "I do not love that approach, because it pushes the complexity onto every caller.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c48",
+      "file": "c48.wav",
+      "text": "We do have to give some sense of timelines, even if the later steps are still fuzzy.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c49",
+      "file": "c49.wav",
+      "text": "I am starting on the pull requests to catch this back up, that delay was my fault.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c50",
+      "file": "c50.wav",
+      "text": "Any reason this does not guard the early return? I might be missing something obvious.",
+      "source": "human",
+      "tags": [
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c51",
+      "file": "c51.wav",
+      "text": "The migration is reversible, but it locks the table, so we should run it off hours.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "migration"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c52",
+      "file": "c52.wav",
+      "text": "Back up the data first, then run the backfill in batches so we do not saturate the database.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "backfill"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c53",
+      "file": "c53.wav",
+      "text": "The webhook fans out to multiple topics from a single change, which is what we wanted.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "webhook"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c54",
+      "file": "c54.wav",
+      "text": "Deploy the service to Kubernetes and watch the latency before the demo.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Kubernetes"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c55",
+      "file": "c55.wav",
+      "text": "The GraphQL endpoint needs a new resolver, and the depth-first path already exists.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GraphQL"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c56",
+      "file": "c56.wav",
+      "text": "The Nginx config proxies the request to the Redis cache layer before it hits the app.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Nginx",
+            "Redis"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c57",
+      "file": "c57.wav",
+      "text": "Check whether the flag is at one hundred percent before you remove the legacy branch.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c58",
+      "file": "c58.wav",
+      "text": "I think we need to remove the translations, they are not used anywhere anymore.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c59",
+      "file": "c59.wav",
+      "text": "The selective tests went flaky three times, so I escalated it instead of burning the retry budget.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c60",
+      "file": "c60.wav",
+      "text": "Pin the dependency to the commit, the latest release has the empty output bug.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c61",
+      "file": "c61.wav",
+      "text": "Run EXPLAIN on the query and see if it is doing a sequential scan on that column.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "EXPLAIN"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c62",
+      "file": "c62.wav",
+      "text": "The index is missing on the foreign key, that is why the join is slow.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c63",
+      "file": "c63.wav",
+      "text": "The token to original map stays in memory only, it is never logged or written to history.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c64",
+      "file": "c64.wav",
+      "text": "Verbatim spans get tokenized first, and redaction tokens get added last, just before the rewrite.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c65",
+      "file": "c65.wav",
+      "text": "Moonshine has no on-device bias path, so I badged it as no dictionary bias.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Moonshine"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c66",
+      "file": "c66.wav",
+      "text": "The MLX metallib is a hard runtime requirement, Qwen crashes without it.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "MLX",
+            "Qwen"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c67",
+      "file": "c67.wav",
+      "text": "Paste is the primary insertion path, it lands across Electron and native apps and undoes in one keystroke.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Electron"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c68",
+      "file": "c68.wav",
+      "text": "The Globe key and right Option are both capturable and distinguishable through the event tap.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c69",
+      "file": "c69.wav",
+      "text": "Parakeet bias is constrained CTC keyword spotting, not a blind post-processing rescorer.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Parakeet",
+            "CTC"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c70",
+      "file": "c70.wav",
+      "text": "Whisper bias breaks in every stock release because of the prompt token bug.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Whisper"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c71",
+      "file": "c71.wav",
+      "text": "When the privacy toggle is on, the context checkboxes are forced off and locked.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c72",
+      "file": "c72.wav",
+      "text": "The post rewrite gate checks that every redaction token came back exactly once, or it falls back locally.",
+      "source": "human",
+      "tags": [
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c73",
+      "file": "c73.wav",
+      "text": "Schedule a sync with Rajesh and Anya next Tuesday and send the agenda ahead of time.",
+      "source": "human",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Rajesh",
+            "Anya"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c74",
+      "file": "c74.wav",
+      "text": "Ask Sofia whether the design review can slip to Thursday morning.",
+      "source": "human",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Sofia"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c75",
+      "file": "c75.wav",
+      "text": "Loop in Dmitri and Yuki on the thread, they own that part of the system.",
+      "source": "human",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Dmitri",
+            "Yuki"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c76",
+      "file": "c76.wav",
+      "text": "I will introduce you to Hassan, he has the most context on the older code.",
+      "source": "human",
+      "tags": [
+        "names"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Hassan"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c77",
+      "file": "c77.wav",
+      "text": "The build finished in 4 minutes and 32 seconds, down from 11 minutes yesterday.",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c78",
+      "file": "c78.wav",
+      "text": "Resident memory sits around 38 megabytes, and the transcribe call is roughly 80 milliseconds.",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c79",
+      "file": "c79.wav",
+      "text": "Open parenthesis, see the footnote, close parenthesis, then continue the sentence.",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c80",
+      "file": "c80.wav",
+      "text": "Reschedule to 2026-06-30 at 4 p.m., and cancel the 10:15 if it conflicts.",
+      "source": "human",
+      "tags": [
+        "punct"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c81",
+      "file": "c81.wav",
+      "text": "The patient presented with tachycardia and mild dyspnea overnight.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "tachycardia",
+            "dyspnea"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c82",
+      "file": "c82.wav",
+      "text": "Send the subpoena to opposing counsel by end of day.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "subpoena"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c83",
+      "file": "c83.wav",
+      "text": "The espresso machine needs a new portafilter gasket and a backflush.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "portafilter"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c84",
+      "file": "c84.wav",
+      "text": "We tuned the carburetor and replaced the alternator on the old wagon.",
+      "source": "human",
+      "tags": [
+        "tech"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "carburetor",
+            "alternator"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "c85",
+      "file": "c85.wav",
+      "text": "When I dictate a long passage I want the engine to keep up without dropping words, handle the natural pauses where I stop to think, and still get the domain terms right, things like Kubernetes and Postgres and FluidAudio, even when I am talking quickly and running sentences together the way I actually do when I am heads down on a problem.",
+      "source": "human",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Kubernetes",
+            "Postgres",
+            "FluidAudio"
+          ],
+          "tier": "T3"
+        }
+      }
+    },
+    {
+      "id": "c86",
+      "file": "c86.wav",
+      "text": "Here is where I landed after the weekend. I found a much smaller model that is memory efficient, I got word bias working across every engine, and I wired the whole pipeline together so a dictation goes from speech, to the text stages, to an optional rewrite, and inserts atomically. It still takes a moment when there is a rewrite in the loop, but it is good enough that I have been using it every single day.",
+      "source": "human",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T3"
+        }
+      }
+    },
+    {
+      "id": "c87",
+      "file": "c87.wav",
+      "text": "The plan is straightforward even if it is tedious. I am going to land the early pull requests first, get reviews while the later steps are still being figured out, and give a rough sense of timelines without pretending the hard part is solved. I do not know exactly how long the last step will take, so I would rather say that out loud than guess and be wrong later.",
+      "source": "human",
+      "tags": [
+        "long",
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T3"
+        }
+      }
+    },
+    {
+      "id": "c88",
+      "file": "c88.wav",
+      "text": "I am going to walk through my reasoning so you can poke holes in it. We could rebake the primary key, but that touches every row and it is a large table, so the cost is real. The alternative avoids the extra hop entirely, which is why I am leaning that way, but I am not attached to it, and if you see a problem I am missing I would genuinely rather hear it now than after we ship.",
+      "source": "human",
+      "tags": [
+        "long",
+        "status"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "primary key"
+          ],
+          "tier": "T3"
+        }
+      }
+    },
+    {
+      "id": "c89",
+      "file": "c89.wav",
+      "text": "Recording for a benchmark is more work than people expect. You read each line exactly as written, save it as its own clip, keep your normal microphone and your normal pace, and then you re-record a handful of them in a slightly noisy room so you have something to measure robustness against. It is an afternoon of talking plus the time to verify every transcript, which is why I am building it up in tiers instead of all at once.",
+      "source": "human",
+      "tags": [
+        "long"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T3"
+        }
+      }
+    },
+    {
+      "id": "c90",
+      "file": "c90.wav",
+      "text": "The privacy story is the part I care about most. Speech recognition is always on device, there is no cloud transcription ever, and the only thing that can leave the machine is an optional rewrite that I key myself. Before that call goes out, anything sensitive is tokenized into a nonce, the rewrite happens over the redacted text, and the original is restored locally afterward. There is no telemetry and no analytics, none of it is collected.",
+      "source": "human",
+      "tags": [
+        "long",
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [],
+          "tier": "T3"
+        }
+      }
+    },
+    {
+      "id": "c91",
+      "file": "c91.wav",
+      "text": "Let me give you the full picture in one go, because I keep explaining it in pieces and it comes out scattered. The product is a local first dictation tool for the Mac. You hold a key, you talk, you let go, and the text is inserted into whatever app you are in, all in a single undoable action. Recognition runs entirely on device, so your voice never leaves the machine. There are several engines you can choose from, Parakeet, Whisper, Qwen, Moonshine and a couple of others, and each one supports a dictionary so that when I say FluidAudio or WhisperKit or Kubernetes it comes out spelled correctly instead of as three lowercase words. On top of recognition there is an optional rewrite step that uses a language model, but that is the only thing that ever touches the network, and only after the sensitive parts of the transcript have been swapped out for placeholder tokens. The rewrite happens over that redacted text, the model never sees the real values, and the placeholders are filled back in locally once it returns. If a single placeholder does not come back exactly once, the whole thing falls back to the local transcript and tells me, because a dropped token would either leak something I redacted or corrupt the part I wanted left alone. That gate is a hard check, not a nice to have. The rest is configuration. A mode is just a named bag of settings that a generic pipeline runs, so adding a new one is data, never code, and I can route to different prompts based on a trigger phrase at the end of what I say. It is the kind of thing I would never have finished without leaning hard on the robots, and honestly it is the most fun I have had building something in a long time.",
+      "source": "human",
+      "tags": [
+        "stress",
+        "proj"
+      ],
+      "condition": "normal",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Parakeet",
+            "Whisper",
+            "Qwen",
+            "Moonshine",
+            "FluidAudio",
+            "WhisperKit",
+            "Kubernetes",
+            "robots"
+          ],
+          "tier": "T3"
+        }
+      }
+    }
+  ]
+}

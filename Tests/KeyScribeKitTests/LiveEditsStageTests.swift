@@ -185,10 +185,10 @@ struct LiveEditsStageTests {
             == "blah blah. blah blah blah")
     }
 
-    @Test func scratchThatPreviousSentenceDoesNotCrossNewline() {
-        // the empty-segment fallback stops at a structural break instead of removing across it
+    @Test func scratchAfterNewlineCancelsTheNewline() {
+        // a scratch immediately after a command cancels that command rather than reaching past it
         #expect(run("keep this insert new line scratch that. final")
-            == "keep this\nfinal")
+            == "keep this final")
     }
 
     @Test func scratchThatEmptySegmentStopsAtComma() {
@@ -232,6 +232,33 @@ struct LiveEditsStageTests {
 
     @Test func scratchThatAtEndOfUtteranceFires() {
         #expect(run("keep this. drop this scratch that") == "keep this.")
+    }
+
+    @Test func scratchAfterTabRemovesOnlyWhatFollowsTheTab() {
+        // tab is a segment boundary, so scratch removes only the words after it, not across it
+        #expect(run("column one insert tab character column two scratch that")
+            == "column one\t")
+    }
+
+    @Test func scratchImmediatelyAfterTabCancelsTheTab() {
+        #expect(run("column one insert tab character scratch that")
+            == "column one")
+    }
+
+    @Test func scratchImmediatelyAfterClipboardTokenCancelsIt() {
+        // the user's case: a comma-joined clipboard command cancelled, surrounding text untouched
+        #expect(run("blah blah ⟦SN:CLIP:1⟧, scratch that, foo foo")
+            == "blah blah foo foo")
+    }
+
+    @Test func scratchDoesNotReachPastAClipboardToken() {
+        // words spoken after a clipboard insert scratch away without deleting the insert
+        #expect(run("alpha ⟦SN:CLIP:1⟧ beta scratch that")
+            == "alpha ⟦SN:CLIP:1⟧")
+    }
+
+    @Test func scratchImmediatelyAfterVerbatimTokenCancelsIt() {
+        #expect(run("⟦SN:VERB:1⟧ scratch that") == "")
     }
 
     @Test func stageRunsBeforeReplacements() {

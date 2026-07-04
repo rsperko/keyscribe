@@ -48,10 +48,10 @@ enum BenchmarkRunner {
             // Warm up so RTF excludes one-time JIT/compile cost.
             if let first = manifest.entries.first {
                 _ = try? await engine.transcribe(
-                    wavURL: dir.appendingPathComponent("\(first.id).wav"), biasTerms: [])
+                    wavURL: dir.appendingPathComponent(first.file), biasTerms: [])
             }
             for entry in manifest.entries {
-                let wav = dir.appendingPathComponent("\(entry.id).wav")
+                let wav = dir.appendingPathComponent(entry.file)
                 guard FileManager.default.fileExists(atPath: wav.path) else {
                     print("  missing \(wav.lastPathComponent), skipping")
                     continue
@@ -109,7 +109,7 @@ enum BenchmarkRunner {
                 continue
             }
             for entry in manifest.entries {
-                let wav = dir.appendingPathComponent("\(entry.id).wav")
+                let wav = dir.appendingPathComponent(entry.file)
                 guard FileManager.default.fileExists(atPath: wav.path) else { continue }
                 let hyp = (try? await engine.transcribe(wavURL: wav, biasTerms: [])) ?? "<error>"
                 let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")

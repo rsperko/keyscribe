@@ -426,6 +426,35 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "first PASTE then PASTE")
     }
 
+    // "scratch that" deleting a verbatim span before the LLM removes an already-issued VERB token from
+    // the sent text. That token is not required by the gate (it never reached the model, so nothing
+    // leaked and nothing needs to come back), so even a token-dropping LLM is accepted — no spurious
+    // fallback for an intentional scratch.
+    @Test func scratchedVerbatimTokenIsNotRequiredByTheGate() async {
+        let m = mode(id: "polish", liveEdits: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "begin verbatim secret sauce end verbatim scratch that. final text",
+            mode: m, connection: conn, llm: DropTokenLLM())
+        #expect(out.outcome == .inserted)
+        #expect(out.lastResult == "completely rewritten with no tokens")
+    }
+
+    // Same for a scratched clipboard command: the clipboard is read (the read gate runs before live
+    // edits) but the CLIP token is scratched out before the LLM, so it is not required, the pasted value
+    // never crosses the boundary, and the rewrite is accepted rather than forced into a local fallback.
+    @Test func scratchedClipboardTokenIsNotRequiredByTheGate() async {
+        let m = mode(id: "polish", liveEdits: true, connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "the path is insert clipboard contents scratch that. use this instead",
+            mode: m, connection: conn, llm: DropTokenLLM(), clipboard: "SECRET")
+        #expect(out.outcome == .inserted)
+        #expect(out.lastResult == "completely rewritten with no tokens")
+        #expect(out.clipboardReadCount == 1)
+        #expect(!(out.lastResult ?? "").contains("SECRET"))
+    }
+
     @Test func liveEditsModeRepairsLLMTrimmedBoundaryNewlinesAndTabs() async {
         let m = mode(id: "polish", liveEdits: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")

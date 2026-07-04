@@ -28,7 +28,7 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
       --commands-check <dir>  Exercise every spoken command (scratch that, verbatim, insert new
                               line/paragraph/tab, insert clipboard contents, whole-utterance
                               replacements) across every installed engine on the recordings in <dir>
-                              (commands.json), then exit. Honors --engines.
+                              (manifest.json), then exit. Honors --engines.
       --capture-probe         Drive the real capture path (record → drain → teardown) and score the
                               result for dropped/corrupted audio you cannot hear. Feed a pure tone into
                               the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,

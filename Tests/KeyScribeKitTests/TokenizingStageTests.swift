@@ -1,6 +1,13 @@
 import Testing
 @testable import KeyScribeKit
 
+// Counts lazy clipboard-provider invocations from inside a @Sendable stage closure. The pipeline runs
+// its stages synchronously on one thread in these tests, so the unchecked box never actually races.
+private final class Counter: @unchecked Sendable {
+    private(set) var value = 0
+    func bump() { value += 1 }
+}
+
 // Verbatim/redaction as pipeline commands (design.md §4.2.1): verbatim sorts before the text stages
 // so its span is protected from everything except STT; redaction sorts after; restore() unwinds
 // both in strict LIFO.
@@ -74,7 +81,7 @@ struct TokenizingStageTests {
     // so the pasted content is opaque to replacements/numbers and to the LLM, then restored.
     @Test func clipboardContentSurvivesTextStages() {
         let p = Pipeline([
-            TokenizingStage.clipboard("twenty five"),
+            TokenizingStage.clipboard(read: { "twenty five" }),
             NumbersStage(),
         ])
         let payload = p.forward("count twenty five insert clipboard contents")
@@ -88,7 +95,7 @@ struct TokenizingStageTests {
     @Test func verbatimAndClipboardDoNotCollide() {
         let p = Pipeline([
             TokenizingStage.verbatim(),
-            TokenizingStage.clipboard("B"),
+            TokenizingStage.clipboard(read: { "B" }),
         ])
         let payload = p.forward("begin verbatim A end verbatim and insert clipboard contents")
         #expect(payload.issuedTokens.count == 2)
@@ -97,15 +104,32 @@ struct TokenizingStageTests {
     }
 
     // A clipboard phrase INSIDE a verbatim span is literal text, not a paste: verbatim sorts before
-    // clipboard, so it swallows the phrase first and clipboard never fires.
+    // clipboard, so it swallows the phrase first and clipboard never fires — AND, because the read is
+    // lazy, the host's clipboard is never even read (privacy: a phrase in a verbatim span must not
+    // trigger a pasteboard read).
     @Test func clipboardPhraseInsideVerbatimStaysLiteral() {
+        let reads = Counter()
         let p = Pipeline([
             TokenizingStage.verbatim(),
-            TokenizingStage.clipboard("PASTED"),
+            TokenizingStage.clipboard(read: { reads.bump(); return "PASTED" }),
         ])
         let payload = p.forward("begin verbatim insert clipboard contents end verbatim")
         #expect(payload.issuedTokens.count == 1)
         #expect(p.restore(payload.text) == "insert clipboard contents")
+        #expect(reads.value == 0)
+    }
+
+    // The mirror of the above: a real (unwrapped) paste DOES read the clipboard exactly once.
+    @Test func clipboardPhraseOutsideVerbatimReadsOnce() {
+        let reads = Counter()
+        let p = Pipeline([
+            TokenizingStage.verbatim(),
+            TokenizingStage.clipboard(read: { reads.bump(); return "PASTED" }),
+        ])
+        let payload = p.forward("insert clipboard contents")
+        #expect(payload.issuedTokens.count == 1)
+        #expect(p.restore(payload.text) == "PASTED")
+        #expect(reads.value == 1)
     }
 
     // Two verbatim spans with EQUAL content must stay distinct tokens (dedup: false), or a faithful

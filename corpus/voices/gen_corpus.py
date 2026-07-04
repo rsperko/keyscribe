@@ -34,6 +34,12 @@ def to_16k_mono(src: Path, dst: Path) -> None:
                    check=True, capture_output=True)
 
 
+def clip(cid: str, text: str, source: str, kind: str, expect: str) -> dict:
+    return {"id": cid, "file": f"{cid}.wav", "text": text, "source": source,
+            "checks": {"stt": {"biasTerms": []},
+                       "command": {"kind": kind, "expectTerminator": expect}}}
+
+
 def main() -> None:
     tmp = HERE / ".tmpwav"
     tmp.mkdir(exist_ok=True)
@@ -57,8 +63,7 @@ def main() -> None:
                 failures.append(cid)
                 continue
             to_16k_mono(Path(f"{prefix}_000.wav"), HERE / f"{cid}.wav")
-            entries.append({"id": cid, "text": text, "biasTerms": [],
-                            "kind": kind, "expectTerminator": expect, "voice": f"kokoro:{v}"})
+            entries.append(clip(cid, text, f"tts:kokoro:{v}", kind, expect))
         print(f"  kokoro {v}: done")
 
     for tag, name in SAY_VOICES.items():
@@ -67,15 +72,17 @@ def main() -> None:
             aiff = tmp / f"{cid}.aiff"
             subprocess.run(["say", "-v", name, "-o", str(aiff), text], check=True)
             to_16k_mono(aiff, HERE / f"{cid}.wav")
-            entries.append({"id": cid, "text": text, "biasTerms": [],
-                            "kind": kind, "expectTerminator": expect, "voice": f"say:{name}"})
+            entries.append(clip(cid, text, f"tts:say:{name}", kind, expect))
         print(f"  say {name}: done")
 
+    # Preserve the hand-recorded human takes verbatim (they carry their own `note` prosody hints);
+    # the committed manifest is the source of truth for `record.sh --voices`.
     man = HERE / "manifest.json"
     human = []
     if man.exists():
-        human = [e for e in json.load(open(man)).get("entries", []) if e.get("voice") == "human"]
-    json.dump({"entries": entries + human}, open(man, "w"), indent=2)
+        human = [c for c in json.load(open(man)).get("clips", []) if c.get("source") == "human"]
+    json.dump({"schemaVersion": 1, "corpus": "voices", "clips": entries + human},
+              open(man, "w"), indent=2, ensure_ascii=False)
     shutil.rmtree(tmp, ignore_errors=True)
 
     print(f"\nwrote {len(entries)} synthetic clips (+{len(human)} human takes preserved) to {HERE}")

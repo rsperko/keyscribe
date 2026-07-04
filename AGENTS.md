@@ -201,10 +201,12 @@ keyscribe/
   scripts/             # dev helpers: setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
                        #   render_app_icon.swift (all reachable via make targets)
   docs/                # user docs, plus development/reference specs
-  benchmark/           # STT benchmark kit: manifest.json + record.sh + compare.sh + README (committed);
-                       #   *.wav recordings + results.json are gitignored (your own voice).
-                       #   Record: bash benchmark/record.sh; rank engines: bash benchmark/compare.sh
-                       #   (compare.sh wraps KeyScribe --benchmark benchmark [--engines a,b])
+  corpus/              # recorded-speech corpus + replay harnesses (committed kit; *.wav + results.json
+                       #   gitignored — your own voice). One folder per sub-corpus = a manifest + flat
+                       #   <id>.wav (the runner convention). Sub-corpora: stt/ engine WER benchmark
+                       #   (→ KeyScribe --benchmark corpus/stt, ranked by compare.sh), commands/ spoken-
+                       #   command regression (→ KeyScribe --commands-check corpus/commands), voices/
+                       #   multi-voice TTS/human studies. Record: bash corpus/record.sh [--commands].
 ```
 
 ---
@@ -320,7 +322,7 @@ KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorde
 107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
 Small) cluster around 5.7–6.0% biased WER; bias is decisive (Moonshine without recognition bias
 ~15%). These numbers are speaker/mic/room dependent — reference table + caveats in
-`docs/reference/stt_benchmarks.md`, reproduction in `benchmark/README.md`. The shipped list order is
+`docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
 "Recommended" badge on the small default.

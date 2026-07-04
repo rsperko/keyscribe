@@ -15,18 +15,19 @@ spikes/
 # Downloaded STT weights — runtime-downloaded, never committed (design.md §4.1, §5)
 models/
 
-# Benchmark corpus — personal voice recordings + run output stay local. The kit (manifest.json,
-# record.sh, README.md, and the voices/ generator + analysis scripts) IS committed so the benchmark
-# is reproducible against your own voice.
-benchmark/*.wav
-benchmark/results.json
-# voices/ "scratch that" regression corpus: generated clips + generated manifest + local TTS venv
-benchmark/voices/*.wav
-benchmark/voices/manifest.json
-benchmark/voices/.ttsenv
-benchmark/voices/.tmpwav
-# commands/ verbal-command verification corpus: recorded/TTS clips stay local; commands.json IS committed
-benchmark/commands/*.wav
+# Speech corpus — personal voice recordings + run output stay local. The kit (each sub-corpus's
+# manifest, the record.sh/compare.sh harnesses, READMEs, and the voices/ generator + analysis
+# scripts) IS committed so every corpus is reproducible against your own voice.
+# stt/ engine-accuracy (WER benchmark) corpus: recorded clips + run output stay local
+corpus/stt/*.wav
+corpus/stt/results.json
+# voices/ "scratch that" study: generated + recorded clips + local TTS venv stay local (manifest.json
+# IS committed — it holds the hand-recorded human takes + prosody notes, and is the record.sh --voices source)
+corpus/voices/*.wav
+corpus/voices/.ttsenv
+corpus/voices/.tmpwav
+# commands/ verbal-command verification corpus: recorded/TTS clips stay local; manifest.json IS committed
+corpus/commands/*.wav
 
 
 # direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead

@@ -88,4 +88,34 @@ struct MigrationRunnerTests {
         #expect(decoded.0 == 2)
         #expect(decoded.1 == "new")
     }
+
+    @Test func gateTableReturnsParsedTable() throws {
+        let table = try MigrationRunner.gateTable(toml: "schema_version = 0\nname = \"x\"", target: 2)
+        #expect(table["schema_version"]?.int == 0)
+        #expect(table["name"]?.string == "x")
+    }
+
+    @Test func gateTableRejectsNewerVersion() {
+        #expect(throws: ConfigError.newerSchemaVersion(found: 3, supported: 1)) {
+            try MigrationRunner.gateTable(toml: "schema_version = 3", target: 1)
+        }
+    }
+
+    @Test func migrateTableMutatesInPlace() throws {
+        let steps = [MigrationStep(from: 1) { $0["added"] = true }]
+        let result = try MigrationRunner.migrateTable(
+            toml: "schema_version = 1\nname = \"x\"", target: 2, steps: steps)
+        #expect(result.didMigrate)
+        #expect(result.table["schema_version"]?.int == 2)
+        #expect(result.table["added"]?.bool == true)
+        #expect(result.table["name"]?.string == "x")
+    }
+
+    @Test func migrateTableAtTargetReturnsParsedOriginal() throws {
+        let result = try MigrationRunner.migrateTable(
+            toml: "schema_version = 2\nname = \"x\"", target: 2, steps: [])
+        #expect(result.didMigrate == false)
+        #expect(result.table["schema_version"]?.int == 2)
+        #expect(result.table["name"]?.string == "x")
+    }
 }

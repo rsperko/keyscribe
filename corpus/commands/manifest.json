@@ -1,0 +1,613 @@
+{
+  "schemaVersion": 1,
+  "corpus": "commands",
+  "description": "Recorded utterances that contain a spoken command, replayed through the real no-LLM dictation pipeline by `KeyScribe --commands-check corpus/commands`. Each case asserts declaratively: `contains` = substrings that must survive (a control char \\n/\\t, the clipboard value, or a literal proving a command did NOT fire); `absent` = substrings that must be gone (a consumed trigger phrase, or text 'scratch that' removed); `equals` = the whole output (whole-utterance replacement, case-exact); `noLeadingPunct` = value with no clause punctuation before it (the clipboard fold). Matching is case-insensitive except `equals`. Record <id>.wav for each case in your own voice — real voice reproduces the spurious punctuation/casing engines emit far better than TTS; `say` is a quick synthetic smoke that will NOT reproduce fold/empty-segment punctuation. The clipboard VALUE below is inserted by the pipeline, never spoken.",
+  "context": {
+    "clipboard": "agent_notes/foo/",
+    "replacements": [
+      {
+        "heard": "slash resume",
+        "replace": "/resume"
+      },
+      {
+        "heard": "slash (\\w+)",
+        "replace": "/$1",
+        "isRegex": true
+      },
+      {
+        "heard": "/resume",
+        "replace": "/resume"
+      },
+      {
+        "heard": "/dog",
+        "replace": "/dog"
+      }
+    ]
+  },
+  "clips": [
+    {
+      "id": "nl01",
+      "file": "nl01.wav",
+      "text": "first thought insert new line second thought",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "\n"
+          ],
+          "absent": [
+            "insert new line"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nl02",
+      "file": "nl02.wav",
+      "text": "here is the plan, insert new line, then the details",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "\n"
+          ],
+          "absent": [
+            "insert new line"
+          ]
+        }
+      }
+    },
+    {
+      "id": "np01",
+      "file": "np01.wav",
+      "text": "wrap up this section insert new paragraph and start fresh",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "\n\n"
+          ],
+          "absent": [
+            "insert new paragraph"
+          ]
+        }
+      }
+    },
+    {
+      "id": "np_period",
+      "file": "np_period.wav",
+      "text": "the plan is done. insert new paragraph next steps below",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "done.",
+            "\n\n"
+          ],
+          "absent": [
+            "insert new paragraph"
+          ]
+        }
+      }
+    },
+    {
+      "id": "tab01",
+      "file": "tab01.wav",
+      "text": "column one insert tab character column two",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "\t"
+          ],
+          "absent": [
+            "insert tab character"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nl_bare_literal",
+      "file": "nl_bare_literal.wav",
+      "text": "please write a new paragraph about the weather now",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "write a new paragraph"
+          ],
+          "absent": [
+            "\n"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_pause",
+      "file": "sc_pause.wav",
+      "text": "We went up the hill, scratch that. We went down the hill.",
+      "source": "human",
+      "checks": {
+        "command": {
+          "contains": [
+            "went down the hill"
+          ],
+          "absent": [
+            "went up the hill",
+            "scratch that"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_after",
+      "file": "sc_after.wav",
+      "text": "We went up the hill. Scratch that. We went down the hill.",
+      "source": "human",
+      "checks": {
+        "command": {
+          "contains": [
+            "went down the hill"
+          ],
+          "absent": [
+            "went up the hill",
+            "scratch that"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_end",
+      "file": "sc_end.wav",
+      "text": "I think the meeting is on Tuesday scratch that",
+      "source": "human",
+      "checks": {
+        "command": {
+          "absent": [
+            "meeting is on Tuesday",
+            "scratch that"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_list_clause",
+      "file": "sc_list_clause.wav",
+      "text": "eggs, milk, bread. scratch that. we are done",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "eggs, milk",
+            "done"
+          ],
+          "absent": [
+            "bread",
+            "scratch that"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_lit_ticket",
+      "file": "sc_lit_ticket.wav",
+      "text": "I told her to scratch that lottery ticket and see if we won",
+      "source": "human",
+      "checks": {
+        "command": {
+          "contains": [
+            "scratch that lottery ticket"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_lit_itch",
+      "file": "sc_lit_itch.wav",
+      "text": "Let me scratch that itch real quick",
+      "source": "human",
+      "checks": {
+        "command": {
+          "contains": [
+            "scratch that itch"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vb01",
+      "file": "vb01.wav",
+      "text": "begin verbatim insert new line end verbatim",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "insert new line"
+          ],
+          "absent": [
+            "begin verbatim",
+            "end verbatim",
+            "\n"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vb02",
+      "file": "vb02.wav",
+      "text": "the flag is begin verbatim insert clipboard contents end verbatim exactly",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "insert clipboard contents"
+          ],
+          "absent": [
+            "begin verbatim",
+            "end verbatim",
+            "agent_notes/foo/"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vb_marker_comma",
+      "file": "vb_marker_comma.wav",
+      "text": "make sure that the begin verbatim, new line, end verbatim, change is in place",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "new line"
+          ],
+          "absent": [
+            "begin verbatim",
+            "end verbatim",
+            "\n"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vb_after_period",
+      "file": "vb_after_period.wav",
+      "text": "begin verbatim keep this end verbatim. Next sentence here",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "keep this"
+          ],
+          "absent": [
+            "begin verbatim",
+            "end verbatim"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vb_start_stop_literal",
+      "file": "vb_start_stop_literal.wav",
+      "text": "the setting is start verbatim keep this stop verbatim exactly",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "start verbatim"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vb_pause_sentence",
+      "file": "vb_pause_sentence.wav",
+      "text": "This is the start of the sentence. Begin verbatim. keep this exact wording. End verbatim. This is the end of the sentence.",
+      "source": "human",
+      "note": "RECORD IN A REAL VOICE with a distinct PAUSE around each marker so the STT terminates the clauses with periods (say cannot reproduce this). Exercises the pause-artifact fixes: begin-marker-glued period stripped, span not merged into the previous clause, redundant post-end-marker period collapsed. Guards against the reported floating ' . ' and double '..'.",
+      "checks": {
+        "command": {
+          "contains": [
+            "keep this",
+            "start of the sentence",
+            "end of the sentence"
+          ],
+          "absent": [
+            "begin verbatim",
+            "end verbatim",
+            " . ",
+            ".."
+          ]
+        }
+      }
+    },
+    {
+      "id": "cb01",
+      "file": "cb01.wav",
+      "text": "read through the directory insert clipboard contents decide whether this makes any sense",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb02",
+      "file": "cb02.wav",
+      "text": "the config file is insert clipboard contents and it looks correct to me",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb03",
+      "file": "cb03.wav",
+      "text": "please compare insert clipboard contents against the previous version",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb04",
+      "file": "cb04.wav",
+      "text": "is the path insert clipboard contents the one you meant",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb05",
+      "file": "cb05.wav",
+      "text": "please insert clipboard content into the notes for later",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb06",
+      "file": "cb06.wav",
+      "text": "double check that insert clipboard contents matches what we expect",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb_qmark",
+      "file": "cb_qmark.wav",
+      "text": "is this the right directory? insert clipboard contents. yes it is",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ],
+          "noLeadingPunct": "agent_notes/foo/"
+        }
+      }
+    },
+    {
+      "id": "cb_risk_period",
+      "file": "cb_risk_period.wav",
+      "text": "here is the path. insert clipboard contents",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "path. agent_notes/foo/"
+          ],
+          "absent": [
+            "clipboard"
+          ]
+        }
+      }
+    },
+    {
+      "id": "wr01",
+      "file": "wr01.wav",
+      "text": "slash resume",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "equals": "/resume"
+        }
+      }
+    },
+    {
+      "id": "wr_regex",
+      "file": "wr_regex.wav",
+      "text": "slash dog",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "equals": "/dog"
+        }
+      }
+    },
+    {
+      "id": "wr_noclamp",
+      "file": "wr_noclamp.wav",
+      "text": "send slash replace to the channel",
+      "source": "tts:say",
+      "checks": {
+        "command": {
+          "contains": [
+            "send",
+            "/replace",
+            "channel"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_tab",
+      "file": "sc_tab.wav",
+      "text": "left side insert tab character right side scratch that",
+      "source": "human",
+      "note": "Say it as one flowing line, with 'scratch that' at the very end.",
+      "checks": {
+        "command": {
+          "contains": [
+            "left side",
+            "\t"
+          ],
+          "absent": [
+            "right side",
+            "scratch that",
+            "insert tab character"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_nl",
+      "file": "sc_nl.wav",
+      "text": "keep this insert new line scratch that. final",
+      "source": "human",
+      "note": "Clear pause and a full stop after 'scratch that' — say it as two sentences, not one run-on.",
+      "checks": {
+        "command": {
+          "contains": [
+            "keep this",
+            "final"
+          ],
+          "absent": [
+            "\n",
+            "scratch that",
+            "insert new line"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nl03",
+      "file": "nl03.wav",
+      "text": "hello insert new line world",
+      "source": "human",
+      "note": "Say it straight through at an even pace; no pause needed.",
+      "checks": {
+        "command": {
+          "contains": [
+            "hello",
+            "world",
+            "\n"
+          ],
+          "absent": [
+            "insert new line"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_cb",
+      "file": "sc_cb.wav",
+      "text": "here is the path insert clipboard contents scratch that. use it anyway",
+      "source": "human",
+      "note": "Clear pause and a full stop after 'scratch that', then continue with 'use it anyway'.",
+      "checks": {
+        "command": {
+          "contains": [
+            "here is the path",
+            "use it anyway"
+          ],
+          "absent": [
+            "agent_notes/foo/",
+            "scratch that",
+            "clipboard"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_cb_keep",
+      "file": "sc_cb_keep.wav",
+      "text": "insert clipboard contents ignore this bit scratch that",
+      "source": "human",
+      "note": "Say it as one flowing line, with 'scratch that' at the very end.",
+      "checks": {
+        "command": {
+          "contains": [
+            "agent_notes/foo/"
+          ],
+          "absent": [
+            "ignore this bit",
+            "scratch that"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sc_vb",
+      "file": "sc_vb.wav",
+      "text": "begin verbatim secret sauce end verbatim scratch that. keep this line",
+      "source": "human",
+      "note": "Clear pause and a full stop after 'scratch that', then continue with 'keep this line'.",
+      "checks": {
+        "command": {
+          "contains": [
+            "keep this line"
+          ],
+          "absent": [
+            "secret sauce",
+            "begin verbatim",
+            "end verbatim",
+            "scratch that"
+          ]
+        }
+      }
+    }
+  ]
+}

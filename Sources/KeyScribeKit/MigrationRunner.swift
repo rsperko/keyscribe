@@ -19,11 +19,24 @@ public enum MigrationRunner {
         return toml
     }
 
+    // Table form for ConfigDecode (parse once). gate(toml:) stays the downstream string API.
+    static func gateTable(toml: String, target: Int) throws -> TOMLTable {
+        try parseAndCheck(toml: toml, target: target).0
+    }
+
     public static func migrate(
         toml: String, target: Int, steps: [MigrationStep]
     ) throws -> (toml: String, didMigrate: Bool) {
+        let (table, didMigrate) = try migrateTable(toml: toml, target: target, steps: steps)
+        return didMigrate ? (table.convert(), true) : (toml, false)
+    }
+
+    // Table form: parse + migrate in place, returned parsed so ConfigDecode skips the serialize/re-parse round-trip.
+    static func migrateTable(
+        toml: String, target: Int, steps: [MigrationStep]
+    ) throws -> (table: TOMLTable, didMigrate: Bool) {
         let (table, version) = try parseAndCheck(toml: toml, target: target)
-        if version == target { return (toml, false) }
+        if version == target { return (table, false) }
 
         var current = version
         while current < target {
@@ -34,7 +47,7 @@ public enum MigrationRunner {
             current += 1
             table["schema_version"] = current
         }
-        return (table.convert(), true)
+        return (table, true)
     }
 
     private static func parseAndCheck(toml: String, target: Int) throws -> (TOMLTable, Int) {

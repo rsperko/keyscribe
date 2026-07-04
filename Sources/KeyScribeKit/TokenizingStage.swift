@@ -40,10 +40,11 @@ public struct TokenizingStage: PipelineStage {
 
     // "insert clipboard contents" — the third protector the machinery above anticipated. Sorts with
     // verbatim (before the text stages) but at a later order, so a verbatim span swallows a clipboard
-    // phrase before it can fire. The clipboard string is captured per-dictation by the host.
-    public static func clipboard(_ clipboard: String?, tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
+    // phrase before it can fire. `read` is a lazy provider the stage invokes only when the command
+    // actually survives to this stage, so an ordinary dictation never reads the host's clipboard.
+    public static func clipboard(read: @escaping @Sendable () -> String?, tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
         TokenizingStage(position: .verbatimMark, order: 1, tokenizer: tokenizer) {
-            ClipboardTokenizer.apply($0, clipboard: clipboard, into: $1)
+            ClipboardTokenizer.apply($0, clipboard: read, into: $1)
         }
     }
 }
@@ -89,7 +90,8 @@ extension Tokenizer {
     // (a "?" stays a "?"). Requiring a terminator on both sides leaves a paste that genuinely starts the
     // next sentence ("It's broken. <paste> fixes it" — no trailing terminator) untouched.
     func spliceAbsorbing(
-        _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true
+        _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true,
+        foldBracketedTerminators: Bool = true, collapseTrailingTerminator: Bool = false
     ) -> String {
         guard !spans.isEmpty else { return text }
         let absorb: Set<Character> = [" ", "\t", ","]
@@ -115,7 +117,7 @@ extension Tokenizer {
 
             let leadingTerminator = result.last.flatMap { terminators.contains($0) ? $0 : nil }
             let bracketed = end < text.endIndex && terminators.contains(text[end])
-            if let leading = leadingTerminator, bracketed {
+            if foldBracketedTerminators, let leading = leadingTerminator, bracketed {
                 result.removeLast()   // drop the artifact leading terminator
                 if let last = result.last, last != " ", last != "\n", last != "\t" { result += " " }
                 result += token(span.value)
@@ -128,10 +130,19 @@ extension Tokenizer {
                 result += " "
             }
             result += token(span.value)
-            if hadRightSeparator, end < text.endIndex, text[end] != "\n" {
-                result += " "
+            // Safe trailing-collapse: if the content already ends a clause AND the STT left a redundant
+            // terminator right after the end marker (a pause artifact), drop the post-marker one — the
+            // content's own terminator stands. Never strips the content's terminator, so an intended
+            // "Hello!" survives.
+            if collapseTrailingTerminator, let contentLast = span.value.last, terminators.contains(contentLast),
+               end < text.endIndex, terminators.contains(text[end]) {
+                cursor = text.index(after: end)
+            } else {
+                if hadRightSeparator, end < text.endIndex, text[end] != "\n" {
+                    result += " "
+                }
+                cursor = end
             }
-            cursor = end
         }
         result += text[cursor...]
         return result

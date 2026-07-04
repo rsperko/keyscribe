@@ -14,21 +14,24 @@ public enum ClipboardTokenizer {
         "insert clipboard content", "insert the clipboard content",
     ]
 
-    // Cheap presence check the host uses to read the clipboard ONLY when the command was spoken, so an
-    // ordinary dictation never touches the user's clipboard.
+    // Cheap presence check that gates the clipboard read: `apply` calls the provider ONLY when the
+    // command was spoken in the (already verbatim-tokenized) text, so an ordinary dictation — or a
+    // clipboard phrase wrapped in a verbatim span — never touches the user's clipboard.
     public static func mentions(_ text: String, phrases: [String] = defaultPhrases) -> Bool {
         guard let re = commandRegex(phrases) else { return false }
         return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     public static func apply(
-        _ text: String, clipboard: String?, phrases: [String] = defaultPhrases, into tokenizer: Tokenizer
+        _ text: String, clipboard: () -> String?, phrases: [String] = defaultPhrases, into tokenizer: Tokenizer
     ) -> String {
-        guard let clipboard, !clipboard.isEmpty, let re = commandRegex(phrases) else { return text }
+        guard let re = commandRegex(phrases),
+              re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil,
+              let clip = clipboard(), !clip.isEmpty else { return text }
         let spans = re.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
             m -> (range: Range<String.Index>, value: String)? in
             guard let r = Range(m.range, in: text) else { return nil }
-            return (r, clipboard)
+            return (r, clip)
         }
         // spliceAbsorbing cleans the pause commas the STT hangs around the command; dedup: false —
         // two "insert clipboard contents" both wrap the SAME clipboard value, so a deduped token would

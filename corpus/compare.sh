@@ -4,11 +4,11 @@
 # *.wav files already in this folder against manifest.json's ground truth, then ranks the results.
 #
 # Usage:
-#   bash benchmark/compare.sh                                       # compare every installed engine
-#   bash benchmark/compare.sh --engines qwen3-asr-0.6b,parakeet     # only these engine ids
-#   bash benchmark/compare.sh --fuzzy                               # also apply the post-STT fuzzy corrector
-#   bash benchmark/compare.sh --raw                                 # raw per-clip transcripts, no scoring
-#   bash benchmark/compare.sh --bin /path/to/KeyScribe              # use a specific build
+#   bash corpus/compare.sh                                       # compare every installed engine
+#   bash corpus/compare.sh --engines qwen3-asr-0.6b,parakeet     # only these engine ids
+#   bash corpus/compare.sh --fuzzy                               # also apply the post-STT fuzzy corrector
+#   bash corpus/compare.sh --raw                                 # raw per-clip transcripts, no scoring
+#   bash corpus/compare.sh --bin /path/to/KeyScribe              # use a specific build
 #
 # Engine ids: parakeet · parakeet-tdt-ctc-110m · whisper · whisper-small-en · apple ·
 #             qwen3-asr-0.6b · qwen3-asr-1.7b · moonshine-base-en
@@ -17,7 +17,7 @@
 set -euo pipefail
 SELF="$(basename "$0")"
 cd "$(dirname "$0")"
-BENCH_DIR="$PWD"
+BENCH_DIR="$PWD/stt"     # the engine-accuracy sub-corpus: manifest.json + flat <id>.wav + results.json
 ROOT="$(cd .. && pwd)"
 
 PASS=()        # flags forwarded verbatim to the --benchmark run
@@ -38,14 +38,14 @@ BIN="${BIN:-$ROOT/.build/release/KeyScribe}"
 if [ ! -x "$BIN" ]; then
   echo "benchmark binary not found at: $BIN" >&2
   echo "Build it once (bundles the MLX metallib Qwen3 needs):  ./make-app.sh release" >&2
-  echo "or point at another build with:  bash benchmark/compare.sh --bin /path/to/KeyScribe" >&2
+  echo "or point at another build with:  bash corpus/compare.sh --bin /path/to/KeyScribe" >&2
   exit 1
 fi
 
 shopt -s nullglob
-wavs=( *.wav )
+wavs=( "$BENCH_DIR"/*.wav )
 if [ ${#wavs[@]} -eq 0 ]; then
-  echo "no recordings in $BENCH_DIR — record some first:  bash benchmark/record.sh --tier T2" >&2
+  echo "no recordings in $BENCH_DIR — record some first:  bash corpus/record.sh --tier T2" >&2
   exit 1
 fi
 echo "Scoring ${#wavs[@]} recordings in $BENCH_DIR …"
@@ -59,9 +59,9 @@ fi
 
 # --raw dumps transcripts and writes no results.json — there is nothing to rank.
 [ "$RAW" -eq 1 ] && exit 0
-[ -f results.json ] || { echo "no results.json produced — no installed engines matched?" >&2; exit 1; }
+[ -f "$BENCH_DIR/results.json" ] || { echo "no results.json produced — no installed engines matched?" >&2; exit 1; }
 
-python3 - results.json <<'PY'
+python3 - "$BENCH_DIR/results.json" <<'PY'
 import json, sys
 res = json.load(open(sys.argv[1]))
 

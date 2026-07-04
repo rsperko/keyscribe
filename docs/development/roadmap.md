@@ -31,6 +31,20 @@
   accessibility pass.
 - **Accessibility / error-state / onboarding polish.** Partial: the error HUD offers a repair action
   on a mic failure, and first run has **Skip for now** on the model + permissions steps. More to do.
+- **Verbatim pause-artifact punctuation — mostly done.** Pausing around the markers makes the STT
+  terminate each clause with a period (`…sentence. Begin verbatim. …contents. End verbatim. This…`).
+  Handled in `VerbatimTokenizer` + `spliceAbsorbing(foldBracketedTerminators:collapseTrailingTerminator:)`:
+  begin-marker-glued terminators are stripped, verbatim spans no longer fold into the preceding clause,
+  and a redundant post-`end verbatim` terminator collapses into the content's own (never stripping the
+  content's, so an intended `Hello!` survives). Validated on real audio — `corpus/commands`
+  `vb_pause_sentence`, clean on Whisper. Two things remain:
+  - **Deferred (ambiguous):** a pause terminator the STT glues to the *content* before `end verbatim`
+    with no post-marker terminator to collapse against is indistinguishable from an intended one
+    (`contentTerminatorIsPreserved`), so it is left as-is.
+  - **Trigger-recognition gap:** when an engine mishears the `end verbatim` trigger (Parakeet
+    `"En verbatim"`, Apple `"and verbatim"`), the span runs unterminated and swallows the tail — a
+    fuzzy-end-marker matching problem, not punctuation. Any future work here needs `--commands-check`
+    with a real-voice recording (`say` cannot reproduce the mid-utterance pause periods).
 
 ### Settings-editor follow-ups
 - Per-keystroke config writes → an explicit **Save** in the mode/connection editors.
