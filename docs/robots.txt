@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://rsperko.github.io/keyscribe/sitemap.xml

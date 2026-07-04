@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KeyScribe - Local-First Voice Dictation for macOS</title>
+  <meta name="description" content="KeyScribe is an open-source macOS dictation app with on-device speech recognition, no telemetry, spoken edits, local history, and optional BYOK AI rewrite modes.">
+  <link rel="canonical" href="https://rsperko.github.io/keyscribe/">
+  <meta property="og:title" content="KeyScribe - Local-First Voice Dictation for macOS">
+  <meta property="og:description" content="On-device speech recognition, no telemetry, spoken edits, and optional BYOK AI rewrite modes.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://rsperko.github.io/keyscribe/">
+  <meta property="og:image" content="https://rsperko.github.io/keyscribe/assets/readme-routing.gif">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="site.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "KeyScribe",
+    "operatingSystem": "macOS",
+    "applicationCategory": "ProductivityApplication",
+    "softwareVersion": "0.1.18",
+    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+    "codeRepository": "https://github.com/rsperko/keyscribe",
+    "downloadUrl": "https://github.com/rsperko/keyscribe/releases",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
+  }
+  </script>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav__inner">
+      <a class="brand" href="./">KeyScribe</a>
+      <div class="nav__links">
+        <a href="download/">Download</a>
+        <a href="privacy/">Privacy</a>
+        <a href="offline-mac-dictation/">Offline Dictation</a>
+        <a href="alternatives/">Alternatives</a>
+        <a href="https://github.com/rsperko/keyscribe">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero__inner">
+      <div class="eyebrow">Open source macOS dictation</div>
+      <h1>Local-first voice dictation for macOS.</h1>
+      <p class="lede">KeyScribe turns speech into finished text wherever you type. Speech recognition always runs on your Mac, there is no telemetry or account, and optional rewrite modes use only providers you configure.</p>
+      <div class="actions">
+        <a class="button button--primary" href="download/">Download KeyScribe</a>
+        <a class="button button--secondary" href="https://github.com/rsperko/keyscribe">View source</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="trust">
+    <div><b>On-device speech</b><span>No cloud speech-to-text path.</span></div>
+    <div><b>No telemetry</b><span>No usage, transcript, or crash collection.</span></div>
+    <div><b>No account</b><span>Install, grant permissions, and dictate.</span></div>
+    <div><b>BYOK optional</b><span>Rewrite only when a mode enables it.</span></div>
+    <div><b>Plain files</b><span>TOML config and local JSONL history.</span></div>
+  </section>
+
+  <section class="section section--white">
+    <div class="section__inner demo">
+      <div>
+        <div class="section__head">
+          <h2>Speak once. Let the mode decide the shape.</h2>
+          <p>Hold a key, say the thought, release, and KeyScribe inserts the result as one undoable edit. A mode can keep the transcript plain, polish it, shape it as email, edit selected text, or route by a spoken suffix such as "as an email."</p>
+        </div>
+        <ul class="list">
+          <li>Trigger by Fn, Right Option, a key chord, app context, URL, or menu choice.</li>
+          <li>Use spoken edits like new line, new paragraph, scratch that, and insert clipboard contents.</li>
+          <li>Correct names and jargon once, then reuse the fix in future dictations.</li>
+        </ul>
+      </div>
+      <div class="demo__media">
+        <img src="assets/readme-routing.gif" alt="KeyScribe routing one dictation through Plain Dictation, Polish, and Email modes">
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section__inner">
+      <div class="section__head">
+        <h2>Built for people who care where their words go.</h2>
+        <p>The default path stays local. Power features are explicit, inspectable, and mode-specific.</p>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <h3>Local speech recognition</h3>
+          <p>Audio is transcribed on your Mac by curated on-device engines. Model weights download on demand and are reused offline.</p>
+        </article>
+        <article class="card">
+          <h3>Optional rewrite modes</h3>
+          <p>Hosted or local OpenAI-compatible providers can polish or transform text only for modes you enable.</p>
+        </article>
+        <article class="card">
+          <h3>Visible privacy boundary</h3>
+          <p>Privacy mode disables context sharing. Best-effort redaction tokenizes recognizable sensitive spans before optional rewrite.</p>
+        </article>
+        <article class="card">
+          <h3>Spoken edits</h3>
+          <p>Insert line breaks, paragraphs, tabs, clipboard contents, verbatim spans, and scratch-that corrections before text lands.</p>
+        </article>
+        <article class="card">
+          <h3>Edit in place</h3>
+          <p>Select existing text, speak an instruction, and replace the selection with a rewritten result in the app you are using.</p>
+        </article>
+        <article class="card">
+          <h3>File ownership</h3>
+          <p>Modes, vocabulary, replacements, connections, prompt fragments, and history live as readable local files.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--white">
+    <div class="section__inner demo">
+      <div class="demo__media">
+        <img src="assets/readme-live-edits.gif" alt="KeyScribe turning spoken commands into line breaks, a scratch-that correction, and inserted clipboard content">
+      </div>
+      <div>
+        <div class="section__head">
+          <h2>Edit while you dictate.</h2>
+          <p>Speech is messy. KeyScribe lets useful command phrases change the text before insertion, while verbatim spans protect text that should stay literal.</p>
+        </div>
+        <ul class="list">
+          <li>Say "insert new line" or "insert new paragraph" while speaking.</li>
+          <li>Say "scratch that" to remove the current segment before insertion.</li>
+          <li>Say "begin verbatim" and "end verbatim" to protect exact wording.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section__inner demo">
+      <div>
+        <div class="section__head">
+          <h2>Install from Homebrew or a notarized DMG.</h2>
+          <p>Current builds are pre-1.0 prereleases for Apple silicon Macs. KeyScribe is a menu-bar app, so after launch look for the waveform glyph in the menu bar.</p>
+        </div>
+        <div class="code">brew install rsperko/tap/keyscribe</div>
+        <div class="actions">
+          <a class="button button--dark" href="download/">Install options</a>
+          <a class="button" href="https://github.com/rsperko/keyscribe/releases">GitHub Releases</a>
+        </div>
+      </div>
+      <div class="grid grid--two">
+        <article class="card">
+          <h3>Requirements</h3>
+          <p>macOS 15+ on Apple silicon. Apple Speech appears only on macOS 26+.</p>
+        </article>
+        <article class="card">
+          <h3>Source build</h3>
+          <p>No paid Apple Developer account is needed for a local dev build.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <span>KeyScribe is open source under GPLv3.</span>
+      <span><a href="privacy/">Privacy</a> · <a href="https://github.com/rsperko/keyscribe/blob/main/FAQ.md">FAQ</a> · <a href="https://github.com/rsperko/keyscribe">GitHub</a></span>
+    </div>
+  </footer>
+</body>
+</html>

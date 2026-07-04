@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KeyScribe Privacy</title>
+  <meta name="description" content="KeyScribe transcribes speech on your Mac, collects no telemetry, and sends text only for optional BYOK rewrite modes you configure.">
+  <link rel="canonical" href="https://rsperko.github.io/keyscribe/privacy/">
+  <meta property="og:title" content="KeyScribe Privacy">
+  <meta property="og:description" content="On-device speech recognition, no telemetry, local history, and explicit optional rewrite boundaries.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://rsperko.github.io/keyscribe/privacy/">
+  <meta property="og:image" content="https://rsperko.github.io/keyscribe/assets/readme-routing.gif">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="../site.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav__inner">
+      <a class="brand" href="../">KeyScribe</a>
+      <div class="nav__links">
+        <a href="../download/">Download</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="../offline-mac-dictation/">Offline Dictation</a>
+        <a href="../alternatives/">Alternatives</a>
+        <a href="https://github.com/rsperko/keyscribe">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="section section--white">
+    <div class="section__inner">
+      <div class="section__head">
+        <h1>Privacy in KeyScribe.</h1>
+        <p>Speech recognition is always local. Network use is limited to model downloads and optional BYOK rewrite calls for modes you enable.</p>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <h3>Audio stays local</h3>
+          <p>There is no cloud speech-to-text mode. Your microphone audio is transcribed on your Mac.</p>
+        </article>
+        <article class="card">
+          <h3>No telemetry</h3>
+          <p>KeyScribe does not collect speech, transcripts, usage data, diagnostics, or crash reports.</p>
+        </article>
+        <article class="card">
+          <h3>Optional rewrite</h3>
+          <p>Text can leave your Mac only when a mode uses a provider or endpoint you configured.</p>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <section class="section">
+    <div class="section__inner">
+      <div class="section__head">
+        <h2>The boundary is explicit.</h2>
+        <p>Privacy mode disables context sharing. Best-effort redaction tokenizes recognizable sensitive spans before optional rewrite and restores them locally afterward.</p>
+      </div>
+      <ul class="list">
+        <li>Saved API keys live in macOS Keychain.</li>
+        <li>History is local JSONL under Application Support.</li>
+        <li>Redaction maps live in memory only.</li>
+        <li>Redaction is best-effort, not a security guarantee.</li>
+        <li>For content that must never reach a provider, use Plain Dictation or another no-rewrite mode.</li>
+      </ul>
+      <p><a href="https://github.com/rsperko/keyscribe/blob/main/PRIVACY.md">Read the full privacy document</a></p>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <span>KeyScribe is open source under GPLv3.</span>
+      <span><a href="../download/">Download</a> · <a href="https://github.com/rsperko/keyscribe">GitHub</a></span>
+    </div>
+  </footer>
+</body>
+</html>
