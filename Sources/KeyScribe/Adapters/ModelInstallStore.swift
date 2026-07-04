@@ -9,6 +9,11 @@ enum ModelInstallStore {
 
     private static let markerFile = "installed.json"
 
+    // The marker set is read on every dictation press but only ever written by this process, so cache it in
+    // memory (refreshed by `write`). Lock-guarded: reads run on the main actor, writes can run off it.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedIds: Set<String>?
+
     // Reconcile the marker against disk and remove orphaned directories.
     static func reconcile(engines: [any SpeechEngine]) {
         let marked = installedIds()
@@ -84,9 +89,23 @@ enum ModelInstallStore {
     }
 
     static func installedIds() -> Set<String> {
-        guard let data = try? Data(contentsOf: markerURL),
-              let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(ids)
+        cacheLock.lock()
+        if let cachedIds { cacheLock.unlock(); return cachedIds }
+        cacheLock.unlock()
+        let ids: Set<String>
+        if let data = try? Data(contentsOf: markerURL),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            ids = Set(decoded)
+        } else {
+            ids = []
+        }
+        // A write may have landed a newer value while we read disk unlocked; don't clobber it with the
+        // stale first read. Adopt our read only if the cache is still empty.
+        cacheLock.lock()
+        if cachedIds == nil { cachedIds = ids }
+        let result = cachedIds ?? ids
+        cacheLock.unlock()
+        return result
     }
 
     static func markInstalled(_ id: String) {
@@ -120,6 +139,11 @@ enum ModelInstallStore {
             try FileManager.default.createDirectory(
                 at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
             try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
+            // Update the cache only after the durable write succeeds, so a failed write never leaves the
+            // process believing an install/removal happened.
+            cacheLock.lock()
+            cachedIds = ids
+            cacheLock.unlock()
         } catch {
             Log.models.error("install marker write failed: \(error.localizedDescription, privacy: .public)")
         }

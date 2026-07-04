@@ -16,6 +16,14 @@ public protocol SpeechEngine: Sendable {
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String
     func evict() async
 
+    // Preheat any per-dictation session state at press so it overlaps speech; fire-and-forget, default
+    // no-op. Only Apple's one-shot SpeechAnalyzer needs it today.
+    func prepareForDictation() async
+
+    // False for Apple: its analyzer is one-shot, so a warmup transcribe would consume the pair prepared for
+    // the real dictation (prepareForDictation is its warmup instead).
+    var benefitsFromWarmupClip: Bool { get }
+
     // Install footprint owned by this engine, used by reconcile/delete. The subdirectory names
     // (under modelsDir) the engine downloads into; empty for system-managed engines.
     var installDirNames: [String] { get }
@@ -34,6 +42,9 @@ public extension SpeechEngine {
     func verifyInstalled(in modelsDir: URL) -> Bool? { nil }
 
     var captureSampleRate: Int { 16000 }
+
+    func prepareForDictation() async {}
+    var benefitsFromWarmupClip: Bool { true }
 }
 
 public enum SpeechEngineError: Error, Equatable {

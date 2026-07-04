@@ -81,7 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history, hud: hud,
             pressSnapshot: ContextProbe.initialSnapshot,
-            snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) })
+            snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) },
+            snapshotAsync: { [hud] in await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID) })
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }

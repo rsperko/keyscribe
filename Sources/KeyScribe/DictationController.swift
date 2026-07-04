@@ -31,6 +31,10 @@ final class DictationController {
     private let pressSnapshot: @MainActor () -> TargetSnapshot
     private let shouldAdoptFullSnapshot: Bool
     private let snapshot: @MainActor () -> TargetSnapshot
+    // Full snapshot for the hot AX sites (press adoption + insertion), run off the main actor so an
+    // unresponsive target can't stall arming or the paste. Defaults to running the injected sync `snapshot`
+    // inline, so a test injecting only `snapshot` keeps its exact call sequence and value.
+    private let snapshotAsync: @MainActor () async -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
@@ -59,6 +63,8 @@ final class DictationController {
     // insulate the in-flight dictation from a mid-dictation config/engine change (see `plan`/`activeEngine`).
     private struct DictationSession {
         var building: DictationRecord
+        // Press instant (session creation == top of handleStart); the `arm` stage measures this → mic-live.
+        var pressedAt = DispatchTime.now()
         var capturedSnapshot: TargetSnapshot?
         var capturedPlan: ResolvedConfig?
         var capturedEngine: (any SpeechEngine)?
@@ -75,7 +81,6 @@ final class DictationController {
         var recordingLimitTask: Task<Void, Never>?
         var modeResolveTask: Task<Void, Never>?
         var snapshotAdoptionTask: Task<Void, Never>?
-        var captureStartTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
         var levelPollTask: Task<Void, Never>?
     }
@@ -161,6 +166,10 @@ final class DictationController {
     // that runs only while recording reads it. Renders are still deduped by `renderLevel`.
     private static let levelPollInterval: Duration = .milliseconds(33)
 
+    // Output-latency pad folded into the cue-end admission boundary (P1-1): the audible chime ends a little
+    // after play-call + file-duration, so admit that much later to keep its tail out of the recording.
+    private static let cueAdmitPadSeconds: Double = 0.04
+
     private func pollLevelWhileRecording() {
         session?.levelPollTask?.cancel()
         session?.levelPollTask = Task { @MainActor [weak self] in
@@ -222,12 +231,14 @@ final class DictationController {
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
         audio: AudioCapturing? = nil,
+        effects: DuringDictationEffects? = nil,
         insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String, Bool) async -> Bool = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         snapshot: @escaping @MainActor () -> TargetSnapshot = { ContextProbe.snapshot() },
+        snapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
@@ -245,7 +256,7 @@ final class DictationController {
         self.history = history
         self.hud = hud
         self.audio = audio ?? AudioCapture()
-        self.effects = DuringDictationEffects()
+        self.effects = effects ?? DuringDictationEffects()
         self.insert = insert
         self.submitKey = submitKey
         self.captureSelection = captureSelection
@@ -253,6 +264,7 @@ final class DictationController {
         self.pressSnapshot = pressSnapshot ?? snapshot
         self.shouldAdoptFullSnapshot = pressSnapshot != nil
         self.snapshot = snapshot
+        self.snapshotAsync = snapshotAsync ?? { snapshot() }
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
         self.activeEngineUsable = activeEngineUsable
@@ -352,6 +364,14 @@ final class DictationController {
         _ = warm(activeEngine)
     }
 
+    // Fire-and-forget press-time preheat of a per-dictation engine session (Apple's one-shot analyzer),
+    // consumed at commit. Separate from warm() because warm caches ONE task per residency, whereas a
+    // one-shot analyzer needs a fresh pair per dictation; not awaited so a settling transcribe can't block.
+    private func prepareActiveEngineForDictation() {
+        let engine = activeEngine
+        Task { await engine.prepareForDictation() }
+    }
+
     // Start (or reuse) the single load for `engine`. Idempotent per engine: a launch preload, the
     // press-time warm, and the commit-time wait all resolve to the same Task, so the model compiles
     // once. Cleared by `invalidateWarm` on eviction so the next press reloads.
@@ -372,7 +392,7 @@ final class DictationController {
             // the user's speech, so the cost is usually invisible. Best-effort: a warmup failure (e.g. the
             // clip is absent under `swift run`) must never fail the load. The commit-time await of this same
             // task serializes warmup before the real transcribe, so the non-actor engines are never reentered.
-            if let clip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
+            if let clip, engine.benefitsFromWarmupClip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
         }
         warmEngineId = engine.id
         warmTask = task
@@ -503,19 +523,18 @@ final class DictationController {
         }
 
         warmActiveEngine()
+        prepareActiveEngineForDictation()
 
-        // Option A cue gating: the start cue plays now and CAPTURE comes up only after it finishes, so the
-        // cue never lands in the recording. The HUD, however, shows instantly — the truthful `.arming`
-        // state (not `.recording`) during the gap, so ESC can cancel before the mic is live and before any
-        // deferred output mute fires; beginCapture flips it to `.recording` when the mic goes live.
+        // Option A cue gating, overlapped (P1-1): the cue plays and the mic comes up UNDER it, but the writer
+        // admits only frames at/after the cue-end host time so the cue never lands in the recording. `.arming`
+        // shows instantly (ESC still cancels); `.recording`/duck are held until cue end (see beginCapture).
         let cueDelay = effects.begin(settings.duringDictation)
         hud?.render(.arming(mode: currentModeName))
         if cueDelay > 0 {
-            session?.captureStartTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(cueDelay))
-                guard let self, !Task.isCancelled, self.machine.state == .arming else { return }
-                self.beginCapture()
-            }
+            let hold = cueDelay + Self.cueAdmitPadSeconds
+            let admitAfter = mach_absolute_time() &+ AudioCapture.hostTicks(seconds: hold)
+            let holdUntil = DispatchTime.now() + .nanoseconds(Int(hold * 1e9))
+            beginCapture(admitAfterHostTime: admitAfter, holdRecordingUntil: holdUntil)
         } else {
             beginCapture()
         }
@@ -528,21 +547,21 @@ final class DictationController {
         session?.snapshotAdoptionTask = Task { @MainActor [weak self] in
             await Task.yield()
             guard let self, !Task.isCancelled, self.capturedSnapshot?.bundleId == captured else { return }
-            let full = self.snapshot()
-            guard full.bundleId == captured else { return }
+            let full = await self.snapshotAsync()
+            guard !Task.isCancelled, self.capturedSnapshot?.bundleId == captured, full.bundleId == captured else { return }
             self.capturedSnapshot = full
             self.building.targetBundleId = full.bundleId
             self.activeMode = self.securePolicyApplied(self.activeMode)
         }
     }
 
-    private func beginCapture() {
+    private func beginCapture(admitAfterHostTime: UInt64 = 0, holdRecordingUntil: DispatchTime? = nil) {
         lastRenderedLevel = 0
         let sampleRate = activeEngine.captureSampleRate
         captureBringUpTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.audio.start(sampleRate: sampleRate)
+                _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime)
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still arming.
@@ -569,6 +588,21 @@ final class DictationController {
             guard !Task.isCancelled, self.machine.state == .arming else {
                 self.finishCanceledBringUp(stopAudio: true)
                 return
+            }
+            // Hold "Listening" and the duck until the cue actually ends, so the go-signal and the mute never
+            // precede the admission boundary. A no-op when bring-up already outran the cue (or no cue plays).
+            if let holdRecordingUntil {
+                let remaining = Int64(holdRecordingUntil.uptimeNanoseconds) - Int64(DispatchTime.now().uptimeNanoseconds)
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining))
+                    guard !Task.isCancelled, self.machine.state == .arming else {
+                        self.finishCanceledBringUp(stopAudio: true)
+                        return
+                    }
+                }
+            }
+            if let pressedAt = self.session?.pressedAt {
+                self.building.stageMillis[.arm] = self.elapsedMs(since: pressedAt)
             }
             self.machine.markRecording()
             self.effects.activateDuck()
@@ -607,7 +641,6 @@ final class DictationController {
         session?.recordingLimitTask?.cancel()
         session?.modeResolveTask?.cancel()
         session?.snapshotAdoptionTask?.cancel()
-        session?.captureStartTask?.cancel()
         captureBringUpTask?.cancel()
         session?.levelPollTask?.cancel()
         session?.rewriteEscapeTask?.cancel()
@@ -664,14 +697,14 @@ final class DictationController {
     }
 
     private func cancelBeforeCaptureStarted() {
-        // If a bring-up is still in flight, move to `.cancellingBringUp` and let the bring-up task's
-        // completion run finishCanceledBringUp; otherwise (cue delay still pending, no unit started) we can
-        // return straight to idle.
+        // Release/ESC during the cue is a release during bring-up (the unit comes up under the cue). Cancel
+        // the bring-up task so a fast bring-up already sitting in the cue-end hold wakes at once (its post-
+        // sleep/post-start guards see `.isCancelled` and tear the mic down) rather than staying live until
+        // the hold expires. The task's own completion still runs finishCanceledBringUp.
         let waitForBringUpCleanup = captureBringUpTask != nil
+        captureBringUpTask?.cancel()
         session?.modeResolveTask?.cancel()
         session?.modeResolveTask = nil
-        session?.captureStartTask?.cancel()
-        session?.captureStartTask = nil
         guard waitForBringUpCleanup else {
             finish(machine: .cancel, cue: .cancel, state: .hidden)
             return
@@ -813,6 +846,7 @@ final class DictationController {
             log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
             finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
         }
+        let modelWaitStart = DispatchTime.now()
         do {
             try await loadOnce()
         } catch {
@@ -833,6 +867,7 @@ final class DictationController {
                 return
             }
         }
+        building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
 
         let transcribeStart = DispatchTime.now()
         let rawFromEngine: String
@@ -910,7 +945,7 @@ final class DictationController {
         // Guarded transition: another terminal path may already have won the race.
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
-        let current = snapshot()
+        let current = await snapshotAsync()
         let targetDecision = decideInsertion(
             captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: current)
         // Without Accessibility every synthetic insertion path is silently dropped by the OS. Divert to
@@ -941,7 +976,7 @@ final class DictationController {
                 // (lastResult is set). Never fire submit against a paste that did not happen.
                 outcome = .failed
             } else if initialOutcome == .inserted, let submit = activeMode?.submit, submit != .none,
-                      submitTargetStillFocused() {
+                      await submitTargetStillFocused() {
                 await submitKey(submit)
             }
             machine.finish(outcome)
@@ -980,9 +1015,9 @@ final class DictationController {
 
     // The submit Return fires after the paste-settle window and lands outside the insert atom. Re-run the
     // same focus-race decision against a fresh snapshot before submitting.
-    private func submitTargetStillFocused() -> Bool {
+    private func submitTargetStillFocused() async -> Bool {
         let decision = decideInsertion(
-            captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: snapshot())
+            captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: await snapshotAsync())
         if decision == .insert { return true }
         log.notice("submit skipped: focus moved before Return (\(String(describing: decision), privacy: .public))")
         return false

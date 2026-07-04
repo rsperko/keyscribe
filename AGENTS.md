@@ -424,6 +424,16 @@ SwiftPM (PID: …) is already running` for minutes, confirm that PID is dead (`p
 `rm -f .build/.lock` and relaunch. Do not stack concurrent `make ship`/`make release` invocations:
 they race on the lock and on `make publish`.
 
+**The release gate is mandatory and enforced: `make preflight` (→ `scripts/preflight.sh`) must pass
+before anything goes public.** `swift test` green is NOT sufficient — it runs on the dev build, but
+releases break on what only exists in the notarized artifact (TCC grants rebinding to the new
+signature, hardened-runtime entitlements, the bundled+signed `mlx.metallib`, Gatekeeper quarantine,
+first-run onboarding, the permission-gated trigger matrix). Preflight runs the automated build/packaging
++ functional gates and walks the human smoke checks on the freshly-installed production app, then writes
+a commit-keyed stamp (`.preflight-pass`). `scripts/publish.sh` **refuses to publish without a matching
+stamp** (override: `KEYSCRIBE_SKIP_PREFLIGHT=1`, i.e. shipping unverified). `make ship` chains
+release → preflight → publish. Full contract + rationale: `docs/development/release_testing.md`.
+
 `KeyScribe.entitlements` (hardened-runtime) is passed by **`release.sh`** for the notarized build;
 `make-app.sh`'s dev signing omits it (a teamless self-signed cert can't authorize it). Keep its XML
 comments free of `--` — AMFI's strict parser rejects them. The bundle's `Info.plist` is a tracked

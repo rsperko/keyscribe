@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test preflight setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -27,14 +27,17 @@ patch minor major:
 publish: ## Publish the built+verified release: push tag + GitHub release (auto-notes) + cask + tap
 	./scripts/publish.sh
 
-ship: ## Build+verify then publish in one go: make ship patch|minor|major (or BUMP=vX.Y.Z)
-	$(MAKE) release BUMP="$(BUMP)" && $(MAKE) publish
+ship: ## Build, run the release preflight (incl. human smoke), then publish: make ship patch|minor|major
+	$(MAKE) release BUMP="$(BUMP)" && ./scripts/preflight.sh && $(MAKE) publish
 
 cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then commit+push the tap)
 	./scripts/update-cask.sh
 
 test: ## Run the full test suite
 	swift test
+
+preflight: ## Release gate: automated build/packaging + functional checks, then human smoke (writes the publish stamp)
+	./scripts/preflight.sh
 
 setup: ## One-time: create the 'KeyScribe Local' signing cert (so dev TCC grants persist)
 	./scripts/setup-dev-signing.sh

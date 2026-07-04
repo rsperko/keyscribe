@@ -9,8 +9,12 @@ actor AppleEngine: SpeechEngine {
     nonisolated let displayName = "Apple Speech"
     nonisolated let supportsRecognitionBias = true
 
+    nonisolated let benefitsFromWarmupClip = false
+
     private let locale: Locale
     private var assetsReady = false
+    // A one-shot analyzer + transcriber preheated at press; consumed by the next transcribe, else rebuilt.
+    private var prepared: (analyzer: SpeechAnalyzer, transcriber: DictationTranscriber)?
 
     init(locale: Locale = Locale.current) {
         self.locale = locale
@@ -22,12 +26,28 @@ actor AppleEngine: SpeechEngine {
         assetsReady = true
     }
 
+    // Analyzers are one-shot, so build the next pair at press and prepareToAnalyze it, overlapping the
+    // multi-hundred-ms session setup with speech. Best-effort: any failure leaves `prepared` nil and
+    // transcribe builds fresh (today's behavior).
+    func prepareForDictation() async {
+        guard (try? await loadIfNeeded()) != nil else { return }
+        let transcriber = DictationTranscriber(locale: locale, preset: .longDictation)
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        try? await analyzer.prepareToAnalyze(in: format)
+        prepared = (analyzer, transcriber)
+    }
+
+    private func takePreparedOrBuild() -> (analyzer: SpeechAnalyzer, transcriber: DictationTranscriber) {
+        if let prepared { self.prepared = nil; return prepared }
+        let transcriber = DictationTranscriber(locale: locale, preset: .longDictation)
+        return (SpeechAnalyzer(modules: [transcriber]), transcriber)
+    }
+
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
 
-        let transcriber = DictationTranscriber(locale: locale, preset: .longDictation)
-
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let (analyzer, transcriber) = takePreparedOrBuild()
         let audioFile = try AVAudioFile(forReading: wavURL)
 
         // Recognition bias (design.md §4.2): dictionary terms become contextual strings the analyzer

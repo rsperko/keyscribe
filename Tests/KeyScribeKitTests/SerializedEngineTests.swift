@@ -55,6 +55,12 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     var evictOverlappedTranscribe: Bool { lock.withLock { _evictOverlappedTranscribe } }
     var maxConcurrentTranscribes: Int { lock.withLock { _maxConcurrentTranscribes } }
 
+    private var _prepareCount = 0
+    var prepareCount: Int { lock.withLock { _prepareCount } }
+    func prepareForDictation() async { lock.withLock { _prepareCount += 1 } }
+    // Opt out to prove the wrapper forwards the metadata rather than returning the protocol default.
+    let benefitsFromWarmupClip = false
+
     private func failIfRequested() throws {
         let shouldFail = lock.withLock {
             if _failNextLoad { _failNextLoad = false; return true }
@@ -120,6 +126,22 @@ private final class ProgressFractions: @unchecked Sendable {
 }
 
 struct SerializedEngineTests {
+    // P1-2: the wrapper must forward prepareForDictation to the base, else the protocol-extension no-op on
+    // the wrapper silently swallows Apple's preheat and the feature does nothing.
+    @Test func prepareForDictationForwardsToBase() async {
+        let spy = SpyEngine()
+        let engine = SerializedEngine(spy)
+        await engine.prepareForDictation()
+        #expect(spy.prepareCount == 1)
+    }
+
+    // P1-2: benefitsFromWarmupClip must reflect the base, not the protocol default (true) — otherwise the
+    // controller would run a warmup transcribe that consumes Apple's prepared analyzer.
+    @Test func benefitsFromWarmupClipForwardsFromBase() {
+        let engine = SerializedEngine(SpyEngine())
+        #expect(engine.benefitsFromWarmupClip == false)
+    }
+
     // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.
     @Test func concurrentLoadsRunBaseLoadOnce() async throws {
         let gate = Gate()

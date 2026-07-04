@@ -34,12 +34,13 @@ enum CommandCheckRunner {
         }
     }
 
-    static func run(dir: URL, only: Set<String>? = nil) async {
+    @discardableResult
+    static func run(dir: URL, only: Set<String>? = nil) async -> CommandCheckReport {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else {
             print("error: could not read \(manifestURL.path)")
-            return
+            return CommandCheckReport(engines: [])
         }
         let engines = InstalledEngineFilter.filter(EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir))
             .filter { only == nil || only!.contains($0.id) }
@@ -80,6 +81,9 @@ enum CommandCheckRunner {
             print("")
         }
         printSummary(summary)
+        return CommandCheckReport(engines: summary.map {
+            .init(id: $0.id, clean: $0.clean, total: $0.total, loaded: $0.status == "ok")
+        })
     }
 
     // The local (no-LLM) dictation pipeline DictationController builds for a plain live-edits mode:

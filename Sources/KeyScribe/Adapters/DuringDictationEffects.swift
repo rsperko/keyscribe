@@ -41,6 +41,9 @@ final class DuringDictationEffects {
     private let setDuck: (Float32, AudioDeviceID) -> Bool
     private let reapplyDelays: [Double]
     private let duckFollowInterval: Double
+    // Test seam: forces `begin` to report this cue length (sounds on) without the bundled cue asset, so the
+    // cue-overlap hold path is exercisable under `swift test`. nil in production → real cue duration.
+    private let startCueDurationOverride: TimeInterval?
 
     init(
         defaultOutputDeviceID: @escaping () -> AudioDeviceID? = SystemOutputAudio.defaultOutputDeviceID,
@@ -50,12 +53,14 @@ final class DuringDictationEffects {
         reapplyDelays: [Double] = [0.4, 1.0, 2.5],
         // While recording, re-check the default output this often and duck it if the route moved to a
         // device we have not ducked yet (the Bluetooth A2DP<->HFP shift).
-        duckFollowInterval: Double = 0.3
+        duckFollowInterval: Double = 0.3,
+        startCueDurationOverride: TimeInterval? = nil
     ) {
         self.defaultOutputDeviceID = defaultOutputDeviceID
         self.setDuck = setDuck
         self.reapplyDelays = reapplyDelays
         self.duckFollowInterval = duckFollowInterval
+        self.startCueDurationOverride = startCueDurationOverride
     }
     // Named system sounds are reloaded by NSSound(named:) on each call; keep one instance per cue for
     // the app's lifetime so begin/end don't re-resolve them every dictation.
@@ -93,7 +98,9 @@ final class DuringDictationEffects {
         // output the device is mid A2DP->HFP route switch until capture comes up — ducking then races the
         // switch. Cancelled-before-capture bumps generation, so activateDuck drops the duck.
         pendingDuckGeneration = config.muteSystemAudio ? generation : nil
-        let startCue = config.sounds ? startCueSound() : nil
+        guard config.sounds else { return 0 }
+        if let startCueDurationOverride { return startCueDurationOverride }
+        let startCue = startCueSound()
         startCue?.play()
         return startCue?.duration ?? 0
     }

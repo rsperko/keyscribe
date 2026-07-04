@@ -36,3 +36,8 @@ corpus/commands/*.wav
 
 # release DMG build artifact (uploaded to GitHub Releases, never committed)
 KeyScribe-*.dmg
+
+# release preflight stamp (written by scripts/preflight.sh, keyed to a commit)
+.preflight-pass
+corpus/commands/baseline.json
+.preflight-run/

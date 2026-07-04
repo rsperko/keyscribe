@@ -9,9 +9,11 @@ import os
 // a normal user's disk.
 enum CaptureArchive {
     static var keepDir: URL? {
-        guard let path = ProcessInfo.processInfo.environment["KEYSCRIBE_KEEP_CAPTURE"], !path.isEmpty else {
-            return nil
-        }
+        // getenv (not ProcessInfo.environment, which snapshots at first access) so a runtime setenv from the
+        // `--keep-capture` flag is honored as well as an inherited KEYSCRIBE_KEEP_CAPTURE env var.
+        guard let c = getenv("KEYSCRIBE_KEEP_CAPTURE") else { return nil }
+        let path = String(cString: c)
+        guard !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 

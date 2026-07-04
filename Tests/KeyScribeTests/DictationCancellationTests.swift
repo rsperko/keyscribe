@@ -914,6 +914,7 @@ private final class CountingGatedStartAudio: AudioCapturing, @unchecked Sendable
 struct DictationCaptureStartTests {
     private func makeController(
         audio: AudioCapturing, hud: HUDPresenting, insertSpy: InsertSpy, supportDir: URL,
+        effects: DuringDictationEffects? = nil,
         configureSettings: (inout Settings) -> Void = { _ in }
     ) -> DictationController {
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
@@ -926,7 +927,7 @@ struct DictationCaptureStartTests {
         configureSettings(&settings)
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio, effects: effects,
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -1004,6 +1005,42 @@ struct DictationCaptureStartTests {
         #expect(controller.lastResult == nil)
         #expect(audio.stopCalls == 1)
         #expect(controller.isBusy == false)
+    }
+
+    // P1-1 regression: with sounds on, capture comes up UNDER the cue and the bring-up task then sleeps until
+    // cue end before flipping to `.recording`. A release during that hold must cancel the task and tear the
+    // mic down AT ONCE (the reviewed edge that regressed) — not leave it live until the hold expires. Drives
+    // a fast bring-up into a long (0.5s) cue hold, releases mid-hold, and asserts teardown far inside the hold.
+    @Test func releasingDuringTheCueHoldStopsCaptureImmediately() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let gate = Signal()
+        gate.fire()   // bring-up returns immediately, so the task settles into the cue-end hold
+        let audio = GatedStartAudio(url: supportDir.appendingPathComponent("capture.wav"), gate: gate)
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { nil }, setDuck: { _, _ in true }, startCueDurationOverride: 0.5)
+        let controller = makeController(
+            audio: audio, hud: HUDSpy(), insertSpy: InsertSpy(), supportDir: supportDir, effects: effects
+        ) { $0.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: true) }
+
+        controller.handleStart()
+        let bringUpTask = controller.captureBringUpTask
+        // Let the fast bring-up finish and the task enter the ~0.54s hold; well before it would flip live.
+        try? await Task.sleep(for: .milliseconds(80))
+        #expect(controller.isBusy)
+        #expect(audio.stopCalls == 0)
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        controller.handleCommit()      // release during the cue hold
+        await bringUpTask?.value
+        let elapsed = clock.now - started
+
+        #expect(audio.stopCalls == 1)
+        #expect(controller.isBusy == false)
+        // Cancelling the hold makes teardown immediate; without it the task would wait out the ~0.46s remainder.
+        #expect(elapsed < .milliseconds(300))
     }
 
     @Test func startShowsCancellableArmingBeforeCaptureIsLive() {

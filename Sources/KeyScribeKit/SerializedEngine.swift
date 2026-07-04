@@ -43,7 +43,17 @@ public actor SerializedEngine: SpeechEngine {
     public nonisolated var supportsRecognitionBias: Bool { base.supportsRecognitionBias }
     public nonisolated var captureSampleRate: Int { base.captureSampleRate }
     public nonisolated var installDirNames: [String] { base.installDirNames }
+    public nonisolated var benefitsFromWarmupClip: Bool { base.benefitsFromWarmupClip }
     public nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? { base.verifyInstalled(in: modelsDir) }
+
+    // Forward under the exclusive lock so prepare never races a base load/transcribe/evict on the
+    // non-Sendable handle. WITHOUT this override the protocol-extension no-op on the wrapper would silently
+    // swallow the base engine's implementation.
+    public func prepareForDictation() async {
+        await acquire()
+        defer { release() }
+        await base.prepareForDictation()
+    }
 
     private func acquire() async {
         while busy { await withCheckedContinuation { waiters.append($0) } }

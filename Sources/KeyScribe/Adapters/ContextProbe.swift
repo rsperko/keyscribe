@@ -15,14 +15,33 @@ enum ContextProbe {
     // Exclude our HUD when dictating into KeyScribe itself, where the HUD can become the key window.
     static func snapshot(excludingWindow excluded: CGWindowID? = nil) -> TargetSnapshot {
         let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let pid = bundleId.flatMap(pid(forBundleId:))
         return TargetSnapshot(
             bundleId: bundleId,
-            focusedWindowId: bundleId.flatMap { focusedWindowId(bundleId: $0, excluding: excluded) },
+            focusedWindowId: pid.flatMap { focusedWindowId(pid: $0, excluding: excluded) },
             isSecureField: focusedIsSecure())
     }
 
+    // Off-main variant of `snapshot`: the frontmost-app identity is read on the main actor, then the AX
+    // round trips (each bounded by a 0.1s messaging timeout, but able to stall on an unresponsive target)
+    // run on a detached task so an arming or insert never blocks the main actor. Mirrors `precedingText`.
+    static func snapshotAsync(excludingWindow excluded: CGWindowID? = nil) async -> TargetSnapshot {
+        let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let pid = bundleId.flatMap(pid(forBundleId:))
+        return await Task.detached {
+            TargetSnapshot(
+                bundleId: bundleId,
+                focusedWindowId: pid.flatMap { focusedWindowId(pid: $0, excluding: excluded) },
+                isSecureField: focusedIsSecure())
+        }.value
+    }
+
+    nonisolated private static func pid(forBundleId bundleId: String) -> pid_t? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.processIdentifier
+    }
+
     // Best-effort secure-field detection; AX failures return false.
-    static func focusedIsSecure() -> Bool {
+    nonisolated static func focusedIsSecure() -> Bool {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.1)
         var focusedRef: CFTypeRef?
@@ -36,10 +55,9 @@ enum ContextProbe {
         return subrole == (kAXSecureTextFieldSubrole as String)
     }
 
-    // Best-effort stable focused-window id; nil never blocks insertion.
-    static func focusedWindowId(bundleId: String, excluding excluded: CGWindowID? = nil) -> String? {
-        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-            .first?.processIdentifier else { return nil }
+    // Best-effort stable focused-window id; nil never blocks insertion. Nonisolated (pure AX) so the
+    // async snapshot path can run it off the main actor.
+    nonisolated static func focusedWindowId(pid: pid_t, excluding excluded: CGWindowID? = nil) -> String? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
         guard let focused = axWindow(app, attribute: kAXFocusedWindowAttribute) else { return nil }
@@ -50,7 +68,7 @@ enum ContextProbe {
         return windowIdString(of: focused)
     }
 
-    private static func axWindow(_ app: AXUIElement, attribute: String) -> AXUIElement? {
+    nonisolated private static func axWindow(_ app: AXUIElement, attribute: String) -> AXUIElement? {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, attribute as CFString, &ref) == .success,
               let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
@@ -59,12 +77,12 @@ enum ContextProbe {
         return window
     }
 
-    private static func cgWindowID(of window: AXUIElement) -> CGWindowID? {
+    nonisolated private static func cgWindowID(of window: AXUIElement) -> CGWindowID? {
         var windowID = CGWindowID(0)
         return _AXUIElementGetWindow(window, &windowID) == .success && windowID != 0 ? windowID : nil
     }
 
-    private static func windowIdString(of window: AXUIElement) -> String? {
+    nonisolated private static func windowIdString(of window: AXUIElement) -> String? {
         if let windowID = cgWindowID(of: window) { return "cg:\(windowID)" }
 
         var components: [String] = []

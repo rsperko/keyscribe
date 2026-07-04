@@ -25,6 +25,12 @@ struct PermissionsSettingsView: View {
                         }
                     },
                     openSettings: { Permissions.openSettings(.microphone) })
+                // macOS caches the mic verdict for the process lifetime and gives no live "granted" signal
+                // to detect a grant made after launch (unlike Accessibility below), so surface the relaunch
+                // step proactively whenever access is missing.
+                if microphoneStatus == .denied {
+                    relaunchBanner("If you just enabled Microphone for \(Branding.appName) in System Settings, quit and reopen it to apply the change — macOS only recognizes a new grant after a relaunch.")
+                }
                 PermissionRow(
                     title: "Accessibility", status: accessibilityStatus,
                     purpose: "Lets \(Branding.appName) detect a modifier-key trigger and paste finished text into the focused field.",
@@ -34,15 +40,7 @@ struct PermissionsSettingsView: View {
                     },
                     openSettings: { Permissions.openSettings(.accessibility) })
                 if accessibilityStatus == .granted && !tapActive {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label(
-                            "Accessibility is granted, but it only takes effect after a relaunch. Until then, modifier-key triggers won't start dictation.",
-                            systemImage: "arrow.clockwise.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                        Button("Quit & Relaunch to Apply", action: onRelaunch)
-                    }
-                    .padding(.vertical, 4)
+                    relaunchBanner("Accessibility is granted, but it only takes effect after a relaunch. Until then, modifier-key triggers won't start dictation.")
                 }
             }
         }
@@ -68,6 +66,18 @@ struct PermissionsSettingsView: View {
         microphoneStatus = Permissions.microphoneStatus()
         accessibilityStatus = Permissions.accessibilityStatus()
         tapActive = accessibilityTapActive()
+    }
+
+    // A grant that only takes effect after a relaunch (TCC verdicts are cached for the process lifetime).
+    @ViewBuilder
+    private func relaunchBanner(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(message, systemImage: "arrow.clockwise.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Button("Quit & Relaunch to Apply", action: onRelaunch)
+        }
+        .padding(.vertical, 4)
     }
 }
 

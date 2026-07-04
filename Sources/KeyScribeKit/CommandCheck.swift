@@ -80,3 +80,78 @@ public enum CommandCheck {
         "\"" + s.replacingOccurrences(of: "\n", with: "\\n").replacingOccurrences(of: "\t", with: "\\t") + "\""
     }
 }
+
+// Release-gate view over a whole `--commands-check` run: one row per engine the harness attempted.
+// The pass rule is the pure decision the CLI's exit code keys off, so a spoken-command regression
+// fails the preflight instead of merely printing a ✗ nobody reads.
+public struct CommandCheckReport: Equatable, Sendable {
+    public struct Engine: Equatable, Sendable {
+        public let id: String
+        public let clean: Int
+        public let total: Int
+        public let loaded: Bool
+        public init(id: String, clean: Int, total: Int, loaded: Bool) {
+            self.id = id
+            self.clean = clean
+            self.total = total
+            self.loaded = loaded
+        }
+    }
+
+    public var engines: [Engine]
+    public init(engines: [Engine]) { self.engines = engines }
+
+    // Guards against a green result that only means "nothing ran": a missing corpus or uninstalled
+    // models must not read as a pass.
+    public var ranCount: Int { engines.filter { $0.loaded && $0.total > 0 }.count }
+
+    public func diff(against baseline: CommandCheckBaseline) -> CommandCheckDiff {
+        var regressions: [CommandCheckDiff.Change] = []
+        var stale: [String] = []
+        for e in engines where e.loaded && e.total > 0 {
+            guard let base = baseline.engines[e.id] else { continue }  // a newly-installed engine is not a regression
+            if e.total != base.total { stale.append(e.id); continue }  // corpus changed under the baseline → re-baseline
+            if e.clean < base.clean {
+                regressions.append(.init(id: e.id, baseline: base.clean, current: e.clean, total: e.total))
+            }
+        }
+        return CommandCheckDiff(regressions: regressions, stale: stale, ranCount: ranCount)
+    }
+}
+
+// A per-engine record of how many command checks were clean on a known-good run. Ground truth, not a
+// guessed threshold: the corpus clips are transcription-sensitive, so no absolute pass-rate is
+// meaningful across engines (a weak engine that mishears "scratch that" fails a clip its WER, not a
+// bug). "This clip passed on this engine last time" is the real bar; the gate flags only a *drop*.
+public struct CommandCheckBaseline: Codable, Equatable, Sendable {
+    public struct Entry: Codable, Equatable, Sendable {
+        public var clean: Int
+        public var total: Int
+        public init(clean: Int, total: Int) { self.clean = clean; self.total = total }
+    }
+    public var engines: [String: Entry]
+    public init(engines: [String: Entry]) { self.engines = engines }
+
+    public static func from(_ report: CommandCheckReport) -> CommandCheckBaseline {
+        var e: [String: Entry] = [:]
+        for eng in report.engines where eng.loaded && eng.total > 0 {
+            e[eng.id] = Entry(clean: eng.clean, total: eng.total)
+        }
+        return CommandCheckBaseline(engines: e)
+    }
+}
+
+public struct CommandCheckDiff: Equatable, Sendable {
+    public struct Change: Equatable, Sendable {
+        public let id: String
+        public let baseline: Int
+        public let current: Int
+        public let total: Int
+    }
+    public var regressions: [Change]
+    // Engines whose clip count no longer matches the baseline — the corpus changed, so re-baseline.
+    public var stale: [String]
+    public var ranCount: Int
+
+    public var passed: Bool { regressions.isEmpty && stale.isEmpty && ranCount > 0 }
+}

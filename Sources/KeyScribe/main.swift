@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import KeyScribeKit
+import Synchronization
 
 // `--help` / `-h`: print the CLI surface and exit. Run with no arguments to launch the menu-bar app;
 // the flags below are dev/admin tools meant to be run from a terminal.
@@ -28,15 +30,24 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
       --commands-check <dir>  Exercise every spoken command (scratch that, verbatim, insert new
                               line/paragraph/tab, insert clipboard contents, whole-utterance
                               replacements) across every installed engine on the recordings in <dir>
-                              (manifest.json), then exit. Honors --engines.
+                              (manifest.json), then exit. Honors --engines. Informational by default.
+        --baseline <file>       Gate against a per-engine known-good baseline: if <file> is absent it is
+                                established from this run (exit 0); if present, exit non-zero when any
+                                engine cleans fewer clips than its baseline (a command-pipeline
+                                regression) or the clip count changed (re-baseline). Ground truth, not
+                                an absolute pass-rate — the clips are transcription-sensitive.
+      --list-engines          Print each shipped catalog engine and whether it is installed
+                              (installed / missing / system), then exit — coverage for the release gate.
       --capture-probe         Drive the real capture path (record → drain → teardown) and score the
                               result for dropped/corrupted audio you cannot hear. Feed a pure tone into
                               the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,
                               ring-drop and CoreAudio-overload counts. Needs Microphone permission.
         --seconds <n>           Record for n seconds (default 5).
         --tone <hz>             Expected input tone in Hz (default 440).
-      KEYSCRIBE_KEEP_CAPTURE=<dir>  Env var: save a copy of each committed capture WAV to <dir> for
-                              offline inspection (off unless set).
+      --keep-capture <dir>    Save a copy of each committed capture WAV to <dir> for offline inspection
+                              (off unless set). Rides `open --args`, so it survives a LaunchServices
+                              launch (which Microphone TCC needs) where an env var would not. Equivalent
+                              env var: KEYSCRIBE_KEEP_CAPTURE=<dir>.
       --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                               (downloaded models stay shared). Pair with --first-run to test
                               onboarding without touching your real configuration.
@@ -51,6 +62,15 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
 // --first-run to replay onboarding against a clean sandbox without touching the real configuration.
 if let i = CommandLine.arguments.firstIndex(of: "--config-dir"), i + 1 < CommandLine.arguments.count {
     KeyScribePaths.configDirOverride = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+}
+
+// Dev flag: `--keep-capture <dir>` mirrors the KEYSCRIBE_KEEP_CAPTURE env var. It exists because a
+// LaunchServices launch (`open ...`) — required for microphone TCC to attribute to the app rather than
+// the launching terminal — starts with a clean environment, so a shell env var never reaches the app.
+// A flag rides `open --args`, so `open KeyScribe.app --args --keep-capture <dir>` both keeps Mic working
+// and retains capture WAVs. Feeds the same env the read path already uses (CaptureArchive reads it live).
+if let i = CommandLine.arguments.firstIndex(of: "--keep-capture"), i + 1 < CommandLine.arguments.count {
+    setenv("KEYSCRIBE_KEEP_CAPTURE", CommandLine.arguments[i + 1], 1)
 }
 
 if let i = CommandLine.arguments.firstIndex(of: "--reset") {
@@ -80,6 +100,17 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     exit(0)
 }
 
+// Diagnostic: print every shipped catalog engine and whether it is installed — so a release gate can
+// report which engines it will actually exercise vs. which are missing (and therefore untested).
+if CommandLine.arguments.contains("--list-engines") {
+    let installed = ModelInstallStore.installedIds()
+    for e in SpeechModelCatalog.all {
+        let state = e.systemManaged ? "system" : (installed.contains(e.id) ? "installed" : "missing")
+        print("\(e.id)\t\(state)")
+    }
+    exit(0)
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?
@@ -103,13 +134,47 @@ if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < Com
     if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
         only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
     }
+    var baselineURL: URL?
+    if let b = CommandLine.arguments.firstIndex(of: "--baseline"), b + 1 < CommandLine.arguments.count {
+        baselineURL = URL(fileURLWithPath: CommandLine.arguments[b + 1])
+    }
     let done = DispatchSemaphore(value: 0)
+    let ok = Atomic<Bool>(true)
     Task.detached {
-        await CommandCheckRunner.run(dir: dir, only: only)
+        let report = await CommandCheckRunner.run(dir: dir, only: only)
+        // No --baseline: informational only (exit 0). With --baseline: gate. If the file is absent,
+        // establish it from this run (a known-good baseline) and pass; otherwise diff and fail on any
+        // per-engine drop or a stale (corpus-changed) baseline.
+        if let url = baselineURL {
+            if let data = try? Data(contentsOf: url),
+               let baseline = try? JSONDecoder().decode(CommandCheckBaseline.self, from: data) {
+                let diff = report.diff(against: baseline)
+                if diff.passed {
+                    print("\nPASS — every engine held its baseline (\(diff.ranCount) ran).")
+                } else if diff.ranCount == 0 {
+                    print("\nFAIL — no engine could run the checks (models/corpus missing).")
+                } else {
+                    for r in diff.regressions {
+                        print("\nFAIL — \(r.id) regressed: \(r.current)/\(r.total) clean, baseline was \(r.baseline).")
+                    }
+                    if !diff.stale.isEmpty {
+                        print("\nFAIL — baseline stale for \(diff.stale.joined(separator: ", ")) (clip count changed). Re-baseline: delete \(url.lastPathComponent) and re-run.")
+                    }
+                }
+                ok.store(diff.passed, ordering: .relaxed)
+            } else {
+                let baseline = CommandCheckBaseline.from(report)
+                if let data = try? JSONEncoder().encode(baseline) {
+                    try? data.write(to: url)
+                    print("\nBASELINE ESTABLISHED → \(url.path) (\(baseline.engines.count) engines). Re-run to gate against it.")
+                }
+                ok.store(!baseline.engines.isEmpty, ordering: .relaxed)
+            }
+        }
         done.signal()
     }
     done.wait()
-    exit(0)
+    exit(ok.load(ordering: .relaxed) ? 0 : 1)
 }
 
 if CommandLine.arguments.contains("--capture-probe") {

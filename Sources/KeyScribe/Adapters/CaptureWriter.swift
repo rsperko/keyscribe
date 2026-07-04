@@ -40,13 +40,20 @@ final class CaptureWriter: @unchecked Sendable {
     private let feed = FeedOnce()
     // Set once the drain gate trips: the converter tail has been flushed and no further slots are written.
     private var sealed = false
+    // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
+    // only, operating on device-native slots (pre-resample).
+    private var headGate: HeadAdmitGate?
 
     init(ring: AudioSampleRing, file: AVAudioFile?, recordFormat: AVAudioFormat,
+         admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0,
          observeHostTime: @escaping (UInt64?) -> Bool) {
         self.ring = ring
         self.file = file
         self.recordFormat = recordFormat
         self.observeHostTime = observeHostTime
+        if admitAfterHostTime != 0, hostTicksPerSecond > 0 {
+            headGate = HeadAdmitGate(admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond)
+        }
     }
 
     func start() {
@@ -88,12 +95,23 @@ final class CaptureWriter: @unchecked Sendable {
     private func consume(_ info: AudioSampleRing.SlotInfo, channel: (Int) -> UnsafeBufferPointer<Float>) {
         guard AudioCapture.isUsableInputFormat(
             sampleRate: info.sampleRate, channelCount: AVAudioChannelCount(info.channelCount)) else { return }
-        guard let input = inputBuffer(for: info) else { return }
-        input.frameLength = AVAudioFrameCount(info.frameCount)
+        // Head admission: drop/trim cue-window frames before the boundary, before conversion/write.
+        var offset = 0
+        var count = info.frameCount
+        if headGate != nil {
+            let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
+            switch headGate!.observe(slotStartHostTime: host, frameCount: info.frameCount, sampleRate: info.sampleRate) {
+            case .admit: break
+            case .drop: return
+            case .admitTrailing(let dropFrames): offset = dropFrames; count = info.frameCount - dropFrames
+            }
+        }
+        guard count > 0, let input = inputBuffer(for: info) else { return }
+        input.frameLength = AVAudioFrameCount(count)
         if let dst = input.floatChannelData {
             for c in 0..<info.channelCount {
                 let src = channel(c)
-                dst[c].update(from: src.baseAddress!, count: info.frameCount)
+                dst[c].update(from: src.baseAddress!.advanced(by: offset), count: count)
             }
         }
         write(input)

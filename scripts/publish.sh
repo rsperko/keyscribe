@@ -23,6 +23,19 @@ if [ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
   exit 1
 fi
 
+# Hard gate: refuse to publish unless the release preflight passed for THIS exact commit. The stamp is
+# written by ./scripts/preflight.sh only after Tier A+B (automated) and Tier C (human smoke) all pass,
+# and is keyed to the commit SHA so a rebuild or a moved HEAD invalidates it. Emergency override:
+# KEYSCRIBE_SKIP_PREFLIGHT=1 (say so out loud — you are shipping unverified).
+STAMP=".preflight-pass"
+if [ "${KEYSCRIBE_SKIP_PREFLIGHT:-0}" = "1" ]; then
+  echo "warning: KEYSCRIBE_SKIP_PREFLIGHT=1 — publishing WITHOUT a verified preflight." >&2
+elif [ ! -f "$STAMP" ] || [ "$(head -1 "$STAMP" 2>/dev/null)" != "$(git rev-parse HEAD)" ]; then
+  echo "error: no passing preflight for this commit — run ./scripts/preflight.sh (or 'make preflight') first." >&2
+  echo "       the release gate must be green before anything goes public. See docs/development/release_testing.md." >&2
+  exit 1
+fi
+
 PRERELEASE=""; [ "${VERSION%%.*}" = "0" ] && PRERELEASE="--prerelease"
 
 echo "== push tag $TAG =="
