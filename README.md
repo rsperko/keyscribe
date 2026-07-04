@@ -1,38 +1,15 @@
 # KeyScribe
 
-**Local-first voice dictation for macOS. Your voice never leaves your Mac.**
+**Local-first voice dictation for macOS. On-device speech, no telemetry, powerful modes when you
+want them.**
 
 KeyScribe turns speech into finished text wherever you type. Hold a key, say the thought, release,
-and the result lands in the app you're already using. It keeps the speed of system dictation, then
-adds the pieces heavy dictation users miss: mode routing, correction shortcuts, edit-in-place,
-local history, and optional cleanup through your provider and your key.
+and the result lands in the app you're already using. Plain Dictation stays entirely on your Mac.
+Optional rewrite modes can polish, format, or edit text through a provider and key you configure.
 
-Speech recognition runs **100% on-device**. There is no cloud STT, no account, no subscription, and
-no telemetry. The only user content that can ever leave your Mac is optional BYOK LLM cleanup, over
-a payload you control.
-
-KeyScribe is early, open source, and built for people who want a local-first alternative to
-Superwhisper, Wispr Flow, Aqua, and MacWhisper without giving up serious workflow control.
-
----
-
-## Why it feels different
-
-- **Your voice stays local.** Speech recognition is always on-device. Turn off optional cleanup and
-  KeyScribe never touches the network after model download.
-- **Dictation fits the work.** One mode can write a terse Slack update, another can draft email,
-  another can format Markdown, and another can rewrite a selected paragraph in place.
-- **Corrections do not break your flow.** Fix a misheard name, command, or acronym from the current
-  app or a history item, and future dictations learn it through recognition bias, dictionary
-  recovery, or replacements.
-- **Insertion behaves like a good Mac citizen.** Dictations insert atomically, undo in one **⌘Z**,
-  preserve your clipboard when safe, and avoid inserting into the wrong app if focus changes.
-- **The files are yours.** Config, modes, replacements, prompt fragments, and history are plain files
-  under `~/Library/Application Support/KeyScribe/`; secrets live in macOS Keychain.
-
-Full privacy details are in [PRIVACY.md](PRIVACY.md).
-
----
+<p align="center">
+  <img src="docs/assets/readme-routing.gif" alt="KeyScribe routing the same dictation through Plain Dictation, Polish, and Email modes" width="760">
+</p>
 
 ## Install
 
@@ -47,110 +24,141 @@ brew install rsperko/tap/keyscribe
 
 ### Direct download
 
-Grab the latest notarized `KeyScribe-<version>.dmg` from the
-[Releases](https://github.com/rsperko/keyscribe/releases) page, open it, and drag
-**KeyScribe** to Applications. Current binaries are pre-1.0 prereleases.
+Download the latest notarized `KeyScribe-<version>.dmg` from
+[Releases](https://github.com/rsperko/keyscribe/releases), open it, and drag **KeyScribe** to
+Applications. Current binaries are pre-1.0 prereleases.
 
-KeyScribe is a menu-bar app — after launching, look for the waveform glyph in the menu bar (no Dock
-icon, no window).
+KeyScribe is a menu-bar app. After launch, look for the waveform glyph in the menu bar; there is no
+Dock icon or main window.
 
-### Build from source
+## First Dictation
 
-No Apple Developer account or paid certificate required — just the Swift toolchain:
+1. Launch KeyScribe.
+2. Download an on-device speech model.
+3. Grant Microphone, then Accessibility when prompted.
+4. Focus any text field.
+5. Hold `Fn (Globe)`, say one sentence, and release.
+
+The whole dictation inserts as one unit, so one `Cmd-Z` removes it. If the Globe key opens Emoji,
+Apple Dictation, or the input-source switcher, set the Globe action to "Do Nothing" in System
+Settings > Keyboard, or choose `Right Option` in KeyScribe Settings.
+
+Requirements: macOS 15+ on Apple silicon. Apple Speech, the zero-download system model, requires
+macOS 26+.
+
+## Why It Is Different
+
+| Capability | What it means |
+| --- | --- |
+| **On-device speech only** | Audio never leaves your Mac. There is no cloud STT mode. |
+| **No account, subscription, or telemetry** | KeyScribe does not collect usage, speech, transcripts, diagnostics, or crash reports. |
+| **Plain Dictation without an LLM** | The default mode inserts local transcript text with live edits, vocabulary, and replacements. |
+| **Modes instead of one global prompt** | Route by trigger key, app, URL, window title, menu choice, or spoken suffix such as `as an email`. |
+| **Spoken edits before insertion** | Say line breaks, paragraphs, tabs, `scratch that`, verbatim spans, or `insert clipboard contents`. |
+| **Optional BYOK rewrite** | Hosted or local OpenAI-compatible providers can polish, format, or rewrite text only for modes you enable. |
+| **Plain files** | Config, modes, prompt fragments, vocabulary, replacements, and history live under `~/Library/Application Support/KeyScribe/`. |
+| **Reproducible model testing** | Record your own corpus and compare on-device models against your voice. |
+
+## Edit While Speaking
+
+KeyScribe can turn spoken commands into local text edits before anything reaches the target app.
+This works in Plain Dictation and does not require an LLM.
+
+<p align="center">
+  <img src="docs/assets/readme-live-edits.gif" alt="KeyScribe turning spoken commands into line breaks, a scratch-that correction, and inserted clipboard content" width="700">
+</p>
+
+Useful commands include:
+
+- `insert new line`
+- `insert new paragraph`
+- `insert tab character`
+- `scratch that`
+- `insert clipboard contents`
+- `begin verbatim ... end verbatim`
+
+Clipboard insertion is tokenized like a verbatim span. In a rewrite mode, the model sees only a
+placeholder; the clipboard text stays on your Mac and is restored locally into the final result.
+
+## Modes
+
+Modes are reusable pipeline presets. A mode can decide when it runs, which local transforms apply,
+whether rewrite is enabled, which provider handles that rewrite, what context may be sent, and how
+the result is inserted.
+
+Good starter modes:
+
+| Mode | Use it for | Requires rewrite |
+| --- | --- | --- |
+| Plain Dictation | Local transcript at the cursor. | No |
+| Polish | Same meaning, cleaner text. | Yes |
+| Email | A rough thought shaped into an email. | Yes |
+| Edit Selection | Select text, speak an instruction, replace the selection. | Yes |
+| Markdown | Notes with headings, bullets, and code fences. | Yes |
+| Shell | A terminal-ready command inserted as text, never run by KeyScribe. | Yes |
+
+End a dictation with a spoken suffix like `as an email`, choose a one-shot mode from the menu bar,
+or bind the same key to different modes in different apps.
+
+## Privacy Boundary
+
+Speech recognition is always local. KeyScribe touches the network only for:
+
+1. Downloading on-device speech model weights.
+2. Optional BYOK rewrite calls for modes you enable.
+
+When rewrite runs, the request goes to the provider or endpoint you configured. Saved API keys live
+in macOS Keychain, local/no-auth endpoints are supported, and command-generated bearer tokens are
+kept in memory only.
+
+Best-effort redaction can tokenize recognizable sensitive spans before rewrite and restore them
+locally afterward. It is pattern matching, not a security guarantee. Content that must never reach a
+third-party provider should stay in Plain Dictation or another no-rewrite mode.
+
+Full details: [PRIVACY.md](PRIVACY.md).
+
+## Under the Hood
+
+```text
+hotkey -> microphone -> local STT -> local pipeline -> optional BYOK rewrite -> atomic insert
+```
+
+The local pipeline handles dictionary bias/recovery, replacements, spoken edits, verbatim spans,
+clipboard tokenization, number normalization, and best-effort redaction. Rewrite, when enabled, is
+validated before insertion so redaction/verbatim/clipboard tokens survive and restore correctly.
+
+Supported speech models include Parakeet TDT v3, Parakeet TDT-CTC 110M, Whisper Large v3 Turbo,
+Whisper Small (English), Apple Speech, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base
+(English). Availability depends on macOS version and model download state.
+
+## Build From Source
+
+No Apple Developer account or paid certificate is required for a local build:
 
 ```bash
 git clone https://github.com/rsperko/keyscribe.git
 cd keyscribe
-KEYSCRIBE_VARIANT=release ./make-app.sh && open ./KeyScribe.app
+./make-app.sh && open ./KeyScribeDev.app
 ```
 
-Prerequisites and signing options (so permissions survive rebuilds) are in [BUILD.md](BUILD.md).
-
----
-
-## First run
-
-1. Launch KeyScribe. The first-run window appears.
-2. **Download** an on-device speech model (progress shown). It stays on your Mac.
-3. **Grant** Microphone, then Accessibility when prompted.
-4. Focus any text field, **hold Fn (Globe)**, say a sentence, **release**.
-5. The text is inserted where you're typing — and a single **⌘Z** undoes the whole dictation.
-
-> If the Globe key is mapped to a system action (Emoji, Dictation, Input Source) it may fire
-> alongside KeyScribe. Set it to "Do Nothing" in **System Settings ▸ Keyboard**, or pick **Right
-> Option** in KeyScribe ▸ Settings as the conflict-free alternative. More in [FAQ.md](FAQ.md).
-
-The full ramp from first dictation through advanced modes is in
-[docs/getting_started.md](docs/getting_started.md).
-
----
-
-## Features
-
-**Dictate anywhere on the Mac.** Hold-to-talk insertion works in native, Electron/Chromium, and web
-apps. The whole dictation lands as one undoable insert, and focus-race protection copies the result
-to the clipboard instead of pasting into the wrong place.
-
-**Route by mode, app, URL, or voice.** Modes are reusable pipeline presets, not hardcoded app hacks.
-Use one trigger key across multiple contexts, pick a one-shot mode from the menu bar, or end a
-dictation with a phrase like "as an email" to route the text through another mode before insertion.
-
-**Edit while speaking.** Say "insert new line", "insert new paragraph", "insert tab character",
-"scratch that", "insert clipboard contents", or "begin verbatim ... end verbatim" and KeyScribe
-applies those instructions before the text lands.
-
-**Fix it once, and it sticks.** Add a dictionary entry or replacement from a global shortcut, a
-selection, or a history item. Dictionary entries bias supported engines; replacements auto-substitute
-from then on.
-
-**Rewrite selected text in place.** Select a paragraph, trigger an edit mode, and say "make this
-shorter", "turn this into bullets", or "make this warmer." KeyScribe replaces the selection in the
-app you're already using.
-
-**Choose the local model.** Up to eight on-device speech models are available in-app: Parakeet TDT
-v3, Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech,
-Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and Moonshine Base (English). Apple Speech appears only on
-macOS 26+; the other models are downloadable on supported Apple silicon Macs.
-Trade accuracy, speed, and footprint without sending audio to a server.
-
-**Optional cleanup on your terms.** BYOK LLM cleanup can strip filler, fix grammar, or reformat text
-using OpenAI, Anthropic, Gemini, or an OpenAI-compatible endpoint. Hosted providers use a key saved
-in Keychain; local OpenAI-compatible endpoints can use no auth, a saved key, or a command that prints
-a short-lived bearer token. Best-effort redaction tokenizes recognizable sensitive spans before
-rewrite and restores them locally afterward.
-
-**Inspectable history.** Browse and reuse past dictations stored as local JSONL, with processing
-details that show what was heard, transformed, rewritten, or kept local.
-
----
-
-## Requirements
-
-- macOS 15+ on Apple silicon.
-- Apple Speech, the zero-download system model, requires macOS 26+.
-
----
-
-## Contributing
-
-KeyScribe is open source under GPLv3. Bug reports, fixes, and new built-in modes are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md) for the build setup and project conventions.
-
-## License
-
-[GPLv3](LICENSE). Third-party libraries and downloaded model weights retain their own licenses — see
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+`make-app.sh` builds the dev variant so it can run alongside an installed KeyScribe. Build
+prerequisites, signing options, release builds, and permission persistence are in [BUILD.md](BUILD.md).
 
 ## Documentation
 
-- [docs/getting_started.md](docs/getting_started.md) — a progressive tutorial from first dictation
-  through modes, privacy controls, and history.
-- [PRIVACY.md](PRIVACY.md) — exactly what stays local and what (optionally) leaves.
-- [FAQ.md](FAQ.md) — permissions, key conflicts, engine choice, troubleshooting.
-- [BUILD.md](BUILD.md) — building, signing, and prerequisites from source.
-- [docs/reference/advanced_configuration.md](docs/reference/advanced_configuration.md) — file-level
-  examples for advanced mode setup.
-- [docs/reference/stt_benchmarks.md](docs/reference/stt_benchmarks.md) — speech-model benchmarks and
-  the local benchmark workflow.
-- [docs/development/](docs/development/) and [docs/reference/config_schema.md](docs/reference/config_schema.md)
-  — implementation specs for contributors.
+- [docs/README.md](docs/README.md) — start here for the full documentation map.
+- [docs/getting_started.md](docs/getting_started.md) — progressive ramp from first dictation to
+  modes, privacy controls, and history.
+- [PRIVACY.md](PRIVACY.md) — exact local/cloud boundary and redaction limits.
+- [FAQ.md](FAQ.md) — first-run issues, permissions, model choice, and troubleshooting.
+- [BUILD.md](BUILD.md) — building, signing, packaging, and release notes.
+- [docs/reference/stt_benchmarks.md](docs/reference/stt_benchmarks.md) — reference model numbers and
+  how to benchmark on your own voice.
+- [docs/reference/advanced_configuration.md](docs/reference/advanced_configuration.md) and
+  [docs/reference/config_schema.md](docs/reference/config_schema.md) — file-level configuration.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — project conventions and development entry points.
+
+## License
+
+KeyScribe is open source under [GPLv3](LICENSE). Third-party libraries and downloaded model weights
+retain their own licenses; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

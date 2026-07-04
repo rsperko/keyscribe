@@ -11,20 +11,38 @@ struct ModeSeedReconcileTests {
                 support.appendingPathComponent("lkg", isDirectory: true))
     }
 
-    // Build a legacy on-disk file by taking the new catalog seed for `newId` and stamping the old
-    // identity onto it (so an unedited old install is byte-shaped like the catalog modulo identity).
+    // Build a legacy on-disk file from the FROZEN pre-rename template — the shape a real v0.1.x build
+    // wrote, not today's catalog seed. A rename must recognize this (modulo the connection/enabled the
+    // user set), which is exactly what a pre-rename upgrade presents. Deliberately NOT derived from the
+    // current catalog: today's `polish`/`ai-prompt`/`edit-selection` have drifted, so a fixture built
+    // from them would be an EDITED file to the reconciler and would (correctly) not rename.
     private func writeLegacy(
         newId: String, oldId: String, oldName: String,
         connection: String = "", enabled: Bool = true, editPrompt: Bool = false, to modesDir: URL
     ) throws {
-        var mode = try #require(ModeStore.starterModes().first { $0.id == newId })
-        mode.id = oldId
-        mode.seedId = oldId
-        mode.name = oldName
+        var mode = try #require(ModeStore.preRenameTemplate(for: oldId))
         mode.enabled = enabled
         mode.aiRewrite?.connection = connection
         if editPrompt { mode.aiRewrite?.prompt = "totally custom prompt the user wrote" }
         try ModeStore.write(mode, to: modesDir)
+    }
+
+    // The frozen pre-rename templates are the bytes v0.1.0–v0.1.6 wrote (reconstructed verbatim from the
+    // starterModes() definitions at the commit before the rename). They must NEVER be "fixed" or refreshed
+    // from the live catalog — an install upgrading across the rename presents exactly these, and the whole
+    // migration hinges on recognizing them. This pins their template fingerprints so an accidental edit
+    // fails here loudly instead of silently breaking the migration for real upgraders.
+    @Test func preRenameTemplatesAreFrozen() throws {
+        let pinned: [String: String] = [
+            "polished-dictation": "51c638201452def4",
+            "prompt": "bbd17ef594d95ef9",
+            "work-on-selection": "46bf15b15afc60f9",
+        ]
+        for (id, fingerprint) in pinned {
+            let mode = try #require(ModeStore.preRenameTemplate(for: id))
+            #expect(ModeStore.seedTemplateFingerprint(mode) == fingerprint,
+                    "pre-rename template '\(id)' changed — it must match what old builds wrote, never be refreshed")
+        }
     }
 
     @Test func freshSeedWritesLedgerThenReconcileIsANoOp() throws {
@@ -56,6 +74,44 @@ struct ModeSeedReconcileTests {
         #expect(polish.seedId == "polish")
         #expect(polish.aiRewrite?.connection == "conn-1")
         #expect(polish.enabled == true)
+    }
+
+    // P1-6 regression: a genuine pre-rename file carries the OLD (short) prompt, seed_version 1, and no
+    // trigger key. The rename must recognize it and upgrade it to today's polish template. The prior
+    // matcher compared the on-disk file against the CURRENT catalog, so this exact file never matched and
+    // the mode stayed frozen at its old id forever, with no signal.
+    @Test func preRenameFileWithOldPromptIsUpgradedToCurrentTemplate() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        let old = try #require(ModeStore.preRenameTemplate(for: "polished-dictation"))
+        try ModeStore.write(old, to: d.modes)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(outcome.renamed.contains("polish"))
+
+        let polish = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "polish" })
+        let currentPolish = try #require(ModeStore.starterModes().first { $0.id == "polish" })
+        #expect(polish.aiRewrite?.prompt == currentPolish.aiRewrite?.prompt)   // upgraded to today's prompt
+        #expect(polish.seedVersion == currentPolish.seedVersion)
+        #expect(polish.triggerKeys == currentPolish.triggerKeys)               // gains today's right_option
+    }
+
+    // A file byte-shaped like TODAY's polish but sitting at the old id is NOT a pre-rename file (no old
+    // build ever wrote today's template there): its template differs from the frozen old one, so it must
+    // be left alone, not silently overwritten. Proves the match is against the frozen old template, not
+    // the current catalog — the crux of the P1-6 fix.
+    @Test func currentShapedFileAtOldIdIsNotTreatedAsARename() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        var current = try #require(ModeStore.starterModes().first { $0.id == "polish" })
+        current.id = "polished-dictation"
+        current.seedId = "polished-dictation"
+        current.name = "Polished Dictation"
+        try ModeStore.write(current, to: d.modes)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(!outcome.renamed.contains("polish"))
+        #expect(FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("polished-dictation.toml").path))
     }
 
     @Test func editedRenameSeedIsLeftAtItsOldIdentity() throws {

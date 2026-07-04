@@ -141,6 +141,7 @@ final class FirstRunModel: ObservableObject {
     var tapActive: () -> Bool = { true }
     @Published var needsRelaunch = false
     private var pollTask: Task<Void, Never>?
+    private(set) var setupTask: Task<Void, Never>?
 
     var aiServiceName: String {
         get { aiDraft.name }
@@ -393,7 +394,22 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    func stopPolling() { pollTask?.cancel(); pollTask = nil }
+    // Both background tasks strongly retain the model, and both mutate config on completion (the poll
+    // refreshes status; the connect writes the connection + enables modes). Cancelling them on teardown is
+    // what keeps a closed wizard from running work — or, worse, silently connecting an AI service — after
+    // the user has walked away.
+    func stopPolling() {
+        pollTask?.cancel(); pollTask = nil
+        setupTask?.cancel(); setupTask = nil
+    }
+
+    // The Connect button drives this so the in-flight test/write can be cancelled when the wizard closes
+    // (see createAIService's post-test cancellation guard). Running it bare in a detached Task instead
+    // would let a slow test complete and mutate config after a user-perceived cancel.
+    func connect() {
+        setupTask?.cancel()
+        setupTask = Task { @MainActor [weak self] in await self?.createAIService() }
+    }
 
     var allPermissionsGranted: Bool {
         micStatus == .granted && axStatus == .granted
@@ -456,6 +472,13 @@ final class FirstRunModel: ObservableObject {
         aiTesting = true
         let result = await testConnection(connection)
         aiTesting = false
+        // The wizard may have been closed while the test was in flight (connect()'s task is cancelled in
+        // stopPolling). Do not write the connection or enable modes after a user-perceived cancel, and drop
+        // the key that was saved before the test so it does not strand under an id nothing references.
+        if Task.isCancelled {
+            if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
+            return
+        }
         if case .failed(let message) = result {
             if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
             aiSetupError = "Connection test failed: \(message)"

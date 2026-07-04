@@ -116,6 +116,15 @@ struct InverseTextNormalizerTests {
         #expect(itn("fifteen percent") == "15%")
     }
 
+    @Test func percentDoesNotCrossSentenceBoundary() {
+        #expect(itn("The odds are fifty. Percent signs confuse people")
+            == "The odds are 50. Percent signs confuse people")
+    }
+
+    @Test func percentDoesNotCrossPunctuatedDecimal() {
+        #expect(itn("three point five. Percent") == "3.5. Percent")
+    }
+
     @Test func isCaseInsensitive() {
         #expect(itn("Twenty Five") == "25")
         #expect(itn("Fifty Percent") == "50%")

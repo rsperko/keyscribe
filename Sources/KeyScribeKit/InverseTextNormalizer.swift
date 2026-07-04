@@ -117,11 +117,12 @@ public enum InverseTextNormalizer {
             if !digits.isEmpty {
                 fractional = digits
                 idx = j
+                if digitStopped { stopped = true }
             }
         }
 
         var percent = false
-        if !isOrdinal && idx < tokens.count && canonical(tokens[idx]) == "percent" {
+        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx]) == "percent" {
             percent = true
             idx += 1
         }

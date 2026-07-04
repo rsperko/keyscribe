@@ -739,6 +739,11 @@ final class DictationController {
                 windowTitle = ContextProbe.focusedWindowTitle(bundleId: bundleId)
             }
         }
+        // The probe is the one per-dictation task that can outlive a cancel (the browser-URL round trip
+        // runs to ~0.6 s after ESC). A cancelled dictation must not apply its stale mode: doing so writes
+        // A's routing/activeMode into a live successor session B and consumes B's one-shot override
+        // (nextModeOverrideID lives on the controller, so session == nil does not neuter that write).
+        guard !Task.isCancelled else { return }
         applyResolvedMode(triggerKey: triggerKey, url: url, windowTitle: windowTitle)
     }
 

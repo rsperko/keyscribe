@@ -1,5 +1,35 @@
 # KeyScribe FAQ & Troubleshooting
 
+## First-run fixes
+
+### I launched KeyScribe but do not see a window.
+
+KeyScribe is a menu-bar app. Look for the waveform glyph in the macOS menu bar. Open the menu from
+there to reach Settings, History, speech models, and mode choices.
+
+### The Globe (Fn) key triggers Emoji or Apple Dictation.
+
+The Globe key is mapped to a system action. Either set it to **"Do Nothing"** in **System Settings >
+Keyboard**, or pick **Right Option** as the trigger key in **KeyScribe > Settings**. Trigger keys are
+per-mode.
+
+### I granted a permission, but KeyScribe still says it is missing.
+
+Quit and relaunch KeyScribe after changing macOS permission toggles. macOS caches permission
+verdicts for the life of a running process. If it still does not take effect, remove KeyScribe from
+that permission list and re-add it, or reset it with `tccutil reset <Service> com.keyscribe.app`.
+
+### My dictation went to the clipboard instead of being typed in.
+
+That is the focus-race fallback. If focus changes during dictation, KeyScribe copies the result
+instead of inserting it into the wrong app. Paste it where you want it.
+
+### Selecting a Qwen3-ASR model crashes in a source build.
+
+The Metal Toolchain was not installed when the app was built. Run
+`xcodebuild -downloadComponent MetalToolchain`, then rebuild with `./make-app.sh`. Packaged
+downloads include the required bundled artifact.
+
 ## Using KeyScribe
 
 ### Does any of my speech or text get sent anywhere?
@@ -8,7 +38,7 @@ Speech recognition is always on-device — your audio is never sent anywhere. Th
 leave your Mac is an optional, you-keyed LLM cleanup over a redacted payload, and it is off unless
 you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
 
-### Which speech engine should I pick?
+### Which speech model should I pick?
 
 Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint:
 
@@ -21,7 +51,7 @@ Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs
 
 You can switch engines anytime in **Settings ▸ Speech Models**; each is downloaded on first use.
 
-### Why is one engine badged "no recognition bias"?
+### Why is one model badged "no recognition bias"?
 
 Recognition bias teaches the model your names, jargon, and acronyms while it transcribes. Every
 model except Moonshine supports it. Moonshine has no on-device bias path, so KeyScribe can instead
@@ -62,34 +92,16 @@ KeyScribe does **not** request Input Monitoring.
 
 macOS caches permission verdicts for the life of a running process, so **quit and relaunch
 KeyScribe** after changing a toggle. If it still doesn't take effect, the grant may be bound to an old
-build signature — remove KeyScribe from that permission's list and re-add it, or reset it with
+build signature. Remove KeyScribe from that permission's list and re-add it, or reset it with
 `tccutil reset <Service> com.keyscribe.app`.
 
 ## Troubleshooting
-
-### The Globe (Fn) key triggers Emoji or Dictation instead of (or alongside) KeyScribe.
-
-The Globe key is mapped to a system action. Either set it to **"Do Nothing"** in **System Settings ▸
-Keyboard**, or pick **Right Option** as the trigger key in **KeyScribe ▸ Settings** — a conflict-free
-alternative. Trigger keys are per-mode.
-
-### My dictation went to the clipboard instead of being typed in.
-
-That's by design: if you move focus to another app mid-dictation, KeyScribe copies the result to the
-clipboard (with a HUD notice) rather than inserting it into the wrong place. Paste it where you want
-it.
 
 ### Background audio cuts out while I dictate.
 
 With **Settings ▸ General ▸ Mute system audio while dictating** on, playback is muted for the
 duration. If start/end sounds are also on, the mute begins *after* the start sound so the cue isn't
 swallowed — turn the start sound off if you want an instant mute.
-
-### Selecting a Qwen3-ASR engine crashes with "Failed to load the default metallib."
-
-This only affects builds from source: the Metal Toolchain wasn't installed at build time. Run
-`xcodebuild -downloadComponent MetalToolchain`, then rebuild with `./make-app.sh`. See
-[BUILD.md](BUILD.md).
 
 ### macOS re-prompts for permissions on every rebuild (building from source).
 

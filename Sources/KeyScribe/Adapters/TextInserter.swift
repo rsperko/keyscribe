@@ -13,8 +13,12 @@ enum TextInserter {
     private static var pendingRestoreGeneration = 0
 
     // Captures the target app's current selection via ⌘C, then restores the user's clipboard only if
-    // that copy actually changed the pasteboard.
+    // that copy actually changed the pasteboard. Drains any in-flight detached restore first, so the
+    // snapshot is the user's real clipboard and never a prior paste's still-present scratch text —
+    // restoring that would leak dictated content (including just-restored redacted spans) into the
+    // user's clipboard.
     static func captureSelection(modifier: Mode.ClipboardModifier = .command) async -> String? {
+        await drainPendingRestore()
         let pb = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture()
         postKey(cKeyCode, flags: eventFlags(modifier))

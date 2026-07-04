@@ -36,11 +36,33 @@ struct ModelMaintenanceTests {
         #expect(plan.removeDirs == ["parakeet-tdt-0.6b-v3"])
     }
 
-    @Test func removesUnknownOrphanDirs() {
+    @Test func preservesUnrecognizedDirs() {
+        // The models dir is shared across build variants: a dir this binary doesn't recognize can be a
+        // newer build's engine or the other variant's in-flight download, never safe to delete. Only
+        // dirs owned by a KNOWN-but-incomplete engine are removed.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["parakeet"],
-            dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml", "some-stale-thing"])
-        #expect(plan.removeDirs == ["some-stale-thing"])
+            dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml", "some-newer-engine"])
+        #expect(plan.removeDirs.isEmpty)
+    }
+
+    @Test func protectsRecentlyModifiedDirOfIncompleteEngine() {
+        // A partial dir of a known-incomplete engine is normally removed, but not while it is being
+        // actively written — the other variant may be mid-download into the shared dir.
+        let plan = ModelMaintenance.reconcile(
+            knownIds: known, owned: owned, completeIds: [],
+            dirsOnDisk: ["parakeet-tdt-0.6b-v3"], protectedDirs: ["parakeet-tdt-0.6b-v3"])
+        #expect(plan.removeDirs.isEmpty)
+    }
+
+    @Test func preservesUnknownMarkerIds() {
+        // installed.json is shared: an id this binary doesn't know belongs to the other variant / a
+        // newer build and must survive the marker rewrite rather than being clobbered.
+        let plan = ModelMaintenance.reconcile(
+            knownIds: known, owned: owned, completeIds: ["parakeet"],
+            dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml"],
+            markedIds: ["parakeet", "future-engine"])
+        #expect(plan.installed == ["parakeet", "future-engine"])
     }
 
     @Test func keepsPartialBiasDirOfInstalledEngine() {

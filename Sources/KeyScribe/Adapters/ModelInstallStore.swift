@@ -31,7 +31,8 @@ enum ModelInstallStore {
 
         let plan = ModelMaintenance.reconcile(
             knownIds: Array(owned.keys), owned: owned, completeIds: complete,
-            dirsOnDisk: directoriesOnDisk(), keep: [markerFile])
+            dirsOnDisk: directoriesOnDisk(), markedIds: marked,
+            protectedDirs: recentlyModifiedDirs(), keep: [markerFile])
         let adopted = plan.installed.subtracting(marked)
         let dropped = marked.subtracting(plan.installed)
         Log.models.notice("reconcile: installed=\(plan.installed.sorted(), privacy: .public) adopted=\(adopted.sorted(), privacy: .public) dropped=\(dropped.sorted(), privacy: .public) orphanDirs=\(plan.removeDirs.sorted(), privacy: .public)")
@@ -55,6 +56,42 @@ enum ModelInstallStore {
             entries
                 .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
                 .map { $0.lastPathComponent })
+    }
+
+    // Dirs touched within the recency window are treated as in-flight downloads (this variant or, since
+    // modelsDir is shared, the other) and never deleted — a partial dir mid-write is not an orphan.
+    private static let downloadRecencyWindow: TimeInterval = 5 * 60
+
+    private static func recentlyModifiedDirs() -> Set<String> {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: KeyScribePaths.modelsDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        let cutoff = Date().addingTimeInterval(-downloadRecencyWindow)
+        var recent: Set<String> = []
+        for entry in entries {
+            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            if directoryActive(entry, since: cutoff) { recent.insert(entry.lastPathComponent) }
+        }
+        return recent
+    }
+
+    // True if the directory OR any file/subdirectory under it was modified since `cutoff`. Checking only
+    // the top-level dir's mtime is not enough: a directory's mtime bumps when its direct entries are
+    // created/removed, but a large download that creates its files early and then streams bytes into them
+    // for minutes bumps each FILE's mtime, not the parent's. So a >window-long in-flight download would
+    // look idle and get deleted out from under the other variant (the P1-5 hazard). Walk descendants and
+    // stop at the first recent entry so the common (actively-writing) case exits fast.
+    static func directoryActive(_ dir: URL, since cutoff: Date) -> Bool {
+        let fm = FileManager.default
+        if let modified = try? dir.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+           modified >= cutoff { return true }
+        guard let enumerator = fm.enumerator(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return false }
+        for case let url as URL in enumerator {
+            if let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               modified >= cutoff { return true }
+        }
+        return false
     }
 
     static func installedIds() -> Set<String> {

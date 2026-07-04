@@ -61,6 +61,29 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.removed, ["parakeet"])
     }
 
+    func testPassingSelfTestEvictsAnInactiveEngine() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: true)
+
+        // "parakeet" is installed but not the active engine ("parakeet-tdt-ctc-110m").
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.evicted, ["parakeet"])
+        XCTAssertTrue(try row("parakeet", in: model).testPassed)
+        XCTAssertFalse(try row("parakeet", in: model).verificationFailed)
+    }
+
+    func testPassingSelfTestKeepsTheActiveEngineResident() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: true)
+
+        model.test("parakeet-tdt-ctc-110m")   // the active engine
+        await settleTasks()
+
+        XCTAssertEqual(recorder.evicted, [])
+    }
+
     func testFailedSelfTestRemovesFilesImmediately() async throws {
         let recorder = Recorder()
         let model = makeModel(

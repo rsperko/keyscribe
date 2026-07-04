@@ -287,7 +287,7 @@ struct FirstRunView: View {
                 Spacer()
                 if model.aiTesting { ProgressView().controlSize(.small) }
                 Button(model.aiTesting ? "Testing…" : "Connect AI Service") {
-                    Task { await model.createAIService() }
+                    model.connect()
                 }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
                     .disabled(!model.aiCanConnect || model.aiTesting)

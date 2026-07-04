@@ -228,8 +228,8 @@ extension Modifier {
 extension BaseKey {
     init?(token: String) {
         if token.count == 1, let c = token.first {
-            if c.isLetter { self = .letter(c); return }
-            if c.isNumber { self = .digit(c); return }
+            if BaseKey.letterKeyCodes[c] != nil { self = .letter(c); return }
+            if BaseKey.digitKeyCodes[c] != nil { self = .digit(c); return }
         }
         if token.first == "f", let n = Int(token.dropFirst()), (1...20).contains(n) {
             self = .function(n)

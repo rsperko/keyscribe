@@ -46,6 +46,21 @@ struct KeyDescriptorTests {
         }
     }
 
+    @Test func nonAsciiLetterKeyIsRejected() {
+        #expect(throws: TriggerKeyError.unknownToken("é")) {
+            try KeyDescriptor(parsing: "control+é")
+        }
+        #expect(throws: TriggerKeyError.unknownToken("ß")) {
+            try KeyDescriptor(parsing: "control+ß")
+        }
+    }
+
+    @Test func nonAsciiDigitKeyIsRejected() {
+        #expect(throws: TriggerKeyError.unknownToken("٣")) {
+            try KeyDescriptor(parsing: "control+٣")
+        }
+    }
+
     @Test func canonicalRoundTrips() throws {
         for s in ["fn", "hyper", "right_option", "right_command", "control+option+a", "f5"] {
             #expect(try KeyDescriptor(parsing: s).canonical == s)

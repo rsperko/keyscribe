@@ -1,19 +1,35 @@
 # Getting Started with KeyScribe
 
 This guide is a ramp. Start at the top, stop when KeyScribe already fits your workflow, and come
-back later for the deeper pieces. The early steps keep everything local. The later steps add optional
-AI cleanup, mode routing, context controls, history, and advanced setup.
+back later for the deeper pieces. The first useful milestone is simple: hold a key, speak, release,
+and undo the inserted text with one `Cmd-Z`.
+
+Plain Dictation stays on your Mac and does not need an AI service. The later steps add spoken edits,
+vocabulary, optional BYOK rewrite, mode routing, context controls, history, and file-level setup.
+
+## Fast path
+
+If you just installed KeyScribe, do this first:
+
+1. Launch KeyScribe and complete first run.
+2. Download the recommended on-device speech model.
+3. Grant Microphone and Accessibility.
+4. Open a text field.
+5. Hold `Fn (Globe)`, say one sentence, and release.
+
+When that works, use KeyScribe normally for a day before changing much. Add vocabulary only after
+you see real misses, and add rewrite modes only when plain dictation is not enough.
 
 ## The ramp
 
 | Stage | Learn this | Stop here when |
 |---|---|---|
-| 1. First dictation | Hold a key, speak, release, undo once. | Plain local dictation works in your usual apps. |
+| 1. First dictation | Hold a key, speak, release, undo once. | Plain Dictation works in your usual apps. |
 | 2. Reliability | Pick a trigger, recover from focus changes, paste the last result. | Dictation feels safe enough to use all day. |
 | 3. Vocabulary | Fix names, jargon, and repeated mishearings. | KeyScribe spells the words you care about. |
 | 4. Live edits | Say line breaks, tabs, scratch-that, clipboard paste, and verbatim spans. | You can dictate structured text without stopping. |
-| 5. Speech models | Choose the local engine that fits your voice and Mac. | Accuracy and latency feel right. |
-| 6. AI rewrite | Add your own provider key for optional cleanup. | You want polished messages, email, Markdown, or selected-text edits. |
+| 5. Speech models | Choose the local model that fits your voice and Mac. | Accuracy and latency feel right. |
+| 6. Rewrite | Add your own provider key for optional cleanup. | You want polished messages, email, Markdown, or selected-text edits. |
 | 7. Modes | Route dictation by key, app, URL, window title, or spoken suffix. | One trigger does the right thing in different places. |
 | 8. Privacy and history | See exactly what happened and control what is stored or sent. | You understand the local/cloud boundary. |
 | 9. Advanced setup | Combine modes, routing, privacy controls, and reusable instructions. | KeyScribe fits the way you write in different apps. |
@@ -163,12 +179,12 @@ The reference numbers and the local benchmark workflow are in
 Checkpoint: choose one model for a full day before switching again. Short A/B tests can overvalue a
 single lucky or unlucky sentence.
 
-## 6. Add optional AI cleanup only when you want finished text
+## 6. Add optional rewrite only when you want finished text
 
 Plain dictation does not need an AI service. Add one only when you want KeyScribe to rewrite the local
 transcript before insertion.
 
-What AI rewrite is good for:
+What rewrite is good for:
 
 - Removing filler words.
 - Fixing grammar and punctuation.
@@ -190,9 +206,10 @@ Set it up:
    short-lived bearer token.
 5. Test the connection.
 
-During first run, connecting an AI service enables the starter rewrite modes: Polish, Message, Email,
-and Edit Selection. If you add a service later, KeyScribe can point existing rewrite modes at it; open
-Settings > Modes and enable the modes you actually want.
+During first run, connecting an AI service enables the starter rewrite modes: Polish and Edit
+Selection. Email, Message, Markdown, Shell, and AI Prompt stay available as examples you can enable
+when you want them. If you add a service later, open Settings > Modes and enable the modes you
+actually want.
 
 Checkpoint: try **Polish** first. It is the smallest rewrite: same meaning, cleaner text.
 

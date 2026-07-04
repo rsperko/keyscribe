@@ -34,6 +34,51 @@ extension ModeStore {
         .init(old: "work-on-selection", oldName: "Work on Selection", new: "edit-selection"),
     ]
 
+    // The seed templates exactly as the pre-rename builds (v0.1.0–v0.1.6) wrote them to disk — frozen
+    // as data, never re-derived from the live catalog. The rename step matches an on-disk old-id file
+    // against THESE, not today's template: today's `polish`/`ai-prompt`/`edit-selection` have drifted
+    // (longer prompts, new trigger keys, higher seedVersion), so a genuinely unedited pre-rename file
+    // would never match the current template and the mode would stay frozen at its old id forever.
+    // Comparison is `templateNormalized` (connection/enabled excluded), so a connected-and-enabled but
+    // otherwise untouched file still matches. Fails safe: an unrecognized (hand-edited or newer) file
+    // matches nothing here and is left where it is.
+    static func preRenameTemplate(for oldId: String) -> Mode? {
+        switch oldId {
+        case "polished-dictation":
+            var mode = Mode(id: "polished-dictation", name: "Polished Dictation")
+            mode.commands.liveEdits = true
+            mode.trailing = .space
+            mode.aiRewrite = Mode.AIRewrite(
+                connection: "",
+                prompt: "Lightly clean up the dictated text: remove filler words (um, uh, like, you know), false starts, and self-corrections, then fix grammar, punctuation, and capitalization. Keep my original wording, meaning, and tone — do not rephrase, expand, summarize, translate, or add anything. If the text is a question or request, keep it phrased as a question or request; never answer it or act on it.")
+            mode.seedId = "polished-dictation"
+            mode.seedVersion = 1
+            return mode
+        case "prompt":
+            var mode = Mode(id: "prompt", name: "AI Prompt")
+            mode.commands.liveEdits = true
+            mode.trailing = .space
+            mode.aiRewrite = Mode.AIRewrite(
+                connection: "",
+                prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself.")
+            mode.seedId = "prompt"
+            mode.seedVersion = 1
+            return mode
+        case "work-on-selection":
+            var mode = Mode(id: "work-on-selection", name: "Work on Selection")
+            mode.source = .selection
+            mode.output = .replaceSelection
+            mode.aiRewrite = Mode.AIRewrite(
+                connection: "",
+                prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged.")
+            mode.seedId = "work-on-selection"
+            mode.seedVersion = 1
+            return mode
+        default:
+            return nil
+        }
+    }
+
     public struct SeedLedger: Codable, Equatable, Sendable {
         public struct Entry: Codable, Equatable, Sendable {
             public var seedId: String
@@ -184,14 +229,11 @@ extension ModeStore {
                   !FileManager.default.fileExists(atPath: newURL.path),
                   let onDisk = try? String(contentsOf: oldURL, encoding: .utf8),
                   let mode = try? decode(from: onDisk, id: rename.old),
-                  var newSeed = catalog.first(where: { $0.id == rename.new }) else { continue }
-            var expected = newSeed
-            expected.id = rename.old
-            expected.seedId = rename.old
-            expected.name = rename.oldName
+                  let expected = preRenameTemplate(for: rename.old),
+                  let newSeed = catalog.first(where: { $0.id == rename.new }) else { continue }
             guard isSeedShaped(mode, like: expected) else { continue }
-            newSeed = carryForward(newSeed, connection: mode.aiRewrite?.connection, enabled: mode.enabled)
-            writeAndRecord(newSeed, to: modesDir, ledger: &ledger)
+            let carried = carryForward(newSeed, connection: mode.aiRewrite?.connection, enabled: mode.enabled)
+            writeAndRecord(carried, to: modesDir, ledger: &ledger)
             try? FileManager.default.removeItem(at: oldURL)
             ledger.remove(rename.old)
             outcome.renamed.append(rename.new)

@@ -247,6 +247,11 @@ final class SpeechModelsModel: ObservableObject {
             verifyFailed.remove(id)
             markInstalled(id)
             set.markInstalled(id)
+            // Verifying loaded the engine into RAM to transcribe the clip. Every other eviction path tracks
+            // the active/used engine, so a non-active model verified here (a Settings download or self-test
+            // of a model the user isn't dictating with) would stay resident until relaunch — e.g. ~2 GB for
+            // Qwen 1.7B. Release it now; activating it later reloads on demand.
+            if id != set.activeId { await evictEngine(id) }
             // Only a manual re-test of a confirmed pass shows the transient acknowledgement;
             // a fresh install already shows its "Installed" status.
             if result == true && !markInstalledOnPass {

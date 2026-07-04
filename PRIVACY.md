@@ -4,6 +4,19 @@ KeyScribe is built local-first. This document describes precisely what stays on 
 optionally leave it, and the limits of those guarantees. It describes how the software behaves; it is
 not a legal privacy policy.
 
+## Summary
+
+| Data | Where it goes |
+| --- | --- |
+| Audio from the microphone | Transcribed on your Mac. Never uploaded by KeyScribe. |
+| Plain Dictation text | Processed and inserted on your Mac. No provider request. |
+| Optional rewrite text | Sent only to the provider or endpoint configured for that mode. |
+| Clipboard text inserted by voice | Tokenized before rewrite and restored locally; not sent as clipboard text. |
+| History | Local JSONL files under `~/Library/Application Support/KeyScribe/`. |
+| Saved API keys | macOS Keychain. The config stores only a key reference. |
+| Command-generated bearer tokens | Memory only, with expiry honored when present. |
+| Speech model weights | Downloaded on demand, cached locally, and reused offline. |
+
 ## What never leaves your Mac
 
 - **Speech recognition is always on-device.** There is no cloud speech-to-text in KeyScribe, and

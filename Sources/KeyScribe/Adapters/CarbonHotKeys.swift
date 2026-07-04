@@ -35,6 +35,10 @@ final class CarbonHotKeys: ChordRegistering {
         guard !registrations.isEmpty else { return }
         installHandlerIfNeeded()
         for reg in registrations {
+            guard reg.keyCode >= 0 else {
+                carbonLog.error("skipping registration with unmapped keyCode=\(reg.keyCode, privacy: .public)")
+                continue
+            }
             let numericId = nextId
             nextId &+= 1
             var ref: EventHotKeyRef?

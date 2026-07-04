@@ -3,6 +3,25 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
+// One-shot coordination across the connect Task and the test body.
+private final class Signal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var fired = false
+    func wait() async {
+        await withCheckedContinuation { c in
+            lock.lock()
+            if fired { lock.unlock(); c.resume(); return }
+            continuation = c
+            lock.unlock()
+        }
+    }
+    func fire() {
+        lock.lock(); fired = true; let c = continuation; continuation = nil; lock.unlock()
+        c?.resume()
+    }
+}
+
 @MainActor
 struct FirstRunAISetupTests {
     private func makeModel(
@@ -160,6 +179,43 @@ struct FirstRunAISetupTests {
 
         #expect(model.aiProvider == .openaiCompatible)
         #expect(model.aiAuthMethod == .apiKey)
+    }
+
+    @Test func closingTheWizardMidTestDoesNotConnectOrEnableModes() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: modesDir)
+
+        let started = Signal(), release = Signal()
+        var completed = 0
+        var deletedKeyRef: String?
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            deleteAPIKey: { deletedKeyRef = $0 },
+            testConnection: { _ in started.fire(); await release.wait(); return .passed },
+            onComplete: { completed += 1 })
+
+        model.aiServiceName = "Gemini"
+        model.aiProvider = .gemini
+        model.aiModel = "gemini-2.5-flash"
+        model.aiAPIKey = "secret"
+
+        model.connect()
+        await started.wait()      // the connection test is in flight; the key is already saved
+        let task = model.setupTask  // capture before stopPolling nils it
+        model.stopPolling()       // user closes the wizard → connect task cancelled
+        release.fire()            // the test returns .passed after the cancel
+        await task?.value
+
+        #expect(completed == 0)
+        #expect(model.step != .playground)
+        #expect(deletedKeyRef == "keyscribe.llm.gemini")
+        #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
+        let modes = ModeStore.loadAll(in: modesDir)
+        #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
     }
 
     @Test func failedConnectionTestDoesNotPersistOrFinish() async throws {
