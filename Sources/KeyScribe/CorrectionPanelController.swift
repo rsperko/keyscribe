@@ -15,17 +15,20 @@ import SwiftUI
 @MainActor
 final class CorrectionPanelController {
     private var window: NSWindow?
-    private let addDictionaryWord: (String) -> Void
-    private let addReplacement: (String, String, Bool) -> Void
+    private let destinations: () -> [CorrectionDestination]
+    private let addDictionaryWord: (String, CorrectionDestination) -> Void
+    private let addReplacement: (String, String, Bool, CorrectionDestination) -> Void
     private let captureSelection: () async -> String?
     private var previousApp: NSRunningApplication?
     private let status = CorrectionPanelStatus()
 
     init(
-        addDictionaryWord: @escaping (String) -> Void,
-        addReplacement: @escaping (String, String, Bool) -> Void,
+        destinations: @escaping () -> [CorrectionDestination] = { [.global] },
+        addDictionaryWord: @escaping (String, CorrectionDestination) -> Void,
+        addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Void,
         captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection() }
     ) {
+        self.destinations = destinations
         self.addDictionaryWord = addDictionaryWord
         self.addReplacement = addReplacement
         self.captureSelection = captureSelection
@@ -50,6 +53,7 @@ final class CorrectionPanelController {
         let view = CorrectionPanelView(
             prefill: prefill ?? "",
             canCorrect: prefill != nil && hasPasteTarget,
+            destinations: destinations(),
             status: status,
             onSave: { [weak self] result in
                 self?.apply(result)
@@ -69,8 +73,9 @@ final class CorrectionPanelController {
 
     private func apply(_ result: CorrectionPanelView.SaveResult) {
         switch result {
-        case .dictionary(let word): addDictionaryWord(word)
-        case .replacement(let heard, let replace, let regex): addReplacement(heard, replace, regex)
+        case .dictionary(let word, let destination): addDictionaryWord(word, destination)
+        case .replacement(let heard, let replace, let regex, let destination):
+            addReplacement(heard, replace, regex, destination)
         }
     }
 
@@ -102,16 +107,36 @@ final class CorrectionPanelStatus: ObservableObject {
     @Published var message: String?
 }
 
+struct CorrectionDestination: Hashable, Identifiable {
+    enum Scope: Hashable {
+        case global
+        case mode(String)
+    }
+
+    let scope: Scope
+    let title: String
+    let menuTitle: String
+
+    var id: Scope { scope }
+
+    static let global = CorrectionDestination(scope: .global, title: "Global", menuTitle: "Global")
+
+    static func lastMode(id: String, name: String) -> CorrectionDestination {
+        CorrectionDestination(scope: .mode(id), title: name, menuTitle: "Last mode: \(name)")
+    }
+}
+
 private struct CorrectionPanelView: View {
     enum SaveResult {
-        case dictionary(word: String)
-        case replacement(heard: String, replace: String, regex: Bool)
+        case dictionary(word: String, destination: CorrectionDestination)
+        case replacement(heard: String, replace: String, regex: Bool, destination: CorrectionDestination)
     }
 
     // The selection captured when the panel opened. "Add & Replace Selection" pastes the rule's effect
     // on *this* text, so a regex is applied to the original selection — not to the pattern field.
     let originalSelection: String
     let canCorrect: Bool
+    let destinations: [CorrectionDestination]
     let onSave: (SaveResult) -> Void
     let onCorrect: (SaveResult, String) -> Void
     let onCancel: () -> Void
@@ -120,24 +145,29 @@ private struct CorrectionPanelView: View {
     @State private var term: String
     @State private var replace: String
     @State private var regex = false
+    @State private var destination: CorrectionDestination
     @FocusState private var focus: Field?
 
     private enum Field { case term, replace }
 
     init(
         prefill: String, canCorrect: Bool,
+        destinations: [CorrectionDestination],
         status: CorrectionPanelStatus,
         onSave: @escaping (SaveResult) -> Void, onCorrect: @escaping (SaveResult, String) -> Void,
         onCancel: @escaping () -> Void
     ) {
+        let destinations = destinations.isEmpty ? [.global] : destinations
         self.originalSelection = prefill
         self.canCorrect = canCorrect
+        self.destinations = destinations
         self.status = status
         self.onSave = onSave
         self.onCorrect = onCorrect
         self.onCancel = onCancel
         _term = State(initialValue: prefill)
         _replace = State(initialValue: "")
+        _destination = State(initialValue: destinations[0])
     }
 
     var body: some View {
@@ -173,6 +203,26 @@ private struct CorrectionPanelView: View {
             Toggle("Match heard phrase as a regular expression", isOn: $regex)
                 .toggleStyle(.checkbox)
 
+            HStack(spacing: 10) {
+                Text("Save to")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if destinations.count == 1 {
+                    Text(destination.title)
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                } else {
+                    Picker("", selection: $destination) {
+                        ForEach(destinations) { destination in
+                            Text(destination.menuTitle).tag(destination)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+                Spacer()
+            }
+
             Text(helpText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -184,7 +234,7 @@ private struct CorrectionPanelView: View {
                     .foregroundStyle(.red)
             }
 
-            Text("Saved to your global vocabulary. Nothing leaves this Mac.")
+            Text(saveDestinationText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -234,6 +284,19 @@ private struct CorrectionPanelView: View {
 
     private var canCorrectNow: Bool { canSave && hasReplacementValue && !correctedValue.isEmpty }
 
+    private var entryKind: String {
+        (!regex && trimmedReplace.isEmpty) ? "vocabulary" : "replacements"
+    }
+
+    private var saveDestinationText: String {
+        switch destination.scope {
+        case .global:
+            return "Saves to global \(entryKind). Nothing leaves this Mac."
+        case .mode:
+            return "Saves to \(destination.title) \(entryKind). Nothing leaves this Mac."
+        }
+    }
+
     // What "Add & Replace Selection" pastes over the captured selection: the replacement text, or — for a
     // regex rule — the rule applied to the original selection (not to the pattern in the heard field).
     private func correctionPasteText() -> String {
@@ -257,8 +320,8 @@ private struct CorrectionPanelView: View {
 
     private func buildResult() -> SaveResult {
         if !regex && trimmedReplace.isEmpty {
-            return .dictionary(word: trimmedTerm)
+            return .dictionary(word: trimmedTerm, destination: destination)
         }
-        return .replacement(heard: trimmedTerm, replace: trimmedReplace, regex: regex)
+        return .replacement(heard: trimmedTerm, replace: trimmedReplace, regex: regex, destination: destination)
     }
 }

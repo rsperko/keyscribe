@@ -56,6 +56,15 @@ public actor SerializedEngine: SpeechEngine {
         await base.prepareForDictation()
     }
 
+    // Forward under the exclusive lock for the same reason as prepareForDictation: without this override
+    // the protocol-extension no-op on the wrapper would silently swallow Parakeet's implementation, and
+    // building the CTC vocab/rescorer touches the non-Sendable handle so it must not race a transcribe.
+    public func prewarmBias(termSets: [[String]]) async {
+        await acquire()
+        defer { release() }
+        await base.prewarmBias(termSets: termSets)
+    }
+
     private func acquire() async {
         while busy { await withCheckedContinuation { waiters.append($0) } }
         busy = true

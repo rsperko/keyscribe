@@ -54,6 +54,14 @@ final class ConfigRepository {
     }
 
     @discardableResult
+    func addDictionaryWord(_ word: String, toMode modeId: String) -> Bool {
+        (try? mutateMode(id: modeId) { mode in
+            let set = DictionarySet(words: mode.dictionary.words).adding(word: word)
+            mode.dictionary.words = set.words
+        }) != nil
+    }
+
+    @discardableResult
     func mutateDictionary(_ transform: (DictionarySet) -> DictionarySet) throws -> DictionarySet {
         let updated = transform(try loadDictionaryForMutation())
         try commit(touching: [supportDir.appendingPathComponent(DictionaryStore.fileName)]) {
@@ -77,6 +85,19 @@ final class ConfigRepository {
     }
 
     @discardableResult
+    func addReplacement(heard: String, replace: String, regex: Bool = false, toMode modeId: String) -> Bool {
+        let result = try? mutateMode(id: modeId) { mode in
+            if regex {
+                mode.replacements.rules.append(.init(heard: heard.trimmingCharacters(in: .whitespacesAndNewlines), replace: replace, regex: true))
+            } else {
+                let set = ReplacementsSet(rules: mode.replacements.rules).addingLiteral(heard: heard, replace: replace)
+                mode.replacements.rules = set.rules
+            }
+        }
+        return result != nil
+    }
+
+    @discardableResult
     func mutateReplacements(_ transform: (inout ReplacementsSet) -> Void) throws -> ReplacementsSet {
         var set = try loadReplacementsForMutation()
         transform(&set)
@@ -90,6 +111,15 @@ final class ConfigRepository {
 
     func writeMode(_ mode: Mode) throws {
         try commit(touching: [modeFileURL(id: mode.id)]) { try ModeStore.write(mode, to: modesDir) }
+    }
+
+    @discardableResult
+    func mutateMode(id: String, _ transform: (inout Mode) -> Void) throws -> Mode {
+        var mode = try loadModeForMutation(id: id)
+        guard !mode.isSystem else { throw ConfigError.invalid("system modes cannot hold local vocabulary") }
+        transform(&mode)
+        try writeMode(mode)
+        return mode
     }
 
     func deleteMode(_ mode: Mode) throws {
@@ -181,6 +211,11 @@ final class ConfigRepository {
         let file = supportDir.appendingPathComponent(ReplacementsStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return ReplacementsSet() }
         return try ReplacementsStore.decode(from: String(contentsOf: file, encoding: .utf8))
+    }
+
+    private func loadModeForMutation(id: String) throws -> Mode {
+        let file = modeFileURL(id: id)
+        return try ModeStore.decode(from: String(contentsOf: file, encoding: .utf8), id: id)
     }
 
     private func loadConnectionsForMutation() throws -> ConnectionSet {

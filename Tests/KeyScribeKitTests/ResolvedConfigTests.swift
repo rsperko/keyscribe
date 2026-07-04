@@ -80,6 +80,31 @@ struct ResolvedConfigTests {
         #expect(rc.recognitionBiasTerms(for: nil) == ["Global"])
     }
 
+    @Test func allBiasTermSetsCoverGlobalAndEachEnabledModeDeduped() {
+        var withLocal = Mode(id: "a", name: "A")
+        withLocal.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["Metaobject"])
+        let globalOnly = Mode(id: "b", name: "B")  // includeGlobal, no local words → set == global
+        let rc = resolved(modes: [withLocal, globalOnly], dictionary: ["Metafield"])
+        // Global first, then the mode that adds a term; the global-equal mode is deduped away.
+        #expect(rc.allRecognitionBiasTermSets() == [["Metafield"], ["Metafield", "Metaobject"]])
+    }
+
+    @Test func allBiasTermSetsSkipDisabledModesAndEmptySets() {
+        var disabled = Mode(id: "a", name: "A")
+        disabled.enabled = false
+        disabled.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["Never"])
+        var localOnly = Mode(id: "b", name: "B")
+        localOnly.dictionary = Mode.ModeDictionary(includeGlobal: false, words: ["OnlyLocal"])
+        // Empty global → the global set is dropped; the disabled mode never contributes.
+        let rc = resolved(modes: [disabled, localOnly], dictionary: [])
+        #expect(rc.allRecognitionBiasTermSets() == [["OnlyLocal"]])
+    }
+
+    @Test func allBiasTermSetsEmptyWhenNoTermsAnywhere() {
+        let rc = resolved(dictionary: [])
+        #expect(rc.allRecognitionBiasTermSets().isEmpty)
+    }
+
     // mergedDictionary delegates to the same lock-held path recognitionBias/textStages use, sharing one
     // cache — priming via bias must not diverge from the public accessor.
     @Test func mergedDictionaryAndBiasShareCache() {

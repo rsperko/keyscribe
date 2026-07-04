@@ -68,12 +68,17 @@ actor ParakeetEngine: SpeechEngine {
     private var ctcDir: URL?
     private var ctcUnavailable = false
 
-    // Bias terms rarely change between consecutive dictations, so the tokenized vocabulary and the
-    // rescorer it feeds are cached keyed on the term set. Both are rebuilt only when the terms change
-    // (the rescorer reads from the CTC model dir, so recreating it per dictation was needless I/O).
-    private var cachedBiasTerms: [String]?
-    private var cachedVocab: CustomVocabularyContext?
-    private var cachedRescorer: VocabularyRescorer?
+    // The tokenized vocabulary and the rescorer it feeds are cached keyed on the term set. The cache
+    // is multi-slot (a small LRU) rather than single-entry so distinct modes coexist: the warm/default
+    // (global) set stays resident while a mode with local dictionary words gets its own slot, instead
+    // of the two evicting each other and re-reading the CTC tokenizer from disk on every mode switch.
+    private struct BiasArtifacts {
+        let vocab: CustomVocabularyContext
+        var rescorer: VocabularyRescorer?
+    }
+    private var biasCache: [[String]: BiasArtifacts] = [:]
+    private var biasCacheLRU: [[String]] = []
+    private let biasCacheLimit = 8
 
     init(profile: ParakeetModelProfile, modelsDir: URL) {
         self.id = profile.id
@@ -179,7 +184,7 @@ actor ParakeetEngine: SpeechEngine {
             }
 
             let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocab.terms.count)
-            let rescorer = try await rescorer(vocab: vocab, ctcDir: ctcDir, spotter: spotter)
+            let rescorer = try await rescorer(for: biasTerms, vocab: vocab, ctcDir: ctcDir, spotter: spotter)
             let rescored = rescorer.ctcTokenRescore(
                 transcript: result.text,
                 tokenTimings: timings,
@@ -204,24 +209,54 @@ actor ParakeetEngine: SpeechEngine {
     }
 
     private func vocabulary(for biasTerms: [String]) -> CustomVocabularyContext {
-        if cachedBiasTerms == biasTerms, let cachedVocab { return cachedVocab }
+        if let cached = biasCache[biasTerms] { touchBias(biasTerms); return cached.vocab }
         let vocab = makeVocabulary(biasTerms)
-        cachedBiasTerms = biasTerms
-        cachedVocab = vocab
-        cachedRescorer = nil
+        storeBias(BiasArtifacts(vocab: vocab), for: biasTerms)
         return vocab
     }
 
     private func rescorer(
-        vocab: CustomVocabularyContext, ctcDir: URL, spotter: CtcKeywordSpotter
+        for biasTerms: [String], vocab: CustomVocabularyContext, ctcDir: URL, spotter: CtcKeywordSpotter
     ) async throws -> VocabularyRescorer {
-        if let cachedRescorer { return cachedRescorer }
+        if let cached = biasCache[biasTerms]?.rescorer { touchBias(biasTerms); return cached }
         let rescorer = try await VocabularyRescorer.create(
             spotter: spotter, vocabulary: vocab,
             config: VocabularyRescorer.Config(spotterRescueEnabled: spotterRescue),
             ctcModelDirectory: ctcDir)
-        cachedRescorer = rescorer
+        if biasCache[biasTerms] != nil {
+            biasCache[biasTerms]?.rescorer = rescorer
+            touchBias(biasTerms)
+        } else {
+            storeBias(BiasArtifacts(vocab: vocab, rescorer: rescorer), for: biasTerms)
+        }
         return rescorer
+    }
+
+    private func storeBias(_ artifacts: BiasArtifacts, for terms: [String]) {
+        biasCache[terms] = artifacts
+        touchBias(terms)
+        while biasCacheLRU.count > biasCacheLimit {
+            biasCache[biasCacheLRU.removeFirst()] = nil
+        }
+    }
+
+    private func touchBias(_ terms: [String]) {
+        if let idx = biasCacheLRU.firstIndex(of: terms) { biasCacheLRU.remove(at: idx) }
+        biasCacheLRU.append(terms)
+    }
+
+    // Warm-time (once per residency): build the CTC vocab + rescorer for each mode's bias set into its own
+    // cache slot, so the first biased dictation in a mode with local dictionary terms hits the cache
+    // instead of paying VocabularyRescorer.create (a CTC-tokenizer disk read) mid-transcription. Capped to
+    // the cache size so warming can't self-evict the sets it just built (global is first, stays resident).
+    func prewarmBias(termSets: [[String]]) async {
+        for terms in termSets.prefix(biasCacheLimit) where !terms.isEmpty {
+            if biasCache[terms]?.rescorer != nil { touchBias(terms); continue }
+            guard let spotter = await ensureCtc(), let ctcDir else { return }
+            let vocab = vocabulary(for: terms)
+            guard !vocab.terms.isEmpty else { continue }
+            _ = try? await rescorer(for: terms, vocab: vocab, ctcDir: ctcDir, spotter: spotter)
+        }
     }
 
     private func makeVocabulary(_ biasTerms: [String]) -> CustomVocabularyContext {
@@ -260,8 +295,7 @@ actor ParakeetEngine: SpeechEngine {
         ctcTokenizer = nil
         ctcDir = nil
         ctcUnavailable = false
-        cachedBiasTerms = nil
-        cachedVocab = nil
-        cachedRescorer = nil
+        biasCache.removeAll()
+        biasCacheLRU.removeAll()
     }
 }

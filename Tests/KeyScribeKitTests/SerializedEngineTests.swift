@@ -58,6 +58,10 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     private var _prepareCount = 0
     var prepareCount: Int { lock.withLock { _prepareCount } }
     func prepareForDictation() async { lock.withLock { _prepareCount += 1 } }
+
+    private var _prewarmedTermSets: [[String]]?
+    var prewarmedTermSets: [[String]]? { lock.withLock { _prewarmedTermSets } }
+    func prewarmBias(termSets: [[String]]) async { lock.withLock { _prewarmedTermSets = termSets } }
     // Opt out to prove the wrapper forwards the metadata rather than returning the protocol default.
     let benefitsFromWarmupClip = false
 
@@ -144,6 +148,15 @@ struct SerializedEngineTests {
         let engine = SerializedEngine(spy)
         await engine.prepareForDictation()
         #expect(spy.prepareCount == 1)
+    }
+
+    // P3-2a: the wrapper must forward prewarmBias to the base, else the protocol-extension no-op on the
+    // wrapper silently swallows Parakeet's per-mode bias prewarm and every mode's first dictation rebuilds.
+    @Test func prewarmBiasForwardsToBase() async {
+        let spy = SpyEngine()
+        let engine = SerializedEngine(spy)
+        await engine.prewarmBias(termSets: [["Metafield"], ["Metafield", "Metaobject"]])
+        #expect(spy.prewarmedTermSets == [["Metafield"], ["Metafield", "Metaobject"]])
     }
 
     // P1-2: benefitsFromWarmupClip must reflect the base, not the protocol default (true) — otherwise the

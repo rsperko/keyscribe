@@ -384,6 +384,7 @@ final class DictationController {
         // otherwise compile mid-dictation on the first biased transcribe. Empty dictionary ⇒ [] ⇒ Parakeet
         // keeps skipping the CTC load entirely, preserving that optimization for users who never bias.
         let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
+        let biasTermSets = Self.warmupBiasTermSets(settings: settings, engine: engine, plan: plan)
         let task = Task {
             try await engine.loadIfNeeded()
             // Warm the inference graph on a throwaway clip so the user's first real dictation isn't the one
@@ -393,6 +394,11 @@ final class DictationController {
             // clip is absent under `swift run`) must never fail the load. The commit-time await of this same
             // task serializes warmup before the real transcribe, so the non-actor engines are never reentered.
             if let clip, engine.benefitsFromWarmupClip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
+            // Pre-build the CTC vocab/rescorer for EVERY enabled mode's bias set (P3-2a), not just the global
+            // set the warmup transcribe covered, so the first biased dictation in a mode with local dictionary
+            // terms hits the multi-slot cache instead of building mid-transcription. No-op off Parakeet / when
+            // bias is off; overlaps the user's speech exactly like the warmup transcribe above.
+            if !biasTermSets.isEmpty { await engine.prewarmBias(termSets: biasTermSets) }
         }
         warmEngineId = engine.id
         warmTask = task
@@ -407,6 +413,12 @@ final class DictationController {
         guard settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias) else { return [] }
         return plan.recognitionBiasTerms(for: nil)
+    }
+
+    static func warmupBiasTermSets(settings: Settings, engine: any SpeechEngine, plan: ResolvedConfig) -> [[String]] {
+        guard settings.stt.recognitionBiasEnabled(
+            engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias) else { return [] }
+        return plan.allRecognitionBiasTermSets()
     }
 
     private func invalidateWarm(_ engineId: String) {

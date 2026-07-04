@@ -54,4 +54,39 @@ struct VocabularyLostWriteTests {
         #expect(onDisk.contains { $0.heard == "wont" })
         #expect(!onDisk.contains { $0.heard == "teh" })
     }
+
+    @Test func modeDictionaryAddWritesOnlyToThatMode() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        var mode = Mode(id: "code", name: "Code")
+        mode.dictionary.words = ["Postgres"]
+        try ModeStore.write(mode, to: repo.modesDir)
+
+        #expect(repo.addDictionaryWord("Kubernetes", toMode: "code"))
+
+        let global = DictionaryStore.loadOrDefault(supportDir: dir)
+        let updated = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("code.toml"), encoding: .utf8),
+            id: "code")
+        #expect(global.words.isEmpty)
+        #expect(updated.dictionary.words == ["Postgres", "Kubernetes"])
+    }
+
+    @Test func modeReplacementAddWritesOnlyToThatMode() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let mode = Mode(id: "code", name: "Code")
+        try ModeStore.write(mode, to: repo.modesDir)
+
+        #expect(repo.addReplacement(heard: "cube cuddle", replace: "kubectl", toMode: "code"))
+
+        let global = ReplacementsStore.loadOrDefault(supportDir: dir)
+        let updated = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("code.toml"), encoding: .utf8),
+            id: "code")
+        #expect(global.rules.isEmpty)
+        #expect(updated.replacements.rules == [.init(heard: "cube cuddle", replace: "kubectl", regex: false)])
+    }
 }

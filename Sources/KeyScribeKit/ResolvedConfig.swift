@@ -60,6 +60,22 @@ public final class ResolvedConfig: @unchecked Sendable {
         return terms
     }
 
+    // Every distinct non-empty recognition-bias term set across global + each enabled mode, global first.
+    // Warm-on-press runs once per residency, so an engine with a per-term-set bias cost (Parakeet's CTC
+    // vocab/rescorer) can pre-build a slot for each set here and let any mode's first biased dictation hit
+    // the cache instead of building mid-transcription. Deduped by value so modes sharing a set warm once.
+    public func allRecognitionBiasTermSets() -> [[String]] {
+        var seen = Set<[String]>()
+        var result: [[String]] = []
+        func add(_ terms: [String]) {
+            guard !terms.isEmpty, seen.insert(terms).inserted else { return }
+            result.append(terms)
+        }
+        add(recognitionBiasTerms(for: nil))
+        for mode in modes where mode.enabled { add(recognitionBiasTerms(for: mode)) }
+        return result
+    }
+
     // Post-STT text stages for a mode, memoized per (mode, dictionaryRecovery). Verbatim/redaction
     // tokenizers are per-dictation and added separately by the host; these stages are pure config.
     public func postSTTTextStages(for mode: Mode?, dictionaryRecovery: Bool) -> [any PipelineStage] {
