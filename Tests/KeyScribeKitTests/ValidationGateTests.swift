@@ -72,7 +72,6 @@ struct ValidationGateTests {
     }
 
     @Test func retryAndFallbackDecision() {
-        // first failure → retry stricter; second failure → local fallback
         #expect(ValidationGate.recovery(attempt: 0) == .retryStricter)
         #expect(ValidationGate.recovery(attempt: 1) == .localFallback)
     }

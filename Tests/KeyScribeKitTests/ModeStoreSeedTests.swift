@@ -95,13 +95,13 @@ struct ModeStoreSeedTests {
         ModeStore.ensureSystemModes(in: dir)
         let loaded = ModeStore.loadAll(in: dir)
         let direct = try #require(loaded.first { $0.id == Mode.directId })
-        #expect(direct.name == "Plain Dictation")   // display name; id is still _direct
+        #expect(direct.name == "Plain Dictation")
         #expect(direct.isSystem)
         #expect(direct.aiRewrite == nil)
         #expect(!direct.excludeFromHistory)                  // records per global setting by default
         #expect(direct.triggerKeys == [.init(key: "fn")])    // fresh install: Fn is free → Direct takes it
 
-        ModeStore.ensureSystemModes(in: dir)        // idempotent
+        ModeStore.ensureSystemModes(in: dir)
         #expect(ModeStore.loadAll(in: dir).filter { $0.id == Mode.directId }.count == 1)
     }
 

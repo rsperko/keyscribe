@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import KeyScribeKit
+import UniformTypeIdentifiers
 
 @MainActor
 enum TextInserter {
@@ -262,9 +263,19 @@ enum TextInserter {
         }
 
         static func capture(from pb: NSPasteboard = .general) -> PasteboardSnapshot {
+            let pbItems = pb.pasteboardItems ?? []
+            // Materializing a flavor with `data(forType:)` renders any promised/lazy representation in
+            // full (a Preview TIFF can be 50–100 MB) — the size cap below only stops *storing*, not the
+            // render that already stalled the main actor. Pre-scan types and divert heavyweight
+            // clipboards (image/PDF/media/file-URL) straight to the plain-text snapshot before touching
+            // their data, so we never render a flavor we would only discard.
+            if pbItems.contains(where: { $0.types.contains(where: isHeavyweight) }) {
+                return PasteboardSnapshot(
+                    changeCount: pb.changeCount, storage: .plainText(pb.string(forType: .string)))
+            }
             var total = 0
             var items: [[NSPasteboard.PasteboardType: Data]] = []
-            for item in pb.pasteboardItems ?? [] {
+            for item in pbItems {
                 var byType: [NSPasteboard.PasteboardType: Data] = [:]
                 for type in item.types {
                     if let data = item.data(forType: type) {
@@ -282,14 +293,23 @@ enum TextInserter {
             return PasteboardSnapshot(changeCount: pb.changeCount, storage: .full(items))
         }
 
+        private static func isHeavyweight(_ type: NSPasteboard.PasteboardType) -> Bool {
+            guard let ut = UTType(type.rawValue) else { return false }
+            return ut.conforms(to: .image) || ut.conforms(to: .pdf)
+                || ut.conforms(to: .movie) || ut.conforms(to: .audio)
+                || ut.conforms(to: .fileURL)
+        }
+
         func restore(to pb: NSPasteboard = .general) {
             switch storage {
             case .full(let items):
                 restoreFull(items, to: pb)
             case .plainText(let text):
-                guard let text else { return }
+                // Always clear first (like restoreFull) so a nil snapshot — a heavyweight or oversized
+                // clipboard we could not preserve, captured with no `.string` flavor — removes the scratch
+                // paste rather than leaving dictated text (incl. restored redacted spans) on the clipboard.
                 pb.clearContents()
-                pb.setString(text, forType: .string)
+                if let text { pb.setString(text, forType: .string) }
             }
         }
 

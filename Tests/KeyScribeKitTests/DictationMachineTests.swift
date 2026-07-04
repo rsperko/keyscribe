@@ -87,15 +87,15 @@ struct DictationMachineTests {
 
     @Test func cancellabilityTracksTheState() {
         var m = DictationMachine()
-        #expect(m.isCancellable == false)   // idle
+        #expect(m.isCancellable == false)
         _ = m.beginArming()
-        #expect(m.isCancellable == true)    // arming
+        #expect(m.isCancellable == true)
         _ = m.markRecording()
-        #expect(m.isCancellable == true)    // recording
+        #expect(m.isCancellable == true)
         _ = m.beginTranscribing()
-        #expect(m.isCancellable == true)    // transcribing
+        #expect(m.isCancellable == true)
         _ = m.beginInserting()
-        #expect(m.isCancellable == false)   // inserting
+        #expect(m.isCancellable == false)
     }
 
     @Test func finishIsReachableFromAnyLiveState() {

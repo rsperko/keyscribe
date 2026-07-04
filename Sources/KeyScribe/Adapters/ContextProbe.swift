@@ -2,9 +2,7 @@ import AppKit
 import ApplicationServices
 import KeyScribeKit
 
-// Private AX SPI: the CGWindowID backing an AXUIElement window, stable for the window's lifetime.
-// Used to tell two windows of the same app apart so a focus move during an LLM round-trip diverts to
-// the clipboard instead of pasting into the wrong window.
+// Private AX SPI for the CGWindowID backing an AXUIElement window.
 @_silgen_name("_AXUIElementGetWindow")
 private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
@@ -14,12 +12,7 @@ enum ContextProbe {
         TargetSnapshot(bundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
     }
 
-    // `excludingWindow` is our own recording HUD's window id. When the target is a *different* app the
-    // HUD (a nonactivating key panel in our process) is invisible to that app's focused-window read, so
-    // this is a no-op. It matters only when we dictate into our OWN window (the onboarding trial): the
-    // HUD becomes our app's key window, so a naive read would flip focusedWindowId to the HUD between
-    // capture and insertion and misfire decideInsertion's same-app focus-change guard → a spurious
-    // clipboard fallback. Excluding it falls back to the app's main window, so captured and current agree.
+    // Exclude our HUD when dictating into KeyScribe itself, where the HUD can become the key window.
     static func snapshot(excludingWindow excluded: CGWindowID? = nil) -> TargetSnapshot {
         let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         return TargetSnapshot(
@@ -28,8 +21,7 @@ enum ContextProbe {
             isSecureField: focusedIsSecure())
     }
 
-    // Best-effort secure-field detection. AX failures return false, and some browser password inputs do
-    // not expose the AXSecureTextField subrole, so this is a guard rather than a guarantee.
+    // Best-effort secure-field detection; AX failures return false.
     static func focusedIsSecure() -> Bool {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.1)
@@ -44,14 +36,7 @@ enum ContextProbe {
         return subrole == (kAXSecureTextFieldSubrole as String)
     }
 
-    // A stable id for the frontmost app's focused window, so decideInsertion can catch a same-app window
-    // switch between capture and insertion. Best-effort: a nil id never blocks insertion.
-    //
-    // Synchronous on purpose: snapshot() is read on the hot key-down path (handleStart) and again at
-    // insertion, both @MainActor, so it cannot await. A tight per-element messaging timeout (mirrors
-    // precedingTextSync, ContextProbe.swift) bounds a wedged AX server so it never stalls the dictation
-    // flow. Preferred id is the CGWindowID via the _AXUIElementGetWindow SPI; falls back to a
-    // title+position+size composite when the SPI is unavailable.
+    // Best-effort stable focused-window id; nil never blocks insertion.
     static func focusedWindowId(bundleId: String, excluding excluded: CGWindowID? = nil) -> String? {
         guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?.processIdentifier else { return nil }
@@ -107,8 +92,7 @@ enum ContextProbe {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName
     }
 
-    // The focused window's title for a window-title-constrained mode. Best-effort: nil if AX exposes no
-    // title.
+    // Best-effort title for window-title-constrained modes.
     static func focusedWindowTitle(bundleId: String) -> String? {
         guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?.processIdentifier else { return nil }
@@ -128,20 +112,14 @@ enum ContextProbe {
     // Bounded text immediately before the caret in the focused field. Chromium/Electron expose no caret
     // range through AX, so this returns nil there.
     static func precedingText(forBundleId bundleId: String, maxChars: Int = 600) async -> String? {
-        // Scope to the captured app. precedingText is read at rewrite time — after STT
-        // and partway into the LLM round trip — so resolving the live system-wide focused element would
-        // read whatever the user has since switched to, feeding the wrong field's (possibly sensitive)
-        // text to the LLM. Read only when the captured app is still frontmost, via that app's own focused
-        // element, so a switch away yields nil rather than another app's text.
+        // Read only while the captured app is still frontmost.
         guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId,
               let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
                   .first?.processIdentifier else { return nil }
         return await Task.detached { precedingTextSync(pid: pid, maxChars: maxChars) }.value
     }
 
-    // Synchronous AX walk, run off the main actor (each AXUIElementCopy… is cross-process IPC; a slow
-    // target must never stall the dictation flow on the main thread). A per-element messaging timeout
-    // bounds a wedged AX server.
+    // Synchronous AX walk; caller runs it off the main actor.
     nonisolated private static func precedingTextSync(pid: pid_t, maxChars: Int) -> String? {
         let app = AXUIElementCreateApplication(pid)
         var focusedRef: CFTypeRef?
@@ -165,12 +143,7 @@ enum ContextProbe {
         return text
     }
 
-    // Browser URL for URL-constrained modes: AppleScript/Apple Events, never AX. Browser identity comes
-    // from Launch Services rather than a bundle-id list, and the URL read tries both common script dialects.
-    //
-    // The Apple Event is a synchronous cross-process round trip with no per-call timeout (NSAppleScript
-    // uses kAEDefaultTimeout, ~2 min), so it runs off the main actor. The serial AppleScript queue avoids
-    // starving the cooperative pool; whichever of the fetch or the 0.6s timeout fires first wins.
+    // Browser URL for URL-constrained modes; AppleScript runs on a serial queue with a timeout race.
     static func browserURLAsync(forBundleId bundleId: String) async -> String? {
         guard handlesHTTPS(bundleId) else { return nil }
         return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in

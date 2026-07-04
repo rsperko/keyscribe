@@ -129,7 +129,6 @@ struct HotkeyMonitorChordTests {
         await drainMain()
         #expect(starts == 1)
 
-        // Rebuild with the same binding (as a Settings toggle would) while the key is still held.
         m.update(bindings: [chordBinding("control+option+e")])
 
         fake.lastRegistrations[0].onReleased?()
@@ -148,7 +147,7 @@ struct HotkeyMonitorChordTests {
         fake.lastRegistrations[0].onPressed()   // tap-to-toggle start; gesture now "recording"
         await drainMain()
 
-        m.update(bindings: [chordBinding("control+option+r", style: .tapToToggle)])  // different key
+        m.update(bindings: [chordBinding("control+option+r", style: .tapToToggle)])
         fake.lastRegistrations[0].onPressed()   // fresh gesture → start, not commit
         await drainMain()
         #expect(commits == 0)

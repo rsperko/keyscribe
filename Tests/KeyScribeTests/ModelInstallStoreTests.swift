@@ -16,10 +16,10 @@ struct ModelInstallStoreActivityTests {
         try? FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
     }
 
-    // The P1-5 hazard GPT flagged: a download creates its files early, then streams bytes into an existing
-    // nested file for longer than the recency window. That bumps the FILE's mtime, not the parent dir's,
-    // so a top-level-mtime-only check would see the dir as idle and let the other variant delete it
-    // mid-download. directoryActive must recurse and treat the recent nested file as activity.
+    // A download creates its files early, then streams bytes into an existing nested file for longer
+    // than the recency window. That bumps the FILE's mtime, not the parent dir's, so a top-level-mtime-only
+    // check would see the dir as idle and let the other variant delete it mid-download. directoryActive
+    // must recurse and treat the recent nested file as activity.
     @Test func nestedFileWriteKeepsADirActiveEvenWhenTheDirMtimeIsStale() throws {
         let root = tempDir()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -87,7 +87,7 @@ struct ReplacementsStageTests {
     // must override the default case-insensitive option.
     @Test func regexCaseSensitivityOptOutWithInlineFlag() {
         let rule = ReplacementRule(heard: #"(?-i)slash (\w+)"#, replace: "/$1", isRegex: true)
-        #expect(run([rule], on: "Slash dog") == "Slash dog")  // capital S not matched
+        #expect(run([rule], on: "Slash dog") == "Slash dog")
         #expect(run([rule], on: "slash dog") == "/dog")
     }
 

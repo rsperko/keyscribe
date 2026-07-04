@@ -29,8 +29,14 @@ final class ConfigRepository {
     }
 
     // For write paths not routed through `commit` (fragment files edited directly by ModesSettingsView).
+    // Matches `commit`'s post-write discipline: suppress the watcher's self-write echo, invalidate the
+    // cache so the next dictation sees the edited instruction (fragments are baked into the resolved plan
+    // and reused across dictations, so without this an AI-rewrite instruction edit does nothing until
+    // relaunch), then notify the host.
     func recordSelfWrite(at url: URL) {
         selfWriteGate.recordSelfWrite(url: url, supportDir: supportDir)
+        config.invalidate()
+        onChange?()
     }
 
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
@@ -47,7 +53,6 @@ final class ConfigRepository {
         (try? mutateDictionary { $0.adding(word: word) }) != nil
     }
 
-    // Read-modify-write from disk, then invalidate + notify. Returns the written set.
     @discardableResult
     func mutateDictionary(_ transform: (DictionarySet) -> DictionarySet) throws -> DictionarySet {
         let updated = transform(try loadDictionaryForMutation())

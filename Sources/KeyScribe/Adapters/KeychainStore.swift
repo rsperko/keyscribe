@@ -2,19 +2,12 @@ import Foundation
 import Security
 import KeyScribeKit
 
-// BYOK secrets live in the Keychain; TOML stores only the `key_ref` (design.md §4.6,
-// config_schema.md). A connection's key_ref is the Keychain account under one service.
+// BYOK secrets live in the Keychain; TOML stores only the `key_ref`.
 //
-// We use the legacy login keychain, not the data-protection keychain: under local self-signed
-// signing (no Team ID) the data-protection keychain is unusable — the keychain-access-groups
-// entitlement it needs makes AMFI SIGKILL the app at launch, and without it SecItem returns
-// errSecMissingEntitlement. The login keychain's only downside is the interactive ACL prompt, which
-// fires solely when the *secret data* is decrypted (`get`). Existence checks (`has`) ask for
-// attributes only, never the data, so they never prompt — that is what the Settings UI uses.
+// Use the legacy login keychain because dev builds are self-signed. `has` reads attributes only, so
+// Settings badges do not trigger the ACL prompt that decrypting secret data can show.
 //
-// A `CachingSecretStore` fronts the raw SecItem ops so a key is decrypted at most once per process
-// (get on every rewrite attempt was the hot-path prompt risk). Every mutation routes through the
-// cache; `has` stays a direct pass-through so the Settings badges reflect the live keychain.
+// `CachingSecretStore` keeps rewrite attempts from decrypting the same key repeatedly.
 enum KeychainStore {
     // Per-variant service so the KeyScribeDev build keeps its BYOK keys separate and never fights the
     // production app over a shared item's ACL.
@@ -35,9 +28,6 @@ enum KeychainStore {
         ]
     }
 
-    // Returns whether the secret was actually stored. The caller must not mark a key "present" on a
-    // false return: a discarded failure would show a saved-key badge while every later rewrite quietly
-    // falls back to local for want of a key.
     @discardableResult
     static func set(_ secret: String, for keyRef: String) -> Bool {
         cache.set(secret, for: keyRef)
@@ -51,17 +41,13 @@ enum KeychainStore {
         cache.delete(keyRef)
     }
 
-    // Erase every BYOK secret under this variant's service in one call (no account ⇒ all items match).
-    // Variant-scoped, so the dev build never touches the production app's keys. Backs the "Erase All
-    // KeyScribe Data" action. The count is read with attributes only (no ACL prompt), for an honest
-    // action message; deletion needs no data access either.
+    // Erase every BYOK secret under this variant's service.
     @discardableResult
     static func deleteAll() -> Int {
         cache.deleteAll()
     }
 
-    // Existence only: returns attributes, never the secret data, so it does not trigger the Keychain
-    // ACL prompt. Use this anywhere you only need "is a key stored?" (e.g. the Settings UI badges).
+    // Existence only: returns attributes, never secret data.
     static func has(_ keyRef: String) -> Bool {
         var query = baseQuery(keyRef)
         query[kSecReturnAttributes as String] = true

@@ -46,7 +46,6 @@ struct HistoryExportTests {
         #expect(md.contains("On this Mac"))
         #expect(md.contains("Cloud rewrite"))
         #expect(md.contains("Best-effort redaction"))
-        // Heard → Result is rendered.
         #expect(md.contains("hello"))
     }
 

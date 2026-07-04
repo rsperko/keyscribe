@@ -76,10 +76,10 @@ struct ModeSeedReconcileTests {
         #expect(polish.enabled == true)
     }
 
-    // P1-6 regression: a genuine pre-rename file carries the OLD (short) prompt, seed_version 1, and no
-    // trigger key. The rename must recognize it and upgrade it to today's polish template. The prior
-    // matcher compared the on-disk file against the CURRENT catalog, so this exact file never matched and
-    // the mode stayed frozen at its old id forever, with no signal.
+    // A genuine pre-rename file carries the OLD (short) prompt, seed_version 1, and no trigger key. The
+    // rename must recognize it and upgrade it to today's polish template. Matching against the CURRENT
+    // catalog instead of the frozen old template would miss this file, leaving the mode frozen at its old
+    // id forever, with no signal.
     @Test func preRenameFileWithOldPromptIsUpgradedToCurrentTemplate() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -99,7 +99,7 @@ struct ModeSeedReconcileTests {
     // A file byte-shaped like TODAY's polish but sitting at the old id is NOT a pre-rename file (no old
     // build ever wrote today's template there): its template differs from the frozen old one, so it must
     // be left alone, not silently overwritten. Proves the match is against the frozen old template, not
-    // the current catalog — the crux of the P1-6 fix.
+    // the current catalog.
     @Test func currentShapedFileAtOldIdIsNotTreatedAsARename() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }

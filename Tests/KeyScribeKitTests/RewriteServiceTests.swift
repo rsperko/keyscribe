@@ -62,7 +62,7 @@ struct RewriteServiceTests {
         #expect(await client.calls == 2)   // initial + one stricter retry, no more
     }
 
-    // W4/H2: an issued token that was swallowed upstream (a verbatim token captured inside a redaction
+    // An issued token that was swallowed upstream (a verbatim token captured inside a redaction
     // span) is absent from the sent content, so the model never sees it. The gate must NOT require it —
     // a clean output that reproduces only the tokens actually present passes on the first call, no doomed
     // retry, no spurious fallback for the privacy+verbatim users this targets.
@@ -93,7 +93,7 @@ struct RewriteServiceTests {
     }
 
     // A token minted for the instruction (not in payload.text, so never `required`) must still be
-    // usable in the output via `allowedTokens` (hotkeys-llm-network H1 follow-up).
+    // usable in the output via `allowedTokens`.
     @Test func allowedTokenFromInstructionMayAppearInOutput() async {
         let client = FakeClient([.success("send to ⟦SN:REDACT:2⟧")])
         let svc = RewriteService(client: client)

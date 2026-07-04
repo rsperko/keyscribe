@@ -1,12 +1,8 @@
 import Foundation
 
-// Legacy marker for global macOS audio state that earlier builds changed during dictation and might have
-// stranded after a crash. Current builds only decode, reconcile, and clear it. Identity is by stable device
-// UID, never transient AudioDeviceID.
+// Legacy marker for audio state that earlier builds could strand after a crash.
 public struct PendingSystemRestore: Decodable, Equatable, Sendable {
-    // The user's original system default input device UID from a legacy marker.
     public var defaultInputUID: String?
-    // Output mute marker decoded from earlier builds. Never encoded by current builds.
     public var legacyMutedOutputUID: String?
 
     public init(defaultInputUID: String? = nil, legacyMutedOutputUID: String? = nil) {
@@ -30,8 +26,6 @@ public struct PendingSystemRestore: Decodable, Equatable, Sendable {
             (try? c.decodeIfPresent(LegacyOutputMute.self, forKey: .outputMute))??.deviceUID
     }
 
-    // Undecodable bytes decode to nil so the launch reconcile leaves an unreadable marker untouched rather
-    // than treating it as empty and clearing it.
     public static func decode(from data: Data) -> PendingSystemRestore? {
         try? JSONDecoder().decode(PendingSystemRestore.self, from: data)
     }

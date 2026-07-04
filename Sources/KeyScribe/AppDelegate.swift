@@ -38,9 +38,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
 
-    // A graceful Cmd-Q during an active dictation tears the app down without running the dictation-end
-    // restore paths, leaving the default input overridden (the output duck releases itself on process exit).
-    // Run the SAME ordered in-process teardown a cancel uses — it disposes the realized engine BEFORE
     func applicationWillTerminate(_: Notification) {
         controller?.cancel()
     }
@@ -65,7 +62,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate)
-        configRepository.onChange = { [weak self] in self?.refreshStatus() }
+        configRepository.onChange = { [weak self] in
+            // A mode write can enable/disable a mode or change its trigger key, so re-register the
+            // hotkey bindings from the freshly-invalidated config. The FSEvents watcher no longer does
+            // this for in-app writes (they are self-write echoes it deliberately skips), so without this
+            // an enabled mode's trigger never binds — and a disabled mode's keeps firing — until relaunch.
+            self?.rebuildHotkeyMonitor()
+            self?.refreshStatus()
+        }
         selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
         configWatcher = ConfigWatcher(path: KeyScribePaths.supportDir.path) { [weak self, gate = selfWriteGate, dir = KeyScribePaths.supportDir] in
             // Off-main (FSEvents utility queue): skip the hop entirely on a pure self-write echo.

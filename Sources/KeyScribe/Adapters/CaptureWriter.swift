@@ -3,34 +3,21 @@ import Foundation
 import KeyScribeKit
 import Synchronization
 
-// Boxes the (non-Sendable) live buffer + a one-shot flag for AVAudioConverter's @Sendable input block.
-// Reused across buffers on the writer thread so the resampling path does not heap-allocate per buffer.
 final class FeedOnce: @unchecked Sendable {
     var buffer: AVAudioPCMBuffer?
     var consumed = false
 }
 
-// The single consumer of an `AudioSampleRing`, running on its own dedicated thread. Resampling and file I/O
-// stay off the CoreAudio realtime thread.
-//
-// The thread polls the ring on a short interval (no wakeup is ever signalled FROM the RT thread — the RT
-// path stays syscall-free). The ring holds several hardware periods of buffering, more than the poll
-// interval, and drops are counted when writer-thread jitter exceeds that budget. `finish()` from the owner
-// signals the shutdown gate for a prompt, deterministic join — the owner can then close the file knowing no
-// write is in flight.
+// Single consumer of an `AudioSampleRing`; keeps resampling and file I/O off the realtime thread.
 final class CaptureWriter: @unchecked Sendable {
-    // The device-native buffer delivered per slot is at most a few ms; the ring absorbs many of them, so a
-    // 5 ms poll keeps disk latency negligible while the thread is otherwise asleep. The shutdown semaphore's
-    // timeout doubles as the poll tick.
+    // Poll tick for draining the ring while keeping the realtime path syscall-free.
     private static let pollInterval: Double = 0.005
 
     private let ring: AudioSampleRing
     // Released when the writer thread exits; the session owns final file-close ordering.
     private var file: AVAudioFile?
     private let recordFormat: AVAudioFormat
-    // Called after each written slot with the slot's host time (nil when the RT layer had no valid host
-    // time). Returns true when the tail-drain gate has tripped, i.e. the release-covering buffer has reached
-    // disk and capture may seal. During normal recording (no drain armed) it always returns false.
+    // Returns true once the release-covering buffer has reached disk and capture may seal.
     private let observeHostTime: (UInt64?) -> Bool
 
     private let shutdown = DispatchSemaphore(value: 0)
@@ -88,8 +75,7 @@ final class CaptureWriter: @unchecked Sendable {
         done.leave()
     }
 
-    // Consume every slot currently published, writing each to disk and feeding the drain gate. Stops early
-    // (leaving later post-release slots in the ring, to be discarded) the moment the gate trips.
+    // Stop as soon as the drain gate trips; later post-release slots are discarded.
     private func drainReady() {
         while !sealed {
             let had = ring.read { [self] info, channel in
@@ -118,9 +104,7 @@ final class CaptureWriter: @unchecked Sendable {
         }
     }
 
-    // Build (or reuse) the native-format scratch buffer that a slot's planar samples are copied into. Its
-    // format matches the device-native rate/channels the RT layer delivered; rebuilt when that changes
-    // (a mid-recording device swap), which also resets the resampler so it rebinds to the new input.
+    // Rebuild when the native rate/channels change, which also resets the resampler.
     private func inputBuffer(for info: AudioSampleRing.SlotInfo) -> AVAudioPCMBuffer? {
         if let inputFormat, inputFormat.sampleRate == info.sampleRate,
            Int(inputFormat.channelCount) == info.channelCount, let inBuffer {
@@ -138,7 +122,6 @@ final class CaptureWriter: @unchecked Sendable {
         return buffer
     }
 
-    // Write one native-format buffer to the file, resampling to the record format first when they differ.
     private func write(_ input: AVAudioPCMBuffer) {
         guard let file else { return }
         let inFmt = input.format

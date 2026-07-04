@@ -1,14 +1,4 @@
-// Decides when a commit-on-release dictation may stop the audio engine without clipping the tail.
-//
-// An AVAudioEngine input tap accumulates `bufferSize` frames before each callback, so at the moment
-// the trigger is released the buffer holding the final word is still filling and has not been
-// delivered. Stopping the engine then drops it. The gate keeps the engine running until a delivered
-// buffer's audio is known to cover the release instant, then signals stop.
-//
-// Buffers carry the mach host time of their first sample. The release instant is sampled with the
-// same clock. The first buffer whose start is at or after release is delivered strictly after the
-// buffer that contained release, so seeing it proves the release-containing buffer already reached
-// disk. When the tap supplies no valid host time, a buffer count bounds the wait instead.
+// Stops commit-on-release capture after the buffer covering the release instant has reached disk.
 public struct TailDrainGate: Sendable {
     public enum Outcome: Equatable, Sendable { case keepDraining, stop }
 

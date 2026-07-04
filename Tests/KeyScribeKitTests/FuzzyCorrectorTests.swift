@@ -65,7 +65,7 @@ struct FuzzyCorrectorTests {
         #expect(FuzzyCorrector.phoneticKey("Java") != FuzzyCorrector.phoneticKey("Lava"))
     }
 
-    // Audit #2: phonetic agreement must GATE a fuzzy snap, not merely buy a second edit. A common word
+    // Phonetic agreement must GATE a fuzzy snap, not merely buy a second edit. A common word
     // one edit from a dictionary term but phonetically distinct (different leading sound) must be left
     // alone — otherwise "Java" in the dictionary eats spoken "lava", "Rust" eats "dust". This is the
     // classic edit-distance false-positive band (Austria/Australia). A genuine same-sound misspelling
@@ -76,7 +76,7 @@ struct FuzzyCorrectorTests {
         #expect(fix("install postgress now", ["Postgres"]) == "install Postgres now")
     }
 
-    // Audit #1: Soundex anchors on the literal first letter, so a mis-heard leading consonant that is
+    // Soundex anchors on the literal first letter, so a mis-heard leading consonant that is
     // phonetically identical (soft C ≡ S) yields different codes and the phonetic +1 never fires —
     // "sellery" (a plausible mishearing of soft-C "Celery") is two edits away and stays uncorrected.
     // A first-letter-insensitive phonetic key (Double Metaphone: both → "SLR") would grant the edit and

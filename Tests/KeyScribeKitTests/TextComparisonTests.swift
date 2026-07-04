@@ -10,6 +10,7 @@ struct TextComparisonTests {
         #expect(comparison.right.map(\.kind) == [.unchanged])
         #expect(comparison.left.map(\.text).joined() == "send the report")
         #expect(comparison.right.map(\.text).joined() == "send the report")
+        #expect(comparison.summary == .identical)
     }
 
     @Test func caseAndPunctuationOnlyIsFormatting() {
@@ -18,6 +19,7 @@ struct TextComparisonTests {
         #expect(comparison.hasMeaningfulDifference == false)
         #expect(comparison.left.contains { $0.kind == .formatting })
         #expect(comparison.right.contains { $0.kind == .formatting })
+        #expect(comparison.summary == .formattingOnly)
     }
 
     @Test func substitutedWordIsChangedOnBothSides() {
@@ -28,6 +30,7 @@ struct TextComparisonTests {
         #expect(comparison.right.map(\.kind).contains(.changed))
         #expect(comparison.left.filter { $0.kind == .changed }.map(\.text).joined() == "pat")
         #expect(comparison.right.filter { $0.kind == .changed }.map(\.text).joined() == "Matt")
+        #expect(comparison.summary == .substitution(from: "pat", to: "Matt"))
     }
 
     @Test func missingWordIsRemovedFromLeft() {
@@ -36,6 +39,7 @@ struct TextComparisonTests {
         #expect(comparison.hasMeaningfulDifference)
         #expect(comparison.left.filter { $0.kind == .removed }.map(\.text).joined() == "weekly")
         #expect(comparison.right.contains { $0.kind == .removed } == false)
+        #expect(comparison.summary == .counts(removed: 1, added: 0, changed: 0))
     }
 
     @Test func addedWordIsAddedOnRight() {
@@ -44,6 +48,7 @@ struct TextComparisonTests {
         #expect(comparison.hasMeaningfulDifference)
         #expect(comparison.right.filter { $0.kind == .added }.map(\.text).joined() == "weekly")
         #expect(comparison.left.contains { $0.kind == .added } == false)
+        #expect(comparison.summary == .counts(removed: 0, added: 1, changed: 0))
     }
 
     @Test func repeatedWordsStayAligned() {
@@ -113,29 +118,6 @@ struct TextComparisonTests {
         #expect(comparison.left.map(\.kind) == [.unchanged])
         #expect(comparison.hasMeaningfulDifference == false)
         #expect(comparison.summary == .identical)
-    }
-
-    @Test func summaryIdenticalWhenExactlyEqual() {
-        #expect(TextComparison.compare("send the report", "send the report").summary == .identical)
-    }
-
-    @Test func summaryFormattingOnlyForCaseAndPunctuation() {
-        #expect(TextComparison.compare("hello world", "Hello, world.").summary == .formattingOnly)
-    }
-
-    @Test func summaryIsSubstitutionForSingleWordSwap() {
-        #expect(TextComparison.compare("send it to pat", "send it to Matt").summary
-            == .substitution(from: "pat", to: "Matt"))
-    }
-
-    @Test func summaryCountsAddedWord() {
-        #expect(TextComparison.compare("send the report", "send the weekly report").summary
-            == .counts(removed: 0, added: 1, changed: 0))
-    }
-
-    @Test func summaryCountsRemovedWord() {
-        #expect(TextComparison.compare("send the weekly report", "send the report").summary
-            == .counts(removed: 1, added: 0, changed: 0))
     }
 
     @Test func summaryCountsMultipleChangedWords() {

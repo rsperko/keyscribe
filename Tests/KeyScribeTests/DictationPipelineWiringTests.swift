@@ -155,7 +155,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    // Counts how many times the host read the clipboard seam (all on the main actor).
     @MainActor private final class ClipboardReads { var count = 0 }
 
     private struct Result {

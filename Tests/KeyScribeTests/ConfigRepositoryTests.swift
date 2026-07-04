@@ -32,6 +32,36 @@ struct ConfigRepositoryTests {
         #expect(notified == 1)
     }
 
+    // Fragment (AI-rewrite instruction) files are written directly, not through `commit`, so their
+    // self-write must independently invalidate + notify — otherwise the resolved plan keeps the stale
+    // instruction text (baked in at realization and reused across dictations) until relaunch.
+    @Test func recordingAFragmentSelfWriteInvalidatesResolvedAndNotifies() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fragmentsDir = dir.appendingPathComponent("fragments", isDirectory: true)
+        try FileManager.default.createDirectory(at: fragmentsDir, withIntermediateDirectories: true)
+        let fragURL = fragmentsDir.appendingPathComponent("tone.md")
+        try FragmentStore.replacingBody(inFile: "", with: "old instruction")
+            .write(to: fragURL, atomically: true, encoding: .utf8)
+
+        let config = ConfigCache(supportDir: dir)
+        let repo = ConfigRepository(supportDir: dir, config: config)
+        var notified = 0
+        repo.onChange = { notified += 1 }
+
+        var mode = Mode(id: "note", name: "Note")
+        mode.aiRewrite = .init(connection: "", prompt: "x", fragments: ["tone"])
+        try repo.writeMode(mode)
+        #expect(config.resolved.fragmentBodies(ids: ["tone"]) == ["old instruction"])   // realize + cache
+
+        try FragmentStore.replacingBody(inFile: try String(contentsOf: fragURL, encoding: .utf8), with: "new instruction")
+            .write(to: fragURL, atomically: true, encoding: .utf8)
+        repo.recordSelfWrite(at: fragURL)
+
+        #expect(config.resolved.fragmentBodies(ids: ["tone"]) == ["new instruction"])
+        #expect(notified == 2)
+    }
+
     @Test func aConnectionWriteInvalidatesTheCacheAndNotifies() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

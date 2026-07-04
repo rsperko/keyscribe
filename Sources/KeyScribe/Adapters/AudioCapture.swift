@@ -8,8 +8,7 @@ import Synchronization
 
 protocol AudioCapturing: AnyObject, Sendable {
     func start(sampleRate: Int) async throws -> URL
-    // Latest perceptual mic level (0…1), published from the RT thread and polled by the controller's HUD
-    // meter while recording — no per-buffer main-actor hop.
+    // Latest perceptual mic level (0…1), published from the realtime thread.
     var currentLevel: Float { get }
     func stop() -> URL?
     // Commit-on-release stop: let the callback deliver the buffer that holds the final word.
@@ -17,8 +16,7 @@ protocol AudioCapturing: AnyObject, Sendable {
     func prewarm()
     // Rebuild and prewarm the idle unit after wake or long idle.
     func refreshBinding()
-    // The user's preferred capture device UID (empty/nil = follow the system default). The adapter holds
-    // it standing — the idle device listener consults it independently of any start()/prewarm() call.
+    // Empty/nil follows the system default.
     func setPreferredInputUID(_ uid: String?)
 }
 
@@ -27,38 +25,27 @@ extension AudioCapturing {
     func refreshBinding() {}
     func finishDraining() async -> URL? { stop() }
     func setPreferredInputUID(_ uid: String?) {}
-    // Real capture publishes a live meter level from the RT thread into an atomic; the controller polls it
-    // while recording. Fakes have no meter, so default to silence.
     var currentLevel: Float { 0 }
 }
 
 enum AudioCaptureError: Error {
     case formatUnavailable
     case preferredInputFailed
-    // Bring-up did not return within the watchdog window — the device (classically a Bluetooth headset
-    // mid A2DP↔HFP switch, or a half-transitioned/dead input) wedged a synchronous CoreAudio call. The
-    // main thread was never blocked; the dictation fails gracefully and the next attempt rebuilds on a
-    // fresh unit + queue.
     case bringUpTimedOut
 }
 
-// Carries a specific unit instance into the control queue's @Sendable teardown closure. The instance
-// matters: a rebuild may swap self.unit before the queued teardown runs, and we must dispose the one we
-// intended to. HALInputUnit is confined to the control queue, so this is safe.
+// Carries a specific unit instance into a queued teardown after `self.unit` may have changed.
 private final class UnitBox: @unchecked Sendable {
     let unit: HALInputUnit
     init(_ unit: HALInputUnit) { self.unit = unit }
 }
 
-// All state for one in-flight capture, created on the control queue when a dictation arms and dropped under
-// `lock` at teardown. The RT callback copies into the shared ring rather than touching the session.
 private final class CaptureSession: @unchecked Sendable {
     let url: URL
     let file: AVAudioFile
     // Drains the shared ring to `file` on its own thread (owns the resampler/converter). See CaptureWriter.
     let writer: CaptureWriter
-    // Mid-recording restart attempts for THIS capture; bounds a flapping device. Reset to 0 by being a
-    // fresh session per capture.
+    // Bounds mid-recording restart attempts for this capture.
     var configRestartCount = 0
 
     init(url: URL, file: AVAudioFile, writer: CaptureWriter) {
@@ -68,101 +55,60 @@ private final class CaptureSession: @unchecked Sendable {
     }
 }
 
-// Device-pinned microphone capture over a raw AUHAL input unit. The unit binds the chosen device directly
-// and matches the client format to the device's native format, so selecting a non-default mic has no global
-// system-default side effect. All unit control runs off the main thread under a watchdog.
+// Device-pinned microphone capture over a raw AUHAL input unit.
 final class AudioCapture: AudioCapturing, @unchecked Sendable {
-    // Every HALInputUnit control call (configure/start/stop/dispose) runs on this serial queue, NEVER on
-    // the main thread: a transitioning audio device can make those calls block for a long time (or
-    // indefinitely), and doing that on `@MainActor` froze the whole app + event tap. Off-main, the worst
-    // case is one wedged background thread, bounded by the bring-up watchdog. The queue is swapped (with a
-    // fresh unit) when a wedge is detected, so the next dictation never queues behind the stuck call.
+    // HAL control calls can block on transitioning devices, so they run off-main on a swappable queue.
     private var unit: HALInputUnit?
     private var configuredDeviceID: AudioDeviceID?
     private var controlQueue = DispatchQueue(label: "com.keyscribe.audio.0")
     private var generation = 0
     private let producerGeneration = Atomic<Int>(-1)
-    // Set when a bring-up wedged (watchdog) or a device change invalidated the binding. Consumed by
-    // rebuildIfNeeded() before the next bring-up: a fresh unit re-resolves the current effective device; a
-    // fresh queue escapes a possibly-wedged one.
+    // Consumed before the next bring-up to re-resolve the device on a fresh unit/queue.
     private var mustRebuild = false
 
     private let lock = NSLock()
-    // The user's preferred capture device UID (nil/empty = follow system default). Resolved live each
-    // bring-up: preferred device if present, else system default — so an absent preferred device follows
-    // the default, and the device-list listener re-prewarms when it returns.
+    // Nil follows the system default; an absent preferred device falls back until it returns.
     private var preferredInputUID: String?
-    // The single per-dictation capture object (file, writer, restart counter). Non-nil only while a capture
-    // is live; created on the control queue in armSync, dropped atomically at teardown.
     private var session: CaptureSession?
 
-    // RT-thread transport, touched lock-free from the CoreAudio IO thread. `capturing` gates the callback
-    // (false ⇒ drop the buffer); `levelBits` holds the latest perceptual level for the controller's meter poll.
+    // Realtime-thread transport, touched lock-free from the CoreAudio IO thread.
     //
-    // `ring` is a `var` because `armSync` adapts its geometry to the bound device's IO period (baselineRing for
-    // the common ~10 ms period; more slots for a small pro-interface buffer). It is reset-in-place or REPLACED
-    // ONLY inside the quiescent arm window — after `capturing` is set false and the previous writer joined, and
-    // before `capturing` is set true again. The new pointer is published to the RT thread by that
-    // `capturing.store(true, .releasing)`, paired with the callback's `capturing.load(.acquiring)`; the ring is
-    // never reassigned while `capturing` is true (the mid-recording restart keeps its ring), so the producer
-    // and this assignment never overlap.
+    // `ring` may be resized only while `capturing` is false and the previous writer has joined. The
+    // `capturing` release/acquire pair publishes the current ring to the callback.
     private var ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
-    // CoreAudio's count of IO-cycle overloads on the bound device for this capture. A healthy capture keeps
-    // it at 0.
     private let overloadCount = Atomic<Int>(0)
+    // Stashed at teardown so diagnostics survive resizing the ring back to baseline.
+    private var lastRingDroppedCount = 0
     private var overloadListenerBlock: AudioObjectPropertyListenerBlock?
-    // The most recently created writer, kept so the NEXT capture's arm can JOIN it before it resets the
-    // shared ring — closing the narrow window where a cancel's async teardown is still draining the ring on
-    // the outgoing control queue while a new dictation arms on a freshly-swapped one. Touched under `lock`.
+    // Joined by the next arm before resetting the shared ring.
     private var lastWriter: CaptureWriter?
-    // Set while a commit-on-release drain is in flight: each delivered buffer feeds the gate, and the
-    // continuation is resumed once a buffer covers the release instant (or a backstop timeout fires).
     private var drainGate: TailDrainGate?
     private var drainContinuation: CheckedContinuation<Void, Never>?
-    // Monotonic id for the in-flight drain. The 300 ms backstop captures the id of the drain it was armed
-    // for and is ignored if a newer drain has since started — otherwise a backstop from dictation N could
-    // resume dictation N+1's drain early and clip its final word (the exact bug the gate prevents).
+    // Lets stale backstop timers fail closed when a newer drain has started.
     private var drainSequence = 0
     private var currentDrainID = 0
 
-    // Bound for a single bring-up. A healthy prewarmed unit starts in a few ms; a legitimately slow
-    // Bluetooth profile switch can take several hundred ms; an indefinite wedge is the failure we abandon.
+    // Bound for a single bring-up.
     private static let bringUpTimeout: Double = 2.0
 
-    // Extra window the INTERACTIVE start() path waits past `bringUpTimeout` before hard-failing, so a
-    // bring-up that lands just late is ADOPTED rather than discarded. Waiting longer here CANNOT reintroduce
-    // the original main-thread freeze: bring-up runs on the off-main control queue, so the main actor only
-    // `await`s (never blocks); the deadline exists solely to surface a TRULY wedged device as a clean
-    // failure instead of hanging forever. prewarm keeps the tight `bringUpTimeout` — it is background work.
+    // Extra wait for interactive starts so a slow-but-successful device switch can be adopted.
     private static let bringUpGrace: Double = 2.0
 
-    // Two listeners on the system's input topology. While idle the prewarmed unit caches a device binding
-    // that nothing refreshes, so a device switch would otherwise leave the hot path bound to a gone/stale
-    // device. We watch BOTH the default-input selector (covers "follow the system default") AND the device
-    // list (covers a preferred device appearing/disappearing). Either change flags a rebuild and re-prewarms
-    // off-main so the next bring-up resolves the current effective device.
+    // Input topology listeners keep the idle/prewarmed unit bound to the effective device.
     private let deviceListenerQueue = DispatchQueue(label: "com.keyscribe.audio.device-listener")
     private var defaultInputListenerBlock: AudioObjectPropertyListenerBlock?
     private var deviceListListenerBlock: AudioObjectPropertyListenerBlock?
-    // Coalesces a storm of topology callbacks (one physical plug/unplug fires the listener several times)
-    // into a single rebuild, and skips the rebuild when the effective device did not actually change. Both
-    // fields are touched ONLY on `deviceListenerQueue`, so they need no lock.
+    // Touched only on `deviceListenerQueue`.
     private var topologyDebounce: DispatchWorkItem?
     private var lastEffectiveDeviceID: AudioDeviceID?
 
-    // Mid-recording device-change recovery (the AUHAL replacement for AVAudioEngineConfigurationChange,
-    // which raw AUHAL does not post). While RECORDING we listen on the BOUND device for disconnect
-    // (`DeviceIsAlive`) and a sample-rate change (a Bluetooth A2DP↔HFP flip), and restart capture into the
-    // same file on the control queue. Touched on the control queue (install/remove) only; the block fires
-    // on `deviceListenerQueue`.
+    // Mid-recording device-change recovery; restarts capture into the same file on the control queue.
     private var activeDeviceListenerBlock: AudioObjectPropertyListenerBlock?
     private var activeListenedDeviceID: AudioDeviceID?
     private var activeDeviceDebounce: DispatchWorkItem?
-    // Bounds a flapping device: each restart attempt increments the live session's counter; past the cap we
-    // stop retrying and let the release→finishDraining path finalize the partial capture. The counter lives
-    // on the CaptureSession, so it resets to 0 with each fresh capture.
+    // Bounds flapping-device restarts per capture.
     private static let maxConfigRestarts = 5
     private static let activeDeviceSelectors: [AudioObjectPropertySelector] =
         [kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyNominalSampleRate]
@@ -254,10 +200,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // off-main and watchdogged: a wedged prewarm flags a rebuild rather than stranding the next dictation.
     func prewarm() {
         rebuildIfNeeded()
-        // Initializing the HAL unit binds and HOLDS the input device. On a Bluetooth headset that pins it to
-        // HFP (mono call mode) and mutes the user's music even while idle — the reported bug. Skip the idle
-        // realization there and pay the one-time cost on the next dictation instead. Wired/built-in inputs
-        // have no A2DP/HFP penalty, so they keep fast prewarm.
+        // Skip idle realization for Bluetooth; binding can hold the headset in HFP while idle.
         guard !effectiveInputIsBluetooth() else { return }
         let (queue, generation) = currentQueueAndGeneration()
         Task.detached { [self] in
@@ -276,10 +219,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    // MUST run on the control queue. Configure (but do not start) a unit bound to the current effective
-    // device, reusing an already-warm one for that device. Generation-checked at the store: a rebuild that
-    // lands DURING the slow configure() supersedes this prewarm, so the freshly-configured candidate is
-    // disposed instead of clobbering (and leaking) the new generation's live unit.
+    // Control queue only. Configure but do not start a unit for the current effective device.
     private func prewarmUnit(generation: Int) {
         guard let deviceID = effectiveDeviceID() else { return }
         let outgoing = lock.withLock { () -> (keep: Bool, dispose: HALInputUnit?) in
@@ -314,22 +254,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             .appendingPathComponent("keyscribe-capture-\(UUID().uuidString).wav")
         let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
 
-        // Bail BEFORE touching any shared state if this arm is already superseded (its generation was bumped
-        // by a watchdog swap while it sat queued behind a wedged control queue). A superseded arm that
-        // published `session`/`capturing`/the writer would leave the adapter thinking a dead capture is live
-        // — suppressing idle behavior, leaking the WAV, and letting a spurious restart push into a
-        // consumer-less ring. Everything up to here is a local; drop the file and throw.
+        // Bail before publishing shared state if a watchdog already superseded this arm.
         guard isGeneration(generation) else {
             try? FileManager.default.removeItem(at: url)
             throw AudioCaptureError.bringUpTimedOut
         }
 
-        // CONFIGURE the capture device FIRST — bind + initialize the unit, but do NOT start its IOProc yet, so
-        // no buffer is delivered until the ring is sized. The retry-to-default lives here because the documented
-        // "just-connected device fails while its HAL proxy initializes" failure is an `AudioUnitInitialize`
-        // (configure) failure; `configureCaptureDevice` returns the device actually bound (post-retry), so the
-        // ring below is sized for EXACTLY the device that will deliver — the geometry can never disagree with
-        // the bound device, even on the retry path.
+        // Configure before sizing the ring; retry may bind a different default device.
         let target = captureTarget()
         let boundDeviceID: AudioDeviceID
         do {
@@ -339,10 +270,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             throw error
         }
 
-        // Gate the RT producer off and join any previous writer before resetting/replacing the shared ring. The
-        // just-configured unit's IOProc is NOT started yet, so no buffer is in flight; this is the sole
-        // quiescent window in which the ring may be reassigned, and the `capturing.store(true, .releasing)`
-        // below publishes the (possibly new) ring to the RT thread.
+        // Quiescent window for resetting/replacing the shared ring before the IOProc starts.
         producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         lock.withLock { lastWriter }?.finish(flushConverter: false)
@@ -360,10 +288,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             ring: ring, file: file, recordFormat: recordFormat,
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, writer: writer)
-        // Publish ONLY if still current, atomically with the generation read: a bump between the guard above
-        // and here means a newer generation now owns the capture slot, so do NOT clobber its session — bail and
-        // clean up this arm's own local file (the writer was never started, so there is no thread; a bump also
-        // disposed our just-configured unit via swapToFreshGeneration, so it does not leak).
+        // Publish only if this generation still owns the capture slot.
         let published = lock.withLock { () -> Bool in
             guard generation == self.generation else { return false }
             session = mySession
@@ -378,17 +303,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         capturing.store(true, ordering: .releasing)
         writer.start()
 
-        // Start the IOProc LAST: `capturing` is already true and the writer already draining, so the first
-        // delivered buffer lands in the correctly-sized ring with no head clip.
+        // Start the IOProc last so the first buffer lands in the correctly-sized ring.
         do {
             try startConfiguredUnit(generation: generation)
         } catch {
-            // Only unwind SHARED capture state (unit/listener) if this bring-up still owns the current
-            // generation — a superseded arm must not touch a newer generation's unit/listener. The writer +
-            // session + file are THIS arm's own, so always tear them down: finish the writer thread, and clear
-            // the shared session ONLY if it still points at our capture by identity (a newer generation may
-            // have already published its own, which we must not clobber). `capturing` is intentionally left to
-            // the next arm's reset — flipping it false here could race a newer generation's `capturing = true`.
+            // A superseded arm must not unwind a newer generation's unit or session.
             if isGeneration(generation) {
                 removeActiveDeviceListener()
                 disposeUnitInline()
@@ -407,20 +326,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return url
     }
 
-    // Resolve + CONFIGURE the capture device (bind + initialize the unit; the IOProc is NOT started here),
-    // returning the device actually bound so armSync can size the ring for exactly it. Get the RIGHT microphone
-    // live; if a PRESENT preferred device fails, surface that (do not silently record from a different mic).
-    // When following the system default, retry once after a beat (a just-connected device can fail the first
-    // `AudioUnitInitialize` while its HAL proxy initializes) before giving up. On the control queue.
+    // Bind and initialize the target device, retrying a failed system default once.
     private func configureCaptureDevice(target: CaptureTarget, generation: Int) throws -> AudioDeviceID {
         guard let deviceID = target.deviceID else { throw AudioCaptureError.formatUnavailable }
         do {
             try configureUnit(deviceID: deviceID, generation: generation)
             return deviceID
         } catch {
-            // Superseded (watchdog-abandoned, generation bumped): do not clobber the newer generation's unit
-            // and do not retry — just propagate. The retry path below owns shared state and must only run for
-            // the current generation.
+            // A superseded configure must not retry or touch shared state.
             guard isGeneration(generation) else { throw error }
             disposeUnitInline()
             if target.isPreferredPresent { throw AudioCaptureError.preferredInputFailed }
@@ -438,11 +351,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    // Reuse a resident/prewarmed unit already bound to `deviceID` (a no-op — it is already configured);
-    // otherwise configure a fresh one and swap it in under the lock ONLY if this arm still owns the current
-    // generation. Does NOT start the IOProc. A superseded configure disposes its own freshly-built unit and
-    // throws without touching shared state — so a watchdog-abandoned call can't strand a hot mic. On the
-    // control queue.
+    // Control queue only. Configure a fresh unit unless the resident one already matches.
     private func configureUnit(deviceID: AudioDeviceID, generation: Int) throws {
         guard isGeneration(generation) else { throw AudioCaptureError.bringUpTimedOut }
         if lock.withLock({ self.generation == generation && unit != nil && configuredDeviceID == deviceID }) {
@@ -460,9 +369,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         outgoing.dispose?.dispose()
     }
 
-    // Start the IOProc of the unit `configureUnit` bound. Runs after the ring is sized and the writer is
-    // draining, so the first delivered buffer is captured. Disposes the unit on a start failure (current
-    // generation only) so a configured-but-dead unit does not keep holding the device. On the control queue.
+    // Control queue only. Start the bound unit after the ring and writer are ready.
     private func startConfiguredUnit(generation: Int) throws {
         guard let liveUnit = lock.withLock({ self.generation == generation ? unit : nil }) else {
             throw AudioCaptureError.bringUpTimedOut
@@ -477,9 +384,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private func makeUnit(generation: Int) -> HALInputUnit {
         HALInputUnit(handler: { [weak self] buffer, hostTime in
-            // On the CoreAudio realtime IO thread. Do ONLY lock-free, allocation-free, syscall-free work:
-            // gate on `capturing`, copy the frames into the ring, publish the meter level. Everything heavy
-            // (resample, file write, drain-gate arbitration) runs on the writer thread draining the ring.
+            // Realtime thread: gate, copy to the ring, and publish meter level only.
             guard let self,
                   Self.shouldAcceptRealtimeBuffer(
                     capturing: self.capturing.load(ordering: .acquiring),
@@ -514,10 +419,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    // Called by the WRITER thread once per written slot with that slot's host time (nil ⇒ the RT layer had
-    // no valid host time; the gate has a buffer-count fallback). Advances the drain gate and, if it trips,
-    // resumes the drain awaiter. Returns true on the trip so the writer seals (flush + stop writing). During
-    // normal recording (no drain armed) it is a cheap locked no-op returning false. Off the RT thread.
+    // Writer-thread callback for advancing the drain gate and sealing once it trips.
     @discardableResult
     private func feedDrainGate(hostTime: UInt64?) -> Bool {
         let (tripped, cont) = lock.withLock { () -> (Bool, CheckedContinuation<Void, Never>?) in
@@ -534,9 +436,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         return tripped
     }
 
-    // `id == nil` is the wildcard resume (gate-covered, or the forced resume from stop()) and always fires.
-    // A non-nil id is the backstop's own drain id: it resumes only if it is still the current drain, so a
-    // stale backstop cannot resume a newer drain.
+    // Nil is a forced resume; non-nil backstops must still match the active drain id.
     private func resumeDrain(id: Int? = nil) {
         let cont = lock.withLock { () -> CheckedContinuation<Void, Never>? in
             guard Self.shouldResumeDrain(backstopID: id, currentDrainID: currentDrainID) else { return nil }
@@ -548,18 +448,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         cont?.resume()
     }
 
-    // Pure resume-arbitration for the tail drain: a nil id (gate/forced) always resumes; a backstop's own id
-    // resumes only while it is still the current drain. Keeps a stale backstop from clipping a newer drain.
     static func shouldResumeDrain(backstopID: Int?, currentDrainID: Int) -> Bool {
         guard let backstopID else { return true }
         return backstopID == currentDrainID
     }
 
-    // Finalize and close the WAV, then return its URL immediately — transcription can start the moment
-    // the file is closed and must not wait out the unit teardown (ms wired, 100 ms+ while a Bluetooth unit
-    // releases HFP, up to the deadline when wedged). The teardown runs detached: it is generation-guarded
-    // so it can never stop or dispose a newer capture's unit, and on a wedge it only flags a rebuild for
-    // the next dictation. Mirrors stop()'s fire-and-forget teardown, plus the deadline/markRebuild watchdog.
+    // Close the WAV before detached unit teardown so transcription can start immediately.
     private func teardownAndFinalize() -> URL? {
         let (queue, generation) = currentQueueAndGeneration()
         let url = lock.withLock { session?.url }
@@ -619,13 +513,21 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
         // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
         // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
+        lastRingDroppedCount = ring.droppedCount
         Log.audio.debug(
-            "capture ended: ringDropped=\(self.ring.droppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public)")
+            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public)")
+        // Writer joined and `capturing` is false → the ring is quiescent (the same window armSync uses to
+        // reassign it). A capture on a small-period pro interface can have grown it to ~16.7 MiB; a menu-bar
+        // app then retains that for the app's lifetime, so shrink back to the baseline geometry here. The
+        // next arm re-grows it for the bound device if needed. Zero hot-path cost.
+        if !ring.matches(Self.baselineRingGeometry()) {
+            ring = AudioSampleRing(Self.baselineRingGeometry())
+        }
     }
 
     // Valid from capture end until the next arm resets the counters.
     func captureDiagnostics() -> (ringDropped: Int, overloads: Int) {
-        (ring.droppedCount, overloadCount.load(ordering: .relaxed))
+        (lastRingDroppedCount, overloadCount.load(ordering: .relaxed))
     }
 
     // Audio-discarding teardown for cancel()/over-limit abort. Close the file synchronously so the caller

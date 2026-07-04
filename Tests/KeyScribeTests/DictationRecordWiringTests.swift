@@ -4,8 +4,8 @@ import Testing
 @testable import KeyScribeKit
 
 // Proves the per-dictation DictationRecord is actually FED real data through the REAL
-// DictationController — the discipline item 1 showed can rot silently (a green unit test on a starved
-// seam). Two guarantees: (1) lastRecord is populated even with history DISABLED (the record is the
+// DictationController, not stubbed — a green unit test on a starved seam can rot silently. Two
+// guarantees: (1) lastRecord is populated even with history DISABLED (the record is the
 // reliable ground truth regardless of the history setting), and (2) the boundary fingerprints differ
 // across the redaction boundary when tokens were issued (the instrumentation is wired, not stubbed).
 @MainActor

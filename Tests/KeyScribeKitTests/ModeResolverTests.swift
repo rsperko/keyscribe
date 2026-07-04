@@ -247,7 +247,6 @@ struct ModeResolverTests {
         #expect(r.routedModeId == nil)
     }
 
-    // With no eligible mode at all, resolution lands on the Direct floor.
     @Test func fallsBackToDirectWhenTheOnlyModeIsIneligible() {
         let plain = mode("plain", bundles: ["com.apple.mail"])
         let m = phaseA([plain], context: .init(bundleId: "com.apple.notes"), triggerKey: nil)

@@ -7,34 +7,22 @@ private func tokenize(_ text: String, clipboard: String?) -> (out: String, tok: 
 }
 
 struct ClipboardTokenizerTests {
-    @Test func phraseBecomesClipboardToken() {
-        let (out, t) = tokenize("the url is insert clipboard contents thanks", clipboard: "https://ex.com/a?b=c")
-        #expect(out == "the url is ⟦SN:CLIP:1⟧ thanks")
-        #expect(t.restore(out) == "the url is https://ex.com/a?b=c thanks")
-    }
-
-    @Test func articleVariantAlsoFires() {
-        let (out, t) = tokenize("insert the clipboard contents", clipboard: "X")
-        #expect(out == "⟦SN:CLIP:1⟧")
-        #expect(t.restore(out) == "X")
-    }
-
-    @Test func singularVariantFires() {
-        let (out, t) = tokenize("insert clipboard content", clipboard: "X")
-        #expect(out == "⟦SN:CLIP:1⟧")
-        #expect(t.restore(out) == "X")
-    }
-
-    @Test func singularArticleVariantFires() {
-        let (out, t) = tokenize("insert the clipboard content", clipboard: "X")
-        #expect(out == "⟦SN:CLIP:1⟧")
-        #expect(t.restore(out) == "X")
-    }
-
-    @Test func caseInsensitive() {
-        let (out, t) = tokenize("Insert Clipboard Contents", clipboard: "X")
-        #expect(out == "⟦SN:CLIP:1⟧")
-        #expect(t.restore(out) == "X")
+    @Test(arguments: [
+        ("the url is insert clipboard contents thanks", "https://ex.com/a?b=c", "the url is ⟦SN:CLIP:1⟧ thanks", "the url is https://ex.com/a?b=c thanks"),
+        ("insert the clipboard contents", "X", "⟦SN:CLIP:1⟧", "X"),
+        ("insert clipboard content", "X", "⟦SN:CLIP:1⟧", "X"),
+        ("insert the clipboard content", "X", "⟦SN:CLIP:1⟧", "X"),
+        ("Insert Clipboard Contents", "X", "⟦SN:CLIP:1⟧", "X"),
+    ])
+    func phraseVariantsBecomeClipboardTokens(
+        _ input: String,
+        _ clipboard: String,
+        _ expectedOut: String,
+        _ expectedRestore: String
+    ) {
+        let (out, t) = tokenize(input, clipboard: clipboard)
+        #expect(out == expectedOut)
+        #expect(t.restore(out) == expectedRestore)
     }
 
     @Test func trailingPunctuationLeftAsText() {
@@ -92,13 +80,6 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "it's broken. P fixes it")
     }
 
-    // The singular aliases fire too.
-    @Test func singularAliasFires() {
-        let (out, t) = tokenize("insert clipboard content", clipboard: "P")
-        #expect(out == "⟦SN:CLIP:1⟧")
-        #expect(t.restore(out) == "P")
-    }
-
     // Parakeet TDT v3 sometimes punctuates mid-phrase ("insert clipboard, contents"); the command
     // still fires (verified by the wav-based commands-check across engines).
     @Test func internalCommaFromSTTStillFires() {
@@ -107,14 +88,13 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "read the directory P now")
     }
 
-    @Test func commandAtStartAbsorbsFollowingComma() {
-        let (out, _) = tokenize("insert clipboard contents, done", clipboard: "X")
-        #expect(out == "⟦SN:CLIP:1⟧ done")
-    }
-
-    @Test func trailingCommaAtEndIsAbsorbed() {
-        let (out, _) = tokenize("paste it insert clipboard contents,", clipboard: "X")
-        #expect(out == "paste it ⟦SN:CLIP:1⟧")
+    @Test(arguments: [
+        ("insert clipboard contents, done", "⟦SN:CLIP:1⟧ done"),
+        ("paste it insert clipboard contents,", "paste it ⟦SN:CLIP:1⟧"),
+    ])
+    func pauseCommasAtCommandBoundariesAreAbsorbed(_ input: String, _ expected: String) {
+        let (out, _) = tokenize(input, clipboard: "X")
+        #expect(out == expected)
     }
 
     // Attached brackets are not pause artifacts — they stay attached, no spurious space inserted.
@@ -143,14 +123,9 @@ struct ClipboardTokenizerTests {
         #expect(out == "value, insert clipboard contents, done")
     }
 
-    @Test func emptyClipboardLeavesPhraseLiteral() {
-        let (out, t) = tokenize("insert clipboard contents", clipboard: "")
-        #expect(out == "insert clipboard contents")
-        #expect(t.issuedTokens.isEmpty)
-    }
-
-    @Test func nilClipboardLeavesPhraseLiteral() {
-        let (out, t) = tokenize("insert clipboard contents", clipboard: nil)
+    @Test(arguments: ["", nil])
+    func absentClipboardLeavesPhraseLiteral(_ clipboard: String?) {
+        let (out, t) = tokenize("insert clipboard contents", clipboard: clipboard)
         #expect(out == "insert clipboard contents")
         #expect(t.issuedTokens.isEmpty)
     }
@@ -181,18 +156,24 @@ struct ClipboardTokenizerTests {
     }
 
     // `mentions` gates the host's clipboard read so an ordinary dictation never touches the clipboard.
-    @Test func mentionsDetectsTheCommand() {
-        #expect(ClipboardTokenizer.mentions("please insert clipboard contents now"))
-        #expect(ClipboardTokenizer.mentions("insert the clipboard contents"))
-        #expect(ClipboardTokenizer.mentions("INSERT CLIPBOARD CONTENTS"))
-        #expect(ClipboardTokenizer.mentions("please insert clipboard content now"))
-        #expect(ClipboardTokenizer.mentions("insert the clipboard content"))
+    @Test(arguments: [
+        "please insert clipboard contents now",
+        "insert the clipboard contents",
+        "INSERT CLIPBOARD CONTENTS",
+        "please insert clipboard content now",
+        "insert the clipboard content",
+    ])
+    func mentionsDetectsTheCommand(_ text: String) {
+        #expect(ClipboardTokenizer.mentions(text))
     }
 
-    @Test func mentionsIsFalseWithoutTheCommand() {
-        #expect(!ClipboardTokenizer.mentions("just some ordinary dictated words"))
-        #expect(!ClipboardTokenizer.mentions("insert the clipboard now"))
-        #expect(!ClipboardTokenizer.mentions(""))
+    @Test(arguments: [
+        "just some ordinary dictated words",
+        "insert the clipboard now",
+        "",
+    ])
+    func mentionsIsFalseWithoutTheCommand(_ text: String) {
+        #expect(!ClipboardTokenizer.mentions(text))
     }
 
     // apply reads the clipboard lazily: the provider is never invoked when the command is absent, so an

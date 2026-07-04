@@ -1,6 +1,5 @@
 import Foundation
 
-// Shared engine errors, replacing the per-adapter Whisper/Qwen3/Moonshine error enums.
 enum EngineError: Error {
     case notInitialized
     case badModelURL(String)

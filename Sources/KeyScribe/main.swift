@@ -53,7 +53,6 @@ if let i = CommandLine.arguments.firstIndex(of: "--config-dir"), i + 1 < Command
     KeyScribePaths.configDirOverride = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
 }
 
-// Headless dev mode: `KeyScribe --reset <onboarding|modes|config|all>` clears local state and exits.
 if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     let arg = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : ""
     guard let target = ResetTarget(rawValue: arg) else {
@@ -81,8 +80,6 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     exit(0)
 }
 
-// Headless dev mode: `KeyScribe --benchmark <dir>` runs the STT benchmark and exits without launching
-// the menu-bar app. Anything else is a normal app launch.
 if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?
@@ -100,8 +97,6 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
     exit(0)
 }
 
-// Headless dev mode: `KeyScribe --commands-check <dir>` exercises every spoken command across every
-// installed engine on recorded audio, then exits.
 if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?
@@ -117,8 +112,6 @@ if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < Com
     exit(0)
 }
 
-// Headless dev mode: `KeyScribe --capture-probe` drives the real capture path and scores the recording for
-// dropped/corrupted audio (feed a pure tone into the input via a loopback device), then exits.
 if CommandLine.arguments.contains("--capture-probe") {
     var seconds = 5.0
     if let s = CommandLine.arguments.firstIndex(of: "--seconds"), s + 1 < CommandLine.arguments.count {

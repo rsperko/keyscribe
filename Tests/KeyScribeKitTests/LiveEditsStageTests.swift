@@ -136,12 +136,10 @@ struct LiveEditsStageTests {
         #expect(run("really? insert new paragraph yes") == "really?\n\nyes")
     }
 
-    // Two commands back to back (a comma between them) still both fire.
     @Test func adjacentCommandsWithCommaBetween() {
         #expect(run("insert new line, insert new paragraph foo") == "\n\n\nfoo")
     }
 
-    // Preceding pause comma absorbed AND the command's own trailing period consumed with it.
     @Test func absorbsPrecedingCommaAndCommandOwnPeriod() {
         #expect(run("he left, insert new line. home") == "he left\nhome")
     }

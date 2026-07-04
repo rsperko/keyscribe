@@ -1,9 +1,7 @@
 import Foundation
 import KeyScribeKit
 
-// Tracks which downloadable engines are installed via a small marker file, decoupled from each SDK's
-// on-disk layout. The active engine and rules live in KeyScribeKit's SpeechModelSet; this is durable
-// install bookkeeping plus best-effort file removal. Engines report their own footprint and integrity.
+// Durable install bookkeeping for downloadable engines, independent of each SDK's directory layout.
 enum ModelInstallStore {
     private static var markerURL: URL {
         KeyScribePaths.modelsDir.appendingPathComponent(markerFile)
@@ -11,10 +9,7 @@ enum ModelInstallStore {
 
     private static let markerFile = "installed.json"
 
-    // Reconcile the marker against disk: adopt completed-but-unrecorded downloads, drop entries whose
-    // files are gone/partial, and delete orphaned directories. Each engine reports what it owns and
-    // whether it's present (Parakeet verifies; others defer to the marker). System-managed engines
-    // have no install footprint and are skipped. Run at launch with the constructed engine set.
+    // Reconcile the marker against disk and remove orphaned directories.
     static func reconcile(engines: [any SpeechEngine]) {
         let marked = installedIds()
         var owned: [String: [String]] = [:]
@@ -58,8 +53,7 @@ enum ModelInstallStore {
                 .map { $0.lastPathComponent })
     }
 
-    // Dirs touched within the recency window are treated as in-flight downloads (this variant or, since
-    // modelsDir is shared, the other) and never deleted — a partial dir mid-write is not an orphan.
+    // Recently touched dirs may be in-flight downloads from this app variant or another.
     private static let downloadRecencyWindow: TimeInterval = 5 * 60
 
     private static func recentlyModifiedDirs() -> Set<String> {
@@ -75,12 +69,7 @@ enum ModelInstallStore {
         return recent
     }
 
-    // True if the directory OR any file/subdirectory under it was modified since `cutoff`. Checking only
-    // the top-level dir's mtime is not enough: a directory's mtime bumps when its direct entries are
-    // created/removed, but a large download that creates its files early and then streams bytes into them
-    // for minutes bumps each FILE's mtime, not the parent's. So a >window-long in-flight download would
-    // look idle and get deleted out from under the other variant (the P1-5 hazard). Walk descendants and
-    // stop at the first recent entry so the common (actively-writing) case exits fast.
+    // Check descendants too; long downloads may update file mtimes without touching the parent dir.
     static func directoryActive(_ dir: URL, since cutoff: Date) -> Bool {
         let fm = FileManager.default
         if let modified = try? dir.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
@@ -132,8 +121,6 @@ enum ModelInstallStore {
                 at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
             try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
         } catch {
-            // A lost marker isn't fatal — reconcile re-derives install state from disk next launch — but
-            // it can mean a re-download, so surface it rather than swallow it.
             Log.models.error("install marker write failed: \(error.localizedDescription, privacy: .public)")
         }
     }

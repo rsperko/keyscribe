@@ -14,8 +14,6 @@ struct DeadlineTests {
     }
 
     @Test func throwsAtDeadlineEvenWhenOperationIgnoresCancellation() async {
-        // Thread.sleep is a synchronous, non-cooperative block — it never observes Task cancellation.
-        // The fixed helper must still return at the deadline rather than wait the full 2s.
         let start = Date()
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.1) {
@@ -26,11 +24,11 @@ struct DeadlineTests {
         #expect(Date().timeIntervalSince(start) < 1.0)
     }
 
-    // Fix 2 (bring-up grace window): the SAME late-landing operation a tight deadline throws away is
-    // ADOPTED under a widened one — a bring-up that lands just past the base watchdog is returned, not
-    // discarded. Mirrors AudioCapture.start() waiting bringUpTimeout + bringUpGrace, not bringUpTimeout
-    // alone; without the grace window the stale-binding re-realization at ~2s surfaced as a spurious
-    // "Could not start the microphone".
+    // The SAME late-landing operation a tight deadline throws away is ADOPTED under a widened one — a
+    // bring-up that lands just past the base watchdog is returned, not discarded. Mirrors
+    // AudioCapture.start() waiting bringUpTimeout + bringUpGrace, not bringUpTimeout alone; without the
+    // grace window the stale-binding re-realization at ~2s surfaced as a spurious "Could not start the
+    // microphone".
     @Test func adoptsALateResultWithinTheGraceWindowButNotPastIt() async throws {
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.15) {

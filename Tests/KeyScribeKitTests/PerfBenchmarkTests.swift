@@ -2,8 +2,7 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Opt-in micro-benchmark for the four profiling-gated perf concerns from the 2026-06-20 GPT review
-// (see docs/session-status.md "profiling-gated perf cleanups"). It isolates each hot-path function
+// Opt-in micro-benchmark for four profiling-gated perf concerns. It isolates each hot-path function
 // and measures it at realistic vs stress sizes so the simplicity-vs-speed call is data-driven rather
 // than guessed. A deterministic scaling benchmark beats a live Instruments trace here: the token
 // path is a sub-millisecond blip inside the multi-hundred-ms STT+LLM dictation, so a live trace

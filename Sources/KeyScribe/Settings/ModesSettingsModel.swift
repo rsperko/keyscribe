@@ -100,8 +100,6 @@ final class ModesSettingsModel: ObservableObject {
         var renamed = mode
         renamed.id = newId
         do {
-            // One repository operation: write the new file, delete the old, rolling the new file back if the
-            // delete fails — so a failed rename never leaves a duplicate mode on disk.
             try repository.renameMode(mode, to: newId)
             if let index = modes.firstIndex(where: { $0.id == oldId }) {
                 modes[index] = renamed

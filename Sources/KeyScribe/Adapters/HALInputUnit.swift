@@ -2,10 +2,7 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-// Delivered on the CoreAudio IO thread: the freshly rendered buffer (client format = device-native
-// rate/channels, Float32 non-interleaved) and its host time (nil when the timestamp's host time is not
-// valid — the drain gate has a buffer-count fallback for that). File-scoped (not nested) so the C render
-// callback below can resolve it from the opaque refcon.
+// File-scoped so the C render callback can resolve it from the opaque refcon.
 private final class HALRenderContext {
     var unit: AudioUnit?
     var format: AVAudioFormat?
@@ -14,28 +11,16 @@ private final class HALRenderContext {
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) { self.handler = handler }
 }
 
-// Raw AUHAL (`kAudioUnitSubType_HALOutput`) input unit for device-pinned capture with NO global side
-// effects. It binds the chosen device on the unit's `CurrentDevice` and matches the client stream format
-// to that device's OWN native format — the fix for the -10868 (`kAudioUnitErr_FormatNotSupported`) that
-// `AVAudioEngine.inputNode` cannot cleanly do (inputNode caches a stale format after a device swap and
-// exposes no supported "set client format after CurrentDevice" seam). It NEVER writes
-// `kAudioHardwarePropertyDefaultInputDevice`, so selecting a non-default mic (even while Bluetooth holds
-// the system default) does not hijack every other app's microphone — the antipattern we deleted.
+// Raw AUHAL input unit for device-pinned capture without global default-device side effects.
 //
-// Threading: every control call (`configure`/`start`/`stop`/`dispose`) can BLOCK on a transitioning
-// device (classically a Bluetooth headset forced A2DP→HFP the instant capture opens), so the OWNER must
-// invoke them off the main thread on a serial queue under a watchdog (see `AudioCapture`). This type is
-// therefore control-queue-confined and NOT internally synchronized. The render callback runs on
-// CoreAudio's realtime IO thread — a different thread from the control queue — and only touches the
-// caller-provided handler + a reusable scratch buffer (the delivery is serial, like an AVAudioEngine tap).
+// Control calls can block on transitioning devices, so the owner confines them to an off-main serial
+// queue under a watchdog. The render callback runs on CoreAudio's realtime thread.
 final class HALInputUnit {
     struct UnitError: Error { let status: OSStatus; let stage: String }
 
     private var unit: AudioUnit?
     private let context: HALRenderContext
-    // The device-native format the unit delivers (Float32 non-interleaved at the device's own rate/channel
-    // count). The owner converts this down to the 16 kHz mono WAV target in software — the AUHAL is never
-    // asked for a rate/channel count the hardware cannot produce, which is exactly how -10868 is avoided.
+    // Device-native Float32 non-interleaved format; conversion happens in the owner.
     private(set) var clientFormat: AVAudioFormat?
 
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) {
@@ -44,11 +29,7 @@ final class HALInputUnit {
 
     var isConfigured: Bool { unit != nil }
 
-    // Create + configure + INITIALIZE the unit bound to `deviceID`, ending realized-but-not-capturing
-    // (no IOProc running, so the mic indicator does not light — that is `start()`). Strict ordering:
-    // enable input / disable output → set CurrentDevice → read the device's NATIVE format → set the client
-    // format matched to it → install the input callback → initialize. Throws (leaving nothing realized) on
-    // any step, so the owner can map the failure to the right user-facing error.
+    // Configure and initialize the unit without starting the IOProc.
     func configure(deviceID: AudioDeviceID) throws {
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
@@ -62,8 +43,7 @@ final class HALInputUnit {
         try check(AudioComponentInstanceNew(component, &au), "instanceNew")
         guard let au else { throw UnitError(status: -1, stage: "instanceNew.nil") }
 
-        // On any failure past this point the half-built unit must be disposed, or it leaks an initialized
-        // I/O proc and holds the device (a Bluetooth headset would stay in HFP).
+        // Dispose the half-built unit on failure so it cannot keep holding the device.
         do {
             var enableInput: UInt32 = 1
             try check(AudioUnitSetProperty(
@@ -79,8 +59,7 @@ final class HALInputUnit {
                 au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                 &device, UInt32(MemoryLayout<AudioDeviceID>.size)), "setCurrentDevice")
 
-            // Read the device's native input format AFTER binding it, so the client format below matches
-            // the actual hardware (a Bluetooth HFP device sits at 1 ch / ~16 kHz; a USB mic at 48 kHz).
+            // Read the native format after binding so the client format matches the actual hardware.
             var native = AudioStreamBasicDescription()
             var nativeSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
             try check(AudioUnitGetProperty(
@@ -95,7 +74,7 @@ final class HALInputUnit {
                 au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1,
                 &clientASBD, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)), "setClientFormat")
 
-            // We render into our own AVAudioPCMBuffer, so the unit must not allocate its own input buffer.
+            // We render into our own scratch buffer.
             var shouldAllocate: UInt32 = 0
             _ = AudioUnitSetProperty(
                 au, kAudioUnitProperty_ShouldAllocateBuffer, kAudioUnitScope_Output, 1,
@@ -129,16 +108,12 @@ final class HALInputUnit {
         try check(AudioOutputUnitStart(unit), "start")
     }
 
-    // Stop the IOProc but keep the unit realized (fast to re-`start()`). The owner uses this for a healthy
-    // teardown of a non-Bluetooth device so the next dictation reuses the resident unit.
     func stop() {
         guard let unit else { return }
         AudioOutputUnitStop(unit)
     }
 
-    // Stop → uninitialize → dispose, releasing the device entirely (frees a Bluetooth headset from HFP).
-    // Idempotent. The input callback cannot fire after `AudioOutputUnitStop` returns, so tearing the
-    // context down here does not race a live render.
+    // Stop, uninitialize, and dispose, releasing the device entirely.
     func dispose() {
         guard let unit else { return }
         AudioOutputUnitStop(unit)
@@ -173,9 +148,7 @@ final class HALInputUnit {
     }
 }
 
-// C render callback: pull the just-captured frames into a reusable AVAudioPCMBuffer (no per-callback heap
-// churn; delivery is serial so reuse is safe) and hand them to the owner's handler. Returns the render
-// status so CoreAudio sees a failed pull rather than silently corrupt audio.
+// Pull the just-captured frames into a reusable buffer and hand them to the owner's handler.
 private let halInputRenderCallback: AURenderCallback = {
     refCon, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, _ in
     let context = Unmanaged<HALRenderContext>.fromOpaque(refCon).takeUnretainedValue()

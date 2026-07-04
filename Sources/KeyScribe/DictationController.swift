@@ -290,7 +290,6 @@ final class DictationController {
         }
     }
 
-    // The active engine changed (Settings). Evict the one we switched away from.
     func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
         guard !isProtectedFromEviction(engine) else {
             runWhenIdle { [weak self] in
@@ -1097,9 +1096,6 @@ final class DictationController {
         let fellBack: Bool
     }
 
-    // Dictation mode → the spoken text is the content (pipeline + optional rewrite); we always
-    // insert something. Selection mode (edit-in-place) → the selection is the content and speech is
-    // the instruction; on any failure we abort rather than touch the selection.
     private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
         guard mode?.trimTrailingPunctuation ?? false else { return tokenizedText }
         return OutputCleanup.trimTrailingPunctuation(tokenizedText)

@@ -91,6 +91,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
+    // Permissions are granted out-of-process; poll while the window is open so a flag clears as soon as
+    // the user fixes the problem. Owned here (not by a view `.task`) because the window is retained
+    // (`isReleasedWhenClosed = false`) — a view-owned task would never cancel and would run for the
+    // process lifetime after the first open. Mirrors FirstRunController's `stopPolling`.
+    private var problemPollTask: Task<Void, Never>?
     // Shared with the recorders (via the environment) and the app, which suspends the global hotkey
     // monitor while a recorder is capturing so the chord can't fire an existing shortcut.
     let recordingState = HotkeyRecordingState()
@@ -136,6 +141,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func present(_ destination: SettingsDestination? = nil) {
         refreshProblems()
+        startProblemPoll()
         if let destination { navigation.destination = destination }
         if let window {
             if !window.isVisible { AppActivationPolicy.pushRegular() }
@@ -147,7 +153,6 @@ final class SettingsController: NSObject, NSWindowDelegate {
             general: model, speechModels: speechModels, dictionary: dictionary,
             replacements: replacements, aiServices: aiServices, modes: modes,
             problems: problems, navigation: navigation, recordingState: recordingState,
-            refresh: { [weak self] in self?.refreshProblems() },
             accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
@@ -166,7 +171,20 @@ final class SettingsController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        problemPollTask?.cancel()
+        problemPollTask = nil
         AppActivationPolicy.popRegular()
+    }
+
+    private func startProblemPoll() {
+        problemPollTask?.cancel()
+        problemPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, !Task.isCancelled else { return }
+                self.refreshProblems()
+            }
+        }
     }
 }
 
@@ -180,7 +198,6 @@ struct SettingsRootView: View {
     @ObservedObject var problems: SettingsProblemModel
     @ObservedObject var navigation: SettingsNavigationModel
     @ObservedObject var recordingState: HotkeyRecordingState
-    let refresh: () -> Void
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
 
@@ -210,14 +227,6 @@ struct SettingsRootView: View {
             .disabled(recordingState.isRecording)
             .navigationTitle("Settings")
             .frame(minWidth: 180)
-            // Permissions are granted out-of-process; poll while the window is open so a flag clears
-            // as soon as the user fixes the problem (mirrors the Permissions pane's own poll).
-            .task {
-                while !Task.isCancelled {
-                    refresh()
-                    try? await Task.sleep(for: .seconds(2))
-                }
-            }
         } detail: {
             switch navigation.destination ?? .general {
             case .general:
