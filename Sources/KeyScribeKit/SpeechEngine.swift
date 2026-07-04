@@ -14,6 +14,15 @@ public protocol SpeechEngine: Sendable {
     func loadIfNeeded() async throws
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String
+
+    // True when the engine can transcribe already-decoded PCM directly, letting the capture path hand it
+    // the samples the writer just produced instead of re-reading and re-decoding the WAV. Default false;
+    // FluidAudio/WhisperKit/Qwen/Moonshine override it. Apple keeps the file (its analyzer takes a URL).
+    var supportsSampleInput: Bool { get }
+    // Transcribe mono Float32 PCM at `sampleRate` (the engine's captureSampleRate). Only called when
+    // supportsSampleInput is true. `wavURL` is still written for archive/probe/fallback.
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String
+
     func evict() async
 
     // Preheat any per-dictation session state at press so it overlaps speech; fire-and-forget, default
@@ -45,10 +54,18 @@ public extension SpeechEngine {
 
     func prepareForDictation() async {}
     var benefitsFromWarmupClip: Bool { true }
+
+    var supportsSampleInput: Bool { false }
+    // Never reached in practice — the controller only calls this when supportsSampleInput is true, and
+    // every such engine overrides it. Present so the WAV-only engines satisfy the protocol.
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
+        throw SpeechEngineError.sampleInputUnsupported
+    }
 }
 
 public enum SpeechEngineError: Error, Equatable {
     case unknownEngine(String)
+    case sampleInputUnsupported
 }
 
 public final class SpeechEngineProvider: @unchecked Sendable {

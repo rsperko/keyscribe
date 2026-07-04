@@ -79,7 +79,7 @@ act()  { printf '\033[36m  ▸ %s\033[0m\n         (press Enter when done) ' "$1
 section "Tier A — build / packaging gates"
 
 # A0. unit + DI-seam suite
-if timeout 900 swift test >/tmp/preflight-swifttest.log 2>&1; then
+if timeout --foreground 900 swift test >/tmp/preflight-swifttest.log 2>&1; then
   pass "swift test — full suite green"
 else
   fail "swift test — see /tmp/preflight-swifttest.log"; tail -20 /tmp/preflight-swifttest.log
@@ -176,7 +176,7 @@ fi
 #     noise is not, because the bar is "this engine's own last-good clip count".
 CMD_BASELINE="$REPO_ROOT/corpus/commands/baseline.json"
 if [ -f "$REPO_ROOT/corpus/commands/manifest.json" ]; then
-  if timeout 1200 "$EXE" --config-dir "$PF_CFG" --commands-check "$REPO_ROOT/corpus/commands" --baseline "$CMD_BASELINE" >/tmp/preflight-commands.log 2>&1; then
+  if timeout --foreground 1200 "$EXE" --config-dir "$PF_CFG" --commands-check "$REPO_ROOT/corpus/commands" --baseline "$CMD_BASELINE" >/tmp/preflight-commands.log 2>&1; then
     if grep -q "BASELINE ESTABLISHED" /tmp/preflight-commands.log; then
       skip "--commands-check: baseline just established — re-run preflight to gate against it"
       grep "BASELINE ESTABLISHED" /tmp/preflight-commands.log | sed 's/^/         /'
@@ -193,7 +193,7 @@ fi
 
 # B2. STT benchmark WER ceiling — a gross regression (bias broke, model swapped) fails the gate
 if [ -f "$REPO_ROOT/corpus/stt/manifest.json" ]; then
-  if timeout 2400 "$EXE" --config-dir "$PF_CFG" --benchmark "$REPO_ROOT/corpus/stt" >/tmp/preflight-bench.log 2>&1; then
+  if timeout --foreground 2400 "$EXE" --config-dir "$PF_CFG" --benchmark "$REPO_ROOT/corpus/stt" >/tmp/preflight-bench.log 2>&1; then
     RES="$REPO_ROOT/corpus/stt/results.json"
     if [ -f "$RES" ]; then
       WORST=$(python3 - "$RES" "$MAX_WER" <<'PY'
@@ -221,7 +221,7 @@ fi
 
 # B3. capture-path integrity — opt-in (needs a loopback/Aggregate device feeding a steady tone)
 if [ "${KEYSCRIBE_CAPTURE_PROBE:-0}" = "1" ]; then
-  if timeout 60 "$EXE" --config-dir "$PF_CFG" --capture-probe --seconds 5 >/tmp/preflight-capture.log 2>&1; then
+  if timeout --foreground 60 "$EXE" --config-dir "$PF_CFG" --capture-probe --seconds 5 >/tmp/preflight-capture.log 2>&1; then
     if grep -qE "ringDropped=0.*overloads=0|overloads=0.*ringDropped=0" /tmp/preflight-capture.log; then
       pass "--capture-probe: no ring drops, no CoreAudio overloads"
     else

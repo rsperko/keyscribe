@@ -16,6 +16,10 @@ protocol AudioCapturing: AnyObject, Sendable {
     func stop() -> URL?
     // Commit-on-release stop: let the callback deliver the buffer that holds the final word.
     func finishDraining() async -> URL?
+    // The just-committed capture's in-memory mono PCM (record rate), or nil. Consumes it (one read per
+    // capture). Valid only immediately after finishDraining() returns a URL, before the next arm. Default
+    // nil so test doubles that only produce a WAV keep the file transcription path.
+    func takeDrainedSamples() -> [Float]?
     func prewarm()
     // Rebuild and prewarm the idle unit after wake or long idle.
     func refreshBinding()
@@ -27,6 +31,7 @@ extension AudioCapturing {
     func prewarm() {}
     func refreshBinding() {}
     func finishDraining() async -> URL? { stop() }
+    func takeDrainedSamples() -> [Float]? { nil }
     func setPreferredInputUID(_ uid: String?) {}
     var currentLevel: Float { 0 }
     // Default: ignore the admission boundary. Test doubles inherit this; AudioCapture overrides it.
@@ -88,6 +93,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private let overloadCount = Atomic<Int>(0)
     // Stashed at teardown so diagnostics survive resizing the ring back to baseline.
     private var lastRingDroppedCount = 0
+    // The committed capture's in-memory mono PCM (P2-1), captured when the writer joins on the commit
+    // path only (flushConverter == true). Consumed once by the controller via takeDrainedSamples() right
+    // after finishDraining() returns; a cancel/stop leaves it untouched (its audio is discarded). Guarded
+    // by `lock`.
+    private var lastDrainedSamples: [Float]?
     private var overloadListenerBlock: AudioObjectPropertyListenerBlock?
     // Joined by the next arm before resetting the shared ring.
     private var lastWriter: CaptureWriter?
@@ -537,6 +547,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         capturing.store(false, ordering: .releasing)
         removeActiveDeviceListener()
         s?.writer.finish(flushConverter: flushConverter)
+        // The writer thread has joined; its accumulated PCM is now stable. Keep it only on the commit path
+        // (flushConverter) — cancel/stop/discard pass false and their audio is dropped with the session.
+        if flushConverter, let s {
+            let samples = s.writer.drainedSamples()
+            lock.withLock { lastDrainedSamples = samples }
+        }
         // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
         // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
         // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
@@ -555,6 +571,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Valid from capture end until the next arm resets the counters.
     func captureDiagnostics() -> (ringDropped: Int, overloads: Int) {
         (lastRingDroppedCount, overloadCount.load(ordering: .relaxed))
+    }
+
+    func takeDrainedSamples() -> [Float]? {
+        lock.withLock { let s = lastDrainedSamples; lastDrainedSamples = nil; return s }
     }
 
     // Audio-discarding teardown for cancel()/over-limit abort. Close the file synchronously so the caller

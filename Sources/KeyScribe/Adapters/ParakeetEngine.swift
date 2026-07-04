@@ -128,16 +128,33 @@ actor ParakeetEngine: SpeechEngine {
         self.manager = manager
     }
 
+    nonisolated let supportsSampleInput = true
+
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
         guard let manager else { throw EngineError.notInitialized }
-
+        // Unbiased keeps FluidAudio's file entry point unchanged — it disk-backs clips over its streaming
+        // threshold (~30 s), which the in-memory samples path does not. Biased already resampled to samples.
         guard !biasTerms.isEmpty else {
             var decoderState = try TdtDecoderState(decoderLayers: version.decoderLayers)
             return try await manager.transcribe(wavURL, decoderState: &decoderState).text
         }
+        return try await biasedTranscribe(samples: try audioConverter.resampleAudioFile(wavURL), biasTerms: biasTerms, manager: manager)
+    }
 
-        let samples = try audioConverter.resampleAudioFile(wavURL)
+    // FluidAudio's sample APIs assume 16 kHz mono (the capture rate for Parakeet), so `sampleRate` is
+    // informational here — the manager/spotter are fixed at 16 kHz.
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
+        try await loadIfNeeded()
+        guard let manager else { throw EngineError.notInitialized }
+        guard !biasTerms.isEmpty else {
+            var decoderState = try TdtDecoderState(decoderLayers: version.decoderLayers)
+            return try await manager.transcribe(samples, decoderState: &decoderState).text
+        }
+        return try await biasedTranscribe(samples: samples, biasTerms: biasTerms, manager: manager)
+    }
+
+    private func biasedTranscribe(samples: [Float], biasTerms: [String], manager: AsrManager) async throws -> String {
         var decoderState = try TdtDecoderState(decoderLayers: version.decoderLayers)
         let result = try await manager.transcribe(samples, decoderState: &decoderState)
 

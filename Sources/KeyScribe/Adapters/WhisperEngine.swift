@@ -128,28 +128,68 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         modelFilesPresent(at: localModelFolder(in: modelsDir))
     }
 
+    nonisolated var supportsSampleInput: Bool { true }
+
+    // Routed through the samples entry (not WhisperKit's audioPath) so the short-audio padding below
+    // covers the WAV path too — audioPath would feed a sub-1s file straight into the unpadded seek loop.
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+        try await transcribe(
+            samples: try AudioDecoder.pcmMono(wavURL, sampleRate: WhisperKit.sampleRate),
+            sampleRate: WhisperKit.sampleRate, biasTerms: biasTerms)
+    }
+
+    // WhisperKit's audioPath entry decodes the file to 16 kHz mono then runs the same pipeline as
+    // audioArray — the capture writer already produced exactly that, so skip the file round-trip.
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
         guard let pipe else { throw EngineError.notInitialized }
         let options = decodeOptions(biasTerms: biasTerms, pipe: pipe)
-        Log.bias.info("whisper terms=\(biasTerms.joined(separator: "|"), privacy: .private) promptTokens=\(options?.promptTokens?.count ?? 0, privacy: .public)")
-        let results = try await pipe.transcribe(audioPath: wavURL.path, decodeOptions: options)
+        Log.bias.info("whisper samples terms=\(biasTerms.joined(separator: "|"), privacy: .private) promptTokens=\(options.promptTokens?.count ?? 0, privacy: .public)")
+        let audio = Self.paddedForDecode(samples, windowClipTime: options.windowClipTime)
+        let results = try await pipe.transcribe(audioArray: audio, decodeOptions: options)
         return results.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // WhisperKit's seek loop stops `windowClipTime` (default 1 s) short of the clip end to avoid
+    // end-of-window hallucinations, so a clip SHORTER than that never enters the loop at all — zero
+    // decode windows, "" for real speech, and a false "No speech detected" for any sub-second
+    // utterance. Pad short audio just past the guard with trailing zeros: identical to the zero-fill
+    // WhisperKit applies to reach the 30 s window, so a ≥1 s clip's transcript is unaffected.
+    static func paddedForDecode(_ samples: [Float], windowClipTime: Float) -> [Float] {
+        let minFrames = Int(windowClipTime * Float(WhisperKit.sampleRate)) + 1
+        guard samples.count < minFrames else { return samples }
+        return samples + [Float](repeating: 0, count: minFrames - samples.count)
     }
 
     // Recognition bias for Whisper is its conditioning prompt: dictionary terms are tokenized and
     // prepended as `promptTokens`, nudging the decoder toward those spellings (design.md §4.2). This
     // is a soft hint the model may ignore, not a guarantee — only nonce tokens survive a rewrite.
-    // Word tokens only (drop special tokens); nil options when there's nothing to bias.
+    // Word tokens only (drop special tokens); no prompt when there's nothing to bias.
     //
     // Requires the prefill-completion fix in our WhisperKit fork (see Package.swift): stock 1.0.0
     // aborts the decode to an empty transcript whenever `promptTokens` are set (#372).
-    private func decodeOptions(biasTerms: [String], pipe: WhisperKit) -> DecodingOptions? {
+    private func decodeOptions(biasTerms: [String], pipe: WhisperKit) -> DecodingOptions {
+        Self.batchDecodingOptions(promptTokens: promptTokens(biasTerms: biasTerms, pipe: pipe))
+    }
+
+    private func promptTokens(biasTerms: [String], pipe: WhisperKit) -> [Int]? {
         guard !biasTerms.isEmpty, let tokenizer = pipe.tokenizer else { return nil }
         let promptText = " " + biasTerms.joined(separator: ", ")
         let tokens = tokenizer.encode(text: promptText).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-        guard !tokens.isEmpty else { return nil }
-        return DecodingOptions(promptTokens: tokens)
+        return tokens.isEmpty ? nil : tokens
+    }
+
+    // WhisperKit's default firstTokenLogProbThreshold (-1.5) EARLY-STOPS a window whose first predicted
+    // token is low-confidence, keeping ZERO word tokens; the temperature fallbacks that follow sample
+    // randomly and can all early-stop too, returning "" for real speech — a short fast utterance with a
+    // cue-trimmed onset then surfaces as a false "No speech detected", intermittently (the fallback RNG).
+    // Batch push-to-talk dictation knows the user spoke, so that latency-oriented gate is disabled; true
+    // silence still returns "" via the model predicting end-of-text first. Every other threshold keeps
+    // its WhisperKit default.
+    static func batchDecodingOptions(promptTokens: [Int]?) -> DecodingOptions {
+        var options = DecodingOptions(promptTokens: promptTokens)
+        options.firstTokenLogProbThreshold = nil
+        return options
     }
 
     func evict() async {

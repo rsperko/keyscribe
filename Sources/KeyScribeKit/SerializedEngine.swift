@@ -44,6 +44,7 @@ public actor SerializedEngine: SpeechEngine {
     public nonisolated var captureSampleRate: Int { base.captureSampleRate }
     public nonisolated var installDirNames: [String] { base.installDirNames }
     public nonisolated var benefitsFromWarmupClip: Bool { base.benefitsFromWarmupClip }
+    public nonisolated var supportsSampleInput: Bool { base.supportsSampleInput }
     public nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? { base.verifyInstalled(in: modelsDir) }
 
     // Forward under the exclusive lock so prepare never races a base load/transcribe/evict on the
@@ -144,6 +145,16 @@ public actor SerializedEngine: SpeechEngine {
         defer { release() }
         try await ensureRuntimeLocked()
         return try await base.transcribe(wavURL: wavURL, biasTerms: biasTerms)
+    }
+
+    // Same exclusive-lock + load-then-transcribe discipline as the WAV path. WITHOUT this override the
+    // protocol-extension default would throw sampleInputUnsupported on the wrapper even though the base
+    // engine supports samples — the same silent-no-op trap as prepareForDictation.
+    public func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
+        await acquire()
+        defer { release() }
+        try await ensureRuntimeLocked()
+        return try await base.transcribe(samples: samples, sampleRate: sampleRate, biasTerms: biasTerms)
     }
 
     public func evict() async {

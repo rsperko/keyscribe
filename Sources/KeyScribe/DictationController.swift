@@ -678,6 +678,10 @@ final class DictationController {
                 self.finish(machine: .cancel, cue: .cancel, state: .hidden)
                 return
             }
+            // The writer already produced this capture's PCM; a sample-capable engine takes it directly
+            // instead of re-reading and re-decoding the WAV just written (P2-1). The WAV stays on disk for
+            // archive/probe/fallback. Read once, right after draining, before any later arm clears it.
+            let samples = self.audio.takeDrainedSamples()
             // Capture is done — unmute the output now rather than holding it muted across
             // transcription and the (potentially slow) cloud LLM rewrite.
             self.effects.restoreAudio()
@@ -692,7 +696,7 @@ final class DictationController {
             } else {
                 self.log.error("wav unreadable at \(url.path, privacy: .public)")
             }
-            await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds)
+            await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples)
         }
     }
 
@@ -798,10 +802,15 @@ final class DictationController {
     // (a structured task group would wait for it). A late result resolves a no-op and is discarded.
     // Because an abandoned transcribe may still be running, the gate refuses a second concurrent call
     // (throws `Busy`) until the wedged one truly settles, so two transcribes never run at once.
-    private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL) async throws -> String {
+    private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL, samples: [Float]?) async throws -> String {
         let timeout = max(30, audioSeconds * 20)
         return try await transcribeGate.run(seconds: timeout) {
-            try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
+            // Prefer the in-memory PCM when the engine accepts it (P2-1); fall back to the WAV otherwise.
+            if engine.supportsSampleInput, let samples {
+                return try await engine.transcribe(
+                    samples: samples, sampleRate: engine.captureSampleRate, biasTerms: biasTerms)
+            }
+            return try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
         }
     }
 
@@ -822,7 +831,7 @@ final class DictationController {
         transcribeBusyStreakStartedAt = nil
     }
 
-    private func transcribeAndInsert(url: URL, audioSeconds: Double?) async {
+    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil) async {
         await session?.modeResolveTask?.value
         let engine = activeEngine
         building.audioSeconds = audioSeconds
@@ -847,12 +856,17 @@ final class DictationController {
             finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
         }
         let modelWaitStart = DispatchTime.now()
+        // A resident model resolves loadOnce() in ~0 ms, but a cold/frugal-evicted load can run for seconds
+        // (up to ~140 s for a big ANE model). Rather than leave the HUD on "Transcribing" — a lie during a
+        // load — name the wait once it exceeds ~1 s (P2-2). Cancelled on load resolution; guarded on
+        // machine.state so a cancel that flips state can't render it stale (mirrors scheduleRewriteEscapeHatch).
+        let loadingHUD = scheduleLoadingModelHUD()
         do {
             try await loadOnce()
         } catch {
-            if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
+            if Task.isCancelled { loadingHUD.cancel(); try? FileManager.default.removeItem(at: url); return }
             // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
-            if error is DeadlineExceeded { failModelLoadTerminal(error); return }
+            if error is DeadlineExceeded { loadingHUD.cancel(); failModelLoadTerminal(error); return }
             // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch, and a
             // fresh reload (what a user does by hand) usually succeeds. invalidateWarm drops the failed task
             // so warm(engine) builds a new one; the HUD stays on `transcribing`, so a recovered transient is
@@ -862,18 +876,23 @@ final class DictationController {
             do {
                 try await loadOnce()
             } catch {
+                loadingHUD.cancel()
                 if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
                 failModelLoadTerminal(error)
                 return
             }
         }
+        loadingHUD.cancel()
+        // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
+        // loading-model state was actually shown during a slow load.
+        hud?.render(.transcribing(mode: currentModeName))
         building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
 
         let transcribeStart = DispatchTime.now()
         let rawFromEngine: String
         do {
             rawFromEngine = try await transcribeBounded(
-                audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url)
+                audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples)
             resetTranscribeBusyStreak()
         } catch is SingleFlightDeadline.Busy {
             try? FileManager.default.removeItem(at: url)
@@ -1391,6 +1410,16 @@ final class DictationController {
             finishError(message, action: action)
         case .insert(let final, let bare):
             Task { await self.finishInsertion(transcript: final, heard: heard, transformed: transcript, rewrite: rewrite, bare: bare) }
+        }
+    }
+
+    private static let loadingModelHUDDelay: Duration = .seconds(1)
+
+    private func scheduleLoadingModelHUD() -> Task<Void, Never> {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.loadingModelHUDDelay)
+            guard let self, !Task.isCancelled, self.machine.state == .transcribing else { return }
+            self.hud?.render(.loadingModel(mode: self.currentModeName))
         }
     }
 

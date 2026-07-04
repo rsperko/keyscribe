@@ -95,15 +95,20 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
         progress?(.init(phase: "Ready", fraction: 1))
     }
 
+    nonisolated var supportsSampleInput: Bool { true }
+
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+        try await transcribe(samples: try AudioDecoder.pcmMono(wavURL, sampleRate: 16000), sampleRate: 16000, biasTerms: biasTerms)
+    }
+
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
         Log.bias.info("moonshine bias unsupported — \(biasTerms.count, privacy: .public) term(s) ignored")
-        let audio = try AudioDecoder.pcmMono(wavURL, sampleRate: 16000)
         let text = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
             inferenceQueue.async { [self] in
                 guard let transcriber else { cont.resume(throwing: EngineError.notInitialized); return }
                 do {
-                    let transcript = try transcriber.transcribeWithoutStreaming(audioData: audio, sampleRate: 16000)
+                    let transcript = try transcriber.transcribeWithoutStreaming(audioData: samples, sampleRate: Int32(sampleRate))
                     cont.resume(returning: transcript.lines.map(\.text).joined(separator: " "))
                 } catch {
                     cont.resume(throwing: error)

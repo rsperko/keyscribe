@@ -36,6 +36,9 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                                 engine cleans fewer clips than its baseline (a command-pipeline
                                 regression) or the clip count changed (re-baseline). Ground truth, not
                                 an absolute pass-rate — the clips are transcription-sensitive.
+      --samples-parity <dir>  Verify the in-memory samples transcription path matches the WAV path for
+                              every installed sample-capable engine over the *.wav files in <dir> (P2-1).
+                              Exits non-zero on any mismatch. Honors --engines.
       --list-engines          Print each shipped catalog engine and whether it is installed
                               (installed / missing / system), then exit — coverage for the release gate.
       --capture-probe         Drive the real capture path (record → drain → teardown) and score the
@@ -98,6 +101,33 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
         }
     }
     exit(0)
+}
+
+// Dev tool: `--reload-stress <dir>` reproduces the Frugal-memory "No speech detected" — cold-reload a
+// model N times and transcribe a known non-silent clip, failing if any reload returns empty.
+if let i = CommandLine.arguments.firstIndex(of: "--reload-stress"), i + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    var only: Set<String>?
+    if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
+        only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
+    }
+    var iterations = 12
+    if let n = CommandLine.arguments.firstIndex(of: "--iterations"), n + 1 < CommandLine.arguments.count {
+        iterations = Int(CommandLine.arguments[n + 1]) ?? iterations
+    }
+    var bias: [String] = []
+    if let b = CommandLine.arguments.firstIndex(of: "--bias"), b + 1 < CommandLine.arguments.count {
+        bias = CommandLine.arguments[b + 1].split(separator: ",").map(String.init)
+    }
+    let done = DispatchSemaphore(value: 0)
+    let ok = Atomic<Bool>(false)
+    Task.detached {
+        let passed = await ReloadStressRunner.run(dir: dir, only: only, iterations: iterations, biasTerms: bias)
+        ok.store(passed, ordering: .relaxed)
+        done.signal()
+    }
+    done.wait()
+    exit(ok.load(ordering: .relaxed) ? 0 : 1)
 }
 
 // Diagnostic: print every shipped catalog engine and whether it is installed — so a release gate can
@@ -171,6 +201,23 @@ if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < Com
                 ok.store(!baseline.engines.isEmpty, ordering: .relaxed)
             }
         }
+        done.signal()
+    }
+    done.wait()
+    exit(ok.load(ordering: .relaxed) ? 0 : 1)
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--samples-parity"), i + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    var only: Set<String>?
+    if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
+        only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
+    }
+    let done = DispatchSemaphore(value: 0)
+    let ok = Atomic<Bool>(false)
+    Task.detached {
+        let passed = await SamplesParityRunner.run(dir: dir, only: only)
+        ok.store(passed, ordering: .relaxed)
         done.signal()
     }
     done.wait()

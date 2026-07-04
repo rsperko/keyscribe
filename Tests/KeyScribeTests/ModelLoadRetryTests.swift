@@ -51,6 +51,26 @@ private final class TimeoutLoadEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
+// loadIfNeeded() sleeps past the loading-HUD delay on its first call, then succeeds — models a cold
+// CoreML/MLX compile slow enough for the HUD to name the wait (P2-2).
+private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
+    let id = "slow"
+    let displayName = "Slow"
+    let supportsRecognitionBias = false
+    private let lock = NSLock()
+    private var loaded = false
+    private let text: String
+    init(text: String = "hello world") { self.text = text }
+    func loadIfNeeded() async throws {
+        let already = lock.withLock { let a = loaded; loaded = true; return a }
+        // Comfortably longer than the 1 s loading-HUD delay so the delayed render fires well before the
+        // load resolves even under full-suite parallel CPU contention (a tight margin flaked at 1.3 s).
+        if !already { try await Task.sleep(for: .milliseconds(2500)) }
+    }
+    func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
+    func evict() async {}
+}
+
 private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     init(url: URL) { self.url = url }
@@ -159,6 +179,47 @@ struct ModelLoadRetryTests {
         #expect(h.recorder.records.first?.engine == "flaky")
         #expect(h.recorder.records.first?.timedOut == false)
         #expect(sawLoadError(h.hud.states))
+    }
+
+    @Test func slowColdLoadNamesTheWaitThenReturnsToTranscribing() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let engine = SlowLoadEngine()
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "slow")
+        let insertSpy = InsertSpy()
+        let hud = HUDSpy()
+        let recorder = LoadFailureRecorder()
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "slow", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud,
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _, _ in await insertSpy.record(); return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true },
+            recordModelLoadFailure: { recorder.record($0, $1, $2) })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+
+        #expect(await insertSpy.calls == 1)
+        let sawLoading = hud.states.contains { if case .loadingModel = $0 { return true }; return false }
+        #expect(sawLoading)
+        // The loading state is transient — the last processing state before insertion is transcribing again.
+        let lastProcessing = hud.states.last {
+            if case .loadingModel = $0 { return true }
+            if case .transcribing = $0 { return true }
+            return false
+        }
+        #expect({ if case .transcribing = lastProcessing { return true }; return false }())
     }
 
     @Test func loadTimeoutSurfacesWithoutRetrying() async {

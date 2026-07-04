@@ -61,6 +61,17 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     // Opt out to prove the wrapper forwards the metadata rather than returning the protocol default.
     let benefitsFromWarmupClip = false
 
+    // Opt in to prove the wrapper forwards supportsSampleInput (default false) and routes the samples call.
+    let supportsSampleInput = true
+    private var _sampleTranscribeCalled = false
+    private var _lastSampleRate = 0
+    var sampleTranscribeCalled: Bool { lock.withLock { _sampleTranscribeCalled } }
+    var lastSampleRate: Int { lock.withLock { _lastSampleRate } }
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
+        lock.withLock { _sampleTranscribeCalled = true; _lastSampleRate = sampleRate }
+        return "samples-text"
+    }
+
     private func failIfRequested() throws {
         let shouldFail = lock.withLock {
             if _failNextLoad { _failNextLoad = false; return true }
@@ -140,6 +151,27 @@ struct SerializedEngineTests {
     @Test func benefitsFromWarmupClipForwardsFromBase() {
         let engine = SerializedEngine(SpyEngine())
         #expect(engine.benefitsFromWarmupClip == false)
+    }
+
+    // P2-1: supportsSampleInput must reflect the base, not the protocol default (false) — otherwise the
+    // controller never hands the in-memory PCM to a sample-capable engine and always re-reads the WAV.
+    @Test func supportsSampleInputForwardsFromBase() {
+        let engine = SerializedEngine(SpyEngine())
+        #expect(engine.supportsSampleInput)
+    }
+
+    // P2-1: the samples transcribe must forward to the base under the lock (with the runtime model loaded),
+    // else the protocol-extension default throws sampleInputUnsupported on the wrapper — the same silent
+    // trap as prepareForDictation. Also proves the runtime model is ensured first.
+    @Test func transcribeSamplesForwardsToBaseAndEnsuresRuntimeModel() async throws {
+        let spy = SpyEngine()
+        let engine = SerializedEngine(spy)
+        let text = try await engine.transcribe(samples: [0, 0.1, -0.1], sampleRate: 24000, biasTerms: [])
+        #expect(text == "samples-text")
+        #expect(spy.sampleTranscribeCalled)
+        #expect(spy.lastSampleRate == 24000)
+        #expect(spy.runtimeBodies == 1)   // ensureRuntimeLocked ran before the base transcribe
+        #expect(spy.loadBodies == 0)      // never the install/bias body
     }
 
     // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.

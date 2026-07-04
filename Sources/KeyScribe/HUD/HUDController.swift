@@ -52,9 +52,12 @@ final class HUDController: HUDPresenting {
         if case .recording(_, let level) = state { levelModel.level = level }
         model.state = state
         if case .hidden = state {
-            panel?.orderOut(nil)
+            fadeOutPanel()
         } else {
             showPanelIfNeeded()
+            // Appear is always instant (latency reads as sluggishness on show); reset alpha in case a
+            // fade-out was mid-flight when this dictation started.
+            panel?.alphaValue = 1
             if let panel {
                 resize(panel, to: state)
             }
@@ -130,6 +133,29 @@ final class HUDController: HUDPresenting {
         guard let panel, panel.isKeyWindow else { return }
         panel.orderOut(nil)
         panel.orderFrontRegardless()
+    }
+
+    // Fade the panel out over ~120 ms on the →hidden edge (the complete toast vanishing abruptly is the
+    // most jarring transition; polish reads well on hide). Appear stays instant. The completion re-checks
+    // state so a dictation that starts mid-fade (which reset alpha to 1 in render) is not ordered back out;
+    // reduce-motion hides immediately.
+    private func fadeOutPanel() {
+        guard let panel, panel.isVisible else { return }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.12
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel else { return }
+                if case .hidden = self.model.state { panel.orderOut(nil) }
+                panel.alphaValue = 1
+            }
+        })
     }
 
     private func installLocalKeyMonitor() {
@@ -293,7 +319,31 @@ private struct HUDView: View {
         }
     }
 
+    // Arming and recording share one continuous mic glyph so the go-signal is a *fill* (dim → solid +
+    // level ring) rather than an orange→red swap — legible even with sounds off, when the fill is the
+    // only mic-live cue (press-path.md §5.1). One `if` branch keeps the glyph's identity stable across
+    // the arming→recording transition so SwiftUI animates the fill instead of replacing the view.
     @ViewBuilder private var icon: some View {
+        if isMicGlyphState {
+            MicLevelIcon(live: isRecordingState, level: level)
+        } else {
+            indicatorIcon
+        }
+    }
+
+    private var isMicGlyphState: Bool {
+        switch model.state {
+        case .arming, .recording: return true
+        default: return false
+        }
+    }
+
+    private var isRecordingState: Bool {
+        if case .recording = model.state { return true }
+        return false
+    }
+
+    @ViewBuilder private var indicatorIcon: some View {
         switch model.state.indicator {
         case .ready:
             Image(systemName: "mic").foregroundStyle(.secondary)
@@ -435,6 +485,45 @@ private struct ProcessingIcon: View {
 private struct RecordingIcon: View {
     @ObservedObject var level: HUDLevel
     var body: some View { LevelIndicator(level: level.level) }
+}
+
+// The unified arming↔recording mic glyph (press-path.md §5.1). While arming: a dim mic with a gently
+// pulsing halo (the pulse keeps a slow/Bluetooth bring-up reading as "working", not frozen). The instant
+// frames are admitted (`live`) the mic fills solid and the halo becomes a red level ring driven by input.
+// The fill IS the mic-live signal for sounds-off users. Reduce-motion drops every animation.
+private struct MicLevelIcon: View {
+    let live: Bool
+    @ObservedObject var level: HUDLevel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        let l = CGFloat(min(1, max(0, level.level)))
+        ZStack {
+            Circle()
+                .fill(haloColor.opacity(haloOpacity(l)))
+                .frame(width: haloSize(l), height: haloSize(l))
+                .animation(live || reduceMotion ? nil
+                    : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+            Image(systemName: "mic.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(haloColor)
+                .opacity(live ? 1 : 0.5)
+        }
+        .frame(width: 30, height: 30)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: live)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level.level)
+        .onAppear { pulse = true }
+        .accessibilityLabel(live ? "Recording" : "Preparing dictation")
+    }
+
+    private var haloColor: Color { live ? .red : .orange }
+    private func haloOpacity(_ l: CGFloat) -> Double {
+        live ? Double(0.14 + l * 0.34) : (pulse ? 0.5 : 0.24)
+    }
+    private func haloSize(_ l: CGFloat) -> CGFloat {
+        live ? 16 + l * 14 : (pulse ? 30 : 24)
+    }
 }
 
 private struct LevelIndicator: View {

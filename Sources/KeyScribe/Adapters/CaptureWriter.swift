@@ -40,6 +40,11 @@ final class CaptureWriter: @unchecked Sendable {
     private let feed = FeedOnce()
     // Set once the drain gate trips: the converter tail has been flushed and no further slots are written.
     private var sealed = false
+    // Post-conversion mono PCM (record rate), accumulated alongside the file write so the committed
+    // capture can be handed to a sample-capable engine without re-reading the WAV (P2-1). Written on the
+    // writer thread; read by drainedSamples() only after finish() has joined the thread. Bounded by the
+    // recording cap (~19 MiB @16 kHz / ~29 MiB @24 kHz for the 5-min max), freed with the session.
+    private var accumulated: [Float] = []
     // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
     // only, operating on device-native slots (pre-resample).
     private var headGate: HeadAdmitGate?
@@ -145,6 +150,7 @@ final class CaptureWriter: @unchecked Sendable {
         let inFmt = input.format
         if inFmt.sampleRate == recordFormat.sampleRate && inFmt.channelCount == recordFormat.channelCount {
             try? file.write(from: input)
+            appendSamples(from: input)
             return
         }
         if converter == nil {
@@ -171,7 +177,20 @@ final class CaptureWriter: @unchecked Sendable {
         }
         guard convError == nil, outBuffer.frameLength > 0 else { return }
         try? file.write(from: outBuffer)
+        appendSamples(from: outBuffer)
     }
+
+    // Mirror the mono PCM written to the file into the in-memory accumulator. Same buffer, same samples,
+    // so the samples an engine consumes are bit-identical to the WAV's content.
+    private func appendSamples(from buffer: AVAudioPCMBuffer) {
+        let n = Int(buffer.frameLength)
+        guard n > 0, let ptr = buffer.floatChannelData?[0] else { return }
+        accumulated.append(contentsOf: UnsafeBufferPointer(start: ptr, count: n))
+    }
+
+    // The committed capture's post-conversion mono PCM. Safe to call only after finish() has joined the
+    // writer thread (the caller — AudioCapture.finishWriterAndCloseFile — does exactly that first).
+    func drainedSamples() -> [Float] { accumulated }
 
     // Drain the resampler's internal latency (a few samples of SRC delay) into the file at end of capture,
     // so the very tail isn't left stuck inside the converter. No-op when no conversion is happening.
@@ -183,7 +202,10 @@ final class CaptureWriter: @unchecked Sendable {
             status.pointee = .endOfStream
             return nil
         }
-        if convError == nil, outBuffer.frameLength > 0 { try? file.write(from: outBuffer) }
+        if convError == nil, outBuffer.frameLength > 0 {
+            try? file.write(from: outBuffer)
+            appendSamples(from: outBuffer)
+        }
     }
 
     // Request the thread to stop and block until it has fully exited, so the owner may then close the file

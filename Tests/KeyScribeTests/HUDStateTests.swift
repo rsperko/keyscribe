@@ -53,6 +53,15 @@ struct HUDStateTests {
         #expect(state.secondaryText == "Transcribing")
     }
 
+    @Test func loadingModelNamesTheWaitAndStaysCancellable() {
+        let state = HUDState.loadingModel(mode: "Email")
+        #expect(state.primaryText == "Email")
+        #expect(state.secondaryText == "Loading speech model…")
+        #expect(state.indicator == .preparing)
+        #expect(state.holdsKeyFocus)
+        #expect(state.dataBoundaryBadges.isEmpty)
+    }
+
     @Test func rewritingBadgesListEachBoundaryCategorySeparately() {
         let state = HUDState.rewriting(
             connection: "Gemini", mode: "Email", redacted: false,

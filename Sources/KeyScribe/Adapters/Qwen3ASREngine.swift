@@ -124,15 +124,20 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         fullInstallPresent(in: existingCacheDirectory(in: modelsDir))
     }
 
+    nonisolated var supportsSampleInput: Bool { true }
+
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+        try await transcribe(samples: try AudioDecoder.pcmMono(wavURL, sampleRate: 24000), sampleRate: 24000, biasTerms: biasTerms)
+    }
+
+    func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
-        let audio = try AudioDecoder.pcmMono(wavURL, sampleRate: 24000)
         let context = biasTerms.isEmpty ? nil : biasTerms.joined(separator: ", ")
         Log.bias.info("qwen3asr terms=\(biasTerms.joined(separator: "|"), privacy: .private) context=\(context != nil, privacy: .public)")
         let text = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
             inferenceQueue.async { [self] in
                 guard let model else { cont.resume(throwing: EngineError.notInitialized); return }
-                cont.resume(returning: model.transcribe(audio: audio, sampleRate: 24000, context: context))
+                cont.resume(returning: model.transcribe(audio: samples, sampleRate: sampleRate, context: context))
             }
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
