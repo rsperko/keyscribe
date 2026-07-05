@@ -124,7 +124,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var drainContinuation: CheckedContinuation<Void, Never>?
     // Lets stale backstop timers fail closed when a newer drain has started.
     private var drainSequence = 0
-    private var currentDrainID = 0
 
     // Bound for a single bring-up.
     private static let bringUpTimeout: Double = 2.0
@@ -353,13 +352,24 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // The previous capture's samples are consumed by the controller right after finishDraining; clear any
         // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
         lock.withLock { lastDrainedSamples = nil }
+        // Approximate the remaining cue window from arm time so the head gate's invalid-timestamp fallback
+        // drops about the cue's worth of audio (not a fixed slot count) on a device that never stamps hostTime.
+        let now = mach_absolute_time()
+        let cueWindowSeconds = admitAfterHostTime > now
+            ? Double(admitAfterHostTime - now) / Self.hostTicksPerSecond : 0
         let writer = CaptureWriter(
             ring: ring, file: file, recordFormat: recordFormat,
             admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: Self.hostTicksPerSecond,
+            cueWindowSeconds: cueWindowSeconds,
             wantsSamples: wantsSamples,
             onSamples: onSamples,
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, writer: writer)
+        // Start the writer BEFORE publishing the session/lastWriter, so no teardown path can ever observe a
+        // published-but-not-yet-started writer and return from finish() without joining its thread (GPT review):
+        // finishWriterAndCloseFile relies on finish() having joined before it closes/deletes the file. The
+        // writer just polls the already-reset ring until the IOProc below begins producing.
+        writer.start()
         // Publish only if this generation still owns the capture slot.
         let published = lock.withLock { () -> Bool in
             guard generation == self.generation else { return false }
@@ -368,12 +378,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             return true
         }
         guard published else {
+            writer.finish(flushConverter: false)
             try? FileManager.default.removeItem(at: url)
             throw AudioCaptureError.bringUpTimedOut
         }
         producerGeneration.store(generation, ordering: .releasing)
         capturing.store(true, ordering: .releasing)
-        writer.start()
 
         // Start the IOProc last so the first buffer lands in the correctly-sized ring.
         do {
@@ -479,7 +489,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             let id = lock.withLock { () -> Int in
                 drainSequence += 1
-                currentDrainID = drainSequence
                 drainGate = TailDrainGate(releaseHostTime: releaseHostTime)
                 drainContinuation = cont
                 return drainSequence
@@ -511,7 +520,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Nil is a forced resume; non-nil backstops must still match the active drain id.
     private func resumeDrain(id: Int? = nil) {
         let cont = lock.withLock { () -> CheckedContinuation<Void, Never>? in
-            guard Self.shouldResumeDrain(backstopID: id, currentDrainID: currentDrainID) else { return nil }
+            guard Self.shouldResumeDrain(backstopID: id, currentDrainID: drainSequence) else { return nil }
             let c = drainContinuation
             drainContinuation = nil
             drainGate = nil
@@ -531,6 +540,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let url = lock.withLock { session?.url }
         finishWriterAndCloseFile(flushConverter: true)
         if let url { CaptureArchive.archive(url, tag: "commit") }
+        scheduleWatchdoggedTeardown(queue: queue, generation: generation)
+        return url
+    }
+
+    // Tear the unit down off-main under the bring-up watchdog: a wedged transitioning device (classically a
+    // Bluetooth A2DP→HFP flip) can block teardown for a long time, so abandon it after the deadline and flag a
+    // rebuild — the NEXT dictation then starts on a fresh queue instead of waiting out the full bring-up window.
+    private func scheduleWatchdoggedTeardown(queue: DispatchQueue, generation: Int) {
         Task { [self] in
             do {
                 try await runWithDeadline(seconds: Self.bringUpTimeout) {
@@ -545,7 +562,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 markRebuild()
             }
         }
-        return url
     }
 
     // Non-Bluetooth units are stopped for reuse; Bluetooth units are disposed to release HFP.
@@ -623,7 +639,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let (queue, generation) = currentQueueAndGeneration()
         let url = lock.withLock { session?.url }
         finishWriterAndCloseFile(flushConverter: false)
-        queue.async { [self] in teardownUnit(generation: generation) }
+        scheduleWatchdoggedTeardown(queue: queue, generation: generation)
         return url
     }
 

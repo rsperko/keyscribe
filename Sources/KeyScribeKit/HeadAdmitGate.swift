@@ -10,22 +10,38 @@ public struct HeadAdmitGate: Sendable {
 
     private let admitAfterHostTime: UInt64
     private let hostTicksPerSecond: Double
+    // Approximate cue-window duration for the invalid-timestamp fallback. When finite, the fallback drops
+    // until the dropped audio reaches it (measured from each slot's own frames/rate). `.infinity` (the
+    // default) means no cue window was supplied, so the fallback uses only the bounded slot count.
+    private let fallbackDropSeconds: Double
     private let maxInvalidSlotsBeforeAdmit: Int
     private var invalidSlotsSeen = 0
+    private var invalidSecondsSeen = 0.0
     private var admitted = false  // latched on first admit; monotonic host time makes this a fast path too
 
-    public init(admitAfterHostTime: UInt64, hostTicksPerSecond: Double, maxInvalidSlotsBeforeAdmit: Int = 8) {
+    public init(admitAfterHostTime: UInt64, hostTicksPerSecond: Double,
+                fallbackDropSeconds: Double = .infinity, maxInvalidSlotsBeforeAdmit: Int = 8) {
         self.admitAfterHostTime = admitAfterHostTime
         self.hostTicksPerSecond = hostTicksPerSecond
+        self.fallbackDropSeconds = fallbackDropSeconds
         self.maxInvalidSlotsBeforeAdmit = max(1, maxInvalidSlotsBeforeAdmit)
     }
 
     public mutating func observe(slotStartHostTime: UInt64?, frameCount: Int, sampleRate: Double) -> Outcome {
         if admitted { return .admit }
-        // Unplaceable timestamp: drop a bounded number, then admit rather than eat audio forever (mirrors
-        // the tail gate's buffer-count fallback).
+        // Unplaceable timestamp. With a finite cue window supplied, keep dropping until the dropped audio
+        // approximates it — measured from each slot's own frame count, since a device that never stamps
+        // hostTime still reports its rate — so a measurable slot never counts toward the slot backstop and
+        // thus can't preempt the duration budget. With no window supplied (the public default), fall back to
+        // the historical bounded slot count. Either way an absolute slot backstop guarantees admission for
+        // slots whose frames/rate are also unreadable, so the gate can never eat audio forever.
         guard let start = slotStartHostTime, start != 0, sampleRate > 0, frameCount > 0,
               hostTicksPerSecond > 0 else {
+            if sampleRate > 0, frameCount > 0, fallbackDropSeconds.isFinite {
+                invalidSecondsSeen += Double(frameCount) / sampleRate
+                if invalidSecondsSeen >= fallbackDropSeconds { admitted = true; return .admit }
+                return .drop
+            }
             invalidSlotsSeen += 1
             if invalidSlotsSeen >= maxInvalidSlotsBeforeAdmit { admitted = true; return .admit }
             return .drop

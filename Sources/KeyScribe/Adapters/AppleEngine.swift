@@ -50,6 +50,12 @@ actor AppleEngine: SpeechEngine {
     // the engine where streaming helps most: per-call session setup dominates release→text today (P3-1).
     nonisolated var supportsStreaming: Bool { true }
 
+    // Bound the analyzer's input queue so a stalled analyzer can't accumulate converted buffers without limit
+    // (neither the driver's ingest-lag guard nor the writer→driver buffer catches an analyzer-side stall, since
+    // append itself never blocks). Overflow surfaces as a `.dropped` yield → append throws → driver degrades to
+    // batch. Generous headroom (many seconds at ~5 ms writer chunks), far past streaming's latency win.
+    static let maxPendingAnalyzerInputs = 512
+
     func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
         try await loadIfNeeded()
         let (analyzer, transcriber) = takePreparedOrBuild()
@@ -63,7 +69,8 @@ actor AppleEngine: SpeechEngine {
               let captureFormat = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)
         else { throw EngineError.notInitialized }
-        let (inputSequence, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        let (inputSequence, input) = AsyncStream.makeStream(
+            of: AnalyzerInput.self, bufferingPolicy: .bufferingNewest(Self.maxPendingAnalyzerInputs))
         try await analyzer.start(inputSequence: inputSequence)
         // Collect finalized results (no volatileResults option → results are final) on a task that ends when
         // the analyzer finishes at finalize. Spun here where the opaque `results` type is known.
@@ -139,13 +146,23 @@ final class AppleStreamingSession: StreamingSpeechSession, @unchecked Sendable {
 
     func append(samples: [Float]) async throws {
         guard let buffer = try makeBuffer(samples) else { return }
-        input.yield(AnalyzerInput(buffer: buffer))
+        // A `.dropped` yield means the bounded input queue overflowed (the analyzer stalled) — dropping audio
+        // would corrupt the transcript, so throw and let the driver degrade to batch (re-transcribes the WAV).
+        if case .dropped = input.yield(AnalyzerInput(buffer: buffer)) {
+            throw EngineError.streamingFailed
+        }
     }
 
     func finalizeTranscript() async throws -> String {
         // Drain the resampler's internal latency (a few ms of SRC delay holding the last syllable's tail)
-        // into the analyzer before ending the input — the same end-of-stream flush the capture writer does.
-        if let tail = flushConverterTail() { input.yield(AnalyzerInput(buffer: tail)) }
+        // into the analyzer before ending the input — the same end-of-stream flush the capture writer does. A
+        // `.dropped` here means the bounded queue overflowed on the last buffer, so the transcript would be
+        // missing audio — throw (cancelling the results task) so the driver degrades to batch rather than
+        // finalize a corrupted streaming transcript.
+        if let tail = flushConverterTail(), case .dropped = input.yield(AnalyzerInput(buffer: tail)) {
+            resultsTask.cancel()
+            throw EngineError.streamingFailed
+        }
         input.finish()
         do {
             try await analyzer.finalizeAndFinishThroughEndOfInput()

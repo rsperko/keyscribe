@@ -166,13 +166,18 @@ struct ClientStreamFormatTests {
 }
 
 struct HALInputUnitScratchPreallocationTests {
-    @Test func scratchCapacityUsesDeviceFrameSize() {
-        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 128) == 128)
-        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 512) == 512)
+    @Test func scratchCapacityFloorsAtTheCeilingForInSpecDevices() {
+        // A small in-spec period is rounded up to the ceiling so the realtime callback never has to grow it.
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 128) == HALInputUnit.scratchFrameCeiling)
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 512) == HALInputUnit.scratchFrameCeiling)
+    }
+
+    @Test func scratchCapacityHonorsAReportedPeriodAboveTheCeiling() {
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 16384) == 16384)
     }
 
     @Test func scratchCapacityHasSafeFallbackForInvalidFrameSize() {
-        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 0) == 4096)
+        #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 0) == HALInputUnit.scratchFrameCeiling)
     }
 }
 

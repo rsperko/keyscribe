@@ -109,9 +109,10 @@ This file is the entry point. Read the design docs before writing code — they 
   ring below a poll tick. **The arm order is load-bearing for this: `armSync` CONFIGURES the unit first
   (`configureCaptureDevice` — bind + initialize, including the default-follow retry, but the IOProc is NOT
   started), so the device that will actually deliver is known BEFORE the ring is sized; then it sizes the ring
-  for that bound device, arms the writer + `capturing=true`, and calls `startConfiguredUnit` LAST — so the first
-  delivered buffer already lands in a correctly-sized ring with no head clip, and a retry that rebinds a
-  different device cannot leave the ring mis-sized.** The swapped-in ring is published to the RT thread by the
+  for that bound device, starts the writer (BEFORE publishing the session/`lastWriter`, so no teardown path can
+  observe a published-but-not-yet-started writer and skip joining its thread), sets `capturing=true`, and calls
+  `startConfiguredUnit` LAST — so the first delivered buffer already lands in a correctly-sized ring with no head
+  clip, and a retry that rebinds a different device cannot leave the ring mis-sized.** The swapped-in ring is published to the RT thread by the
   same `capturing.store(true, .releasing)` the callback's acquire load pairs with, and is NEVER reassigned while
   `capturing` is true (the mid-recording restart keeps its ring — the one remaining case where the ring can
   outlast a device change, bounded by the drain backstop). The previous capture's writer is JOINED

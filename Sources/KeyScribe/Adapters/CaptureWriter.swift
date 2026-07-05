@@ -36,7 +36,14 @@ final class CaptureWriter: @unchecked Sendable {
     private let done = DispatchGroup()
     private let stopRequested = Atomic<Bool>(false)
     private let flushOnStop = Atomic<Bool>(false)
-    private var started = false
+    // Serializes start()/finish() so `done.enter()` happens under the same lock that sets `didStart`. Any
+    // finish() that observes `didStart == true` is therefore guaranteed the group was already entered, so its
+    // `done.wait()` cannot slip past an empty group before the writer thread exists. `finishRequested` remembers
+    // a finish() that raced ahead of start() so start() can honor the stop instead of running the thread full-
+    // length.
+    private let lifecycleLock = NSLock()
+    private var didStart = false
+    private var finishRequested = false
     // Retains the running thread for its lifetime; cleared implicitly when this writer is released.
     private var thread: Thread?
 
@@ -68,7 +75,7 @@ final class CaptureWriter: @unchecked Sendable {
     private let onSamples: (@Sendable ([Float]) -> Void)?
 
     init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
-         admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0,
+         admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0, cueWindowSeconds: Double = .infinity,
          wantsSamples: Bool = true,
          onSamples: (@Sendable ([Float]) -> Void)? = nil,
          observeHostTime: @escaping (UInt64?) -> Bool) {
@@ -79,7 +86,9 @@ final class CaptureWriter: @unchecked Sendable {
         self.onSamples = onSamples
         self.observeHostTime = observeHostTime
         if admitAfterHostTime != 0, hostTicksPerSecond > 0 {
-            headGate = HeadAdmitGate(admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond)
+            headGate = HeadAdmitGate(
+                admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond,
+                fallbackDropSeconds: cueWindowSeconds)
         }
         // Pre-size the accumulator to ~30 s of record-rate mono so a multi-minute dictation stops
         // re-copying the whole multi-MiB prefix through repeated doubling.
@@ -87,9 +96,16 @@ final class CaptureWriter: @unchecked Sendable {
     }
 
     func start() {
-        guard !started else { return }
-        started = true
-        done.enter()
+        let outcome: (isFirstStart: Bool, finishRequested: Bool) = lifecycleLock.withLock {
+            guard !didStart else { return (false, false) }
+            didStart = true
+            done.enter()
+            return (true, finishRequested)
+        }
+        guard outcome.isFirstStart else { return }
+        // A finish() landed before the thread was spawned; carry its stop into the run loop so the thread
+        // stops promptly rather than running the full capture (flushOnStop was already set by that finish()).
+        if outcome.finishRequested { stopRequested.store(true, ordering: .releasing) }
         let t = Thread { [weak self] in self?.run() }
         t.name = "com.keyscribe.audio.writer"
         t.qualityOfService = .userInitiated
@@ -265,8 +281,16 @@ final class CaptureWriter: @unchecked Sendable {
     // (e.g. the 300 ms backstop fired) — the commit path passes true, cancel passes false (the file is
     // discarded). Idempotent.
     func finish(flushConverter: Bool) {
-        guard started else { return }
         flushOnStop.store(flushConverter, ordering: .releasing)
+        // Record the request and read whether start() has already entered the group, under the same lock
+        // start() uses — so observing `started == true` guarantees `done.enter()` already ran and the wait()
+        // below cannot slip past an empty group. A finish() that raced ahead of start() just records the
+        // request (start() will honor it) and returns; there is no thread to join yet.
+        let started = lifecycleLock.withLock { () -> Bool in
+            finishRequested = true
+            return didStart
+        }
+        guard started else { return }
         // Only the first caller drives the shutdown handshake (release the store above BEFORE the run loop's
         // acquiring load of stopRequested sees it); every caller then blocks on the group until the thread
         // has left. Safe to call after the thread already sealed-and-left — wait() returns at once.

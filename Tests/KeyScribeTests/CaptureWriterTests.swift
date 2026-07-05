@@ -204,4 +204,20 @@ struct CaptureWriterTests {
         let read = try AVAudioFile(forReading: url)
         #expect(read.length == 320)
     }
+
+    @Test func finishBeforeStartDoesNotHangAndAStartAfterwardStillStops() throws {
+        // A finish() that races ahead of start() must return promptly (nothing to join yet) rather than wait on
+        // an empty group; start() then honors that stop so the thread self-terminates and a following finish()
+        // joins without hanging or double-leaving the group. If the lifecycle accounting were wrong this would
+        // hang (empty-group wait) or crash (unbalanced leave).
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = recordFormat(16_000)
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 1024, maxChannels: 2)
+        let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
+        writer.finish(flushConverter: false)
+        writer.start()
+        writer.finish(flushConverter: false)
+    }
 }

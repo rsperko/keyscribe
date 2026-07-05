@@ -46,13 +46,39 @@ struct HeadAdmitGateTests {
         #expect(gate.observe(slotStartHostTime: s2, frameCount: 480, sampleRate: 16000) == .admitTrailing(dropFrames: 160))
     }
 
-    @Test func invalidTimestampsDropUpToTheFallbackThenAdmitUnconditionally() {
+    @Test func invalidTimestampsDropUpToTheSlotBackstopThenAdmitUnconditionally() {
         var gate = HeadAdmitGate(admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond, maxInvalidSlotsBeforeAdmit: 3)
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .drop)
         #expect(gate.observe(slotStartHostTime: 0, frameCount: 480, sampleRate: 16000) == .drop)
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
         // Latched: further slots admit regardless.
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
+    }
+
+    @Test func invalidTimestampsDropAboutTheCueWindowBeforeAdmitting() {
+        // Cue window 100 ms; 30 ms slots. Drop through 30/60/90 ms (still under the window), admit at 120 ms.
+        var gate = HeadAdmitGate(
+            admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond, fallbackDropSeconds: 0.1)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .drop)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .drop)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .drop)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
+    }
+
+    @Test func aShortCueWindowAdmitsInvalidTimestampsAlmostImmediately() {
+        // A 10 ms cue window is already exceeded by the first 30 ms slot.
+        var gate = HeadAdmitGate(
+            admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond, fallbackDropSeconds: 0.01)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
+    }
+
+    @Test func unmeasurableInvalidSlotsCannotAccumulateDurationSoTheSlotBackstopGuaranteesAdmission() {
+        // Zero-frame slots can't add cue-window duration, so even a large window relies on the slot backstop.
+        var gate = HeadAdmitGate(
+            admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond,
+            fallbackDropSeconds: 10, maxInvalidSlotsBeforeAdmit: 2)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 0, sampleRate: 0) == .drop)
+        #expect(gate.observe(slotStartHostTime: nil, frameCount: 0, sampleRate: 0) == .admit)
     }
 
     @Test func aFractionalBoundaryRoundsTheDroppedFrameCountUp() {

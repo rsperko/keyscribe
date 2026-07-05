@@ -1,12 +1,15 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import Synchronization
 
 // File-scoped so the C render callback can resolve it from the opaque refcon.
 private final class HALRenderContext {
     var unit: AudioUnit?
-    var format: AVAudioFormat?
     var scratch: AVAudioPCMBuffer?
+    // Buffers dropped because the device grew its IO period past the preallocated scratch mid-capture: the
+    // realtime callback must not reallocate, so it drops (counted) instead. Read off-RT for diagnostics.
+    let oversizeDrops = Atomic<UInt64>(0)
     let handler: (AVAudioPCMBuffer, UInt64?) -> Void
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) { self.handler = handler }
 }
@@ -22,6 +25,13 @@ final class HALInputUnit {
     private let context: HALRenderContext
     // Device-native Float32 non-interleaved format; conversion happens in the owner.
     private(set) var clientFormat: AVAudioFormat?
+
+    // Realtime callbacks can't allocate, so scratch is preallocated to at least this ceiling (the ring's slot
+    // ceiling); a device that later grows its IO period past it drops the oversize buffer rather than realloc.
+    static let scratchFrameCeiling: AVAudioFrameCount = 8192
+
+    // Buffers dropped on the realtime thread because the device's IO period grew past the preallocated scratch.
+    var oversizeDropCount: Int { Int(context.oversizeDrops.load(ordering: .relaxed)) }
 
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) {
         self.context = HALRenderContext(handler: handler)
@@ -81,7 +91,6 @@ final class HALInputUnit {
                 &shouldAllocate, UInt32(MemoryLayout<UInt32>.size))
 
             context.unit = au
-            context.format = client
             context.scratch = AVAudioPCMBuffer(
                 pcmFormat: client,
                 frameCapacity: Self.scratchFrameCapacity(deviceBufferFrameSize: Self.deviceBufferFrameSize(deviceID)))
@@ -98,7 +107,6 @@ final class HALInputUnit {
         } catch {
             AudioComponentInstanceDispose(au)
             context.unit = nil
-            context.format = nil
             throw error
         }
     }
@@ -122,7 +130,6 @@ final class HALInputUnit {
         self.unit = nil
         clientFormat = nil
         context.unit = nil
-        context.format = nil
         context.scratch = nil
     }
 
@@ -130,8 +137,10 @@ final class HALInputUnit {
         guard status == noErr else { throw UnitError(status: status, stage: stage) }
     }
 
+    // Size scratch to at least the ceiling so an in-spec device (period ≤ ceiling) never needs the realtime
+    // thread to grow it; a larger reported period is honored up front so only a mid-capture growth drops.
     static func scratchFrameCapacity(deviceBufferFrameSize: UInt32) -> AVAudioFrameCount {
-        deviceBufferFrameSize > 0 ? AVAudioFrameCount(deviceBufferFrameSize) : 4096
+        max(AVAudioFrameCount(deviceBufferFrameSize), scratchFrameCeiling)
     }
 
     private static func deviceBufferFrameSize(_ deviceID: AudioDeviceID) -> UInt32 {
@@ -152,11 +161,13 @@ final class HALInputUnit {
 private let halInputRenderCallback: AURenderCallback = {
     refCon, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, _ in
     let context = Unmanaged<HALRenderContext>.fromOpaque(refCon).takeUnretainedValue()
-    guard let unit = context.unit, let format = context.format else { return noErr }
-    if context.scratch == nil || context.scratch!.frameCapacity < inNumberFrames {
-        context.scratch = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: inNumberFrames)
+    guard let unit = context.unit else { return noErr }
+    // No allocation on the realtime thread: if the device grew its IO period past the preallocated scratch,
+    // drop this buffer (counted) rather than reallocate. The ring drops the same oversize the same way.
+    guard let buffer = context.scratch, buffer.frameCapacity >= inNumberFrames else {
+        context.oversizeDrops.add(1, ordering: .relaxed)
+        return noErr
     }
-    guard let buffer = context.scratch else { return noErr }
     buffer.frameLength = inNumberFrames
     let status = AudioUnitRender(
         unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, buffer.mutableAudioBufferList)
