@@ -61,7 +61,14 @@ final class DictationController {
     // `lastRecord`; only token COUNTS and one-way fingerprints, never the token→original map, design.md
     // §4.2). The frozen `capturedPlan`/`capturedEngine`/`capturedSnapshot`/`capturedDictionaryRecovery`
     // insulate the in-flight dictation from a mid-dictation config/engine change (see `plan`/`activeEngine`).
+    // Reference identity for a single dictation. A fresh instance per `DictationSession(building:)`; struct
+    // copies (the `session?.field = …` in-place mutations) share it, so `===` distinguishes "still this
+    // dictation" from "a successor replaced it" across an await — used to stop a suspended streaming build
+    // from opening on the SUCCESSOR's captured engine.
+    private final class DictationIdentity: Sendable {}
+
     private struct DictationSession {
+        let identity = DictationIdentity()
         var building: DictationRecord
         // Press instant (session creation == top of handleStart); the `arm` stage measures this → mic-live.
         var pressedAt = DispatchTime.now()
@@ -601,9 +608,10 @@ final class DictationController {
     private func setUpStreamingIfEnabled(sampleRate: Int) -> (@Sendable ([Float]) -> Void)? {
         guard settings.features.isEnabled(.streamingTranscription), activeEngine.supportsStreaming else { return nil }
         let policy = StreamingStartPolicy(thresholdSeconds: Self.streamingStartThresholdSeconds, sampleRate: sampleRate)
+        let identity = session?.identity
         let driver = StreamingDictationDriver(policy: policy, makeSession: { [weak self] in
-            guard let self else { throw CancellationError() }
-            return try await self.makeStreamingSession()
+            guard let self, let identity else { throw CancellationError() }
+            return try await self.makeStreamingSession(for: identity)
         })
         let (stream, continuation) = AsyncStream.makeStream(
             of: [Float].self, bufferingPolicy: .bufferingNewest(Self.streamingBackpressureMaxChunks))
@@ -623,9 +631,20 @@ final class DictationController {
     // Built lazily at the deferred-start crossing (seconds into the recording), so the mode has resolved and
     // its recognition bias is known. Goes through the SerializedEngine wrapper, which holds the exclusive
     // lock for the session's whole lifetime.
-    private func makeStreamingSession() async throws -> any StreamingSpeechSession {
+    private func makeStreamingSession(for identity: DictationIdentity) async throws -> any StreamingSpeechSession {
+        // The dictation can end (cancel/release) — and a SUCCESSOR can start — while this deferred-start build
+        // is suspended (the MainActor hop, the mode-resolve await, the analyzer setup). Bind to THIS
+        // dictation's identity across EVERY suspension: if the live session is gone OR is a different
+        // dictation, do not open. Opening would (a) escape the captured-engine discipline by reading the
+        // successor's `provider.active` engine, and worse (b) steal and lock the successor's engine + consume
+        // its one-shot prepared analyzer. Throw so the (already terminal) driver degrades to batch and no lock
+        // is taken on anyone's engine. Check BEFORE the mode-resolve await too, so we wait on THIS dictation's
+        // mode task, not a successor's, and bail early when the session is already gone.
+        guard session?.identity === identity else { throw StreamingSessionUnavailable() }
         await session?.modeResolveTask?.value
-        let engine = activeEngine
+        guard let session, session.identity === identity, let engine = session.capturedEngine else {
+            throw StreamingSessionUnavailable()
+        }
         return try await engine.makeStreamingSession(sampleRate: engine.captureSampleRate, biasTerms: recognitionBiasTerms())
     }
 
@@ -802,6 +821,8 @@ final class DictationController {
                 if Task.isCancelled { return }
                 self.log.error("streaming finalize timed out (\(self.activeEngine.id, privacy: .public))")
                 self.finishError("Transcription timed out")
+            case .cancelled:
+                try? FileManager.default.removeItem(at: url)
             }
         }
     }
@@ -811,7 +832,11 @@ final class DictationController {
         case batch              // no session opened, or the driver degraded — run the batch transcribe
         case busy               // the transcribe gate is still occupied by a prior wedged transcribe/finalize
         case timedOut           // this finalize wedged past the deadline; the session may still hold the lock
+        case cancelled          // the commit task was cancelled mid-finalize — terminal, no error to show
     }
+
+    // The dictation ended before the deferred-start session finished building; the driver degrades to batch.
+    private struct StreamingSessionUnavailable: Error {}
 
     // Test seam: the streaming-finalize deadline. Production scales with the recording length exactly like
     // the batch transcribe deadline; tests override it to force the deadline in bounded time.
@@ -841,6 +866,8 @@ final class DictationController {
             }
         } catch is SingleFlightDeadline.Busy {
             return .busy
+        } catch is CancellationError {
+            return .cancelled   // a user cancel, not a wedge — don't misreport it as a timeout
         } catch {
             return .timedOut
         }

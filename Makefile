@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test preflight setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test preflight preflight-pre setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -27,8 +27,8 @@ patch minor major:
 publish: ## Publish the built+verified release: push tag + GitHub release (auto-notes) + cask + tap
 	./scripts/publish.sh
 
-ship: ## Build, run the release preflight (incl. human smoke), then publish: make ship patch|minor|major
-	$(MAKE) release BUMP="$(BUMP)" && ./scripts/preflight.sh && $(MAKE) publish
+ship: ## Fail-fast pre-notarize gate, build+notarize, human smoke, then publish: make ship patch|minor|major
+	$(MAKE) preflight-pre && $(MAKE) release BUMP="$(BUMP)" && ./scripts/preflight.sh && $(MAKE) publish
 
 cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then commit+push the tap)
 	./scripts/update-cask.sh
@@ -38,6 +38,9 @@ test: ## Run the full test suite
 
 preflight: ## Release gate: automated build/packaging + functional checks, then human smoke (writes the publish stamp)
 	./scripts/preflight.sh
+
+preflight-pre: ## Fail-fast: swift test + Tier B on the dev build BEFORE notarizing (caches into the full run)
+	./make-app.sh && ./scripts/preflight.sh --pre --dev
 
 setup: ## One-time: create the 'KeyScribe Local' signing cert (so dev TCC grants persist)
 	./scripts/setup-dev-signing.sh

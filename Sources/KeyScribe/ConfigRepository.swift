@@ -12,20 +12,33 @@ import KeyScribeKit
 // The mutating methods THROW so a Settings pane can surface the specific failure; the `add*` helpers
 // wrap them into a Bool for the correction-surface callers (menu, History detail, correction panel)
 // that only care whether it stuck. settings.toml is the one config file NOT owned here — it is a
-// single whole-object write routed through AppDelegate.applySettings (which merges against the
-// on-disk value to avoid clobbering an external edit); folding a whole-struct rewrite behind
-// read-modify-write would buy nothing.
+// single whole-object write routed through AppDelegate.applySettings, which writes the in-memory
+// struct wholesale (an external settings.toml edit is absorbed only via the FSEvents reload path, not
+// merged at write time); folding a whole-struct rewrite behind read-modify-write would buy little.
 @MainActor
 final class ConfigRepository {
     let supportDir: URL
     private let config: ConfigCache
     private let selfWriteGate: ConfigSelfWriteGate
     var onChange: (() -> Void)?
+    // Additional in-app observers (beyond the host's single `onChange`) that need to re-read from disk
+    // when ANY surface writes config — notably the Settings pane models, whose in-memory drafts would
+    // otherwise clobber a term the global correction panel routed into a mode while the pane was open.
+    private var changeObservers: [() -> Void] = []
 
     init(supportDir: URL, config: ConfigCache, selfWriteGate: ConfigSelfWriteGate = ConfigSelfWriteGate()) {
         self.supportDir = supportDir
         self.config = config
         self.selfWriteGate = selfWriteGate
+    }
+
+    func addChangeObserver(_ observer: @escaping () -> Void) {
+        changeObservers.append(observer)
+    }
+
+    private func notifyChange() {
+        onChange?()
+        for observer in changeObservers { observer() }
     }
 
     // For write paths not routed through `commit` (fragment files edited directly by ModesSettingsView).
@@ -36,7 +49,7 @@ final class ConfigRepository {
     func recordSelfWrite(at url: URL) {
         selfWriteGate.recordSelfWrite(url: url, supportDir: supportDir)
         config.invalidate()
-        onChange?()
+        notifyChange()
     }
 
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
@@ -196,7 +209,7 @@ final class ConfigRepository {
         try write()
         for path in paths { selfWriteGate.recordSelfWrite(url: path, supportDir: supportDir) }
         config.invalidate()
-        onChange?()
+        notifyChange()
     }
 
     private func modeFileURL(id: String) -> URL { modesDir.appendingPathComponent("\(id).toml") }

@@ -76,7 +76,7 @@ public enum InverseTextNormalizer {
         var sign = ""
         let firstCanon = canonical(tokens[start])
         if firstCanon == "minus" || firstCanon == "negative" {
-            guard !precededByNumber, idx + 1 < tokens.count, isNumberWord(canonical(tokens[idx + 1])) else { return nil }
+            guard !precededByNumber, !hasTrailingPunct(tokens[start]), idx + 1 < tokens.count, isNumberWord(canonical(tokens[idx + 1])) else { return nil }
             sign = "-"
             idx += 1
         }

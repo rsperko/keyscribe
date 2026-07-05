@@ -38,6 +38,25 @@ Modes: `make preflight` targets the release artifact and writes the publish stam
 `scripts/preflight.sh --dev` targets `KeyScribeDev.app` (skips notarization checks, no stamp) for
 day-to-day sanity; `--auto` runs the automated tiers only, non-interactive, for CI.
 
+## Resumable — re-run one check, not the whole gate
+
+Every check has a stable id (`scripts/preflight.sh --list-checks`) and its result is recorded in a
+per-commit ledger under `.preflight-state/<commit>/`. A re-run **skips any check already green for this
+commit + artifact**, so fixing one thing never means redoing `swift test` and the benchmark to get back
+to Tier C. A cached green is reused only while its input signature still matches — source for
+`swift test`, the built artifact for Tier A/C, the corpus + installed-engine set for Tier B — so a
+rebuild or a corpus change re-runs the affected checks instead of trusting a stale pass.
+
+- **Re-run just the failures:** `--only <id[,id]>` runs a subset; `--force [id[,id]]` ignores the cache
+  (all checks, or the listed ones). The stamp is still only written once **every** required check is
+  green for the commit — a partial `--only` run reports what is still outstanding and writes no stamp.
+- **A failed check is retryable in place.** On a failure the interactive run offers **`[r]etry`**
+  (re-run that one check — the fix for a flaky human check, e.g. re-dictating the redaction phrase so it
+  is the latest history entry again) or **`[o]verride`** (mark it passed by hand, with a reason). An
+  override is recorded truthfully in the stamp and the ledger — it does **not** masquerade as a real
+  pass, and it is scoped to that one check, so every other gate still holds. This replaces reaching for
+  the all-or-nothing `KEYSCRIBE_SKIP_PREFLIGHT=1`, which stays only as the last-resort full bypass.
+
 ## Why `swift test` being green is not enough
 
 Releases have broken *immediately after shipping* while the dev build and `swift test` were both
@@ -138,16 +157,29 @@ already proves notarization) unless you want that end-to-end, and reinstall your
 ## Workflow
 
 ```
+make preflight-pre                 # FAIL-FAST: swift test + Tier B on the dev build, BEFORE notarizing
 ./release.sh patch|minor|major     # build + notarize the app and DMG (background + poll; ~10–30 min)
-make preflight                     # Tier A + B automated, then the Tier C checklist → writes .preflight-pass
+make preflight                     # Tier A packaging + Tier C smoke (A/B from the pre-run are cached) → stamp
 make publish                       # refuses unless .preflight-pass matches HEAD
-# or, all three chained:
-make ship patch|minor|major        # release → preflight → publish
+# or, all of it chained (this exact order):
+make ship patch|minor|major        # preflight-pre → release → preflight → publish
 ```
 
-Modes: `preflight.sh --dev` (target `KeyScribeDev.app`, skip notarization checks, no stamp — day-to-day
-sanity) · `preflight.sh --auto` (Tier A + B only, non-interactive, no stamp — CI / quick regression).
+**Why `preflight-pre` runs first.** `swift test` and the Tier B functional gates need a *built* app but
+not a *notarized* one — WER and command behavior are byte-identical dev vs release. So they run against a
+fast `make-app.sh` dev bundle **before** `release.sh`, and a red test or a WER regression aborts the whole
+thing without ever spending the 10–30 min Apple notarize round-trip. Their green results are cached in the
+per-commit ledger, so the post-notarize `make preflight` reuses them and only runs Tier A's packaging /
+notarization checks (which *need* the notarized artifact) plus the Tier C human smoke. Net work is the
+same, reordered to fail fast. (Notarization checks are deliberately excluded from `--pre` — a dev bundle
+can't pass them.)
 
-The stamp (`.preflight-pass`, gitignored) records the verified commit SHA. Rebuilding or moving HEAD
-invalidates it — re-run preflight. Emergency override: `KEYSCRIBE_SKIP_PREFLIGHT=1 make publish`
-(you are then shipping unverified — say so).
+Modes: `preflight.sh --dev` (target `KeyScribeDev.app`, skip notarization checks, no stamp — day-to-day
+sanity) · `preflight.sh --auto` (Tier A + B only, non-interactive, no stamp — CI / quick regression) ·
+`--only <ids>` / `--force [ids]` / `--list-checks` / `--reset` (per-check re-run, see "Resumable" above).
+
+The stamp (`.preflight-pass`, gitignored) records the verified commit SHA on its first line (what
+`publish.sh` matches) plus a per-check breakdown, incl. any hand overrides. Rebuilding or moving HEAD
+invalidates it — re-run preflight (cached-green checks are skipped, so this is cheap). Per-check override
+is preferred over the full-bypass `KEYSCRIBE_SKIP_PREFLIGHT=1 make publish` (which ships wholly
+unverified — say so).

@@ -41,3 +41,4 @@ KeyScribe-*.dmg
 .preflight-pass
 corpus/commands/baseline.json
 .preflight-run/
+.preflight-state/

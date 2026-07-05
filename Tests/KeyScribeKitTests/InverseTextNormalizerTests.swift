@@ -91,6 +91,13 @@ struct InverseTextNormalizerTests {
         #expect(itn("minus twenty point five percent") == "-20.5%")
     }
 
+    @Test func signDoesNotCrossSentenceBoundary() {
+        #expect(itn("The test came back negative. Twenty people were tested")
+            == "The test came back negative. 20 people were tested")
+        #expect(itn("Subtract them and you get minus. Fifty remain")
+            == "Subtract them and you get minus. 50 remain")
+    }
+
     @Test func convertsLargeScaleCardinals() {
         #expect(itn("two million") == "2000000")
         #expect(itn("one billion") == "1000000000")

@@ -97,6 +97,12 @@ public extension SpeechEngine {
 // Contract: append/finalizeTranscript MUST run their inference off the main actor. The controller awaits
 // finalizeTranscript from the @MainActor commit task, so if an implementation did heavy work on the main
 // actor the HUD would freeze during the post-release finalize — the main actor must only suspend here.
+//
+// Contract: cancel() may overlap an in-flight append()/finalizeTranscript(). The driver is an actor and
+// cancels at a suspension point (ESC/over-limit/backpressure), so a cancel() can land while an append is
+// still awaiting inside the adapter. Adapters MUST tolerate this — tear down SDK state so the pending
+// call unblocks and cannot corrupt or double-release — and cancel() must be idempotent-safe against a
+// concurrent terminal call.
 public protocol StreamingSpeechSession: Sendable {
     // Feed the next decoded mono Float32 chunk (engine sample rate). Called off the writer/RT threads.
     // Throws if the chunk cannot be admitted (e.g. a failed resample); the driver then cancels the session

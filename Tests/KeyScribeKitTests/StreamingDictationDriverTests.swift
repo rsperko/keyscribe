@@ -72,6 +72,80 @@ private final class SessionFactory: @unchecked Sendable {
     }
 }
 
+// A build gate: makeSession blocks inside `enter()` until the test `release()`s it, so the test can fire
+// cancel()/noteBackpressureDrop() via actor reentrancy while the driver is suspended mid-build.
+private actor BuildGate {
+    private var buildWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    private var isBuilding = false
+    private var isReleased = false
+
+    func enter() async {
+        isBuilding = true
+        for w in buildWaiters { w.resume() }
+        buildWaiters.removeAll()
+        guard !isReleased else { return }
+        await withCheckedContinuation { releaseWaiter = $0 }
+    }
+    func waitUntilBuilding() async {
+        guard !isBuilding else { return }
+        await withCheckedContinuation { buildWaiters.append($0) }
+    }
+    func release() {
+        isReleased = true
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+
+private final class GatedSessionFactory: @unchecked Sendable {
+    let gate = BuildGate()
+    private let lock = NSLock()
+    private var _last: FakeSession?
+    var last: FakeSession? { lock.withLock { _last } }
+    func callable() -> @Sendable () async throws -> any StreamingSpeechSession {
+        { [self] in
+            await gate.enter()
+            let s = FakeSession()
+            lock.withLock { _last = s }
+            return s
+        }
+    }
+}
+
+// A session whose append() blocks until released, modelling a slow/wedged replay append. cancel() releases
+// it (the StreamingSpeechSession overlap contract: cancel may unblock an in-flight append).
+private actor BlockingAppendSession: StreamingSpeechSession {
+    private var appendingWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    private var isAppending = false
+    private var released = false
+    private var didCancel = false
+
+    func append(samples: [Float]) async throws {
+        isAppending = true
+        for w in appendingWaiters { w.resume() }
+        appendingWaiters.removeAll()
+        guard !released else { return }
+        await withCheckedContinuation { releaseWaiter = $0 }
+    }
+    func finalizeTranscript() async throws -> String { "streamed" }
+    func cancel() async {
+        didCancel = true
+        release()
+    }
+    func waitUntilAppending() async {
+        guard !isAppending else { return }
+        await withCheckedContinuation { appendingWaiters.append($0) }
+    }
+    func release() {
+        released = true
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+    var cancelled: Bool { didCancel }
+}
+
 struct StreamingDictationDriverTests {
     // 16 kHz, 4 s threshold → 64000 frames.
     private func policy(threshold: Double = 4) -> StreamingStartPolicy {
@@ -166,6 +240,54 @@ struct StreamingDictationDriverTests {
         #expect(factory.last?.cancelled == true)   // the opened session was cancelled to free the lock
         #expect(factory.last?.finalized == false)
         #expect(outcome == .fallBackToBatch)
+    }
+
+    // cancel() (ESC near the 4 s threshold) landing WHILE makeSession is still building must close the
+    // session that build ultimately hands back — never store it. A stored-but-never-closed session leaks
+    // the engine's exclusive lock (SerializedEngine) and wedges the engine until relaunch.
+    @Test func cancelDuringSessionBuildClosesTheOpenedSessionAndDoesNotLeakIt() async {
+        let factory = GatedSessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        let ingesting = Task { await driver.ingest([Float](repeating: 0.1, count: 64000)) }  // 4 s → build starts
+        await factory.gate.waitUntilBuilding()
+        await driver.cancel()                    // reentrant: runs while ingest is suspended in makeSession
+        await factory.gate.release()
+        await ingesting.value
+        #expect(factory.last?.cancelled == true)  // the opened session was closed → lock released
+        #expect(factory.last?.finalized == false)
+        #expect(await driver.didCreateSession == false)
+        #expect(await driver.finish() == .fallBackToBatch)
+    }
+
+    // Same window for backpressure: a fell-behind drop during the build must also close the built session,
+    // and finish() must not surface a transcript from it.
+    @Test func backpressureDropDuringSessionBuildClosesTheOpenedSession() async {
+        let factory = GatedSessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        let ingesting = Task { await driver.ingest([Float](repeating: 0.1, count: 64000)) }
+        await factory.gate.waitUntilBuilding()
+        await driver.noteBackpressureDrop()
+        await factory.gate.release()
+        await ingesting.value
+        #expect(factory.last?.cancelled == true)
+        #expect(await driver.didCreateSession == false)
+        #expect(await driver.finish() == .fallBackToBatch)
+    }
+
+    // cancel() landing WHILE a replay append is suspended must reach and close the just-opened session (not
+    // hit the session==nil path), so a slow/wedged replay append is unblocked and its lock released — rather
+    // than stranded until the append returns on its own.
+    @Test func cancelDuringReplayAppendClosesTheOpeningSession() async {
+        let session = BlockingAppendSession()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: { session })
+        let ingesting = Task { await driver.ingest([Float](repeating: 0.1, count: 64000)) }  // opens, replay append blocks
+        await session.waitUntilAppending()
+        await driver.cancel()                        // reentrant while the replay append is suspended
+        #expect(await session.cancelled == true)     // the opening session was closed (append unblocked)
+        await session.release()                      // idempotent — cancel already released it
+        await ingesting.value
+        #expect(await driver.didCreateSession == false)
+        #expect(await driver.finish() == .fallBackToBatch)
     }
 
     // A live chunk (post-replay) that fails to append cancels the session and degrades to batch.

@@ -19,9 +19,29 @@ final class ModesSettingsModel: ObservableObject {
     private var supportDir: URL { repository.supportDir }
     private var loadedSignature: String?
 
+    // True while THIS model is writing through the repository, so the change observer skips the reentrant
+    // reload the write's own `onChange` fires — that reload would land mid-mutation (before the model's
+    // post-write bookkeeping runs) and corrupt the create/rename selection state. External writes (the
+    // correction panel routing a mode-scoped term) run with this false, so those DO reload.
+    private var isApplyingLocalMutation = false
+
     init(repository: ConfigRepository) {
         self.repository = repository
         reload()
+        // A mode-scoped vocabulary term routed through the global correction panel (a fresh on-disk RMW)
+        // while this pane is open must survive the pane's next full-file mode save. Refresh the draft from
+        // disk on any EXTERNAL config write; `reload` is signature-guarded, so an unrelated file no-ops.
+        repository.addChangeObserver { [weak self] in
+            guard let self, !self.isApplyingLocalMutation else { return }
+            self.reload()
+        }
+    }
+
+    private func applyingLocalMutation<T>(_ body: () throws -> T) rethrows -> T {
+        let previous = isApplyingLocalMutation
+        isApplyingLocalMutation = true
+        defer { isApplyingLocalMutation = previous }
+        return try body()
     }
 
     // Re-read modes, connections, and fragments from disk. `.onAppear` calls this on every visit to the
@@ -100,7 +120,7 @@ final class ModesSettingsModel: ObservableObject {
         var renamed = mode
         renamed.id = newId
         do {
-            try repository.renameMode(mode, to: newId)
+            try applyingLocalMutation { try repository.renameMode(mode, to: newId) }
             if let index = modes.firstIndex(where: { $0.id == oldId }) {
                 modes[index] = renamed
             } else {
@@ -117,7 +137,7 @@ final class ModesSettingsModel: ObservableObject {
     func delete(_ mode: Mode) {
         guard !mode.isSystem else { return }
         do {
-            try repository.deleteMode(mode)
+            try applyingLocalMutation { try repository.deleteMode(mode) }
             if awaitingInitialName == mode.id { awaitingInitialName = nil }
             modes.removeAll { $0.id == mode.id }
             selectedID = modes.first?.id
@@ -146,7 +166,7 @@ final class ModesSettingsModel: ObservableObject {
     func addFragmentFile(named name: String) -> String? {
         do {
             let (id, created) = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
-            if created { repository.recordSelfWrite(at: fragmentsDir.appendingPathComponent("\(id).md")) }
+            if created { applyingLocalMutation { repository.recordSelfWrite(at: fragmentsDir.appendingPathComponent("\(id).md")) } }
             fragmentIds = loadFragmentIds()
             error = nil
             return id
@@ -168,7 +188,7 @@ final class ModesSettingsModel: ObservableObject {
             let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             try FragmentStore.replacingBody(inFile: content, with: body)
                 .write(to: url, atomically: true, encoding: .utf8)
-            repository.recordSelfWrite(at: url)
+            applyingLocalMutation { repository.recordSelfWrite(at: url) }
             error = nil
         } catch {
             self.error = "Could not save the instruction: \(error.localizedDescription)"
@@ -196,7 +216,7 @@ final class ModesSettingsModel: ObservableObject {
         if !stillUsed {
             let url = fragmentsDir.appendingPathComponent("\(id).md")
             try? FileManager.default.removeItem(at: url)
-            repository.recordSelfWrite(at: url)
+            applyingLocalMutation { repository.recordSelfWrite(at: url) }
             fragmentIds = loadFragmentIds()
         }
     }
@@ -204,7 +224,7 @@ final class ModesSettingsModel: ObservableObject {
     private func save(_ mode: Mode) {
         let mode = mode.isSystem ? mode.systemNormalized() : mode
         do {
-            try repository.writeMode(mode)
+            try applyingLocalMutation { try repository.writeMode(mode) }
             if let index = modes.firstIndex(where: { $0.id == mode.id }) {
                 modes[index] = mode
             } else {

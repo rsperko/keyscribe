@@ -73,6 +73,33 @@ struct VocabularyLostWriteTests {
         #expect(updated.dictionary.words == ["Postgres", "Kubernetes"])
     }
 
+    // The Modes editor is open on "code". The global Add-to-Vocabulary hotkey routes a term into that
+    // mode via ConfigRepository's on-disk RMW. A subsequent editor control toggle full-file-writes the
+    // whole mode — and must not resurrect the pane's stale draft and drop the just-routed term.
+    @Test func modeEditorControlEditPreservesAVocabTermAddedConcurrentlyOnDisk() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        var mode = Mode(id: "code", name: "Code")
+        mode.trailing = .space
+        try ModeStore.write(mode, to: repo.modesDir)
+
+        let model = ModesSettingsModel(repository: repo)   // snapshots "code" with no vocabulary
+        model.selectedID = "code"
+
+        #expect(repo.addDictionaryWord("kubectl", toMode: "code"))   // disk now has the term
+
+        var edited = try #require(model.selected)                    // build from the (refreshed) draft
+        edited.trailing = .newline
+        model.update(edited)                                         // full-file save of the whole mode
+
+        let onDisk = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("code.toml"), encoding: .utf8),
+            id: "code")
+        #expect(onDisk.dictionary.words == ["kubectl"])
+        #expect(onDisk.trailing == .newline)
+    }
+
     @Test func modeReplacementAddWritesOnlyToThatMode() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

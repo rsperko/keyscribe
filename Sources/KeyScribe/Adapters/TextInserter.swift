@@ -13,20 +13,74 @@ enum TextInserter {
     private static var pendingRestore: Task<Void, Never>?
     private static var pendingRestoreGeneration = 0
 
-    // Captures the target app's current selection via ⌘C, then restores the user's clipboard only if
-    // that copy actually changed the pasteboard. Drains any in-flight detached restore first, so the
-    // snapshot is the user's real clipboard and never a prior paste's still-present scratch text —
-    // restoring that would leak dictated content (including just-restored redacted spans) into the
-    // user's clipboard.
+    // Reads the target app's current selection. Native apps expose it through Accessibility, so we read
+    // it directly — no clipboard, no synthetic ⌘C — which means an empty selection can neither beep nor
+    // grab the current line. Only when AX is unavailable (Electron/Chromium) do we fall back to a ⌘C
+    // copy, muted so an empty-selection copy cannot beep, and we trust that copy only if it came from a
+    // real selection: VS Code-family editors copy the whole line on an empty ⌘C but flag it in
+    // `vscode-editor-data.isFromEmptySelection`; a copy without that flag (Obsidian, Chrome, …) is
+    // discarded rather than risk inserting a line the user never selected. Drains any in-flight detached
+    // restore first so the snapshot is the user's real clipboard, never a prior paste's scratch text.
     static func captureSelection(modifier: Mode.ClipboardModifier = .command) async -> String? {
-        await drainPendingRestore()
-        let pb = NSPasteboard.general
-        let snapshot = PasteboardSnapshot.capture()
-        postKey(cKeyCode, flags: eventFlags(modifier))
-        guard await waitForChange(since: snapshot.changeCount) else { return nil }
-        let copied = pb.string(forType: .string)
-        snapshot.restore()
-        return copied
+        if case .text(let selection) = axSelectedText() {
+            return selection.isEmpty ? nil : selection
+        }
+        return await withMutedAlertVolume {
+            await drainPendingRestore()
+            let pb = NSPasteboard.general
+            let snapshot = PasteboardSnapshot.capture()
+            postKey(cKeyCode, flags: eventFlags(modifier))
+            guard await waitForChange(since: snapshot.changeCount) else { return nil }
+            let copied = pb.string(forType: .string)
+            let editorData = pb.pasteboardItems?.first?.data(forType: webCustomDataType)
+            snapshot.restore()
+            guard WebCustomData.vscodeIsFromEmptySelection(editorData) == false else {
+                Log.insertion.debug("captureSelection: discarding non-AX copy with no real-selection flag")
+                return nil
+            }
+            return copied
+        }
+    }
+
+    private static let webCustomDataType = NSPasteboard.PasteboardType("org.chromium.web-custom-data")
+
+    private enum AXSelection { case text(String); case unsupported }
+
+    // `.text` (including empty) when the focused element reports a selection — native apps do, so an
+    // empty string means "nothing selected". `.unsupported` when there is no readable selection
+    // attribute (Electron/Chromium web areas), which routes to the ⌘C fallback.
+    private static func axSelectedText() -> AXSelection {
+        let system = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef else { return .unsupported }
+        let element = focusedRef as! AXUIElement
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success,
+              let text = value as? String else { return .unsupported }
+        return .text(text)
+    }
+
+    // Mutes the system alert volume for the duration of `body` so a synthetic ⌘C that lands on an app
+    // with nothing to copy cannot beep. Best-effort: if the volume cannot be read/set, the copy still
+    // runs (it may beep). The volume is global, so it is muted only for the brief copy window.
+    private static func withMutedAlertVolume<T>(_ body: () async -> T) async -> T {
+        let saved = alertVolume()
+        if saved != nil { setAlertVolume(0) }
+        defer { if let saved { setAlertVolume(saved) } }
+        return await body()
+    }
+
+    private static func alertVolume() -> Int? {
+        var error: NSDictionary?
+        guard let result = NSAppleScript(source: "alert volume of (get volume settings)")?
+            .executeAndReturnError(&error), error == nil else { return nil }
+        return Int(result.int32Value)
+    }
+
+    private static func setAlertVolume(_ volume: Int) {
+        var error: NSDictionary?
+        _ = NSAppleScript(source: "set volume alert volume \(volume)")?.executeAndReturnError(&error)
     }
 
     // The user's current clipboard as text, for the "insert clipboard contents" live edit. Read at
