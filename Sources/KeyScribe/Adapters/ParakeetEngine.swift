@@ -107,7 +107,7 @@ actor ParakeetEngine: SpeechEngine {
         // phases advance the bar by guesstimate. Best-effort: bias is optional, transcription is not.
         let share = tdtDownloadShare
         progress?(.init(phase: "Downloading recognition-bias model…", fraction: share + (1 - share) * 0.5))
-        await ensureCtc()
+        await ensureCtc(allowDownload: true)
         progress?(.init(phase: "Compiling recognition-bias model…", fraction: share + (1 - share) * 0.9))
         progress?(.init(phase: "Ready", fraction: 1))
     }
@@ -269,17 +269,28 @@ actor ParakeetEngine: SpeechEngine {
         return CustomVocabularyContext(terms: terms)
     }
 
+    // `allowDownload` is true only on the Settings install path (`load(progress:)`), which is the one place a
+    // network fetch of the CTC bias model is legitimate. Warm/transcribe/prewarm paths pass false: after an
+    // interrupted install (TDT present, CTC missing — CTC never gates "installed") the bias models aren't on
+    // disk, and firing `CtcModels.downloadAndLoad` from the press-time warm path would violate the
+    // no-network-on-cold-load contract (SpeechEngine.swift). When the models are absent and download isn't
+    // allowed, bias latches off for the residency; a later install re-arms it (allowDownload bypasses the latch).
     @discardableResult
-    private func ensureCtc() async -> CtcKeywordSpotter? {
+    private func ensureCtc(allowDownload: Bool = false) async -> CtcKeywordSpotter? {
         if let ctcSpotter { return ctcSpotter }
-        if ctcUnavailable { return nil }
+        if ctcUnavailable, !allowDownload { return nil }
+        let target = modelsDir.appendingPathComponent(
+            CtcModels.defaultCacheDirectory(for: ctcVariant).lastPathComponent, isDirectory: true)
+        guard allowDownload || CtcModels.modelsExist(at: target) else {
+            ctcUnavailable = true
+            return nil
+        }
         do {
-            let target = modelsDir.appendingPathComponent(
-                CtcModels.defaultCacheDirectory(for: ctcVariant).lastPathComponent, isDirectory: true)
             let models = try await CtcModels.downloadAndLoad(to: target, variant: ctcVariant)
             self.ctcSpotter = CtcKeywordSpotter(models: models, blankId: models.vocabulary.count)
             self.ctcTokenizer = try await CtcTokenizer.load(from: target)
             self.ctcDir = target
+            self.ctcUnavailable = false
             return ctcSpotter
         } catch {
             ctcUnavailable = true

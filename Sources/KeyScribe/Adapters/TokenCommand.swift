@@ -183,14 +183,24 @@ enum TokenCommandRunner {
         killer.cancel()
         stderrReader.wait()
 
-        if timedOut.value { throw TokenCommandError.timedOut }
-        guard process.terminationStatus == 0 else {
-            let message = String(data: stderrData.value, encoding: .utf8)?
+        return try outcome(
+            terminationStatus: process.terminationStatus, timedOut: timedOut.value,
+            stdout: stdoutData, stderr: stderrData.value)
+    }
+
+    // A command that finished cleanly right as the deadline killer fired still produced a valid token, so
+    // exit 0 with valid stdout is success regardless of the timeout flag — only a non-zero exit is treated
+    // as a timeout (terminate()/SIGKILL forces a signal status on a genuinely overrunning command). The
+    // prior order threw `.timedOut` on the raced flag even when the token had already been written.
+    static func outcome(terminationStatus: Int32, timedOut: Bool, stdout: Data, stderr: Data) throws -> String {
+        guard terminationStatus == 0 else {
+            if timedOut { throw TokenCommandError.timedOut }
+            let message = String(data: stderr, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             throw TokenCommandError.failed(
-                process.terminationStatus, message: (message?.isEmpty == false) ? message : nil)
+                terminationStatus, message: (message?.isEmpty == false) ? message : nil)
         }
-        guard let output = String(data: stdoutData, encoding: .utf8) else {
+        guard let output = String(data: stdout, encoding: .utf8) else {
             throw TokenCommandError.emptyOutput
         }
         return output

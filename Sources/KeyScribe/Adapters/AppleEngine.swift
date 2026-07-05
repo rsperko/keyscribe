@@ -101,7 +101,7 @@ actor AppleEngine: SpeechEngine {
         for try await result in transcriber.results {
             transcript += result.text
         }
-        return String(transcript.characters)
+        return String(transcript.characters).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func evict() async {}
@@ -147,7 +147,12 @@ final class AppleStreamingSession: StreamingSpeechSession, @unchecked Sendable {
         // into the analyzer before ending the input — the same end-of-stream flush the capture writer does.
         if let tail = flushConverterTail() { input.yield(AnalyzerInput(buffer: tail)) }
         input.finish()
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
+        do {
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+        } catch {
+            resultsTask.cancel()
+            throw error
+        }
         return try await resultsTask.value
     }
 

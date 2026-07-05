@@ -143,3 +143,37 @@ struct TokenCommandRunnerTests {
         #expect(Date().timeIntervalSince(start) < 3)
     }
 }
+
+struct TokenCommandOutcomeTests {
+    @Test func cleanExitReturnsStdoutEvenWhenTheDeadlineFlagRaced() throws {
+        let out = try TokenCommandRunner.outcome(
+            terminationStatus: 0, timedOut: true,
+            stdout: Data("the-token\n".utf8), stderr: Data())
+        #expect(out == "the-token\n")
+    }
+
+    @Test func nonZeroExitWithTheTimeoutFlagReportsTimeout() {
+        do {
+            _ = try TokenCommandRunner.outcome(
+                terminationStatus: 15, timedOut: true, stdout: Data(), stderr: Data())
+            Issue.record("expected outcome to throw")
+        } catch TokenCommandError.timedOut {
+        } catch {
+            Issue.record("expected .timedOut, got \(error)")
+        }
+    }
+
+    @Test func nonZeroExitWithoutTimeoutSurfacesStderr() {
+        do {
+            _ = try TokenCommandRunner.outcome(
+                terminationStatus: 7, timedOut: false,
+                stdout: Data(), stderr: Data("boom\n".utf8))
+            Issue.record("expected outcome to throw")
+        } catch TokenCommandError.failed(let status, let message) {
+            #expect(status == 7)
+            #expect(message == "boom")
+        } catch {
+            Issue.record("expected .failed, got \(error)")
+        }
+    }
+}

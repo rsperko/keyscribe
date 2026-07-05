@@ -47,7 +47,7 @@ struct ConnectionTesterTests {
     }
 
     @Test func failureCarriesTheProviderMessage() async {
-        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(401))))
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(401, body: nil))))
         #expect(await tester.test(connection) == .failed("The model service returned an error (401)."))
     }
 
