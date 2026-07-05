@@ -120,8 +120,9 @@ final class HotkeyMonitor {
         if tap != nil { return true }
         // Never create the tap untrusted: tapCreate would fail anyway AND can leave a denied ListenEvent
         // record that suppresses it for good (see the isTapActive comment above). The post-grant relaunch
-        // re-invokes start() with the verdict present, so the tap comes up enabled. Carbon chords + the
-        // mouse tap still register via the defer — they do not depend on Accessibility.
+        // re-invokes start() with the verdict present, so the tap comes up enabled. Carbon chords register
+        // via the defer with no permission at all; the mouse tap DOES need Accessibility (it self-gates on
+        // the same trust check in MouseEventTap.ensureRunning, so it comes up once granted).
         guard isProcessTrusted() else {
             hotkeyLog.info("modifier-key event tap deferred until Accessibility is granted")
             return false

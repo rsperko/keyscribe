@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import KeyScribeKit
@@ -48,12 +49,17 @@ final class MouseEventTap: MouseTapping {
         if !buttons.isEmpty { ensureRunning() }
     }
 
-    // The thread is created at most once and lives for the app's lifetime — config reloads and
-    // suspend/resume only swap the lock-guarded set, never spawn or kill the thread, so there is no
-    // per-change lifecycle to race on. stop() is a TERMINAL teardown (app exit / test seam); clearing
+    // The thread is created at most once per successful bring-up and lives for the app's lifetime — config
+    // reloads and suspend/resume only swap the lock-guarded set, never spawn or kill the thread, so there is
+    // no per-change lifecycle to race on. stop() is a TERMINAL teardown (app exit / test seam); clearing
     // stopRequested here lets a later restart spawn a live tap instead of one that self-tears-down.
+    //
+    // The mouse tap needs Accessibility (like the keyboard tap, unlike Carbon chords). Don't spawn untrusted:
+    // tapCreate would fail and leave `thread` non-nil (its run loop already returned), permanently deaf even
+    // after a mid-run grant. Gating on the same trust seam the keyboard tap uses means the post-grant
+    // `startListening()` retry — which re-sends the consumed set — spawns a live tap instead of no-op'ing.
     private func ensureRunning() {
-        guard thread == nil else { return }
+        guard thread == nil, AXIsProcessTrusted() else { return }
         control.withLockUnchecked { $0.stopRequested = false }
         let t = Thread { [weak self] in self?.runTapLoop() }
         t.name = "com.keyscribe.mousetap"
@@ -72,6 +78,8 @@ final class MouseEventTap: MouseTapping {
             userInfo: Unmanaged.passUnretained(self).toOpaque())
         else {
             mouseLog.error("mouse event tap not created; Accessibility verdict is likely cached as denied from launch — relaunch needed")
+            // Clear `thread` so a later ensureRunning() can respawn (the run loop below never ran).
+            Task { @MainActor [weak self] in self?.thread = nil }
             return
         }
         self.tap = tap

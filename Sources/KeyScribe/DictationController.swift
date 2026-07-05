@@ -30,7 +30,6 @@ final class DictationController {
     private let clipboard: @MainActor () -> String?
     private let pressSnapshot: @MainActor () -> TargetSnapshot
     private let shouldAdoptFullSnapshot: Bool
-    private let snapshot: @MainActor () -> TargetSnapshot
     // Full snapshot for the hot AX sites (press adoption + insertion), run off the main actor so an
     // unresponsive target can't stall arming or the paste. Defaults to running the injected sync `snapshot`
     // inline, so a test injecting only `snapshot` keeps its exact call sequence and value.
@@ -286,7 +285,6 @@ final class DictationController {
         self.clipboard = clipboard
         self.pressSnapshot = pressSnapshot ?? snapshot
         self.shouldAdoptFullSnapshot = pressSnapshot != nil
-        self.snapshot = snapshot
         self.snapshotAsync = snapshotAsync ?? { snapshot() }
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted

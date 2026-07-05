@@ -105,7 +105,8 @@ final class RecorderButtonView: NSButton {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if autostart, window != nil, !recording, currentKey.isEmpty { start() }
+        if window == nil { stop(); return }
+        if autostart, !recording, currentKey.isEmpty { start() }
     }
 
     func syncKey(_ key: String) {
@@ -128,7 +129,7 @@ final class RecorderButtonView: NSButton {
         // (which runs ahead of performKeyEquivalent and ignores first responder). Returning nil here
         // swallows the event, so recording a shortcut never navigates the mode/sidebar list.
         monitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .flagsChanged, .otherMouseDown]
+            matching: [.keyDown, .otherMouseDown]
         ) { [weak self] event in
             guard let self, self.recording, event.window === self.window else { return event }
             if event.type == .keyDown { _ = self.capture(event) }

@@ -11,14 +11,15 @@ public enum TriggerKeyConflicts {
     // constrained one wins in its app, the other wins everywhere else, and both stay reachable. So the
     // warning fires only when `canContend` holds, matching what routing actually does.
     public static func conflict(for mode: Mode, in modes: [Mode]) -> TriggerKeyConflict? {
-        guard let key = mode.triggerKeys.first?.key,
-              let descriptor = try? KeyDescriptor(parsing: key) else { return nil }
-        for other in modes where other.id != mode.id && other.enabled {
-            for trigger in other.triggerKeys {
-                guard let otherDescriptor = try? KeyDescriptor(parsing: trigger.key),
-                      otherDescriptor.collides(with: descriptor),
-                      canContend(mode, other) else { continue }
-                return TriggerKeyConflict(modeId: other.id, modeName: other.name, key: trigger.key)
+        for editedTrigger in mode.triggerKeys {
+            guard let descriptor = try? KeyDescriptor(parsing: editedTrigger.key) else { continue }
+            for other in modes where other.id != mode.id && other.enabled {
+                for trigger in other.triggerKeys {
+                    guard let otherDescriptor = try? KeyDescriptor(parsing: trigger.key),
+                          otherDescriptor.collides(with: descriptor),
+                          canContend(mode, other) else { continue }
+                    return TriggerKeyConflict(modeId: other.id, modeName: other.name, key: trigger.key)
+                }
             }
         }
         return nil

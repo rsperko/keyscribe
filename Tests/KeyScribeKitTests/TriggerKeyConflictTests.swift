@@ -13,6 +13,13 @@ struct TriggerKeyConflictTests {
         return m
     }
 
+    private func mode(_ id: String, keys: [String], enabled: Bool = true) -> Mode {
+        var m = Mode(id: id, name: id.capitalized)
+        m.enabled = enabled
+        m.triggerKeys = keys.map { .init(key: $0) }
+        return m
+    }
+
     @Test func findsConflictAcrossModes() {
         let modes = [mode("a", key: "fn"), mode("b", key: "fn")]
         #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes)?.modeId == "a")
@@ -52,5 +59,11 @@ struct TriggerKeyConflictTests {
         let a = mode("a", key: "right_option", bundles: ["com.tinyspeck.slackmacgap"])
         let b = mode("b", key: "right_option", bundles: ["com.tinyspeck.slackmacgap"])
         #expect(TriggerKeyConflicts.conflict(for: b, in: [a, b])?.modeId == "a")
+    }
+
+    @Test func findsConflictOnANonFirstTriggerKey() {
+        let edited = mode("b", keys: ["fn", "right_option"])
+        let other = mode("a", key: "right_option")
+        #expect(TriggerKeyConflicts.conflict(for: edited, in: [other, edited])?.modeId == "a")
     }
 }

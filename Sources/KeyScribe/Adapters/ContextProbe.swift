@@ -14,10 +14,13 @@ enum ContextProbe {
 
     // Exclude our HUD when dictating into KeyScribe itself, where the HUD can become the key window.
     static func snapshot(excludingWindow excluded: CGWindowID? = nil) -> TargetSnapshot {
-        let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let pid = bundleId.flatMap(pid(forBundleId:))
+        // Read the frontmost app once and use its own pid, so the focused-window probe queries the exact
+        // process that supplied the bundle id — not an arbitrary same-bundle instance a bundle-id lookup
+        // might resolve to.
+        let front = NSWorkspace.shared.frontmostApplication
+        let pid = front?.processIdentifier
         return TargetSnapshot(
-            bundleId: bundleId,
+            bundleId: front?.bundleIdentifier,
             focusedWindowId: pid.flatMap { focusedWindowId(pid: $0, excluding: excluded) },
             isSecureField: focusedIsSecure())
     }
@@ -26,18 +29,15 @@ enum ContextProbe {
     // round trips (each bounded by a 0.1s messaging timeout, but able to stall on an unresponsive target)
     // run on a detached task so an arming or insert never blocks the main actor. Mirrors `precedingText`.
     static func snapshotAsync(excludingWindow excluded: CGWindowID? = nil) async -> TargetSnapshot {
-        let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let pid = bundleId.flatMap(pid(forBundleId:))
+        let front = NSWorkspace.shared.frontmostApplication
+        let bundleId = front?.bundleIdentifier
+        let pid = front?.processIdentifier
         return await Task.detached {
             TargetSnapshot(
                 bundleId: bundleId,
                 focusedWindowId: pid.flatMap { focusedWindowId(pid: $0, excluding: excluded) },
                 isSecureField: focusedIsSecure())
         }.value
-    }
-
-    nonisolated private static func pid(forBundleId bundleId: String) -> pid_t? {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.processIdentifier
     }
 
     // Best-effort secure-field detection; AX failures return false.
