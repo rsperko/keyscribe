@@ -300,8 +300,10 @@ private final class HistoryViewModel: ObservableObject {
 
     func deleteSelected() {
         guard let entry = selected else { return }
-        _ = store.delete(entry)
-        reload()
+        switch store.delete(entry) {
+        case .deleted, .notFound: reload()
+        case .writeFailed: flash("Could not delete this entry.")
+        }
     }
 
     func flash(_ message: String) {

@@ -156,6 +156,27 @@ struct CorrectionSurfaceTests {
         #expect(set.rules.first?.regex == false)
     }
 
+    @Test func addingRegexRuleIgnoresBlankAndDupHeard() {
+        var set = ReplacementsSet().addingRegex(heard: #"\bfoo\b"#, replace: "bar")
+        set = set.addingRegex(heard: "   ", replace: "x")
+        set = set.addingRegex(heard: #"\bfoo\b"#, replace: "baz")   // dup heard → first wins, no accumulation
+        #expect(set.rules.count == 1)
+        #expect(set.rules.first?.regex == true)
+        #expect(set.rules.first?.replace == "bar")
+    }
+
+    @Test func regexAndLiteralDedupAreIndependentKeyspaces() {
+        var set = ReplacementsSet().addingLiteral(heard: "foo", replace: "L")
+        set = set.addingRegex(heard: "foo", replace: "R")          // same text, different rule kind
+        #expect(set.rules.count == 2)
+    }
+
+    @Test func unifiedAddingDispatchesOnTheRegexFlag() {
+        var set = ReplacementsSet().adding(heard: "foo", replace: "bar", regex: true)
+        set = set.adding(heard: "baz", replace: "qux", regex: false)
+        #expect(set.rules.map(\.regex) == [true, false])
+    }
+
     @Test func storesWriteAndReloadRoundTrip() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-vocab-\(UUID().uuidString)", isDirectory: true)
@@ -248,7 +269,7 @@ struct HistoryStoreTests {
         let drop = sampleEntry(heard: "drop", at: 10)
         try store.append(keep, today: "2026-06-20")
         try store.append(drop, today: "2026-06-20")
-        #expect(store.delete(drop) == true)
+        #expect(store.delete(drop) == .deleted)
         #expect(store.entries().map(\.heard) == ["keep"])
     }
 
@@ -258,7 +279,7 @@ struct HistoryStoreTests {
         let only = sampleEntry(heard: "only", at: 0)
         try store.append(only, today: "2026-06-19")
         try store.append(sampleEntry(heard: "newer", at: 0), today: "2026-06-20")
-        #expect(store.delete(only) == true)
+        #expect(store.delete(only) == .deleted)
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
     }
 
@@ -270,16 +291,37 @@ struct HistoryStoreTests {
         let entry = sampleEntry(heard: "target", at: 0)
         try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
         try store.append(sampleEntry(heard: "other-day", at: 0), today: "2099-01-01")
-        #expect(store.delete(entry) == true)
+        #expect(store.delete(entry) == .deleted)
         #expect(store.entries().map(\.heard) == ["other-day"])
         #expect(store.dayFiles() == ["2099-01-01.jsonl"])
     }
 
-    @Test func deleteReturnsFalseWhenNoEntryMatches() throws {
+    // A privacy-motivated delete on a read-only history dir must report failure, not silently succeed
+    // while the entry stays on disk. The atomic rewrite needs directory write permission, so 0o500 forces
+    // it to throw; the read that locates the entry still works.
+    @Test func deleteReportsFailureWhenTheRewriteFails() throws {
+        let store = tempStore()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: store.dir.path)
+            try? FileManager.default.removeItem(at: store.dir)
+        }
+        let keep = sampleEntry(heard: "keep", at: 0)
+        let drop = sampleEntry(heard: "drop", at: 10)
+        try store.append(keep, today: "2026-06-20")
+        try store.append(drop, today: "2026-06-20")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: store.dir.path)
+
+        #expect(store.delete(drop) == .writeFailed)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: store.dir.path)
+        #expect(Set(store.entries().map(\.heard)) == ["keep", "drop"])   // still on disk
+    }
+
+    @Test func deleteReturnsNotFoundWhenNoEntryMatches() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }
         try store.append(sampleEntry(heard: "present", at: 0), today: "2026-06-20")
-        #expect(store.delete(sampleEntry(heard: "absent", at: 99)) == false)
+        #expect(store.delete(sampleEntry(heard: "absent", at: 99)) == .notFound)
         #expect(store.entries().count == 1)
     }
 
@@ -291,7 +333,7 @@ struct HistoryStoreTests {
         let dup = sampleEntry(heard: "same", result: "Same.", at: 0)
         try store.append(dup, today: "2026-06-20")
         try store.append(dup, today: "2026-06-20")
-        #expect(store.delete(dup) == true)
+        #expect(store.delete(dup) == .deleted)
         #expect(store.entries().count == 1)
         #expect(store.entries().first?.heard == "same")
     }

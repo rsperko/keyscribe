@@ -89,6 +89,23 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
         copy.rules.append(Rule(heard: h, replace: replace, regex: false))
         return copy
     }
+
+    // The regex-rule counterpart: dedup by `heard` (case-sensitive — regex patterns are), keyed like
+    // VocabularyMerge so a repeated correction-panel add can't accumulate identical rules that all run
+    // per dictation. First-write-wins, mirroring addingLiteral.
+    public func addingRegex(heard: String, replace: String) -> ReplacementsSet {
+        let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !h.isEmpty,
+              !rules.contains(where: { $0.regex && $0.heard == h })
+        else { return self }
+        var copy = self
+        copy.rules.append(Rule(heard: h, replace: replace, regex: true))
+        return copy
+    }
+
+    public func adding(heard: String, replace: String, regex: Bool) -> ReplacementsSet {
+        regex ? addingRegex(heard: heard, replace: replace) : addingLiteral(heard: heard, replace: replace)
+    }
 }
 
 extension [ReplacementsSet.Rule] {

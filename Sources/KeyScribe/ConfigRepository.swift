@@ -88,11 +88,7 @@ final class ConfigRepository {
     @discardableResult
     func addReplacement(heard: String, replace: String, regex: Bool = false) -> Bool {
         let result = try? mutateReplacements { set in
-            if regex {
-                set.rules.append(.init(heard: heard.trimmingCharacters(in: .whitespacesAndNewlines), replace: replace, regex: true))
-            } else {
-                set = set.addingLiteral(heard: heard, replace: replace)
-            }
+            set = set.adding(heard: heard, replace: replace, regex: regex)
         }
         return result != nil
     }
@@ -100,12 +96,9 @@ final class ConfigRepository {
     @discardableResult
     func addReplacement(heard: String, replace: String, regex: Bool = false, toMode modeId: String) -> Bool {
         let result = try? mutateMode(id: modeId) { mode in
-            if regex {
-                mode.replacements.rules.append(.init(heard: heard.trimmingCharacters(in: .whitespacesAndNewlines), replace: replace, regex: true))
-            } else {
-                let set = ReplacementsSet(rules: mode.replacements.rules).addingLiteral(heard: heard, replace: replace)
-                mode.replacements.rules = set.rules
-            }
+            let set = ReplacementsSet(rules: mode.replacements.rules)
+                .adding(heard: heard, replace: replace, regex: regex)
+            mode.replacements.rules = set.rules
         }
         return result != nil
     }

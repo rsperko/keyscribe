@@ -304,12 +304,8 @@ struct ModeEditorView: View {
     }
 
     private func addReplacementRule(_ heard: String, _ replace: String, _ regex: Bool) {
-        var set = ReplacementsSet(rules: mode.replacements.rules)
-        if regex {
-            set.rules.append(.init(heard: heard, replace: replace, regex: true))
-        } else {
-            set = set.addingLiteral(heard: heard, replace: replace)
-        }
+        let set = ReplacementsSet(rules: mode.replacements.rules)
+            .adding(heard: heard, replace: replace, regex: regex)
         var updated = mode
         updated.replacements.rules = set.rules
         onUpdate(updated)

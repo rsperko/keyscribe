@@ -29,17 +29,23 @@ enum ModelInstallStore {
             }
         }
 
+        // No protectedDirs here: it only ever narrows removeDirs, and recency is checked below on the
+        // (usually empty) candidate set instead of walking the multi-GB shared models tree every launch.
         let plan = ModelMaintenance.reconcile(
             knownIds: Array(owned.keys), owned: owned, completeIds: complete,
-            dirsOnDisk: directoriesOnDisk(), markedIds: marked,
-            protectedDirs: recentlyModifiedDirs(), keep: [markerFile])
+            dirsOnDisk: directoriesOnDisk(), markedIds: marked, keep: [markerFile])
         let adopted = plan.installed.subtracting(marked)
         let dropped = marked.subtracting(plan.installed)
-        Log.models.notice("reconcile: installed=\(plan.installed.sorted(), privacy: .public) adopted=\(adopted.sorted(), privacy: .public) dropped=\(dropped.sorted(), privacy: .public) orphanDirs=\(plan.removeDirs.sorted(), privacy: .public)")
         write(plan.installed)
 
-        guard !plan.removeDirs.isEmpty else { return }
-        let dirs = plan.removeDirs
+        // Recency-check only the candidate dirs (usually none) — the filter body never runs when the
+        // candidate set is empty, so the steady state does no per-file stat at all.
+        let cutoff = Date().addingTimeInterval(-downloadRecencyWindow)
+        let dirs = plan.removeDirs.filter { name in
+            !directoryActive(KeyScribePaths.modelsDir.appendingPathComponent(name), since: cutoff)
+        }
+        Log.models.notice("reconcile: installed=\(plan.installed.sorted(), privacy: .public) adopted=\(adopted.sorted(), privacy: .public) dropped=\(dropped.sorted(), privacy: .public) orphanDirs=\(dirs.sorted(), privacy: .public)")
+        guard !dirs.isEmpty else { return }
         Task.detached(priority: .utility) {
             for name in dirs {
                 try? FileManager.default.removeItem(
@@ -60,19 +66,6 @@ enum ModelInstallStore {
 
     // Recently touched dirs may be in-flight downloads from this app variant or another.
     private static let downloadRecencyWindow: TimeInterval = 5 * 60
-
-    private static func recentlyModifiedDirs() -> Set<String> {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: KeyScribePaths.modelsDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
-        let cutoff = Date().addingTimeInterval(-downloadRecencyWindow)
-        var recent: Set<String> = []
-        for entry in entries {
-            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            if directoryActive(entry, since: cutoff) { recent.insert(entry.lastPathComponent) }
-        }
-        return recent
-    }
 
     // Check descendants too; long downloads may update file mtimes without touching the parent dir.
     static func directoryActive(_ dir: URL, since cutoff: Date) -> Bool {

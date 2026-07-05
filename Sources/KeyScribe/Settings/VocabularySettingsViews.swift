@@ -245,11 +245,7 @@ final class ReplacementsSettingsModel: ObservableObject {
         let trimmed = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         mutate { set in
-            if regex {
-                set.rules.append(.init(heard: trimmed, replace: replace, regex: true))
-            } else {
-                set = set.addingLiteral(heard: trimmed, replace: replace)
-            }
+            set = set.adding(heard: trimmed, replace: replace, regex: regex)
         }
     }
 

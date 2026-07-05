@@ -98,22 +98,32 @@ public struct HistoryStore: Sendable {
         return entries
     }
 
+    // `notFound` (already gone) and `deleted` both satisfy the caller's intent; only `writeFailed` means
+    // the entry is still on disk. Kept distinct so a privacy-motivated delete on a full disk or read-only
+    // history dir cannot silently report success, while an already-removed row does not flash a false error.
+    public enum DeleteOutcome: Sendable { case deleted, notFound, writeFailed }
+
     // Remove the first matching line only; duplicate entries can compare equal after JSON round-trip.
     @discardableResult
-    public func delete(_ entry: HistoryEntry) -> Bool {
+    public func delete(_ entry: HistoryEntry) -> DeleteOutcome {
         // Try the expected local-day file first, then fall back for rare day-boundary skew.
         let derived = "\(HistoryStore.todayString(date: entry.timestamp)).jsonl"
-        if deleteEntry(entry, fromFile: derived) { return true }
-        for file in dayFiles() where file != derived {
-            if deleteEntry(entry, fromFile: file) { return true }
+        var files = [derived]
+        files.append(contentsOf: dayFiles().filter { $0 != derived })
+        for file in files {
+            switch deleteEntry(entry, fromFile: file) {
+            case .deleted: return .deleted
+            case .writeFailed: return .writeFailed
+            case .notFound: continue
+            }
         }
-        return false
+        return .notFound
     }
 
-    private func deleteEntry(_ entry: HistoryEntry, fromFile file: String) -> Bool {
+    private func deleteEntry(_ entry: HistoryEntry, fromFile file: String) -> DeleteOutcome {
         Self.mutationQueue.sync {
             let url = dir.appendingPathComponent(file)
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return false }
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return .notFound }
             var kept: [String] = []
             var removed = false
             for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
@@ -123,13 +133,17 @@ public struct HistoryStore: Sendable {
                     kept.append(line)
                 }
             }
-            guard removed else { return false }
-            if kept.isEmpty {
-                try? FileManager.default.removeItem(at: url)
-            } else {
-                try? Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
+            guard removed else { return .notFound }
+            do {
+                if kept.isEmpty {
+                    try FileManager.default.removeItem(at: url)
+                } else {
+                    try Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
+                }
+            } catch {
+                return .writeFailed
             }
-            return true
+            return .deleted
         }
     }
 
