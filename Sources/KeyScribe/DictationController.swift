@@ -588,6 +588,13 @@ final class DictationController {
     // the press-time prepare/prewarm latency, so session creation never races those on the engine's lock.
     static let streamingStartThresholdSeconds: Double = 4
 
+    // Cap on the writer→feed backlog of undelivered PCM chunks. The healthy path never approaches it (Apple's
+    // append is a cheap convert+yield, so the feed loop keeps the buffer near-empty); it exists so a future
+    // slow/wedged streaming engine whose append can't keep up can't grow memory without bound — the buffer
+    // drops the overflow and the driver degrades to batch. ~1024 writer chunks (writer polls ~5 ms) is many
+    // seconds of backlog, far past the point streaming has lost its latency win.
+    static let streamingBackpressureMaxChunks = 1024
+
     // Stand up the streaming driver + writer→driver feed for this dictation, or nil when streaming is off /
     // the engine can't stream (the sole gate — the pipeline never branches on flag identity again). Returns
     // the writer-thread sink; a nil return keeps the batch path byte-for-byte.
@@ -598,11 +605,19 @@ final class DictationController {
             guard let self else { throw CancellationError() }
             return try await self.makeStreamingSession()
         })
-        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self, bufferingPolicy: .unbounded)
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: [Float].self, bufferingPolicy: .bufferingNewest(Self.streamingBackpressureMaxChunks))
         session?.streamingDriver = driver
         session?.streamingSampleContinuation = continuation
         session?.streamingFeedTask = Task { for await chunk in stream { await driver.ingest(chunk) } }
-        return { chunk in continuation.yield(chunk) }
+        return { [weak driver] chunk in
+            // Writer-thread sink (off-RT, non-blocking). A dropped chunk means the feed loop fell behind — a
+            // wedged/slow append can't drain fast enough — so trip the driver to batch rather than let memory
+            // grow. Off-RT, so spawning a Task here is fine; it no-ops once the driver has already fallen back.
+            if case .dropped = continuation.yield(chunk), let driver {
+                Task { await driver.noteBackpressureDrop() }
+            }
+        }
     }
 
     // Built lazily at the deferred-start crossing (seconds into the recording), so the mode has resolved and

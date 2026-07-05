@@ -28,7 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // System sleep suspends CoreAudio, so the resident capture engine's cached device binding is stale on
     // wake. Refresh it while idle (off the hot path) so the first post-wake dictation binds cleanly.
     private var wakeObserver: NSObjectProtocol?
-    private var lastVocabularyModeID: String?
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
     // launch. With neither set, lifecycle and bootstrap behave exactly as without them.
@@ -196,7 +195,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         buildHotkeyMonitor()
         applyLoginItem(settings.loadOnLogin)
-        installDictationCompletionHandler()
 
         // Start the tap now if permissions already allow (idempotent); first-run re-tries it via
         // onReadyToDictate once permissions are granted. So dictation works regardless of whether
@@ -502,37 +500,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] in
             guard let self else { return }
             UserDefaults.standard.set(true, forKey: firstRunKey)
-            self.installDictationCompletionHandler()
+            self.controller.onDictationCompleted = nil
             self.firstRun = nil
             self.startListening()
             self.controller.prewarmCapture()
         }
         controller.onDictationCompleted = { [weak self] completion in
-            self?.noteDictationCompleted(completion)
             self?.firstRun?.noteDictation(completion)
         }
         firstRun?.present()
     }
 
-    private func installDictationCompletionHandler() {
-        controller.onDictationCompleted = { [weak self] completion in
-            self?.noteDictationCompleted(completion)
-        }
-    }
-
-    private func noteDictationCompleted(_ completion: DictationCompletion) {
-        guard let modeId = completion.modeId, modeId != Mode.directId,
-              config.modes.contains(where: { $0.id == modeId && !$0.isSystem }) else { return }
-        lastVocabularyModeID = modeId
-    }
-
     private func correctionDestinations() -> [CorrectionDestination] {
-        var result: [CorrectionDestination] = [.global]
-        if let modeId = lastVocabularyModeID,
-           let mode = config.modes.first(where: { $0.id == modeId && !$0.isSystem }) {
-            result.append(.lastMode(id: mode.id, name: mode.name))
-        }
-        return result
+        [.global] + config.modes.filter { !$0.isSystem }.map { .mode(id: $0.id, name: $0.name) }
     }
 
     // Relaunch into the guided setup so the new process reads the just-granted Accessibility verdict

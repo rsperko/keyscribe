@@ -81,6 +81,22 @@ public actor StreamingDictationDriver {
         }
     }
 
+    // The controller's writer→feed buffer overflowed: session.append can't drain chunks as fast as capture
+    // produces them, so the bounded feed buffer dropped one. Streaming has already lost the latency win and
+    // would only grow memory, so trip the same fall-back-to-batch as the time-based fell-behind check. Runs
+    // via actor reentrancy while an ingest may be suspended inside a slow append — that's the point: it does
+    // not wait for the wedged append to return. Batch re-transcribes the committed audio in full.
+    public func noteBackpressureDrop() async {
+        guard !failed, !cancelled, !finished else { return }
+        fellBehindFlag = true
+        if let session {
+            await failStreaming(session)
+        } else {
+            failed = true
+            pending.removeAll()
+        }
+    }
+
     // Cancel the live session and route the rest of the dictation to batch. The accumulated audio is intact
     // on disk/in PCM, so accuracy is fully preserved — only the latency win is lost.
     private func failStreaming(_ session: any StreamingSpeechSession) async {

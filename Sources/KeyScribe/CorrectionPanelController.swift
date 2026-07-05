@@ -121,8 +121,8 @@ struct CorrectionDestination: Hashable, Identifiable {
 
     static let global = CorrectionDestination(scope: .global, title: "Global", menuTitle: "Global")
 
-    static func lastMode(id: String, name: String) -> CorrectionDestination {
-        CorrectionDestination(scope: .mode(id), title: name, menuTitle: "Last mode: \(name)")
+    static func mode(id: String, name: String) -> CorrectionDestination {
+        CorrectionDestination(scope: .mode(id), title: name, menuTitle: name)
     }
 }
 

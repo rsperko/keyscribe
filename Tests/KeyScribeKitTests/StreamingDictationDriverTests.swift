@@ -180,6 +180,36 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
+    // The controller's feed buffer overflowed (a wedged/slow session.append couldn't drain it, so chunks
+    // piled up past the cap): a backpressure drop trips the same fall-back-to-batch as the time-based
+    // fell-behind check, so memory stays bounded and batch re-transcribes the committed audio in full.
+    @Test func backpressureDropTripsToBatch() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }   // session open + live
+        #expect(factory.built == 1)
+        await driver.noteBackpressureDrop()
+        let outcome = await driver.finish()
+        #expect(await driver.fellBehind)
+        #expect(factory.last?.cancelled == true)
+        #expect(factory.last?.finalized == false)
+        #expect(outcome == .fallBackToBatch)
+    }
+
+    // A backpressure drop before any session opened (a slow makeSession/replay stalling the feed while still
+    // under the threshold) still routes the dictation to batch and opens no session.
+    @Test func backpressureDropBeforeSessionOpenFallsBackToBatch() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        await driver.ingest([Float](repeating: 0.1, count: 16000))   // 1 s, under threshold — no session yet
+        await driver.noteBackpressureDrop()
+        await driver.ingest([Float](repeating: 0.1, count: 32000))   // later chunk is inert after the trip
+        let outcome = await driver.finish()
+        #expect(factory.built == 0)
+        #expect(await driver.fellBehind)
+        #expect(outcome == .fallBackToBatch)
+    }
+
     // When a session can't keep up with real time (wall-clock outruns ingested audio by > maxLagSeconds),
     // the driver stops streaming and degrades to batch — never silently loses the latency win or piles memory.
     @Test func fallsBehindRealtimeTripsToBatch() async {
