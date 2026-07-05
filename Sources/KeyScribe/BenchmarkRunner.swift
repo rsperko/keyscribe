@@ -120,6 +120,92 @@ enum BenchmarkRunner {
         }
     }
 
+    // `KeyScribe --benchmark <dir> --streaming`: for every streaming-capable engine, transcribe each clip
+    // BOTH ways — batch (transcribe) and streaming (makeStreamingSession fed as ~0.1 s live chunks, the same
+    // path a real dictation drives) — and report WER for each so streaming↔batch parity is directly visible
+    // (P3-1: streaming must not regress accuracy). No bias (Moonshine has none); scored against the manifest.
+    static func runStreamingParity(dir: URL, only: Set<String>? = nil, raw: Bool = false) async {
+        let manifestURL = dir.appendingPathComponent("manifest.json")
+        guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {
+            print("error: could not read \(manifestURL.path)")
+            return
+        }
+        let engines = InstalledEngineFilter.filter(makeEngines())
+            .filter { (only == nil || only!.contains($0.id)) && $0.supportsStreaming }
+        guard !engines.isEmpty else { print("no installed streaming-capable engines to compare"); return }
+        let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
+        // Raw streamed output per clip (the silence sweep uses this: no reference scoring, just the literal
+        // text each streaming session emits so no-speech artifacts on the streaming path are visible).
+        if raw {
+            FileHandle.standardError.write("streaming raw dump: \(manifest.entries.count) clips × \(engines.count) engine(s)\n".data(using: .utf8)!)
+            for engine in engines {
+                do { try await engine.loadIfNeeded() } catch {
+                    FileHandle.standardError.write("· \(engine.id): not installed / load failed\n".data(using: .utf8)!); continue
+                }
+                for entry in manifest.entries {
+                    let wav = dir.appendingPathComponent(entry.file)
+                    guard FileManager.default.fileExists(atPath: wav.path) else { continue }
+                    let hyp = (await streamingReplay(engine: engine, wav: wav)) ?? "<error>"
+                    let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
+                    print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
+                }
+                await engine.evict()
+                FileHandle.standardError.write("· \(engine.id): done\n".data(using: .utf8)!)
+            }
+            return
+        }
+        print("Streaming parity: \(manifest.entries.count) clips × \(engines.count) engine(s)\n")
+
+        for engine in engines {
+            do { try await engine.loadIfNeeded() } catch {
+                print("· \(engine.id): not installed / load failed"); continue
+            }
+            var batchWER = 0.0, streamWER = 0.0, clips = 0
+            for entry in manifest.entries {
+                let wav = dir.appendingPathComponent(entry.file)
+                guard FileManager.default.fileExists(atPath: wav.path) else { continue }
+                guard let batch = try? await engine.transcribe(wavURL: wav, biasTerms: []) else { continue }
+                let stream = (await streamingReplay(engine: engine, wav: wav)) ?? "<error>"
+                let bw = BenchmarkScoring.wer(reference: entry.text, hypothesis: batch)
+                let sw = BenchmarkScoring.wer(reference: entry.text, hypothesis: stream)
+                batchWER += bw; streamWER += sw; clips += 1
+                if verbose {
+                    print("  [\(entry.id)] batchWER=\(pct(bw)) streamWER=\(pct(sw))")
+                    if batch != stream {
+                        print("    batch : \(batch)")
+                        print("    stream: \(stream)")
+                    }
+                }
+            }
+            await engine.evict()
+            let n = Double(max(clips, 1))
+            print("· \(engine.id): clips=\(clips) batchWER=\(pct(batchWER / n)) streamWER=\(pct(streamWER / n)) Δ=\(pct((streamWER - batchWER) / n))")
+        }
+    }
+
+    // Drive the engine's streaming session exactly as a live dictation does: ~0.1 s chunks fed via append,
+    // then finalize. Returns nil on any failure (the controller would fall back to batch here).
+    private static func streamingReplay(engine: any SpeechEngine, wav: URL) async -> String? {
+        let sampleRate = engine.captureSampleRate
+        guard let samples = try? AudioDecoder.pcmMono(wav, sampleRate: sampleRate),
+              let session = try? await engine.makeStreamingSession(sampleRate: sampleRate, biasTerms: []) else { return nil }
+        let chunk = max(1, sampleRate / 10)
+        var i = 0
+        do {
+            while i < samples.count {
+                let end = min(i + chunk, samples.count)
+                try await session.append(samples: Array(samples[i..<end]))
+                i = end
+            }
+        } catch {
+            await session.cancel()
+            return nil
+        }
+        return try? await session.finalizeTranscript()
+    }
+
+    private static func pct(_ v: Double) -> String { String(format: "%.1f%%", v * 100) }
+
     private static func makeEngines() -> [any SpeechEngine] {
         EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
     }

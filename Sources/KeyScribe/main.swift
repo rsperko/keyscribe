@@ -27,6 +27,7 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
         --engines <a,b,...>     Limit the benchmark run to these engine ids.
         --raw                   Emit raw per-clip benchmark output.
         --fuzzy                 Apply the post-STT fuzzy corrector (dict = clip bias terms) before scoring.
+        --streaming             Compare streaming vs batch WER per streaming-capable engine (P3-1 parity).
       --commands-check <dir>  Exercise every spoken command (scratch that, verbatim, insert new
                               line/paragraph/tab, insert clipboard contents, whole-utterance
                               replacements) across every installed engine on the recordings in <dir>
@@ -149,9 +150,14 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
     }
     let raw = CommandLine.arguments.contains("--raw")
     let fuzzy = CommandLine.arguments.contains("--fuzzy")
+    let streaming = CommandLine.arguments.contains("--streaming")
     let done = DispatchSemaphore(value: 0)
     Task.detached {
-        await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
+        if streaming {
+            await BenchmarkRunner.runStreamingParity(dir: dir, only: only, raw: raw)
+        } else {
+            await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
+        }
         done.signal()
     }
     done.wait()
