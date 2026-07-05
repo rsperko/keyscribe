@@ -777,7 +777,13 @@ final class DictationController {
             guard let self else { return }
             guard let url = await self.audio.finishDraining() else {
                 if Task.isCancelled { return }
-                self.finish(machine: .cancel, cue: .cancel, state: .hidden)
+                // Nil drain on an intended commit: the mic was live but produced no audio file (an empty
+                // or failed capture — silence itself still yields a WAV and is caught downstream by the
+                // .noSpeech guard). Keep the terminal quiet (hidden HUD, cancel cue — no scary error for a
+                // stray tap), but finalize a .failed record so lastRecord describes THIS dictation and the
+                // vanish leaves a diagnostic trace instead of silently attributing to the previous one.
+                self.finish(machine: .cancel, cue: .cancel, state: .hidden,
+                            record: (.failed, "no audio captured"))
                 return
             }
             // The writer already produced this capture's PCM; a sample-capable engine takes it directly

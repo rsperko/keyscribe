@@ -1,0 +1,598 @@
+{
+  "schemaVersion": 1,
+  "corpus": "bias",
+  "description": "Recognition-bias stress clips derived from ContextASR-Bench (MrSupW/ContextASR-Bench, MIT). Entity-dense zero-shot-TTS speech; each clip's named entities are the bias terms. 26-77 s, so every clip exercises streaming and batch. Rebuild: corpus/bias/build.py.",
+  "clips": [
+    {
+      "id": "bx01",
+      "file": "bx01.wav",
+      "text": "Did you catch the Oscar shortlist announcement? The Los Angeles Film Festival's selection committee went all out this year. Take ' Pacific Bride' for example that cinematography with A R R I A L E X A sixty five millimeters sensors was mind blowing! It didn't win Best Picture but scooped the Dolby Atmos sound mixing award. Warner Bros. even brought in Method acting coaches for the kid star in ' Carry Dad to School'. Cannes jury adored ' Bitter Herbs' shot on thirty five millimeters Kodak stock, though Berlin Festival voters leaned toward ' Passionate Defense' with its Rashomon style narrative. By the way, remember last year's I M A X documentary ' Symphony of Life'? Shocked it didn't get a single Best Cinematography nod!",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "arts-media",
+        "contextasr:PEOPLE_DAIRY_1998-004249_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "A R R I A L E X A sixty five millimeters sensors",
+            "Warner Bros",
+            "' Carry Dad to School'",
+            "Cannes jury",
+            "thirty five millimeters Kodak stock",
+            "Berlin Festival",
+            "' Passionate Defense'",
+            "Rashomon style narrative",
+            "I M A X documentary",
+            "' Symphony of Life'",
+            "Best Cinematography"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx02",
+      "file": "bx02.wav",
+      "text": "Wait up, Mister Zhao! That Go Pro H E R O twelve stunt you pulled at the San Francisco Pier was insane! When you insisted on mounting it on the D J I Ronin four D for timelapse shots, I thought the fisheye distortion would ruin the Golden Gate Bridge framing. Let's just stick with the Arri Alexa thirty five like the cinematography team suggested. Oh, and remind the colorists to maintain Rec point seven oh nine gamma curve this time last week's D C I P three color space conversion messed up the skin tones in our corporate video!",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "arts-media",
+        "contextasr:WEIBO-000103_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Go Pro H E R O twelve",
+            "San Francisco Pier",
+            "D J I Ronin four D",
+            "fisheye distortion",
+            "Arri Alexa thirty five",
+            "Rec point seven oh nine gamma curve",
+            "D C I P three color space"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx03",
+      "file": "bx03.wav",
+      "text": "Hey Tom, remember when they scattered Jonathan Liu's ashes along the Eastwater Canal back in spring of 'ninety eight? The Brookshire County cultural commission installed this gorgeous bronze plaque quoting his novel ' Riverside Chronicles'. Last month, the Writers' Guild hosted a symposium on fluvial heritage studies at the Eastwater Cultural Center. Oh! Professor Carter from Yale gave this fascinating talk about ancient canal lock systems. Did you see the special exhibit at the county library? They've got Liu's original manuscripts and even his National Book Award medal on display.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "arts-media",
+        "contextasr:PEOPLE_DAIRY_1998-004739_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Jonathan Liu",
+            "Eastwater Canal",
+            "Brookshire County cultural commission",
+            "bronze plaque",
+            "Writers' Guild",
+            "fluvial heritage studies",
+            "Eastwater Cultural Center",
+            "Professor Carter",
+            "Yale",
+            "ancient canal lock systems",
+            "county library",
+            "National Book Award"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx04",
+      "file": "bx04.wav",
+      "text": "Hey Mister Thompson, did you read the S E C filings about Bright Future Tech's board restructuring? The section on C E O Michael Yu caught my eye he maintains Chinese citizenship despite previously working on cross border M and A deals through the Hong Kong Monetary Authority. You know how N A S D A Q has been tightening regulations on variable interest entities? Their prospectus explicitly states no offshore domicile arrangements, not even those typical Cayman Islands holding companies. Oh, and C F O Emily Wang mentioned they're doing a roadshow at the New York Stock Exchange next Thursday. Should we consider participating in the institutional offering?",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "finance-business",
+        "contextasr:RESUME-002121_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Bright Future Tech",
+            "C E O Michael Yu",
+            "cross border M and A",
+            "N A S D A Q",
+            "variable interest entities",
+            "Cayman Islands holding companies",
+            "C F O Emily Wang",
+            "roadshow",
+            "New York Stock Exchange",
+            "institutional offering"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx05",
+      "file": "bx05.wav",
+      "text": "Mate, you should've seen the African Development Consortium summit in Nairobi! Over three thousand delegates packed the K I C C Convention Centre World Bank folks rubbing shoulders with I M F technical advisors. The keynote speaker from Ecobank Transnational dropped a bombshell about launching A I driven microcredit models across francophone Africa. That Ghanaian fintech startup demo was wild though, their real time remittance corridor with mobile money integration actually processed fifty million cedis during the presentation! Barclays Africa Group kept pushing their sovereign debt restructuring framework, but everyone was secretly worried about Moody's downgrading Kenya's B one rating. Oh, and the panel on cryptocurrency regulations? Absolute madness when the Central Bank of Nigeria rep started arguing about stablecoin collateralization ratios.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "finance-business",
+        "contextasr:PEOPLE_DAIRY_1998-015928_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "K I C C Convention Centre",
+            "Ecobank Transnational",
+            "A I driven microcredit models",
+            "francophone Africa",
+            "real time remittance corridor",
+            "Barclays Africa Group",
+            "sovereign debt restructuring framework",
+            "Moody's",
+            "B one rating",
+            "cryptocurrency regulations",
+            "Central Bank of Nigeria",
+            "stablecoin collateralization ratios"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx06",
+      "file": "bx06.wav",
+      "text": "You know what's wild? The German Finance Ministry just released their fiscal consolidation blueprint through twenty thirty. They're pushing for structural reforms to maintain a one point eight percent annual growth floor. Bundesbank officials keep debating whether to phase out quantitative easing by Q two twenty twenty five. The real kicker? The proposed V A T hike to twenty two percent that's got the ifo Institute economists up in arms. My portfolio manager at Deutsche Bank was explaining yield curve normalization strategies yesterday something about aligning with E C B's monetary policy framework. Honestly, all this talk about cyclically adjusted budget balances and debt to G D P ratios makes my head spin.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "finance-business",
+        "contextasr:PEOPLE_DAIRY_1998-007718_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "one point eight percent annual growth floor",
+            "Q two twenty twenty five",
+            "V A T hike",
+            "ifo Institute",
+            "Deutsche Bank",
+            "yield curve normalization strategies",
+            "E C B",
+            "monetary policy framework",
+            "cyclically adjusted budget balances",
+            "debt to G D P ratios"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx07",
+      "file": "bx07.wav",
+      "text": "Hey Chris, remember when Tung Chee hwa gave that iconic speech at the Hong Kong Convention Centre back in july nineteen ninety seven? The whole world was watching as the Union Jack came down at Admiralty and the P L A garrison marched in. These days when I read the Hong Kong Special Administrative Region's Basic Law provisions, especially Article twenty three about national security legislation, it makes me recall the Sino British Joint Declaration negotiations. Did you catch the Legislative Council debate last week about maintaining the Linked Exchange Rate System with U S D? Honestly, the ' One Country, Two Systems' principle under the Central People's Government has shaped everything from the Court of Final Appeal's jurisdiction to our H K S A R Establishment Day ceremonies.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "history-culture",
+        "contextasr:PEOPLE_DAIRY_1998-003752_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Tung Chee hwa",
+            "Hong Kong Convention Centre",
+            "Article twenty three",
+            "Sino British Joint Declaration",
+            "Linked Exchange Rate System",
+            "One Country, Two Systems",
+            "Central People's Government",
+            "Court of Final Appeal",
+            "H K S A R Establishment Day"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx08",
+      "file": "bx08.wav",
+      "text": "Hey Tom, remember that folk song Stonehenge Stories we heard at the visitor centre? The one that made that retired Royal Engineer get all sentimental? He was telling me how they used Li D A R scanning to map the trilithon formations on Salisbury Plain. Did you know English Heritage is restoring the heel stone using Neolithic era flint tools? Oh, and the National Trust just announced a new guided tour along the cursus monument with augmented reality displays. By the way, U N E S C O's adding Avebury's sarsen stone circle to their monitoring list next month!",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "history-culture",
+        "contextasr:PEOPLE_DAIRY_1998-009121_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Stonehenge Stories",
+            "Royal Engineer",
+            "Li D A R scanning",
+            "trilithon formations",
+            "Salisbury Plain",
+            "English Heritage",
+            "heel stone",
+            "Neolithic era flint tools",
+            "cursus monument",
+            "U N E S C O",
+            "Avebury",
+            "sarsen stone circle"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx09",
+      "file": "bx09.wav",
+      "text": "Hey Chris, did you see the latest from the Gulf region? President Khatami gave this impassioned speech at the Majlis yesterday urging support for Nouri's cabinet. Between the I A E A's new enrichment protocol demands and the S W I F T banking restrictions, they're saying the National Energy Security Act is deadlocked. The Guardian Council just postponed voting on the parliamentary confidence motion again. Oh, and get this Tehran University's geopolitics department published a white paper comparing O P E C production ceilings with the J C P O A compliance metrics. Though honestly, with the Revolutionary Guard pushing for heavy water reactor upgrades, this whole nuclear dossier is getting messier.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "history-culture",
+        "contextasr:PEOPLE_DAIRY_1998-011822_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "President Khatami",
+            "Nouri's cabinet",
+            "I A E A",
+            "S W I F T banking restrictions",
+            "Majlis",
+            "Tehran University",
+            "O P E C production ceilings",
+            "J C P O A compliance metrics",
+            "heavy water reactor upgrades",
+            "nuclear dossier"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx10",
+      "file": "bx10.wav",
+      "text": "Hey Misses Thompson, remember that Herbal Vitality Tonic you mentioned? I got the fifteen vial pack from Chongqing Herb Well Pharmaceuticals. The amber colored liquid has this subtle herbal aroma with a sweet aftertaste. The pharmacist explained it contains Morinda Root and Eucommia Bark for kidney yang deficiency, plus Cistanche to address things like erectile dysfunction and weak loins. My husband's been taking ten milliliters three times daily those glass ampoules are tricky to open though! Oh, the formula includes Himalayan Teasel for joint support and Cyathula Root to stabilize essence. Our neighbor's daughter used it for amenorrhea along with Chinese Angelica decoctions. By the way, does the Rehmannia Glutinosa in it help with that lingering fatigue?",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "medical",
+        "contextasr:WANCHUANG-000936_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Herbal Vitality Tonic",
+            "Chongqing Herb Well Pharmaceuticals",
+            "Morinda Root",
+            "Eucommia Bark",
+            "kidney yang deficiency",
+            "Cistanche",
+            "ten milliliters",
+            "glass ampoules",
+            "Himalayan Teasel",
+            "Cyathula Root",
+            "amenorrhea",
+            "Chinese Angelica decoctions",
+            "Rehmannia Glutinosa",
+            "sweet aftertaste"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx11",
+      "file": "bx11.wav",
+      "text": "Hey doctor Wilson, didn't you work at the Midwest Biopharma Institute back in twenty nineteen? I was reading their paper on extended spectrum beta lactam antibiotics yesterday. The part about modifying cephalosporin core structures using C R I S P R C A's nine gene editing was fascinating. Oh, and their collaboration with Johns Hopkins on multidrug resistant Pseudomonas aeruginosa treatments did you work on those P C R assays? By the way, our team's struggling with ampicillin sulbactam stability issues. Remember that novel biofilm disruption technique they developed for M R S A strains?",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "medical",
+        "contextasr:RESUME-003567_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Midwest Biopharma Institute",
+            "extended spectrum beta lactam antibiotics",
+            "cephalosporin core structures",
+            "C R I S P R C A's nine gene editing",
+            "multidrug resistant Pseudomonas aeruginosa",
+            "P C R assays",
+            "ampicillin sulbactam",
+            "biofilm disruption technique",
+            "M R S A strains"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx12",
+      "file": "bx12.wav",
+      "text": "Hey Mike, did you catch the aviation update? The F A A just greenlit Cubana de Aviación's request to transit through Jacksonville F I R en route to Toronto Pearson. Can you believe it? Those A three hundred and thirty seconds can finally use the N A T T tracks with A D S B surveillance now. Transport Canada was initially concerned about overlapping with Air Canada's Montreal Havana routes, but they worked out the oceanic clearance protocols. Oh, and get this they're implementing Performance Based Navigation procedures from F L three hundred and thirty upwards. The I C A O even issued new N O T A Ms about transponder requirements in the New York Oceanic area.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "military-aviation",
+        "contextasr:PEOPLE_DAIRY_1998-007345_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "N A T T tracks",
+            "A D S B surveillance",
+            "Air Canada",
+            "Montreal Havana routes",
+            "oceanic clearance protocols",
+            "F L three hundred and thirty",
+            "I C A O",
+            "N O T A Ms",
+            "New York Oceanic"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx13",
+      "file": "bx13.wav",
+      "text": "Hey Mike, remember that urban planning seminar last month? The Department of Construction Affairs sent Lisa Liu to consult with doctor Thompson from A E C O M about modular construction protocols. They're experimenting with carbon fiber reinforced concrete for high rise core walls apparently meets A S C E seven to twenty two wind load requirements! But get this, the discussion shifted to implementing A I driven B I M coordination for M E P systems. Oh, and they're debating between adopting Eurocode two or the Japanese A I J standards for seismic detailing. By the way, did you see the new L E E D certification guidelines from the Green Building Council?",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "other",
+        "contextasr:PEOPLE_DAIRY_1998-004008_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Lisa Liu",
+            "A E C O M",
+            "modular construction protocols",
+            "A S C E seven to twenty two",
+            "A I driven B I M coordination",
+            "M E P systems",
+            "Eurocode two",
+            "A I J standards",
+            "L E E D certification",
+            "Green Building Council"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx14",
+      "file": "bx14.wav",
+      "text": "Mate, you won't believe what happened at the Mersey River estuary yesterday! doctor Paul Harrison from the Manchester Birding Society came back buzzing their team tracked Eurasian Spoonbills for four solid hours using thermal imaging cameras. That new Swarovski spotting scope actually captured the iridescent plumage of a Common Tern mid dive! Though the G P S logger malfunctioned during the black tailed godwit migration count. Oh, the R S P B's organizing a wader banding workshop next Saturday, bring your waterproof field notebooks and polarized sunglasses!",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "other",
+        "contextasr:PEOPLE_DAIRY_1998-003984_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Mersey River estuary",
+            "doctor Paul Harrison",
+            "Manchester Birding Society",
+            "Eurasian Spoonbills",
+            "Swarovski spotting scope",
+            "Common Tern",
+            "G P S logger",
+            "black tailed godwit",
+            "R S P B",
+            "wader banding workshop",
+            "waterproof field notebooks",
+            "polarized sunglasses"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx15",
+      "file": "bx15.wav",
+      "text": "Did you see doctor Bernstein's latest Twitter thread? The man claimed researchers at C E R N's A T L A S detector are basically modern alchemists! Speaking of which, the M I T Harvard team just published their findings on C R I S P R C A's nine gene editing in Cell. Oh, and remember that J P L Mars rover? It detected organic compounds in the Jezero Crater samples last week. Honestly, the Stanford Linear Accelerator Center crew working on quantum chromodynamics should collaborate with the Cambridge graphene institute By the way, N A S A's James Webb Telescope finally captured those protoplanetary disk spectrographs everyone was buzzing about!",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "other",
+        "contextasr:PEOPLE_DAIRY_1998-008800_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "doctor Bernstein",
+            "M I T Harvard team",
+            "Cell",
+            "J P L Mars rover",
+            "Jezero Crater",
+            "Stanford Linear Accelerator Center",
+            "quantum chromodynamics",
+            "Cambridge graphene institute",
+            "N A S A",
+            "James Webb Telescope",
+            "protoplanetary disk spectrographs"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx16",
+      "file": "bx16.wav",
+      "text": "Man, did you catch the quarterfinals between South Korean squad and Indonesian team? That fifth set tiebreaker had me on the edge of my seat! Coach Park's signature pendulum serve strategy got countered by Putri's crosscourt backhand flick. Now our Chinese team is drilling at the Paris twenty twenty four Velodrome with those robotic ball feeders. I heard they're analyzing spin rates with motion capture tech gotta watch out for Kim's topspin loops with her new Tenergy oh five rubber. Oh, and I T T F just mandated Hawkeye challenge systems for medal matches. The Japanese contingent brought their secret weapon though those carbon fiber blades with tensor technology.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "sports",
+        "contextasr:PEOPLE_DAIRY_1998-010081_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "pendulum serve strategy",
+            "Putri",
+            "crosscourt backhand flick",
+            "Paris twenty twenty four Velodrome",
+            "robotic ball feeders",
+            "motion capture tech",
+            "Kim's topspin loops",
+            "Tenergy oh five rubber",
+            "I T T F",
+            "Hawkeye challenge systems",
+            "carbon fiber blades",
+            "tensor technology"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx17",
+      "file": "bx17.wav",
+      "text": "Did you catch the F I N A Diving Grand Prix in Fort Lauderdale? Our boy Alex Yu from Team China absolutely crushed the one minute springboard final! That reverse two point five somersault with twist in the last round splashless entry like a knife through butter! The judges panel gave him three perfect ten seconds. But man, that British diver Thompson nearly stole the show with his inward three point five pike, difficulty rating three point seven though. N B C Sports said the federation's introducing new sensor tech next season to measure takeoff angles and entry velocity. Oh, and rumor has it F I N A's considering adding mixed synchro events to the Paris twenty twenty four program!",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "sports",
+        "contextasr:PEOPLE_DAIRY_1998-006143_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "F I N A Diving Grand Prix",
+            "Alex Yu",
+            "reverse two point five somersault with twist",
+            "judges panel",
+            "N B C Sports",
+            "sensor tech",
+            "takeoff angles",
+            "F I N A",
+            "mixed synchro events",
+            "Paris twenty twenty four"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx18",
+      "file": "bx18.wav",
+      "text": "Hey did you catch the Trail Masters highlights? The podium was all about the China Japan Taiwan trifecta this year! That insane riverbed section where Hong Kong's Chloe Ng wiped out on the granite scree slope? Turns out Team Korea's using some next gen moisture wicking compression gear from Icebreaker. Oh, and get this Taiwan's new recruit Lin Wei ting smashed the elevation gain record with Black Diamond's hybrid suspension system. The course marshals had to recalibrate all the G P S checkpoints after the monsoon erosion messed with the elevation profiles. Honestly, anyone attempting those limestone karst formations without Petzl's reactive heel stabilizers is just asking for tendonitis.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "sports",
+        "contextasr:PEOPLE_DAIRY_1998-007695_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Trail Masters",
+            "China Japan Taiwan trifecta",
+            "granite scree slope",
+            "Team Korea",
+            "moisture wicking compression gear",
+            "Icebreaker",
+            "Lin Wei ting",
+            "elevation gain record",
+            "Black Diamond",
+            "hybrid suspension system",
+            "limestone karst formations",
+            "Petzl",
+            "reactive heel stabilizers"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx19",
+      "file": "bx19.wav",
+      "text": "Hey Alex, remember that geospatial infrastructure project U S G S initiated back in twenty eighteen? They partnered with M I T Geodesy Lab and Stanford's Earth Observation Center under the ' Precision Nav' program. After five years of grinding, they finally integrated G L O N A S S signals with their multi constellation P P P solutions. doctor Wilson from the field team was telling me about their breakthrough in tropospheric delay modeling using A I algorithms. Though I heard they're still troubleshooting the datum transformation between N A D eighty three and I T R F twenty twenty frameworks at some C O R S stations. Oh, and they're deploying new scintillation mitigation receivers nationwide next quarter.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "tech-electronics",
+        "contextasr:PEOPLE_DAIRY_1998-015579_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "U S G S",
+            "M I T Geodesy Lab",
+            "Stanford's Earth Observation Center",
+            "G L O N A S S",
+            "multi constellation P P P solutions",
+            "tropospheric delay modeling",
+            "A I algorithms",
+            "N A D eighty three",
+            "C O R S stations",
+            "scintillation mitigation receivers"
+          ],
+          "tier": "T2"
+        }
+      }
+    },
+    {
+      "id": "bx20",
+      "file": "bx20.wav",
+      "text": "Hey Sarah, guess who I ran into at the biotech conference? doctor Wilson from Shenzhen Bio Core Biotech you know, the ones working on M R N A vaccines. He just moved to Peking University Biotech Hub as their new V P of R and D. Their team's developing a novel plasmid vector system combined with C R I S P R C A's nine for gene therapy. Oh, and get this they're collaborating with the National Center for Nanoscience on lipid nanoparticle delivery platforms. Did you hear about their recent breakthrough in hybridoma cell line optimization? Though I heard the F D A compliance audit found some issues with their cleanroom particulate counts last quarter.",
+      "source": "tts:contextasr",
+      "tags": [
+        "bias",
+        "tech-electronics",
+        "contextasr:RESUME-000043_EN"
+      ],
+      "condition": "clean-tts",
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Shenzhen Bio Core Biotech",
+            "Peking University Biotech Hub",
+            "M R N A vaccines",
+            "C R I S P R C A's nine",
+            "gene therapy",
+            "National Center for Nanoscience",
+            "hybridoma cell line optimization",
+            "F D A compliance audit"
+          ],
+          "tier": "T2"
+        }
+      }
+    }
+  ]
+}

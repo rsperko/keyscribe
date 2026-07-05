@@ -189,10 +189,17 @@ extension ModeStore {
         return seedFingerprint(toml)
     }
 
-    private static func carryForward(_ newSeed: Mode, connection: String?, enabled: Bool) -> Mode {
+    // Carry the user-owned knobs from the on-disk file onto the new seed: connection, enabled, and — as
+    // critically — the trigger keys. Trigger bindings are the user's, exactly like connection/enabled: a
+    // seed update (rename or version bump) refreshes prompt/behavior but must NEVER silently rebind a
+    // global hotkey the user did not choose (P2-16 — v0.1.17 pushed right_option/right_command this way).
+    // A fresh install still gets the catalog default trigger: it is written whole through the additive
+    // path, which never calls carryForward.
+    private static func carryForward(_ newSeed: Mode, from existing: Mode) -> Mode {
         var carried = newSeed
-        if let connection { carried.aiRewrite?.connection = connection }
-        carried.enabled = enabled
+        if let connection = existing.aiRewrite?.connection { carried.aiRewrite?.connection = connection }
+        carried.enabled = existing.enabled
+        carried.triggerKeys = existing.triggerKeys
         return carried
     }
 
@@ -238,7 +245,7 @@ extension ModeStore {
                   let expected = preRenameTemplate(for: rename.old),
                   let newSeed = catalog.first(where: { $0.id == rename.new }) else { continue }
             guard isSeedShaped(mode, like: expected) else { continue }
-            let carried = carryForward(newSeed, connection: mode.aiRewrite?.connection, enabled: mode.enabled)
+            let carried = carryForward(newSeed, from: mode)
             guard writeAndRecord(carried, to: modesDir, ledger: &ledger) else { continue }
             try? FileManager.default.removeItem(at: oldURL)
             ledger.remove(rename.old)
@@ -288,7 +295,7 @@ extension ModeStore {
                   let onDisk = try? String(contentsOf: url, encoding: .utf8),
                   let current = try? decode(from: onDisk, id: mode.id),
                   seedTemplateFingerprint(current) == fingerprint else { continue }
-            let updated = carryForward(mode, connection: current.aiRewrite?.connection, enabled: current.enabled)
+            let updated = carryForward(mode, from: current)
             if writeAndRecord(updated, to: modesDir, ledger: &ledger) { outcome.updated.append(mode.id) }
         }
 

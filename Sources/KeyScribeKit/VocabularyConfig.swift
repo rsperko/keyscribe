@@ -144,8 +144,13 @@ public enum DictionaryStore {
         }
     }
 
+    public static func load(supportDir: URL) -> ConfigLoad<DictionarySet> {
+        ConfigLoad.read(supportDir.appendingPathComponent(fileName), decode: decode)
+    }
+
     public static func loadOrDefault(supportDir: URL) -> DictionarySet {
-        loadVocabulary(supportDir: supportDir, fileName: fileName, decode: decode) ?? DictionarySet()
+        if case .loaded(let set) = load(supportDir: supportDir) { return set }
+        return DictionarySet()
     }
 
     public static func write(_ set: DictionarySet, to supportDir: URL) throws {
@@ -163,21 +168,18 @@ public enum ReplacementsStore {
         }
     }
 
+    public static func load(supportDir: URL) -> ConfigLoad<ReplacementsSet> {
+        ConfigLoad.read(supportDir.appendingPathComponent(fileName), decode: decode)
+    }
+
     public static func loadOrDefault(supportDir: URL) -> ReplacementsSet {
-        loadVocabulary(supportDir: supportDir, fileName: fileName, decode: decode) ?? ReplacementsSet()
+        if case .loaded(let set) = load(supportDir: supportDir) { return set }
+        return ReplacementsSet()
     }
 
     public static func write(_ set: ReplacementsSet, to supportDir: URL) throws {
         try writeVocabulary(TOMLEncoder().encode(set), fileName: fileName, to: supportDir)
     }
-}
-
-private func loadVocabulary<T>(
-    supportDir: URL, fileName: String, decode: (String) throws -> T
-) -> T? {
-    let file = supportDir.appendingPathComponent(fileName)
-    guard let toml = try? String(contentsOf: file, encoding: .utf8) else { return nil }
-    return try? decode(toml)
 }
 
 private func writeVocabulary(_ toml: String, fileName: String, to supportDir: URL) throws {

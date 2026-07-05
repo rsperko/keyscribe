@@ -153,6 +153,51 @@ struct ConnectionsTests {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    @Test func loadReportsAbsentLoadedAndFailed() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-connection-load-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(ConnectionStore.load(supportDir: dir) == .absent)
+        #expect(ConnectionStore.loadOrDefault(supportDir: dir).connections.isEmpty)
+
+        let set = ConnectionSet(connections: [connection(provider: .gemini, model: "gemini-2.5-flash")])
+        try ConnectionStore.write(set, to: dir)
+        #expect(ConnectionStore.load(supportDir: dir) == .loaded(set))
+
+        // A present-but-malformed file must surface as .failed, not silently drop every connection.
+        try "schema_version = 1\n[[connection]\nid = \"x\"".write(
+            to: dir.appendingPathComponent(ConnectionStore.fileName), atomically: true, encoding: .utf8)
+        guard case .failed = ConnectionStore.load(supportDir: dir) else {
+            Issue.record("expected .failed for malformed connections.toml")
+            return
+        }
+        #expect(ConnectionStore.loadOrDefault(supportDir: dir).connections.isEmpty)
+    }
+
+    @Test func loadReportsAPresentButUnreadableFileAsFailedNotAbsent() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-connection-unreadable-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Present but not valid UTF-8 — must not be mistaken for an absent file and silently defaulted.
+        try Data([0xFF, 0xFE, 0x00, 0xFF]).write(to: dir.appendingPathComponent(ConnectionStore.fileName))
+        guard case .failed = ConnectionStore.load(supportDir: dir) else {
+            Issue.record("expected .failed for a present but unreadable connections.toml")
+            return
+        }
+    }
+
+    @Test func loadReportsNewerSchemaAsFailed() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-connection-newer-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "schema_version = 99".write(
+            to: dir.appendingPathComponent(ConnectionStore.fileName), atomically: true, encoding: .utf8)
+        #expect(ConnectionStore.load(supportDir: dir) == .failed(.newerSchemaVersion(found: 99, supported: 1)))
+    }
+
     @Test func newIDNormalizesNamesAndAvoidsExistingIDs() {
         #expect(ConnectionStore.newID(for: "My Local AI", existing: []) == "my-local-ai")
         #expect(ConnectionStore.newID(for: "My Local AI", existing: ["my-local-ai"]) == "my-local-ai-2")

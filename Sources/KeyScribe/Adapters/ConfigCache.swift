@@ -11,15 +11,27 @@ final class ConfigCache {
     private let supportDir: URL
     private let log = Logger(subsystem: "com.keyscribe.app", category: "config")
 
-    // Survives invalidate(): the last set of modes that decoded cleanly, so a mid-edit malformed
-    // file falls back to its prior good copy instead of disappearing (design discipline §5.1).
+    // Survives invalidate(): the last set of modes/vocabulary/connections that loaded successfully, so a
+    // mid-edit malformed file falls back to its prior good copy instead of disappearing (design
+    // discipline §5.1). A cleanly-decoded file and an *absent* file both update it (absent → the empty
+    // default), so a delete followed by a malformed write can't resurrect the pre-delete copy.
     private var lastGoodModes: [Mode] = []
+    private var lastGoodReplacements = ReplacementsSet()
+    private var lastGoodConnections = ConnectionSet()
+    private var lastGoodDictionary = DictionarySet()
 
     private var modesCache: [Mode]?
     private var replacementsCache: ReplacementsSet?
     private var connectionsCache: ConnectionSet?
     private var dictionaryCache: DictionarySet?
     private var resolvedCache: ResolvedConfig?
+
+    // Per config generation: files that are present but failed to decode (malformed or a newer schema
+    // after a downgrade). Recorded as the loads run so a fat-fingered replacements.toml or a dropped-
+    // schema connections.toml lights the same user-visible malformed-config problem as settings.toml,
+    // instead of silently disabling every replacement / dropping every connection (P2-14). Reset by
+    // invalidate() and repopulated on the next load.
+    private(set) var loadFailures: [String] = []
 
     init(supportDir: URL) {
         self.supportDir = supportDir
@@ -31,6 +43,31 @@ final class ConfigCache {
         connectionsCache = nil
         dictionaryCache = nil
         resolvedCache = nil
+        loadFailures = []
+    }
+
+    // A user-facing summary of any present config file that failed to decode this generation, or nil
+    // if all files loaded (or are simply absent). Forces the vocabulary/connection loads (cheap after
+    // the first access, which the resolved plan already triggers) so the answer is complete regardless
+    // of call order.
+    var configFileError: String? {
+        _ = dictionary; _ = replacements; _ = connections
+        return loadFailures.isEmpty ? nil : loadFailures.joined(separator: "; ")
+    }
+
+    private func recordLoadFailure(_ fileName: String, _ error: ConfigError) {
+        let message = "\(fileName) — \(Self.describe(error))"
+        if !loadFailures.contains(message) { loadFailures.append(message) }
+        log.error("config '\(fileName, privacy: .public)' failed to load: \(Self.describe(error), privacy: .public)")
+    }
+
+    private static func describe(_ error: ConfigError) -> String {
+        switch error {
+        case .missingSchemaVersion: "missing schema_version"
+        case .newerSchemaVersion(let found, let supported):
+            "schema \(found) is newer than this build supports (\(supported))"
+        case .invalid(let message): message
+        }
     }
 
     // The frozen, derived view of this config generation handed to a dictation at record-start
@@ -76,21 +113,36 @@ final class ConfigCache {
 
     var replacements: ReplacementsSet {
         if let replacementsCache { return replacementsCache }
-        let loaded = ReplacementsStore.loadOrDefault(supportDir: supportDir)
+        let loaded: ReplacementsSet
+        switch ReplacementsStore.load(supportDir: supportDir) {
+        case .absent: loaded = ReplacementsSet(); lastGoodReplacements = ReplacementsSet()
+        case .loaded(let set): loaded = set; lastGoodReplacements = set
+        case .failed(let error): loaded = lastGoodReplacements; recordLoadFailure(ReplacementsStore.fileName, error)
+        }
         replacementsCache = loaded
         return loaded
     }
 
     var connections: ConnectionSet {
         if let connectionsCache { return connectionsCache }
-        let loaded = ConnectionStore.loadOrDefault(supportDir: supportDir)
+        let loaded: ConnectionSet
+        switch ConnectionStore.load(supportDir: supportDir) {
+        case .absent: loaded = ConnectionSet(); lastGoodConnections = ConnectionSet()
+        case .loaded(let set): loaded = set; lastGoodConnections = set
+        case .failed(let error): loaded = lastGoodConnections; recordLoadFailure(ConnectionStore.fileName, error)
+        }
         connectionsCache = loaded
         return loaded
     }
 
     var dictionary: DictionarySet {
         if let dictionaryCache { return dictionaryCache }
-        let loaded = DictionaryStore.loadOrDefault(supportDir: supportDir)
+        let loaded: DictionarySet
+        switch DictionaryStore.load(supportDir: supportDir) {
+        case .absent: loaded = DictionarySet(); lastGoodDictionary = DictionarySet()
+        case .loaded(let set): loaded = set; lastGoodDictionary = set
+        case .failed(let error): loaded = lastGoodDictionary; recordLoadFailure(DictionaryStore.fileName, error)
+        }
         dictionaryCache = loaded
         return loaded
     }

@@ -5,6 +5,7 @@ import KeyScribeKit
 struct ModesSettingsView: View {
     @ObservedObject var model: ModesSettingsModel
     var brokenConnectionIds: Set<String> = []
+    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var modePendingDelete: Mode?
 
@@ -47,7 +48,7 @@ struct ModesSettingsView: View {
             Group {
                 if let mode = model.selected {
                     ModeEditorView(
-                        mode: mode, allModes: model.modes,
+                        mode: mode, allModes: model.modes, actionShortcuts: actionShortcuts,
                         connections: model.connections, fragmentIds: model.fragmentIds,
                         fragmentNames: model.fragmentNames,
                         autofocusName: model.lastCreatedId == mode.id,

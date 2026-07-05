@@ -66,4 +66,103 @@ struct TriggerKeyConflictTests {
         let other = mode("a", key: "right_option")
         #expect(TriggerKeyConflicts.conflict(for: edited, in: [other, edited])?.modeId == "a")
     }
+
+    // --- modifierOverlap (review 4 P2-d): a modifier-only trigger double-fires with any chord/shortcut
+    //     whose modifiers subsume it — a distinct overlap the exact-duplicate `collides` check misses.
+
+    private func rival(_ key: String, _ label: String = "the other mode") -> TriggerKeyConflicts.RivalBinding {
+        .init(key: key, label: label)
+    }
+
+    @Test func hyperOverlapsAFullHyperChord() {
+        // Pressing ⌃⌥⇧⌘X engages the Hyper modifiers, so a Hyper-triggered mode fires alongside the chord.
+        let overlap = TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "hyper", with: [rival("control+option+shift+command+x", "the Snippet mode’s shortcut")])
+        #expect(overlap?.rivalLabel == "the Snippet mode’s shortcut")
+    }
+
+    @Test func rightOptionOverlapsTheDefaultAddVocabularyShortcut() {
+        // Default Add-Vocabulary is ⌃⌥⇧V — its modifiers include Option, so a right-Option trigger fires
+        // when the user forms that chord with the right Option key. This is a default-config overlap.
+        let overlap = TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "right_option", with: [rival("control+option+shift+v", "the Add to Vocabulary shortcut")])
+        #expect(overlap?.rivalLabel == "the Add to Vocabulary shortcut")
+    }
+
+    @Test func hyperDoesNotOverlapAChordMissingCommand() {
+        // ⌃⌥⇧V lacks Command, so Hyper (⌃⌥⇧⌘) is NOT a subset — no double-fire.
+        #expect(TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "hyper", with: [rival("control+option+shift+v")]) == nil)
+    }
+
+    @Test func fnNeverOverlapsAChord() {
+        // Fn keys off the Fn flag, which no chord carries, so it is not a modifier-only overlap source.
+        #expect(TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "fn", with: [rival("control+option+shift+command+x")]) == nil)
+    }
+
+    @Test func exactDuplicateIsLeftToTheCollisionCheck() {
+        // Two right-Option bindings are an exact collision handled by `conflict`/`shadowed`, not an overlap.
+        #expect(TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "right_option", with: [rival("right_option")]) == nil)
+    }
+
+    @Test func aChordTriggerIsNotAModifierOnlyOverlapSource() {
+        #expect(TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "control+option+shift+command+x", with: [rival("control+option+shift+command+x")]) == nil)
+    }
+
+    @Test func rightCommandDoesNotOverlapAControlOptionShiftChord() {
+        // right-Command is {command}; ⌃⌥⇧V lacks Command → not a superset → no overlap.
+        #expect(TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "right_command", with: [rival("control+option+shift+v")]) == nil)
+    }
+
+    @Test func emptyAndUnparsableRivalsAreIgnored() {
+        #expect(TriggerKeyConflicts.modifierOverlap(
+            triggerKey: "right_option", with: [rival(""), rival("not-a-key")]) == nil)
+    }
+
+    // --- liveActionRivals: only shortcuts that actually register can double-fire, so the warning must
+    //     not name a shadowed, unset, or non-chord global shortcut (mirrors AppDelegate.actionBindings).
+
+    private func action(_ id: String, _ key: String, _ label: String = "the shortcut")
+        -> TriggerKeyConflicts.ActionShortcut { .init(id: id, key: key, label: label) }
+
+    @Test func liveActionRivalsKeepsAnActiveChordShortcut() {
+        let vocab = action("global:add_vocabulary", "control+option+shift+v", "the Add to Vocabulary shortcut")
+        #expect(TriggerKeyConflicts.liveActionRivals([vocab], shadowed: []).map(\.label)
+                == ["the Add to Vocabulary shortcut"])
+    }
+
+    @Test func liveActionRivalsDropsShadowedUnsetAndNonChordShortcuts() {
+        let shadowedVocab = action("global:add_vocabulary", "control+option+shift+v")
+        #expect(TriggerKeyConflicts.liveActionRivals([shadowedVocab], shadowed: ["global:add_vocabulary"]).isEmpty)
+        #expect(TriggerKeyConflicts.liveActionRivals([action("global:paste_last", "")], shadowed: []).isEmpty)
+        // A modifier-only key never registers as a global action, so it is not a live rival.
+        #expect(TriggerKeyConflicts.liveActionRivals([action("global:add_vocabulary", "right_option")], shadowed: []).isEmpty)
+    }
+
+    // GPT review scenario: a right-Option mode alongside an Add-Vocabulary chord that is shadowed by
+    // another mode on the same chord. The warning must NOT name the shadowed (inactive) Add-Vocabulary
+    // shortcut; the overlap is re-attributed to the enabled mode that actually claims that chord.
+    @Test func shadowedActionShortcutIsNotNamedTheShadowingModeIs() {
+        let shortcutKey = "control+option+shift+v"
+        // Ordered as at runtime: modes first, then the global — so the mode claims the chord and the
+        // global add-vocabulary is shadowed.
+        let shadowed = HotkeyConflicts.shadowed([
+            .init(id: "vocab-mode#\(shortcutKey)", key: shortcutKey),
+            .init(id: "global:add_vocabulary", key: shortcutKey),
+        ])
+        #expect(shadowed.contains("global:add_vocabulary"))
+
+        let liveActions = TriggerKeyConflicts.liveActionRivals(
+            [action("global:add_vocabulary", shortcutKey, "the Add to Vocabulary shortcut")], shadowed: shadowed)
+        #expect(liveActions.isEmpty)
+
+        // The enabled mode on that chord is the real rival; right-Option is subsumed by its modifiers.
+        let rivals = liveActions + [rival(shortcutKey, "the Snippet mode’s shortcut")]
+        #expect(TriggerKeyConflicts.modifierOverlap(triggerKey: "right_option", with: rivals)?.rivalLabel
+                == "the Snippet mode’s shortcut")
+    }
 }

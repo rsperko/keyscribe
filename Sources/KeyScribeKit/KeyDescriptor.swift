@@ -169,6 +169,16 @@ extension KeyDescriptor {
         }
     }
 
+    /// A modifier-only trigger fires the instant its modifiers are held (no key), so any chord or
+    /// shortcut whose modifier set is a superset ALSO fires it. `fn` is excluded — it keys off the Fn
+    /// flag, which no chord carries — as are chords and mouse buttons.
+    public var isModifierOnly: Bool {
+        switch self {
+        case .named(.hyper), .named(.rightOption), .named(.rightCommand): return true
+        case .named(.fn), .chord, .mouseButton: return false
+        }
+    }
+
     public var displayString: String {
         switch self {
         case .named(.fn): return "Fn (Globe)"

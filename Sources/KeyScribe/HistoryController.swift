@@ -39,6 +39,7 @@ final class HistoryController {
             loadedSignature = signature
         }
         if let window {
+            registerObservers(for: window)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
@@ -56,10 +57,14 @@ final class HistoryController {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         self.window = window
-        observeLifecycle(of: window)
+        registerObservers(for: window)
     }
 
-    private func observeLifecycle(of window: NSWindow) {
+    // Observers live only while the window is open: seeded here (idempotent — a second present() while
+    // already open is a no-op) and torn down in the close handler, so no workspace observer runs for the
+    // app's lifetime after the user closes History.
+    private func registerObservers(for window: NSWindow) {
+        guard activationObserver == nil else { return }
         let selfBundleId = Bundle.main.bundleIdentifier
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -80,8 +85,16 @@ final class HistoryController {
                 guard let self else { return }
                 self.model.releaseForClose()
                 self.loadedSignature = nil
+                self.removeObservers()
             }
         }
+    }
+
+    private func removeObservers() {
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+        activationObserver = nil
+        closeObserver = nil
     }
 
     // Paste lands in the frontmost app, but History is key while open, so we hand focus back to the

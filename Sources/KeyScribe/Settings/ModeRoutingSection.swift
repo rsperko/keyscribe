@@ -5,6 +5,7 @@ import KeyScribeKit
 struct ModeRoutingSection: View {
     let mode: Mode
     let allModes: [Mode]
+    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     let onUpdate: (Mode) -> Void
     @State private var routingExpanded = false
     @State private var newPhrase = ""
@@ -14,7 +15,9 @@ struct ModeRoutingSection: View {
     @State private var enteringBundleId = false
     @State private var runningApps: [InstalledApps.Info] = []
 
-    private var trigger: ModeTrigger { ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate) }
+    private var trigger: ModeTrigger {
+        ModeTrigger(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
+    }
 
     var body: some View {
         Section("When this mode is used") {
@@ -24,6 +27,7 @@ struct ModeRoutingSection: View {
             } content: {
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 TriggerConflictLabel(conflict: trigger.conflict)
+                TriggerOverlapLabel(overlap: trigger.overlap)
                 Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by \(Branding.appName) while it runs, so they won’t also go Back or Forward in other apps.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

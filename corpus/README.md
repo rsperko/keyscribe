@@ -17,6 +17,7 @@ flat and are organized by **semantic id prefix**, not subfolders. A clip needed 
 | Folder | Purpose | Manifest | Replay |
 |--------|---------|----------|--------|
 | `stt/` | Engine accuracy (WER / term recall / RTF) | `manifest.json` | `KeyScribe --benchmark corpus/stt` — ranked by `compare.sh` |
+| `bias/` | Recognition-bias stress + streaming-vs-batch + engine onboarding (ContextASR-Bench derived) | `manifest.json` | `KeyScribe --benchmark corpus/bias [--streaming] [--raw]` — build via `bias/build.py` |
 | `commands/` | Spoken-command regression on real transcripts | `manifest.json` | `KeyScribe --commands-check corpus/commands` |
 | `voices/` | Multi-voice TTS/human studies of command phrasing | `manifest.json` | `KeyScribe --benchmark corpus/voices --raw` |
 

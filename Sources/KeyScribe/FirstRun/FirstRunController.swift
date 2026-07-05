@@ -15,6 +15,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         selectEngine: @escaping (String) -> Void,
         onReadyToDictate: @escaping () -> Void,
         permissionsOnly: Bool = false,
+        resumeOnboarding: Bool = false,
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
@@ -27,6 +28,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         model = FirstRunModel(
             initialEngineId: initialEngineId, download: download,
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
+            resumeOnboarding: resumeOnboarding,
             repository: repository, saveAPIKey: saveAPIKey,
             deleteAPIKey: deleteAPIKey,
             testConnection: testConnection, onComplete: onComplete)
@@ -186,6 +188,7 @@ final class FirstRunModel: ObservableObject {
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
         permissionsOnly: Bool = false,
+        resumeOnboarding: Bool = false,
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
@@ -209,6 +212,14 @@ final class FirstRunModel: ObservableObject {
         if permissionsOnly {
             step = .permissions
             startPolling()
+        } else if resumeOnboarding {
+            // Relaunched from the onboarding permissions funnel: `continueFromPermissions` saw a dead
+            // modifier tap (a fresh Accessibility grant is cached as denied until relaunch) and funneled
+            // here. Continue is disabled until every permission is granted, so reaching that funnel proves
+            // the grants exist; this fresh process reads them and starts the tap at launch. Resume the
+            // full wizard at the AI-service step (ui_design §2 steps 4–5) instead of dropping the user at
+            // the permissions-only Done, which silently ended onboarding early (P2-21).
+            step = .aiService
         }
     }
 

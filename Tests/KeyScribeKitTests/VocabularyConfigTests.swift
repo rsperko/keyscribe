@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import KeyScribeKit
 
@@ -34,6 +35,40 @@ struct VocabularyConfigTests {
         #expect(throws: ConfigError.newerSchemaVersion(found: 99, supported: 1)) {
             try DictionaryStore.decode(from: "schema_version = 99\nwords = []")
         }
+    }
+
+    @Test func replacementsLoadReportsAbsentLoadedAndFailed() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-replacements-load-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(ReplacementsStore.load(supportDir: dir) == .absent)
+
+        let set = ReplacementsSet(rules: [.init(heard: "teh", replace: "the", regex: false)])
+        try ReplacementsStore.write(set, to: dir)
+        #expect(ReplacementsStore.load(supportDir: dir) == .loaded(set))
+
+        // A `[[rules]` typo must surface as .failed, not silently disable every replacement.
+        try "schema_version = 1\n[[rules]\nheard = \"a\"".write(
+            to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
+        guard case .failed = ReplacementsStore.load(supportDir: dir) else {
+            Issue.record("expected .failed for malformed replacements.toml")
+            return
+        }
+        #expect(ReplacementsStore.loadOrDefault(supportDir: dir).rules.isEmpty)
+    }
+
+    @Test func dictionaryLoadReportsNewerSchemaAsFailed() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-dictionary-load-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        #expect(DictionaryStore.load(supportDir: dir) == .absent)
+        try "schema_version = 99\nwords = []".write(
+            to: dir.appendingPathComponent(DictionaryStore.fileName), atomically: true, encoding: .utf8)
+        #expect(DictionaryStore.load(supportDir: dir) == .failed(.newerSchemaVersion(found: 99, supported: 1)))
+        #expect(DictionaryStore.loadOrDefault(supportDir: dir).words.isEmpty)
     }
 
     @Test func mergeWordsIncludesGlobal() {

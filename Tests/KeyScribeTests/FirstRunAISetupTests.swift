@@ -45,6 +45,33 @@ struct FirstRunAISetupTests {
             onComplete: onComplete)
     }
 
+    // P2-21: the permission relaunch used to drop the user into the permissions-only flow, whose Done
+    // ended onboarding — skipping the AI-service and try-it steps. Resuming lands on the AI-service step.
+    @Test func resumeOnboardingStartsAtTheAIServiceStep() {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-resume-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let model = FirstRunModel(
+            initialEngineId: SpeechModelCatalog.defaultEnglishId,
+            download: { _, _ in }, selectEngine: { _ in }, resumeOnboarding: true,
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            onComplete: {})
+        #expect(model.step == .aiService)
+    }
+
+    @Test func permissionsOnlyStillStartsAtThePermissionsStep() {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-permsonly-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let model = FirstRunModel(
+            initialEngineId: SpeechModelCatalog.defaultEnglishId,
+            download: { _, _ in }, selectEngine: { _ in }, permissionsOnly: true,
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            onComplete: {})
+        #expect(model.step == .permissions)
+        model.stopPolling()
+    }
+
     @Test func creatingAIServiceConnectsAndEnablesLaunchRewriteModes() async throws {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)

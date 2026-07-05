@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let firstRunKey = ResetTool.firstRunKey
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
+    private let forceResumeOnboarding = CommandLine.arguments.contains("--resume-onboarding")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
 
     func applicationWillTerminate(_: Notification) {
@@ -205,6 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if forceFirstRun {
             // Dev flag: replay the full wizard regardless of the completion flag or permission state.
             presentFirstRun()
+        } else if forceResumeOnboarding {
+            // Relaunched from the onboarding permissions funnel — the grants now read fresh. Resume the
+            // full wizard at the post-permissions step (must precede the permissionsReady branch below,
+            // which would otherwise mark setup complete and show nothing, skipping AI + try-it). P2-21.
+            presentFirstRun(resumeOnboarding: true)
         } else if forcePermissionsSetup {
             presentFirstRun(permissionsOnly: true)
         } else if UserDefaults.standard.bool(forKey: firstRunKey) || permissionsReady {
@@ -480,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {}
     }
 
-    private func presentFirstRun(permissionsOnly: Bool = false) {
+    private func presentFirstRun(permissionsOnly: Bool = false, resumeOnboarding: Bool = false) {
         firstRun = FirstRunController(
             initialEngineId: provider.active.id,
             download: { [weak self] id, progress in
@@ -494,8 +500,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.controller.prewarmCapture()
             },
             permissionsOnly: permissionsOnly,
+            resumeOnboarding: resumeOnboarding,
             repository: configRepository,
-            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
+            // The full onboarding wizard resumes itself after the permission relaunch (P2-21); the
+            // permissions-only repair flow (reached from Settings) stays a permissions-only relaunch.
+            onRelaunch: { [weak self] in self?.relaunchForPermissionSetup(resumeOnboarding: !permissionsOnly) },
             tapActive: { [weak self] in self?.hotkey?.isTapActive ?? false }
         ) { [weak self] in
             guard let self else { return }
@@ -522,11 +531,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // modifier-only event tap even once Accessibility is granted. Clearing it heals such installs; on a
     // healthy machine there is no record and the reset is a harmless no-op. User-initiated (this is the
     // "Relaunch to finish setup" action), so it cannot loop.
-    private func relaunchForPermissionSetup() {
+    private func relaunchForPermissionSetup(resumeOnboarding: Bool = false) {
         ResetTool.resetInputMonitoring()
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        configuration.arguments = ["--setup-permissions"]
+        configuration.arguments = [resumeOnboarding ? "--resume-onboarding" : "--setup-permissions"]
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
             Task { @MainActor in NSApp.terminate(nil) }
         }
@@ -550,8 +559,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.setErrorBadge(!problems.isEmpty)
         settingsController?.refreshProblems(problems)
 
-        if let configError {
-            menu.setStatus(configError)
+        if let message = combinedConfigError {
+            menu.setStatus(message)
         } else if Permissions.microphoneStatus() != .granted {
             menu.setStatus("Microphone access needed")
         } else if Permissions.accessibilityStatus() != .granted {
@@ -584,11 +593,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.setSpeechModels(speechModels.rows)
     }
 
+    // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection
+    // file surfaced by the config cache — both light the Advanced pane's malformed-config problem and
+    // the menu status line so a broken config file is never silently swallowed (P2-14).
+    private var combinedConfigError: String? {
+        let parts = [configError, config.configFileError].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     private func currentProblems() -> [SettingsProblem] {
         let modes = config.modes.filter(\.enabled)
         let failedConnectionIds = settingsController?.failedConnectionIds ?? []
         return SettingsProblem.detect(
-            hasConfigError: configError != nil,
+            hasConfigError: combinedConfigError != nil,
             microphoneGranted: Permissions.microphoneStatus() == .granted,
             accessibilityGranted: Permissions.accessibilityStatus() == .granted,
             accessibilityTapActive: hotkey?.isTapActive ?? true,

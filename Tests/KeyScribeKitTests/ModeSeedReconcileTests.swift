@@ -129,7 +129,9 @@ struct ModeSeedReconcileTests {
     // A genuine pre-rename file carries the OLD (short) prompt, seed_version 1, and no trigger key. The
     // rename must recognize it and upgrade it to today's polish template. Matching against the CURRENT
     // catalog instead of the frozen old template would miss this file, leaving the mode frozen at its old
-    // id forever, with no signal.
+    // id forever, with no signal. The prompt/version upgrade to today's template, but the user's trigger
+    // bindings (here, their absence) are preserved — a migration never silently binds a global hotkey the
+    // user did not choose (P2-16), so the renamed polish does NOT gain today's right_option.
     @Test func preRenameFileWithOldPromptIsUpgradedToCurrentTemplate() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -143,7 +145,7 @@ struct ModeSeedReconcileTests {
         let currentPolish = try #require(ModeStore.starterModes().first { $0.id == "polish" })
         #expect(polish.aiRewrite?.prompt == currentPolish.aiRewrite?.prompt)   // upgraded to today's prompt
         #expect(polish.seedVersion == currentPolish.seedVersion)
-        #expect(polish.triggerKeys == currentPolish.triggerKeys)               // gains today's right_option
+        #expect(polish.triggerKeys.isEmpty)                                    // keeps the old file's absent binding
     }
 
     // A file byte-shaped like TODAY's polish but sitting at the old id is NOT a pre-rename file (no old
@@ -260,6 +262,40 @@ struct ModeSeedReconcileTests {
         #expect(after.aiRewrite?.prompt == "revised message prompt")
         #expect(after.aiRewrite?.connection == "conn-1")
         #expect(after.enabled == true)
+    }
+
+    // P2-16: a seed_version bump must NEVER silently push a new trigger key onto an upgrading install.
+    // Trigger bindings are user-owned exactly like connection/enabled — carryForward preserves the
+    // on-disk keys (here, their absence), so a version bump carries prompt/behavior forward but leaves
+    // the user's global hotkeys untouched. A fresh install still gets the catalog default trigger (it is
+    // written whole through the additive path, which never calls carryForward — proven separately).
+    @Test func versionBumpDoesNotPushANewTriggerKeyOntoAnUneditedSeed() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        // The user enabled message but never edited it; message ships with no trigger key.
+        var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
+        #expect(message.triggerKeys.isEmpty)
+        message.enabled = true
+        try ModeStore.write(message, to: d.modes)
+
+        // A revision that bumps the version AND adds a global bare-modifier trigger — the shape of the
+        // change that shipped right_option/right_command onto polish/edit-selection in v0.1.17.
+        let bumped = ModeStore.starterModes().map { mode -> Mode in
+            guard mode.id == "message" else { return mode }
+            var revised = mode
+            revised.seedVersion = 3
+            revised.triggerKeys = [.init(key: "right_option")]
+            return revised
+        }
+        let outcome = ModeStore.reconcileSeeds(
+            modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
+
+        #expect(outcome.updated.contains("message"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
+        #expect(after.triggerKeys.isEmpty)   // the pushed right_option is NOT silently bound
+        #expect(after.enabled == true)       // user-owned knobs preserved …
+        #expect(after.seedVersion == 3)      // … while the version/behavior update still lands
     }
 
     @Test func versionBumpSkipsAnEditedSeed() throws {

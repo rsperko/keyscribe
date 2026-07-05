@@ -57,6 +57,8 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                               onboarding without touching your real configuration.
       --first-run             Replay the full onboarding wizard, ignoring the completion flag.
       --setup-permissions     Present the permissions-only setup flow.
+      --resume-onboarding     Resume the full onboarding wizard after the permission relaunch
+                              (set automatically by that relaunch; not meant to be run by hand).
     """)
     exit(0)
 }

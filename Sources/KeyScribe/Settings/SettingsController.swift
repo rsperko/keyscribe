@@ -201,6 +201,20 @@ struct SettingsRootView: View {
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
 
+    // The global action shortcuts as double-fire rivals for the mode trigger overlap warning: a chord
+    // like the default Add-Vocabulary ⌃⌥⇧V subsumes a right-Option mode trigger. Read from the live
+    // `general` model so editing a shortcut refreshes the warning, and filtered through the SAME
+    // shadow/chord gate as runtime registration (AppDelegate.actionBindings) so the warning never names a
+    // shortcut that will not fire — a shadowed one is re-attributed to the mode that shadows it.
+    private var actionShortcutRivals: [TriggerKeyConflicts.RivalBinding] {
+        TriggerKeyConflicts.liveActionRivals([
+            .init(id: GlobalHotkey.vocabularyId, key: general.addVocabularyShortcut,
+                  label: "the Add to Vocabulary shortcut"),
+            .init(id: GlobalHotkey.pasteLastId, key: general.pasteLastShortcut,
+                  label: "the Paste Last Dictation shortcut"),
+        ], shadowed: shadowedHotkeys())
+    }
+
     private func shadowedHotkeys() -> Set<String> {
         var ordered = modes.modes.map {
             HotkeyConflicts.Registrant(
@@ -242,7 +256,8 @@ struct SettingsRootView: View {
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:
-                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds)
+                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds,
+                                  actionShortcuts: actionShortcutRivals)
             case .permissions:
                 PermissionsSettingsView(
                     accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)

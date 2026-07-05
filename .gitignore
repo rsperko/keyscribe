@@ -30,6 +30,11 @@ corpus/voices/.ttsenv
 corpus/voices/.tmpwav
 # commands/ verbal-command verification corpus: recorded/TTS clips stay local; manifest.json IS committed
 corpus/commands/*.wav
+# bias/ recognition-bias corpus (ContextASR-Bench derived): extracted TTS clips + the fetched shard/
+# metadata stay local; manifest.json + build.py + fetch.sh IS committed (reproducible via fetch.sh)
+corpus/bias/*.wav
+corpus/bias/shard.tar
+corpus/bias/ContextASR-Speech_English.jsonl
 
 
 # direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead

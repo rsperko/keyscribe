@@ -409,6 +409,10 @@ struct DictationCancellationTests {
         #expect(idleCount == 1)
         #expect(hud.states.filter { $0 == .hidden }.count == 1)
         #expect(controller.isBusy == false)
+        // P2-11: the terminal stays silent (hidden HUD, cancel cue — no scary error for an empty
+        // capture), but it now finalizes a .failed record for THIS dictation instead of leaving
+        // lastRecord describing the previous one and vanishing without a trace.
+        #expect(controller.lastRecord?.outcome == .failed)
     }
 
     // The over-limit abort must finalizeRecord (.failed, "recording limit") and land in a non-busy

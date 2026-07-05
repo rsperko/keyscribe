@@ -4,6 +4,16 @@ public struct TriggerKeyConflict: Equatable, Sendable {
     public let key: String
 }
 
+// A modifier-only trigger that will double-fire because a rival binding's modifiers subsume it.
+public struct TriggerOverlap: Equatable, Sendable {
+    public let triggerKey: String
+    public let rivalLabel: String
+    public init(triggerKey: String, rivalLabel: String) {
+        self.triggerKey = triggerKey
+        self.rivalLabel = rivalLabel
+    }
+}
+
 public enum TriggerKeyConflicts {
     // A shared trigger key is only a real conflict when two modes could *contend* for the same press —
     // i.e. some routing context selects either with no clear winner. With constraint-aware key routing
@@ -21,6 +31,63 @@ public enum TriggerKeyConflicts {
                     return TriggerKeyConflict(modeId: other.id, modeName: other.name, key: trigger.key)
                 }
             }
+        }
+        return nil
+    }
+
+    // A rival binding that could double-fire a modifier-only trigger: another mode's trigger key or a
+    // global action shortcut, paired with a human label for the warning ("the Message mode's shortcut").
+    public struct RivalBinding: Equatable, Sendable {
+        public let key: String
+        public let label: String
+        public init(key: String, label: String) {
+            self.key = key
+            self.label = label
+        }
+    }
+
+    // A configured global action shortcut considered as a potential rival, tagged with the id used in the
+    // shadow set so inactive ones can be filtered out of the warning.
+    public struct ActionShortcut: Equatable, Sendable {
+        public let id: String
+        public let key: String
+        public let label: String
+        public init(id: String, key: String, label: String) {
+            self.id = id
+            self.key = key
+            self.label = label
+        }
+    }
+
+    // Keep only the action shortcuts that can actually fire — a registerable chord that is not shadowed —
+    // so the overlap warning never names a shortcut that will not fire. Mirrors the runtime registration
+    // filter (AppDelegate.actionBindings). A shadowed action shortcut is shadowed by an earlier mode
+    // registrant (modes are ordered before globals), and that mode already surfaces as a rival, so
+    // dropping the shadowed global here re-attributes the warning to the active binding instead of losing it.
+    public static func liveActionRivals(_ shortcuts: [ActionShortcut], shadowed: Set<String>) -> [RivalBinding] {
+        shortcuts.compactMap { shortcut in
+            guard !shortcut.key.isEmpty, !shadowed.contains(shortcut.id),
+                  let descriptor = try? KeyDescriptor(parsing: shortcut.key),
+                  case .chord = descriptor else { return nil }
+            return RivalBinding(key: shortcut.key, label: shortcut.label)
+        }
+    }
+
+    // A modifier-only trigger (Hyper / right-Option / right-Command) fires the instant its modifiers are
+    // held, so any chord or action shortcut whose modifier set is a superset ALSO fires it — that rival
+    // runs its own action AND starts this mode's dictation from a single press. `collides` cannot express
+    // this (the key codes differ), so the exact-duplicate check misses it; this is the distinct, silent
+    // overlap review 4 P2-d flagged. Returns the first rival that would double-fire `triggerKey`; exact
+    // duplicates are left to `conflict`/`shadowed`.
+    public static func modifierOverlap(triggerKey: String, with rivals: [RivalBinding]) -> TriggerOverlap? {
+        guard let trigger = try? KeyDescriptor(parsing: triggerKey), trigger.isModifierOnly else { return nil }
+        let mods = trigger.requiredModifierMask
+        guard !mods.isEmpty else { return nil }
+        for rival in rivals {
+            guard let descriptor = try? KeyDescriptor(parsing: rival.key),
+                  !descriptor.collides(with: trigger),
+                  descriptor.requiredModifierMask.isSuperset(of: mods) else { continue }
+            return TriggerOverlap(triggerKey: triggerKey, rivalLabel: rival.label)
         }
         return nil
     }

@@ -156,10 +156,13 @@ public enum ConnectionStore {
         }
     }
 
+    public static func load(supportDir: URL) -> ConfigLoad<ConnectionSet> {
+        .read(supportDir.appendingPathComponent(fileName), decode: decode)
+    }
+
     public static func loadOrDefault(supportDir: URL) -> ConnectionSet {
-        let file = supportDir.appendingPathComponent(fileName)
-        guard let toml = try? String(contentsOf: file, encoding: .utf8) else { return ConnectionSet() }
-        return (try? decode(from: toml)) ?? ConnectionSet()
+        if case .loaded(let set) = load(supportDir: supportDir) { return set }
+        return ConnectionSet()
     }
 
     public static func write(_ set: ConnectionSet, to supportDir: URL) throws {
