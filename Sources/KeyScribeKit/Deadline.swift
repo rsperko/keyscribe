@@ -99,6 +99,10 @@ public actor SingleFlightDeadline {
     public func run<T: Sendable>(
         seconds: Double, operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
+        // A cancel that lands between the caller deciding to transcribe and this gate entry must not start
+        // the operation: it runs as an unstructured task that holds the gate until it TRULY settles, so a
+        // doomed transcribe/finalize for an already-cancelled dictation would wedge the next one Busy.
+        try Task.checkCancellation()
         if inFlight { throw Busy() }
         inFlight = true
         return try await runWithDeadline(seconds: seconds, operation: operation) {

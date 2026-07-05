@@ -126,4 +126,28 @@ struct SingleFlightDeadlineTests {
         let value = try await gate.run(seconds: 5) { "ok" }
         #expect(value == "ok")
     }
+
+    // A cancel landing before the gate is entered must NOT launch the operation. The transcribe/finalize
+    // op runs as an unstructured task that keeps the engine lock until it truly settles, so starting one
+    // for a dictation the user already cancelled would hold the gate `Busy` against the next dictation
+    // ("Still finishing the previous dictation") and delete a fresh WAV. run() bails with CancellationError
+    // before setting inFlight, so the closure never runs and the gate stays open.
+    @Test func aCancelledCallerNeverEntersTheGate() async {
+        let gate = SingleFlightDeadline()
+        let ran = Counter()
+        let t = Task {
+            // Observe cancellation BEFORE entering the gate, else the closure could run to completion ahead
+            // of cancel() and the test would race — the point is that the gate rejects an already-cancelled
+            // caller, so cancellation must be in effect at the moment run() is entered.
+            while !Task.isCancelled { await Task.yield() }
+            return try await gate.run(seconds: 5) {
+                await ran.bump()
+                return "x"
+            }
+        }
+        t.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await t.value }
+        #expect(await ran.value == 0)
+        #expect(await gate.isBusy == false)
+    }
 }

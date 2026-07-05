@@ -811,7 +811,9 @@ final class DictationController {
             // abandoned session still holds the engine lock, so a fallback would queue behind it forever).
             switch await self.finalizeStreamingIfActive(audioSeconds: audioSeconds ?? 0) {
             case .streamed(let text):
-                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, streamedTranscript: text)
+                // The streamed arm never re-transcribes, so it has no use for the PCM copy — drop it here
+                // rather than carry a multi-MiB buffer through the call for nothing.
+                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: nil, streamedTranscript: text)
             case .batch:
                 await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, streamedTranscript: nil)
             case .busy:
@@ -1027,65 +1029,68 @@ final class DictationController {
         let engine = activeEngine
         building.audioSeconds = audioSeconds
 
-        // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a legitimate one-time
-        // cost — a 632 MB model measured ~140 s to load even from a compiled cache — so counting it
-        // against the per-utterance transcribe deadline (≥30 s) both false-times-out a healthy load and,
-        // because the abandoned load keeps running, leaves the single-flight gate `Busy` so every later
-        // dictation reports "Still finishing…" until it settles. Awaiting the single warm load (started at
-        // press, overlapping speech) here keeps the deadline on inference, where it belongs.
-        func loadOnce() async throws {
-            try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = warm(engine)] in
-                try await task.value
-            }
-        }
-        func failModelLoadTerminal(_ error: Error) {
-            try? FileManager.default.removeItem(at: url)
-            invalidateWarm(engine.id)
-            let timedOut = error is DeadlineExceeded
-            recordModelLoadFailure(engine.id, timedOut, String(describing: error))
-            log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
-            finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
-        }
-        let modelWaitStart = DispatchTime.now()
-        // A resident model resolves loadOnce() in ~0 ms, but a cold/frugal-evicted load can run for seconds
-        // (up to ~140 s for a big ANE model). Rather than leave the HUD on "Transcribing" — a lie during a
-        // load — name the wait once it exceeds ~1 s (P2-2). Cancelled on load resolution; guarded on
-        // machine.state so a cancel that flips state can't render it stale (mirrors scheduleRewriteEscapeHatch).
-        let loadingHUD = scheduleLoadingModelHUD()
-        do {
-            try await loadOnce()
-        } catch {
-            if Task.isCancelled { loadingHUD.cancel(); try? FileManager.default.removeItem(at: url); return }
-            // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
-            if error is DeadlineExceeded { loadingHUD.cancel(); failModelLoadTerminal(error); return }
-            // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch, and a
-            // fresh reload (what a user does by hand) usually succeeds. invalidateWarm drops the failed task
-            // so warm(engine) builds a new one; the HUD stays on `transcribing`, so a recovered transient is
-            // invisible. Mirrors the pipeline's one-retry policy (design.md §4.2).
-            invalidateWarm(engine.id)
-            log.notice("model load failed, retrying once (\(engine.id, privacy: .public)): \(error, privacy: .public)")
-            do {
-                try await loadOnce()
-            } catch {
-                loadingHUD.cancel()
-                if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
-                failModelLoadTerminal(error)
-                return
-            }
-        }
-        loadingHUD.cancel()
-        // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
-        // loading-model state was actually shown during a slow load.
-        hud?.render(.transcribing(mode: currentModeName))
-        building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
-
         let rawFromEngine: String
         if let streamedTranscript {
             // Streaming already produced the transcript during capture (finalize ran in handleCommit, which
-            // stamped .streamFinalize). No batch transcribe, no .transcribe stage.
+            // stamped .streamFinalize). No batch transcribe, no .transcribe stage. The model-load block below
+            // is skipped entirely: a session that finalized proves the model is loaded, so running the load
+            // machinery here could only ever fabricate an impossible "model load failed" terminal after a
+            // successful transcript.
             rawFromEngine = streamedTranscript
             try? FileManager.default.removeItem(at: url)
         } else {
+            // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a legitimate one-time
+            // cost — a 632 MB model measured ~140 s to load even from a compiled cache — so counting it
+            // against the per-utterance transcribe deadline (≥30 s) both false-times-out a healthy load and,
+            // because the abandoned load keeps running, leaves the single-flight gate `Busy` so every later
+            // dictation reports "Still finishing…" until it settles. Awaiting the single warm load (started at
+            // press, overlapping speech) here keeps the deadline on inference, where it belongs.
+            func loadOnce() async throws {
+                try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = warm(engine)] in
+                    try await task.value
+                }
+            }
+            func failModelLoadTerminal(_ error: Error) {
+                try? FileManager.default.removeItem(at: url)
+                invalidateWarm(engine.id)
+                let timedOut = error is DeadlineExceeded
+                recordModelLoadFailure(engine.id, timedOut, String(describing: error))
+                log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+                finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
+            }
+            let modelWaitStart = DispatchTime.now()
+            // A resident model resolves loadOnce() in ~0 ms, but a cold/frugal-evicted load can run for seconds
+            // (up to ~140 s for a big ANE model). Rather than leave the HUD on "Transcribing" — a lie during a
+            // load — name the wait once it exceeds ~1 s (P2-2). Cancelled on load resolution; guarded on
+            // machine.state so a cancel that flips state can't render it stale (mirrors scheduleRewriteEscapeHatch).
+            let loadingHUD = scheduleLoadingModelHUD()
+            do {
+                try await loadOnce()
+            } catch {
+                if Task.isCancelled { loadingHUD.cancel(); try? FileManager.default.removeItem(at: url); return }
+                // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
+                if error is DeadlineExceeded { loadingHUD.cancel(); failModelLoadTerminal(error); return }
+                // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch, and a
+                // fresh reload (what a user does by hand) usually succeeds. invalidateWarm drops the failed task
+                // so warm(engine) builds a new one; the HUD stays on `transcribing`, so a recovered transient is
+                // invisible. Mirrors the pipeline's one-retry policy (design.md §4.2).
+                invalidateWarm(engine.id)
+                log.notice("model load failed, retrying once (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+                do {
+                    try await loadOnce()
+                } catch {
+                    loadingHUD.cancel()
+                    if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
+                    failModelLoadTerminal(error)
+                    return
+                }
+            }
+            loadingHUD.cancel()
+            // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
+            // loading-model state was actually shown during a slow load.
+            hud?.render(.transcribing(mode: currentModeName))
+            building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
+
             let transcribeStart = DispatchTime.now()
             do {
                 rawFromEngine = try await transcribeBounded(
