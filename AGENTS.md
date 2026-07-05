@@ -368,6 +368,18 @@ silently drop legitimate one-word dictations. The robust guard for those is an *
 (was there speech in the audio?) upstream of the transcript, not string matching. Re-run this the moment
 a model is added or an STT dep is bumped — the marker set is engine- and version-specific.
 
+**A streaming session is a DISTINCT no-speech path — sweep it separately.** An engine's `makeStreamingSession`
+feed→finalize can emit different silence artifacts than its batch `transcribe`, so a model that ships a
+streaming path (`supportsStreaming=true`) must be exercised against silence **both ways**. Use
+`--benchmark <sil-dir> --engines <id> --streaming --raw` (raw dumps the literal streamed output per clip)
+alongside the batch `--raw`. Include a **≥5 s** silence/hiss clip: the real dictation path defers session
+creation past the `StreamingStartPolicy` threshold (4 s), so only clips longer than that actually open a
+session live — the benchmark's streaming replay opens one for every clip, so it covers both. (2026-07-04,
+Apple: streaming output was byte-identical to batch — clean-empty except a deterministic `No` on 3 s
+silence, the same documented Apple lexical artifact — so streaming added no new marker class. Do not assume
+that generalizes; a slower/looping engine like Moonshine could differ, which is one more reason its
+streaming is disabled.)
+
 ### Forked / pinned STT deps
 
 Three forks + one pinned binary dep; the forks work live and cost nothing day-to-day:
