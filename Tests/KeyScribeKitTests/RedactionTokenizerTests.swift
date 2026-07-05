@@ -136,4 +136,28 @@ struct RedactionTokenizerTests {
         let (out, _) = redact("this is an ordinary sentence about establishment matters")
         #expect(out == "this is an ordinary sentence about establishment matters")
     }
+
+    // A detector must never scan an already-minted ⟦SN:…⟧ token body. The KEY=value detector's value
+    // class (`[^\s"']{6,}`) would otherwise swallow a whole token that trails a "password:"-style run
+    // (and a future detector could match partway in, stranding a `⟦SN:` fragment and leaking the
+    // protected span). Scanning only the runs between sentinels leaves the token byte-for-byte intact.
+    @Test func doesNotRedactAcrossASentinelBoundary() {
+        let t = Tokenizer()
+        let token = t.tokenize("s3cr3t-body-value", type: .verbatim)
+        let out = RedactionTokenizer.apply("password: \(token)", into: t)
+        #expect(out == "password: \(token)")
+        #expect(t.restore(out) == "password: s3cr3t-body-value")
+    }
+
+    // A real secret sitting between two sentinel tokens is still redacted normally.
+    @Test func redactsSecretBetweenSentinelTokens() {
+        let t = Tokenizer()
+        let a = t.tokenize("alpha", type: .verbatim)
+        let b = t.tokenize("beta", type: .clipboard)
+        let out = RedactionTokenizer.apply("\(a) john@example.com \(b)", into: t)
+        #expect(!out.contains("john@example.com"))
+        #expect(out.contains(a))
+        #expect(out.contains(b))
+        #expect(t.restore(out) == "alpha john@example.com beta")
+    }
 }

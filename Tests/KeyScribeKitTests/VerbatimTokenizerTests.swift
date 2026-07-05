@@ -142,6 +142,14 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "say KeepThis done")
     }
 
+    // A pause-comma BETWEEN the trigger words ("begin, verbatim") must still fire the marker — the STT
+    // transcribes a spoken pause mid-phrase as a comma. Shared with the clipboard command joiner.
+    @Test func pauseCommaInsideTriggerWordsStillFires() {
+        let (out, t) = tokenize("say begin, verbatim KeepThis end, verbatim done")
+        #expect(out == "say ⟦SN:VERB:1⟧ done")
+        #expect(t.restore(out) == "say KeepThis done")
+    }
+
     @Test func unterminatedTokenizesToEnd() {
         let (out, t) = tokenize("the password is begin verbatim hunter2 and more")
         #expect(out == "the password is ⟦SN:VERB:1⟧")

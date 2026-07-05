@@ -44,6 +44,12 @@ public enum FuzzyCorrector {
                 // A ⟦SN:…⟧ nonce is opaque (design.md §4.2): never fuzzy-snap a window touching one, else a
                 // token fragment ("VERB") could be rewritten to a dictionary term and corrupt the span.
                 if window.contains(where: { $0.contains(SentinelText.open) }) { continue }
+                // A snap keeps only alphanumerics (→ the canonical term), the inter-token spaces it
+                // deliberately merges away, and outer-edge punctuation. Any other dictated character
+                // inside a token — interior punctuation ("git-hub", "spring,boot"), a clause comma
+                // between two tokens ("spring, boot"), or a LiveEdits control char ("git\nhub") — would
+                // be silently deleted, so a window carrying such content is left untouched.
+                if wouldDeleteInteriorContent(window) { continue }
                 let core = window.map(stripPunct).joined()
                 let norm = normalize(core)
                 guard norm.count >= 4 else { continue }
@@ -103,6 +109,25 @@ public enum FuzzyCorrector {
 
     private static func normalize(_ s: String) -> String {
         String(s.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+    }
+
+    private static func isAlphanumeric(_ c: Character) -> Bool {
+        c.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains)
+    }
+
+    // True when snapping the window would delete a dictated character. `normalize` keeps only
+    // alphanumerics and the output re-emits just the outer-edge punctuation (leadingPunct of the first
+    // token, trailingPunct of the last), so strip each token's preserved outer edge and report any
+    // remaining non-alphanumeric content.
+    private static func wouldDeleteInteriorContent(_ window: [String]) -> Bool {
+        for (idx, token) in window.enumerated() {
+            var lo = token.startIndex
+            var hi = token.endIndex
+            if idx == 0 { lo = token.index(lo, offsetBy: leadingPunct(token).count) }
+            if idx == window.count - 1 { hi = token.index(hi, offsetBy: -trailingPunct(token).count) }
+            if lo < hi, token[lo..<hi].contains(where: { !isAlphanumeric($0) }) { return true }
+        }
+        return false
     }
 
     private static let punctSet = CharacterSet(charactersIn: ".,!?;:\"'()[]{}")

@@ -41,14 +41,6 @@ public enum ClipboardTokenizer {
     }
 
     private static func commandRegex(_ phrases: [String]) -> NSRegularExpression? {
-        // Between the phrase's words, tolerate an optional weak separator (Parakeet TDT v3 transcribes
-        // "insert clipboard, contents" with a comma mid-phrase) so a spuriously-punctuated pause inside
-        // the command still fires it.
-        let alternation = phrases.filter { !$0.isEmpty }
-            .map { NSRegularExpression.escapedPattern(for: $0.lowercased())
-                .replacingOccurrences(of: " ", with: "[,;:]?\\s+") }
-            .joined(separator: "|")
-        guard !alternation.isEmpty else { return nil }
-        return RegexCache.regex("(?i)\\b(?:\(alternation))\\b", options: [])
+        CommandPhrase.alternationRegex(phrases)
     }
 }

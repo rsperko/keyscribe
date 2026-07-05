@@ -100,7 +100,7 @@ public struct ReplacementsStage: PipelineStage {
     // we only clamp when running every rule over the core reproduces exactly that value — so a second
     // rule mutating the owner's output conservatively falls through to the normal path.
     public func bareReplacement(for input: String, transformedInput: String? = nil) -> String? {
-        let core = utteranceCore(of: input)
+        let (core, leading, trailing) = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
         // A whole-utterance replacement is inserted verbatim, bypassing the LLM; if the utterance
         // carries a protected token (verbatim/clipboard), no single rule cleanly "owns" it — fall
@@ -114,7 +114,7 @@ public struct ReplacementsStage: PipelineStage {
             // surrounding whitespace/cruft), the caller's transform(input) already equals
             // transform(core), so reuse it rather than running the battery again.
             let coreTransformed = (transformedInput != nil && core == input) ? transformedInput! : transform(core)
-            return coreTransformed == generated ? generated : nil
+            return coreTransformed == generated ? leading + generated + trailing : nil
         }
         return nil
     }
@@ -124,10 +124,28 @@ public struct ReplacementsStage: PipelineStage {
         c.isLetter || c.isNumber || c == "_"
     }
 
-    private func utteranceCore(of input: String) -> String {
-        let cruft: Set<Character> = [".", "!", "?", " ", "\t", "\n", "\r"]
-        var core = Substring(input.trimmingCharacters(in: .whitespacesAndNewlines))
-        while let last = core.last, cruft.contains(last) { core = core.dropLast() }
-        return String(core)
+    // A LiveEdits control char (`\n` from "insert new line", `\t` from "insert tab") is a command's
+    // output, not STT cruft: it is trimmed off the core so a rule can still own the words, then
+    // re-attached (as `leading`/`trailing`) around the clamped value so the dictated newline/tab
+    // survives. Ordinary STT residue (surrounding whitespace, trailing `.!?`) is discarded.
+    private static let liveEditControl: Set<Character> = ["\n", "\t"]
+    private static let trailingCruft: Set<Character> = [".", "!", "?"]
+    private func utteranceCore(of input: String) -> (core: String, leading: String, trailing: String) {
+        let chars = Array(input)
+        var lo = 0, hi = chars.count
+        var leading = "", trailing = ""
+        while lo < hi {
+            let c = chars[lo]
+            if Self.liveEditControl.contains(c) { leading.append(c); lo += 1 }
+            else if c.isWhitespace { lo += 1 }
+            else { break }
+        }
+        while hi > lo {
+            let c = chars[hi - 1]
+            if Self.liveEditControl.contains(c) { trailing.insert(c, at: trailing.startIndex); hi -= 1 }
+            else if c.isWhitespace || Self.trailingCruft.contains(c) { hi -= 1 }
+            else { break }
+        }
+        return (String(chars[lo..<hi]), leading, trailing)
     }
 }

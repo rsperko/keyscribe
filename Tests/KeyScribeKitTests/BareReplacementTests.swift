@@ -90,6 +90,24 @@ struct BareReplacementTests {
         #expect(detect(rules, on: "slash dog") == nil)
     }
 
+    // A LiveEdits control char (\n from "insert new line", \t from "insert tab") is a command's
+    // OUTPUT, not STT cruft — clamping must not swallow it. The dictated control char is re-attached
+    // around the clamped value, on whichever side it was dictated.
+    @Test func preservesDictatedTrailingNewline() {
+        let rules = [ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false)]
+        #expect(detect(rules, on: "slash resume\n") == "/resume\n")
+    }
+
+    @Test func preservesDictatedLeadingNewline() {
+        let rules = [ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false)]
+        #expect(detect(rules, on: "\nslash resume") == "\n/resume")
+    }
+
+    @Test func preservesDictatedTabAlongsideTrimmedSpace() {
+        let rules = [ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false)]
+        #expect(detect(rules, on: "slash resume \t") == "/resume\t")
+    }
+
     // Pure punctuation/whitespace reduces to empty core → no clamp, no crash.
     @Test func emptyCoreNeverClamps() {
         let rules = [ReplacementRule(heard: "slash replace", replace: "/replace", isRegex: false)]

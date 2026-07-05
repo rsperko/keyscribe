@@ -88,4 +88,39 @@ struct FuzzyCorrectorTests {
     @Test func doesNotSnapDistanceTwoOnAShortWord() {
         #expect(fix("please install mane now", ["Mono"]) == "please install mane now")
     }
+
+    // A clause comma between the two words ("spring, boot") is a sentence boundary, not a split term:
+    // merging into "Spring Boot" would silently destroy the comma. A clean split still snaps, and a
+    // terminator on the whole window's edge is preserved (it is not interior).
+    @Test func multiTokenMergeDoesNotDropInteriorPunctuation() {
+        #expect(fix("in spring, boot camp", ["Spring Boot"]) == "in spring, boot camp")
+    }
+
+    @Test func multiTokenMergeStillSnapsACleanSplit() {
+        #expect(fix("in spring boot camp", ["Spring Boot"]) == "in Spring Boot camp")
+    }
+
+    @Test func multiTokenMergePreservesWholeWindowTrailingPunctuation() {
+        #expect(fix("we use spring boot.", ["Spring Boot"]) == "we use Spring Boot.")
+    }
+
+    // Interior punctuation glued INSIDE a single token ("git-hub", "spring,boot") would be erased by
+    // normalize() and never re-emitted (only outer-edge punctuation survives), so the window is left
+    // untouched rather than snapped to the canonical term.
+    @Test func doesNotDeleteInteriorPunctuationInASingleToken() {
+        #expect(fix("git-hub", ["GitHub"]) == "git-hub")
+        #expect(fix("spring,boot", ["Spring Boot"]) == "spring,boot")
+    }
+
+    // A LiveEdits control char glued inside a token ("git\nhub" from "insert new line") is command
+    // output, not a spelling: normalize() strips it, so snapping to "GitHub" would erase the dictated
+    // newline. The window is skipped; an ordinary-space split still snaps.
+    @Test func doesNotEraseAControlCharGluedInsideAToken() {
+        #expect(fix("git\nhub", ["GitHub"]) == "git\nhub")
+        #expect(fix("git\thub", ["GitHub"]) == "git\thub")
+    }
+
+    @Test func stillSnapsAcrossOrdinarySpace() {
+        #expect(fix("git hub", ["GitHub"]) == "GitHub")
+    }
 }

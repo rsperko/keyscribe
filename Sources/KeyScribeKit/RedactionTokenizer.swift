@@ -74,7 +74,16 @@ public enum RedactionTokenizer {
         }
     }
 
+    // Redaction runs LAST, after verbatim/clipboard have already minted opaque ⟦SN:…⟧ tokens
+    // (design.md §4.2.1). A detector must never scan a token body — a partway match would strand a
+    // `⟦SN:` fragment outside its redaction span and leak the protected content. So, like every other
+    // free-substituting stage, redact only the plain runs BETWEEN sentinels; a whole-token nesting is
+    // command-stage-only and irrelevant here.
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
+        SentinelText.mappingOutsideSentinels(text) { run in redactRun(run, into: tokenizer) }
+    }
+
+    private static func redactRun(_ text: String, into tokenizer: Tokenizer) -> String {
         let haystack = text.lowercased()
         var spans: [Span] = []
         for detector in detectors {

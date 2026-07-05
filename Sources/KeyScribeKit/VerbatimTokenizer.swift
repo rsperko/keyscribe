@@ -5,8 +5,10 @@ import Foundation
 // then restored verbatim. Gated by the mode's live-edits opt-in at the call site. Runs as the first
 // tokenization step (before redaction), so it is the last text mutation before the LLM.
 public enum VerbatimTokenizer {
-    private static let beginTrigger = #"\bbegin verbatim\b"#
-    private static let endTrigger = #"\bend verbatim\b"#
+    // The spoken markers tolerate a pause-comma between their words ("begin, verbatim") via the shared
+    // CommandPhrase joiner — the same `[,;:]?\s+` builder the clipboard command uses.
+    private static let beginTrigger = CommandPhrase.boundedTrigger("begin verbatim")
+    private static let endTrigger = CommandPhrase.boundedTrigger("end verbatim")
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
         guard text.range(of: "verbatim", options: .caseInsensitive) != nil else { return text }
