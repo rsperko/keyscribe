@@ -59,6 +59,56 @@ struct ModeSeedReconcileTests {
         #expect(ModeStore.loadAll(in: d.modes).count == 8)
     }
 
+    // A write that fails (disk full, unwritable path) must NOT record the seed in the ledger — otherwise
+    // the mode is marked "already offered" and a later healthy run never re-seeds it, so the user
+    // permanently loses a starter that was never written.
+    @Test func failedSeedWriteDoesNotRecordTheLedger() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try FileManager.default.createDirectory(at: d.support, withIntermediateDirectories: true)
+        try Data().write(to: d.modes)
+
+        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+
+        let entries = ModeStore.loadLedger(in: d.ledger)?.entries ?? []
+        #expect(entries.isEmpty)
+    }
+
+    // A rename whose new-file write fails must NOT delete the user's old mode file or record the new id.
+    // The unconditional delete-then-record shape would strand the mode entirely: old removed, new never
+    // written. Read-only `modes` fails the write; the ledger (separate dir) still records the outcome.
+    @Test func failedRenameWritePreservesTheOldFileAndDoesNotRecord() throws {
+        let d = tempDirs()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: d.modes.path)
+            try? FileManager.default.removeItem(at: d.support)
+        }
+        try writeLegacy(newId: "polish", oldId: "polished-dictation", oldName: "Polished Dictation",
+                        connection: "conn-1", enabled: true, to: d.modes)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: d.modes.path)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(outcome.renamed.isEmpty)
+        #expect(FileManager.default.fileExists(
+            atPath: d.modes.appendingPathComponent("polished-dictation.toml").path))
+        let ledgerIds = (ModeStore.loadLedger(in: d.ledger)?.entries ?? []).map(\.seedId)
+        #expect(!ledgerIds.contains("polish"))
+    }
+
+    @Test func failedAdditiveReconcileWriteLeavesTheSeedEligible() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try FileManager.default.createDirectory(at: d.support, withIntermediateDirectories: true)
+        try Data().write(to: d.modes)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        let entries = ModeStore.loadLedger(in: d.ledger)?.entries ?? []
+        #expect(outcome.added.isEmpty)
+        #expect(entries.isEmpty)
+    }
+
     @Test func renamesUneditedSeedPreservingConnectionAndEnabled() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }

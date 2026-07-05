@@ -196,11 +196,17 @@ extension ModeStore {
         return carried
     }
 
-    private static func writeAndRecord(_ mode: Mode, to modesDir: URL, ledger: inout SeedLedger) {
-        guard let toml = try? encode(mode) else { return }
-        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
-        try? toml.write(to: modesDir.appendingPathComponent("\(mode.id).toml"), atomically: true, encoding: .utf8)
+    @discardableResult
+    private static func writeAndRecord(_ mode: Mode, to modesDir: URL, ledger: inout SeedLedger) -> Bool {
+        guard let toml = try? encode(mode) else { return false }
+        do {
+            try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+            try toml.write(to: modesDir.appendingPathComponent("\(mode.id).toml"), atomically: true, encoding: .utf8)
+        } catch {
+            return false
+        }
         ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: seedTemplateFingerprint(mode))
+        return true
     }
 
     // Reconcile the on-disk seeded modes against the current starter catalog. Idempotent: a second run
@@ -233,7 +239,7 @@ extension ModeStore {
                   let newSeed = catalog.first(where: { $0.id == rename.new }) else { continue }
             guard isSeedShaped(mode, like: expected) else { continue }
             let carried = carryForward(newSeed, connection: mode.aiRewrite?.connection, enabled: mode.enabled)
-            writeAndRecord(carried, to: modesDir, ledger: &ledger)
+            guard writeAndRecord(carried, to: modesDir, ledger: &ledger) else { continue }
             try? FileManager.default.removeItem(at: oldURL)
             ledger.remove(rename.old)
             outcome.renamed.append(rename.new)
@@ -248,8 +254,7 @@ extension ModeStore {
             let satisfiedOnDisk = present.contains(mode.id) || predecessors.contains { present.contains($0) }
             let knownToLedger = ledger.contains(mode.id) || predecessors.contains { ledger.contains($0) }
             if !satisfiedOnDisk && !knownToLedger {
-                writeAndRecord(mode, to: modesDir, ledger: &ledger)
-                outcome.added.append(mode.id)
+                if writeAndRecord(mode, to: modesDir, ledger: &ledger) { outcome.added.append(mode.id) }
             } else if present.contains(mode.id) && !ledger.contains(mode.id) {
                 ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: nil)
             }
@@ -284,8 +289,7 @@ extension ModeStore {
                   let current = try? decode(from: onDisk, id: mode.id),
                   seedTemplateFingerprint(current) == fingerprint else { continue }
             let updated = carryForward(mode, connection: current.aiRewrite?.connection, enabled: current.enabled)
-            writeAndRecord(updated, to: modesDir, ledger: &ledger)
-            outcome.updated.append(mode.id)
+            if writeAndRecord(updated, to: modesDir, ledger: &ledger) { outcome.updated.append(mode.id) }
         }
 
         saveLedger(ledger, in: ledgerDir)

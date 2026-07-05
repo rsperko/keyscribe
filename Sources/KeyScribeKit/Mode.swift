@@ -651,7 +651,11 @@ public enum ModeStore {
         var ledger = SeedLedger()
         for mode in starterModes() {
             guard let toml = try? encode(mode) else { continue }
-            try? toml.write(to: dir.appendingPathComponent("\(mode.id).toml"), atomically: true, encoding: .utf8)
+            do {
+                try toml.write(to: dir.appendingPathComponent("\(mode.id).toml"), atomically: true, encoding: .utf8)
+            } catch {
+                continue
+            }
             ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: seedTemplateFingerprint(mode))
         }
         if let ledgerDir { saveLedger(ledger, in: ledgerDir) }

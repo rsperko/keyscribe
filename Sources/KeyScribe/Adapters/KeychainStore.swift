@@ -56,39 +56,22 @@ enum KeychainStore {
         return SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess
     }
 
+    // Update the existing item in place so there is never a window where the key is absent: a crash
+    // mid-write can neither strand the stored secret (the old delete-then-add did, between the delete
+    // and the re-add) nor leak a `.tmp.<UUID>` backup item. `SecItemUpdate` errors `errSecItemNotFound`
+    // when nothing is stored yet, which is the only case that needs a fresh `SecItemAdd`. The update is
+    // data-only: `kSecAttrAccessible` is set once at creation, and updating it on a legacy login-keychain
+    // item can return `errSecParam` — which here would wrongly read as a save failure.
     private static func rawSet(_ secret: String, for keyRef: String, cachedOld: String?) -> Bool {
         let data = Data(secret.utf8)
         let query = baseQuery(keyRef)
-        // Rollback backup: reuse the cached secret when warm so a re-save skips the decrypt/prompt.
-        let oldData = cachedOld.map { Data($0.utf8) } ?? existingData(query)
-        let tempRef = "\(keyRef).tmp.\(UUID().uuidString)"
-        var temp = baseQuery(tempRef)
-        temp[kSecValueData as String] = data
-        temp[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        guard SecItemAdd(temp as CFDictionary, nil) == errSecSuccess else { return false }
-        SecItemDelete(query as CFDictionary)
+        let updated = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess { return true }
+        guard updated == errSecItemNotFound else { return false }
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        let ok = SecItemAdd(add as CFDictionary, nil) == errSecSuccess
-        SecItemDelete(baseQuery(tempRef) as CFDictionary)
-        if ok { return true }
-        if let oldData {
-            var restore = query
-            restore[kSecValueData as String] = oldData
-            restore[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-            _ = SecItemAdd(restore as CFDictionary, nil)
-        }
-        return false
-    }
-
-    private static func existingData(_ query: [String: Any]) -> Data? {
-        var q = query
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess else { return nil }
-        return item as? Data
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
     private static func rawGet(_ keyRef: String) -> String? {
