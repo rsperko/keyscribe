@@ -8,6 +8,14 @@ final class FeedOnce: @unchecked Sendable {
     var consumed = false
 }
 
+// Seam over the capture file write so the WAV and the in-memory samples stay in lockstep even on a write
+// failure, and so a fake can force a failure in tests. AVAudioFile satisfies it directly.
+protocol CaptureFileWriting: AnyObject {
+    func write(from buffer: AVAudioPCMBuffer) throws
+}
+
+extension AVAudioFile: CaptureFileWriting {}
+
 // Single consumer of an `AudioSampleRing`; keeps resampling and file I/O off the realtime thread.
 final class CaptureWriter: @unchecked Sendable {
     // Poll tick for draining the ring while keeping the realtime path syscall-free.
@@ -15,7 +23,7 @@ final class CaptureWriter: @unchecked Sendable {
 
     private let ring: AudioSampleRing
     // Released when the writer thread exits; the session owns final file-close ordering.
-    private var file: AVAudioFile?
+    private var file: (any CaptureFileWriting)?
     private let recordFormat: AVAudioFormat
     // Returns true once the release-covering buffer has reached disk and capture may seal.
     private let observeHostTime: (UInt64?) -> Bool
@@ -44,7 +52,12 @@ final class CaptureWriter: @unchecked Sendable {
     // capture can be handed to a sample-capable engine without re-reading the WAV (P2-1). Written on the
     // writer thread; read by drainedSamples() only after finish() has joined the thread. Bounded by the
     // recording cap (~19 MiB @16 kHz / ~29 MiB @24 kHz for the 5-min max), freed with the session.
+    // Only populated when `wantsSamples` — a sample-incapable engine (e.g. Apple) never reads it, so the
+    // per-chunk memcpy and peak memory are skipped for it (P2-2).
     private var accumulated: [Float] = []
+    // The active engine can transcribe from in-memory samples; when false, skip accumulation entirely and
+    // report no samples so the commit path re-reads the WAV instead.
+    private let wantsSamples: Bool
     // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
     // only, operating on device-native slots (pre-resample).
     private var headGate: HeadAdmitGate?
@@ -54,18 +67,23 @@ final class CaptureWriter: @unchecked Sendable {
     // nil when streaming is off, so the batch path allocates and does nothing extra.
     private let onSamples: (@Sendable ([Float]) -> Void)?
 
-    init(ring: AudioSampleRing, file: AVAudioFile?, recordFormat: AVAudioFormat,
+    init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
          admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0,
+         wantsSamples: Bool = true,
          onSamples: (@Sendable ([Float]) -> Void)? = nil,
          observeHostTime: @escaping (UInt64?) -> Bool) {
         self.ring = ring
         self.file = file
         self.recordFormat = recordFormat
+        self.wantsSamples = wantsSamples
         self.onSamples = onSamples
         self.observeHostTime = observeHostTime
         if admitAfterHostTime != 0, hostTicksPerSecond > 0 {
             headGate = HeadAdmitGate(admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond)
         }
+        // Pre-size the accumulator to ~30 s of record-rate mono so a multi-minute dictation stops
+        // re-copying the whole multi-MiB prefix through repeated doubling.
+        if wantsSamples { accumulated.reserveCapacity(Int(recordFormat.sampleRate * 30)) }
     }
 
     func start() {
@@ -85,12 +103,20 @@ final class CaptureWriter: @unchecked Sendable {
             if sealed || stopRequested.load(ordering: .acquiring) { break }
             _ = shutdown.wait(timeout: .now() + Self.pollInterval)
         }
-        if !sealed && flushOnStop.load(ordering: .acquiring) { flushConverterTail() }
+        let flushing = flushOnStop.load(ordering: .acquiring)
+        if !sealed && flushing { flushConverterTail() }
         // Drop heavy resources before `lastWriter` keeps the writer around for the next arm.
         file = nil
         converter = nil
         inBuffer = nil
         outBuffer = nil
+        // The cancel/discard path discards the audio, so don't let the writer pin the multi-MiB accumulator
+        // until the next arm replaces it (P2-1). Guard on `!sealed` too: a sealed COMMIT exits here on its own
+        // (the drain-gate trip) BEFORE finish(flushConverter:true) has set `flushOnStop`, so `flushing` reads
+        // false — clearing then would drop the committed samples finishWriterAndCloseFile is about to read.
+        // The commit paths (sealed, or backstop with `flushing`) keep it and clear via releaseSamples() after
+        // the copy, once this thread has joined.
+        if !sealed && !flushing { accumulated = [] }
         done.leave()
     }
 
@@ -110,9 +136,11 @@ final class CaptureWriter: @unchecked Sendable {
         // Head admission: drop/trim cue-window frames before the boundary, before conversion/write.
         var offset = 0
         var count = info.frameCount
-        if headGate != nil {
+        if var gate = headGate {
             let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
-            switch headGate!.observe(slotStartHostTime: host, frameCount: info.frameCount, sampleRate: info.sampleRate) {
+            let outcome = gate.observe(slotStartHostTime: host, frameCount: info.frameCount, sampleRate: info.sampleRate)
+            headGate = gate
+            switch outcome {
             case .admit: break
             case .drop: return
             case .admitTrailing(let dropFrames): offset = dropFrames; count = info.frameCount - dropFrames
@@ -152,12 +180,19 @@ final class CaptureWriter: @unchecked Sendable {
         return buffer
     }
 
+    // Write to the file and report whether it landed, so callers only expose samples the WAV actually holds.
+    private func writeToFile(_ file: any CaptureFileWriting, _ buffer: AVAudioPCMBuffer) -> Bool {
+        do { try file.write(from: buffer); return true } catch { return false }
+    }
+
     private func write(_ input: AVAudioPCMBuffer) {
         guard let file else { return }
         let inFmt = input.format
         if inFmt.sampleRate == recordFormat.sampleRate && inFmt.channelCount == recordFormat.channelCount {
-            try? file.write(from: input)
-            appendSamples(from: input)
+            // Only mirror to the accumulator/streaming sink if the WAV write landed, so the in-memory samples
+            // mainline STT transcribes never contain a chunk the file/archive/probe lacks (keeps P2-4's
+            // samples==WAV invariant true by construction, not just under the probe).
+            if writeToFile(file, input) { appendSamples(from: input) }
             return
         }
         if converter == nil {
@@ -183,8 +218,7 @@ final class CaptureWriter: @unchecked Sendable {
             return self.feed.buffer
         }
         guard convError == nil, outBuffer.frameLength > 0 else { return }
-        try? file.write(from: outBuffer)
-        appendSamples(from: outBuffer)
+        if writeToFile(file, outBuffer) { appendSamples(from: outBuffer) }
     }
 
     // Mirror the mono PCM written to the file into the in-memory accumulator. Same buffer, same samples,
@@ -193,15 +227,23 @@ final class CaptureWriter: @unchecked Sendable {
         let n = Int(buffer.frameLength)
         guard n > 0, let ptr = buffer.floatChannelData?[0] else { return }
         let slice = UnsafeBufferPointer(start: ptr, count: n)
-        accumulated.append(contentsOf: slice)
+        // Skip the accumulator when the active engine can't consume in-memory samples (P2-2); the streaming
+        // sink below is independent (it feeds Apple's live session) and still fires.
+        if wantsSamples { accumulated.append(contentsOf: slice) }
         // The streaming session sees the SAME samples the file/accumulator get, so a streamed transcript is
         // bit-identical in source to the committed WAV. Only allocates the copy when streaming is on.
         if let onSamples { onSamples(Array(slice)) }
     }
 
-    // The committed capture's post-conversion mono PCM. Safe to call only after finish() has joined the
-    // writer thread (the caller — AudioCapture.finishWriterAndCloseFile — does exactly that first).
-    func drainedSamples() -> [Float] { accumulated }
+    // The committed capture's post-conversion mono PCM, or nil when the engine can't consume samples
+    // (accumulation was skipped — the caller re-reads the WAV). Safe to call only after finish() has joined
+    // the writer thread (the caller — AudioCapture.finishWriterAndCloseFile — does exactly that first).
+    func drainedSamples() -> [Float]? { wantsSamples ? accumulated : nil }
+
+    // Drop the accumulator after the commit path has copied it out (via drainedSamples()), so the writer —
+    // retained via `lastWriter` until the next arm — does not pin a redundant multi-MiB copy while idle
+    // (P2-1). Safe only after finish() has joined the writer thread; the caller does that first.
+    func releaseSamples() { accumulated = [] }
 
     // Drain the resampler's internal latency (a few samples of SRC delay) into the file at end of capture,
     // so the very tail isn't left stuck inside the converter. No-op when no conversion is happening.
@@ -213,8 +255,7 @@ final class CaptureWriter: @unchecked Sendable {
             status.pointee = .endOfStream
             return nil
         }
-        if convError == nil, outBuffer.frameLength > 0 {
-            try? file.write(from: outBuffer)
+        if convError == nil, outBuffer.frameLength > 0, writeToFile(file, outBuffer) {
             appendSamples(from: outBuffer)
         }
     }

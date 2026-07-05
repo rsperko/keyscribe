@@ -651,11 +651,12 @@ final class DictationController {
     private func beginCapture(admitAfterHostTime: UInt64 = 0, holdRecordingUntil: DispatchTime? = nil) {
         lastRenderedLevel = 0
         let sampleRate = activeEngine.captureSampleRate
+        let wantsSamples = activeEngine.supportsSampleInput
         let onSamples = setUpStreamingIfEnabled(sampleRate: sampleRate)
         captureBringUpTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples)
+                _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples)
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still arming.
@@ -790,10 +791,15 @@ final class DictationController {
             self.effects.restoreAudio()
             let drainMs = self.elapsedMs(since: drainStart)
             self.building.stageMillis[.drain] = drainMs
-            // Open the freshly-written capture once here, for both the debug log and the audioSeconds the
-            // transcribe deadline scales from.
+            // The audioSeconds the transcribe deadline scales from. When the writer handed us samples they
+            // already carry the frame count at the record rate, so derive it directly and skip re-opening the
+            // WAV (and re-parsing its header) on the release→text critical path. Only a sample-incapable
+            // engine (samples == nil) falls back to the file open, which it needs anyway for transcription.
             var audioSeconds: Double?
-            if let f = try? AVAudioFile(forReading: url) {
+            if let samples {
+                audioSeconds = Double(samples.count) / Double(self.activeEngine.captureSampleRate)
+                self.log.debug("samples \(samples.count) @ \(self.activeEngine.captureSampleRate, privacy: .public)Hz drain=\(drainMs, privacy: .public)ms")
+            } else if let f = try? AVAudioFile(forReading: url) {
                 audioSeconds = Double(f.length) / f.fileFormat.sampleRate
                 self.log.debug("wav \(f.length) frames @ \(f.fileFormat.sampleRate, privacy: .public)Hz ch=\(f.fileFormat.channelCount, privacy: .public) drain=\(drainMs, privacy: .public)ms")
             } else {

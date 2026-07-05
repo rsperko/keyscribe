@@ -34,6 +34,9 @@ enum CaptureProbeRunner {
             print("capture-probe: capture produced no file.")
             return
         }
+        // Mainline dictation now transcribes the writer's in-memory samples, NOT the WAV — so verify the two
+        // are identical here (P2-4). Read before the WAV so a divergence surfaces even if the file read fails.
+        let drained = audio.takeDrainedSamples()
         let diag = audio.captureDiagnostics()
 
         let samples: [Float]
@@ -41,12 +44,22 @@ enum CaptureProbeRunner {
             print("capture-probe: could not read \(finalURL.path): \(error)")
             return
         }
+        let samplesMatchWAV = drained == samples
         // The commit path already archived a copy if KEYSCRIBE_KEEP_CAPTURE is set; drop the working file.
         try? FileManager.default.removeItem(at: finalURL)
 
         let m = CaptureProbeScoring.score(samples: samples, toneHz: Double(toneHz), sampleRate: Double(rate))
         let durationS = Double(m.sampleCount) / Double(rate)
-        let clean = diag.ringDropped == 0 && diag.overloads == 0 && m.glitchCount == 0
+        let clean = diag.ringDropped == 0 && diag.overloads == 0 && m.glitchCount == 0 && samplesMatchWAV
+
+        let samplesLine: String
+        if let drained {
+            samplesLine = samplesMatchWAV
+                ? "\(drained.count) == WAV (in-memory STT path matches the file)"
+                : "MISMATCH — \(drained.count) samples vs \(samples.count) in the WAV (STT would diverge from the probe)"
+        } else {
+            samplesLine = "nil — writer did not accumulate (engine can't consume samples)"
+        }
 
         print("""
         == capture-probe ==
@@ -54,6 +67,7 @@ enum CaptureProbeRunner {
           rms / peak        : \(String(format: "%.4f", m.rms)) / \(String(format: "%.4f", m.peak))
           tone \(Int(toneHz)) Hz SINAD  : \(String(format: "%.1f", m.sinadDB)) dB   (higher = cleaner; a clean tone is >80)
           glitches          : \(m.glitchCount)   maxGlitchRatio: \(String(format: "%.3f", m.maxGlitchRatio))
+          in-memory samples : \(samplesLine)
           ring dropped      : \(diag.ringDropped)   (writer-keep-up canary; must be 0)
           CoreAudio overloads: \(diag.overloads)   (RT-deadline canary; must be 0)
           verdict           : \(clean ? "CLEAN" : "SUSPECT — investigate the non-zero counters above")

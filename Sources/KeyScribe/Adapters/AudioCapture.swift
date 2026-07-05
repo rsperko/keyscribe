@@ -15,6 +15,11 @@ protocol AudioCapturing: AnyObject, Sendable {
     // thread (never the realtime IO thread), so a streaming session can transcribe during capture. `onSamples`
     // nil = batch only. Default forwards to the 2-arg start, dropping the sink, so non-streaming doubles inherit.
     func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
+    // Richest variant: `wantsSamples` mirrors the active engine's `supportsSampleInput` — when false, the
+    // writer skips the in-memory PCM accumulator the engine would ignore anyway (P2-2). Default drops it
+    // (`true`) and forwards to the onSamples variant so existing doubles inherit unchanged.
+    func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
+               onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
     // Latest perceptual mic level (0…1), published from the realtime thread.
     var currentLevel: Float { get }
     func stop() -> URL?
@@ -45,6 +50,12 @@ extension AudioCapturing {
     // Default: drop the streaming sink and take the batch path. A streaming double overrides this.
     func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime)
+    }
+    // Default: drop `wantsSamples` and forward to the onSamples variant, so a double that only implements the
+    // onSamples overload (or the base start) still receives the call.
+    func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
+               onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples)
     }
 }
 
@@ -184,6 +195,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: true, onSamples: onSamples)
+    }
+
+    func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
+               onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         rebuildIfNeeded()
         let (queue, generation) = currentQueueAndGeneration()
         let started = DispatchTime.now()
@@ -191,7 +207,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             // Non-destructive watchdog: adopt a bring-up that lands within the grace window; only the
             // DeadlineExceeded branch below (a genuinely wedged device) tears the half-open capture down.
             let url = try await runWithDeadline(seconds: Self.bringUpTimeout + Self.bringUpGrace) { [self] in
-                try await bringUp(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples, queue: queue, generation: generation)
+                try await bringUp(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples, queue: queue, generation: generation)
             }
             let ms = Self.elapsedMs(since: started)
             let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
@@ -230,14 +246,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func bringUp(
-        sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?,
+        sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?,
         queue: DispatchQueue, generation: Int
     ) async throws -> URL {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
             queue.async { [self] in
                 do {
                     cont.resume(returning: try armSync(
-                        sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples, generation: generation))
+                        sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples, generation: generation))
                 } catch { cont.resume(throwing: error) }
             }
         }
@@ -295,7 +311,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // Sets up the capture file and writer thread, then brings the unit up on the control queue. The ring is
     // reset, the writer starts, and `capturing` flips on before the unit's IOProc goes live.
-    private func armSync(sampleRate: Int, admitAfterHostTime: UInt64 = 0,
+    private func armSync(sampleRate: Int, admitAfterHostTime: UInt64 = 0, wantsSamples: Bool = true,
                          onSamples: (@Sendable ([Float]) -> Void)? = nil, generation: Int) throws -> URL {
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
@@ -334,9 +350,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         overloadCount.store(0, ordering: .relaxed)
         levelBits.store(Float(0).bitPattern, ordering: .relaxed)
+        // The previous capture's samples are consumed by the controller right after finishDraining; clear any
+        // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
+        lock.withLock { lastDrainedSamples = nil }
         let writer = CaptureWriter(
             ring: ring, file: file, recordFormat: recordFormat,
             admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: Self.hostTicksPerSecond,
+            wantsSamples: wantsSamples,
             onSamples: onSamples,
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, writer: writer)
@@ -563,11 +583,15 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         removeActiveDeviceListener()
         s?.writer.finish(flushConverter: flushConverter)
         // The writer thread has joined; its accumulated PCM is now stable. Keep it only on the commit path
-        // (flushConverter) — cancel/stop/discard pass false and their audio is dropped with the session.
-        if flushConverter, let s {
-            let samples = s.writer.drainedSamples()
+        // (flushConverter) — cancel/stop/discard pass false and their audio is dropped with the session — and
+        // only when the writer actually accumulated (nil when the engine can't consume samples, P2-2).
+        if flushConverter, let samples = s?.writer.drainedSamples() {
             lock.withLock { lastDrainedSamples = samples }
         }
+        // The samples (if any) are now held by lastDrainedSamples; drop the writer's own reference so the
+        // writer retained via lastWriter until the next arm doesn't pin a redundant idle copy (P2-1). The
+        // sealed/backstop commit paths don't clear in run() (they can't — see there), so clear here.
+        s?.writer.releaseSamples()
         // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
         // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
         // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
