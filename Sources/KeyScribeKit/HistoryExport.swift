@@ -37,11 +37,11 @@ public enum HistoryExport {
         return e
     }()
 
-    public static func export(_ entries: [HistoryEntry], format: Format, formatting: Formatting) -> String {
+    public static func export(_ entries: [HistoryEntry], format: Format, formatting: Formatting, appName: String) -> String {
         switch format {
         case .json: return json(entries)
-        case .markdown: return markdown(entries, formatting)
-        case .text: return text(entries, formatting)
+        case .markdown: return markdown(entries, formatting, appName)
+        case .text: return text(entries, formatting, appName)
         }
     }
 
@@ -50,8 +50,8 @@ public enum HistoryExport {
             .joined(separator: "\n")
     }
 
-    private static func markdown(_ entries: [HistoryEntry], _ f: Formatting) -> String {
-        var out = "# KeyScribe history\n"
+    private static func markdown(_ entries: [HistoryEntry], _ f: Formatting, _ appName: String) -> String {
+        var out = "# \(appName) history\n"
         for group in grouped(entries, f) {
             out += "\n## \(group.day)\n\n"
             for e in group.entries {
@@ -66,8 +66,8 @@ public enum HistoryExport {
         return out
     }
 
-    private static func text(_ entries: [HistoryEntry], _ f: Formatting) -> String {
-        var out = "KeyScribe history\n"
+    private static func text(_ entries: [HistoryEntry], _ f: Formatting, _ appName: String) -> String {
+        var out = "\(appName) history\n"
         for group in grouped(entries, f) {
             out += "\n\(group.day)\n"
             for e in group.entries {

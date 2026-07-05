@@ -4,7 +4,7 @@ import KeyScribeKit
 // Thin BYOK client over the OpenAI / Anthropic / Gemini HTTP APIs (design.md §5). The key is
 // fetched from the Keychain by the connection's key_ref. Provider-agnostic orchestration
 // (assemble → gate → retry/fallback) lives in KeyScribeKit.RewriteService; this only does transport.
-// Runtime-unverified without a real key — flagged in docs/session-status.md.
+// Runtime-unverified without a real key.
 struct HTTPLLMClient: LLMClient {
     // A bounded session, not URLSession.shared (whose default request timeout is 60s — and the gate's
     // stricter-retry would double that). A hung BYOK endpoint must fall back to the local transcript

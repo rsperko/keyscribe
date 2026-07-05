@@ -27,7 +27,7 @@ private func utc() -> HistoryExport.Formatting {
 struct HistoryExportTests {
     @Test func jsonExportRoundTripsLineByLineThroughHistoryEntry() throws {
         let entries = [entry("first"), entry("second", secondsAgo: 90_000)]
-        let out = HistoryExport.export(entries, format: .json, formatting: utc())
+        let out = HistoryExport.export(entries, format: .json, formatting: utc(), appName: "KeyScribe")
         let lines = out.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         #expect(lines.count == 2)
         let decoded = try lines.map { try HistoryEntry(jsonLine: $0) }
@@ -39,7 +39,7 @@ struct HistoryExportTests {
             entry("hello", mode: "Email", outcome: .inserted),
             entry("secret", mode: "Secure", outcome: .copied, secondsAgo: 90_000, cloud: true, redaction: true),
         ]
-        let md = HistoryExport.export(entries, format: .markdown, formatting: utc())
+        let md = HistoryExport.export(entries, format: .markdown, formatting: utc(), appName: "KeyScribe")
         #expect(md.contains("## 2023-11-14"))
         #expect(md.contains("## 2023-11-13"))
         #expect(md.contains("Email"))
@@ -50,14 +50,23 @@ struct HistoryExportTests {
     }
 
     @Test func textExportContainsResultsAndOutcomes() {
-        let md = HistoryExport.export([entry("ship it", outcome: .inserted)], format: .text, formatting: utc())
+        let md = HistoryExport.export([entry("ship it", outcome: .inserted)], format: .text, formatting: utc(), appName: "KeyScribe")
         #expect(md.contains("ship it"))
         #expect(md.contains("Inserted"))
     }
 
+    @Test func headerUsesTheSuppliedAppName() {
+        let entries = [entry("hello", outcome: .inserted)]
+        let md = HistoryExport.export(entries, format: .markdown, formatting: utc(), appName: "Acme Voice")
+        let txt = HistoryExport.export(entries, format: .text, formatting: utc(), appName: "Acme Voice")
+        #expect(md.hasPrefix("# Acme Voice history\n"))
+        #expect(txt.hasPrefix("Acme Voice history\n"))
+        #expect(!md.contains("KeyScribe"))
+    }
+
     @Test func emptyExportIsNotCrashing() {
-        #expect(HistoryExport.export([], format: .json, formatting: utc()).isEmpty)
-        #expect(!HistoryExport.export([], format: .markdown, formatting: utc()).isEmpty)
+        #expect(HistoryExport.export([], format: .json, formatting: utc(), appName: "KeyScribe").isEmpty)
+        #expect(!HistoryExport.export([], format: .markdown, formatting: utc(), appName: "KeyScribe").isEmpty)
     }
 }
 

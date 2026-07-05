@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Hardened-runtime entitlements, passed by release.sh (Developer ID + notarization). KeyScribe is
-     NOT App-Sandboxed (it needs event taps / Accessibility, which the sandbox forbids). Full rationale
-     and the data-protection-keychain plan live in docs/session-status.md and agent_notes/distribution_plan.
+     NOT App-Sandboxed (it needs event taps / Accessibility, which the sandbox forbids).
      Keep XML comments free of double hyphens: AMFI parses this file strictly and rejects them. -->
 <plist version="1.0">
 <dict>

@@ -18,8 +18,11 @@
 ## Remaining work
 
 ### Distribution & updates
-- **In-app updates (Sparkle)** + the menu-bar **update badge** (amber dot, top-right —
-  `ui_design.md` §6) and the matching update menu item. None built yet.
+- **Update affordance built; no in-app update check ships.** The menu-bar **update badge** (amber dot,
+  top-right — `ui_design.md` §6), the matching update menu item, and the `AppUpdater` injection seam
+  (`Sources/KeyScribeKit/AppUpdater.swift`) are built and wired. KeyScribe itself performs no update
+  check — public updates go through **Homebrew**, and no updater is injected by default (Sparkle is no
+  longer the plan). The seam exists so a downstream build can run its own check off the existing lifecycle.
 - **Release packaging floor alignment.** The app bundle and `Package.swift` declare macOS 15.0, and
   Apple Speech is availability-gated to macOS 26+, but the Homebrew cask currently declares macOS
   Tahoe. Decide whether the cask should relax to the app floor before the next publish.

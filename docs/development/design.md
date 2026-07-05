@@ -582,8 +582,10 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
   - No SQLite (simple architecture, YAGNI). Revisit only if history search outgrows line-scanning
     JSONL.
 - **Distribution & updates:** direct distribution, **notarized** (Developer ID) — **not** Mac App
-  Store, whose App Sandbox restricts the AX APIs KeyScribe depends on. **In-app updates** (Sparkle)
-  with a menu-bar indicator are planned, not built.
+  Store, whose App Sandbox restricts the AX APIs KeyScribe depends on. The menu-bar update badge +
+  "Update Available…" item and the `AppUpdater` injection seam are built, but KeyScribe itself ships
+  **no in-app update check** — public updates go through **Homebrew**, and no updater is injected by
+  default (Sparkle is no longer the plan; the seam lets a downstream build run its own check).
 - **License: GPLv3.** Compatible with the deps (Apache-2.0 and MIT code flow into a GPLv3 project;
   weights are runtime-downloaded *data*, not linked code, so the source tree stays clean), and it
   permits selling notarized binaries provided source is offered. The legal obligation is four things:

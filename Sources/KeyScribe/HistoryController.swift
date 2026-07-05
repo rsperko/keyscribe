@@ -203,7 +203,7 @@ private final class HistoryViewModel: ObservableObject {
                 let timeF = DateFormatter(); timeF.dateStyle = .none; timeF.timeStyle = .short
                 let formatting = HistoryExport.Formatting(
                     day: { dayF.string(from: $0) }, time: { timeF.string(from: $0) })
-                return HistoryExport.export(filtered, format: format, formatting: formatting)
+                return HistoryExport.export(filtered, format: format, formatting: formatting, appName: Branding.appName)
             }.value
             self.presentSavePanel(payload: payload, format: format)
         }
@@ -212,7 +212,8 @@ private final class HistoryViewModel: ObservableObject {
     private func presentSavePanel(payload: String, format: HistoryExport.Format) {
         guard !payload.isEmpty else { flash("Nothing to export."); return }
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "keyscribe-history.\(format.fileExtension)"
+        let slug = Branding.appName.lowercased().replacingOccurrences(of: " ", with: "-")
+        panel.nameFieldStringValue = "\(slug)-history.\(format.fileExtension)"
         panel.canCreateDirectories = true
         if let type = UTType(filenameExtension: format.fileExtension) { panel.allowedContentTypes = [type] }
         guard panel.runModal() == .OK, let url = panel.url else { return }
