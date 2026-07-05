@@ -221,6 +221,18 @@ enum TextInserter {
         }
     }
 
+    // Hand focus back to `target` and paste `text` there via the shared safe insertion path (single ⌘Z
+    // undo). The caller orders its own window out and owns the fallback: returns false without pasting
+    // if focus could not be handed back, so History can copy-to-clipboard while the correction panel
+    // reports the selection unchanged. The 120 ms after frontmost confirmation lets the target's key
+    // window become ready before ⌘V.
+    static func pasteReturning(to target: NSRunningApplication, text: String) async -> Bool {
+        target.activate()
+        guard await waitUntilFrontmost(target) else { return false }
+        try? await Task.sleep(for: .milliseconds(120))
+        return await insertViaPaste(text)
+    }
+
     static func poll(timeoutMs: Int, stepMs: Int, condition: () -> Bool) async -> Bool {
         var waited = 0
         while waited < timeoutMs {

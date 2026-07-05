@@ -88,15 +88,12 @@ final class CorrectionPanelController {
         }
         window?.orderOut(nil)
         Task { @MainActor in
-            target.activate()
-            guard await TextInserter.waitUntilFrontmost(target) else {
+            guard await TextInserter.pasteReturning(to: target, text: pasteText) else {
                 status.message = "Saved to your vocabulary. \(Branding.appName) could not return to the app, so the selected text was not changed."
                 NSApp.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)
                 return
             }
-            try? await Task.sleep(for: .milliseconds(120))
-            await TextInserter.insertViaPaste(pasteText)
             window?.close()
         }
     }

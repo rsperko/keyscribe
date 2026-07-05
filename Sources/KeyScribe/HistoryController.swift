@@ -8,9 +8,13 @@ final class HistoryController {
     private var window: NSWindow?
     private let model: HistoryViewModel
     private var loadedSignature: String?
-    // The app that was frontmost when History opened — the target a "Paste Result" must land in,
-    // since History itself is key while the user is reading.
+    // The app to hand focus back to for a "Paste Result", since History itself is key while the user
+    // reads. Seeded from the frontmost app at open and kept fresh while the window is up: the user can
+    // switch to another app and back before pasting, so the target must track the last real app they
+    // were in, not the one frontmost when History was first presented.
     private var previousApp: NSRunningApplication?
+    private var activationObserver: NSObjectProtocol?
+    private var closeObserver: NSObjectProtocol?
 
     init(
         store: HistoryStore,
@@ -52,10 +56,36 @@ final class HistoryController {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         self.window = window
+        observeLifecycle(of: window)
+    }
+
+    private func observeLifecycle(of window: NSWindow) {
+        let selfBundleId = Bundle.main.bundleIdentifier
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window?.isVisible == true,
+                      let app = NSWorkspace.shared.frontmostApplication,
+                      app.bundleIdentifier != selfBundleId else { return }
+                self.previousApp = app
+            }
+        }
+        // The window is not released on close, so its parsed rows + full-store cache would otherwise
+        // survive until the next open; drop them and force a fresh read next present().
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.model.releaseForClose()
+                self.loadedSignature = nil
+            }
+        }
     }
 
     // Paste lands in the frontmost app, but History is key while open, so we hand focus back to the
-    // app that was frontmost when History opened and paste there via the shared safe insertion path.
+    // app the user was last in and paste there via the shared safe insertion path.
     // No reliable target (History is the only candidate, or nothing was frontmost) → copy instead and
     // say so, rather than synthesize a ⌘V into ourselves.
     private func pasteToPreviousApp(_ text: String) {
@@ -66,17 +96,14 @@ final class HistoryController {
             return
         }
         window?.orderOut(nil)
-        target.activate()
         Task { @MainActor in
-            guard await TextInserter.waitUntilFrontmost(target) else {
+            guard await TextInserter.pasteReturning(to: target, text: text) else {
                 TextInserter.copyToClipboard(text)
                 NSApp.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)
                 model.flash("Could not return to the app — copied to clipboard instead.")
                 return
             }
-            try? await Task.sleep(for: .milliseconds(120))
-            await TextInserter.insertViaPaste(text)
         }
     }
 }
@@ -123,6 +150,10 @@ private final class HistoryViewModel: ObservableObject {
     private var statusTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
+    // Bumped by every reload() and by releaseForClose(); a detached load/search task captures it at
+    // spawn and its main-actor continuation is dropped if it no longer matches, so a task that already
+    // passed its cancellation check cannot repopulate the caches after close (or after a newer reload).
+    private var loadGeneration = 0
 
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Void
@@ -155,20 +186,39 @@ private final class HistoryViewModel: ObservableObject {
 
     func storeSignature() -> String { store.signature() }
 
+    // Drop everything held for the visible window so a closed History window retains no parsed
+    // transcripts or the full-store search cache; the next open re-reads from disk.
+    func releaseForClose() {
+        loadGeneration &+= 1
+        recomputeTask?.cancel(); searchTask?.cancel(); statusTask?.cancel()
+        selectionTask?.cancel(); reloadTask?.cancel()
+        rows = []
+        entryIndex = [:]
+        searchCache = nil
+        groups = []
+        selection = nil
+        statsLine = nil
+        statusMessage = nil
+        isLoading = false
+    }
+
     func reload() {
         isLoading = true
         searchCache = nil
+        loadGeneration &+= 1
+        let generation = loadGeneration
         let store = self.store
         let limit = Self.loadLimit
         reloadTask?.cancel()
         reloadTask = Task.detached { [weak self] in
             let loaded = store.entries(limit: limit)
             if Task.isCancelled { return }
-            await self?.applyLoaded(loaded)
+            await self?.applyLoaded(loaded, generation: generation)
         }
     }
 
-    private func applyLoaded(_ loaded: [HistoryEntry]) {
+    private func applyLoaded(_ loaded: [HistoryEntry], generation: Int) {
+        guard generation == loadGeneration else { return }
         rows = loaded.map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
         entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
         statsLine = Self.statsSummary(HistoryStats.compute(from: loaded))
@@ -239,9 +289,10 @@ private final class HistoryViewModel: ObservableObject {
 
     private func recomputeGroups() {
         searchTask?.cancel()
+        let generation = loadGeneration
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            applyFilteredRows(rows)
+            applyFilteredRows(rows, generation: generation)
             return
         }
         let store = self.store
@@ -253,21 +304,23 @@ private final class HistoryViewModel: ObservableObject {
                 all = cachedEntries
             } else {
                 all = store.entries(limit: nil)
-                await self?.cacheFullEntries(all, signature: signature)
+                await self?.cacheFullEntries(all, signature: signature, generation: generation)
             }
             let filtered = all
                 .filter { HistorySearch.matches($0, query: trimmed) }
                 .map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
             if Task.isCancelled { return }
-            await self?.applyFilteredRows(filtered)
+            await self?.applyFilteredRows(filtered, generation: generation)
         }
     }
 
-    private func cacheFullEntries(_ entries: [HistoryEntry], signature: String) {
+    private func cacheFullEntries(_ entries: [HistoryEntry], signature: String, generation: Int) {
+        guard generation == loadGeneration else { return }
         searchCache = (signature, entries)
     }
 
-    private func applyFilteredRows(_ filtered: [HistoryRow]) {
+    private func applyFilteredRows(_ filtered: [HistoryRow], generation: Int) {
+        guard generation == loadGeneration else { return }
         groups = Dictionary(grouping: filtered, by: \.day)
             .map { (day: $0.key, rows: $0.value) }
             .sorted { ($0.rows.first?.entry.timestamp ?? .distantPast) > ($1.rows.first?.entry.timestamp ?? .distantPast) }
