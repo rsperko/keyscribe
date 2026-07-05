@@ -96,6 +96,31 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     }
 
     nonisolated var supportsSampleInput: Bool { true }
+    // Streaming is DISABLED for Moonshine: it proved the streaming interface (P3-1) but its streamed WER ran
+    // +2.7% over batch with no latency win, so it fails the rollout contract. makeStreamingSession and
+    // MoonshineStreamingSession are kept as harness fixtures; this flag being false means the controller
+    // never opens a session for it. Apple is the shipping streaming engine.
+    nonisolated var supportsStreaming: Bool { false }
+
+    // A fresh per-dictation stream off the transcriber handle. loadIfNeeded ran under the SerializedEngine
+    // lock (ensureRuntimeLocked) before this, so the transcriber is resident; the lock is held for the
+    // session's whole lifetime, so evict()'s transcriber.close() can never fire under a live stream.
+    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
+        try await loadIfNeeded()
+        Log.bias.info("moonshine streaming: bias unsupported — \(biasTerms.count, privacy: .public) term(s) ignored")
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<any StreamingSpeechSession, Error>) in
+            inferenceQueue.async { [self] in
+                guard let transcriber else { cont.resume(throwing: EngineError.notInitialized); return }
+                do {
+                    let stream = try transcriber.createStream()
+                    try stream.start()
+                    cont.resume(returning: MoonshineStreamingSession(stream: stream, sampleRate: sampleRate, queue: inferenceQueue))
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+        }
+    }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await transcribe(samples: try AudioDecoder.pcmMono(wavURL, sampleRate: 16000), sampleRate: 16000, biasTerms: biasTerms)
@@ -121,5 +146,54 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {
         transcriber?.close()
         transcriber = nil
+    }
+}
+
+// One dictation's Moonshine stream. Every SDK call (addAudio/stop/updateTranscription/close) touches the
+// non-Sendable Stream handle, so all run on the same inferenceQueue the batch path uses — serialized both
+// against each other (the driver calls them sequentially anyway) and off the cooperative pool. The
+// SerializedEngine lock (held for this session's lifetime) keeps evict from closing the transcriber under it.
+final class MoonshineStreamingSession: StreamingSpeechSession, @unchecked Sendable {
+    private let stream: MoonshineVoice.Stream
+    private let sampleRate: Int
+    private let queue: DispatchQueue
+
+    init(stream: MoonshineVoice.Stream, sampleRate: Int, queue: DispatchQueue) {
+        self.stream = stream
+        self.sampleRate = sampleRate
+        self.queue = queue
+    }
+
+    // A mid-stream addAudio failure throws so the driver cancels this session and the dictation degrades to
+    // a batch transcribe of the intact audio — the chunk is never silently dropped.
+    func append(samples: [Float]) async throws {
+        try await onQueueThrowing {
+            try self.stream.addAudio(samples, sampleRate: Int32(self.sampleRate))
+        }
+    }
+
+    func finalizeTranscript() async throws -> String {
+        try await onQueueThrowing {
+            defer { self.stream.close() }
+            try self.stream.stop()
+            let transcript = try self.stream.updateTranscription()
+            return transcript.lines.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    func cancel() async {
+        await onQueue { self.stream.close() }
+    }
+
+    private func onQueue(_ body: @escaping @Sendable () -> Void) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            queue.async { body(); cont.resume() }
+        }
+    }
+
+    private func onQueueThrowing<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
+            queue.async { do { cont.resume(returning: try body()) } catch { cont.resume(throwing: error) } }
+        }
     }
 }

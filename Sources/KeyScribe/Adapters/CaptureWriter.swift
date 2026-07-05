@@ -48,13 +48,20 @@ final class CaptureWriter: @unchecked Sendable {
     // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
     // only, operating on device-native slots (pre-resample).
     private var headGate: HeadAdmitGate?
+    // Streaming feed (P3-1): when set, each post-conversion mono chunk written to the file is also handed to
+    // this sink so a streaming session can transcribe during capture. Called on the writer thread ONLY, and
+    // MUST be non-blocking (the real wiring is a bounded AsyncStream yield) — never the realtime IO thread.
+    // nil when streaming is off, so the batch path allocates and does nothing extra.
+    private let onSamples: (@Sendable ([Float]) -> Void)?
 
     init(ring: AudioSampleRing, file: AVAudioFile?, recordFormat: AVAudioFormat,
          admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0,
+         onSamples: (@Sendable ([Float]) -> Void)? = nil,
          observeHostTime: @escaping (UInt64?) -> Bool) {
         self.ring = ring
         self.file = file
         self.recordFormat = recordFormat
+        self.onSamples = onSamples
         self.observeHostTime = observeHostTime
         if admitAfterHostTime != 0, hostTicksPerSecond > 0 {
             headGate = HeadAdmitGate(admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond)
@@ -185,7 +192,11 @@ final class CaptureWriter: @unchecked Sendable {
     private func appendSamples(from buffer: AVAudioPCMBuffer) {
         let n = Int(buffer.frameLength)
         guard n > 0, let ptr = buffer.floatChannelData?[0] else { return }
-        accumulated.append(contentsOf: UnsafeBufferPointer(start: ptr, count: n))
+        let slice = UnsafeBufferPointer(start: ptr, count: n)
+        accumulated.append(contentsOf: slice)
+        // The streaming session sees the SAME samples the file/accumulator get, so a streamed transcript is
+        // bit-identical in source to the committed WAV. Only allocates the copy when streaming is on.
+        if let onSamples { onSamples(Array(slice)) }
     }
 
     // The committed capture's post-conversion mono PCM. Safe to call only after finish() has joined the

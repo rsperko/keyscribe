@@ -52,7 +52,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
     // Wall-clock stage timings, stamped by the app layer (the clock stays out of this pure type).
     // Ordered chronologically: `arm` is press→mic-live, `modelWait` is the commit-time load await.
     public enum Stage: String, Codable, Sendable, CaseIterable {
-        case arm, drain, modelWait, transcribe, localProcess, rewrite, insert
+        case arm, drain, modelWait, transcribe, streamFinalize, localProcess, rewrite, insert
     }
 
     // The text boundaries a fingerprint is taken at, in pipeline order.

@@ -25,5 +25,14 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public let title: String
     public let summary: String
 
-    public static let allCases: [Feature] = []
+    // Streaming transcription (P3-1): on supported engines, transcribe speech incrementally during
+    // capture so the transcript is ready sooner after the key is released. Off by default; engines that
+    // can't stream, and this flag off, keep the batch transcribe path unchanged.
+    public static let streamingTranscription = Feature(
+        id: "streaming_transcription",
+        title: "Streaming transcription",
+        summary: "On supported speech models, begin transcribing while you talk, so longer dictations can be ready sooner after you finish. Short dictations are unaffected."
+    )
+
+    public static let allCases: [Feature] = [streamingTranscription]
 }

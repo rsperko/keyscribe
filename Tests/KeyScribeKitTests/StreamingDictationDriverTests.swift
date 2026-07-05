@@ -1,0 +1,200 @@
+import Foundation
+import Testing
+@testable import KeyScribeKit
+
+// Fake session recording what the driver fed it and how it was closed. finalizeThrows models a mid-stream
+// SDK failure at commit; the driver must then fall back to batch, never surface a partial.
+private final class FakeSession: StreamingSpeechSession, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _appended: [[Float]] = []
+    private var _appendCalls = 0
+    private var _finalized = false
+    private var _cancelled = false
+    private let finalizeThrows: Bool
+    private let appendThrowsAt: Int?   // 1-based append call at/after which append throws (nil = never)
+    private let transcript: String
+    init(transcript: String = "streamed", finalizeThrows: Bool = false, appendThrowsAt: Int? = nil) {
+        self.transcript = transcript
+        self.finalizeThrows = finalizeThrows
+        self.appendThrowsAt = appendThrowsAt
+    }
+
+    var appendedChunks: [[Float]] { lock.withLock { _appended } }
+    var appendedFrames: Int { lock.withLock { _appended.reduce(0) { $0 + $1.count } } }
+    var finalized: Bool { lock.withLock { _finalized } }
+    var cancelled: Bool { lock.withLock { _cancelled } }
+
+    func append(samples: [Float]) async throws {
+        let n = lock.withLock { _appendCalls += 1; return _appendCalls }
+        if let at = appendThrowsAt, n >= at { throw FakeSessionError() }
+        lock.withLock { _appended.append(samples) }
+    }
+    func finalizeTranscript() async throws -> String {
+        lock.withLock { _finalized = true }
+        if finalizeThrows { throw FakeSessionError() }
+        return transcript
+    }
+    func cancel() async { lock.withLock { _cancelled = true } }
+}
+
+private struct FakeSessionError: Error {}
+
+// Controllable monotonic clock for the fell-behind trip.
+private final class StepClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var t: Double
+    init(_ start: Double = 0) { t = start }
+    func advance(_ d: Double) { lock.withLock { t += d } }
+    func read() -> Double { lock.withLock { t } }
+}
+
+// Counts how many sessions the factory built, so "no session for a short clip" is provable.
+private final class SessionFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _built = 0
+    private let make: @Sendable () -> FakeSession
+    private let fails: Bool
+    init(fails: Bool = false, make: @escaping @Sendable () -> FakeSession = { FakeSession() }) {
+        self.make = make
+        self.fails = fails
+    }
+    var built: Int { lock.withLock { _built } }
+    var last: FakeSession? { lock.withLock { _last } }
+    private var _last: FakeSession?
+    func callable() -> @Sendable () async throws -> any StreamingSpeechSession {
+        { [self] in
+            lock.withLock { _built += 1 }
+            if fails { throw FakeSessionError() }
+            let s = make()
+            lock.withLock { _last = s }
+            return s
+        }
+    }
+}
+
+struct StreamingDictationDriverTests {
+    // 16 kHz, 4 s threshold → 64000 frames.
+    private func policy(threshold: Double = 4) -> StreamingStartPolicy {
+        StreamingStartPolicy(thresholdSeconds: threshold, sampleRate: 16000)
+    }
+
+    // Short clip (below threshold): no session is ever created, and finish() defers to batch.
+    @Test func shortClipNeverCreatesASessionAndFallsBackToBatch() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        await driver.ingest([Float](repeating: 0, count: 16000))   // 1 s, under 4 s
+        let outcome = await driver.finish()
+        #expect(factory.built == 0)
+        #expect(outcome == .fallBackToBatch)
+    }
+
+    // Crossing the threshold creates ONE session and replays every buffered frame in order, then streams live.
+    @Test func crossingThresholdCreatesSessionReplaysThenStreamsLive() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        // Three 2 s chunks: session opens on the second (4 s crossed), replays chunks 1+2, streams chunk 3.
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        let outcome = await driver.finish()
+        #expect(factory.built == 1)
+        #expect(outcome == .streamed("streamed"))
+        #expect(factory.last?.appendedFrames == 96000)   // all three chunks reached the session
+        #expect(factory.last?.finalized == true)
+    }
+
+    // finalize throwing (a mid-stream SDK failure surfacing at commit) must fall back to batch, not partial.
+    @Test func finalizeThrowFallsBackToBatch() async {
+        let factory = SessionFactory(make: { FakeSession(finalizeThrows: true) })
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        let outcome = await driver.finish()
+        #expect(factory.built == 1)
+        #expect(factory.last?.finalized == true)   // finalize was attempted
+        #expect(outcome == .fallBackToBatch)        // and its failure degraded to batch
+    }
+
+    // A session that fails to build (SDK/model error) degrades to batch and never retries mid-dictation.
+    @Test func sessionBuildFailureFallsBackToBatch() async {
+        let factory = SessionFactory(fails: true)
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        let outcome = await driver.finish()
+        #expect(factory.built == 1)                 // tried once at the crossing
+        #expect(outcome == .fallBackToBatch)
+    }
+
+    // Cancel (ESC/over-limit) after a session exists cancels it and never finalizes.
+    @Test func cancelClosesSessionWithoutFinalizing() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        await driver.cancel()
+        #expect(factory.last?.cancelled == true)
+        #expect(factory.last?.finalized == false)
+    }
+
+    // Ingest after cancel is inert — no late frames reach a cancelled session.
+    @Test func ingestAfterCancelIsIgnored() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        let framesBefore = factory.last?.appendedFrames ?? -1
+        await driver.cancel()
+        await driver.ingest([Float](repeating: 0.1, count: 32000))
+        #expect(factory.last?.appendedFrames == framesBefore)
+    }
+
+    // A defensive cancel() after finish() (the controller fires cancel on every terminal path to guarantee
+    // the engine lock is released) must be a clean no-op — never re-touch a session that already finalized.
+    @Test func cancelAfterFinishIsANoOp() async {
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        _ = await driver.finish()
+        await driver.cancel()
+        #expect(factory.last?.finalized == true)
+        #expect(factory.last?.cancelled == false)   // cancel did not re-close the finalized session
+    }
+
+    // A replayed chunk that fails to append (e.g. a resample error) cancels the just-opened session to
+    // release the engine lock, and degrades to batch — never a partial from a compromised session.
+    @Test func appendThrowDuringReplayCancelsSessionAndFallsBackToBatch() async {
+        let factory = SessionFactory(make: { FakeSession(appendThrowsAt: 1) })
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        let outcome = await driver.finish()
+        #expect(factory.built == 1)
+        #expect(factory.last?.cancelled == true)   // the opened session was cancelled to free the lock
+        #expect(factory.last?.finalized == false)
+        #expect(outcome == .fallBackToBatch)
+    }
+
+    // A live chunk (post-replay) that fails to append cancels the session and degrades to batch.
+    @Test func appendThrowOnLiveChunkCancelsSessionAndFallsBackToBatch() async {
+        // 4 s threshold, 2 s chunks: replay = 2 appends (calls 1,2); the live 3rd chunk is call 3.
+        let factory = SessionFactory(make: { FakeSession(appendThrowsAt: 3) })
+        let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
+        for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
+        let outcome = await driver.finish()
+        #expect(factory.built == 1)
+        #expect(factory.last?.cancelled == true)
+        #expect(outcome == .fallBackToBatch)
+    }
+
+    // When a session can't keep up with real time (wall-clock outruns ingested audio by > maxLagSeconds),
+    // the driver stops streaming and degrades to batch — never silently loses the latency win or piles memory.
+    @Test func fallsBehindRealtimeTripsToBatch() async {
+        let clock = StepClock()
+        let factory = SessionFactory()
+        let driver = StreamingDictationDriver(
+            policy: policy(), maxLagSeconds: 5, now: { clock.read() }, makeSession: factory.callable())
+        await driver.ingest([Float](repeating: 0.1, count: 32000))   // t=0: 2 s buffered
+        await driver.ingest([Float](repeating: 0.1, count: 32000))   // t=0: 4 s → session opens, replay
+        #expect(factory.built == 1)
+        clock.advance(20)                                            // 20 s of wall-clock, only 4 s of audio
+        await driver.ingest([Float](repeating: 0.1, count: 32000))   // live chunk → lag 20-6 > 5 → trip
+        let outcome = await driver.finish()
+        #expect(await driver.fellBehind)
+        #expect(factory.last?.cancelled == true)
+        #expect(outcome == .fallBackToBatch)
+    }
+}

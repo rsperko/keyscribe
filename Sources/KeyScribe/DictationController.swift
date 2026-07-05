@@ -83,6 +83,12 @@ final class DictationController {
         var snapshotAdoptionTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
         var levelPollTask: Task<Void, Never>?
+        // Streaming transcription (P3-1), non-nil only when the flag is on AND the active engine streams.
+        // The driver owns the deferred-start session; the continuation is the writer→driver feed; the feed
+        // task drains it. All torn down in releaseCapturedPlan (driver.cancel releases the engine lock).
+        var streamingDriver: StreamingDictationDriver?
+        var streamingSampleContinuation: AsyncStream<[Float]>.Continuation?
+        var streamingFeedTask: Task<Void, Never>?
     }
     // Non-nil only while a dictation is in flight. Per-dictation state is accessed directly as
     // `session?.field`; the accessors below remain as thin façades — building/capturedSnapshot/activeMode
@@ -110,6 +116,16 @@ final class DictationController {
     var dictationTask: Task<Void, Never>? {
         get { session?.dictationTask } set { session?.dictationTask = newValue }
     }
+
+    // The fire-and-forget streaming-session cancel dispatched at teardown (releases the engine lock held by
+    // a live session). Nil when the dictation had no live streaming session. Exposed so tests can await the
+    // release deterministically, as they do captureBringUpTask/dictationTask.
+    private(set) var streamingCancelTask: Task<Void, Never>?
+
+    // Test seam: whether the shared transcribe/finalize deadline gate is still occupied. A wedged streaming
+    // finalize that hit the deadline keeps it busy until it truly settles — tests assert the abandoned
+    // session holds the gate, then that a later dictation proceeds once it frees.
+    func transcribeGateBusy() async -> Bool { await transcribeGate.isBusy }
 
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
@@ -567,13 +583,45 @@ final class DictationController {
         }
     }
 
+    // Deferred-start threshold (Fable adj. #1): audio must exceed this before a streaming session opens, so
+    // the common short utterance never pays streaming inference or pins the engine lock. Comfortably above
+    // the press-time prepare/prewarm latency, so session creation never races those on the engine's lock.
+    static let streamingStartThresholdSeconds: Double = 4
+
+    // Stand up the streaming driver + writer→driver feed for this dictation, or nil when streaming is off /
+    // the engine can't stream (the sole gate — the pipeline never branches on flag identity again). Returns
+    // the writer-thread sink; a nil return keeps the batch path byte-for-byte.
+    private func setUpStreamingIfEnabled(sampleRate: Int) -> (@Sendable ([Float]) -> Void)? {
+        guard settings.features.isEnabled(.streamingTranscription), activeEngine.supportsStreaming else { return nil }
+        let policy = StreamingStartPolicy(thresholdSeconds: Self.streamingStartThresholdSeconds, sampleRate: sampleRate)
+        let driver = StreamingDictationDriver(policy: policy, makeSession: { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.makeStreamingSession()
+        })
+        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self, bufferingPolicy: .unbounded)
+        session?.streamingDriver = driver
+        session?.streamingSampleContinuation = continuation
+        session?.streamingFeedTask = Task { for await chunk in stream { await driver.ingest(chunk) } }
+        return { chunk in continuation.yield(chunk) }
+    }
+
+    // Built lazily at the deferred-start crossing (seconds into the recording), so the mode has resolved and
+    // its recognition bias is known. Goes through the SerializedEngine wrapper, which holds the exclusive
+    // lock for the session's whole lifetime.
+    private func makeStreamingSession() async throws -> any StreamingSpeechSession {
+        await session?.modeResolveTask?.value
+        let engine = activeEngine
+        return try await engine.makeStreamingSession(sampleRate: engine.captureSampleRate, biasTerms: recognitionBiasTerms())
+    }
+
     private func beginCapture(admitAfterHostTime: UInt64 = 0, holdRecordingUntil: DispatchTime? = nil) {
         lastRenderedLevel = 0
         let sampleRate = activeEngine.captureSampleRate
+        let onSamples = setUpStreamingIfEnabled(sampleRate: sampleRate)
         captureBringUpTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime)
+                _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples)
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still arming.
@@ -656,6 +704,15 @@ final class DictationController {
         captureBringUpTask?.cancel()
         session?.levelPollTask?.cancel()
         session?.rewriteEscapeTask?.cancel()
+        // Streaming teardown on EVERY terminal (commit, cancel, error, over-limit): finish the feed and
+        // cancel the driver so a session still holding the SerializedEngine lock releases it. Idempotent — a
+        // committed dictation already finalized (driver.finish marked it done), so cancel is a no-op there;
+        // an aborted dictation with a live session gets its lock freed here (else the engine wedges).
+        session?.streamingSampleContinuation?.finish()
+        session?.streamingFeedTask?.cancel()
+        if let streamingDriver = session?.streamingDriver {
+            streamingCancelTask = Task { await streamingDriver.cancel() }
+        }
         protectedEngineIds.removeAll()
         session = nil
         scheduleCaptureRefresh()
@@ -708,7 +765,83 @@ final class DictationController {
             } else {
                 self.log.error("wav unreadable at \(url.path, privacy: .public)")
             }
-            await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples)
+            // If a streaming session opened during this recording, its finalize (the post-release inference)
+            // produces the transcript; otherwise the driver degraded to batch and transcribeAndInsert batches
+            // as today. Runs after finishDraining, so the writer has already fed every sample (incl. the tail).
+            // The whole finalize is bounded by the transcribe deadline gate (see finalizeStreamingIfActive):
+            // a wedged append/finalize is terminal — abandoned, never a same-engine batch fallback (the
+            // abandoned session still holds the engine lock, so a fallback would queue behind it forever).
+            switch await self.finalizeStreamingIfActive(audioSeconds: audioSeconds ?? 0) {
+            case .streamed(let text):
+                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, streamedTranscript: text)
+            case .batch:
+                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, streamedTranscript: nil)
+            case .busy:
+                try? FileManager.default.removeItem(at: url)
+                self.noteTranscribeBusyRejection()
+                if Task.isCancelled { return }
+                self.log.error("streaming finalize rejected — previous transcription still running (\(self.activeEngine.id, privacy: .public))")
+                self.finishError("Still finishing the previous dictation")
+            case .timedOut:
+                try? FileManager.default.removeItem(at: url)
+                if Task.isCancelled { return }
+                self.log.error("streaming finalize timed out (\(self.activeEngine.id, privacy: .public))")
+                self.finishError("Transcription timed out")
+            }
+        }
+    }
+
+    private enum StreamingFinalizeOutcome {
+        case streamed(String)   // streaming produced the transcript — use it, no batch transcribe
+        case batch              // no session opened, or the driver degraded — run the batch transcribe
+        case busy               // the transcribe gate is still occupied by a prior wedged transcribe/finalize
+        case timedOut           // this finalize wedged past the deadline; the session may still hold the lock
+    }
+
+    // Test seam: the streaming-finalize deadline. Production scales with the recording length exactly like
+    // the batch transcribe deadline; tests override it to force the deadline in bounded time.
+    var streamingFinalizeTimeoutOverride: Double?
+    private func streamingFinalizeTimeout(audioSeconds: Double) -> Double {
+        streamingFinalizeTimeoutOverride ?? max(30, audioSeconds * 20)
+    }
+
+    // Close the streaming feed and finalize the session under the SAME single-flight deadline gate the batch
+    // transcribe uses. Wrapping the WHOLE thing — the feed-drain await AND driver.finish() — is load-bearing:
+    // a wedged append hangs at `await feedTask?.value` before finalize is even reached, so bounding finalize
+    // alone would not save the commit. On deadline/Busy the finalize is terminal (never a same-engine batch
+    // fallback: the abandoned session still holds the engine's exclusive lock, so a batch transcribe would
+    // queue behind it forever) — the gate stays closed until the wedged call settles, and the next press
+    // reports "Still finishing…", exactly mirroring the batch deadline. Stamps .streamFinalize on success.
+    private func finalizeStreamingIfActive(audioSeconds: Double) async -> StreamingFinalizeOutcome {
+        guard let driver = session?.streamingDriver else { return .batch }
+        let continuation = session?.streamingSampleContinuation
+        let feedTask = session?.streamingFeedTask
+        let finalizeStart = DispatchTime.now()
+        let outcome: StreamingDictationDriver.Outcome
+        do {
+            outcome = try await transcribeGate.run(seconds: streamingFinalizeTimeout(audioSeconds: audioSeconds)) {
+                continuation?.finish()
+                await feedTask?.value
+                return await driver.finish()
+            }
+        } catch is SingleFlightDeadline.Busy {
+            return .busy
+        } catch {
+            return .timedOut
+        }
+        switch outcome {
+        case .streamed(let text):
+            resetTranscribeBusyStreak()
+            building.stageMillis[.streamFinalize] = elapsedMs(since: finalizeStart)
+            return .streamed(text)
+        case .fallBackToBatch:
+            resetTranscribeBusyStreak()
+            if await driver.fellBehind {
+                log.debug("streaming fell behind real time — falling back to batch transcription")
+            } else {
+                log.debug("streaming fell back to batch transcription")
+            }
+            return .batch
         }
     }
 
@@ -843,7 +976,7 @@ final class DictationController {
         transcribeBusyStreakStartedAt = nil
     }
 
-    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil) async {
+    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, streamedTranscript: String? = nil) async {
         await session?.modeResolveTask?.value
         let engine = activeEngine
         building.audioSeconds = audioSeconds
@@ -900,36 +1033,43 @@ final class DictationController {
         hud?.render(.transcribing(mode: currentModeName))
         building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
 
-        let transcribeStart = DispatchTime.now()
         let rawFromEngine: String
-        do {
-            rawFromEngine = try await transcribeBounded(
-                audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples)
-            resetTranscribeBusyStreak()
-        } catch is SingleFlightDeadline.Busy {
+        if let streamedTranscript {
+            // Streaming already produced the transcript during capture (finalize ran in handleCommit, which
+            // stamped .streamFinalize). No batch transcribe, no .transcribe stage.
+            rawFromEngine = streamedTranscript
             try? FileManager.default.removeItem(at: url)
-            noteTranscribeBusyRejection()
-            if Task.isCancelled { return }
-            log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
-            finishError("Still finishing the previous dictation")
-            return
-        } catch is DeadlineExceeded {
+        } else {
+            let transcribeStart = DispatchTime.now()
+            do {
+                rawFromEngine = try await transcribeBounded(
+                    audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples)
+                resetTranscribeBusyStreak()
+            } catch is SingleFlightDeadline.Busy {
+                try? FileManager.default.removeItem(at: url)
+                noteTranscribeBusyRejection()
+                if Task.isCancelled { return }
+                log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
+                finishError("Still finishing the previous dictation")
+                return
+            } catch is DeadlineExceeded {
+                try? FileManager.default.removeItem(at: url)
+                // A user cancel cancels this task too; cancel() already handled the terminal state, so a
+                // late deadline/error must not stomp the next dictation's HUD/effects/state.
+                if Task.isCancelled { return }
+                log.error("transcribe timed out (\(engine.id, privacy: .public))")
+                finishError("Transcription timed out")
+                return
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                if Task.isCancelled { return }
+                log.error("transcribe failed (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+                finishError("Transcription failed")
+                return
+            }
             try? FileManager.default.removeItem(at: url)
-            // A user cancel cancels this task too; cancel() already handled the terminal state, so a
-            // late deadline/error must not stomp the next dictation's HUD/effects/state.
-            if Task.isCancelled { return }
-            log.error("transcribe timed out (\(engine.id, privacy: .public))")
-            finishError("Transcription timed out")
-            return
-        } catch {
-            try? FileManager.default.removeItem(at: url)
-            if Task.isCancelled { return }
-            log.error("transcribe failed (\(engine.id, privacy: .public)): \(error, privacy: .public)")
-            finishError("Transcription failed")
-            return
+            building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
         }
-        try? FileManager.default.removeItem(at: url)
-        building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
         // A no-speech clip that an engine renders as a whole-utterance annotation (Whisper's
         // `[BLANK_AUDIO]` / `(water running)`) collapses to "" here, so routing, history, and the
         // outcome all see empty and short-circuit to .noSpeech instead of pasting the marker. A

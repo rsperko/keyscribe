@@ -23,6 +23,17 @@ public protocol SpeechEngine: Sendable {
     // supportsSampleInput is true. `wavURL` is still written for archive/probe/fallback.
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String
 
+    // True when the engine can consume audio incrementally during capture and produce the transcript at
+    // commit with less post-release latency (streaming). Default false; streaming-capable engines override
+    // it. The controller only calls makeStreamingSession when this is true AND the streaming flag is on;
+    // every other engine and the flag-off path stay on the batch transcribe above, unchanged.
+    var supportsStreaming: Bool { get }
+    // Open a streaming session bound to this engine for one dictation. `sampleRate` is the engine's
+    // captureSampleRate; `biasTerms` is the recognition bias for the session's lifetime. The session holds
+    // the engine's non-Sendable handle until finalizeTranscript/cancel, so the decorator keeps its
+    // exclusive lock for that whole span. Only called when supportsStreaming is true.
+    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession
+
     func evict() async
 
     // Preheat any per-dictation session state at press so it overlaps speech; fire-and-forget, default
@@ -68,11 +79,40 @@ public extension SpeechEngine {
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         throw SpeechEngineError.sampleInputUnsupported
     }
+
+    var supportsStreaming: Bool { false }
+    // Never reached in practice — the controller only calls this when supportsStreaming is true. Present so
+    // the batch-only engines satisfy the protocol; the same silent-no-op trap as transcribe(samples:).
+    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
+        throw SpeechEngineError.streamingUnsupported
+    }
+}
+
+// One dictation's incremental transcription. Created by makeStreamingSession, fed decoded PCM off the
+// realtime path as capture proceeds, and closed exactly once at commit (finalizeTranscript) or abort
+// (cancel). Every exit path must be reached exactly once so the decorator's exclusive lock is always
+// released; a leaked session wedges the engine until relaunch (SerializedEngine holds its lock for the
+// session's whole lifetime).
+//
+// Contract: append/finalizeTranscript MUST run their inference off the main actor. The controller awaits
+// finalizeTranscript from the @MainActor commit task, so if an implementation did heavy work on the main
+// actor the HUD would freeze during the post-release finalize — the main actor must only suspend here.
+public protocol StreamingSpeechSession: Sendable {
+    // Feed the next decoded mono Float32 chunk (engine sample rate). Called off the writer/RT threads.
+    // Throws if the chunk cannot be admitted (e.g. a failed resample); the driver then cancels the session
+    // and the dictation degrades to a batch transcribe of the intact accumulated audio, so audio a user
+    // spoke is never silently dropped mid-utterance.
+    func append(samples: [Float]) async throws
+    // Run the final chunk and return the whole transcript. Terminal: the session is spent after this.
+    func finalizeTranscript() async throws -> String
+    // Abort without a result (ESC/over-limit). Terminal: releases SDK state, no transcript.
+    func cancel() async
 }
 
 public enum SpeechEngineError: Error, Equatable {
     case unknownEngine(String)
     case sampleInputUnsupported
+    case streamingUnsupported
 }
 
 public final class SpeechEngineProvider: @unchecked Sendable {

@@ -49,4 +49,29 @@ struct FeaturesTests {
         let ids = Feature.allCases.map(\.id)
         #expect(ids.count == Set(ids).count)
     }
+
+    // P3-1 streaming flag: strictly opt-in, so it is off unless the user turns it on.
+    @Test func streamingTranscriptionDefaultsOff() {
+        #expect(!Settings.defaults.features.isEnabled(.streamingTranscription))
+    }
+
+    // An on deviation persists across an encode/decode round trip and lands in the [features] table.
+    @Test func streamingTranscriptionOverridePersists() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .streamingTranscription)
+        let toml = try SettingsStore.encode(s)
+        #expect(toml.contains("streaming_transcription = true"))
+        let decoded = try SettingsStore.decode(from: toml)
+        #expect(decoded.features.isEnabled(.streamingTranscription))
+    }
+
+    // Turning the flag back off carries no information (absent already means off), so it is elided.
+    @Test func streamingTranscriptionOffIsElided() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .streamingTranscription)
+        s.features.setEnabled(false, for: .streamingTranscription)
+        #expect(s.features == Settings.Features())
+        let toml = try SettingsStore.encode(s)
+        #expect(!toml.contains("streaming_transcription"))
+    }
 }

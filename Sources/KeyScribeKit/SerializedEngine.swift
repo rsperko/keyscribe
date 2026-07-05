@@ -45,6 +45,7 @@ public actor SerializedEngine: SpeechEngine {
     public nonisolated var installDirNames: [String] { base.installDirNames }
     public nonisolated var benefitsFromWarmupClip: Bool { base.benefitsFromWarmupClip }
     public nonisolated var supportsSampleInput: Bool { base.supportsSampleInput }
+    public nonisolated var supportsStreaming: Bool { base.supportsStreaming }
     public nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? { base.verifyInstalled(in: modelsDir) }
 
     // Forward under the exclusive lock so prepare never races a base load/transcribe/evict on the
@@ -166,6 +167,24 @@ public actor SerializedEngine: SpeechEngine {
         return try await base.transcribe(samples: samples, sampleRate: sampleRate, biasTerms: biasTerms)
     }
 
+    // A streaming session holds the non-Sendable handle for the recording's whole lifetime, so it must
+    // hold the exclusive lock for that whole span — not just while this method runs. Acquire the lock here,
+    // ensure the runtime model, build the base session, and hand back a wrapper that RELEASES the lock
+    // exactly once when finalize/cancel completes. Guaranteed release on EVERY exit path (build-throw here,
+    // finalize-success, finalize-throw, cancel) — a leaked lock wedges every later transcribe and hangs
+    // evict, and the batch fallback the controller runs after a finalize-throw would deadlock behind it.
+    public func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
+        await acquire()
+        do {
+            try await ensureRuntimeLocked()
+            let session = try await base.makeStreamingSession(sampleRate: sampleRate, biasTerms: biasTerms)
+            return LockedStreamingSession(base: session) { [weak self] in await self?.release() }
+        } catch {
+            release()
+            throw error
+        }
+    }
+
     public func evict() async {
         // Never evict a half-loaded engine or race a base load: wait for in-flight loads (either level) to
         // settle first.
@@ -179,6 +198,49 @@ public actor SerializedEngine: SpeechEngine {
         await base.evict()
         runtimeLoaded = false
         fullLoaded = false
+    }
+}
+
+// Wraps a base engine's streaming session so the SerializedEngine's exclusive lock is released exactly
+// once, whichever terminal path (finalize success, finalize throw, cancel) fires. `onTerminate` hops back
+// onto the actor to call release(); the once-guard makes a double-release (e.g. cancel after a failed
+// finalize) impossible.
+private final class LockedStreamingSession: StreamingSpeechSession, @unchecked Sendable {
+    private let base: any StreamingSpeechSession
+    private let onTerminate: @Sendable () async -> Void
+    private let releaseLock = NSLock()
+    private var released = false
+
+    init(base: any StreamingSpeechSession, onTerminate: @escaping @Sendable () async -> Void) {
+        self.base = base
+        self.onTerminate = onTerminate
+    }
+
+    func append(samples: [Float]) async throws { try await base.append(samples: samples) }
+
+    func finalizeTranscript() async throws -> String {
+        do {
+            let text = try await base.finalizeTranscript()
+            await terminate()
+            return text
+        } catch {
+            await terminate()
+            throw error
+        }
+    }
+
+    func cancel() async {
+        await base.cancel()
+        await terminate()
+    }
+
+    private func terminate() async {
+        let first = releaseLock.withLock { () -> Bool in
+            if released { return false }
+            released = true
+            return true
+        }
+        if first { await onTerminate() }
     }
 }
 

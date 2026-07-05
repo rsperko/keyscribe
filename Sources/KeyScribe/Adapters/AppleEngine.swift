@@ -44,6 +44,40 @@ actor AppleEngine: SpeechEngine {
         return (SpeechAnalyzer(modules: [transcriber]), transcriber)
     }
 
+    // SpeechAnalyzer's native design is a live input sequence (start(inputSequence:) of AnalyzerInput),
+    // volatile results discarded, finalized results collected — so it streams with the lowest bias risk of
+    // any engine (contextualStrings applies to the session, we consume only finalized text). This is also
+    // the engine where streaming helps most: per-call session setup dominates release→text today (P3-1).
+    nonisolated var supportsStreaming: Bool { true }
+
+    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
+        try await loadIfNeeded()
+        let (analyzer, transcriber) = takePreparedOrBuild()
+        Log.bias.info("apple streaming terms=\(biasTerms.joined(separator: "|"), privacy: .private) applied=\(!biasTerms.isEmpty, privacy: .public)")
+        if !biasTerms.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings = [.general: biasTerms]
+            try await analyzer.setContext(context)
+        }
+        guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
+              let captureFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)
+        else { throw EngineError.notInitialized }
+        let (inputSequence, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        try await analyzer.start(inputSequence: inputSequence)
+        // Collect finalized results (no volatileResults option → results are final) on a task that ends when
+        // the analyzer finishes at finalize. Spun here where the opaque `results` type is known.
+        let results = transcriber.results
+        let resultsTask = Task<String, Error> {
+            var transcript = AttributedString()
+            for try await result in results { transcript += result.text }
+            return String(transcript.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return AppleStreamingSession(
+            analyzer: analyzer, resultsTask: resultsTask, input: input,
+            captureFormat: captureFormat, analyzerFormat: analyzerFormat)
+    }
+
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
 
@@ -77,5 +111,92 @@ actor AppleEngine: SpeechEngine {
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             try await request.downloadAndInstall()
         }
+    }
+}
+
+// One dictation's Apple streaming session. Feeds capture PCM into the analyzer's live input sequence
+// (converting the 16 kHz mono capture format to the analyzer's preferred format), and returns the
+// finalized transcript at commit. Access is serialized by the driver + SerializedEngine lock.
+@available(macOS 26, *)
+final class AppleStreamingSession: StreamingSpeechSession, @unchecked Sendable {
+    private let analyzer: SpeechAnalyzer
+    private let resultsTask: Task<String, Error>
+    private let input: AsyncStream<AnalyzerInput>.Continuation
+    private let captureFormat: AVAudioFormat
+    private let analyzerFormat: AVAudioFormat
+    private let converter: AVAudioConverter?
+
+    init(analyzer: SpeechAnalyzer, resultsTask: Task<String, Error>,
+         input: AsyncStream<AnalyzerInput>.Continuation,
+         captureFormat: AVAudioFormat, analyzerFormat: AVAudioFormat) {
+        self.analyzer = analyzer
+        self.resultsTask = resultsTask
+        self.input = input
+        self.captureFormat = captureFormat
+        self.analyzerFormat = analyzerFormat
+        self.converter = captureFormat.isEqual(analyzerFormat) ? nil : AVAudioConverter(from: captureFormat, to: analyzerFormat)
+    }
+
+    func append(samples: [Float]) async throws {
+        guard let buffer = try makeBuffer(samples) else { return }
+        input.yield(AnalyzerInput(buffer: buffer))
+    }
+
+    func finalizeTranscript() async throws -> String {
+        // Drain the resampler's internal latency (a few ms of SRC delay holding the last syllable's tail)
+        // into the analyzer before ending the input — the same end-of-stream flush the capture writer does.
+        if let tail = flushConverterTail() { input.yield(AnalyzerInput(buffer: tail)) }
+        input.finish()
+        try await analyzer.finalizeAndFinishThroughEndOfInput()
+        return try await resultsTask.value
+    }
+
+    func cancel() async {
+        input.finish()
+        await analyzer.cancelAndFinishNow()
+        resultsTask.cancel()
+    }
+
+    // Wrap the incoming samples in a capture-format buffer, then convert to the analyzer's format if they
+    // differ (a persistent converter keeps resampler continuity across chunks). Throws on a real conversion
+    // failure so the driver can degrade to batch — a failed convert must never silently drop spoken audio.
+    private func makeBuffer(_ samples: [Float]) throws -> AVAudioPCMBuffer? {
+        guard !samples.isEmpty else { return nil }
+        guard let inBuf = AVAudioPCMBuffer(pcmFormat: captureFormat, frameCapacity: AVAudioFrameCount(samples.count))
+        else { throw EngineError.streamingFailed }
+        inBuf.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            inBuf.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
+        }
+        guard let converter else { return inBuf }
+        let ratio = analyzerFormat.sampleRate / captureFormat.sampleRate
+        let capacity = AVAudioFrameCount(Double(samples.count) * ratio) + 1024
+        guard let outBuf = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity)
+        else { throw EngineError.streamingFailed }
+        let feed = FeedOnce()
+        feed.buffer = inBuf
+        var convError: NSError?
+        converter.convert(to: outBuf, error: &convError) { _, status in
+            if feed.consumed { status.pointee = .noDataNow; return nil }
+            feed.consumed = true; status.pointee = .haveData; return feed.buffer
+        }
+        if let convError { throw convError }
+        // 0 output frames with no error is benign — the resampler is holding this chunk; the tail flush at
+        // finalize recovers it, so return nothing to yield rather than treating it as a loss.
+        return outBuf.frameLength > 0 ? outBuf : nil
+    }
+
+    // End-of-stream flush of the resampler tail at finalize (no-op when capture and analyzer formats match,
+    // so converter is nil). Mirrors CaptureWriter.flushConverterTail.
+    private func flushConverterTail() -> AVAudioPCMBuffer? {
+        guard let converter,
+              let outBuf = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: 4096) else { return nil }
+        outBuf.frameLength = 0
+        var convError: NSError?
+        converter.convert(to: outBuf, error: &convError) { _, status in
+            status.pointee = .endOfStream
+            return nil
+        }
+        return (convError == nil && outBuf.frameLength > 0) ? outBuf : nil
     }
 }

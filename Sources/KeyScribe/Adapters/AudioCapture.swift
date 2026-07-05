@@ -11,6 +11,10 @@ protocol AudioCapturing: AnyObject, Sendable {
     // Bring capture up now but admit only frames at/after `admitAfterHostTime` (mach host time), so a start
     // cue playing under the bring-up never lands in the recording. 0 admits everything (no head gate).
     func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL
+    // Streaming variant (P3-1): each post-conversion mono chunk is also handed to `onSamples` on the writer
+    // thread (never the realtime IO thread), so a streaming session can transcribe during capture. `onSamples`
+    // nil = batch only. Default forwards to the 2-arg start, dropping the sink, so non-streaming doubles inherit.
+    func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
     // Latest perceptual mic level (0…1), published from the realtime thread.
     var currentLevel: Float { get }
     func stop() -> URL?
@@ -37,6 +41,10 @@ extension AudioCapturing {
     // Default: ignore the admission boundary. Test doubles inherit this; AudioCapture overrides it.
     func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL {
         try await start(sampleRate: sampleRate)
+    }
+    // Default: drop the streaming sink and take the batch path. A streaming double overrides this.
+    func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime)
     }
 }
 
@@ -168,10 +176,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     var currentLevel: Float { Float(bitPattern: levelBits.load(ordering: .relaxed)) }
 
     func start(sampleRate: Int) async throws -> URL {
-        try await start(sampleRate: sampleRate, admitAfterHostTime: 0)
+        try await start(sampleRate: sampleRate, admitAfterHostTime: 0, onSamples: nil)
     }
 
     func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL {
+        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: nil)
+    }
+
+    func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         rebuildIfNeeded()
         let (queue, generation) = currentQueueAndGeneration()
         let started = DispatchTime.now()
@@ -179,7 +191,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             // Non-destructive watchdog: adopt a bring-up that lands within the grace window; only the
             // DeadlineExceeded branch below (a genuinely wedged device) tears the half-open capture down.
             let url = try await runWithDeadline(seconds: Self.bringUpTimeout + Self.bringUpGrace) { [self] in
-                try await bringUp(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, queue: queue, generation: generation)
+                try await bringUp(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples, queue: queue, generation: generation)
             }
             let ms = Self.elapsedMs(since: started)
             let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
@@ -218,13 +230,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func bringUp(
-        sampleRate: Int, admitAfterHostTime: UInt64, queue: DispatchQueue, generation: Int
+        sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?,
+        queue: DispatchQueue, generation: Int
     ) async throws -> URL {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
             queue.async { [self] in
                 do {
                     cont.resume(returning: try armSync(
-                        sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, generation: generation))
+                        sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples, generation: generation))
                 } catch { cont.resume(throwing: error) }
             }
         }
@@ -282,7 +295,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // Sets up the capture file and writer thread, then brings the unit up on the control queue. The ring is
     // reset, the writer starts, and `capturing` flips on before the unit's IOProc goes live.
-    private func armSync(sampleRate: Int, admitAfterHostTime: UInt64 = 0, generation: Int) throws -> URL {
+    private func armSync(sampleRate: Int, admitAfterHostTime: UInt64 = 0,
+                         onSamples: (@Sendable ([Float]) -> Void)? = nil, generation: Int) throws -> URL {
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
@@ -323,6 +337,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let writer = CaptureWriter(
             ring: ring, file: file, recordFormat: recordFormat,
             admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: Self.hostTicksPerSecond,
+            onSamples: onSamples,
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, writer: writer)
         // Publish only if this generation still owns the capture slot.
