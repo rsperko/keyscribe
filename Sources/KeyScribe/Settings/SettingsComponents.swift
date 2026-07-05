@@ -149,6 +149,8 @@ struct CommittedTextField: View {
             .onExitCommand { draft = text }
             .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
             .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
+            // A container teardown (`.id` swap, pane switch) removes the field without a focus-loss commit.
+            .onDisappear { commitIfChanged() }
             .onAppear {
                 guard autofocus else { return }
                 Task { @MainActor in
@@ -161,16 +163,26 @@ struct CommittedTextField: View {
     private func commitIfChanged() { if draft != text { commit(draft) } }
 }
 
+// Lets a dismissing container (a popover with a Done button) land the editor's pending edit
+// synchronously before it acts on the saved value — the popover's own onDisappear commit does NOT fire
+// reliably on teardown, so the debounce alone can lose a just-typed edit to a fast Done.
+@MainActor final class PromptEditorFlush {
+    var commit: (() -> Void)?
+    func flush() { commit?() }
+}
+
 struct PromptEditor: View {
     let title: String
     let placeholder: String
     let text: String
     // Live commit (write on every change) is for an editor that lives in a dismissing container like a
     // popover: TextEditor's focus-loss/onDisappear commit does NOT fire reliably when the container is
-    // torn down on Done, so the only dependable save is per-change. Inline editors (the writing
-    // instruction in the form) keep focus-loss to avoid per-keystroke config-watcher churn.
+    // torn down on Done, so the only dependable save is per-change (plus the flush handle on Done).
+    // Inline editors (the writing instruction in the form) keep focus-loss to avoid per-keystroke
+    // config-watcher churn, and commit on teardown via onDisappear.
     let commitsOnChange: Bool
     let commit: (String) -> Void
+    let flush: PromptEditorFlush?
     @State private var draft: String
     @State private var expanded = false
     @State private var commitTask: Task<Void, Never>?
@@ -178,12 +190,14 @@ struct PromptEditor: View {
 
     init(
         title: String, placeholder: String = "", text: String,
-        commitsOnChange: Bool = false, commit: @escaping (String) -> Void
+        commitsOnChange: Bool = false, flush: PromptEditorFlush? = nil,
+        commit: @escaping (String) -> Void
     ) {
         self.title = title
         self.placeholder = placeholder
         self.text = text
         self.commitsOnChange = commitsOnChange
+        self.flush = flush
         self.commit = commit
         _draft = State(initialValue: text)
     }
@@ -202,6 +216,8 @@ struct PromptEditor: View {
                 .onChange(of: draft) { if commitsOnChange { scheduleCommit() } }
                 .onChange(of: focused) { _, nowFocused in if !nowFocused { commitNow() } }
                 .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
+                .onAppear { flush?.commit = { commitNow() } }
+                .onDisappear { commitNow() }
             Button("Open in a larger editor…") { expanded = true }
                 .font(.caption).buttonStyle(.link)
         }

@@ -16,6 +16,7 @@ struct ModeAISection: View {
     @State private var newFragmentName = ""
     @State private var editingFragment: String?
     @State private var creatingFragment = false
+    @State private var fragmentFlush = PromptEditorFlush()
 
     var body: some View {
         Section("Improve with AI") {
@@ -125,7 +126,8 @@ struct ModeAISection: View {
                 title: fragmentName(id),
                 placeholder: "Describe the reusable instruction\u{2026}",
                 text: onLoadFragmentBody(id),
-                commitsOnChange: true
+                commitsOnChange: true,
+                flush: fragmentFlush
             ) { body in
                 onSaveFragmentBody(id, body)
             }
@@ -182,10 +184,11 @@ struct ModeAISection: View {
     private func closeFragmentEditor(_ id: String) {
         guard editingFragment == id else { return }
         let modeId = mode.id
+        // Land the pending debounced edit before the empty-check: closeFragment deletes an empty-bodied
+        // instruction, and the popover's onDisappear does not fire reliably to flush a fast Done.
+        fragmentFlush.flush()
         editingFragment = nil
-        // Tearing the popover down flushes the editor's pending edit via its onDisappear commit; let
-        // that land before deciding whether the instruction is empty and should be discarded.
-        Task { @MainActor in onCloseFragment(id, modeId) }
+        onCloseFragment(id, modeId)
     }
 
     private func addFragment(_ id: String) {

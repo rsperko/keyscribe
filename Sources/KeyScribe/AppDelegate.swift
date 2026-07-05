@@ -512,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func correctionDestinations() -> [CorrectionDestination] {
-        [.global] + config.modes.filter { !$0.isSystem }.map { .mode(id: $0.id, name: $0.name) }
+        CorrectionDestination.list(for: config.modes)
     }
 
     // Relaunch into the guided setup so the new process reads the just-granted Accessibility verdict

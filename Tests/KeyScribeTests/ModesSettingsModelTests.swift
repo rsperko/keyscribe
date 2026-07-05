@@ -154,4 +154,55 @@ struct ModesSettingsModelTests {
         #expect(tomls(in: modesDir) == ["email", "email-2"])
         #expect(model.selectedID == "email-2")
     }
+
+    @Test func flushHandleRunsThePendingCommit() {
+        let flush = PromptEditorFlush()
+        var ran = 0
+        flush.commit = { ran += 1 }
+        flush.flush()
+        #expect(ran == 1)
+    }
+
+    // P2-19: replays closeFragmentEditor's ordering. The PromptEditor's 300 ms debounce has NOT fired, so
+    // its pending body edit lives only in the flush handle. Flushing before the close lands the body on
+    // disk, so closeFragment's empty-check keeps the instruction instead of discarding it.
+    @Test func flushingBeforeCloseSavesTheStillPendingBodyAndKeepsTheInstruction() throws {
+        let (model, support, _) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        model.create()
+        let id = try #require(model.addFragmentFile(named: "My Voice"))
+        var mode = try #require(model.selected)
+        mode.aiRewrite = .init(connection: "", prompt: "p", fragments: [id])
+        model.update(mode)
+
+        let flush = PromptEditorFlush()
+        flush.commit = { model.saveFragmentBody(id, "keep it terse") }
+        #expect(model.fragmentBody(id).isEmpty)   // debounce not fired: nothing on disk yet
+
+        flush.flush()                             // closeFragmentEditor's flush() step
+        model.closeFragment(id, fromMode: try #require(model.selectedID))
+
+        #expect(model.fragmentIds.contains(id))
+        #expect(model.fragmentBody(id) == "keep it terse")
+        #expect(model.selected?.aiRewrite?.fragments == [id])
+    }
+
+    // The old bug: closing while the body edit is still pending (never flushed) reads an empty body and
+    // discards the instruction — this is the regression the flush prevents.
+    @Test func closingWithoutFlushingAPendingBodyDiscardsAndDetachesIt() throws {
+        let (model, support, _) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        model.create()
+        let id = try #require(model.addFragmentFile(named: "Empty"))
+        var mode = try #require(model.selected)
+        mode.aiRewrite = .init(connection: "", prompt: "p", fragments: [id])
+        model.update(mode)
+
+        model.closeFragment(id, fromMode: try #require(model.selectedID))
+
+        #expect(!model.fragmentIds.contains(id))
+        #expect(model.selected?.aiRewrite?.fragments == [])
+    }
 }

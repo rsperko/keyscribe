@@ -10,6 +10,34 @@ private struct FakeClient: LLMClient {
     }
 }
 
+// One-shot gate so a test can interleave state changes while a connection test is mid-flight.
+private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+    func wait() async {
+        await withCheckedContinuation { c in
+            lock.lock()
+            if opened { lock.unlock(); c.resume(); return }
+            continuation = c
+            lock.unlock()
+        }
+    }
+    func open() {
+        lock.lock(); opened = true; let c = continuation; continuation = nil; lock.unlock()
+        c?.resume()
+    }
+}
+
+private struct BlockingClient: LLMClient {
+    let result: Result<String, Error>
+    let gate: Gate
+    func complete(system: String, user: String, connection: Connection) async throws -> String {
+        await gate.wait()
+        return try result.get()
+    }
+}
+
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
@@ -162,6 +190,54 @@ struct AIServiceTestStateTests {
 
         model.update(connection, apiKey: nil)
         #expect(model.testState(for: connection.id) == nil)
+    }
+
+    @Test func aStaleVerdictLandingAfterAPostTestEditIsDiscarded() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gate = Gate()
+        let model = AIServiceSettingsModel(
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            tester: ConnectionTester(client: BlockingClient(
+                result: .failure(ProviderTransportError.http(500, body: nil)), gate: gate)))
+        model.create()
+        let connection = model.selected!
+
+        model.test(connection)
+        #expect(model.testState(for: connection.id) == .testing)
+        model.update(connection, apiKey: nil)
+        #expect(model.testState(for: connection.id) == nil)
+
+        gate.open()
+        await model.testTask?.value
+
+        #expect(model.testState(for: connection.id) == nil)
+        #expect(model.failedTestIds.isEmpty)
+    }
+
+    @Test func aStaleVerdictDoesNotAttachToANewConnectionReusingADeletedId() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gate = Gate()
+        let model = AIServiceSettingsModel(
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            tester: ConnectionTester(client: BlockingClient(
+                result: .failure(ProviderTransportError.http(500, body: nil)), gate: gate)))
+        model.create()
+        let deleted = model.selected!
+
+        model.test(deleted)
+        model.delete(deleted)
+        // A fresh connection re-mints the freed id.
+        model.create()
+        let recreated = model.selected!
+        #expect(recreated.id == deleted.id)
+
+        gate.open()
+        await model.testTask?.value
+
+        #expect(model.testState(for: recreated.id) == nil)
+        #expect(model.failedTestIds.isEmpty)
     }
 
     @Test func dependentModeNamesListsOnlyModesWiredToTheConnection() async {

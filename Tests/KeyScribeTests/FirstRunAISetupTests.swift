@@ -396,4 +396,30 @@ struct FirstRunAISetupTests {
         #expect(saveCalled == false)
         #expect(model.step == .playground)
     }
+
+    @Test func closingTheWizardMidDownloadDoesNotSwitchEngineOrAdvance() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let started = Signal()
+        let release = Signal()
+        var selected: String?
+        let model = FirstRunModel(
+            initialEngineId: SpeechModelCatalog.defaultEnglishId,
+            download: { _, _ in started.fire(); await release.wait() },
+            selectEngine: { selected = $0 },
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            onComplete: {})
+
+        model.beginDownload()
+        let task = model.downloadTask
+        await started.wait()
+        model.stopPolling()
+        release.fire()
+        await task?.value
+
+        #expect(selected == nil)
+        #expect(model.step != .permissions)
+        #expect(model.downloading == false)
+    }
 }

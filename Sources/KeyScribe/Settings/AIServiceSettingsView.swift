@@ -46,6 +46,9 @@ final class AIServiceSettingsModel: ObservableObject {
     private let tester: ConnectionTester
     private let listModels: (Connection, String?) async throws -> [String]
     private(set) var testTask: Task<Void, Never>?
+    // Monotonic per-connection token. A post-test edit bumps it so a slow verdict landing after the reset
+    // cannot resurrect a stale error badge (which drives the menu error dot + Modes-pane flags).
+    private var testGeneration: [String: Int] = [:]
 
     init(
         repository: ConfigRepository,
@@ -75,9 +78,12 @@ final class AIServiceSettingsModel: ObservableObject {
     func test(_ connection: Connection) {
         let id = connection.id
         guard testStates[id] != .testing else { return }
+        let generation = (testGeneration[id] ?? 0) + 1
+        testGeneration[id] = generation
         testStates[id] = .testing
         testTask = Task {
             let result = await tester.test(connection)
+            guard testGeneration[id] == generation else { return }
             testStates[id] = result
         }
     }
@@ -180,6 +186,7 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func update(_ connection: Connection, apiKey: String?) {
         testStates[connection.id] = nil
+        testGeneration[connection.id, default: 0] += 1
         save(connection)
         guard let apiKey, !apiKey.isEmpty else { return }
         if KeychainStore.set(apiKey, for: connection.keyRef), KeychainStore.has(connection.keyRef) {
@@ -195,6 +202,9 @@ final class AIServiceSettingsModel: ObservableObject {
             KeychainStore.delete(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
+            // Bump so an in-flight test for the deleted connection can't land on a freshly created one that
+            // reuses the same id (create() re-mints the freed id).
+            testGeneration[connection.id, default: 0] += 1
             modelDiscoveryStates[connection.id] = nil
             modelSuggestionsByConnection[connection.id] = nil
             connections = updated

@@ -124,6 +124,12 @@ struct CorrectionDestination: Hashable, Identifiable {
     static func mode(id: String, name: String) -> CorrectionDestination {
         CorrectionDestination(scope: .mode(id), title: name, menuTitle: name)
     }
+
+    // Global plus the user's enabled, non-system modes. A disabled mode is excluded: a term routed there
+    // would do nothing until the mode is enabled, with no hint at the panel.
+    static func list(for modes: [Mode]) -> [CorrectionDestination] {
+        [.global] + modes.filter { !$0.isSystem && $0.enabled }.map { .mode(id: $0.id, name: $0.name) }
+    }
 }
 
 private struct CorrectionPanelView: View {

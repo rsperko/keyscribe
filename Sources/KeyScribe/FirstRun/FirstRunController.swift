@@ -142,6 +142,7 @@ final class FirstRunModel: ObservableObject {
     @Published var needsRelaunch = false
     private var pollTask: Task<Void, Never>?
     private(set) var setupTask: Task<Void, Never>?
+    private(set) var downloadTask: Task<Void, Never>?
 
     var aiServiceName: String {
         get { aiDraft.name }
@@ -232,7 +233,7 @@ final class FirstRunModel: ObservableObject {
         downloadError = nil
         downloadProgress = 0
         let id = selectedEngineId
-        Task {
+        downloadTask = Task {
             do {
                 try await download(id) { progress in
                     // Coalesce to whole-percent changes: the SDK can emit progress far faster than the
@@ -242,6 +243,9 @@ final class FirstRunModel: ObservableObject {
                         self.downloadProgress = progress.fraction
                     }
                 }
+                // Wizard closed mid-download → cancelled; don't switch the engine after a user-perceived
+                // cancel (the P1-9 class). The install finishes; only the switch + step advance are gated.
+                guard !Task.isCancelled else { downloading = false; return }
                 selectEngine(id)
                 downloading = false
                 step = .permissions
@@ -394,13 +398,14 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // Both background tasks strongly retain the model, and both mutate config on completion (the poll
-    // refreshes status; the connect writes the connection + enables modes). Cancelling them on teardown is
-    // what keeps a closed wizard from running work — or, worse, silently connecting an AI service — after
-    // the user has walked away.
+    // These background tasks strongly retain the model and mutate config on completion (the poll refreshes
+    // status; the connect writes the connection + enables modes; the download switches the active engine).
+    // Cancelling them on teardown is what keeps a closed wizard from running work — or, worse, silently
+    // connecting an AI service or switching the STT engine — after the user has walked away.
     func stopPolling() {
         pollTask?.cancel(); pollTask = nil
         setupTask?.cancel(); setupTask = nil
+        downloadTask?.cancel(); downloadTask = nil
     }
 
     // The Connect button drives this so the in-flight test/write can be cancelled when the wizard closes
