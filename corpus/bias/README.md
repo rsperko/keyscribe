@@ -41,14 +41,21 @@ recorded in its `tags` as `contextasr:<uniq_id>` for traceability.
 ## Run it
 
 ```bash
-# biased vs unbiased WER + bias-term recall (batch)
+# biased vs unbiased WER + bias-term recall (batch) — any engine
 .build/debug/KeyScribe --benchmark corpus/bias --engines parakeet-tdt-ctc-110m
-# same clips, streaming path — compare the streamed final against batch
-.build/debug/KeyScribe --benchmark corpus/bias --engines parakeet-tdt-ctc-110m --streaming
-# literal per-clip output (diff streaming vs batch by eye)
+# literal per-clip output (diff bias vs unbias by eye)
 .build/debug/KeyScribe --benchmark corpus/bias --engines parakeet-tdt-ctc-110m --raw
-.build/debug/KeyScribe --benchmark corpus/bias --engines parakeet-tdt-ctc-110m --streaming --raw
+# streaming↔batch parity — only streaming-capable engines (today: apple)
+.build/debug/KeyScribe --benchmark corpus/bias --engines apple --streaming
+.build/debug/KeyScribe --benchmark corpus/bias --engines apple --streaming --raw
 ```
+
+`--streaming` drives the real `StreamingDictationDriver` at **realtime cadence** (the same feed a live
+mic produces), so a full 20-clip run streams in ~realtime (minutes) by design — that is what keeps the
+session's input queue drained exactly as the app does. Set `KEYSCRIBE_STREAM_SPEEDUP=N` to feed N× faster
+for quick iteration; `>1` may trip the driver's backpressure fallback on a slower engine (reported as
+`fellBack`), which is itself a realistic signal. A clip that falls back is scored as batch (what the user
+would get). `KEYSCRIBE_BENCH_VERBOSE=1` prints per-clip batch-vs-stream text.
 
 Use `KeyScribeDev.app/Contents/MacOS/KeyScribe` instead of the raw `.build` binary for the Qwen MLX
 engines (the raw binary lacks the bundled metallib — see the corpus skill gotchas). The benchmark

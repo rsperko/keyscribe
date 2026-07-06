@@ -26,9 +26,8 @@ final class SpeechModelsModel: ObservableObject {
 
     var activeName: String { SpeechModelCatalog.entry(for: set.activeId)?.displayName ?? set.activeId }
 
-    // The selected engine's files are present (or it's system-managed). False means the active model
-    // was deleted out from under us and dictation is silently running on a fallback — a problem worth
-    // flagging (ui_design.md §6).
+    // False means the active model was deleted out from under us and dictation is silently on a fallback —
+    // flagged per ui_design.md §6.
     var activeEngineUsable: Bool { self.set.isUsable(self.set.activeId) }
 
     private var set: SpeechModelSet
@@ -50,8 +49,8 @@ final class SpeechModelsModel: ObservableObject {
     private let removeFiles: (String) -> Void
     private let markInstalled: (String) -> Void
     private let markRemoved: (String) -> Void
-    // Runs `work` immediately when the controller is idle, else parks it until the current dictation
-    // finishes. Used so a model delete never removes files an in-flight dictation may still need.
+    // Runs `work` when idle, else parks it until the current dictation finishes, so a model delete never
+    // removes files an in-flight dictation still needs.
     private let deferWhileBusy: (@escaping () -> Void) -> Void
 
     init(
@@ -86,9 +85,8 @@ final class SpeechModelsModel: ObservableObject {
         rebuild()
     }
 
-    // Sizing each installed model recursively enumerates its on-disk bundle (many files); doing it
-    // synchronously here would block the main actor, including at launch where this model is built.
-    // Snapshot the usable ids on the main actor, compute bytes on a utility task, then publish back.
+    // Sizing recursively enumerates each bundle (many files); doing it synchronously would block the main
+    // actor, including at launch. Snapshot usable ids on the main actor, size on a utility task, publish back.
     private func refreshSizes() {
         sizeRefreshGeneration &+= 1
         let generation = sizeRefreshGeneration
@@ -108,9 +106,9 @@ final class SpeechModelsModel: ObservableObject {
         rebuild()
     }
 
-    // The first-run flow downloads through the engine directly (not startDownload), so the install
-    // store and this model never learned the model is present — it kept reading "not installed" until a
-    // redundant re-download in Settings. Mark it installed and refresh so onboarding's download sticks.
+    // First-run downloads through the engine directly (not startDownload), so the install store never
+    // learned the model is present and kept reading "not installed". Mark installed so onboarding's download
+    // sticks.
     func noteInstalled(_ id: String) {
         markInstalled(id)
         set.markInstalled(id)
@@ -176,8 +174,8 @@ final class SpeechModelsModel: ObservableObject {
         Task {
             do {
                 try await download(id) { progress in
-                    // Coalesce: skip the row rebuild unless the phase or whole-percent changed, so a
-                    // chatty SDK progress stream does not thrash the install UI.
+                    // Coalesce: skip the row rebuild unless phase or whole-percent changed, so a chatty SDK
+                    // progress stream doesn't thrash the install UI.
                     Task { @MainActor in
                         if let last = self.downloading[id], last.phase == progress.phase,
                            Int(last.fraction * 100) == Int(progress.fraction * 100) { return }
@@ -233,7 +231,7 @@ final class SpeechModelsModel: ObservableObject {
             verifyFailed.insert(id)
             errors[id] = "This model failed its self-test — reinstall it."
             // A model that can't transcribe the known clip must not stay selectable. Remove files, not just
-            // the marker, so launch reconcile cannot re-adopt the failed install.
+            // the marker, so launch reconcile can't re-adopt the failed install.
             if SpeechModelCatalog.entry(for: id)?.systemManaged == false {
                 let wasActive = set.activeId == id
                 await evictEngine(id)
@@ -243,17 +241,15 @@ final class SpeechModelsModel: ObservableObject {
                 if wasActive { onActiveChange(set.activeId) }
             }
         } else {
-            // Passed, or skipped because no clip is bundled (dev runs) — treat as installed.
+            // Passed, or skipped (no clip bundled, dev runs) — treat as installed.
             verifyFailed.remove(id)
             markInstalled(id)
             set.markInstalled(id)
-            // Verifying loaded the engine into RAM to transcribe the clip. Every other eviction path tracks
-            // the active/used engine, so a non-active model verified here (a Settings download or self-test
-            // of a model the user isn't dictating with) would stay resident until relaunch — e.g. ~2 GB for
-            // Qwen 1.7B. Release it now; activating it later reloads on demand.
+            // Verifying loaded the engine into RAM. A non-active model verified here would stay resident
+            // until relaunch (~2 GB for Qwen 1.7B), so release it now; activating later reloads on demand.
             if id != set.activeId { await evictEngine(id) }
             // Only a manual re-test of a confirmed pass shows the transient acknowledgement;
-            // a fresh install already shows its "Installed" status.
+            // a fresh install already shows "Installed".
             if result == true && !markInstalledOnPass {
                 verifiedOk.insert(id)
                 scheduleClearVerified(id)
@@ -298,8 +294,8 @@ final class SpeechModelsModel: ObservableObject {
         let wasActive = set.activeId == id
         Task {
             await evictEngine(id)
-            // Defer file removal until idle so an in-flight dictation can keep using its frozen engine.
-            // The marker and set update immediately for the UI.
+            // Defer file removal until idle so an in-flight dictation keeps its frozen engine; marker + set
+            // update immediately for the UI.
             deferWhileBusy { [removeFiles] in removeFiles(id) }
             markRemoved(id)
             set.delete(id)
@@ -314,9 +310,8 @@ final class SpeechModelsModel: ObservableObject {
         rows = EngineRegistry.availableCatalog.map(makeRow)
     }
 
-    // Rebuild only the one row whose state changed (e.g. a download-progress tick) — fires many times
-    // per second, so reconstructing every row (and re-statting installed model dirs) each tick was
-    // needless churn. SwiftUI's identified ForEach re-renders just the changed row.
+    // Rebuild only the changed row (e.g. a download-progress tick, many times/sec): reconstructing every
+    // row and re-statting model dirs each tick was needless churn.
     private func updateRow(_ id: String) {
         guard let info = SpeechModelCatalog.all.first(where: { $0.id == id }),
               let index = rows.firstIndex(where: { $0.id == id }) else { rebuild(); return }

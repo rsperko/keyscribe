@@ -210,10 +210,9 @@ final class DictionarySettingsModel: ObservableObject {
         mutate { $0.removing(word: word) }
     }
 
-    // All writes go through ConfigRepository, which read-modify-writes from disk (not from `@Published
-    // words`, refreshed only on .onAppear) and invalidates the ConfigCache immediately. The global
-    // Add-to-Vocabulary hotkey writes through the same repository while this pane is open; mutating stale
-    // in-memory state would silently drop that just-added word.
+    // All writes go through ConfigRepository, which read-modify-writes from disk (not from `@Published words`)
+    // and invalidates the ConfigCache. The global Add-to-Vocabulary hotkey writes through the same repository
+    // while this pane is open, so mutating stale in-memory state would silently drop that just-added word.
     private func mutate(_ transform: (DictionarySet) -> DictionarySet) {
         do {
             words = try repository.mutateDictionary(transform).words

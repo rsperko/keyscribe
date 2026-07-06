@@ -78,9 +78,8 @@ struct ProviderTransport: Sendable {
         return data
     }
 
-    // A trimmed, length-capped snippet of the provider's error payload so a failed rewrite/connection test
-    // shows the provider's own message (e.g. "invalid model") instead of a bare status code. This is the
-    // provider's response body, never user content.
+    // Length-capped snippet of the provider's error payload so a failure shows the provider's own message
+    // (e.g. "invalid model") instead of a bare status code. Provider's response body, never user content.
     static func errorSnippet(from data: Data, limit: Int = 300) -> String? {
         guard let raw = String(data: data, encoding: .utf8) else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)

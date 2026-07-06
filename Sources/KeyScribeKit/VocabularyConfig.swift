@@ -90,9 +90,8 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
         return copy
     }
 
-    // The regex-rule counterpart: dedup by `heard` (case-sensitive — regex patterns are), keyed like
-    // VocabularyMerge so a repeated correction-panel add can't accumulate identical rules that all run
-    // per dictation. First-write-wins, mirroring addingLiteral.
+    // Regex counterpart: dedup by `heard` (case-sensitive — regex patterns are) so a repeated
+    // correction-panel add can't accumulate identical rules. First-write-wins, like addingLiteral.
     public func addingRegex(heard: String, replace: String) -> ReplacementsSet {
         let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !h.isEmpty,

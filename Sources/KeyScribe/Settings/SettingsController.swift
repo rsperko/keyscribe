@@ -5,8 +5,8 @@ import KeyScribeKit
 typealias Settings = KeyScribeKit.Settings
 
 // A live problem that lights the menu-bar error dot and flags the Settings pane that fixes it
-// (ui_design.md §6). `detect` is the single mapping from raw signals → problems, shared by the menu
-// badge and the Settings sidebar so they never disagree.
+// (ui_design.md §6). `detect` is the single signals→problems mapping, shared by the menu badge and the
+// Settings sidebar so they never disagree.
 enum SettingsProblem: Equatable, CaseIterable {
     case malformedConfig
     case microphonePermission
@@ -30,10 +30,9 @@ enum SettingsProblem: Equatable, CaseIterable {
         }
     }
 
-    // The single mapping from raw signals → problems. We never *passively* probe a provider to judge
-    // a connection (privacy invariant, and a missing key is legitimate for a local/no-auth endpoint).
-    // The authoritative AI health signal is a **user-initiated Test Connection that failed**;
-    // `aiConnectionMisconfigured` is the structural check (no model / no base URL) that needs no call.
+    // We never passively probe a provider to judge a connection (privacy invariant; a missing key is fine
+    // for a local/no-auth endpoint). The authoritative AI health signal is a user-initiated Test Connection
+    // that failed; `aiConnectionMisconfigured` is the structural check (no model / no base URL).
     static func detect(
         hasConfigError: Bool, microphoneGranted: Bool,
         accessibilityGranted: Bool,
@@ -59,8 +58,8 @@ enum SettingsProblem: Equatable, CaseIterable {
     }
 }
 
-// The selected pane, lifted out of the view so the controller can drive it — opening Settings deep
-// to a pane (e.g. History's "Manage Vocabulary…") just sets this before the window shows.
+// The selected pane, lifted out of the view so the controller can drive it (deep-opening to a pane just
+// sets this before the window shows).
 @MainActor
 final class SettingsNavigationModel: ObservableObject {
     @Published var destination: SettingsDestination? = .general
@@ -69,8 +68,7 @@ final class SettingsNavigationModel: ObservableObject {
 @MainActor
 final class SettingsProblemModel: ObservableObject {
     @Published var flaggedPanes: Set<SettingsDestination> = []
-    // The 2s poll calls this on every tick; only republish when the set actually changes so unchanged
-    // ticks don't re-render the whole split view.
+    // Only republish when the set changes, so unchanged poll ticks don't re-render the whole split view.
     func update(_ problems: [SettingsProblem]) {
         let panes = Set(problems.map(\.pane))
         if panes != flaggedPanes { flaggedPanes = panes }
@@ -91,13 +89,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
-    // Permissions are granted out-of-process; poll while the window is open so a flag clears as soon as
-    // the user fixes the problem. Owned here (not by a view `.task`) because the window is retained
-    // (`isReleasedWhenClosed = false`) — a view-owned task would never cancel and would run for the
-    // process lifetime after the first open. Mirrors FirstRunController's `stopPolling`.
+    // Permissions are granted out-of-process; poll while the window is open so a flag clears as soon as the
+    // user fixes it. Owned here (not a view `.task`) because the window is retained (`isReleasedWhenClosed
+    // = false`) — a view-owned task would never cancel and would run for the process lifetime.
     private var problemPollTask: Task<Void, Never>?
-    // Shared with the recorders (via the environment) and the app, which suspends the global hotkey
-    // monitor while a recorder is capturing so the chord can't fire an existing shortcut.
+    // Shared with the recorders and the app, which suspends the global hotkey monitor while a recorder is
+    // capturing so the chord can't fire an existing shortcut.
     let recordingState = HotkeyRecordingState()
 
     init(
@@ -131,12 +128,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func refreshProblems() { problems.update(detectProblems()) }
 
-    // Variant for callers that have already run problem detection (refreshStatus computes the set once
-    // for the menu badge), so the same detection does not run back-to-back.
+    // For callers that already ran detection (the menu badge), so it doesn't run back-to-back.
     func refreshProblems(_ detected: [SettingsProblem]) { problems.update(detected) }
 
-    // Connections whose last user-run Test Connection failed — the authoritative "this AI service is
-    // broken" signal that drives the error badge (AppDelegate.currentProblems reads it).
+    // Connections whose last user-run Test Connection failed — drives the error badge.
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
 
     func present(_ destination: SettingsDestination? = nil) {
@@ -201,11 +196,10 @@ struct SettingsRootView: View {
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
 
-    // The global action shortcuts as double-fire rivals for the mode trigger overlap warning: a chord
-    // like the default Add-Vocabulary ⌃⌥⇧V subsumes a right-Option mode trigger. Read from the live
-    // `general` model so editing a shortcut refreshes the warning, and filtered through the SAME
-    // shadow/chord gate as runtime registration (AppDelegate.actionBindings) so the warning never names a
-    // shortcut that will not fire — a shadowed one is re-attributed to the mode that shadows it.
+    // Global action shortcuts as double-fire rivals for the mode-trigger overlap warning (a chord like
+    // ⌃⌥⇧V subsumes a right-Option trigger). Read from the live `general` model so editing refreshes the
+    // warning; filtered through the SAME shadow/chord gate as runtime registration so the warning never
+    // names a shortcut that won't fire (a shadowed one is re-attributed to the mode that shadows it).
     private var actionShortcutRivals: [TriggerKeyConflicts.RivalBinding] {
         TriggerKeyConflicts.liveActionRivals([
             .init(id: GlobalHotkey.vocabularyId, key: general.addVocabularyShortcut,
@@ -371,13 +365,12 @@ final class SettingsModel: ObservableObject {
     @Published var eviction: String { didSet { persist() } }
     @Published var addVocabularyShortcut: String { didSet { persist() } }
     @Published var pasteLastShortcut: String { didSet { persist() } }
-    // Enabled state for each in-development feature flag, keyed by Feature.id and always populated
-    // for every Feature.allCases. Bound one-per-toggle by the Experimental Features section.
+    // Feature-flag enabled state, keyed by Feature.id, populated for every Feature.allCases. One toggle each.
     @Published var featureStates: [String: Bool] { didSet { persist() } }
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
     @Published var inputDeviceUID: String { didSet { persist() } }
-    // The friendly name last seen for `inputDeviceUID`, so a disconnected preferred device still reads as
-    // itself in the picker. Refreshed from the live device whenever one is connected (here and at startup).
+    // Name last seen for `inputDeviceUID`, so a disconnected preferred device still reads as itself in the
+    // picker. Refreshed from the live device whenever one is connected.
     private var storedInputDeviceName: String?
 
     struct InputDeviceOption: Identifiable, Equatable {
@@ -387,8 +380,8 @@ final class SettingsModel: ObservableObject {
     }
 
     // Picker rows: "Follow macOS Input" first, then every connected input device. If the saved preference
-    // points at a device that is not currently connected, append a trailing disabled row (labeled with the
-    // last-seen name) so the picker can still render the current selection instead of silently snapping.
+    // points at a disconnected device, append a trailing disabled row (last-seen name) so the picker renders
+    // the current selection instead of silently snapping.
     var inputDeviceOptions: [InputDeviceOption] {
         var options = [InputDeviceOption(id: "", label: "Follow macOS Input", connected: true)]
         let live = currentAudioSnapshot().devices

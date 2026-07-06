@@ -85,8 +85,8 @@ public struct DictationMachine: Sendable {
         }
     }
 
-    // Silence is determined from the heard transcript, but the pipeline must still leave something to
-    // insert. Command-only output such as "\n" is real content.
+    // Silence is keyed off the HEARD transcript, not finalText — so command-only output like "\n" (real
+    // content) survives — but finalText must still be non-empty to insert.
     public static func outcomeForTranscript(finalText: String, heard: String, decision: InsertionDecision) -> DictationOutcome {
         let spoke = heard.contains { !$0.isWhitespace }
         guard spoke, !finalText.isEmpty else { return .noSpeech }

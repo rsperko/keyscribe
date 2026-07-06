@@ -1,29 +1,26 @@
 import Foundation
 import KeyScribeKit
 
-// The single owner of on-disk config writes (dictionary, replacements, modes, connections). Every
-// mutation is a fresh read-modify-write from disk (so a concurrent write from another surface — the
-// global Add-to-Vocabulary hotkey while a Settings pane is open — is never clobbered by stale
-// in-memory state), then it invalidates the ConfigCache IMMEDIATELY so the *next dictation* sees the
-// change without waiting on the FSEvents watcher. The watcher stays only as a backstop for EXTERNAL
-// edits; an extra invalidate from it is harmless (idempotent). `onChange` lets the host refresh
-// dependent UI (menu status).
+// The single owner of on-disk config writes (dictionary, replacements, modes, connections). Every mutation
+// is a fresh read-modify-write from disk (so a concurrent write from another surface — the global
+// Add-to-Vocabulary hotkey while a Settings pane is open — is never clobbered by stale in-memory state),
+// then invalidates the ConfigCache immediately so the next dictation sees the change without waiting on the
+// FSEvents watcher. The watcher stays only as a backstop for external edits (an extra invalidate is
+// idempotent). `onChange` lets the host refresh dependent UI (menu status).
 //
-// The mutating methods THROW so a Settings pane can surface the specific failure; the `add*` helpers
-// wrap them into a Bool for the correction-surface callers (menu, History detail, correction panel)
-// that only care whether it stuck. settings.toml is the one config file NOT owned here — it is a
-// single whole-object write routed through AppDelegate.applySettings, which writes the in-memory
-// struct wholesale (an external settings.toml edit is absorbed only via the FSEvents reload path, not
-// merged at write time); folding a whole-struct rewrite behind read-modify-write would buy little.
+// Mutators THROW so a Settings pane can surface the failure; the `add*` helpers wrap them into a Bool for
+// correction-surface callers (menu, History detail, correction panel) that only care whether it stuck.
+// settings.toml is NOT owned here — it is a whole-object write routed through AppDelegate.applySettings
+// (external edits absorbed only via the FSEvents reload path); read-modify-write would buy little there.
 @MainActor
 final class ConfigRepository {
     let supportDir: URL
     private let config: ConfigCache
     private let selfWriteGate: ConfigSelfWriteGate
     var onChange: (() -> Void)?
-    // Additional in-app observers (beyond the host's single `onChange`) that need to re-read from disk
-    // when ANY surface writes config — notably the Settings pane models, whose in-memory drafts would
-    // otherwise clobber a term the global correction panel routed into a mode while the pane was open.
+    // In-app observers (beyond the host's `onChange`) that re-read from disk when any surface writes config —
+    // notably the Settings pane models, whose drafts would otherwise clobber a term the correction panel
+    // routed into a mode while the pane was open.
     private var changeObservers: [() -> Void] = []
 
     init(supportDir: URL, config: ConfigCache, selfWriteGate: ConfigSelfWriteGate = ConfigSelfWriteGate()) {
@@ -42,10 +39,9 @@ final class ConfigRepository {
     }
 
     // For write paths not routed through `commit` (fragment files edited directly by ModesSettingsView).
-    // Matches `commit`'s post-write discipline: suppress the watcher's self-write echo, invalidate the
-    // cache so the next dictation sees the edited instruction (fragments are baked into the resolved plan
-    // and reused across dictations, so without this an AI-rewrite instruction edit does nothing until
-    // relaunch), then notify the host.
+    // Matches `commit`'s post-write discipline: suppress the watcher echo, invalidate the cache so the next
+    // dictation sees the edited instruction (fragments are baked into the resolved plan and reused across
+    // dictations — without this an AI-rewrite instruction edit does nothing until relaunch), then notify.
     func recordSelfWrite(at url: URL) {
         selfWriteGate.recordSelfWrite(url: url, supportDir: supportDir)
         config.invalidate()
@@ -137,10 +133,9 @@ final class ConfigRepository {
         }
     }
 
-    // Re-slug a mode's file (the id is the filename stem). One operation: write the new file, then delete
-    // the old; if the delete fails, roll the new file back so a failed rename can never leave a DUPLICATE
-    // mode on disk (it leaves the original untouched and surfaces the error) — and it invalidates once, not
-    // twice.
+    // Re-slug a mode's file (id is the filename stem). Write the new file, then delete the old; if the delete
+    // fails, roll the new file back so a failed rename can never leave a DUPLICATE mode on disk (original
+    // untouched, error surfaced). Invalidates once, not twice.
     func renameMode(_ mode: Mode, to newId: String) throws {
         guard newId != mode.id else { return }
         guard !mode.isSystem else { throw ConfigError.invalid("system modes cannot be renamed") }
@@ -166,9 +161,8 @@ final class ConfigRepository {
 
     // MARK: Connections
 
-    // Read-modify-write from disk (like the dictionary/replacements mutators): insert-or-replace by id, so
-    // a connection written by another surface (first-run, a concurrent pane) between this model's snapshot
-    // and its save is never clobbered. Returns the fresh set.
+    // Read-modify-write insert-or-replace by id, so a connection written by another surface (first-run, a
+    // concurrent pane) between this model's snapshot and its save is never clobbered. Returns the fresh set.
     @discardableResult
     func upsertConnection(_ connection: Connection) throws -> ConnectionSet {
         try mutateConnections { set in
@@ -195,9 +189,8 @@ final class ConfigRepository {
         return set
     }
 
-    // Write succeeds → record the touched files (suppresses the watcher's self-write echo), invalidate
-    // the cache so the next dictation sees it, then notify the host. On a throw nothing is invalidated
-    // (the on-disk state is unchanged) and the error propagates.
+    // On write success: record the touched files (suppress the watcher echo), invalidate the cache, then
+    // notify. On a throw nothing is invalidated (on-disk state unchanged) and the error propagates.
     private func commit(touching paths: [URL], _ write: () throws -> Void) throws {
         try write()
         for path in paths { selfWriteGate.recordSelfWrite(url: path, supportDir: supportDir) }

@@ -125,9 +125,9 @@ final class RecorderButtonView: NSButton {
         recordingState?.isRecording = true
         onHint?(nil)
         window?.makeFirstResponder(self)
-        // The load-bearing fix: a local monitor sees the keystroke before SwiftUI's List type-select
-        // (which runs ahead of performKeyEquivalent and ignores first responder). Returning nil here
-        // swallows the event, so recording a shortcut never navigates the mode/sidebar list.
+        // A local monitor sees the keystroke before SwiftUI's List type-select (which runs ahead of
+        // performKeyEquivalent and ignores first responder). Returning nil swallows the event, so
+        // recording a shortcut never navigates the mode/sidebar list.
         monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .otherMouseDown]
         ) { [weak self] event in

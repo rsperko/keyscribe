@@ -17,8 +17,7 @@ public enum HistoryExport {
         }
     }
 
-    // Day/time rendering is injected (not Sendable — built and consumed within a single context) so the
-    // export matches whatever the History window shows and the tests stay locale/timezone-independent.
+    // Injected day/time rendering (not Sendable — built and consumed in one context).
     public struct Formatting {
         public let day: (Date) -> String
         public let time: (Date) -> String

@@ -64,10 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate)
         configRepository.onChange = { [weak self] in
-            // A mode write can enable/disable a mode or change its trigger key, so re-register the
-            // hotkey bindings from the freshly-invalidated config. The FSEvents watcher no longer does
-            // this for in-app writes (they are self-write echoes it deliberately skips), so without this
-            // an enabled mode's trigger never binds — and a disabled mode's keeps firing — until relaunch.
+            // A mode write can change enable state or trigger key, so re-register bindings. The FSEvents
+            // watcher skips in-app writes (self-write echoes), so without this a mode's trigger never
+            // rebinds until relaunch.
             self?.rebuildHotkeyMonitor()
             self?.refreshStatus()
         }
@@ -144,12 +143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onBecameIdle = { [weak self] in
             guard let self else { return }
-            // Resync gesture state with the machine on every return to idle. A controller-side abort
-            // (over-limit, mic/bring-up error) drops the machine to idle while a PressGesture still thinks
-            // it is recording/latched — without this the user's next tap-to-toggle press emits .commit into
-            // an idle machine (a no-op) and their first post-error dictation silently does nothing. Safe at
-            // idle: any legitimate in-progress gesture means the machine is still recording (never idle),
-            // and a cancelled held key returns .none on its eventual release (guard recording).
+            // Resync gesture state on every return to idle. A controller-side abort (over-limit, mic error)
+            // drops the machine to idle while a PressGesture still thinks it is recording, so the next
+            // tap-to-toggle press would emit .commit into an idle machine (a no-op). Safe at idle: a real
+            // in-progress gesture keeps the machine recording, never idle.
             if !self.hotkey.hasPhysicallyDownGesture {
                 self.hotkey.cancelGestures()
             }
@@ -197,9 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildHotkeyMonitor()
         applyLoginItem(settings.loadOnLogin)
 
-        // Start the tap now if permissions already allow (idempotent); first-run re-tries it via
-        // onReadyToDictate once permissions are granted. So dictation works regardless of whether
-        // onboarding has been completed.
+        // Start the tap now if permissions allow (idempotent); first-run retries via onReadyToDictate
+        // once granted, so dictation works regardless of onboarding completion.
         startListening()
         let permissionsReady = Permissions.microphoneStatus() == .granted
             && Permissions.accessibilityStatus() == .granted
@@ -220,11 +216,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             presentFirstRun()
         }
 
-        // Warm the HUD window, audio input unit, and resolved config just after launch settles so the
-        // FIRST dictation feels instant — the HUD appears, the mic is ready, and the frozen plan is
-        // built without paying their one-time realization on the hot path (handleStart reads
-        // config.resolved synchronously before the mic starts). Deferred a tick so it never adds to
-        // launch itself.
+        // Warm the HUD window, audio unit, and resolved config so the FIRST dictation doesn't pay their
+        // one-time realization on the hot path (handleStart reads config.resolved before the mic starts).
+        // Deferred a tick so it never adds to launch itself.
         Task { @MainActor [weak self] in
             self?.hud.prewarm()
             self?.controller.prewarmCapture()
@@ -341,17 +335,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // fresh PressGesture that never saw its key-down.
     private var pendingHotkeyRebuild = false
 
-    // Drop the cached config and re-register per-mode key bindings from the fresh modes. Called by
-    // the file watcher (external edits) and the Settings reload button. Rebuilding the hotkey monitor
-    // replaces its bindings and clears gesture state; doing that while a key is held would drop the
-    // pending release edge, so defer the rebuild until the in-flight dictation finishes.
+    // Drop the cached config and re-register per-mode bindings from the fresh modes. Called by the file
+    // watcher (external edits) and the Settings reload button; the rebuild defers if a key is held (see
+    // rebuildHotkeyMonitor).
     func reloadConfig() {
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
-        // Adopt the post-heal state BEFORE the reads below, so this reload does not echo into a second
-        // one. Capturing before loading keeps adopt-precedes-load: an edit landing after is caught by
-        // the next fire, never absorbed unread.
+        // Adopt the post-heal state BEFORE the reads below so this reload does not echo into a second one;
+        // an edit landing after is caught by the next fire, never absorbed unread.
         selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
         config.invalidate()
         // Absorb an external settings.toml edit (the Advanced pane promises edits are detected). Adopting
@@ -524,13 +516,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CorrectionDestination.list(for: config.modes)
     }
 
-    // Relaunch into the guided setup so the new process reads the just-granted Accessibility verdict
-    // fresh (it is cached at launch and won't apply to this process). First clear any denied ListenEvent
-    // (Input Monitoring) record: KeyScribe never uses Input Monitoring, but a pre-fix build could have left
-    // a denied record (from calling tapCreate before Accessibility was granted) that silently suppresses the
-    // modifier-only event tap even once Accessibility is granted. Clearing it heals such installs; on a
-    // healthy machine there is no record and the reset is a harmless no-op. User-initiated (this is the
-    // "Relaunch to finish setup" action), so it cannot loop.
+    // Relaunch into guided setup so the new process reads the just-granted Accessibility verdict fresh
+    // (it is cached at launch). First reset any denied ListenEvent record: a pre-fix build calling
+    // tapCreate before the grant could leave one that permanently suppresses the modifier tap even after
+    // Accessibility is granted; clearing heals those installs (no-op on a clean machine). User-initiated,
+    // so it cannot loop.
     private func relaunchForPermissionSetup(resumeOnboarding: Bool = false) {
         ResetTool.resetInputMonitoring()
         let configuration = NSWorkspace.OpenConfiguration()

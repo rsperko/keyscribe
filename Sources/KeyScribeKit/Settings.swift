@@ -271,13 +271,11 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
-    // Preferred capture device. `inputDeviceUID` is a CoreAudio device UID (stable across reconnect,
-    // unlike the ephemeral AudioDeviceID); nil means "follow the system default input." The capture
-    // adapter resolves it live each bring-up: preferred device if present, else the system default. A
-    // present preferred device is strict; fallback is for disconnected preferred devices. `inputDeviceName`
-    // is the human-friendly label
-    // captured when the device was last seen; it may be stale (the host refreshes it at startup whenever
-    // the device is connected) and is shown only so a disconnected preferred device still reads as itself.
+    // Preferred capture device. `inputDeviceUID` is a CoreAudio device UID (stable across reconnect, unlike
+    // the ephemeral AudioDeviceID); nil = follow the system default. Resolved live each bring-up: preferred
+    // if present (strict), else the default — fallback is only for a disconnected preferred device.
+    // `inputDeviceName` is a possibly-stale label (refreshed at startup when connected) shown only so a
+    // disconnected preferred device still reads as itself.
     public struct Audio: Codable, Equatable, Sendable {
         public var inputDeviceUID: String?
         public var inputDeviceName: String?
@@ -329,8 +327,8 @@ public struct Settings: Codable, Equatable, Sendable {
             overrides[feature.id] = enabled ? true : nil
         }
 
-        // Off deviations carry no information (absent already means off), so drop them along with any
-        // unknown ids — keeps the table minimal and makes equality track observable state.
+        // Off deviations carry no information (absent already means off), so drop them and any unknown ids —
+        // keeps the table minimal and makes equality track observable state.
         private static func pruned(_ overrides: [String: Bool]) -> [String: Bool] {
             let known = Set(Feature.allCases.map(\.id))
             return overrides.filter { known.contains($0.key) && $0.value }

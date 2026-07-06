@@ -4,61 +4,54 @@ public protocol SpeechEngine: Sendable {
     var id: String { get }
     var displayName: String { get }
     var supportsRecognitionBias: Bool { get }
-    // Sample rate (Hz) the capture path should record at for this engine, so the WAV needs no
-    // resample before transcription. 16 kHz suits every engine except Qwen3-ASR (24 kHz).
+    // Capture sample rate (Hz), so the WAV needs no resample before transcription. 16 kHz for every
+    // engine except Qwen3-ASR (24 kHz).
     var captureSampleRate: Int { get }
-    // Contract: once a model's install footprint is complete (verifyInstalled true, or the install marker
-    // records it), load/loadIfNeeded must not re-fetch those model files. Engine SDKs may own additional
-    // side caches outside installDirNames; adapters should keep those offline where the SDK exposes that
-    // control. STT is always on-device, and normal cold loads should not make network metadata checks.
+    // Contract: once install is complete (verifyInstalled true / install marker set), load must not re-fetch
+    // model files. A cold load must not make network metadata checks (STT is always on-device); keep SDK
+    // side caches offline where the SDK allows.
     func loadIfNeeded() async throws
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String
 
-    // True when the engine can transcribe already-decoded PCM directly, letting the capture path hand it
-    // the samples the writer just produced instead of re-reading and re-decoding the WAV. Default false;
-    // FluidAudio/WhisperKit/Qwen/Moonshine override it. Apple keeps the file (its analyzer takes a URL).
+    // True when the engine can transcribe already-decoded PCM directly, so the capture path hands it the
+    // writer's samples instead of re-reading/decoding the WAV. Default false; Apple keeps the file (URL).
     var supportsSampleInput: Bool { get }
-    // Transcribe mono Float32 PCM at `sampleRate` (the engine's captureSampleRate). Only called when
-    // supportsSampleInput is true. `wavURL` is still written for archive/probe/fallback.
+    // Transcribe mono Float32 PCM at `sampleRate` (captureSampleRate). Only called when supportsSampleInput
+    // is true. `wavURL` is still written for archive/probe/fallback.
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String
 
-    // True when the engine can consume audio incrementally during capture and produce the transcript at
-    // commit with less post-release latency (streaming). Default false; streaming-capable engines override
-    // it. The controller only calls makeStreamingSession when this is true AND the streaming flag is on;
-    // every other engine and the flag-off path stay on the batch transcribe above, unchanged.
+    // True when the engine can consume audio incrementally during capture (streaming). Default false. The
+    // controller only calls makeStreamingSession when this is true AND the streaming flag is on; every other
+    // path stays on the batch transcribe above.
     var supportsStreaming: Bool { get }
-    // Open a streaming session bound to this engine for one dictation. `sampleRate` is the engine's
-    // captureSampleRate; `biasTerms` is the recognition bias for the session's lifetime. The session holds
-    // the engine's non-Sendable handle until finalizeTranscript/cancel, so the decorator keeps its
-    // exclusive lock for that whole span. Only called when supportsStreaming is true.
+    // Open a streaming session for one dictation. The session holds the engine's non-Sendable handle until
+    // finalizeTranscript/cancel, so the decorator keeps its exclusive lock for that whole span. Only called
+    // when supportsStreaming is true.
     func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession
 
     func evict() async
 
-    // Preheat any per-dictation session state at press so it overlaps speech; fire-and-forget, default
-    // no-op. Only Apple's one-shot SpeechAnalyzer needs it today.
+    // Preheat per-dictation session state at press so it overlaps speech; fire-and-forget, default no-op.
+    // Only Apple's one-shot SpeechAnalyzer needs it today.
     func prepareForDictation() async
 
-    // Pre-build any per-term-set bias artifacts (Parakeet's CTC vocab/rescorer) once per residency at warm
-    // time, so the first biased dictation in a mode with local dictionary terms doesn't build them
-    // mid-transcription. Called from the warm task with every enabled mode's bias set. Default no-op;
-    // only Parakeet overrides. Best-effort — a warm failure never fails the load.
+    // Pre-build per-term-set bias artifacts (Parakeet's CTC vocab/rescorer) at warm time so the first biased
+    // dictation doesn't build them mid-transcription. Default no-op; only Parakeet overrides. Best-effort.
     func prewarmBias(termSets: [[String]]) async
 
     // False for Apple: its analyzer is one-shot, so a warmup transcribe would consume the pair prepared for
     // the real dictation (prepareForDictation is its warmup instead).
     var benefitsFromWarmupClip: Bool { get }
 
-    // Install footprint owned by this engine, used by reconcile/delete. The subdirectory names
-    // (under modelsDir) the engine downloads into; empty for system-managed engines.
+    // Subdirectory names under modelsDir the engine downloads into (reconcile/delete); empty for
+    // system-managed engines.
     var installDirNames: [String] { get }
     func verifyInstalled(in modelsDir: URL) -> Bool?
 }
 
 public extension SpeechEngine {
-    // Default: a download with no native progress just loads. Downloadable engines override to report
-    // byte/phase progress.
+    // Default: no native progress, just load. Downloadable engines override to report byte/phase progress.
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         try await loadIfNeeded()
     }
@@ -74,40 +67,34 @@ public extension SpeechEngine {
     var benefitsFromWarmupClip: Bool { true }
 
     var supportsSampleInput: Bool { false }
-    // Never reached in practice — the controller only calls this when supportsSampleInput is true, and
-    // every such engine overrides it. Present so the WAV-only engines satisfy the protocol.
+    // Never reached: the controller only calls this when supportsSampleInput is true. Present so WAV-only
+    // engines satisfy the protocol.
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         throw SpeechEngineError.sampleInputUnsupported
     }
 
     var supportsStreaming: Bool { false }
-    // Never reached in practice — the controller only calls this when supportsStreaming is true. Present so
-    // the batch-only engines satisfy the protocol; the same silent-no-op trap as transcribe(samples:).
+    // Never reached: the controller only calls this when supportsStreaming is true. Present so batch-only
+    // engines satisfy the protocol.
     func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
         throw SpeechEngineError.streamingUnsupported
     }
 }
 
-// One dictation's incremental transcription. Created by makeStreamingSession, fed decoded PCM off the
-// realtime path as capture proceeds, and closed exactly once at commit (finalizeTranscript) or abort
-// (cancel). Every exit path must be reached exactly once so the decorator's exclusive lock is always
-// released; a leaked session wedges the engine until relaunch (SerializedEngine holds its lock for the
-// session's whole lifetime).
+// One dictation's incremental transcription. Every exit path must be reached exactly once so the
+// decorator's exclusive lock is released; a leaked session wedges the engine until relaunch (SerializedEngine
+// holds its lock for the session's whole lifetime).
 //
-// Contract: append/finalizeTranscript MUST run their inference off the main actor. The controller awaits
-// finalizeTranscript from the @MainActor commit task, so if an implementation did heavy work on the main
-// actor the HUD would freeze during the post-release finalize — the main actor must only suspend here.
+// Contract: append/finalizeTranscript MUST run inference off the main actor — the controller awaits
+// finalizeTranscript from the @MainActor commit task, so heavy work here freezes the HUD.
 //
-// Contract: cancel() may overlap an in-flight append()/finalizeTranscript(). The driver is an actor and
-// cancels at a suspension point (ESC/over-limit/backpressure), so a cancel() can land while an append is
-// still awaiting inside the adapter. Adapters MUST tolerate this — tear down SDK state so the pending
-// call unblocks and cannot corrupt or double-release — and cancel() must be idempotent-safe against a
-// concurrent terminal call.
+// Contract: cancel() may overlap an in-flight append()/finalizeTranscript() (the driver cancels at a
+// suspension point). Adapters MUST tolerate this — tear down SDK state so the pending call unblocks without
+// corruption/double-release — and cancel() must be idempotent-safe against a concurrent terminal call.
 public protocol StreamingSpeechSession: Sendable {
     // Feed the next decoded mono Float32 chunk (engine sample rate). Called off the writer/RT threads.
-    // Throws if the chunk cannot be admitted (e.g. a failed resample); the driver then cancels the session
-    // and the dictation degrades to a batch transcribe of the intact accumulated audio, so audio a user
-    // spoke is never silently dropped mid-utterance.
+    // Throws if the chunk cannot be admitted (e.g. failed resample); the driver then cancels and degrades to
+    // a batch transcribe of the intact audio, so spoken audio is never silently dropped mid-utterance.
     func append(samples: [Float]) async throws
     // Run the final chunk and return the whole transcript. Terminal: the session is spent after this.
     func finalizeTranscript() async throws -> String

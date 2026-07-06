@@ -46,10 +46,9 @@ struct DisclosureSummaryLabel: View {
     }
 }
 
-// ui_components.md "Setting row with help": label + one-line result, the control, an inline
-// Learn more disclosure carrying benefit/limit/prerequisite, plus a
-// persistent dependency reason when the control is gated. No hover-only tooltips for anything
-// that affects data, privacy, or output (ui_design.md §3).
+// ui_components.md "Setting row with help": label + one-line result, the control, an inline "Learn
+// more" disclosure carrying benefit/limit/prerequisite, plus a persistent dependency reason when the
+// control is gated. No hover-only tooltips for anything affecting data, privacy, or output (ui_design.md §3).
 struct SettingRow<Control: View>: View {
     let title: String
     var result: String? = nil
@@ -95,9 +94,8 @@ struct SettingRow<Control: View>: View {
 }
 
 // ui_components.md data-boundary badge: one shared capsule for "On this Mac", "Cloud rewrite",
-// "Best-effort redaction", "App shared", "Selected text shared". The label
-// strings come from KeyScribeKit (HistoryEntry); this is the single view used in HUD, Mode
-// summaries, and History so the categories never collapse into a generic "context" label.
+// "Best-effort redaction", "App shared", "Selected text shared". Label strings come from KeyScribeKit
+// (HistoryEntry); the single view used in HUD, Mode summaries, and History so categories stay distinct.
 struct DataBoundaryBadge: View {
     let label: String
 
@@ -110,11 +108,10 @@ struct DataBoundaryBadge: View {
     }
 }
 
-// Settings are modeless / immediate-apply (Apple HIG: a Settings window has no Save/Cancel/Apply/
-// Done). A text field, though, should apply on END-OF-EDITING — Return or focus loss — not on every
-// keystroke, which is the native AppKit commit point and avoids per-character disk writes + config-
-// watcher churn. Esc reverts the in-progress edit to the last committed value (the per-field "cancel").
-// The draft re-seeds from the model when it changes externally and the field is not being edited.
+// Settings are modeless / immediate-apply (Apple HIG: no Save/Cancel/Apply/Done). A text field applies
+// on END-OF-EDITING — Return or focus loss, the native AppKit commit point — not per keystroke, avoiding
+// per-character disk writes + config-watcher churn. Esc reverts to the last committed value. The draft
+// re-seeds from the model when it changes externally and the field is not being edited.
 struct CommittedTextField: View {
     let title: String
     let text: String

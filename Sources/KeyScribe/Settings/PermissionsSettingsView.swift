@@ -47,10 +47,9 @@ struct PermissionsSettingsView: View {
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Permission grants land out-of-process: Microphone is toggled in System Settings (re-checked
-        // when the app reactivates), while Accessibility is granted in another app that never
-        // reactivates us — so there is no event to hook. TCC exposes no "permission changed"
-        // callback, so we poll, but only while this pane is on screen (.task is cancelled on disappear).
+        // Permission grants land out-of-process (Accessibility is granted in another app that never reactivates
+        // us) and TCC exposes no "permission changed" callback, so poll — but only while this pane is on screen
+        // (.task is cancelled on disappear).
         .task {
             while !Task.isCancelled {
                 refreshPermissions()

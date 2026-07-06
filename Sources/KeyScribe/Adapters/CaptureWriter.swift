@@ -8,8 +8,8 @@ final class FeedOnce: @unchecked Sendable {
     var consumed = false
 }
 
-// Seam over the capture file write so the WAV and the in-memory samples stay in lockstep even on a write
-// failure, and so a fake can force a failure in tests. AVAudioFile satisfies it directly.
+// Seam over the file write so WAV and in-memory samples stay in lockstep on a write failure, and a fake
+// can force a failure in tests. AVAudioFile satisfies it directly.
 protocol CaptureFileWriting: AnyObject {
     func write(from buffer: AVAudioPCMBuffer) throws
 }
@@ -29,18 +29,17 @@ final class CaptureWriter: @unchecked Sendable {
     private let observeHostTime: (UInt64?) -> Bool
 
     private let shutdown = DispatchSemaphore(value: 0)
-    // The thread's lifetime, joinable by MANY waiters: both the teardown path AND the next capture's arm can
-    // call finish() concurrently (across a control-queue swap), and every caller must block until the thread
-    // has fully exited before the shared ring is reset. A DispatchGroup (unlike a one-shot semaphore) releases
-    // all waiters on the single leave() and returns immediately for any wait() after exit.
+    // Thread lifetime, joinable by MANY waiters: teardown AND the next capture's arm can call finish()
+    // concurrently (across a control-queue swap), and every caller must block until the thread exits before
+    // the shared ring is reset. A DispatchGroup releases all waiters on the single leave() and returns at
+    // once for any wait() after exit (a one-shot semaphore would not).
     private let done = DispatchGroup()
     private let stopRequested = Atomic<Bool>(false)
     private let flushOnStop = Atomic<Bool>(false)
-    // Serializes start()/finish() so `done.enter()` happens under the same lock that sets `didStart`. Any
-    // finish() that observes `didStart == true` is therefore guaranteed the group was already entered, so its
-    // `done.wait()` cannot slip past an empty group before the writer thread exists. `finishRequested` remembers
-    // a finish() that raced ahead of start() so start() can honor the stop instead of running the thread full-
-    // length.
+    // Serializes start()/finish() so `done.enter()` happens under the same lock that sets `didStart`: any
+    // finish() observing `didStart == true` is guaranteed the group was entered, so its `done.wait()` cannot
+    // slip past an empty group before the thread exists. `finishRequested` remembers a finish() that raced
+    // ahead of start() so start() honors the stop instead of running the thread full-length.
     private let lifecycleLock = NSLock()
     private var didStart = false
     private var finishRequested = false
@@ -55,23 +54,20 @@ final class CaptureWriter: @unchecked Sendable {
     private let feed = FeedOnce()
     // Set once the drain gate trips: the converter tail has been flushed and no further slots are written.
     private var sealed = false
-    // Post-conversion mono PCM (record rate), accumulated alongside the file write so the committed
-    // capture can be handed to a sample-capable engine without re-reading the WAV (P2-1). Written on the
-    // writer thread; read by drainedSamples() only after finish() has joined the thread. Bounded by the
-    // recording cap (~19 MiB @16 kHz / ~29 MiB @24 kHz for the 5-min max), freed with the session.
-    // Only populated when `wantsSamples` — a sample-incapable engine (e.g. Apple) never reads it, so the
-    // per-chunk memcpy and peak memory are skipped for it (P2-2).
+    // Post-conversion mono PCM (record rate), accumulated alongside the file write so a sample-capable engine
+    // gets the committed capture without re-reading the WAV (P2-1). Written on the writer thread; read by
+    // drainedSamples() only after finish() has joined. Bounded by the recording cap (~19 MiB @16 kHz /
+    // ~29 MiB @24 kHz for the 5-min max). Populated only when `wantsSamples` (P2-2).
     private var accumulated: [Float] = []
-    // The active engine can transcribe from in-memory samples; when false, skip accumulation entirely and
-    // report no samples so the commit path re-reads the WAV instead.
+    // False for a sample-incapable engine (e.g. Apple): skip accumulation and report no samples so the commit
+    // path re-reads the WAV.
     private let wantsSamples: Bool
     // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
-    // only, operating on device-native slots (pre-resample).
+    // only, on device-native slots (pre-resample).
     private var headGate: HeadAdmitGate?
-    // Streaming feed (P3-1): when set, each post-conversion mono chunk written to the file is also handed to
-    // this sink so a streaming session can transcribe during capture. Called on the writer thread ONLY, and
-    // MUST be non-blocking (the real wiring is a bounded AsyncStream yield) — never the realtime IO thread.
-    // nil when streaming is off, so the batch path allocates and does nothing extra.
+    // Streaming feed (P3-1): each post-conversion mono chunk written to the file is also handed here so a
+    // streaming session can transcribe during capture. Writer thread ONLY, and MUST be non-blocking (real
+    // wiring is a bounded AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
     private let onSamples: (@Sendable ([Float]) -> Void)?
 
     init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
@@ -90,8 +86,8 @@ final class CaptureWriter: @unchecked Sendable {
                 admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond,
                 fallbackDropSeconds: cueWindowSeconds)
         }
-        // Pre-size the accumulator to ~30 s of record-rate mono so a multi-minute dictation stops
-        // re-copying the whole multi-MiB prefix through repeated doubling.
+        // Pre-size to ~30 s of record-rate mono so a multi-minute dictation avoids re-copying the multi-MiB
+        // prefix through repeated doubling.
         if wantsSamples { accumulated.reserveCapacity(Int(recordFormat.sampleRate * 30)) }
     }
 
@@ -103,8 +99,8 @@ final class CaptureWriter: @unchecked Sendable {
             return (true, finishRequested)
         }
         guard outcome.isFirstStart else { return }
-        // A finish() landed before the thread was spawned; carry its stop into the run loop so the thread
-        // stops promptly rather than running the full capture (flushOnStop was already set by that finish()).
+        // A finish() landed before the thread was spawned; carry its stop in so the thread stops promptly
+        // rather than running the full capture (flushOnStop was already set by that finish()).
         if outcome.finishRequested { stopRequested.store(true, ordering: .releasing) }
         let t = Thread { [weak self] in self?.run() }
         t.name = "com.keyscribe.audio.writer"
@@ -126,11 +122,10 @@ final class CaptureWriter: @unchecked Sendable {
         converter = nil
         inBuffer = nil
         outBuffer = nil
-        // The cancel/discard path discards the audio, so don't let the writer pin the multi-MiB accumulator
-        // until the next arm replaces it (P2-1). Guard on `!sealed` too: a sealed COMMIT exits here on its own
-        // (the drain-gate trip) BEFORE finish(flushConverter:true) has set `flushOnStop`, so `flushing` reads
-        // false — clearing then would drop the committed samples finishWriterAndCloseFile is about to read.
-        // The commit paths (sealed, or backstop with `flushing`) keep it and clear via releaseSamples() after
+        // Free the accumulator only on the cancel/discard path so the writer doesn't pin the multi-MiB copy
+        // while idle (P2-1). Guard on `!sealed`: a sealed COMMIT exits here BEFORE finish(flushConverter:true)
+        // sets `flushOnStop`, so `flushing` reads false — clearing then would drop the committed samples
+        // finishWriterAndCloseFile is about to read. Commit paths keep it and clear via releaseSamples() after
         // the copy, once this thread has joined.
         if !sealed && !flushing { accumulated = [] }
         done.leave()
@@ -205,9 +200,8 @@ final class CaptureWriter: @unchecked Sendable {
         guard let file else { return }
         let inFmt = input.format
         if inFmt.sampleRate == recordFormat.sampleRate && inFmt.channelCount == recordFormat.channelCount {
-            // Only mirror to the accumulator/streaming sink if the WAV write landed, so the in-memory samples
-            // mainline STT transcribes never contain a chunk the file/archive/probe lacks (keeps P2-4's
-            // samples==WAV invariant true by construction, not just under the probe).
+            // Mirror to the accumulator/streaming sink only if the WAV write landed, so in-memory samples never
+            // contain a chunk the file lacks (P2-4's samples==WAV invariant, true by construction).
             if writeToFile(file, input) { appendSamples(from: input) }
             return
         }
@@ -237,32 +231,28 @@ final class CaptureWriter: @unchecked Sendable {
         if writeToFile(file, outBuffer) { appendSamples(from: outBuffer) }
     }
 
-    // Mirror the mono PCM written to the file into the in-memory accumulator. Same buffer, same samples,
-    // so the samples an engine consumes are bit-identical to the WAV's content.
+    // Mirror the mono PCM written to the file into the accumulator (and streaming sink), so an engine's
+    // samples are bit-identical to the WAV.
     private func appendSamples(from buffer: AVAudioPCMBuffer) {
         let n = Int(buffer.frameLength)
         guard n > 0, let ptr = buffer.floatChannelData?[0] else { return }
         let slice = UnsafeBufferPointer(start: ptr, count: n)
-        // Skip the accumulator when the active engine can't consume in-memory samples (P2-2); the streaming
-        // sink below is independent (it feeds Apple's live session) and still fires.
+        // Skip the accumulator when the engine can't consume in-memory samples (P2-2); the streaming sink is
+        // independent (feeds Apple's live session) and still fires. Only allocates the copy when streaming is on.
         if wantsSamples { accumulated.append(contentsOf: slice) }
-        // The streaming session sees the SAME samples the file/accumulator get, so a streamed transcript is
-        // bit-identical in source to the committed WAV. Only allocates the copy when streaming is on.
         if let onSamples { onSamples(Array(slice)) }
     }
 
-    // The committed capture's post-conversion mono PCM, or nil when the engine can't consume samples
-    // (accumulation was skipped — the caller re-reads the WAV). Safe to call only after finish() has joined
-    // the writer thread (the caller — AudioCapture.finishWriterAndCloseFile — does exactly that first).
+    // Committed post-conversion mono PCM, or nil when the engine can't consume samples (caller re-reads the
+    // WAV). Safe only after finish() has joined the writer thread (finishWriterAndCloseFile does that first).
     func drainedSamples() -> [Float]? { wantsSamples ? accumulated : nil }
 
-    // Drop the accumulator after the commit path has copied it out (via drainedSamples()), so the writer —
-    // retained via `lastWriter` until the next arm — does not pin a redundant multi-MiB copy while idle
-    // (P2-1). Safe only after finish() has joined the writer thread; the caller does that first.
+    // Drop the accumulator after the commit path copied it out, so the writer (retained via `lastWriter`)
+    // doesn't pin a redundant multi-MiB copy while idle (P2-1). Safe only after finish() has joined the thread.
     func releaseSamples() { accumulated = [] }
 
-    // Drain the resampler's internal latency (a few samples of SRC delay) into the file at end of capture,
-    // so the very tail isn't left stuck inside the converter. No-op when no conversion is happening.
+    // Drain the resampler's internal latency (a few samples of SRC delay) into the file at end of capture so
+    // the tail isn't stuck inside the converter. No-op when no conversion is happening.
     private func flushConverterTail() {
         guard let converter, let outBuffer, let file else { return }
         outBuffer.frameLength = 0
@@ -276,24 +266,21 @@ final class CaptureWriter: @unchecked Sendable {
         }
     }
 
-    // Request the thread to stop and block until it has fully exited, so the owner may then close the file
-    // with no write in flight. `flushConverter` flushes the resampler tail when the gate never tripped
-    // (e.g. the 300 ms backstop fired) — the commit path passes true, cancel passes false (the file is
-    // discarded). Idempotent.
+    // Request stop and block until the thread has exited, so the owner may close the file with no write in
+    // flight. `flushConverter` flushes the resampler tail when the gate never tripped (e.g. the 300 ms
+    // backstop fired): commit passes true, cancel passes false (file discarded). Idempotent.
     func finish(flushConverter: Bool) {
         flushOnStop.store(flushConverter, ordering: .releasing)
-        // Record the request and read whether start() has already entered the group, under the same lock
-        // start() uses — so observing `started == true` guarantees `done.enter()` already ran and the wait()
-        // below cannot slip past an empty group. A finish() that raced ahead of start() just records the
-        // request (start() will honor it) and returns; there is no thread to join yet.
+        // Record the request and read `didStart` under the lock start() uses, so observing `started == true`
+        // guarantees `done.enter()` ran and the wait() below can't slip past an empty group. A finish() that
+        // raced ahead of start() just records the request (start() honors it); no thread to join yet.
         let started = lifecycleLock.withLock { () -> Bool in
             finishRequested = true
             return didStart
         }
         guard started else { return }
-        // Only the first caller drives the shutdown handshake (release the store above BEFORE the run loop's
-        // acquiring load of stopRequested sees it); every caller then blocks on the group until the thread
-        // has left. Safe to call after the thread already sealed-and-left — wait() returns at once.
+        // Only the first caller drives the shutdown handshake; every caller then blocks on the group until the
+        // thread exits. Safe after the thread already sealed-and-left — wait() returns at once.
         if !stopRequested.exchange(true, ordering: .acquiringAndReleasing) { shutdown.signal() }
         done.wait()
     }

@@ -1,21 +1,17 @@
 import Foundation
 
-// Best-effort redaction (design.md §4.2). Pattern-matches likely-sensitive spans and tokenizes
-// them BEFORE the (possibly cloud) LLM, restoring after. Gated by the mode's privacy toggle at the
-// call site, which also forces context off (§4.4) so the redacted transcript is the only user
-// content that can leave. This is **best-effort** — pattern matching misses obfuscated or novel
-// secrets — and the UX must never imply a guarantee. Over-matching is safe: a token is restored to
-// its original after the LLM, so a false positive only means that span was not rewritten, never
-// that the inserted text is wrong.
+// Best-effort redaction (design.md §4.2). Tokenizes likely-sensitive spans BEFORE the (possibly cloud)
+// LLM and restores them after. Gated by the mode's privacy toggle, which also forces context off (§4.4)
+// so the redacted transcript is the only user content that can leave. Best-effort — pattern matching
+// misses obfuscated/novel secrets, so the UX must never imply a guarantee. Over-matching is safe: a token
+// is restored after the LLM, so a false positive only means that span was not rewritten.
 public enum RedactionTokenizer {
     private struct Detector {
         let pattern: String
         let options: NSRegularExpression.Options
         let validate: @Sendable (String) -> Bool
-        // Lowercased literals that MUST appear (any one) in a real match. A cheap substring check over
-        // the lowercased transcript skips the regex engine entirely when none are present — most
-        // dictations contain none of these vendor prefixes, so most of the detector battery is skipped.
-        // Empty = no cheap literal (digit/email patterns); always run.
+        // Lowercased literals, any one of which must appear in a real match; a cheap substring check skips the
+        // regex engine when none are present (most dictations skip most detectors). Empty = no literal, always run.
         let requires: [String]
         init(
             _ pattern: String, options: NSRegularExpression.Options = [],
@@ -74,11 +70,9 @@ public enum RedactionTokenizer {
         }
     }
 
-    // Redaction runs LAST, after verbatim/clipboard have already minted opaque ⟦SN:…⟧ tokens
-    // (design.md §4.2.1). A detector must never scan a token body — a partway match would strand a
-    // `⟦SN:` fragment outside its redaction span and leak the protected content. So, like every other
-    // free-substituting stage, redact only the plain runs BETWEEN sentinels; a whole-token nesting is
-    // command-stage-only and irrelevant here.
+    // Redaction runs LAST, after verbatim/clipboard have minted opaque ⟦SN:…⟧ tokens (design.md §4.2.1). A
+    // detector must never scan a token body — a partway match would strand a `⟦SN:` fragment outside its span
+    // and leak the protected content — so, like every free-substituting stage, redact only the runs BETWEEN sentinels.
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
         SentinelText.mappingOutsideSentinels(text) { run in redactRun(run, into: tokenizer) }
     }
@@ -113,9 +107,8 @@ public enum RedactionTokenizer {
             kept.append((span.range, span.value))
             lastUpper = span.range.upperBound
         }
-        // dedup: false — a secret repeated verbatim in one dictation must mint distinct tokens per
-        // site, or a faithful rewrite reproducing both occurrences trips the gate's exactly-once
-        // check (mirrors ClipboardTokenizer).
+        // dedup: false — a secret repeated verbatim must mint distinct tokens per site, or a faithful rewrite
+        // reproducing both occurrences trips the gate's exactly-once check (mirrors ClipboardTokenizer).
         return tokenizer.splice(text, spans: kept, type: .redact, dedup: false)
     }
 
@@ -142,10 +135,9 @@ public enum RedactionTokenizer {
         return spans
     }
 
-    // Generic high-entropy fallback for novel/unbranded secrets (API keys, hashes) the named
-    // patterns miss. Conservative: a long run over a secret-like charset that mixes letters and
-    // digits and carries high Shannon entropy. Tuned to avoid prose; over-matching is harmless here
-    // (restored verbatim) so the bar favours catching secrets.
+    // Generic high-entropy fallback for novel/unbranded secrets the named patterns miss: a long run over a
+    // secret-like charset mixing letters and digits with high Shannon entropy. Tuned to avoid prose; over-matching
+    // is harmless (restored verbatim) so the bar favours catching secrets.
     private static func highEntropySpans(_ text: String) -> [Span] {
         guard hasLongSecretRun(text) else { return [] }
         guard let re = RegexCache.regex(#"[A-Za-z0-9+/=_-]{24,}"#) else { return [] }

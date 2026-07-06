@@ -5,9 +5,8 @@ public struct ConfigSnapshot: Equatable, Sendable {
     public init(stamps: [String: String] = [:]) { self.stamps = stamps }
 }
 
-// Stat-only (size:mtime) fingerprint of the config tree, keyed by path relative to the support dir,
-// using the SAME first-level exclusions as ConfigWatchFilter so the snapshot and the watcher agree on
-// what counts as configuration.
+// Stat-only (size:mtime) fingerprint of the config tree, keyed by path relative to the support dir. Uses
+// the SAME first-level exclusions as ConfigWatchFilter so snapshot and watcher agree on what is config.
 public enum ConfigTreeSnapshot {
     public static func stamp(of url: URL) -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -46,11 +45,10 @@ public enum ConfigTreeSnapshot {
     }
 }
 
-// Suppresses the FSEvents echo of the app's own config writes. Each in-app write records the written
-// file's stamp; the watcher captures the tree and reloads only when it differs. Recording is per-file
-// (never a whole-tree recapture) so the baseline can never absorb a concurrent external edit to a
-// different file, and shouldReload never mutates the baseline — so an external edit is never silently
-// swallowed. Thread-safe via NSLock (watcher off-main, writers on the main actor).
+// Suppresses the FSEvents echo of the app's own config writes: each in-app write records its file's stamp;
+// the watcher reloads only when the tree differs. Recording is per-file (never a whole-tree recapture) and
+// shouldReload never mutates the baseline, so a concurrent external edit to a different file is never
+// silently swallowed. Thread-safe via NSLock (watcher off-main, writers on the main actor).
 public final class ConfigSelfWriteGate: @unchecked Sendable {
     private let lock = NSLock()
     private var baseline: ConfigSnapshot

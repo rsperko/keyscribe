@@ -1,9 +1,8 @@
 import Foundation
 
-// A cheap, high-signal fingerprint of text that crossed a pipeline boundary — used to verify exactly
-// what text reached each stage and catch whitespace/encoding mangling WITHOUT logging the text
-// itself. `hash` is FNV-1a 64-bit over the UTF-8 bytes; the counts catch grapheme/byte/whitespace
-// drift the hash alone would only flag as "different". Pure and OS-free.
+// A cheap fingerprint of text crossing a pipeline boundary — verifies what reached each stage and catches
+// whitespace/encoding mangling WITHOUT logging the text. `hash` is FNV-1a 64-bit over UTF-8; the counts
+// catch grapheme/byte/whitespace drift the hash alone would only flag as "different".
 public struct TextFingerprint: Codable, Equatable, Sendable {
     public let hash: UInt64
     public let chars: Int
@@ -36,21 +35,19 @@ public struct TextFingerprint: Codable, Equatable, Sendable {
     public var hex: String { String(format: "%016llx", hash) }
 }
 
-// One structured, in-memory record of the most recent dictation, kept UNCONDITIONALLY (even when
-// persistent history is off) so a dictation is auditable without logs — the reliable ground truth
-// given that `os.Logger` / `log show` is unreliable on this machine (AGENTS).
+// In-memory record of the most recent dictation, kept UNCONDITIONALLY (even when persistent history is off)
+// so a dictation is auditable without logs (`log show` is unreliable on this machine, AGENTS).
 //
-// Privacy (hard footguns, design.md §4.2): the token→original map NEVER enters this record — only
-// `issuedTokenCount` and the restored `final` fingerprint. Fingerprints and timings are safe to log;
-// `humanSummary()` emits ONLY hashes, counts, and milliseconds — never transcript text. The struct
-// MAY hold real text indirectly only via fingerprints (which are one-way hashes), never the text.
+// Privacy (hard footgun, design.md §4.2): the token→original map NEVER enters this record — only
+// `issuedTokenCount` and fingerprints (one-way hashes). `humanSummary()` emits only hashes/counts/ms, never
+// transcript text.
 public struct DictationRecord: Codable, Equatable, Sendable {
     public enum Outcome: String, Codable, Sendable {
         case inserted, copied, localFallback, noSpeech, failed
     }
 
-    // Wall-clock stage timings, stamped by the app layer (the clock stays out of this pure type).
-    // Ordered chronologically: `arm` is press→mic-live, `modelWait` is the commit-time load await.
+    // Wall-clock stage timings, stamped by the app layer, chronological. `arm` is press→mic-live,
+    // `modelWait` is the commit-time load await.
     public enum Stage: String, Codable, Sendable, CaseIterable {
         case arm, drain, modelWait, transcribe, streamFinalize, localProcess, rewrite, insert
     }
@@ -90,8 +87,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
         self.fallbackReason = nil
     }
 
-    // Real-time factor: how long STT took relative to the audio it transcribed (< 1 is faster than
-    // real time). nil unless both a transcribe time and a positive audio duration are known.
+    // Real-time factor: STT time / audio duration (< 1 is faster than real time). nil unless both are known.
     public var rtf: Double? {
         guard let transcribe = stageMillis[.transcribe], let audio = audioSeconds, audio > 0 else { return nil }
         return (transcribe / 1000) / audio

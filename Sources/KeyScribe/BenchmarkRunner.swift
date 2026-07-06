@@ -120,10 +120,10 @@ enum BenchmarkRunner {
         }
     }
 
-    // `KeyScribe --benchmark <dir> --streaming`: for every streaming-capable engine, transcribe each clip
-    // BOTH ways — batch (transcribe) and streaming (makeStreamingSession fed as ~0.1 s live chunks, the same
-    // path a real dictation drives) — and report WER for each so streaming↔batch parity is directly visible
-    // (P3-1: streaming must not regress accuracy). No bias (Moonshine has none); scored against the manifest.
+    // `KeyScribe --benchmark <dir> --streaming`: transcribe each clip BOTH ways — batch and streaming (through the
+    // real `StreamingDictationDriver` at realtime cadence, the exact live path: deferred start, chunk replay,
+    // backpressure fallback) — and report WER for each so streaming↔batch parity is visible (P3-1: streaming must
+    // not regress accuracy). A clip that degrades to batch is scored as batch and counted `fellBack`. No bias.
     static func runStreamingParity(dir: URL, only: Set<String>? = nil, raw: Bool = false) async {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {
@@ -145,7 +145,12 @@ enum BenchmarkRunner {
                 for entry in manifest.entries {
                     let wav = dir.appendingPathComponent(entry.file)
                     guard FileManager.default.fileExists(atPath: wav.path) else { continue }
-                    let hyp = (await streamingReplay(engine: engine, wav: wav)) ?? "<error>"
+                    let hyp: String
+                    switch await streamingReplay(engine: engine, wav: wav) {
+                    case .streamed(let t): hyp = t
+                    case .fellBack: hyp = "<fell back to batch>"
+                    case .failed: hyp = "<error>"
+                    }
                     let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
                     print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
                 }
@@ -160,17 +165,22 @@ enum BenchmarkRunner {
             do { try await engine.loadIfNeeded() } catch {
                 print("· \(engine.id): not installed / load failed"); continue
             }
-            var batchWER = 0.0, streamWER = 0.0, clips = 0
+            var batchWER = 0.0, streamWER = 0.0, clips = 0, fellBack = 0, failed = 0
             for entry in manifest.entries {
                 let wav = dir.appendingPathComponent(entry.file)
                 guard FileManager.default.fileExists(atPath: wav.path) else { continue }
                 guard let batch = try? await engine.transcribe(wavURL: wav, biasTerms: []) else { continue }
-                let stream = (await streamingReplay(engine: engine, wav: wav)) ?? "<error>"
+                let stream: String, note: String
+                switch await streamingReplay(engine: engine, wav: wav) {
+                case .streamed(let t): stream = t; note = ""
+                case .fellBack: stream = batch; note = " (fell back to batch)"; fellBack += 1   // app runs batch
+                case .failed: stream = "<error>"; note = " (setup failed)"; failed += 1
+                }
                 let bw = BenchmarkScoring.wer(reference: entry.text, hypothesis: batch)
                 let sw = BenchmarkScoring.wer(reference: entry.text, hypothesis: stream)
                 batchWER += bw; streamWER += sw; clips += 1
                 if verbose {
-                    print("  [\(entry.id)] batchWER=\(pct(bw)) streamWER=\(pct(sw))")
+                    print("  [\(entry.id)] batchWER=\(pct(bw)) streamWER=\(pct(sw))\(note)")
                     if batch != stream {
                         print("    batch : \(batch)")
                         print("    stream: \(stream)")
@@ -179,29 +189,61 @@ enum BenchmarkRunner {
             }
             await engine.evict()
             let n = Double(max(clips, 1))
-            print("· \(engine.id): clips=\(clips) batchWER=\(pct(batchWER / n)) streamWER=\(pct(streamWER / n)) Δ=\(pct((streamWER - batchWER) / n))")
+            print("· \(engine.id): clips=\(clips) batchWER=\(pct(batchWER / n)) streamWER=\(pct(streamWER / n)) Δ=\(pct((streamWER - batchWER) / n)) fellBack=\(fellBack) failed=\(failed)")
         }
     }
 
-    // Drive the engine's streaming session exactly as a live dictation does: ~0.1 s chunks fed via append,
-    // then finalize. Returns nil on any failure (the controller would fall back to batch here).
-    private static func streamingReplay(engine: any SpeechEngine, wav: URL) async -> String? {
+    enum StreamReplayOutcome {
+        case streamed(String)   // the session finalized — this is the streamed transcript
+        case fellBack           // the driver degraded to batch (short clip / backpressure / failure); the
+                                // app would run batch here, so the user gets the batch text
+        case failed             // could not even set up the replay (decode error)
+    }
+
+    // Drive the streaming session through the SAME production path a live dictation uses: the real
+    // `StreamingDictationDriver` (deferred start at 4 s, buffered-chunk replay, backpressure→batch fallback) fed
+    // via the same bounded `AsyncStream` + drain task + writer-sink as `DictationController.setUpStreamingIfEnabled`.
+    // Chunks are paced to realtime (~0.1 s cadence) so the input queue drains as it does live, not an overrunning
+    // burst. `KEYSCRIBE_STREAM_SPEEDUP=N` feeds N× faster (>1 may trip backpressure — a realistic batch fallback).
+    private static func streamingReplay(engine: any SpeechEngine, wav: URL) async -> StreamReplayOutcome {
         let sampleRate = engine.captureSampleRate
-        guard let samples = try? AudioDecoder.pcmMono(wav, sampleRate: sampleRate),
-              let session = try? await engine.makeStreamingSession(sampleRate: sampleRate, biasTerms: []) else { return nil }
-        let chunk = max(1, sampleRate / 10)
-        var i = 0
-        do {
-            while i < samples.count {
-                let end = min(i + chunk, samples.count)
-                try await session.append(samples: Array(samples[i..<end]))
-                i = end
+        guard let samples = try? AudioDecoder.pcmMono(wav, sampleRate: sampleRate) else { return .failed }
+
+        let policy = StreamingStartPolicy(
+            thresholdSeconds: DictationController.streamingStartThresholdSeconds, sampleRate: sampleRate)
+        let driver = StreamingDictationDriver(policy: policy, makeSession: {
+            try await engine.makeStreamingSession(sampleRate: sampleRate, biasTerms: [])
+        })
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: [Float].self,
+            bufferingPolicy: .bufferingNewest(DictationController.streamingBackpressureMaxChunks))
+        let feedTask = Task { for await chunk in stream { await driver.ingest(chunk) } }
+
+        let chunk = max(1, sampleRate / 10)                     // 0.1 s, the writer's cadence
+        let chunkSeconds = Double(chunk) / Double(sampleRate)
+        let speedup = max(0.1, Double(ProcessInfo.processInfo.environment["KEYSCRIBE_STREAM_SPEEDUP"] ?? "") ?? 1)
+        let start = ProcessInfo.processInfo.systemUptime
+        var i = 0, fed = 0
+        loop: while i < samples.count {
+            let end = min(i + chunk, samples.count)
+            switch continuation.yield(Array(samples[i..<end])) {
+            case .dropped: await driver.noteBackpressureDrop()  // outer buffer overflowed → trip to batch
+            case .terminated: break loop
+            default: break
             }
-        } catch {
-            await session.cancel()
-            return nil
+            i = end; fed += 1
+            let target = Double(fed) * chunkSeconds / speedup
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            if target > elapsed {
+                try? await Task.sleep(nanoseconds: UInt64((target - elapsed) * 1_000_000_000))
+            }
         }
-        return try? await session.finalizeTranscript()
+        continuation.finish()
+        await feedTask.value                                    // drain every remaining ingest
+        switch await driver.finish() {
+        case .streamed(let text): return .streamed(text)
+        case .fallBackToBatch: return .fellBack
+        }
     }
 
     private static func pct(_ v: Double) -> String { String(format: "%.1f%%", v * 100) }

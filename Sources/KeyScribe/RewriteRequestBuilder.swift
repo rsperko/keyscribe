@@ -1,9 +1,9 @@
 import Foundation
 import KeyScribeKit
 
-// Assembles everything the LLM rewrite needs from a dictation's frozen state: the mode prompt +
-// shared fragments, the dictionary "valid term" hints, the opted-in context channels (app identity,
-// preceding text), and the sized connection. @MainActor because the context probes are main-actor isolated.
+// Assembles everything the LLM rewrite needs from a dictation's frozen state: mode prompt + shared
+// fragments, dictionary valid-term hints, opted-in context channels, and the sized connection.
+// @MainActor because the context probes are main-actor isolated.
 @MainActor
 struct RewriteRequestBuilder {
     let mode: Mode
@@ -28,21 +28,19 @@ struct RewriteRequestBuilder {
         sized.params.maxTokens = ContextBudget.maxTokens(
             forSelectionChars: content.count, floor: connection.params.maxTokens)
 
-        // The mode prompt is the task; shared fragments are standing style rules layered on top. They
-        // are passed separately (not flattened in) so PromptAssembler can label them and signal
-        // precedence — see prompt_design.md.
+        // Mode prompt = the task; shared fragments = style rules layered on top, passed separately (not
+        // flattened) so PromptAssembler can label them and signal precedence (prompt_design.md).
         let modePrompt = mode.aiRewrite?.prompt ?? ""
         let styleRules = plan.fragmentBodies(ids: mode.aiRewrite?.fragments ?? [])
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
-        // Lowercase the content once rather than re-folding it per term inside a case-insensitive scan.
+        // Lowercase the content once rather than per term.
         let lowerContent = content.lowercased()
         let validTerms = plan.mergedDictionary(for: mode)
             .filter { lowerContent.contains($0.lowercased()) }
 
-        // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity is a
-        // context channel; the browser URL is a local routing key only (design.md §4.3/§4.4) and never
-        // goes to the LLM.
+        // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity is a context
+        // channel; the browser URL is a local routing key only, never sent to the LLM (design.md §4.3/§4.4).
         let ctx = mode.effectiveContext
         let bundleId = ctx.app ? capturedBundleId : nil
         let appName = bundleId.map { ContextProbe.appName(forBundleId: $0) ?? $0 }
@@ -66,8 +64,8 @@ struct RewriteRequestBuilder {
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText)
 
-        // The exact prompt stored in history (design.md §4.7) — tokens, not their originals. Assembled
-        // once here and handed to RewriteService so the same inputs are not assembled a second time.
+        // The exact prompt stored in history (design.md §4.7) — tokens, not their originals. Assembled once
+        // and handed to RewriteService so the inputs aren't assembled twice.
         let assembled = PromptAssembler.assemble(inputs)
         let promptForHistory = "[system]\n\(assembled.system)\n\n[user]\n\(assembled.user)"
 

@@ -31,13 +31,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
 
-    // Literal text appended to the transcript, INSIDE the atomic insert (one ⌘Z still undoes it all),
-    // given what the text already ends with. A trailing SPACE is only a word separator for the next
-    // dictation, so it is pointless when the insert already ends in whitespace — a newline/paragraph/
-    // tab command ("insert new line" → "\n") would otherwise land a stray "\n " and start the next
-    // dictation indented instead of at column 0. A trailing NEWLINE is an explicit per-mode choice and
-    // is always appended (a line-break-per-dictation mode may legitimately double a spoken "insert new
-    // line" into a blank line).
+    // Text appended inside the atomic insert. `space` is suppressed when the insert already ends in
+    // whitespace (else a "\n" command would land a stray "\n " and indent the next dictation); `newline`
+    // is always appended (an explicit per-mode choice).
     public enum Trailing: String, Codable, Sendable {
         case none, space, newline
         public func suffix(after finalText: String) -> String {
@@ -49,8 +45,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         }
     }
 
-    // A keystroke synthesized AFTER a verified insert (outside the undo atom) — Return submits in chat
-    // and prompt boxes; ⇧Return is a soft newline; ⌘Return sends in Slack et al. Never fired on a
+    // A keystroke synthesized AFTER a verified insert (outside the undo atom). Never fired on a
     // clipboard fallback (the text never reached the target).
     public enum Submit: String, Codable, Sendable {
         case none
@@ -59,11 +54,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case cmdReturn = "cmd_return"
     }
 
-    // The modifier used for the synthesized clipboard keystrokes — ⌘C to capture a selection and ⌘V to
-    // paste an insert. `command` is the macOS default; `control` targets a guest where ⌃C/⌃V are the
-    // paste mechanism (e.g. a Linux/Windows VM with host-clipboard sharing on). It governs both
-    // keystrokes, never `submit`. Selection capture in a guest is best-effort: the host pasteboard bump
-    // it waits on is driven by the guest's clipboard-sync, not the OS, so its timing is not guaranteed.
+    // Modifier for the synthesized ⌘C/⌘V clipboard keystrokes (never `submit`). `control` targets a
+    // guest VM where ⌃C/⌃V are the paste mechanism; selection capture there is best-effort since the
+    // pasteboard bump is driven by the guest's clipboard-sync, not the OS.
     public enum ClipboardModifier: String, Codable, Sendable {
         case command, control
     }
@@ -289,24 +282,18 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
-    // The reserved id namespace (a leading underscore) the slugger can never produce — `newID` builds
-    // ids from letters/numbers joined by hyphens, so a user-named mode can never collide with a system
-    // mode. The prefix reserves the namespace for *creation*; `isSystem` keys off the exact recognized
-    // id, NOT the prefix — so a stray hand-written `_foo.toml` is an ordinary (editable, deletable) mode,
-    // not an unguarded pseudo-system one (`systemNormalized` only knows how to lock `_direct`).
+    // Reserved id namespace the slugger can never produce (`newID` joins letters/numbers with hyphens).
+    // The prefix reserves the namespace for creation only; `isSystem` keys off the exact id, so a stray
+    // hand-written `_foo.toml` is an ordinary editable mode, not a pseudo-system one.
     public static let systemIdPrefix = "_"
     public static let directId = "_direct"
     public var isSystem: Bool { id == Mode.directId }
 
-    // The always-available floor (id `_direct`, shown to users as "Plain Dictation"): the mode a trigger
-    // falls through to when no eligible mode matches the current context, and the everyday mode that owns
-    // Fn by default (design.md §4.3). "Direct"/`_direct` is the internal name; the display name differs.
-    // Guaranteed
-    // on-device — never an LLM rewrite, never context, never edit-in-place. It still dictates fully: voice
-    // edit commands and result handling (trailing/submit/insertion) apply, and it relies on the GLOBAL
-    // dictionary/replacements (no vocabulary of its own). History is user-editable — it records per the
-    // global History setting by default. A system mode (reserved id) so it can never be deleted,
-    // duplicated, or misconfigured to leak.
+    // The always-available floor (id `_direct`, shown as "Plain Dictation") a trigger falls through to
+    // when no eligible mode matches, and the everyday mode owning Fn by default (design.md §4.3).
+    // Guaranteed on-device — never an LLM rewrite, context, or edit-in-place — but still dictates fully
+    // (voice edits, trailing/submit/insertion, the GLOBAL dictionary/replacements). A system mode so it
+    // can never be deleted or misconfigured to leak.
     public static var direct: Mode {
         var mode = Mode(id: directId, name: "Plain Dictation")
         mode.commands = Commands(liveEdits: true)
@@ -316,11 +303,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    // Enforce a system mode's locked guarantees while preserving the few fields the user may edit, so a
-    // hand-edited or stale file can never weaken the floor. Only Direct exists today; any other system id
-    // is returned unchanged. Editable: trigger key(s), insertion method, trailing, submit, clipboard
-    // modifier, the live-edits toggle, and the exclude-from-history toggle (Direct records per the global
-    // History setting unless turned off here). Everything else comes from the canonical locked base.
+    // Re-impose a system mode's locked guarantees over the canonical base, preserving only the user-
+    // editable fields (trigger keys, insertion, trailing, submit, clipboard modifier, live-edits and
+    // exclude-from-history toggles), so a hand-edited or stale file can never weaken the floor.
     public func systemNormalized() -> Mode {
         guard id == Mode.directId else { return self }
         var mode = Mode.direct
@@ -334,12 +319,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    // A copy of this mode forced fully local for a secure (password) field: no cloud rewrite and no
-    // captured context, whatever the mode normally does. The dictated text into a secure field is itself
-    // a secret, so even a redacted cloud payload is wrong — the whole transcript is the secret, and
-    // redaction protects spans, not the entire input (design.md §4.4). Dropping aiRewrite removes both
-    // the LLM call and context capture (context is only gathered when a rewrite runs); privacy is set so
-    // any surface reading effectiveContext also reports nothing.
+    // A copy forced fully local for a secure (password) field: the whole transcript is the secret, so
+    // even a redacted cloud payload is wrong (design.md §4.4). Dropping aiRewrite removes the LLM call
+    // and context capture; privacy is set so effectiveContext also reports nothing.
     public func localOnlyForSecureField() -> Mode {
         var mode = self
         mode.aiRewrite = nil

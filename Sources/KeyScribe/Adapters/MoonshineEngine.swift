@@ -2,19 +2,15 @@ import Foundation
 import MoonshineVoice
 import KeyScribeKit
 
-// Moonshine (Useful Sensors) — ONNX Runtime backend shipped as a prebuilt xcframework. Ultra-low
-// latency English ASR. The .ort model files download directly from download.moonshine.ai into
-// modelsDir/<subdir>; Transcriber loads that directory.
+// Moonshine — ONNX Runtime backend shipped as a prebuilt xcframework. Low-latency English ASR. The .ort
+// files download from download.moonshine.ai into modelsDir/<subdir>; Transcriber loads that directory.
 //
-// Recognition bias: NOT supported on-device. Moonshine's on-device path has no hotword/context
-// parameter (customization is a commercial retraining service), so this engine reports
-// supportsRecognitionBias=false and ignores biasTerms. DictationController skips assembling terms
-// for it, and the Settings models list badges it as no-local-bias.
+// Recognition bias NOT supported on-device (no hotword/context parameter), so supportsRecognitionBias=false
+// and biasTerms are ignored; DictationController skips term assembly and Settings badges it as no-local-bias.
 //
-// Not an actor: MoonshineVoice.Transcriber is a non-Sendable class; access to the `transcriber` handle
-// is serialized by the SerializedEngine actor decorator wrapping this engine at EngineRegistry.makeAll,
-// whose evict() waits for the transcribe lock — so evict()'s transcriber.close() can never fire under a
-// running transcribe (the ONNX use-after-close this engine is most exposed to). Like WhisperEngine/Qwen.
+// Not an actor: Transcriber is non-Sendable; access is serialized by the SerializedEngine decorator, whose
+// evict() waits for the transcribe lock — so evict()'s transcriber.close() can never fire under a running
+// transcribe (the ONNX use-after-close this engine is most exposed to).
 final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     let id = "moonshine-base-en"
     let displayName = "Moonshine Base (English)"
@@ -30,9 +26,8 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
 
     private let modelsDir: URL
     nonisolated(unsafe) private var transcriber: Transcriber?
-    // ONNX inference is a synchronous, whole-clip call; running it on a Swift-concurrency pool thread
-    // parks a cooperative worker (width = core count) for the duration. Hop it to a dedicated queue so
-    // the pool stays free. SerializedEngine still guarantees one transcribe at a time on this instance.
+    // ONNX inference is a synchronous whole-clip call; run it on a dedicated queue so it doesn't park a
+    // cooperative concurrency-pool worker for the duration.
     private let inferenceQueue = DispatchQueue(label: "com.keyscribe.audio.moonshine-inference", qos: .userInitiated)
 
     init(modelsDir: URL) {
@@ -68,9 +63,9 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
                     throw EngineError.badModelURL(file.name)
                 }
                 let (tmp, response) = try await URLSession.shared.download(from: url)
-                // download(from:) does not throw on an HTTP error — a 404/5xx/auth body lands in `tmp`.
-                // Promoting that as a .ort/tokenizer file fails opaquely later in Transcriber and, since
-                // the bogus file now exists, blocks any retry. Require a 2xx + non-empty payload first.
+                // download(from:) doesn't throw on an HTTP error — a 404/5xx/auth body lands in `tmp`, and
+                // promoting it would fail opaquely later AND block retries (the bogus file now exists).
+                // Require a 2xx + non-empty payload first.
                 let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
                 let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path))?[.size] as? Int
                 guard ok, (size ?? 0) > 0 else {
@@ -87,8 +82,8 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
         do {
             transcriber = try Transcriber(modelPath: dir.path, modelArch: .base)
         } catch {
-            // Loading failed against what's on disk (a corrupt/partial artifact from an earlier run).
-            // Remove the model dir so the next attempt re-downloads instead of failing on it forever.
+            // A corrupt/partial artifact on disk. Remove the model dir so the next attempt re-downloads
+            // instead of failing on it forever.
             try? FileManager.default.removeItem(at: dir)
             throw error
         }
@@ -96,10 +91,9 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     }
 
     nonisolated var supportsSampleInput: Bool { true }
-    // Streaming is DISABLED for Moonshine: it proved the streaming interface (P3-1) but its streamed WER ran
-    // +2.7% over batch with no latency win, so it fails the rollout contract. This flag being false means the
-    // controller never opens a session for it (it falls back to the protocol default, which throws), so no
-    // streaming implementation is carried here. Apple is the shipping streaming engine.
+    // Streaming DISABLED: it proved the interface (P3-1) but streamed WER ran +2.7% over batch with no
+    // latency win, so it fails the rollout contract. False ⇒ the controller never opens a session, so no
+    // streaming implementation is carried here.
     nonisolated var supportsStreaming: Bool { false }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {

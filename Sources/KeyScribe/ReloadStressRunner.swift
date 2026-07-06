@@ -2,15 +2,12 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --reload-stress <dir>`. Reproduces the intermittent "No speech detected" seen
-// under Frugal memory (evict-after-each-dictation) — a freshly RELOADED model that occasionally returns
-// an empty transcript on real speech. It mirrors the live Frugal path exactly: per iteration it
-// evict()s, loadIfNeeded()s a COLD model, transcribes one known non-silent clip through the same
-// in-memory `transcribe(samples:)` path the DictationController prefers, applies the same
-// OutputCleanup collapse (so a `[BLANK_AUDIO]`/annotation that would surface as noSpeech counts), and
-// records whether the result is empty. Intermittent by nature, so it LOOPS: any empty result across the
-// run is a reproduction. Headless — reads a wav, never touches the mic. Exit non-zero if any iteration
-// came back empty.
+// Dev tool: `KeyScribe --reload-stress <dir>`. Reproduces the intermittent "No speech detected" under
+// Frugal memory (evict-after-each-dictation) — a cold-RELOADED model occasionally returning an empty
+// transcript on real speech. Mirrors the live Frugal path: per iteration evict → loadIfNeeded → transcribe
+// one non-silent clip via the same path DictationController prefers → same OutputCleanup collapse → record
+// emptiness. Intermittent, so it LOOPS: any empty result is a reproduction. Headless; exit non-zero if any
+// iteration came back empty.
 enum ReloadStressRunner {
     @discardableResult
     static func run(dir: URL, only: Set<String>? = nil, iterations: Int = 12, biasTerms: [String] = []) async -> Bool {

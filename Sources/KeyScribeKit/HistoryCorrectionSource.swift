@@ -1,9 +1,9 @@
 import Foundation
 
-// What a History correction (replacement / dictionary term) is seeded from. The trigger must come from
-// a selection in the *Heard* text: a replacement built from the LLM/result text would mangle every
-// dictation that contains that phrase. A dictionary seed is the selected Heard word or phrase, falling
-// back to a one-word result only. Pure so the rule is unit-tested away from the SwiftUI view.
+// What a History correction (replacement / dictionary term) is seeded from. The trigger must come from a
+// selection in the *Heard* text: a replacement built from the result text would mangle every dictation
+// containing that phrase. Dictionary falls back to a one-word result only. Pure, so it is unit-tested
+// away from the SwiftUI view.
 public enum HistoryCorrectionSource {
     // The misheard fragment for a replacement — only when the selection is from the Heard text.
     public static func replacement(selection: String, selectionIsHeard: Bool) -> String {

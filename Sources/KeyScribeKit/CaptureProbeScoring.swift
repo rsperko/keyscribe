@@ -1,19 +1,17 @@
 import Foundation
 
-// Reference-free scoring for the capture self-test (`--capture-probe`). The RT-thread ring split can only
-// fail in ways you cannot HEAR when the audio goes straight to STT — a dropped/duplicated ring slot, a
-// resampler glitch, an overrun under load. Feeding a known PURE TONE into the input turns those into a
-// number: a clean sine obeys the second-order recurrence x[n] = 2cos(ω)·x[n-1] − x[n-2] exactly, so the
-// residual r[n] = x[n] − 2cos(ω)·x[n-1] + x[n-2] is ~0 for clean capture and SPIKES wherever a sample was
-// dropped, duplicated, or corrupted. No FFT and no reference signal needed — just the expected tone
-// frequency. Pure so it is unit-tested against synthetic clean and deliberately-glitched signals.
+// Reference-free scoring for the capture self-test (`--capture-probe`). Capture defects (dropped/duplicated
+// ring slot, resampler glitch, overrun) are inaudible when audio goes straight to STT. A pure tone turns
+// them into a number: a clean sine obeys x[n] = 2cos(ω)·x[n-1] − x[n-2] exactly, so the residual
+// r[n] = x[n] − 2cos(ω)·x[n-1] + x[n-2] is ~0 for clean capture and SPIKES at any dropped/duplicated/corrupt
+// sample. No FFT, no reference signal — just the expected tone frequency.
 public enum CaptureProbeScoring {
     public struct Metrics: Sendable, Equatable {
         public let sampleCount: Int
         public let rms: Float
         public let peak: Float
-        // 10·log10(Σx² / Σr²): signal energy over sine-recurrence residual energy. A clean tone drives the
-        // residual to ~0 so this is very high (capped); noise, distortion, or glitches lower it.
+        // 10·log10(Σx² / Σr²): signal over sine-recurrence residual energy. Very high (capped) for a clean
+        // tone; noise/distortion/glitches lower it.
         public let sinadDB: Float
         // The worst single residual as a fraction of peak amplitude — one dropped ring slot shows here.
         public let maxGlitchRatio: Float
@@ -23,9 +21,9 @@ public enum CaptureProbeScoring {
 
     public static let sinadCeilingDB: Float = 120
 
-    // `samples` mono. `toneHz` is the frequency fed into the input; `sampleRate` the capture rate.
-    // `glitchThreshold` is the residual-vs-peak fraction that counts as a glitch (a dropped sample in a sine
-    // produces a residual on the order of the amplitude, far above the ~1e-6 floor of a clean sine).
+    // `samples` mono; `toneHz` the input frequency; `sampleRate` the capture rate. `glitchThreshold` is the
+    // residual-vs-peak fraction counting as a glitch (a dropped sample yields a residual near the amplitude,
+    // far above a clean sine's ~1e-6 floor).
     public static func score(
         samples: [Float], toneHz: Double, sampleRate: Double, glitchThreshold: Float = 0.1
     ) -> Metrics {

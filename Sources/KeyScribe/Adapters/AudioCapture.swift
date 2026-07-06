@@ -12,12 +12,10 @@ protocol AudioCapturing: AnyObject, Sendable {
     // cue playing under the bring-up never lands in the recording. 0 admits everything (no head gate).
     func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL
     // Streaming variant (P3-1): each post-conversion mono chunk is also handed to `onSamples` on the writer
-    // thread (never the realtime IO thread), so a streaming session can transcribe during capture. `onSamples`
-    // nil = batch only. Default forwards to the 2-arg start, dropping the sink, so non-streaming doubles inherit.
+    // thread (never the realtime IO thread). nil = batch only. Default drops the sink so non-streaming doubles inherit.
     func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
-    // Richest variant: `wantsSamples` mirrors the active engine's `supportsSampleInput` — when false, the
-    // writer skips the in-memory PCM accumulator the engine would ignore anyway (P2-2). Default drops it
-    // (`true`) and forwards to the onSamples variant so existing doubles inherit unchanged.
+    // Richest variant: `wantsSamples` mirrors the engine's `supportsSampleInput` — when false the writer
+    // skips the in-memory PCM accumulator the engine would ignore anyway (P2-2). Default `true`.
     func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
                onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
     // Latest perceptual mic level (0…1), published from the realtime thread.
@@ -25,9 +23,8 @@ protocol AudioCapturing: AnyObject, Sendable {
     func stop() -> URL?
     // Commit-on-release stop: let the callback deliver the buffer that holds the final word.
     func finishDraining() async -> URL?
-    // The just-committed capture's in-memory mono PCM (record rate), or nil. Consumes it (one read per
-    // capture). Valid only immediately after finishDraining() returns a URL, before the next arm. Default
-    // nil so test doubles that only produce a WAV keep the file transcription path.
+    // The just-committed capture's in-memory mono PCM (record rate), or nil. Consumes it (one read per capture),
+    // valid only after finishDraining() returns a URL and before the next arm. Default nil (file-only doubles).
     func takeDrainedSamples() -> [Float]?
     func prewarm()
     // Rebuild and prewarm the idle unit after wake or long idle.
@@ -51,8 +48,7 @@ extension AudioCapturing {
     func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime)
     }
-    // Default: drop `wantsSamples` and forward to the onSamples variant, so a double that only implements the
-    // onSamples overload (or the base start) still receives the call.
+    // Default: drop `wantsSamples` and forward to the onSamples variant so a minimal double still gets the call.
     func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
                onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples)
@@ -102,20 +98,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var preferredInputUID: String?
     private var session: CaptureSession?
 
-    // Realtime-thread transport, touched lock-free from the CoreAudio IO thread.
-    //
-    // `ring` may be resized only while `capturing` is false and the previous writer has joined. The
-    // `capturing` release/acquire pair publishes the current ring to the callback.
+    // Realtime-thread transport, touched lock-free from the CoreAudio IO thread. `ring` may be resized only
+    // while `capturing` is false and the previous writer has joined; the `capturing` release/acquire pair
+    // publishes the current ring to the callback.
     private var ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
     private let overloadCount = Atomic<Int>(0)
     // Stashed at teardown so diagnostics survive resizing the ring back to baseline.
     private var lastRingDroppedCount = 0
-    // The committed capture's in-memory mono PCM (P2-1), captured when the writer joins on the commit
-    // path only (flushConverter == true). Consumed once by the controller via takeDrainedSamples() right
-    // after finishDraining() returns; a cancel/stop leaves it untouched (its audio is discarded). Guarded
-    // by `lock`.
+    // The committed capture's in-memory mono PCM (P2-1), kept only on the commit path (flushConverter == true)
+    // and consumed once via takeDrainedSamples() after finishDraining(); cancel/stop discard it. Guarded by `lock`.
     private var lastDrainedSamples: [Float]?
     private var overloadListenerBlock: AudioObjectPropertyListenerBlock?
     // Joined by the next arm before resetting the shared ring.
@@ -213,12 +206,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             Log.audio.debug("bringUp=\(ms, privacy: .public)ms\(band, privacy: .public)")
             return url
         } catch is DeadlineExceeded {
-            // The bring-up wedged. The main thread was never blocked — the stuck CoreAudio call is abandoned
-            // on the (now unusable) control queue. Swap to a fresh generation + queue EAGERLY (not just a
-            // flag consumed by the next dictation): the bump makes the wedged bring-up superseded RIGHT NOW,
-            // so if it later un-wedges, every shared-state mutation in armSync/armUnit/bringUpUnit is gated on
-            // its generation and no-ops — no stranded hot mic, no clobber of a newer capture. Then drop the
-            // half-open file and surface a clean failure.
+            // The bring-up wedged (main thread was never blocked; the stuck CoreAudio call is abandoned on the
+            // now-unusable control queue). Swap to a fresh generation + queue EAGERLY so a late un-wedge is
+            // superseded: every armSync/armUnit/bringUpUnit mutation is gated on its generation and no-ops (no
+            // stranded hot mic, no clobber of a newer capture). Then drop the half-open file and fail cleanly.
             Log.audio.error("bringUp timed out after \(Self.elapsedMs(since: started), privacy: .public)ms")
             swapToFreshGeneration()
             discardPendingCapture()
@@ -258,10 +249,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    // Realize the input HAL unit before the first dictation so capture starts without the one-time
-    // unit-realization cost on the hot path. `configure` binds the device and initializes the unit; it does
-    // NOT start the IOProc, so the mic indicator never lights. The caller gates this on a granted mic. Runs
-    // off-main and watchdogged: a wedged prewarm flags a rebuild rather than stranding the next dictation.
+    // Realize the input HAL unit before the first dictation so the hot path skips the one-time realization cost.
+    // `configure` binds + initializes but does NOT start the IOProc, so the mic indicator never lights (caller
+    // gates on a granted mic). Off-main and watchdogged: a wedged prewarm flags a rebuild, not a strand.
     func prewarm() {
         rebuildIfNeeded()
         // Skip idle realization for Bluetooth; binding can hold the headset in HFP while idle.
@@ -365,10 +355,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             onSamples: onSamples,
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, writer: writer)
-        // Start the writer BEFORE publishing the session/lastWriter, so no teardown path can ever observe a
-        // published-but-not-yet-started writer and return from finish() without joining its thread (GPT review):
-        // finishWriterAndCloseFile relies on finish() having joined before it closes/deletes the file. The
-        // writer just polls the already-reset ring until the IOProc below begins producing.
+        // Start the writer BEFORE publishing the session/lastWriter, so no teardown path observes a
+        // published-but-unstarted writer and returns from finish() without joining its thread (finishWriterAndCloseFile
+        // relies on finish() having joined before it closes/deletes the file). It just polls the reset ring until the IOProc starts.
         writer.start()
         // Publish only if this generation still owns the capture slot.
         let published = lock.withLock { () -> Bool in
@@ -604,9 +593,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         if flushConverter, let samples = s?.writer.drainedSamples() {
             lock.withLock { lastDrainedSamples = samples }
         }
-        // The samples (if any) are now held by lastDrainedSamples; drop the writer's own reference so the
-        // writer retained via lastWriter until the next arm doesn't pin a redundant idle copy (P2-1). The
-        // sealed/backstop commit paths don't clear in run() (they can't — see there), so clear here.
+        // Samples now held by lastDrainedSamples; drop the writer's own reference so the writer retained via
+        // lastWriter until the next arm doesn't pin a redundant idle copy (P2-1). Sealed/backstop paths can't
+        // clear in run(), so clear here.
         s?.writer.releaseSamples()
         // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
         // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
@@ -614,10 +603,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lastRingDroppedCount = ring.droppedCount
         Log.audio.debug(
             "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public)")
-        // Writer joined and `capturing` is false → the ring is quiescent (the same window armSync uses to
-        // reassign it). A capture on a small-period pro interface can have grown it to ~16.7 MiB; a menu-bar
-        // app then retains that for the app's lifetime, so shrink back to the baseline geometry here. The
-        // next arm re-grows it for the bound device if needed. Zero hot-path cost.
+        // Writer joined and `capturing` false → ring is quiescent (the window armSync reassigns in). A small-period
+        // pro interface can have grown it to ~16.7 MiB that a menu-bar app would retain for its lifetime, so shrink
+        // back to baseline here; the next arm re-grows it for the bound device if needed. Zero hot-path cost.
         if !ring.matches(Self.baselineRingGeometry()) {
             ring = AudioSampleRing(Self.baselineRingGeometry())
         }
@@ -713,12 +701,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         swapToFreshGeneration()
     }
 
-    // Bump to a fresh generation on a fresh serial control queue, abandoning the outgoing unit's queue. Used
-    // both for a flagged rebuild (rebuildIfNeeded) and eagerly on a watchdog timeout, so the wedged bring-up
-    // is superseded immediately. Dispose the outgoing unit on its OWN (outgoing) queue, async and
-    // fire-and-forget: a HEALTHY outgoing unit gets an orderly dispose serialized off the caller; a WEDGED
-    // one simply never disposes on the abandoned queue and the dead unit is left behind — the intended
-    // abandonment, with no dealloc on the caller's thread.
+    // Bump to a fresh generation on a fresh serial control queue, abandoning the outgoing unit's queue (used by
+    // rebuildIfNeeded and eagerly on a watchdog timeout, so a wedged bring-up is superseded immediately). Dispose
+    // the outgoing unit on its OWN queue, async fire-and-forget: a healthy one disposes orderly off the caller; a
+    // wedged one never disposes and is left behind — the intended abandonment, no dealloc on the caller's thread.
     private func swapToFreshGeneration() {
         lock.lock()
         mustRebuild = false
@@ -737,10 +723,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // MARK: - Ring geometry
 
-    // Target headroom the ring aims to hold so the writer's 5 ms poll plus jitter and a slow write can't
-    // overrun it — 6× the poll tick. The 64-slot cap can hold an extreme tiny-buffer device below this target,
-    // but never below the poll tick (see AudioSampleRing.geometry / its tests). 64 slots caps the worst-case
-    // allocation at ~16.7 MiB.
+    // Target headroom (6× the writer's 5 ms poll) so poll jitter plus a slow write can't overrun the ring. The
+    // 64-slot cap can hold an extreme tiny-buffer device below this target but never below the poll tick (see
+    // AudioSampleRing.geometry); 64 slots caps the worst-case allocation at ~16.7 MiB.
     private static let ringMinHeadroom = 0.03
     private static let ringMinSlots = 8
     private static let ringMaxSlots = 64
@@ -911,9 +896,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         prewarm()
     }
 
-    // Idle-staleness refresh: the resident unit's cached binding rots in place over a long idle or a system
-    // sleep (a dead HAL proxy), so the FIRST dictation afterward would otherwise pay a stale realization on
-    // the hot path — or, at the watchdog edge, fail. Rebuild + re-prewarm while idle. No-op while recording.
+    // Idle-staleness refresh: the resident unit's cached binding rots over a long idle or system sleep (dead HAL
+    // proxy), so the first dictation afterward would pay a stale realization on the hot path — or fail at the
+    // watchdog edge. Rebuild + re-prewarm while idle; no-op while recording.
     func refreshBinding() {
         let recording = lock.withLock { session != nil }
         guard !recording else { return }
@@ -978,9 +963,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func handleActiveDeviceChanged() {
-        // The bound device disconnected or changed its sample rate (a Bluetooth A2DP↔HFP flip). Coalesce a
-        // storm into one restart. The debounce work item is now also cancellable from the control queue
-        // (teardown), so guard the reference under the lock.
+        // The bound device disconnected or changed sample rate (Bluetooth A2DP↔HFP flip). Coalesce a storm into
+        // one restart; the debounce work item is also cancellable from the control queue (teardown), so guard it under the lock.
         let work = DispatchWorkItem { [weak self] in self?.requestMidRecordingRestart() }
         let previous = lock.withLock { () -> DispatchWorkItem? in
             let p = activeDeviceDebounce; activeDeviceDebounce = work; return p
@@ -1037,11 +1021,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 }
                 installActiveDeviceListener(deviceID: deviceID)
             } catch {
-                // A restart can fail transiently precisely because the device is mid-transition (the Bluetooth
-                // A2DP↔HFP case that triggered it). Giving up here left the rest of the dictation recording
-                // dead air with no signal. Instead schedule a bounded retry — still governed by
-                // maxConfigRestarts via configRestartCount — so a device that settles a beat later is picked
-                // back up; only after the cap does the partial capture finalize on release.
+                // A restart fails transiently precisely because the device is mid-transition (the Bluetooth
+                // A2DP↔HFP case that triggered it), and giving up records dead air. Schedule a bounded retry
+                // (still capped by maxConfigRestarts via configRestartCount) so a device that settles a beat
+                // later is picked back up; only after the cap does the partial capture finalize on release.
                 disposeUnitInline()
                 queue.asyncAfter(deadline: .now() + 0.25) { [self] in
                     requestMidRecordingRestart(expectedSession: sessionForRetry, expectedGeneration: generation)

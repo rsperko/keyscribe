@@ -1,12 +1,10 @@
 import Foundation
 
-// Static guard against catastrophic-backtracking ("evil") user regexes on the dictation hot path.
-// A valid-but-pathological pattern like `(a+)+$` can hang `NSRegularExpression` for seconds on a
-// modest input, and there is no way to interrupt a synchronous match — so the only safe defence is
-// to refuse the pattern before it ever runs. We flag the dominant failure mode: a repetition
-// quantifier applied to a group whose body itself contains a repetition (nested quantifiers). This
-// is conservative — it never rejects a non-quantified or singly-quantified pattern — and misses
-// alternation-overlap evils like `(a|a)*`, which are far rarer in practice.
+// Static guard against catastrophic-backtracking ("evil") user regexes on the hot path. A pattern like
+// `(a+)+$` can hang `NSRegularExpression` for seconds with no way to interrupt a synchronous match, so the
+// only safe defence is to refuse it before it runs. Flags the dominant failure mode — a repetition
+// quantifier applied to a group whose body already contains a repetition (nested quantifiers). Conservative:
+// never rejects a non/singly-quantified pattern, and misses rarer alternation-overlap evils like `(a|a)*`.
 public enum ReplacementSafety {
     public static func isSafe(_ pattern: String) -> Bool {
         let chars = Array(pattern)
@@ -72,12 +70,10 @@ public enum ReplacementSafety {
         return true
     }
 
-    // Parses a `{...}` quantifier starting at `from`. Returns the index of the closing brace and
-    // whether it permits two or more repetitions (`{n,}`, `{n,m}` with m≥2, or exact `{n}` with
-    // n≥2) — any such quantifier applied to a group whose body already contains a repetition is
-    // the same combinatorial-split danger as `(a+)+`, regardless of how tight the bound is (e.g.
-    // `(a+){2,999}`). `{0,1}`/`{1,1}`/`{0}`/`{1}` permit at most one repetition and are safe.
-    // Returns nil if `{` is not a valid quantifier (then it is a literal brace).
+    // Parses a `{...}` quantifier from `from`. Returns the closing brace index and whether it permits ≥2
+    // repetitions (`{n,}`, `{n,m}` m≥2, `{n}` n≥2) — any such quantifier on a group whose body already
+    // repeats is the same `(a+)+` combinatorial danger regardless of bound (e.g. `(a+){2,999}`).
+    // `{0,1}`/`{1,1}`/`{0}`/`{1}` permit ≤1 and are safe. nil if `{` is not a valid quantifier (literal brace).
     private static func parseBrace(_ chars: [Character], from: Int) -> (end: Int, allowsRepetition: Bool)? {
         var j = from + 1
         var body = ""

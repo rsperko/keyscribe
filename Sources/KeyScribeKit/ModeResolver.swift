@@ -32,15 +32,13 @@ public enum ModeResolver {
         eligible eligibleOverride: [Mode]? = nil
     ) -> Mode {
         let enabled = modes.filter(\.enabled)
-        // The caller usually already computed the eligible set (it needs it for Phase B); reuse it so
-        // the enabled∧isEligible scan — which runs each mode's constraint regexes — is not repeated.
+        // Reuse the caller's eligible set (also needed for Phase B) so the enabled∧isEligible constraint-
+        // regex scan isn't repeated.
         let eligible = eligibleOverride ?? enabled.filter { isEligible($0, context) }
 
-        // 1. Explicit key binding. App constraints gate the press too: only modes eligible in the
-        //    current context can run. Among the eligible modes bound to the pressed key, the most
-        //    specific wins (ties → declaration order). When modes are bound to the key but none is
-        //    eligible here, the press neither blocks nor substitutes a different mode — it falls through
-        //    to `directFallback`, the always-on-device, no-LLM floor (design.md §4.3).
+        // 1. Explicit key binding, gated by context. Among eligible modes bound to the pressed key, the
+        //    most specific wins (ties → declaration order). If modes are bound but none eligible here, fall
+        //    through to `directFallback`, the always-on-device no-LLM floor (design.md §4.3).
         if let key = triggerKey {
             let wanted = normalizeKey(key)
             let bound = enabled.filter { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
@@ -59,9 +57,8 @@ public enum ModeResolver {
     public static func resolvePhaseB(
         eligibleModes: [Mode], transcript: String, context: RoutingContext = .init()
     ) -> PhaseBResult {
-        // Among eligible modes whose phrase matches the suffix, pick by specificity → declaration
-        // order (same resolver as Phase A). Iterating in declaration order with a strict `>` keeps
-        // the earliest-declared on a specificity tie.
+        // Among eligible modes whose phrase matches the suffix, pick by specificity → declaration order
+        // (strict `>` in declaration order keeps the earliest-declared on a tie).
         var best: (mode: Mode, stripped: String)?
         var bestScore = Int.min
         for mode in eligibleModes {
@@ -143,15 +140,13 @@ public enum ModeResolver {
         return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
-    // Returns the transcript with the matched suffix removed (trimmed), or nil if the phrase does
-    // not match at the end. The phrase is a regex (a plain spoken phrase like "as prompt" is itself a
-    // valid regex), so power users can write `(?i)\bas (a |an )?note$` while the common case stays a
-    // bare phrase. Three guarantees make a bare phrase route reliably without any regex syntax:
-    //   1. case-insensitive by default ((?-i) opts back in), as replacement rules are;
-    //   2. anchored to the *end* — STT commonly capitalizes and appends a period, so trailing
-    //      whitespace/punctuation is trimmed first, then the matched span must reach the end (a bare
-    //      phrase carries no `$`, so the first match may sit earlier — scan for the one at the end);
-    //   3. a leading word boundary, so "as prompt" does not fire inside "has prompt".
+    // Returns the transcript with the matched suffix removed (trimmed), or nil if the phrase doesn't match
+    // at the end. The phrase is a regex (a plain phrase is itself valid), with three guarantees that make a
+    // bare phrase route reliably:
+    //   1. case-insensitive by default ((?-i) opts back in);
+    //   2. anchored to the end — trailing whitespace/punctuation trimmed first, then the matched span must
+    //      reach the end (a bare phrase has no `$`, so scan for the last match at the end);
+    //   3. a leading word boundary, so "as prompt" doesn't fire inside "has prompt".
     private static func matchSuffix(_ pattern: String, in transcript: String) -> String? {
         let trimmed = trimTrailingNoise(transcript)
         guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
@@ -164,9 +159,8 @@ public enum ModeResolver {
         return String(trimmed[trimmed.startIndex..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
     }
 
-    // A `\b`-style boundary at the match start: reject only when a word character would be split —
-    // i.e. the match begins with a word char that is glued to a word char before it ("h|as prompt").
-    // A match that begins on whitespace/punctuation needs no boundary (there is no word to split).
+    // `\b`-style boundary at the match start: reject only when the match begins with a word char glued to a
+    // word char before it ("h|as prompt"). A match beginning on whitespace/punctuation needs no boundary.
     private static func startsOnWordBoundary(_ r: Range<String.Index>, in s: String) -> Bool {
         guard r.lowerBound > s.startIndex else { return true }
         let first = s[r.lowerBound]

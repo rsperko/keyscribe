@@ -1,9 +1,8 @@
 import Foundation
 
-// Pass/fail criterion for the post-install model smoke test: transcribe a known clip and confirm
-// enough of its distinctive words came back. Deliberately loose — different engines and
-// quantizations word things slightly differently, so the test verifies "the model basically works,"
-// not transcription accuracy. The audio + transcription are the OS edge; this decision is pure.
+// Pass/fail criterion for the post-install model smoke test: transcribe a known clip and confirm enough
+// distinctive words came back. Deliberately loose (engines/quantizations word things differently) — it
+// verifies "the model basically works," not accuracy. Audio + transcription are the OS edge; this is pure.
 public enum ModelSelfTest {
     public static func normalize(_ text: String) -> String {
         let lowered = text.lowercased()

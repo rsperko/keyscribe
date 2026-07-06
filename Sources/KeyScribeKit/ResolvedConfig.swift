@@ -1,15 +1,10 @@
 import Foundation
 
-// One config generation, frozen: the modes/vocabulary/connections/fragments a dictation needs,
-// plus the expensive per-mode artifacts derived from them (merged dictionary, compiled post-STT
-// text stages) memoized once and reused across dictations until the config changes.
-//
-// A new instance is built per ConfigCache generation (see ConfigCache.resolved) and handed to a
-// dictation at record-start. Because every input is captured by value at construction, a config
-// reload mid-dictation produces a *new* ResolvedConfig without mutating the one an in-flight
-// dictation already holds — so a single dictation always observes one coherent config (the
-// correctness fix). Memoization is guarded by a lock (the RegexCache/Tokenizer pattern) so the
-// instance is freely Sendable.
+// One config generation, frozen: the modes/vocabulary/connections/fragments a dictation needs, plus the
+// expensive per-mode artifacts (merged dictionary, compiled post-STT stages) memoized once. Built per
+// ConfigCache generation and captured by value, so a config reload mid-dictation builds a *new* instance
+// without mutating the one an in-flight dictation holds — each dictation sees one coherent config. The
+// memoization lock (RegexCache/Tokenizer pattern) makes it freely Sendable.
 public final class ResolvedConfig: @unchecked Sendable {
     public let modes: [Mode]
     public let dictionary: DictionarySet
@@ -60,10 +55,9 @@ public final class ResolvedConfig: @unchecked Sendable {
         return terms
     }
 
-    // Every distinct non-empty recognition-bias term set across global + each enabled mode, global first.
-    // Warm-on-press runs once per residency, so an engine with a per-term-set bias cost (Parakeet's CTC
-    // vocab/rescorer) can pre-build a slot for each set here and let any mode's first biased dictation hit
-    // the cache instead of building mid-transcription. Deduped by value so modes sharing a set warm once.
+    // Every distinct non-empty bias term set across global + each enabled mode, global first, deduped by
+    // value. Lets an engine with a per-term-set bias cost (Parakeet's CTC vocab/rescorer) pre-build a slot
+    // per set on warm-on-press so a mode's first biased dictation hits the cache, not mid-transcription.
     public func allRecognitionBiasTermSets() -> [[String]] {
         var seen = Set<[String]>()
         var result: [[String]] = []

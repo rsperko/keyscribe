@@ -2,10 +2,8 @@ import AppKit
 import KeyScribeKit
 
 extension KeyDescriptor {
-    // Status-bar menu items render this as a right-aligned glyph; they do NOT register a competing
-    // hotkey (status-item menus are outside `performKeyEquivalent:`'s main-menu walk), so it is
-    // display-only and never double-fires the global event tap. Only chords map — the two action
-    // shortcuts are chord-only by construction.
+    // Display-only glyph: status-item menus are outside `performKeyEquivalent:`'s main-menu walk, so
+    // this never registers a competing hotkey or double-fires the event tap. Only chords map.
     var menuItemKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
         guard case .chord(let modifiers, let base) = self else { return nil }
         let key: String

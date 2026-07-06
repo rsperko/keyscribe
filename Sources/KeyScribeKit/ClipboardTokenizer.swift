@@ -1,13 +1,10 @@
 import Foundation
 
-// "insert clipboard contents" is a live edit (design.md §4.2) whose span value is external: the
-// spoken phrase is replaced by a single nonce token (its own `.clipboard`/CLIP type, so it can never
-// collide with a `.verbatim` token when both appear in one dictation) wrapping the host-captured
-// clipboard string, so the pasted content is opaque to the text stages (replacements/numbers/fuzzy)
-// and to the LLM — protected from everything except being inserted, and never sent to the cloud —
-// then restored after the LLM. Runs as a tokenization step alongside verbatim (before the text
-// stages), sorted AFTER verbatim so a clipboard phrase inside a verbatim span stays literal. Empty
-// or absent clipboard leaves the phrase as text rather than silently deleting it.
+// "insert clipboard contents" is a live edit (design.md §4.2) whose value is external: the phrase is
+// replaced by a single nonce token (its own `.clipboard`/CLIP type, so it can't collide with a `.verbatim`
+// token) wrapping the clipboard string — opaque to the text stages and the LLM, never sent to the cloud,
+// restored after the LLM. Tokenized alongside verbatim but sorted AFTER it, so a clipboard phrase inside a
+// verbatim span stays literal. Empty/absent clipboard leaves the phrase as text, not deleted.
 public enum ClipboardTokenizer {
     public static let defaultPhrases = [
         "insert clipboard contents", "insert the clipboard contents",
@@ -33,10 +30,9 @@ public enum ClipboardTokenizer {
             guard let r = Range(m.range, in: text) else { return nil }
             return (r, clip)
         }
-        // spliceAbsorbing cleans the pause commas the STT hangs around the command; dedup: false —
-        // two "insert clipboard contents" both wrap the SAME clipboard value, so a deduped token would
-        // appear twice and trip the exactly-once gate (forcing a needless local fallback). Distinct
-        // tokens per site keep a faithful rewrite valid.
+        // spliceAbsorbing cleans the pause commas STT hangs around the command. dedup: false — two
+        // "insert clipboard contents" wrap the SAME value, so a deduped token would appear twice and trip
+        // the exactly-once gate; distinct tokens per site keep a faithful rewrite valid.
         return tokenizer.spliceAbsorbing(text, spans: spans, type: .clipboard, dedup: false)
     }
 

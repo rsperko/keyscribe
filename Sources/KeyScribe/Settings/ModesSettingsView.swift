@@ -102,8 +102,8 @@ struct ModesSettingsView: View {
     }
 }
 
-// Surfaces a malformed mode file instead of letting it vanish (it would silently change routing).
-// A mode that still has a prior good copy keeps running on it; one that never loaded is skipped.
+// Surfaces a malformed mode file instead of letting it vanish (a silent routing change). A mode with a prior
+// good copy keeps running on it; one that never loaded is skipped.
 private struct ModeLoadFailureBanner: View {
     let failures: [ModeStore.LoadFailure]
 
@@ -183,8 +183,8 @@ private enum ModeSummaryIssue {
     }
 }
 
-// Shared user-facing summary phrasing (ui_components.md "Mode summary"): when a mode runs and
-// where its text goes, in plain words — never bundle IDs or raw regex.
+// Shared user-facing summary phrasing (ui_components.md "Mode summary"): when a mode runs and where its text
+// goes, in plain words — never bundle IDs or raw regex.
 enum ModeSummary {
     static func whenRuns(_ mode: Mode) -> String {
         let constrained = !mode.constraints.isEmpty
@@ -195,9 +195,8 @@ enum ModeSummary {
             }
             return "Fallback when no mode matches"
         }
-        // A shortcut is what makes a mode run automatically. A constrained mode only runs in matching
-        // apps; a constrained mode with NO shortcut/phrase never auto-runs (Fn goes to Plain Dictation)
-        // — it's reachable from the menu, so don't imply it's automatic.
+        // A shortcut is what makes a mode run automatically. A constrained mode with NO shortcut/phrase never
+        // auto-runs (Fn goes to Plain Dictation) — it's menu-reachable, so don't imply it's automatic.
         if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
             return constrained ? "Triggered by \(triggerLabel(descriptor)) in matching apps"
                                : "Triggered by \(triggerLabel(descriptor))"

@@ -1,19 +1,16 @@
 import Foundation
 import TOMLKit
 
-// The outcome of loading a config file from disk, keeping the three cases a plain `loadOrDefault`
-// collapses to `default` distinct — so a caller can tell an absent file (expected, use the default)
-// apart from a present file that failed to decode (malformed or newer-schema after a downgrade),
-// which must not silently disappear (P2-14).
+// The outcome of loading a config file, keeping absent (expected → use default) distinct from a present
+// file that failed to decode (malformed, or newer-schema after a downgrade), which must not silently
+// disappear (P2-14).
 public enum ConfigLoad<T: Equatable & Sendable>: Equatable, Sendable {
     case absent
     case loaded(T)
     case failed(ConfigError)
 
-    // Reads `file`, gating "no file" (→ .absent) from a present-but-broken file (→ .failed) so the
-    // latter surfaces instead of degrading silently to the default. Existence is checked first so a
-    // present-but-unreadable file (bad permissions, invalid UTF-8) reports .failed rather than being
-    // mistaken for absent — the same silent-swallow class this whole seam exists to close (P2-14).
+    // Existence is checked first so a present-but-unreadable file (bad permissions, invalid UTF-8) reports
+    // .failed rather than being mistaken for absent — the silent-swallow class this seam closes (P2-14).
     static func read(_ file: URL, decode: (String) throws -> T) -> ConfigLoad<T> {
         guard FileManager.default.fileExists(atPath: file.path) else { return .absent }
         let toml: String

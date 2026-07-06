@@ -33,8 +33,8 @@ public enum EvictionPolicy {
 }
 
 public enum EvictionCopy {
-    // Below this footprint, reloading is fast enough that the policy choice barely matters, so the
-    // footer says so instead of weighing memory against speed. Moonshine (~141 MB) lands here.
+    // Below this footprint, reloading is fast enough that the policy choice barely matters. Moonshine
+    // (~141 MB) lands here.
     public static let smallModelBytes: Int64 = 200_000_000
 
     public static func footer(

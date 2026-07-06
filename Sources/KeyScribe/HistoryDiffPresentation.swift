@@ -32,10 +32,9 @@ struct ComparisonSection: Identifiable {
     }
 }
 
-// One source of truth for diff styling so the text rendering and the legend never diverge. Meaning is
-// never carried by color alone (ui_components.md §semantic colors): each changed kind also gets a
-// background tint and a typographic mark, so removed/added/changed stay distinguishable in grayscale
-// and for color-vision deficiency. Unchanged text recedes (secondary) so edits are what stand out.
+// One source of truth for diff styling so text rendering and the legend never diverge. Meaning is never
+// carried by color alone (ui_components.md §semantic colors): each changed kind also gets a background tint
+// and a typographic mark, so removed/added/changed stay distinguishable in grayscale and for CVD.
 enum DiffStyle {
     static func foreground(_ kind: TextComparison.Span.Kind) -> NSColor {
         switch kind {
@@ -75,7 +74,7 @@ enum DiffStyle {
         }
     }
 
-    // Legend chips read as a key, so they use the solid foreground hue rather than the faint in-text tint.
+    // Legend chips read as a key, so they use the solid foreground hue, not the faint in-text tint.
     static func swatch(_ kind: TextComparison.Span.Kind) -> NSColor { foreground(kind) }
 
     static let legendOrder: [TextComparison.Span.Kind] = [.removed, .added, .changed, .formatting]
@@ -297,10 +296,10 @@ struct SelectableComparisonText: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.onSelect = onSelect
         guard let textView = scroll.documentView as? NSTextView else { return }
-        // Rebuild only when the spans actually change. Rebuilding on every render collapsed the user's
-        // selection (the selection itself triggers a re-render), and restoring an old range into changed
-        // text both selected the wrong characters and fired a stale onSelect. Keep the selection across a
-        // pure attribute change (same text, different highlight); reset it on a real text change.
+        // Rebuild only when spans actually change: rebuilding every render collapsed the user's selection
+        // (selection itself triggers a re-render), and restoring an old range into changed text selected the
+        // wrong characters + fired a stale onSelect. Keep the selection across a pure attribute change (same
+        // text); reset on a real text change.
         guard context.coordinator.renderedSpans != spans else { return }
         let previousString = textView.string
         let rendered = DiffTextPresentation.render(spans: spans)

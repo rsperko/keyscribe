@@ -22,11 +22,9 @@ struct ParakeetModelProfile {
         ctcVariant: .ctc110m, tdtDownloadShare: 0.5, spotterRescue: false)
 }
 
-// One adapter, parameterized per Parakeet model. Each engine pairs a TDT transcription model with
-// the CTC variant of the same size tier for recognition bias, so every Parakeet model biases
-// consistently: v3 0.6B ↔ ctc06b, TDT-CTC 110M ↔ ctc110m. Both the TDT models and the paired CTC
-// bias model download (and compile/prewarm into CoreML) together in `load`, so bias is ready on the
-// first dictation rather than stalling mid-dictation on a first-use download.
+// One adapter, parameterized per Parakeet model. Each pairs a TDT transcription model with the
+// same-tier CTC variant for bias (v3 0.6B ↔ ctc06b, TDT-CTC 110M ↔ ctc110m). Both download+compile
+// together in `load`, so bias is ready on the first dictation, not stalling mid-dictation.
 actor ParakeetEngine: SpeechEngine {
     nonisolated let id: String
     nonisolated let displayName: String
@@ -55,23 +53,21 @@ actor ParakeetEngine: SpeechEngine {
     private var manager: AsrManager?
     private let audioConverter = AudioConverter()
 
-    // Recognition bias for Parakeet is FluidAudio's constrained-CTC vocabulary boosting: TDT transcribes,
-    // then a CTC keyword spotter re-scores bias terms against the acoustic frames, swapping only when the
-    // CTC evidence and string similarity clear confidence thresholds. Fails soft to plain TDT text.
+    // Recognition bias is FluidAudio's constrained-CTC vocabulary boosting: TDT transcribes, then a CTC
+    // keyword spotter re-scores bias terms against the acoustic frames, swapping only when CTC evidence
+    // and string similarity clear thresholds. Fails soft to plain TDT text.
     //
-    // `spotterRescue` gates FluidAudio's spotter-anchored rescue pass (acoustic-only replacement,
-    // no similarity gate). It's safe only with an accurate CTC model: on by default (ctc06b/v3),
-    // off for the weaker ctc110m where it hallucinated swaps (e.g. "I'm"→"KeyScribe"). Set through
-    // FluidAudio's `VocabularyRescorer.Config.spotterRescueEnabled` (upstreamed in #724).
+    // `spotterRescue` gates the spotter-anchored rescue pass (acoustic-only, no similarity gate): safe on
+    // the accurate ctc06b/v3, off for the weaker ctc110m where it hallucinated swaps ("I'm"→"KeyScribe").
+    // Set via `VocabularyRescorer.Config.spotterRescueEnabled` (upstreamed in #724).
     private var ctcSpotter: CtcKeywordSpotter?
     private var ctcTokenizer: CtcTokenizer?
     private var ctcDir: URL?
     private var ctcUnavailable = false
 
-    // The tokenized vocabulary and the rescorer it feeds are cached keyed on the term set. The cache
-    // is multi-slot (a small LRU) rather than single-entry so distinct modes coexist: the warm/default
-    // (global) set stays resident while a mode with local dictionary words gets its own slot, instead
-    // of the two evicting each other and re-reading the CTC tokenizer from disk on every mode switch.
+    // Vocab + rescorer cached keyed on the term set. Multi-slot LRU (not single-entry) so distinct modes
+    // coexist — the global set stays resident while a mode with local dictionary words gets its own slot,
+    // instead of evicting each other and re-reading the CTC tokenizer on every mode switch.
     private struct BiasArtifacts {
         let vocab: CustomVocabularyContext
         var rescorer: VocabularyRescorer?
@@ -90,21 +86,19 @@ actor ParakeetEngine: SpeechEngine {
         self.modelsDir = modelsDir
     }
 
-    // Runtime warm (warm-on-press / launch preload): load only the TDT transcription model. The CTC
-    // bias model is NOT loaded here — users with an empty dictionary never pay its CoreML load, and
-    // bias users get it lazily from disk inside transcribe() the first time they actually bias (the
-    // install path below already downloaded it, so that lazy load never blocks on the network).
+    // Runtime warm (warm-on-press / launch preload): load only the TDT model. The CTC bias model is NOT
+    // loaded here — empty-dictionary users never pay its CoreML load; bias users get it lazily from disk
+    // in transcribe() (the install path already downloaded it, so no network block).
     func loadIfNeeded() async throws {
         try await ensureManager(progress: nil)
     }
 
-    // Install path (Settings download/verify): fetch + compile BOTH the TDT model and the paired CTC
-    // bias model, so the first biased dictation neither downloads nor compiles the bias model
-    // mid-dictation. Runtime warming uses loadIfNeeded() above and skips the eager CTC load.
+    // Install path (Settings download/verify): fetch + compile BOTH the TDT and paired CTC bias model, so
+    // the first biased dictation neither downloads nor compiles it mid-dictation.
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         try await ensureManager(progress: progress)
-        // The CTC bias model ships with the engine. CtcModels exposes no progress callback, so these
-        // phases advance the bar by guesstimate. Best-effort: bias is optional, transcription is not.
+        // CtcModels exposes no progress callback, so these phases advance the bar by guesstimate.
+        // Best-effort: bias is optional, transcription is not.
         let share = tdtDownloadShare
         progress?(.init(phase: "Downloading recognition-bias model…", fraction: share + (1 - share) * 0.5))
         await ensureCtc(allowDownload: true)
@@ -245,10 +239,9 @@ actor ParakeetEngine: SpeechEngine {
         biasCacheLRU.append(terms)
     }
 
-    // Warm-time (once per residency): build the CTC vocab + rescorer for each mode's bias set into its own
-    // cache slot, so the first biased dictation in a mode with local dictionary terms hits the cache
-    // instead of paying VocabularyRescorer.create (a CTC-tokenizer disk read) mid-transcription. Capped to
-    // the cache size so warming can't self-evict the sets it just built (global is first, stays resident).
+    // Warm-time: build the CTC vocab + rescorer for each mode's bias set into its own cache slot, so the
+    // first biased dictation hits the cache instead of paying VocabularyRescorer.create (a disk read)
+    // mid-transcription. Capped to the cache size so warming can't self-evict what it just built.
     func prewarmBias(termSets: [[String]]) async {
         for terms in termSets.prefix(biasCacheLimit) where !terms.isEmpty {
             if biasCache[terms]?.rescorer != nil { touchBias(terms); continue }
@@ -269,12 +262,11 @@ actor ParakeetEngine: SpeechEngine {
         return CustomVocabularyContext(terms: terms)
     }
 
-    // `allowDownload` is true only on the Settings install path (`load(progress:)`), which is the one place a
-    // network fetch of the CTC bias model is legitimate. Warm/transcribe/prewarm paths pass false: after an
-    // interrupted install (TDT present, CTC missing — CTC never gates "installed") the bias models aren't on
-    // disk, and firing `CtcModels.downloadAndLoad` from the press-time warm path would violate the
-    // no-network-on-cold-load contract (SpeechEngine.swift). When the models are absent and download isn't
-    // allowed, bias latches off for the residency; a later install re-arms it (allowDownload bypasses the latch).
+    // `allowDownload` is true only on the Settings install path (`load(progress:)`) — the one place a
+    // network fetch of the CTC bias model is legitimate. Other paths pass false: firing
+    // `CtcModels.downloadAndLoad` from the press-time warm path would violate the no-network-on-cold-load
+    // contract (SpeechEngine.swift). When absent and download isn't allowed, bias latches off for the
+    // residency; a later install re-arms it (allowDownload bypasses the latch).
     @discardableResult
     private func ensureCtc(allowDownload: Bool = false) async -> CtcKeywordSpotter? {
         if let ctcSpotter { return ctcSpotter }

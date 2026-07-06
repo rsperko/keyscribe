@@ -2,11 +2,10 @@ import CoreServices
 import Foundation
 import KeyScribeKit
 
-// Watches the config directory tree (FSEvents) and fires `onChange` — coalesced — whenever a
-// CONFIG file changes, so the in-memory ConfigCache can invalidate. Event-driven: no polling, no
-// hot-path I/O. External edits (and, later, the Settings UI's writes) are picked up automatically.
-// The callback filters the delivered event paths through ConfigWatchFilter so writes under
-// `history/` (every dictation) and `lkg/` (normal saves) do NOT trigger a spurious full reload.
+// Watches the config tree (FSEvents) and fires `onChange` — coalesced — whenever a CONFIG file changes, so
+// ConfigCache can invalidate. Event-driven, no polling. The callback filters event paths through
+// ConfigWatchFilter so writes under `history/` (every dictation) and `lkg/` (normal saves) do NOT trigger
+// a spurious full reload.
 final class ConfigWatcher {
     private final class Box: Sendable {
         let onChange: @Sendable () -> Void
@@ -22,8 +21,8 @@ final class ConfigWatcher {
 
     init?(path: String, onChange: @escaping @Sendable () -> Void) {
         box = Box(supportDir: path, onChange: onChange)
-        // kFSEventStreamCreateFlagUseCFTypes makes `eventPaths` a CFArray of CFString we can read;
-        // without it the paths are delivered as a raw C string array and cannot be filtered.
+        // kFSEventStreamCreateFlagUseCFTypes makes `eventPaths` a readable CFArray of CFString; without it
+        // they arrive as a raw C string array we can't filter.
         let callback: FSEventStreamCallback = { _, info, numEvents, eventPaths, _, _ in
             guard let info else { return }
             let box = Unmanaged<Box>.fromOpaque(info).takeUnretainedValue()

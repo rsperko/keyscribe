@@ -38,7 +38,6 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         model.tapActive = tapActive
     }
 
-    // Bridges a real dictation outcome from the live pipeline into the trial gate.
     func noteDictation(_ completion: DictationCompletion) { model.noteDictation(completion) }
 
     func present() {
@@ -55,11 +54,10 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         self.window = window
         model.onComplete = { [weak self] in self?.complete() }
-        // The permission relaunch spawns this instance in the background while System Settings is still
-        // frontmost. A background-launched .accessory app usually cannot take focus from inside
-        // applicationDidFinishLaunching, so the activate above is a no-op and the wizard stays hidden
-        // behind the frontmost app — looking, to the user, like it never reappeared. Re-assert once the
-        // launch settles, with orderFrontRegardless so the window surfaces even if activation is denied.
+        // The permission relaunch spawns this in the background while System Settings is frontmost. A
+        // background-launched .accessory app usually can't take focus from inside
+        // applicationDidFinishLaunching, so the activate above is a no-op and the wizard stays hidden. Re-
+        // assert once the launch settles, with orderFrontRegardless so it surfaces even if activation is denied.
         Task { @MainActor [weak self] in
             guard let window = self?.window else { return }
             NSApp.activate(ignoringOtherApps: true)
@@ -68,10 +66,10 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         }
     }
 
-    // Single teardown for both the finish-the-flow path and a manual window close: stop the permission
-    // poll (its task strongly retains the model, so without this a window closed on the permissions step
-    // keeps the whole onboarding graph alive doing 1 Hz work for the process lifetime) and run onComplete
-    // once. Idempotent — the normal finish closes the window, which re-enters here via windowWillClose.
+    // Single teardown for both finish and manual close: stop the permission poll (its task strongly retains
+    // the model, so without this a window closed on the permissions step keeps the onboarding graph alive
+    // doing 1 Hz work forever) and run onComplete once. Idempotent — finish closes the window, re-entering
+    // here via windowWillClose.
     private func complete() {
         guard !finished else { return }
         finished = true
@@ -213,18 +211,16 @@ final class FirstRunModel: ObservableObject {
             step = .permissions
             startPolling()
         } else if resumeOnboarding {
-            // Relaunched from the onboarding permissions funnel: `continueFromPermissions` saw a dead
-            // modifier tap (a fresh Accessibility grant is cached as denied until relaunch) and funneled
-            // here. Continue is disabled until every permission is granted, so reaching that funnel proves
-            // the grants exist; this fresh process reads them and starts the tap at launch. Resume the
-            // full wizard at the AI-service step (ui_design §2 steps 4–5) instead of dropping the user at
-            // the permissions-only Done, which silently ended onboarding early (P2-21).
+            // Relaunched from the permissions funnel: `continueFromPermissions` saw a dead modifier tap (a
+            // fresh Accessibility grant is cached as denied until relaunch). Grants are proven (Continue is
+            // gated on them); this fresh process reads them and starts the tap. Resume at the AI-service step
+            // (ui_design §2 steps 4–5), not the permissions-only Done, which ended onboarding early (P2-21).
             step = .aiService
         }
     }
 
-    // Accessibility verdicts are cached for the process lifetime, so a fresh grant only takes effect
-    // on relaunch. The nuclear setup flow ends by relaunching into itself.
+    // Accessibility verdicts are cached for the process lifetime, so a fresh grant takes effect only on
+    // relaunch. The nuclear setup flow ends by relaunching into itself.
     func relaunch() {
         stopPolling()
         onRelaunch()
@@ -247,15 +243,15 @@ final class FirstRunModel: ObservableObject {
         downloadTask = Task {
             do {
                 try await download(id) { progress in
-                    // Coalesce to whole-percent changes: the SDK can emit progress far faster than the
-                    // bar needs, and each publish re-renders the install view.
+                    // Coalesce to whole-percent changes: the SDK emits progress faster than the bar needs,
+                    // and each publish re-renders the install view.
                     Task { @MainActor in
                         guard Int(progress.fraction * 100) != Int(self.downloadProgress * 100) else { return }
                         self.downloadProgress = progress.fraction
                     }
                 }
-                // Wizard closed mid-download → cancelled; don't switch the engine after a user-perceived
-                // cancel (the P1-9 class). The install finishes; only the switch + step advance are gated.
+                // Wizard closed mid-download → don't switch the engine after a user-perceived cancel (P1-9
+                // class). The install finishes; only the switch + step advance are gated.
                 guard !Task.isCancelled else { downloading = false; return }
                 selectEngine(id)
                 downloading = false
@@ -409,19 +405,18 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // These background tasks strongly retain the model and mutate config on completion (the poll refreshes
-    // status; the connect writes the connection + enables modes; the download switches the active engine).
-    // Cancelling them on teardown is what keeps a closed wizard from running work — or, worse, silently
-    // connecting an AI service or switching the STT engine — after the user has walked away.
+    // These tasks strongly retain the model and mutate config on completion (connect writes the connection +
+    // enables modes; download switches the engine). Cancelling on teardown keeps a closed wizard from
+    // silently connecting an AI service or switching the STT engine after the user walked away.
     func stopPolling() {
         pollTask?.cancel(); pollTask = nil
         setupTask?.cancel(); setupTask = nil
         downloadTask?.cancel(); downloadTask = nil
     }
 
-    // The Connect button drives this so the in-flight test/write can be cancelled when the wizard closes
-    // (see createAIService's post-test cancellation guard). Running it bare in a detached Task instead
-    // would let a slow test complete and mutate config after a user-perceived cancel.
+    // Held in setupTask so the in-flight test/write can be cancelled when the wizard closes (see
+    // createAIService's post-test guard); a bare detached Task would let a slow test mutate config after a
+    // user-perceived cancel.
     func connect() {
         setupTask?.cancel()
         setupTask = Task { @MainActor [weak self] in await self?.createAIService() }
@@ -431,9 +426,9 @@ final class FirstRunModel: ObservableObject {
         micStatus == .granted && axStatus == .granted
     }
 
-    // Leaving the permissions step. `onReadyToDictate` retries the modifier-key tap in this process; if
-    // the just-granted Accessibility verdict was cached as denied at launch the tap stays dead, so the
-    // trial step (its only trigger is that tap) can't be completed — funnel to a relaunch instead.
+    // Leaving the permissions step. `onReadyToDictate` retries the modifier-key tap; if the just-granted
+    // Accessibility verdict was cached as denied at launch the tap stays dead and the trial step (only
+    // triggered by that tap) can't complete — funnel to a relaunch instead.
     func continueFromPermissions() {
         onReadyToDictate()
         if tapActive() {
@@ -488,9 +483,9 @@ final class FirstRunModel: ObservableObject {
         aiTesting = true
         let result = await testConnection(connection)
         aiTesting = false
-        // The wizard may have been closed while the test was in flight (connect()'s task is cancelled in
-        // stopPolling). Do not write the connection or enable modes after a user-perceived cancel, and drop
-        // the key that was saved before the test so it does not strand under an id nothing references.
+        // Wizard may have closed while the test was in flight (connect()'s task cancelled in stopPolling).
+        // Don't write the connection or enable modes after a user-perceived cancel, and drop the key saved
+        // before the test so it doesn't strand under an unreferenced id.
         if Task.isCancelled {
             if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
             return

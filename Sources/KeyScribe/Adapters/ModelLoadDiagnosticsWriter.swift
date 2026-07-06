@@ -1,9 +1,8 @@
 import Foundation
 import KeyScribeKit
 
-// Thin file sink over the pure ModelLoadDiagnostics formatter. Best-effort and append-only (capped):
-// a write failure must never compound a load failure. Holds only the model/file/compile error, never
-// any transcript — safe to persist (see ModelLoadDiagnostics).
+// Thin file sink over the pure ModelLoadDiagnostics formatter. Best-effort, append-only (capped): a write
+// failure must never compound a load failure. Holds only the model/file/compile error, never a transcript.
 enum ModelLoadDiagnosticsWriter {
     static func record(
         engineId: String, timedOut: Bool, error: String,

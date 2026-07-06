@@ -1,30 +1,23 @@
 import Foundation
 
-// Post-STT text stage, runs before replacements (design.md §4.2.1). Handles spoken editing
-// commands: insert a newline / paragraph break / tab, and "scratch that" (deletes what was just
-// said). Every command — a newline/paragraph/tab control char AND a verbatim/clipboard nonce token
-// that a prior tokenizer already spliced in — is a hard scratch boundary and its own undoable unit.
-// "scratch that" removes the most recent unit and never reaches past a command: dictated words since
-// the last boundary are removed; if nothing was said since the last boundary and it is a command,
-// that command is cancelled (undo the newline / tab / clipboard insert); if it is prose (a punctuating
-// STT like Whisper ended the clause with its own terminator), scratch falls back to removing the one
-// previous clause — back to the nearest terminator/comma/semicolon/colon or command boundary.
-// Removing a clause rather than a whole sentence bounds the damage of a
-// mis-fire: under-deleting is re-issuable, over-deleting is silent. "scratch that" only fires when it
-// sits at a clause boundary — its phrase ends with a terminator (. ! ?) or comma, or it ends the
-// utterance — so literal usage like "scratch that lottery ticket" (a continuing word follows) is
-// left as text. This relies on the STT punctuating a spoken correction; engines that do not (e.g.
-// Apple) will under-fire rather than corrupt. The
-// other (additive) commands fire inline regardless of boundary. The trigger phrases are
-// configurable per command (LiveEditsStage.Commands) with sensible defaults; phrases match
-// longest-first, so a multi-word command can never be shadowed by a shorter one. The additive
-// commands all use an explicit "insert …" carrier phrase (with an optional "a") so a bare
-// "new line" or "tab" spoken as prose is left as text. Matching tolerates a trailing terminator/comma
-// on the phrase's last word, a pause comma INSIDE the phrase — whether hung on a word ("insert, new
-// line") or as a standalone token ("insert , new line") — and a pause comma the STT hung on the
-// neighbouring word ("blah, insert new line, foo" → "blah\nfoo"). Commas only in every case, so a
-// preceding OR interior sentence period survives ("insert new. Paragraph two" is not eaten by the
-// command). Verbatim tokenization happens later in the rewrite path (design.md §4.2).
+// Post-STT text stage, runs before replacements (design.md §4.2.1). Handles spoken editing commands:
+// insert newline / paragraph / tab, and "scratch that" (deletes what was just said). Every command —
+// a control char AND a verbatim/clipboard nonce token a prior tokenizer spliced in — is a hard scratch
+// boundary and its own undoable unit.
+//
+// "scratch that" removes the most recent unit and never reaches past a command: it deletes dictated
+// words since the last boundary; if nothing was said and the last unit is a command, it cancels that
+// command; if it is prose (a punctuating STT ended the clause), it removes the one previous clause —
+// back to the nearest terminator/comma/;/: or command boundary. Clause-not-sentence bounds a mis-fire
+// (under-deleting is re-issuable, over-deleting is silent). It only fires at a clause boundary (its
+// phrase ends with . ! ? or comma, or ends the utterance), so "scratch that lottery ticket" stays text.
+// Relies on the STT punctuating; engines that don't (Apple) under-fire rather than corrupt.
+//
+// Additive commands fire inline regardless of boundary, use an explicit "insert …" carrier (optional
+// "a") so a bare "new line" stays text, and match longest-first so a shorter phrase can't shadow a
+// longer. Matching tolerates a trailing terminator/comma on the last word and a pause comma inside or
+// on a neighbouring word ("blah, insert new line, foo" → "blah\nfoo") — commas only, so a sentence
+// period survives ("insert new. Paragraph two"). Verbatim tokenization is later (design.md §4.2).
 public struct LiveEditsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.liveEdits
@@ -76,10 +69,9 @@ public struct LiveEditsStage: PipelineStage {
         var parts: [String] = []
         var segmentStart = 0
         var i = 0
-        // An additive command absorbs a comma the STT hung on the preceding word when the speaker
-        // paused ("blah, insert new line" → "blah\n…") and on the following word (`absorbLeading`),
-        // mirroring spliceAbsorbing for the token-based stage. Commas only — a preceding "." is a real
-        // sentence end and is preserved ("done. insert new paragraph next" → "done.\n\nnext").
+        // An additive command absorbs a comma the STT hung on the preceding word ("blah, insert new
+        // line" → "blah\n…") and on the following word (`absorbLeading`). Commas only — a preceding "."
+        // is a real sentence end and is preserved ("done. insert new paragraph next" → "done.\n\nnext").
         var absorbLeading = false
 
         func resetSegment() { segmentStart = parts.count }
@@ -147,13 +139,10 @@ public struct LiveEditsStage: PipelineStage {
         context.text = join(parts)
     }
 
-    // Returns the matched action and the number of transcript tokens it consumes — which can exceed the
-    // phrase's word count, because a pause between the operator's own words can surface as either a
-    // comma hung on a word ("insert, new line") OR a standalone comma token ("insert , new line"). Both
-    // are prosody artifacts of the same pause and are absorbed into the command, mirroring the
-    // commas-only absorption already applied to a command's neighbours. Interior periods are left to
-    // block a match on purpose, so a real sentence boundary ("insert new. Paragraph two…") survives
-    // rather than being eaten by the command.
+    // Returns the matched action and tokens consumed — which can exceed the phrase's word count, since a
+    // pause between the operator's words surfaces as a hung comma ("insert, new line") or a standalone
+    // comma token ("insert , new line"); both are absorbed. Interior periods block a match on purpose so
+    // a real sentence boundary ("insert new. Paragraph two") survives.
     private func match(_ lowered: [String], at start: Int) -> (Action, Int)? {
         for phrase in phrases {
             var j = start
@@ -180,10 +169,9 @@ public struct LiveEditsStage: PipelineStage {
         !token.isEmpty && token.allSatisfy { $0 == "," }
     }
 
-    // A trailing separator on the command's OWN last word is tolerated for matching and consumed with
-    // the command (it is part of the operator, never emitted), so "insert new line," / ";" / "." all
-    // fire. Broader than the comma-only NEIGHBOR absorption below, because here the punctuation sits on
-    // the command itself, not on dictated content.
+    // A trailing separator on the command's OWN last word is tolerated and consumed with the command, so
+    // "insert new line," / ";" / "." all fire. Broader than the comma-only neighbour absorption because
+    // the punctuation sits on the operator, not dictated content.
     private static func isBoundaryPunct(_ c: Character) -> Bool {
         c == "." || c == "!" || c == "?" || c == "," || c == ";" || c == ":"
     }

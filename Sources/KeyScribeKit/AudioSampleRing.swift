@@ -4,17 +4,14 @@ import Synchronization
 // thread is the sole producer and the writer thread is the sole consumer. Neither side takes a lock,
 // allocates, or makes a syscall on its hot path.
 //
-// Each slot carries the frames plus the metadata the writer needs: the delivered frame/channel count, the
-// device-native sample rate (so the writer builds/rebuilds its resampler), and the buffer's mach host time
-// (so the tail-drain gate can decide when the release-covering buffer has reached the writer). Slots are a
-// fixed, preallocated geometry; invalid or overflow buffers are dropped and counted rather than blocking
-// the RT thread.
+// Each slot carries the frames plus the writer's metadata: frame/channel count, device-native sample rate
+// (to build/rebuild the resampler), and the buffer's mach host time (for the tail-drain gate). Slots are
+// fixed, preallocated; invalid/overflow buffers are dropped and counted rather than blocking the RT thread.
 //
-// Correctness rests on the classic SPSC discipline: the producer publishes a slot by a RELEASING store to
-// `tail` after filling it, and the consumer reads a slot only after an ACQUIRING load of `tail` — the
-// acquire/release pair makes every prior producer write (samples + metadata) visible before the consumer
-// reads them. `head`/`tail` are monotonic counters (never wrap in any realistic lifetime), so full is
-// `tail - head == slotCount` and empty is `tail == head`; the producer never laps the consumer.
+// SPSC discipline: the producer publishes a slot by a RELEASING store to `tail` after filling it; the consumer
+// reads only after an ACQUIRING load of `tail` — the pair makes every prior producer write visible before the
+// consumer reads. `head`/`tail` are monotonic (never wrap in any realistic lifetime), so full is
+// `tail - head == slotCount`, empty is `tail == head`; the producer never laps the consumer.
 public final class AudioSampleRing: @unchecked Sendable {
     public struct SlotInfo: Sendable, Equatable {
         public let frameCount: Int
@@ -51,14 +48,12 @@ public final class AudioSampleRing: @unchecked Sendable {
         }
     }
 
-    // Size the ring for a device delivering `deviceBufferFrames` per IO period at `deviceSampleRate`. A small
-    // device IO buffer (a pro interface at 32-64 frames, well under a millisecond per period) makes a fixed
-    // slot count buffer less than one writer poll tick, dropping a period's worth of speech; slot count scales
-    // inversely with the period to target `minHeadroom` seconds of buffering, clamped to `[minSlots, maxSlots]`.
-    // The common ~10 ms period floors at `minSlots` (baseline — unchanged); only a small period grows it. At
-    // the `maxSlots` cap an extreme buffer may hold below `minHeadroom` but still well above one poll tick.
-    // `maxFramesPerSlot`/`maxChannels` pass through unchanged — shrinking either would newly drop a large or
-    // multichannel buffer the baseline accepts. A 0-frame / non-positive-rate read falls back to safe values.
+    // Size the ring for a device delivering `deviceBufferFrames` per IO period at `deviceSampleRate`. A small IO
+    // buffer (a pro interface at 32-64 frames) would make a fixed slot count less than one writer poll tick and
+    // drop a period of speech, so slot count scales inversely with the period to target `minHeadroom` seconds,
+    // clamped to `[minSlots, maxSlots]`. The common ~10 ms period floors at `minSlots`; at the cap an extreme
+    // buffer may hold below `minHeadroom` but stays above one poll tick. `maxFramesPerSlot`/`maxChannels` pass
+    // through unchanged (shrinking either would drop a large/multichannel buffer). 0-frame/non-positive-rate reads fall back to safe values.
     public static func geometry(
         deviceBufferFrames: Int, deviceSampleRate: Double,
         minHeadroom: Double, minSlots: Int, maxSlots: Int,

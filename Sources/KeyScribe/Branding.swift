@@ -1,11 +1,9 @@
 import Foundation
 import KeyScribeKit
 
-// The user-facing product name, resolved once from the running bundle. Production builds resolve to
-// "KeyScribe", the dev build to "KeyScribeDev", and a `custom` build (make-app.sh KEYSCRIBE_VARIANT=custom
-// with KEYSCRIBE_BUNDLE_NAME) to whatever name that build ships under — so a downstream rebrand changes
-// every user-facing string by setting its bundle name, with no source edits. Use this anywhere the app
-// refers to itself in UI copy; never hardcode the literal name in a user-facing string.
+// The user-facing product name, resolved once from the running bundle ("KeyScribe" prod, "KeyScribeDev"
+// dev, the bundle name for a `custom` rebrand) — so a downstream rebrand needs no source edits. Use
+// anywhere the app refers to itself in UI copy; never hardcode the literal name.
 enum Branding {
     static let appName: String = AppVariant(
         bundleID: Bundle.main.bundleIdentifier,

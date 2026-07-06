@@ -7,8 +7,8 @@ import Synchronization
 private final class HALRenderContext {
     var unit: AudioUnit?
     var scratch: AVAudioPCMBuffer?
-    // Buffers dropped because the device grew its IO period past the preallocated scratch mid-capture: the
-    // realtime callback must not reallocate, so it drops (counted) instead. Read off-RT for diagnostics.
+    // Buffers dropped because the device grew its IO period past scratch mid-capture: the RT callback must
+    // not reallocate, so it drops (counted). Read off-RT for diagnostics.
     let oversizeDrops = Atomic<UInt64>(0)
     let handler: (AVAudioPCMBuffer, UInt64?) -> Void
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) { self.handler = handler }
@@ -26,11 +26,10 @@ final class HALInputUnit {
     // Device-native Float32 non-interleaved format; conversion happens in the owner.
     private(set) var clientFormat: AVAudioFormat?
 
-    // Realtime callbacks can't allocate, so scratch is preallocated to at least this ceiling (the ring's slot
-    // ceiling); a device that later grows its IO period past it drops the oversize buffer rather than realloc.
+    // RT callbacks can't allocate, so scratch is preallocated to at least this ceiling (the ring's slot
+    // ceiling); a device that later grows its IO period past it drops rather than realloc.
     static let scratchFrameCeiling: AVAudioFrameCount = 8192
 
-    // Buffers dropped on the realtime thread because the device's IO period grew past the preallocated scratch.
     var oversizeDropCount: Int { Int(context.oversizeDrops.load(ordering: .relaxed)) }
 
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) {
@@ -137,8 +136,8 @@ final class HALInputUnit {
         guard status == noErr else { throw UnitError(status: status, stage: stage) }
     }
 
-    // Size scratch to at least the ceiling so an in-spec device (period ≤ ceiling) never needs the realtime
-    // thread to grow it; a larger reported period is honored up front so only a mid-capture growth drops.
+    // At least the ceiling so an in-spec device (period ≤ ceiling) never needs the RT thread to grow it; a
+    // larger reported period is honored up front so only a mid-capture growth drops.
     static func scratchFrameCapacity(deviceBufferFrameSize: UInt32) -> AVAudioFrameCount {
         max(AVAudioFrameCount(deviceBufferFrameSize), scratchFrameCeiling)
     }
@@ -162,8 +161,8 @@ private let halInputRenderCallback: AURenderCallback = {
     refCon, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, _ in
     let context = Unmanaged<HALRenderContext>.fromOpaque(refCon).takeUnretainedValue()
     guard let unit = context.unit else { return noErr }
-    // No allocation on the realtime thread: if the device grew its IO period past the preallocated scratch,
-    // drop this buffer (counted) rather than reallocate. The ring drops the same oversize the same way.
+    // No allocation on the RT thread: if the device grew its IO period past scratch, drop (counted) rather
+    // than reallocate.
     guard let buffer = context.scratch, buffer.frameCapacity >= inNumberFrames else {
         context.oversizeDrops.add(1, ordering: .relaxed)
         return noErr

@@ -6,9 +6,8 @@ public struct PromptInputs: Sendable {
     public var content: String
     public var tokens: [String]
     public var validTerms: [String]
-    // The mode's shared fragment bodies, in order. Rendered as labeled standing style rules inside
-    // <instructions> rather than flattened into modePrompt, so the model treats them as overlays the
-    // task must satisfy — not part of the (often conservative) cleanup instruction.
+    // Shared fragment bodies, in order. Rendered as labeled style rules inside <instructions> rather than
+    // flattened into modePrompt, so the model treats them as overlays, not part of the cleanup instruction.
     public var styleRules: [String]
     public var language: String
     public var modeSystemInstructions: String
@@ -46,10 +45,9 @@ public struct RewritePrompt: Equatable, Sendable {
     public let user: String
 }
 
-// Assembles the system + user messages for the optional LLM rewrite (prompt_design.md). Stable
-// rules + dynamic constraints go in the system message; the instruction, opt-in context blocks,
-// and content go in the user message. Token/validTerms lines appear only when present; empty
-// context children are omitted and the whole <context> block is dropped if all are empty.
+// Assembles the system + user messages for the optional LLM rewrite (prompt_design.md). Stable rules +
+// dynamic constraints go in the system message; the instruction, opt-in context blocks, and content go in
+// the user message. Empty children are omitted; the whole <context> block drops if all are empty.
 public enum PromptAssembler {
     public static func assemble(_ inputs: PromptInputs) -> RewritePrompt {
         RewritePrompt(system: system(inputs), user: user(inputs))
@@ -90,9 +88,9 @@ public enum PromptAssembler {
         if !dictated.isEmpty { instructionLines.append(dictated) }
 
         var instructionBody = instructionLines.joined(separator: "\n")
-        // Shared fragments render as a labeled, bulleted section of standing style rules. The lead-in
-        // tells the model to apply them even to already-clean text (counters the minimal-change prior
-        // inline) and that a style rule wins a conflict with the mode wording above (precedence).
+        // Shared fragments render as a labeled bulleted section. The lead-in tells the model to apply them
+        // even to already-clean text (counters the minimal-change prior) and that a style rule wins a
+        // conflict with the mode wording above.
         let styleRules = i.styleRules
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -107,11 +105,10 @@ public enum PromptAssembler {
             "<instructions>\n\(instructionBody)\n</instructions>"
         ]
 
-        // Context children carry *untrusted* external text (pre-caret text, the app name). Neutralize
-        // any of our block-delimiter tags inside them so a crafted value cannot close
-        // its block and inject a fake <instructions> — the validation gate catches dropped tokens, but
-        // not a successful injection that yields clean output. Content/instructions are NOT neutralized:
-        // content is echoed back, so a zero-width space would leak into the insert.
+        // Context children carry UNTRUSTED external text (pre-caret text, app name). Neutralize our
+        // block-delimiter tags inside them so a crafted value can't close its block and inject a fake
+        // <instructions>. Content/instructions are NOT neutralized: content is echoed back, so a zero-width
+        // space would leak into the insert.
         var contextChildren: [String] = []
         if let app = nonEmpty(i.appName) {
             let bundle = nonEmpty(i.bundleId).map { " (\(neutralize($0)))" } ?? ""

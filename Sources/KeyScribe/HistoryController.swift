@@ -8,10 +8,8 @@ final class HistoryController {
     private var window: NSWindow?
     private let model: HistoryViewModel
     private var loadedSignature: String?
-    // The app to hand focus back to for a "Paste Result", since History itself is key while the user
-    // reads. Seeded from the frontmost app at open and kept fresh while the window is up: the user can
-    // switch to another app and back before pasting, so the target must track the last real app they
-    // were in, not the one frontmost when History was first presented.
+    // The app to hand focus back to for "Paste Result" (History itself is key while reading). Seeded at
+    // open and kept fresh while the window is up, so it tracks the last real app the user was in.
     private var previousApp: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
     private var closeObserver: NSObjectProtocol?
@@ -97,10 +95,9 @@ final class HistoryController {
         closeObserver = nil
     }
 
-    // Paste lands in the frontmost app, but History is key while open, so we hand focus back to the
-    // app the user was last in and paste there via the shared safe insertion path.
-    // No reliable target (History is the only candidate, or nothing was frontmost) → copy instead and
-    // say so, rather than synthesize a ⌘V into ourselves.
+    // History is key while open, so hand focus back to the last real app and paste there via the shared
+    // safe path. No reliable target (only History, or nothing frontmost) → copy instead rather than
+    // synthesize a ⌘V into ourselves.
     private func pasteToPreviousApp(_ text: String) {
         guard let target = previousApp,
               target.bundleIdentifier != Bundle.main.bundleIdentifier else {
@@ -340,11 +337,9 @@ private final class HistoryViewModel: ObservableObject {
         resolveSelection()
     }
 
-    // Keep a still-present selection (so a background reload or search refinement does not yank the
-    // user off what they were reading), otherwise fall to the newest visible row — which also makes the
-    // newest dictation the default first glance and picks the first match when a search drops the old one.
-    // The auto-pick is deferred a tick: a List resets a selection assigned before its rows are in the
-    // view tree (the initial load sets it behind the loading spinner), so we wait for the rows to commit.
+    // Keep a still-present selection so a background reload/search does not yank the user off what they
+    // were reading; otherwise fall to the newest visible row. The auto-pick is deferred a tick: a List
+    // resets a selection assigned before its rows are in the view tree, so we wait for the rows to commit.
     private func resolveSelection() {
         let visible = Set(groups.flatMap { $0.rows.map(\.id) })
         if let selection, visible.contains(selection) { return }

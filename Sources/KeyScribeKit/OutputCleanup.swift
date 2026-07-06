@@ -60,15 +60,11 @@ public enum OutputCleanup {
     // Bracketed/parenthesized non-lexical annotation, e.g. `[BLANK_AUDIO]`, `[Music]`, `(water running)`.
     private static let nonSpeechAnnotation = try! NSRegularExpression(pattern: "\\[[^\\]]*\\]|\\([^)]*\\)")
 
-    // Some STT engines render a no-speech clip as a whole-utterance non-lexical annotation, such as
-    // `[BLANK_AUDIO]` or `(water running)`. Collapse an utterance that is nothing but such annotations so
-    // the no-speech guard short-circuits it into the .noSpeech outcome.
-    //
-    // Deliberately whole-utterance only: a real transcript that merely *contains* an annotation
-    // ("the array[0] value", "(laughs) that was funny") is returned unchanged — partial stripping would
-    // corrupt legitimate text. Lexical silence hallucinations ("Thank you.", "No", "嗯。") are out of
-    // scope: they are indistinguishable from a real one-word dictation and need an audio-side VAD gate,
-    // not a string denylist. An utterance with no annotation at all (e.g. a bare "...") is untouched.
+    // Some STT engines render a no-speech clip as a whole-utterance non-lexical annotation (`[BLANK_AUDIO]`,
+    // `(water running)`). Collapse an utterance that is nothing but such annotations so the no-speech guard
+    // short-circuits it. Whole-utterance ONLY: a transcript that merely *contains* one ("the array[0] value")
+    // is unchanged — partial stripping would corrupt legitimate text. Lexical hallucinations ("Thank you.",
+    // "No") are out of scope; they need an audio-side VAD gate, not a string denylist.
     public static func blankingNonSpeechAnnotation(_ text: String) -> String {
         let range = NSRange(text.startIndex..., in: text)
         let stripped = nonSpeechAnnotation.stringByReplacingMatches(in: text, range: range, withTemplate: "")
@@ -76,19 +72,16 @@ public enum OutputCleanup {
         return stripped.contains(where: { $0.isLetter || $0.isNumber }) ? text : ""
     }
 
-    // A bracketed non-lexical marker anchored at the very start or end of the utterance, e.g. the ` [END]`
-    // Whisper Small can append to otherwise-real speech, or a leading `[BLANK_AUDIO]`. The inner content is
-    // restricted to letters, spaces, and underscores so a token carrying a digit or operator (`[0]`, `[i=1]`,
-    // `[HEAD~1]`) is never a match — those are the shapes a real bracket expression takes.
+    // A bracketed marker anchored at the very start/end, e.g. the ` [END]` Whisper Small appends to real
+    // speech. Inner content is letters/spaces/underscores only, so a token with a digit or operator
+    // (`[0]`, `[i=1]`, `[HEAD~1]`) — the shapes real bracket expressions take — never matches.
     private static let leadingBoundaryAnnotation = try! NSRegularExpression(pattern: "^\\s*\\[[A-Za-z_ ]+\\]")
     private static let trailingBoundaryAnnotation = try! NSRegularExpression(pattern: "\\[[A-Za-z_ ]+\\]\\s*$")
 
-    // Strip a standalone bracketed marker riding the leading or trailing edge of a real transcript, so
-    // "real dictated text [END]" → "real dictated text". Unlike `blankingNonSpeechAnnotation` (whole-utterance
-    // only), this fires when the middle is genuine speech — but ONLY for a whole `[…]` token pinned to a
-    // boundary, so an interior bracket ("the array[0] value") and a token with non-annotation content are
-    // left untouched. Runs on the raw STT transcript, where spoken words essentially never yield literal
-    // square brackets — a boundary `[…]` there is an engine artifact, not dictation.
+    // Strip a standalone bracketed marker riding the leading/trailing edge of real speech ("real text [END]"
+    // → "real text"). Unlike `blankingNonSpeechAnnotation`, fires when the middle is genuine speech — but only
+    // for a whole boundary `[…]`, so an interior bracket ("the array[0] value") is untouched. On the raw STT
+    // transcript a boundary `[…]` is an engine artifact, not dictation.
     public static func strippingBoundaryAnnotation(_ text: String) -> String {
         var result = text
         while let match = leadingBoundaryAnnotation.firstMatch(in: result, range: NSRange(result.startIndex..., in: result)),

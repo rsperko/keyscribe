@@ -1,11 +1,9 @@
 import Foundation
 
-// Durable, on-disk record of STT model load failures. os.Logger output does not reliably surface on
-// every machine and history only records successful insertions, so a transient cold-load failure is
-// otherwise undiagnosable. This holds only the model/file/compile error — never any transcript or
-// token→original material — so persisting it does not violate the speech-is-never-stored invariant.
-//
-// Pure here (formatting + the trim-on-append cap); the file IO is a thin adapter in the app target.
+// Durable, on-disk record of STT model load failures — os.Logger doesn't reliably surface on every machine
+// and history records only successes, so a transient cold-load failure is otherwise undiagnosable. Holds
+// only the model/file/compile error, never a transcript or token→original material, so it does not violate
+// the speech-is-never-stored invariant. Pure here (formatting + trim-on-append cap); file IO is an adapter.
 public enum ModelLoadDiagnostics {
     public static let maxEntries = 50
 

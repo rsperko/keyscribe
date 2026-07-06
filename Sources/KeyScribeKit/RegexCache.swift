@@ -1,12 +1,9 @@
 import Foundation
 
-// Compiles each regex pattern once and memoizes it. The pipeline stages, tokenizers, and resolver
-// all run regexes on the dictation hot path with patterns that repeat across dictations — the
-// static redaction/sentinel patterns are constant, and the config-derived trigger phrases, URL
-// patterns, and replacement rules are stable (config is cached). Compiling `NSRegularExpression`
-// per call re-parses the pattern every time; this does it once. Invalid patterns are memoized too,
-// so a malformed user rule is not re-parsed on every dictation it runs in. Thread-safe; the pattern
-// set is bounded by the static patterns plus the user's config, so no eviction is needed.
+// Compiles each regex pattern once and memoizes it. The hot-path patterns repeat across dictations
+// (static redaction/sentinel patterns, and cached config-derived triggers/URLs/replacements), and
+// `NSRegularExpression` re-parses per construction. Invalid patterns are memoized too, so a malformed user
+// rule isn't re-parsed every dictation. Thread-safe; bounded by static + config patterns, so no eviction.
 public enum RegexCache {
     nonisolated(unsafe) private static var cache: [String: NSRegularExpression] = [:]
     nonisolated(unsafe) private static var failed: Set<String> = []

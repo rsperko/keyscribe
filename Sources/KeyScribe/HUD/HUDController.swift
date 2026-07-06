@@ -135,9 +135,8 @@ final class HUDController: HUDPresenting {
         panel.orderFrontRegardless()
     }
 
-    // Fade the panel out over ~120 ms on the →hidden edge (the complete toast vanishing abruptly is the
-    // most jarring transition; polish reads well on hide). Appear stays instant. The completion re-checks
-    // state so a dictation that starts mid-fade (which reset alpha to 1 in render) is not ordered back out;
+    // Fade out over ~120 ms on the →hidden edge (abrupt vanish is the most jarring transition); appear stays
+    // instant. The completion re-checks state so a dictation starting mid-fade is not ordered back out;
     // reduce-motion hides immediately.
     private func fadeOutPanel() {
         guard let panel, panel.isVisible else { return }

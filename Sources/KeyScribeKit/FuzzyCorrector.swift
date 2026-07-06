@@ -1,18 +1,16 @@
 import Foundation
 
 // Repairs proper nouns / identifiers the STT split or mangled, snapping them to a dictionary term
-// ("charge bee" → "ChargeBee"). Used as per-engine dictionary recovery and deliberately timid:
-// the dictionary is a *hint*, never authoritative (design.md §4.2), so we only touch distinctive
-// terms (≥4 normalized chars) and never rewrite across more than 2 edits. A pure casing/spacing fix
-// (same normalized form) is always safe and needs no phonetic check. Every *fuzzy* (non-exact) snap
-// requires phonetic agreement as a NECESSARY gate, not a bonus — otherwise a common word one edit
-// from a term but distinct in sound ("lava"→"Java", "dust"→"Rust") gets swallowed, the classic
-// edit-distance false-positive band. Agreement then buys one edit beyond the bare cap (ceiling 2),
+// ("charge bee" → "ChargeBee"). Per-engine dictionary recovery, deliberately timid: the dictionary is a
+// *hint*, never authoritative (design.md §4.2), so we only touch distinctive terms (≥4 normalized chars)
+// and never rewrite across more than 2 edits. A pure casing/spacing fix (same normalized form) needs no
+// phonetic check. Every fuzzy (non-exact) snap requires phonetic agreement as a NECESSARY gate — otherwise
+// a common word one edit from a term but distinct in sound ("lava"→"Java", "dust"→"Rust") gets swallowed
+// (the classic edit-distance false-positive band). Agreement buys one edit beyond the bare cap (ceiling 2),
 // so a plausible mishearing ("sellery"→"Celery") still recovers.
 public enum FuzzyCorrector {
-    // Canonicalized dictionary, with each term's phonetic key precomputed once. Built when the stage
-    // is constructed (per mode/config generation) so a dictation never re-normalizes or re-keys the
-    // whole dictionary, and never recomputes a term's phonetic key per input token.
+    // Canonicalized dictionary with each term's phonetic key precomputed once, built at stage construction so
+    // a dictation never re-normalizes/re-keys the dictionary or recomputes a key per input token.
     public struct Prepared: Sendable {
         fileprivate let terms: [Term]
         fileprivate let byNorm: [String: Term]            // O(1) casing/spacing match
@@ -44,18 +42,16 @@ public enum FuzzyCorrector {
                 // A ⟦SN:…⟧ nonce is opaque (design.md §4.2): never fuzzy-snap a window touching one, else a
                 // token fragment ("VERB") could be rewritten to a dictionary term and corrupt the span.
                 if window.contains(where: { $0.contains(SentinelText.open) }) { continue }
-                // A snap keeps only alphanumerics (→ the canonical term), the inter-token spaces it
-                // deliberately merges away, and outer-edge punctuation. Any other dictated character
-                // inside a token — interior punctuation ("git-hub", "spring,boot"), a clause comma
-                // between two tokens ("spring, boot"), or a LiveEdits control char ("git\nhub") — would
-                // be silently deleted, so a window carrying such content is left untouched.
+                // A snap keeps only alphanumerics and outer-edge punctuation, merging inter-token spaces away.
+                // Any other dictated char inside a token — interior punctuation ("git-hub"), a clause comma
+                // ("spring, boot"), a LiveEdits control char ("git\nhub") — would be silently deleted, so
+                // leave such a window untouched.
                 if wouldDeleteInteriorContent(window) { continue }
                 let core = window.map(stripPunct).joined()
                 let norm = normalize(core)
                 guard norm.count >= 4 else { continue }
-                // Multi-token windows only snap on an exact normalized match (a split/spacing fix like
-                // "charge bee" → "ChargeBee"); fuzzy distance is single-token only, so a short glue
-                // word ("to kubernetes") can never be merged away.
+                // Multi-token windows only snap on an exact normalized match (split/spacing fix); fuzzy
+                // distance is single-token only, so a short glue word ("to kubernetes") is never merged away.
                 guard let term = bestMatch(norm, in: prepared, allowFuzzy: span == 1),
                       term.norm != norm || term.canonical != core else {
                     continue
@@ -115,10 +111,9 @@ public enum FuzzyCorrector {
         c.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains)
     }
 
-    // True when snapping the window would delete a dictated character. `normalize` keeps only
-    // alphanumerics and the output re-emits just the outer-edge punctuation (leadingPunct of the first
-    // token, trailingPunct of the last), so strip each token's preserved outer edge and report any
-    // remaining non-alphanumeric content.
+    // True when snapping the window would delete a dictated character: the output re-emits only outer-edge
+    // punctuation (leadingPunct of the first token, trailingPunct of the last), so strip each token's
+    // preserved outer edge and report any remaining non-alphanumeric content.
     private static func wouldDeleteInteriorContent(_ window: [String]) -> Bool {
         for (idx, token) in window.enumerated() {
             var lo = token.startIndex
@@ -158,13 +153,12 @@ public enum FuzzyCorrector {
         return prev[t.count]
     }
 
-    // A first-letter-coded consonant skeleton. Unlike Soundex — which keeps the leading letter
-    // literal, truncates to four chars, and so (a) misses a mis-heard leading consonant that is
-    // phonetically equivalent (soft C ≡ S, both group 2) and (b) collides long terms — every letter
-    // including the first is coded, nothing is truncated, and vowels (plus H/W/Y) separate consonant
-    // runs so a repeated code across a vowel survives. Grouping follows Soundex's well-tuned consonant
-    // classes, so common ASR confusions (PH≡F, C/K/S, B/P/V, D/T, M/N) share a key. Used only as a
-    // necessary phonetic gate, never as proof of a match — the edit-distance check still decides.
+    // A consonant skeleton. Unlike Soundex (leading letter literal, truncated to four chars — which misses a
+    // mis-heard equivalent leading consonant like soft C ≡ S, and collides long terms), every letter
+    // including the first is coded, nothing is truncated, and vowels (plus H/W/Y) separate consonant runs so
+    // a repeated code across a vowel survives. Grouping follows Soundex's consonant classes, so common ASR
+    // confusions (PH≡F, C/K/S, B/P/V, D/T, M/N) share a key. A necessary phonetic gate only — edit-distance
+    // still decides.
     static func phoneticKey(_ s: String) -> String {
         func code(_ c: Character) -> Character? {
             switch c {

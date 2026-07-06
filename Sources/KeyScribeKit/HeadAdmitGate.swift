@@ -29,12 +29,10 @@ public struct HeadAdmitGate: Sendable {
 
     public mutating func observe(slotStartHostTime: UInt64?, frameCount: Int, sampleRate: Double) -> Outcome {
         if admitted { return .admit }
-        // Unplaceable timestamp. With a finite cue window supplied, keep dropping until the dropped audio
-        // approximates it — measured from each slot's own frame count, since a device that never stamps
-        // hostTime still reports its rate — so a measurable slot never counts toward the slot backstop and
-        // thus can't preempt the duration budget. With no window supplied (the public default), fall back to
-        // the historical bounded slot count. Either way an absolute slot backstop guarantees admission for
-        // slots whose frames/rate are also unreadable, so the gate can never eat audio forever.
+        // Unplaceable timestamp. With a finite cue window, keep dropping until the dropped audio approximates
+        // it — measured from each slot's own frame count (a device that never stamps hostTime still reports its
+        // rate), so a measurable slot never counts toward the slot backstop. With no window (the public default),
+        // fall back to the bounded slot count. An absolute slot backstop always admits eventually, so the gate can never eat audio forever.
         guard let start = slotStartHostTime, start != 0, sampleRate > 0, frameCount > 0,
               hostTicksPerSecond > 0 else {
             if sampleRate > 0, frameCount > 0, fallbackDropSeconds.isFinite {

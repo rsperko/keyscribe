@@ -2,19 +2,17 @@ import Foundation
 import KeyScribeKit
 import os
 
-// In-memory cache of the on-disk config. Loaded lazily on first access and invalidated on demand
-// (by the ConfigWatcher when files change, or the Settings reload button) — so a normal dictation
-// does zero config I/O, while edits still apply on the next dictation. (settings.toml stays owned
-// by AppDelegate / Settings UI.)
+// In-memory cache of the on-disk config. Loaded lazily and invalidated on demand (ConfigWatcher on file
+// change, or the Settings reload button) — so a normal dictation does zero config I/O while edits still
+// apply on the next dictation. (settings.toml stays owned by AppDelegate / Settings UI.)
 @MainActor
 final class ConfigCache {
     private let supportDir: URL
     private let log = Logger(subsystem: "com.keyscribe.app", category: "config")
 
-    // Survives invalidate(): the last set of modes/vocabulary/connections that loaded successfully, so a
-    // mid-edit malformed file falls back to its prior good copy instead of disappearing (design
-    // discipline §5.1). A cleanly-decoded file and an *absent* file both update it (absent → the empty
-    // default), so a delete followed by a malformed write can't resurrect the pre-delete copy.
+    // Survives invalidate(): the last successfully-loaded config, so a mid-edit malformed file falls back to
+    // its prior good copy instead of disappearing (§5.1). A clean file AND an absent file both update it
+    // (absent → empty default), so a delete then a malformed write can't resurrect the pre-delete copy.
     private var lastGoodModes: [Mode] = []
     private var lastGoodReplacements = ReplacementsSet()
     private var lastGoodConnections = ConnectionSet()
@@ -26,11 +24,9 @@ final class ConfigCache {
     private var dictionaryCache: DictionarySet?
     private var resolvedCache: ResolvedConfig?
 
-    // Per config generation: files that are present but failed to decode (malformed or a newer schema
-    // after a downgrade). Recorded as the loads run so a fat-fingered replacements.toml or a dropped-
-    // schema connections.toml lights the same user-visible malformed-config problem as settings.toml,
-    // instead of silently disabling every replacement / dropping every connection (P2-14). Reset by
-    // invalidate() and repopulated on the next load.
+    // Per generation: present-but-undecodable files (malformed or newer schema after a downgrade). Recorded
+    // so a fat-fingered replacements.toml lights the same user-visible malformed-config warning as
+    // settings.toml instead of silently disabling every replacement / connection (P2-14). Reset by invalidate().
     private(set) var loadFailures: [String] = []
 
     init(supportDir: URL) {
@@ -46,10 +42,8 @@ final class ConfigCache {
         loadFailures = []
     }
 
-    // A user-facing summary of any present config file that failed to decode this generation, or nil
-    // if all files loaded (or are simply absent). Forces the vocabulary/connection loads (cheap after
-    // the first access, which the resolved plan already triggers) so the answer is complete regardless
-    // of call order.
+    // User-facing summary of any config file that failed to decode this generation, or nil if all loaded
+    // (or absent). Forces the vocabulary/connection loads so the answer is complete regardless of call order.
     var configFileError: String? {
         _ = dictionary; _ = replacements; _ = connections
         return loadFailures.isEmpty ? nil : loadFailures.joined(separator: "; ")
@@ -70,10 +64,9 @@ final class ConfigCache {
         }
     }
 
-    // The frozen, derived view of this config generation handed to a dictation at record-start
-    // (DictationController captures it once so a mid-dictation reload can't change what an in-flight
-    // dictation sees). Rebuilt only when the config is invalidated; reused across dictations
-    // otherwise, so the per-mode merged dictionary and compiled stages are computed at most once.
+    // Frozen derived view handed to a dictation at record-start (captured once so a mid-dictation reload
+    // can't change what an in-flight dictation sees). Rebuilt only on invalidate, else reused, so the
+    // per-mode merged dictionary and compiled stages are computed at most once.
     var resolved: ResolvedConfig {
         if let resolvedCache { return resolvedCache }
         let modes = self.modes
@@ -90,9 +83,8 @@ final class ConfigCache {
         return resolved
     }
 
-    // Disk-backed last-known-good for modes, OUTSIDE the watched modes/ dir so a recovery copy is never
-    // read as a real mode and the launch case (a file already malformed before any in-memory good exists)
-    // is still recoverable.
+    // Disk-backed last-known-good for modes, OUTSIDE the watched modes/ dir so a recovery copy is never read
+    // as a real mode and the launch case (malformed before any in-memory good exists) is still recoverable.
     private var lkgModesDir: URL {
         supportDir.appendingPathComponent("lkg", isDirectory: true)
             .appendingPathComponent("modes", isDirectory: true)

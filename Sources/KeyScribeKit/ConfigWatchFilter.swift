@@ -1,11 +1,10 @@
 import Foundation
 
-// Decides whether a changed file under the watched support directory should trigger a config reload.
-// The FSEvents watcher observes the whole support tree, but two subtrees are NOT configuration and
-// must never invalidate the ConfigCache: `history/` (a JSONL append on every dictation) and `lkg/`
-// (last-known-good mirrors written during a normal save). Without this filter every dictation and
-// every settings write re-reads all config, recompiles stages, and rebuilds the hotkey monitor
-// (~200 ms later), defeating the "a normal dictation does zero config I/O" design.
+// Whether a changed file under the watched support dir should trigger a config reload. The FSEvents
+// watcher observes the whole tree, but some subtrees are NOT config and must never invalidate the
+// ConfigCache: `history/` (a JSONL append every dictation), `lkg/` (last-known-good mirrors), `models/`.
+// Without this filter every dictation re-reads all config, recompiles stages, and rebuilds the hotkey
+// monitor, defeating "a normal dictation does zero config I/O".
 public enum ConfigWatchFilter {
     public static let ignoredSubdirectories: Set<String> = ["history", "lkg", "models"]
 
@@ -26,9 +25,8 @@ public enum ConfigWatchFilter {
         changedPaths.contains { isConfigRelevant(changedPath: $0, supportDir: supportDir) }
     }
 
-    // FSEvents resolves firmlinked/symlinked prefixes (/var, /tmp → /private/...), while a URL built
-    // from FileManager keeps the unresolved form; strip the /private prefix from both so a temp-dir
-    // support path compares equal. Also drop any trailing slash.
+    // FSEvents resolves firmlinked prefixes (/var, /tmp → /private/...) while a FileManager URL keeps the
+    // unresolved form; strip /private from both so a temp-dir support path compares equal. Drop trailing slash.
     private static func normalize(_ raw: String) -> String {
         var s = raw
         if s.hasPrefix("/private/") { s.removeFirst("/private".count) }

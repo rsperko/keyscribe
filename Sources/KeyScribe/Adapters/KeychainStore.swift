@@ -56,12 +56,11 @@ enum KeychainStore {
         return SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess
     }
 
-    // Update the existing item in place so there is never a window where the key is absent: a crash
-    // mid-write can neither strand the stored secret (the old delete-then-add did, between the delete
-    // and the re-add) nor leak a `.tmp.<UUID>` backup item. `SecItemUpdate` errors `errSecItemNotFound`
-    // when nothing is stored yet, which is the only case that needs a fresh `SecItemAdd`. The update is
-    // data-only: `kSecAttrAccessible` is set once at creation, and updating it on a legacy login-keychain
-    // item can return `errSecParam` — which here would wrongly read as a save failure.
+    // Update in place so there is never a window where the key is absent: a crash mid-write can neither
+    // strand the stored secret (the old delete-then-add did) nor leak a `.tmp.<UUID>` backup item.
+    // `SecItemUpdate` errors `errSecItemNotFound` only when nothing is stored yet — the one case that
+    // needs a fresh `SecItemAdd`. Data-only update: `kSecAttrAccessible` is set once at creation, and
+    // updating it on a legacy login-keychain item can return `errSecParam`, misread here as a save failure.
     private static func rawSet(_ secret: String, for keyRef: String, cachedOld: String?) -> Bool {
         let data = Data(secret.utf8)
         let query = baseQuery(keyRef)

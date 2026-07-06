@@ -1,19 +1,17 @@
 import Foundation
 
-// Deterministic spoken-number → digits normalization (e.g. "twenty five" → "25"). Opt-in per mode
-// (commands.numbers) and conservative by design: a run that does not form a single unambiguous
-// cardinal is left exactly as spoken. That bail is what preserves year idioms like "twenty twenty
-// six" or "nineteen ninety five" (two tens/teens with no scale word between them) instead of
-// mangling them into a wrong cardinal. Wrong number output is worse than none, so the parser
-// refuses anything it cannot reconstruct exactly.
+// Deterministic spoken-number → digits normalization ("twenty five" → "25"). Opt-in per mode
+// (commands.numbers) and conservative: a run that does not form a single unambiguous cardinal is left
+// exactly as spoken. That bail preserves year idioms like "twenty twenty six" / "nineteen ninety five"
+// (two tens/teens with no scale word between) instead of mangling them — wrong number output is worse
+// than none.
 //
-// Beyond bare cardinals it folds in the low-ambiguity, locale-light decorators (Tier 1): a leading
-// sign ("minus five" → "-5", only when not preceded by a number so subtraction is left alone),
-// decimals ("three point one four" → "3.14", fractional part is single digits only), percent
-// ("fifty percent" → "50%"), and ordinals ("twenty first" → "21st"). Each decorator is parsed only
-// around a cardinal that already validates; anything ambiguous echoes the spoken words verbatim.
-// Locale/context-dependent shaping (currency symbols, thousands grouping, dates, times) is
-// deliberately out of scope — that is the LLM rewrite's job (design.md §4.2, Tier 2).
+// Beyond bare cardinals it folds in low-ambiguity, locale-light decorators (Tier 1): leading sign
+// ("minus five" → "-5", only when not preceded by a number so subtraction is left alone), decimals
+// ("three point one four" → "3.14", fractional part single digits only), percent ("fifty percent" →
+// "50%"), and ordinals ("twenty first" → "21st"). Each is parsed only around a validating cardinal;
+// anything ambiguous echoes verbatim. Locale/context shaping (currency, thousands grouping, dates,
+// times) is out of scope — the LLM rewrite's job (design.md §4.2, Tier 2).
 public enum InverseTextNormalizer {
     private enum Kind { case ones, teen, tens, hundred, scale }
 

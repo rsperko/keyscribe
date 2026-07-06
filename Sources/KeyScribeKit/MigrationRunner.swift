@@ -12,14 +12,14 @@ public struct MigrationStep {
 }
 
 public enum MigrationRunner {
-    // Version gate only: reject files newer than this build supports and require `schema_version`, but
-    // perform no transformation. Stores with no migration steps rely on additive decode for older files.
+    // Version gate only: require `schema_version` and reject files newer than this build supports; no
+    // transformation. Stores with no migration steps rely on additive decode for older files.
     public static func gate(toml: String, target: Int) throws -> String {
         _ = try parseAndCheck(toml: toml, target: target)
         return toml
     }
 
-    // Table form for ConfigDecode (parse once). gate(toml:) stays the downstream string API.
+    // Table form for ConfigDecode (parse once); gate(toml:) is the downstream string API.
     static func gateTable(toml: String, target: Int) throws -> TOMLTable {
         try parseAndCheck(toml: toml, target: target).0
     }
@@ -31,7 +31,7 @@ public enum MigrationRunner {
         return didMigrate ? (table.convert(), true) : (toml, false)
     }
 
-    // Table form: parse + migrate in place, returned parsed so ConfigDecode skips the serialize/re-parse round-trip.
+    // Table form: parse + migrate in place, returned parsed so ConfigDecode skips a serialize/re-parse.
     static func migrateTable(
         toml: String, target: Int, steps: [MigrationStep]
     ) throws -> (table: TOMLTable, didMigrate: Bool) {

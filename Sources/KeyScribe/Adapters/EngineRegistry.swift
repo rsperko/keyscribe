@@ -20,11 +20,10 @@ enum EngineRegistry {
         return true
     }
 
-    // Every engine the app actually loads/transcribes/evicts (the provider's set, plus the dev
-    // benchmark/commands-check) is wrapped in SerializedEngine, so concurrent load/evict across the
-    // Settings download, first-run download, launch preload, self-test, and memory-pressure paths can
-    // never data-race the SDK handle or tear it down under a live transcribe (engines-models.md §1.1,
-    // §1.4). The unwrapped `engine(_:)` below stays for install-only queries, which touch no SDK state.
+    // Every engine the app loads/transcribes/evicts is wrapped in SerializedEngine so concurrent
+    // load/evict (Settings/first-run download, launch preload, self-test, memory pressure) can't
+    // data-race the SDK handle or tear it down under a live transcribe (engines-models.md §1.1, §1.4).
+    // The unwrapped `engine(_:)` below stays for install-only queries, which touch no SDK state.
     static func makeAll(modelsDir: URL) -> [any SpeechEngine] {
         availableCatalog.map { SerializedEngine(construct($0.id, modelsDir)) }
     }

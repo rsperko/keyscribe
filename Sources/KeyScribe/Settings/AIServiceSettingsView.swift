@@ -47,7 +47,7 @@ final class AIServiceSettingsModel: ObservableObject {
     private let listModels: (Connection, String?) async throws -> [String]
     private(set) var testTask: Task<Void, Never>?
     // Monotonic per-connection token. A post-test edit bumps it so a slow verdict landing after the reset
-    // cannot resurrect a stale error badge (which drives the menu error dot + Modes-pane flags).
+    // can't resurrect a stale error badge (drives the menu error dot + Modes-pane flags).
     private var testGeneration: [String: Int] = [:]
 
     init(
@@ -95,8 +95,8 @@ final class AIServiceSettingsModel: ObservableObject {
             let models = try await listModels(connection, apiKey)
             modelSuggestionsByConnection[id] = models
             modelDiscoveryStates[id] = .loaded
-            // Re-read the live connection by id before writing: a text field's focus-loss commit can
-            // land between the snapshot and here, and saving the snapshot would clobber that edit.
+            // Re-read the live connection by id before writing: a text field's focus-loss commit can land
+            // between the snapshot and here, and saving the snapshot would clobber that edit.
             if !models.isEmpty, var latest = connections.first(where: { $0.id == id }) {
                 let current = latest.model.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !models.contains(current) {
@@ -202,8 +202,8 @@ final class AIServiceSettingsModel: ObservableObject {
             KeychainStore.delete(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
-            // Bump so an in-flight test for the deleted connection can't land on a freshly created one that
-            // reuses the same id (create() re-mints the freed id).
+            // Bump so an in-flight test for the deleted connection can't land on a freshly created one
+            // reusing the same id (create() re-mints the freed id).
             testGeneration[connection.id, default: 0] += 1
             modelDiscoveryStates[connection.id] = nil
             modelSuggestionsByConnection[connection.id] = nil

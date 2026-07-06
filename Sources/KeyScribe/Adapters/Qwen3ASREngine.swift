@@ -92,12 +92,10 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         progress?(.init(phase: "Ready", fraction: 1))
     }
 
-    // A Qwen install is multi-file: the safetensors weights PLUS the tokenizer/config sidecars. A plain
-    // weightsExist check is satisfied by ANY single .safetensors, so an interrupted download that landed
-    // a weight shard but not vocab.json passes it — then fromPretrained silently skips the absent tokenizer
-    // (a fileExists check with no else) and transcribe falls back to space-joined raw token IDs pasted into
-    // the user's document. Require the whole set so a partial is treated as absent (re-downloaded / not
-    // adopted), never loaded.
+    // A Qwen install is multi-file: weights PLUS tokenizer/config sidecars. weightsExist passes on ANY
+    // single .safetensors, so an interrupted download (weight shard but no vocab.json) would load with the
+    // tokenizer silently skipped → transcribe pastes space-joined raw token IDs. Require the whole set so
+    // a partial is treated as absent, never loaded.
     private static let requiredSidecars = ["config.json", "vocab.json", "merges.txt", "tokenizer_config.json"]
 
     func fullInstallPresent(in cacheDir: URL) -> Bool {
@@ -145,13 +143,11 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
 
     // Do NOT reduce this to `model = nil`: MLX recycles a dropped model's buffers into a process-wide
     // cache pool rather than returning them to the OS, so the GPU working set stays resident (measured:
-    // multi-GB held after a bare nil, 0 after clearCache). unload() frees the parameters, clears MLX's
-    // cache, and restores the cache limit the 1.7B load path lowered.
-    // The cache clear is process-wide, and SerializedEngine only serializes THIS instance — the other
-    // Qwen variant can be loading/transcribing concurrently. That is safe: MLX's MetalAllocator guards
-    // malloc/free/clear_cache with one internal mutex, and clear_cache empties only the reusable-buffer
-    // pool, never a buffer a live MLXArray still holds. Worst case for a concurrent inference is a
-    // transient buffer-reuse miss (re-alloc from the OS), never a race or use-after-free.
+    // multi-GB after a bare nil, 0 after clearCache). unload() frees parameters, clears MLX's cache, and
+    // restores the cache limit the 1.7B load path lowered. The clear is process-wide but safe against a
+    // concurrent load/transcribe of the other Qwen variant: MLX's MetalAllocator guards malloc/free/
+    // clear_cache with one mutex, and clear_cache empties only the reusable-buffer pool, never a buffer a
+    // live MLXArray holds — worst case a transient buffer-reuse miss, never a race or use-after-free.
     func evict() async {
         model?.unload()
         model = nil

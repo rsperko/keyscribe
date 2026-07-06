@@ -2,13 +2,12 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Headless capture self-test (`--capture-probe`). Drives the REAL capture path — `AudioCapture.start →
-// record → finishDraining` — so it exercises the RT-thread ring, the writer thread, the drain gate, and
-// teardown exactly as a live dictation does (which the WAV-fed `--benchmark`/`--commands-check` do NOT).
-// Feed a known pure tone into the input (route a tone file through an Aggregate/loopback device), and the
-// probe reports whether the capture is clean: SINAD, a glitch count/spike from the sine-recurrence residual,
-// plus CoreAudio's own overload count and the ring's drop count. All three of those should be 0 on a healthy
-// capture; a non-zero value is the ear-free proof the RT path dropped or corrupted audio.
+// Headless capture self-test (`--capture-probe`). Drives the REAL capture path (`AudioCapture.start →
+// record → finishDraining`), exercising the RT-thread ring, writer thread, drain gate, and teardown as a
+// live dictation does (which the WAV-fed `--benchmark`/`--commands-check` do NOT). Feed a known pure tone
+// into the input (via an Aggregate/loopback device); the probe reports SINAD, a glitch count, CoreAudio's
+// overload count, and the ring's drop count — all should be 0, a non-zero value being ear-free proof the
+// RT path dropped or corrupted audio.
 enum CaptureProbeRunner {
     static func run(seconds: Double, toneHz: Double) async {
         guard Permissions.microphoneStatus() == .granted else {

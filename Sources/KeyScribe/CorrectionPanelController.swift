@@ -2,16 +2,13 @@ import AppKit
 import KeyScribeKit
 import SwiftUI
 
-// The standalone correction surfaces (design.md §4.7): a small panel to add a dictionary term or a
-// literal replacement without opening Settings. Reachable from the menu and from optional global
-// shortcuts. The Heard/term field is pre-filled best-effort from the current selection — captured
-// before KeyScribe activates so the synthetic ⌘C still reaches the app the user was working in.
+// The standalone correction surfaces (design.md §4.7): a panel to add a dictionary term or replacement without
+// opening Settings. The Heard/term field is pre-filled best-effort from the current selection, captured before
+// KeyScribe activates so the synthetic ⌘C still reaches the app the user was working in.
 //
-// "Add & Correct" saves the entry and then pastes the corrected value back over that selection in the
-// source app. The selection only ever drives prefill; the paste reuses the shared safe insertion path
-// (single ⌘Z undo) and is only ever posted once the stashed source app is confirmed frontmost — never
-// blind. If focus cannot be handed back, the entry is still saved and the panel says the text was left
-// unchanged.
+// "Add & Correct" saves the entry, then pastes the corrected value back over that selection via the shared safe
+// insertion path (single ⌘Z) — only once the stashed source app is confirmed frontmost, never blind. If focus
+// cannot be handed back, the entry is still saved and the panel says the text was left unchanged.
 @MainActor
 final class CorrectionPanelController {
     private var window: NSWindow?

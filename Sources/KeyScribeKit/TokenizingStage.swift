@@ -1,18 +1,16 @@
 import Foundation
 
-// A pipeline command that tokenizes spans on `apply` and restores them on `post` (LIFO). Verbatim
-// and redaction are the same machinery — a position, a shared per-dictation Tokenizer, and a span
-// scanner — differing only in WHERE they sort and HOW they find spans. One struct + two factories
-// captures that; a third protector (design.md §4.2) becomes one more factory, not another copy.
+// A pipeline command that tokenizes spans on `apply` and restores them on `post` (LIFO). Verbatim and
+// redaction are the same machinery, differing only in WHERE they sort and HOW they find spans; a third
+// protector (design.md §4.2) is one more factory, not another copy.
 public struct TokenizingStage: PipelineStage {
     public let position: StagePosition
     public let order: Int
     private let tokenizer: Tokenizer
     private let scan: @Sendable (String, Tokenizer) -> String
 
-    // Internal, factories-only: the position that decides where a protector sorts (verbatim BEFORE the
-    // text stages, redaction AFTER — the load-bearing ordering invariant, design.md §4.2.1) must not be
-    // caller-supplied. Construct via `.verbatim` / `.redaction` / `.clipboard`.
+    // Factories-only: `position` (verbatim BEFORE the text stages, redaction AFTER — the load-bearing
+    // ordering invariant, design.md §4.2.1) must not be caller-supplied. Use `.verbatim`/`.redaction`/`.clipboard`.
     init(
         position: StagePosition, order: Int = 0, tokenizer: Tokenizer,
         scan: @escaping @Sendable (String, Tokenizer) -> String
@@ -27,9 +25,8 @@ public struct TokenizingStage: PipelineStage {
     public func post(_ context: inout PipelineContext) { context.text = tokenizer.restore(context.text) }
     public var issuedTokens: [String] { tokenizer.issuedTokens }
 
-    // Verbatim sorts BEFORE the post-STT text stages so its span is opaque to them (protected from
-    // everything except STT); redaction sorts AFTER them so it tokenizes the fully-transformed text
-    // just before the LLM (design.md §4.2.1).
+    // Verbatim sorts BEFORE the post-STT text stages so its span is opaque to them (protected from all but
+    // STT); redaction sorts AFTER so it tokenizes the fully-transformed text just before the LLM (§4.2.1).
     public static func verbatim(tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
         TokenizingStage(position: .verbatimMark, tokenizer: tokenizer) { VerbatimTokenizer.apply($0, into: $1) }
     }
@@ -38,10 +35,9 @@ public struct TokenizingStage: PipelineStage {
         TokenizingStage(position: .postSTTMark, tokenizer: tokenizer) { RedactionTokenizer.apply($0, into: $1) }
     }
 
-    // "insert clipboard contents" — the third protector the machinery above anticipated. Sorts with
-    // verbatim (before the text stages) but at a later order, so a verbatim span swallows a clipboard
-    // phrase before it can fire. `read` is a lazy provider the stage invokes only when the command
-    // actually survives to this stage, so an ordinary dictation never reads the host's clipboard.
+    // "insert clipboard contents". Sorts with verbatim (before the text stages) but at a later order, so a
+    // verbatim span swallows a clipboard phrase before it can fire. `read` is lazy — invoked only when the
+    // command survives to this stage, so an ordinary dictation never reads the host's clipboard.
     public static func clipboard(read: @escaping @Sendable () -> String?, tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
         TokenizingStage(position: .verbatimMark, order: 1, tokenizer: tokenizer) {
             ClipboardTokenizer.apply($0, clipboard: read, into: $1)
@@ -50,11 +46,9 @@ public struct TokenizingStage: PipelineStage {
 }
 
 extension Tokenizer {
-    // Rebuild `text` with each span replaced by its nonce token, in one left-to-right pass. The spans
-    // must be ordered by start and non-overlapping (the scanners guarantee this). Shared by the
-    // verbatim and redaction scanners so the cursor/splice accumulation lives in exactly one place.
-    // `dedup: false` mints a distinct token per site even for equal values (clipboard), so N identical
-    // paste sites stay N distinct tokens and each survives the exactly-once gate.
+    // Rebuild `text` with each span replaced by its nonce token, in one left-to-right pass. Spans must be
+    // ordered by start and non-overlapping (scanners guarantee this). `dedup: false` mints a distinct token
+    // per site even for equal values (clipboard), so N identical paste sites each survive the exactly-once gate.
     func splice(
         _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true
     ) -> String {
@@ -70,25 +64,19 @@ extension Tokenizer {
         return result
     }
 
-    // Like `splice`, but each COMMAND span also absorbs the whitespace/comma run that directly hugs it
-    // on either side, then re-normalizes to exactly one space on any side that still borders content. A
-    // spoken command is an invisible operator; the punctuation the STT attaches when the speaker pauses
-    // around it ("the begin verbatim, new line, end verbatim, change" → the commas) is an artifact, not
-    // content. Only spaces, tabs, and commas are absorbed — never sentence terminators (. ! ?),
-    // semicolons, or colons, which are usually intended. `hadLeftSeparator`/`hadRightSeparator` capture
-    // whether the ORIGINAL boundary was a separator, so attached punctuation like "(cmd)" or "cmd."
-    // stays attached (no spurious space) while "a cmd b" and "a, cmd, b" both collapse to "a <tok> b".
-    // Spans must be ordered by start and non-overlapping. Used only by command stages (verbatim,
-    // clipboard); redaction keeps plain `splice` so it never disturbs punctuation around a sensitive
-    // span. `dedup: false` (clipboard) mints a distinct token per site — see `splice`.
+    // Like `splice`, but each COMMAND span absorbs the whitespace/comma run hugging it on either side, then
+    // re-normalizes to one space where it still borders content — a spoken command is an invisible operator,
+    // and the punctuation STT attaches around a pause ("...verbatim, new line, end...") is an artifact. Only
+    // spaces/tabs/commas are absorbed, never sentence terminators (. ! ?), semicolons, or colons.
+    // `hadLeftSeparator`/`hadRightSeparator` record whether the ORIGINAL boundary was a separator, so "(cmd)"
+    // / "cmd." stay attached while "a cmd b" and "a, cmd, b" both collapse to "a <tok> b". Spans ordered by
+    // start, non-overlapping. Command stages only (verbatim, clipboard); redaction keeps plain `splice`.
     //
-    // Bracketed-terminator FOLD: an aggressively-punctuating STT (Whisper Small) inserts a sentence
-    // terminator (. ! ?) right before an inline paste even without a pause, so "the directory. <paste>.
-    // Decide" leaves a spurious period before the pasted value. When the content is bracketed by a
-    // terminator on BOTH sides, the leading one is treated as a pause artifact: it is dropped (the
-    // content folds into the preceding clause) and RELOCATED to the trailing boundary, keeping its type
-    // (a "?" stays a "?"). Requiring a terminator on both sides leaves a paste that genuinely starts the
-    // next sentence ("It's broken. <paste> fixes it" — no trailing terminator) untouched.
+    // Bracketed-terminator FOLD: an aggressively-punctuating STT (Whisper Small) can put a terminator right
+    // before an inline paste ("the directory. <paste>. Decide"). When the content is bracketed by a
+    // terminator on BOTH sides, the leading one is a pause artifact: dropped and RELOCATED to the trailing
+    // boundary (keeping its type). Requiring both sides leaves a paste that genuinely starts the next
+    // sentence ("It's broken. <paste> fixes it") untouched.
     func spliceAbsorbing(
         _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true,
         foldBracketedTerminators: Bool = true, collapseTrailingTerminator: Bool = false
@@ -130,10 +118,9 @@ extension Tokenizer {
                 result += " "
             }
             result += token(span.value)
-            // Safe trailing-collapse: if the content already ends a clause AND the STT left a redundant
-            // terminator right after the end marker (a pause artifact), drop the post-marker one — the
-            // content's own terminator stands. Never strips the content's terminator, so an intended
-            // "Hello!" survives.
+            // Safe trailing-collapse: if the content already ends in a terminator AND STT left a redundant
+            // one right after the end marker, drop the post-marker one (the content's own stands). Never
+            // strips the content's terminator, so an intended "Hello!" survives.
             if collapseTrailingTerminator, let contentLast = span.value.last, terminators.contains(contentLast),
                end < text.endIndex, terminators.contains(text[end]) {
                 cursor = text.index(after: end)

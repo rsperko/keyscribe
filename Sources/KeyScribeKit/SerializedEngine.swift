@@ -1,28 +1,22 @@
 import Foundation
 
-// One place that makes engine load/transcribe/evict safe under concurrency (engines-models.md §1.1,
-// §1.4). The concrete adapters (Whisper/Qwen/Moonshine) hold their SDK handle in `nonisolated(unsafe)`
-// storage and assume "load/evict happen between dictations, never during one" — an assumption the
-// Settings download, first-run download, launch preload, self-test, and memory-pressure paths all
-// violate, giving concurrent loads that data-race the handle and evictions that tear the handle down
-// under a live transcribe (a use-after-close for Moonshine's ONNX session). This actor decorator wraps
-// every engine at the registry so those guarantees hold centrally, once:
+// Makes engine load/transcribe/evict safe under concurrency (engines-models.md §1.1, §1.4). Base
+// adapters (Whisper/Qwen/Moonshine) hold their SDK handle in `nonisolated(unsafe)` storage assuming
+// load/evict never overlap a dictation — which the Settings/first-run download, launch preload,
+// self-test, and memory-pressure paths violate (concurrent loads race the handle; an evict under a live
+// transcribe is a use-after-close for Moonshine's ONNX session). This actor decorator enforces:
 //
-//  - **Two load levels, forwarded faithfully:** the base engines distinguish a cheap runtime warm
-//    (`loadIfNeeded()` — Parakeet loads only the transcription model) from the install path
-//    (`load(progress:)` — Parakeet ALSO loads the bias/CTC model). This decorator forwards each flavor
-//    to its base counterpart instead of collapsing both into `load(progress:)`, so an empty-dictionary
-//    user's warm-on-press never pays the bias model's CoreML load (and never risks a network re-fetch),
-//    while the install path still eager-loads it — even after a runtime warm already ran (full ⊋ runtime,
-//    and the base loads are idempotent). For the engines where the two are identical the behavior is
-//    unchanged.
-//  - **Single-flight load, per level:** concurrent warms share ONE `base.loadIfNeeded`; concurrent
-//    installs share ONE `base.load`. A runtime waiter may ride an in-flight install (it is a superset),
-//    but an install waiter never rides a runtime load (that would skip the bias model).
-//  - **Exclusive base access:** a private async lock serializes each `base.load*` / `base.transcribe` /
-//    `base.evict`, so the non-Sendable SDK handle is never touched by two operations at once.
-//  - **Evict awaits settlement:** `evict` waits for in-flight loads (both levels) to finish and for the
-//    transcribe lock, so it never tears the handle down under a running (or deadline-abandoned) transcribe.
+//  - **Two load levels, forwarded faithfully:** a cheap runtime warm (`loadIfNeeded()`) vs the install
+//    path (`load(progress:)`, which also loads the bias/CTC model). Forwarded separately, not collapsed,
+//    so an empty-dictionary warm-on-press never pays the bias model's CoreML load; the install still
+//    eager-loads it even after a warm (base loads idempotent).
+//  - **Single-flight load, per level:** concurrent warms share one `base.loadIfNeeded`, installs one
+//    `base.load`. A runtime waiter may ride an install (superset); an install waiter never rides a
+//    runtime load (would skip the bias model).
+//  - **Exclusive base access:** an async lock serializes `base.load*`/`transcribe`/`evict` so the
+//    non-Sendable handle is never touched by two ops at once.
+//  - **Evict awaits settlement:** waits for in-flight loads (both levels) and the transcribe lock, so it
+//    never tears the handle down under a running (or deadline-abandoned) transcribe.
 public actor SerializedEngine: SpeechEngine {
     private let base: any SpeechEngine
     private var runtimeLoaded = false   // base.loadIfNeeded() has completed
@@ -48,17 +42,15 @@ public actor SerializedEngine: SpeechEngine {
     public nonisolated var supportsStreaming: Bool { base.supportsStreaming }
     public nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? { base.verifyInstalled(in: modelsDir) }
 
-    // Forward under the exclusive lock so prepare never races a base load/transcribe/evict on the
-    // non-Sendable handle. WITHOUT this override the protocol-extension no-op on the wrapper would silently
-    // swallow the base engine's implementation.
+    // Forward under the exclusive lock so prepare never races a base op on the non-Sendable handle.
+    // Without this override the protocol-extension no-op would silently swallow the base implementation.
     public func prepareForDictation() async {
         await acquire()
         defer { release() }
         await base.prepareForDictation()
     }
 
-    // Forward under the exclusive lock for the same reason as prepareForDictation: without this override
-    // the protocol-extension no-op on the wrapper would silently swallow Parakeet's implementation, and
+    // Same as prepareForDictation: without the override the protocol no-op swallows Parakeet's impl, and
     // building the CTC vocab/rescorer touches the non-Sendable handle so it must not race a transcribe.
     public func prewarmBias(termSets: [[String]]) async {
         await acquire()
@@ -88,9 +80,8 @@ public actor SerializedEngine: SpeechEngine {
     }
 
     // Install path (Settings download/verify, first-run): ensure the FULL load (transcription + bias).
-    // Must run even when a runtime warm already loaded the transcription model, so the bias model is
-    // eager-compiled before the first biased dictation — base.load is idempotent about the part already
-    // loaded.
+    // Runs even after a runtime warm so the bias model is eager-compiled before the first biased
+    // dictation (base.load is idempotent about the part already loaded).
     public func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         if fullLoaded { return }
         let fanout = loadProgress ?? LoadProgressFanout()
@@ -138,12 +129,10 @@ public actor SerializedEngine: SpeechEngine {
         }
     }
 
-    // Ensures the runtime model is loaded. PRECONDITION: the caller holds the exclusive lock. Keeping the
-    // load inside the same critical section as the subsequent transcribe means an evict (or the Settings
-    // file delete that follows it) can never slip between "load" and "transcribe" — the whole
-    // load→transcribe is one protected operation, so base.transcribe never runs against an engine another
-    // op just tore down (or whose files were just deleted). The bias model, when needed, loads lazily
-    // inside base.transcribe (only when bias terms are present), so transcribe never forces it here.
+    // Ensures the runtime model is loaded. PRECONDITION: caller holds the exclusive lock — keeping load
+    // and transcribe in one critical section means an evict (or the Settings file delete after it) can't
+    // slip between them, so base.transcribe never runs against a torn-down engine. The bias model loads
+    // lazily inside base.transcribe when terms are present, never forced here.
     private func ensureRuntimeLocked() async throws {
         if runtimeLoaded || fullLoaded { return }
         try await base.loadIfNeeded()
@@ -157,9 +146,8 @@ public actor SerializedEngine: SpeechEngine {
         return try await base.transcribe(wavURL: wavURL, biasTerms: biasTerms)
     }
 
-    // Same exclusive-lock + load-then-transcribe discipline as the WAV path. WITHOUT this override the
-    // protocol-extension default would throw sampleInputUnsupported on the wrapper even though the base
-    // engine supports samples — the same silent-no-op trap as prepareForDictation.
+    // Same exclusive-lock + load-then-transcribe discipline as the WAV path. Without this override the
+    // protocol default throws sampleInputUnsupported even though the base supports samples.
     public func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         await acquire()
         defer { release() }
@@ -167,12 +155,10 @@ public actor SerializedEngine: SpeechEngine {
         return try await base.transcribe(samples: samples, sampleRate: sampleRate, biasTerms: biasTerms)
     }
 
-    // A streaming session holds the non-Sendable handle for the recording's whole lifetime, so it must
-    // hold the exclusive lock for that whole span — not just while this method runs. Acquire the lock here,
-    // ensure the runtime model, build the base session, and hand back a wrapper that RELEASES the lock
-    // exactly once when finalize/cancel completes. Guaranteed release on EVERY exit path (build-throw here,
-    // finalize-success, finalize-throw, cancel) — a leaked lock wedges every later transcribe and hangs
-    // evict, and the batch fallback the controller runs after a finalize-throw would deadlock behind it.
+    // A streaming session holds the non-Sendable handle for the whole recording, so it must hold the
+    // exclusive lock for that whole span, not just this method. Hand back a wrapper that releases the lock
+    // exactly once on every terminal path (build-throw, finalize success/throw, cancel) — a leaked lock
+    // wedges every later transcribe, hangs evict, and deadlocks the controller's post-throw batch fallback.
     public func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
         await acquire()
         do {
@@ -201,10 +187,9 @@ public actor SerializedEngine: SpeechEngine {
     }
 }
 
-// Wraps a base engine's streaming session so the SerializedEngine's exclusive lock is released exactly
-// once, whichever terminal path (finalize success, finalize throw, cancel) fires. `onTerminate` hops back
-// onto the actor to call release(); the once-guard makes a double-release (e.g. cancel after a failed
-// finalize) impossible.
+// Releases the SerializedEngine's exclusive lock exactly once, whichever terminal path (finalize
+// success/throw, cancel) fires. The once-guard makes a double-release (cancel after a failed finalize)
+// impossible.
 private final class LockedStreamingSession: StreamingSpeechSession, @unchecked Sendable {
     private let base: any StreamingSpeechSession
     private let onTerminate: @Sendable () async -> Void

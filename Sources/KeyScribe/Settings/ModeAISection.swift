@@ -184,8 +184,8 @@ struct ModeAISection: View {
     private func closeFragmentEditor(_ id: String) {
         guard editingFragment == id else { return }
         let modeId = mode.id
-        // Land the pending debounced edit before the empty-check: closeFragment deletes an empty-bodied
-        // instruction, and the popover's onDisappear does not fire reliably to flush a fast Done.
+        // Flush the debounced edit before closeFragment's empty-check (it deletes an empty-bodied
+        // instruction); the popover's onDisappear does not fire reliably for a fast Done.
         fragmentFlush.flush()
         editingFragment = nil
         onCloseFragment(id, modeId)

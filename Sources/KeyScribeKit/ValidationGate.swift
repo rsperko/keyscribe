@@ -17,24 +17,21 @@ public enum GateRecovery: Equatable, Sendable {
     case localFallback
 }
 
-// The hard post-LLM gate (design.md §4.2). A dropped redaction token leaks the protected span and
-// a dropped verbatim token corrupts the insert, so this is a safety check, not normalization:
-// every issued nonce token must return exactly once (unless the mode allows deletion), the model
-// must not invent sentinel-like tokens we never issued, and the output must be non-empty.
+// The hard post-LLM gate (design.md §4.2). A dropped redaction token leaks the protected span and a dropped
+// verbatim token corrupts the insert, so this is a safety check, not normalization: every issued nonce token
+// must return exactly once (unless the mode allows deletion), no invented sentinel-like tokens, non-empty output.
 public enum ValidationGate {
     private static let sentinelPattern = "⟦SN:[^⟧]*⟧"
 
-    // `allowedTokens` (selection-mode instruction redaction) are never required, but one occurrence
-    // must not be rejected as stray — more than one is still ambiguous restore and fails.
+    // `allowedTokens` (selection-mode instruction redaction) are never required, but one occurrence isn't
+    // stray; more than one is still ambiguous restore and fails.
     public static func check(
         output: String, issuedTokens: [String], allowedTokens: [String] = [], allowDeletion: Bool = false
     ) -> GateVerdict {
         if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .fail(.empty) }
 
-        // One regex pass finds every sentinel-shaped span (issued tokens are sentinel-shaped too), so a
-        // count map answers the per-token presence/duplication check without a separate full scan per
-        // issued token. The stray check still iterates the matches in document order, so the same token
-        // is reported on multi-failure inputs as before.
+        // One regex pass finds every sentinel-shaped span, so a count map answers presence/duplication
+        // without a scan per issued token. The stray check iterates matches in document order.
         let found = sentinels(in: output)
         var counts: [String: Int] = [:]
         for sentinel in found { counts[sentinel, default: 0] += 1 }
@@ -55,7 +52,7 @@ public enum ValidationGate {
         return .pass
     }
 
-    // On failure: one stricter retry, then fall back to the local un-rewritten text (never insert
+    // On failure: one stricter retry, then fall back to local un-rewritten text (never insert
     // partially-restored text).
     public static func recovery(attempt: Int) -> GateRecovery {
         attempt == 0 ? .retryStricter : .localFallback

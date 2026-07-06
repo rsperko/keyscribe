@@ -3,8 +3,7 @@ import Foundation
 import KeyScribeKit
 import Synchronization
 
-// `--help` / `-h`: print the CLI surface and exit. Run with no arguments to launch the menu-bar app;
-// the flags below are dev/admin tools meant to be run from a terminal.
+// `--help` / `-h`: print the CLI surface and exit. No arguments launches the menu-bar app.
 if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
     print("""
     KeyScribe — privacy-first, on-device voice dictation for macOS.
@@ -63,18 +62,15 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
     exit(0)
 }
 
-// Dev flag: `--config-dir <path>` points config/modes/history at a throwaway directory (downloaded
-// models stay shared). Parsed first so every path below — including --reset — honors it. Pair with
-// --first-run to replay onboarding against a clean sandbox without touching the real configuration.
+// `--config-dir <path>` points config/modes/history at a throwaway directory (models stay shared). Parsed
+// first so every path below — including --reset — honors it.
 if let i = CommandLine.arguments.firstIndex(of: "--config-dir"), i + 1 < CommandLine.arguments.count {
     KeyScribePaths.configDirOverride = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
 }
 
-// Dev flag: `--keep-capture <dir>` mirrors the KEYSCRIBE_KEEP_CAPTURE env var. It exists because a
-// LaunchServices launch (`open ...`) — required for microphone TCC to attribute to the app rather than
-// the launching terminal — starts with a clean environment, so a shell env var never reaches the app.
-// A flag rides `open --args`, so `open KeyScribe.app --args --keep-capture <dir>` both keeps Mic working
-// and retains capture WAVs. Feeds the same env the read path already uses (CaptureArchive reads it live).
+// `--keep-capture <dir>` mirrors the KEYSCRIBE_KEEP_CAPTURE env var. A LaunchServices launch (`open ...`,
+// required so microphone TCC attributes to the app not the terminal) starts with a clean environment, so a
+// shell env var never reaches the app; a flag rides `open --args`. Sets the same env the read path uses.
 if let i = CommandLine.arguments.firstIndex(of: "--keep-capture"), i + 1 < CommandLine.arguments.count {
     setenv("KEYSCRIBE_KEEP_CAPTURE", CommandLine.arguments[i + 1], 1)
 }
@@ -106,8 +102,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     exit(0)
 }
 
-// Dev tool: `--reload-stress <dir>` reproduces the Frugal-memory "No speech detected" — cold-reload a
-// model N times and transcribe a known non-silent clip, failing if any reload returns empty.
+// `--reload-stress <dir>`: cold-reload a model N times and transcribe a known non-silent clip, failing if
+// any reload returns empty (reproduces the low-memory "No speech detected").
 if let i = CommandLine.arguments.firstIndex(of: "--reload-stress"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?
@@ -133,8 +129,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--reload-stress"), i + 1 < Comm
     exit(ok.load(ordering: .relaxed) ? 0 : 1)
 }
 
-// Diagnostic: print every shipped catalog engine and whether it is installed — so a release gate can
-// report which engines it will actually exercise vs. which are missing (and therefore untested).
+// Print every shipped catalog engine and whether it is installed, so a release gate knows which it will
+// actually exercise vs. which are missing (untested).
 if CommandLine.arguments.contains("--list-engines") {
     let installed = ModelInstallStore.installedIds()
     for e in SpeechModelCatalog.all {
@@ -180,9 +176,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < Com
     let ok = Atomic<Bool>(true)
     Task.detached {
         let report = await CommandCheckRunner.run(dir: dir, only: only)
-        // No --baseline: informational only (exit 0). With --baseline: gate. If the file is absent,
-        // establish it from this run (a known-good baseline) and pass; otherwise diff and fail on any
-        // per-engine drop or a stale (corpus-changed) baseline.
+        // No --baseline: informational (exit 0). With --baseline: gate — absent file establishes it from
+        // this run and passes; present file diffs and fails on any per-engine drop or a stale baseline.
         if let url = baselineURL {
             if let data = try? Data(contentsOf: url),
                let baseline = try? JSONDecoder().decode(CommandCheckBaseline.self, from: data) {

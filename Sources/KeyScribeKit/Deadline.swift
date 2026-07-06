@@ -38,18 +38,17 @@ private final class DeadlineContinuation<T: Sendable>: @unchecked Sendable {
     }
 }
 
-// Run `operation` but return (throw `DeadlineExceeded`) once `seconds` elapse, even if `operation`
-// ignores cancellation. Structured task groups await every child at scope exit, so a wedged
-// CoreML/MLX call that never observes cancellation would keep the group suspended past the deadline.
-// Here the operation runs as an UNSTRUCTURED task: at the deadline we cancel it (best-effort) and
-// return immediately, abandoning the task to finish in the background, its result discarded. Parent
-// cancellation propagates through onCancel. The losing timer is cancelled on the happy path so no
-// long timer lingers after a fast success.
+// Run `operation` but throw `DeadlineExceeded` once `seconds` elapse, even if `operation` ignores
+// cancellation. A structured task group awaits its children at scope exit, so a wedged CoreML/MLX call
+// that never observes cancellation would suspend the group past the deadline. Instead the operation runs
+// as an UNSTRUCTURED task: at the deadline we cancel it (best-effort) and return immediately, abandoning
+// it to finish in the background with its result discarded. Parent cancellation propagates through
+// onCancel; the losing timer is cancelled on the happy path.
 //
-// `onSettled` fires when the operation TRULY finishes (returns or throws) — which on a wedged op is
-// long after the deadline already threw. It is the only honest signal that the operation's resources
-// (engine/model/decoded PCM) are actually released; callers that must not start concurrent work use
-// it to gate, since a returned `DeadlineExceeded` does NOT mean the work stopped (see SingleFlightDeadline).
+// `onSettled` fires when the operation TRULY finishes — on a wedged op, long after the deadline threw.
+// It is the only honest signal that its resources (engine/model/decoded PCM) are released; callers that
+// must not start concurrent work gate on it, since `DeadlineExceeded` does NOT mean the work stopped
+// (see SingleFlightDeadline).
 public func runWithDeadline<T: Sendable>(
     seconds: Double,
     operation: @escaping @Sendable () async throws -> T,

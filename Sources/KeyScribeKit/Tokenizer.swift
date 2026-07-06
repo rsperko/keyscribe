@@ -1,12 +1,11 @@
 import Foundation
 
-// Stateful nonce tokenization shared by verbatim and redaction (design.md §4.2). A span is
-// replaced with a type+index token (⟦SN:REDACT:1⟧, ⟦SN:VERB:1⟧); the same value within one
-// dictation always maps to the same token, distinct values get distinct indices. The
-// token→original map lives ONLY here in memory — it is never written to history or logs — and is
-// applied in reverse (LIFO) after the LLM returns so nested/overlapping spans unwind correctly.
-// Confined to a single dictation but held by Sendable pipeline stages, so it locks its mutable
-// state (same pattern as RegexCache) and is @unchecked Sendable.
+// Stateful nonce tokenization shared by verbatim and redaction (design.md §4.2). A span is replaced with a
+// type+index token (⟦SN:REDACT:1⟧, ⟦SN:VERB:1⟧); the same value within one dictation maps to the same
+// token, distinct values get distinct indices. The token→original map lives ONLY here in memory — never
+// written to history or logs — and is applied in reverse (LIFO) after the LLM returns so nested spans unwind
+// correctly. Confined to one dictation but held by Sendable pipeline stages, so it locks its mutable state
+// (like RegexCache) and is @unchecked Sendable.
 public final class Tokenizer: @unchecked Sendable {
     public enum TokenType: String, Sendable {
         case redact = "REDACT"
@@ -41,10 +40,10 @@ public final class Tokenizer: @unchecked Sendable {
         return token
     }
 
-    // Like `tokenize`, but never reuses a prior token for an equal value — each call mints a fresh
-    // index. Used where multiple sites of the SAME value must stay DISTINCT so the post-LLM gate (which
-    // requires each issued token to return exactly once) is not tripped by one token appearing at N
-    // sites — e.g. two "insert clipboard contents", which both wrap the whole clipboard.
+    // Like `tokenize`, but never reuses a prior token for an equal value — each call mints a fresh index.
+    // Used where multiple sites of the SAME value must stay DISTINCT so the post-LLM gate (each issued token
+    // returns exactly once) isn't tripped by one token appearing at N sites — e.g. two "insert clipboard
+    // contents", both wrapping the whole clipboard.
     @discardableResult
     public func tokenizeUnique(_ value: String, type: TokenType) -> String {
         lock.lock()
@@ -67,15 +66,13 @@ public final class Tokenizer: @unchecked Sendable {
         return order
     }
 
-    // Replace every ⟦SN:…⟧ token with its original in a single linear scan, repeating only while a
-    // round actually restores something — so a restored original that itself contains a token (a
-    // redaction span captured around an earlier verbatim token) still unwinds. Internally-issued
-    // originals are acyclic (a token's original predates the token), so the fixpoint converges in
-    // passes equal to the nesting depth (≤2 in practice). An EXTERNAL value can break that: a
-    // clipboard paste whose text literally contains this sentinel (⟦SN:…⟧) can map a token to an
-    // original that re-contains it, which without a bound would loop forever. `maxPasses` caps the
-    // fixpoint at the token count (the acyclic depth ceiling), so a self-referential original stops
-    // and is left as the literal pasted text — never a hang, and identical content for every real case.
+    // Replace every ⟦SN:…⟧ token with its original in a linear scan, repeating only while a round restores
+    // something — so a restored original that itself contains a token (a redaction span around an earlier
+    // verbatim token) still unwinds. Internally-issued originals are acyclic (a token's original predates the
+    // token), converging in passes equal to nesting depth (≤2 in practice). An EXTERNAL value can break that:
+    // a clipboard paste literally containing this sentinel could map a token to an original that re-contains
+    // it and loop forever. `maxPasses` caps the fixpoint at the token count, so a self-referential original
+    // stops and is left as the literal pasted text — never a hang.
     public func restore(_ text: String) -> String {
         lock.lock()
         defer { lock.unlock() }

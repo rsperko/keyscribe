@@ -17,14 +17,12 @@ public enum VerbatimTokenizer {
     }
 
     // The `[\s,]*` around the content group trims pause whitespace/commas hugging the markers (so
-    // "begin verbatim, new line, end verbatim" protects "new line", not ", new line,") while leaving
-    // the content's own edge terminators/semicolons/colons intact — a verbatim span may legitimately
-    // be "Hello!" or "foo();". spliceAbsorbing then cleans the commas hugging the OUTSIDE of the markers.
+    // "begin verbatim, new line, end verbatim" protects "new line", not ", new line,") while leaving the content's
+    // own edge terminators intact — a span may be "Hello!" or "foo();". spliceAbsorbing then cleans commas OUTSIDE the markers.
     private static let contentEdge = "[\\s,]*"
-    // A sentence terminator FLUSH against a marker word ("begin verbatim." with no space) is a pause
-    // artifact of the spoken command, not content — the speaker paused after the marker, they did not
-    // dictate a leading period. Stripped only when glued to the marker, so a space-separated
-    // content-leading terminal (".config") survives (leadingPeriodInContentPreserved).
+    // A sentence terminator FLUSH against a marker word ("begin verbatim." no space) is a pause artifact, not
+    // content. Stripped only when glued to the marker, so a space-separated content-leading terminal (".config")
+    // survives (leadingPeriodInContentPreserved).
     private static let markerGluedTerminator = "[.!?]*"
 
     private static func replacePairs(_ text: String, _ tokenizer: Tokenizer) -> String {
@@ -35,11 +33,9 @@ public enum VerbatimTokenizer {
             guard let full = Range(m.range, in: text), let content = Range(m.range(at: 1), in: text) else { return nil }
             return (full, String(text[content]))
         }
-        // dedup: false — two verbatim spans with equal content must stay distinct tokens, or a
-        // faithful rewrite reproducing both occurrences trips the gate's exactly-once check
-        // (mirrors ClipboardTokenizer). foldBracketedTerminators: false — a user-delimited verbatim
-        // span is not an inline paste; when the speaker paused (surrounding sentence terminators) it
-        // must stay its own clause, not merge into the previous one.
+        // dedup: false — equal-content spans must stay distinct tokens, or a faithful rewrite reproducing both
+        // trips the gate's exactly-once check (mirrors ClipboardTokenizer). foldBracketedTerminators: false — a
+        // user-delimited span is not an inline paste; on a pause it stays its own clause, not merged into the previous.
         return tokenizer.spliceAbsorbing(
             text, spans: spans, type: .verbatim, dedup: false,
             foldBracketedTerminators: false, collapseTrailingTerminator: true)

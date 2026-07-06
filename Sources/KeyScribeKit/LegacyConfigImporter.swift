@@ -1,10 +1,10 @@
 import Foundation
 
-// Optional, injected one-time import of configuration from a different legacy app. KeyScribe ships no
-// importer; this is a seam so a build can populate its config directory before KeyScribe seeds or
-// loads its own defaults. Default is no importer injected, in which case bootstrap is unchanged.
+// Optional injected one-time config import from a legacy app. KeyScribe ships no importer; this is a seam so
+// a build can populate its config directory before KeyScribe seeds or loads defaults. None injected =
+// bootstrap unchanged.
 public protocol LegacyConfigImporter {
-    // Runs before KeyScribe writes or loads its default config. The host calls this at most once —
-    // on first run, before `supportDir` exists. Implementations may re-check and no-op as needed.
+    // Runs before KeyScribe writes or loads default config. Host calls it at most once, on first run before
+    // `supportDir` exists. Implementations may re-check and no-op.
     func importIfNeeded(into supportDir: URL) throws
 }

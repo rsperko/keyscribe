@@ -2,16 +2,13 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --samples-parity <dir>`. Verifies the P2-1 in-memory-samples transcription path
-// against the WAV path for every installed sample-capable engine, over the *.wav files in <dir>. It runs
-// TWO isolated passes over the clips in the same order — all `transcribe(wavURL:)`, then evict+reload,
-// then all `transcribe(samples:)` fed the SAME audio decoded to the engine's captureSampleRate exactly as
-// the capture writer produces it — and asserts each clip's two transcripts are identical. The passes are
-// separated (not interleaved per clip) because some engines (Moonshine's ONNX transcriber) carry state
-// across calls: interleaving would let the second call see state from the first and report a spurious
-// mismatch that never happens live (one transcribe per dictation). With separate same-order passes each
-// call sees the identical preceding-state trajectory, so any surviving divergence is a real code-path bug.
-// Headless: reads wavs, loads/evicts each engine, never touches the mic. Exit non-zero on any mismatch.
+// Dev tool: `KeyScribe --samples-parity <dir>`. Verifies the in-memory-samples transcription path matches
+// the WAV path for every installed sample-capable engine, over the *.wav files in <dir>. Runs TWO isolated
+// same-order passes — all `transcribe(wavURL:)`, then evict+reload, then all `transcribe(samples:)` fed the
+// SAME audio at the engine's captureSampleRate — and asserts each clip's two transcripts are identical.
+// Separated (not interleaved) because some engines (Moonshine's ONNX transcriber) carry state across calls,
+// so interleaving would report a mismatch that never happens live; same-order passes give each call the
+// identical preceding-state trajectory, so any divergence is a real bug. Headless; exit non-zero on mismatch.
 enum SamplesParityRunner {
     @discardableResult
     static func run(dir: URL, only: Set<String>? = nil) async -> Bool {

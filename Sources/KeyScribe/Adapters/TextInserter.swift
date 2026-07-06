@@ -13,14 +13,12 @@ enum TextInserter {
     private static var pendingRestore: Task<Void, Never>?
     private static var pendingRestoreGeneration = 0
 
-    // Reads the target app's current selection. Native apps expose it through Accessibility, so we read
-    // it directly — no clipboard, no synthetic ⌘C — which means an empty selection can neither beep nor
-    // grab the current line. Only when AX is unavailable (Electron/Chromium) do we fall back to a ⌘C
-    // copy, muted so an empty-selection copy cannot beep, and we trust that copy only if it came from a
-    // real selection: VS Code-family editors copy the whole line on an empty ⌘C but flag it in
-    // `vscode-editor-data.isFromEmptySelection`; a copy without that flag (Obsidian, Chrome, …) is
-    // discarded rather than risk inserting a line the user never selected. Drains any in-flight detached
-    // restore first so the snapshot is the user's real clipboard, never a prior paste's scratch text.
+    // Reads the target app's current selection. Native apps expose it via AX, read directly (no ⌘C, so an
+    // empty selection can't beep or grab the current line). AX-unavailable (Electron/Chromium) falls back
+    // to a muted ⌘C, trusted only if it came from a real selection: VS Code-family editors copy the whole
+    // line on empty ⌘C but flag it in `vscode-editor-data.isFromEmptySelection`; a copy without that flag
+    // is discarded rather than insert a line the user never selected. Drains any in-flight detached restore
+    // first so the snapshot is the user's real clipboard, not a prior paste's scratch text.
     static func captureSelection(modifier: Mode.ClipboardModifier = .command) async -> String? {
         if case .text(let selection) = axSelectedText() {
             return selection.isEmpty ? nil : selection
@@ -46,9 +44,8 @@ enum TextInserter {
 
     private enum AXSelection { case text(String); case unsupported }
 
-    // `.text` (including empty) when the focused element reports a selection — native apps do, so an
-    // empty string means "nothing selected". `.unsupported` when there is no readable selection
-    // attribute (Electron/Chromium web areas), which routes to the ⌘C fallback.
+    // `.text` (incl. empty) when the focused element reports a selection; `.unsupported` (no readable
+    // selection attribute — Electron/Chromium) routes to the ⌘C fallback.
     private static func axSelectedText() -> AXSelection {
         let system = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
@@ -61,9 +58,8 @@ enum TextInserter {
         return .text(text)
     }
 
-    // Mutes the system alert volume for the duration of `body` so a synthetic ⌘C that lands on an app
-    // with nothing to copy cannot beep. Best-effort: if the volume cannot be read/set, the copy still
-    // runs (it may beep). The volume is global, so it is muted only for the brief copy window.
+    // Mutes the global alert volume for `body` so a synthetic ⌘C with nothing to copy can't beep.
+    // Best-effort: if the volume can't be read/set, the copy still runs (it may beep).
     private static func withMutedAlertVolume<T>(_ body: () async -> T) async -> T {
         let saved = alertVolume()
         if saved != nil { setAlertVolume(0) }
@@ -83,12 +79,10 @@ enum TextInserter {
         _ = NSAppleScript(source: "set volume alert volume \(volume)")?.executeAndReturnError(&error)
     }
 
-    // The user's current clipboard as text, for the "insert clipboard contents" live edit. Read at
-    // pipeline time — before any ⌘C/⌘V machinery stages a value — so it is the real clipboard the user
-    // copied. The plain-text flavor covers plain text and the plain rendering of rich text (formatting
-    // is dropped — dictation inserts plain text); the NSAttributedString fallback recovers text from
-    // apps that put only RTF/HTML with no plain flavor. Non-text clipboards (images, copied files) and
-    // an empty clipboard yield nil, which leaves the spoken phrase as literal text (ClipboardTokenizer).
+    // The user's clipboard as text, for "insert clipboard contents". Read at pipeline time (before any
+    // ⌘C/⌘V machinery stages a value). Formatting is dropped (dictation inserts plain text); the
+    // NSAttributedString fallback recovers text from apps that put only RTF/HTML. Non-text/empty clipboards
+    // yield nil, leaving the spoken phrase as literal text (ClipboardTokenizer).
     static func currentClipboardText() -> String? {
         let pb = NSPasteboard.general
         if let s = pb.string(forType: .string), !s.isEmpty { return s }
@@ -99,8 +93,8 @@ enum TextInserter {
         return nil
     }
 
-    // Returns whether the chosen insertion path actually acted. A false paste result means nothing was
-    // inserted, so the caller must not report success or fire a submit keystroke.
+    // Returns whether the insertion path actually acted. False ⇒ nothing inserted, so the caller must not
+    // report success or fire a submit keystroke.
     @discardableResult
     static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String, awaitSettle: Bool = true) async -> Bool {
         switch insertionAction(decision: decision, method: method) {
@@ -136,9 +130,8 @@ enum TextInserter {
     }
 
     // Snapshots the clipboard and writes the scratch value ⌘V will paste. Drains any in-flight detached
-    // restore first, so the snapshot is the user's real clipboard and never a prior paste's still-present
-    // scratch text (restoring that would leak dictated content into the user's clipboard). nil ⇒ the
-    // scratch write was unverified and the caller must not ⌘V.
+    // restore first so the snapshot is the user's real clipboard, not a prior paste's scratch text
+    // (restoring that would leak dictated content). nil ⇒ scratch write unverified, caller must not ⌘V.
     static func beginScratchPaste(_ text: String, on pb: NSPasteboard) async -> ScratchPaste? {
         await drainPendingRestore()
         let snapshot = PasteboardSnapshot.capture(from: pb)
@@ -149,9 +142,8 @@ enum TextInserter {
         return ScratchPaste(pb: pb, snapshot: snapshot, stamp: pb.changeCount)
     }
 
-    // Restores the user's clipboard once the scratch survived the settle window. Inline when a submit
-    // Return must land after ⌘V; otherwise detached so the completion cue is not delayed — the next
-    // paste drains it before snapshotting.
+    // Restores the user's clipboard once the scratch survived the settle window. Inline when a submit Return
+    // must land after ⌘V; otherwise detached (the next paste drains it before snapshotting).
     static func settleScratch(_ scratch: ScratchPaste, awaitSettle: Bool) async {
         if awaitSettle {
             if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: 250, stepMs: 25) {
@@ -188,10 +180,9 @@ enum TextInserter {
         return pb.changeCount == stamp
     }
 
-    // Our temporary clipboard write for the paste, read-back verified. Marked transient + concealed so
-    // clipboard managers do not capture the dictated text (it can contain just-redacted-then-restored
-    // sensitive spans). Returns false if, after a few attempts, the pasteboard's string is not the
-    // dictated text — so the caller refuses to ⌘V rather than paste whatever stale content is there.
+    // Temporary clipboard write for the paste, read-back verified. Transient + concealed so clipboard
+    // managers don't capture the dictated text (may contain just-restored sensitive spans). Returns false
+    // if after a few attempts the string isn't the dictated text, so the caller refuses to ⌘V stale content.
     private static func writeScratchVerified(_ text: String, to pb: NSPasteboard = .general, attempts: Int = 3) -> Bool {
         for _ in 0..<attempts {
             let item = NSPasteboardItem()
@@ -221,11 +212,9 @@ enum TextInserter {
         }
     }
 
-    // Hand focus back to `target` and paste `text` there via the shared safe insertion path (single ⌘Z
-    // undo). The caller orders its own window out and owns the fallback: returns false without pasting
-    // if focus could not be handed back, so History can copy-to-clipboard while the correction panel
-    // reports the selection unchanged. The 120 ms after frontmost confirmation lets the target's key
-    // window become ready before ⌘V.
+    // Hand focus back to `target` and paste `text` there via the shared paste path (single ⌘Z undo).
+    // Returns false without pasting if focus couldn't be handed back (caller owns the fallback). The 120 ms
+    // after frontmost confirmation lets the target's key window become ready before ⌘V.
     static func pasteReturning(to target: NSRunningApplication, text: String) async -> Bool {
         target.activate()
         guard await waitUntilFrontmost(target) else { return false }
@@ -243,8 +232,7 @@ enum TextInserter {
         return condition()
     }
 
-    // AX can report success while doing nothing in some targets, so use it only when a read-back proves
-    // the value changed.
+    // AX can report success while doing nothing, so trust it only when a read-back proves the value changed.
     @discardableResult
     static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command, awaitSettle: Bool = true) async -> Bool {
         if axInsertVerified(text) {
@@ -300,8 +288,8 @@ enum TextInserter {
         postKey(returnKeyCode, flags: flags)
     }
 
-    // `concealed` marks the item transient + concealed so clipboard managers do not capture it — used
-    // for the secure-field divert, where the copied text is a password.
+    // `concealed` marks the item transient + concealed so clipboard managers don't capture it (secure-field
+    // divert, where the copied text is a password).
     @discardableResult
     static func copyToClipboard(_ text: String, concealed: Bool = false, to pb: NSPasteboard = .general) -> Bool {
         pb.clearContents()
@@ -316,8 +304,8 @@ enum TextInserter {
         return pb.writeObjects([item]) && pb.string(forType: .string) == text
     }
 
-    // Captures all pasteboard item types up to a size cap; oversized clipboards fall back to plain text
-    // so image/file-heavy clipboards do not stall the main actor.
+    // Captures all pasteboard item types up to a size cap; oversized clipboards fall back to plain text so
+    // image/file-heavy clipboards don't stall the main actor.
     struct PasteboardSnapshot {
         let changeCount: Int
         private let storage: Storage
@@ -330,11 +318,10 @@ enum TextInserter {
 
         static func capture(from pb: NSPasteboard = .general) -> PasteboardSnapshot {
             let pbItems = pb.pasteboardItems ?? []
-            // Materializing a flavor with `data(forType:)` renders any promised/lazy representation in
-            // full (a Preview TIFF can be 50–100 MB) — the size cap below only stops *storing*, not the
-            // render that already stalled the main actor. Pre-scan types and divert heavyweight
-            // clipboards (image/PDF/media/file-URL) straight to the plain-text snapshot before touching
-            // their data, so we never render a flavor we would only discard.
+            // `data(forType:)` renders any promised/lazy representation in full (a Preview TIFF can be
+            // 50–100 MB) — the size cap below only stops storing, not the render that already stalled the
+            // main actor. Pre-scan types and divert heavyweight clipboards (image/PDF/media/file-URL) to the
+            // plain-text snapshot before touching their data, so we never render a flavor we'd discard.
             if pbItems.contains(where: { $0.types.contains(where: isHeavyweight) }) {
                 return PasteboardSnapshot(
                     changeCount: pb.changeCount, storage: .plainText(pb.string(forType: .string)))
@@ -371,9 +358,9 @@ enum TextInserter {
             case .full(let items):
                 restoreFull(items, to: pb)
             case .plainText(let text):
-                // Always clear first (like restoreFull) so a nil snapshot — a heavyweight or oversized
-                // clipboard we could not preserve, captured with no `.string` flavor — removes the scratch
-                // paste rather than leaving dictated text (incl. restored redacted spans) on the clipboard.
+                // Always clear first so a nil snapshot (a heavyweight/oversized clipboard we couldn't
+                // preserve, no `.string` flavor) removes the scratch paste rather than leaving dictated text
+                // (incl. restored redacted spans) on the clipboard.
                 pb.clearContents()
                 if let text { pb.setString(text, forType: .string) }
             }
@@ -388,8 +375,8 @@ enum TextInserter {
                 return item
             }
             if pb.writeObjects(objects) { return }
-            // Some exotic multi-representation clipboards reject a full round-trip write; rather than
-            // leave the clipboard empty, fall back to restoring the plain-text representation if any.
+            // Some multi-representation clipboards reject a full round-trip write; fall back to the
+            // plain-text representation rather than leave the clipboard empty.
             pb.clearContents()
             if let stringData = items.first?[.string], let text = String(data: stringData, encoding: .utf8) {
                 pb.setString(text, forType: .string)

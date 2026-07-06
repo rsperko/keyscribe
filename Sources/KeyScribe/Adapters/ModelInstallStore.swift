@@ -9,8 +9,8 @@ enum ModelInstallStore {
 
     private static let markerFile = "installed.json"
 
-    // The marker set is read on every dictation press but only ever written by this process, so cache it in
-    // memory (refreshed by `write`). Lock-guarded: reads run on the main actor, writes can run off it.
+    // Read on every dictation press, written only by this process → cache in memory (refreshed by `write`).
+    // Lock-guarded: reads on the main actor, writes can run off it.
     private static let cacheLock = NSLock()
     nonisolated(unsafe) private static var cachedIds: Set<String>?
 
@@ -29,8 +29,8 @@ enum ModelInstallStore {
             }
         }
 
-        // No protectedDirs here: it only ever narrows removeDirs, and recency is checked below on the
-        // (usually empty) candidate set instead of walking the multi-GB shared models tree every launch.
+        // No protectedDirs: it only narrows removeDirs, and recency is checked below on the (usually empty)
+        // candidate set instead of walking the multi-GB shared models tree every launch.
         let plan = ModelMaintenance.reconcile(
             knownIds: Array(owned.keys), owned: owned, completeIds: complete,
             dirsOnDisk: directoriesOnDisk(), markedIds: marked, keep: [markerFile])
@@ -38,8 +38,7 @@ enum ModelInstallStore {
         let dropped = marked.subtracting(plan.installed)
         write(plan.installed)
 
-        // Recency-check only the candidate dirs (usually none) — the filter body never runs when the
-        // candidate set is empty, so the steady state does no per-file stat at all.
+        // Recency-check only the candidate dirs (usually none), so the steady state does no per-file stat.
         let cutoff = Date().addingTimeInterval(-downloadRecencyWindow)
         let dirs = plan.removeDirs.filter { name in
             !directoryActive(KeyScribePaths.modelsDir.appendingPathComponent(name), since: cutoff)
@@ -92,8 +91,8 @@ enum ModelInstallStore {
         } else {
             ids = []
         }
-        // A write may have landed a newer value while we read disk unlocked; don't clobber it with the
-        // stale first read. Adopt our read only if the cache is still empty.
+        // A write may have landed a newer value while we read disk unlocked; adopt our read only if the
+        // cache is still empty, so we don't clobber it with the stale first read.
         cacheLock.lock()
         if cachedIds == nil { cachedIds = ids }
         let result = cachedIds ?? ids

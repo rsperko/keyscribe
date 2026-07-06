@@ -19,18 +19,16 @@ final class ModesSettingsModel: ObservableObject {
     private var supportDir: URL { repository.supportDir }
     private var loadedSignature: String?
 
-    // True while THIS model is writing through the repository, so the change observer skips the reentrant
-    // reload the write's own `onChange` fires — that reload would land mid-mutation (before the model's
-    // post-write bookkeeping runs) and corrupt the create/rename selection state. External writes (the
-    // correction panel routing a mode-scoped term) run with this false, so those DO reload.
+    // True while THIS model is writing, so the change observer skips the reentrant reload the write's own
+    // `onChange` fires — that reload would land mid-mutation and corrupt the create/rename selection state.
+    // External writes run with this false, so those DO reload.
     private var isApplyingLocalMutation = false
 
     init(repository: ConfigRepository) {
         self.repository = repository
         reload()
-        // A mode-scoped vocabulary term routed through the global correction panel (a fresh on-disk RMW)
-        // while this pane is open must survive the pane's next full-file mode save. Refresh the draft from
-        // disk on any EXTERNAL config write; `reload` is signature-guarded, so an unrelated file no-ops.
+        // Refresh the draft from disk on any EXTERNAL config write (e.g. a mode-scoped term routed through
+        // the correction panel) so it survives the pane's next full-file save. `reload` is signature-guarded.
         repository.addChangeObserver { [weak self] in
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
@@ -44,11 +42,9 @@ final class ModesSettingsModel: ObservableObject {
         return try body()
     }
 
-    // Re-read modes, connections, and fragments from disk. `.onAppear` calls this on every visit to the
-    // pane, but the model's own mutators keep memory in sync with disk — so when nothing on disk has
-    // changed since the last load (the common navigate-away-and-back case) the decode is skipped. The
-    // signature covers everything reload reads; a mutator's own write changes it, costing at most one
-    // redundant reload on the next visit.
+    // Re-read modes, connections, and fragments from disk. `.onAppear` calls this on every pane visit, but
+    // the decode is skipped when the signature (covering everything reload reads) is unchanged — the
+    // mutators keep memory in sync, so navigate-away-and-back costs nothing.
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
@@ -83,9 +79,8 @@ final class ModesSettingsModel: ObservableObject {
 
     func consumeCreated() { lastCreatedId = nil }
 
-    // Duplicate an existing mode into a new user-created mode. The system Direct floor is not
-    // duplicable. The copy drops the seed identity (it is now user-created) and its trigger keys, so it
-    // never silently clashes with the original's shortcut — the user assigns a new one.
+    // Duplicate into a new user-created mode (the system Direct floor is not duplicable). The copy drops the
+    // seed identity and trigger keys, so it never clashes with the original's shortcut.
     func duplicate(_ mode: Mode) {
         guard !mode.isSystem else { return }
         let name = "\(mode.name) copy"
@@ -99,10 +94,8 @@ final class ModesSettingsModel: ObservableObject {
         selectedID = copy.id
     }
 
-    // A freshly created mode's id is the slug of the placeholder "New Mode". The first time the user
-    // gives it a real name, re-slug the id so the TOML filename matches the name instead of staying
-    // "new-mode" (the id is the filename stem). Only the initial naming re-slugs; later renames keep
-    // the file so external references stay stable.
+    // A new mode's id is the slug of "New Mode". The first real name re-slugs the id so the TOML filename
+    // matches (the id is the filename stem); later renames keep the file so external references stay stable.
     func update(_ mode: Mode) {
         if mode.id == awaitingInitialName {
             let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
@@ -161,8 +154,8 @@ final class ModesSettingsModel: ObservableObject {
         return ids
     }
 
-    // Create (or resolve) a fragment file by name and refresh the list. Returns the fragment id to
-    // add to the mode; the caller opens it in the in-app editor to fill in the instruction text.
+    // Create (or resolve) a fragment file by name; returns the id to add to the mode. The caller opens it in
+    // the in-app editor to fill in the instruction text.
     func addFragmentFile(named name: String) -> String? {
         do {
             let (id, created) = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
@@ -201,9 +194,8 @@ final class ModesSettingsModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    // Closing the editor on an empty instruction discards it: detach from the editing mode and, when
-    // no other mode still references it, delete the file. So an instruction created but never written
-    // never persists — an empty one is not a saveable instruction.
+    // Closing the editor on an empty instruction discards it: detach from the mode and, if no other mode
+    // references it, delete the file. So an instruction created but never written never persists.
     func closeFragment(_ id: String, fromMode modeId: String) {
         guard fragmentBody(id).isEmpty else { return }
         if var mode = modes.first(where: { $0.id == modeId }),

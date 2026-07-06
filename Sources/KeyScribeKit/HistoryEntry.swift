@@ -1,10 +1,9 @@
 import Foundation
 
-// One local-history record (design.md §4.7). Stores the raw transcription, the mode, the exact
-// prompt sent to the LLM (carrying the ⟦SN:…⟧ tokens, never their originals), and the final
-// inserted text — plus the data-boundary metadata the History detail view shows. **Audio is never
-// stored and the redaction map is never stored.** The raw transcription and result still contain
-// real values, so the privacy lever for sensitive work is per-mode `exclude_from_history`.
+// One local-history record (design.md §4.7): raw transcription, mode, the exact LLM prompt (carrying the
+// ⟦SN:…⟧ tokens, never their originals), the final inserted text, and data-boundary metadata. Audio and the
+// redaction map are NEVER stored. The transcription/result still contain real values, so the privacy lever
+// is per-mode `exclude_from_history`.
 public struct HistoryEntry: Codable, Equatable, Sendable {
     public enum Outcome: String, Codable, Sendable {
         case inserted
@@ -15,14 +14,12 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
 
     public var timestamp: Date
     public var modeName: String
-    // The on-device STT engine that produced `heard` (display name, e.g. "Parakeet TDT v3"). nil on
-    // entries written before this was captured, in which case the History detail shows just "On-device".
+    // Display name of the STT engine that produced `heard`. nil on older entries (detail shows "On-device").
     public var engine: String?
     public var heard: String
-    // The local text after replacements and spoken edits, before any AI rewrite — the middle of the
-    // Heard → Transformed → Result model (ui_design.md §8). Recorded on every entry, even when local
-    // processing changed nothing (then it equals Heard), so history is durable proof the local
-    // pipeline ran rather than was skipped. nil only on older entries written before this was captured.
+    // Local text after replacements and spoken edits, before any AI rewrite — the middle of Heard →
+    // Transformed → Result (ui_design.md §8). Recorded on every entry (equals Heard when nothing changed)
+    // as durable proof the local pipeline ran. nil only on older entries.
     public var transformed: String?
     public var result: String
     public var outcome: Outcome
@@ -83,8 +80,8 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         return decoder
     }()
 
-    // One JSONL line. JSON escapes embedded newlines, so a multi-line transcript stays on a single
-    // line — load-bearing for the one-entry-per-line file format.
+    // One JSONL line. JSON escapes embedded newlines, so a multi-line transcript stays on one line —
+    // load-bearing for the one-entry-per-line format.
     public func jsonLine() throws -> String {
         String(decoding: try Self.encoder.encode(self), as: UTF8.self)
     }

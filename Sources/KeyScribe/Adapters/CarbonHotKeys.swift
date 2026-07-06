@@ -31,11 +31,9 @@ final class CarbonHotKeys: ChordRegistering {
     private let signature: OSType = 0x4B59_5343  // 'KYSC'
 
     func update(_ registrations: [Registration]) {
-        // unregisterAll() drops any in-flight hold: a chord physically held across an update never delivers
-        // its kEventHotKeyReleased (the ref that would fire it is gone), so a hold-to-talk chord held here
-        // loses its release edge. Mainline is protected — AppDelegate defers rebuilds while the machine is
-        // busy, and a suspend needs a recorder click — so this needs an external config edit landing in the
-        // arming window. A real fix would skip re-registering entries whose keyCode+modifiers are unchanged.
+        // unregisterAll() drops any in-flight hold: a chord held across an update loses its kEventHotKeyReleased
+        // (the ref that would fire it is gone). Mainline is protected (AppDelegate defers rebuilds while busy), so
+        // this needs an external config edit landing in the arming window. Real fix: skip re-registering unchanged entries.
         unregisterAll()
         guard !registrations.isEmpty else { return }
         installHandlerIfNeeded()

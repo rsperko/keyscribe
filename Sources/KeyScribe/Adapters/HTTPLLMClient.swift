@@ -1,14 +1,12 @@
 import Foundation
 import KeyScribeKit
 
-// Thin BYOK client over the OpenAI / Anthropic / Gemini HTTP APIs (design.md §5). The key is
-// fetched from the Keychain by the connection's key_ref. Provider-agnostic orchestration
-// (assemble → gate → retry/fallback) lives in KeyScribeKit.RewriteService; this only does transport.
-// Runtime-unverified without a real key.
+// Thin BYOK transport over the OpenAI / Anthropic / Gemini HTTP APIs (design.md §5). Key fetched from
+// Keychain by the connection's key_ref. Provider-agnostic orchestration (assemble → gate → retry/fallback)
+// lives in KeyScribeKit.RewriteService.
 struct HTTPLLMClient: LLMClient {
-    // A bounded session, not URLSession.shared (whose default request timeout is 60s — and the gate's
-    // stricter-retry would double that). A hung BYOK endpoint must fall back to the local transcript
-    // promptly, so cap each attempt; RewriteService turns the thrown timeout into a local fallback.
+    // Bounded session, not URLSession.shared (60s default, doubled by the gate's stricter-retry). A hung
+    // BYOK endpoint must fall back to the local transcript promptly, so cap each attempt.
     var session: URLSession = ProviderTransport.makeSession(requestTimeout: 30, resourceTimeout: 45)
     var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
@@ -104,9 +102,8 @@ struct HTTPLLMClient: LLMClient {
                   let choice = choices.first,
                   let message = choice["message"] as? [String: Any],
                   let content = message["content"] as? String else { throw ProviderTransportError.badResponse }
-            // A response cut off at max_tokens passes the gate when no sentinels were issued (the common
-            // privacy-off case), and half a sentence would be pasted as final text. Treat truncation as an
-            // error so RewriteService falls back to the local transcript instead.
+            // A response cut off at max_tokens passes the gate when no sentinels were issued (common
+            // privacy-off case), pasting half a sentence. Treat truncation as an error → local fallback.
             if (choice["finish_reason"] as? String) == "length" { throw ProviderTransportError.truncated }
             return content
         case .anthropic:

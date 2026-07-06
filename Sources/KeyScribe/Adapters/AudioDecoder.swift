@@ -1,12 +1,11 @@
 import AVFoundation
 import Foundation
 
-// Single audio-decode path shared by the engines that need raw PCM at a specific rate (Qwen3 @24k,
-// Moonshine @16k). Reads a wav into mono Float32, resampling through AVAudioConverter only when the
-// source rate/layout differs (the common 16 kHz-mono dictation clip takes the fast path). Engines
-// whose SDK consumes a file path (Whisper) or owns its own converter (Parakeet/FluidAudio) don't use
-// this. Decode runs in fixed-size frame chunks so peak memory is bounded by one chunk plus the
-// growing result, not two whole-clip PCM buffers held at once.
+// Single audio-decode path shared by engines needing raw PCM at a specific rate (Qwen3 @24k, Moonshine
+// @16k). Reads a wav into mono Float32, resampling through AVAudioConverter only when the source rate/layout
+// differs (the common 16 kHz-mono clip takes the fast path). Engines whose SDK consumes a file path
+// (Whisper) or own their converter (Parakeet) don't use this. Chunked decode bounds peak memory to one
+// chunk plus the growing result.
 enum AudioDecoder {
     private static let chunkFrames: AVAudioFrameCount = 16384
 
@@ -45,11 +44,9 @@ enum AudioDecoder {
         let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames)!
         var out: [Float] = []
         out.reserveCapacity(Int(file.length))
-        // AVAudioFile.read(into:) throws (a bare `nilError`) at end-of-stream instead of returning a
-        // zero-length read, so a throw after at least one successful read is a normal EOF — break on it
-        // rather than failing the whole decode. (ChunkReader.feed swallows the same throw on the resampling
-        // path; the fast path must too, else every same-rate clip fails to decode.) A throw on the very
-        // first read is a real error and propagates.
+        // AVAudioFile.read(into:) throws (a bare `nilError`) at EOF instead of a zero-length read, so a throw
+        // after ≥1 successful read is normal EOF — break rather than fail the decode. A throw on the very
+        // first read is a real error and propagates. (ChunkReader.feed swallows the same throw.)
         var read = 0
         while true {
             do { try file.read(into: chunk) } catch {
@@ -70,9 +67,9 @@ enum AudioDecoder {
     }
 }
 
-// AVAudioConverter's input block is @Sendable under strict concurrency. Box the file + reusable input
-// chunk in an @unchecked Sendable holder — convert(to:error:withInputFrom:) consumes each supplied
-// chunk synchronously on one thread before requesting the next, so reusing one buffer is safe.
+// AVAudioConverter's input block is @Sendable under strict concurrency. Box the file + reusable chunk in an
+// @unchecked Sendable holder — convert(...) consumes each supplied chunk synchronously before requesting the
+// next, so reusing one buffer is safe.
 private final class ChunkReader: @unchecked Sendable {
     private let file: AVAudioFile
     private let buffer: AVAudioPCMBuffer

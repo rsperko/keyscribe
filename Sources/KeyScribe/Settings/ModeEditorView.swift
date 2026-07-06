@@ -30,9 +30,9 @@ struct ModeEditorView: View {
         if mode.isSystem { systemBody } else { normalBody }
     }
 
-    // The Direct floor (`_direct`, shown to users as "Plain Dictation"): a reduced, mostly-locked
-    // editor. Only its shortcut and result handling are editable; the guarantees (no AI, no
-    // edit-in-place, global vocabulary only) are fixed.
+    // The Direct floor (`_direct`, shown as "Plain Dictation"): a reduced, mostly-locked editor. Only its
+    // shortcut and result handling are editable; the guarantees (no AI, no edit-in-place, global vocabulary
+    // only) are fixed.
     private var systemBody: some View {
         Form {
             Section {
@@ -259,8 +259,8 @@ struct ModeEditorView: View {
         }
     }
 
-    // When a mode rewrites, the user must be able to see exactly what leaves the Mac. Privacy and context
-    // are mutually exclusive; the controls stay visible with the reason rather than disappearing.
+    // When a mode rewrites, the user must see exactly what leaves the Mac. Privacy and context are mutually
+    // exclusive; the controls stay visible with the reason rather than disappearing.
     @ViewBuilder private var dataSentWithAISection: some View {
         if mode.aiRewrite != nil {
             Section("Data sent with AI") {

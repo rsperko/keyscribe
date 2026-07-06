@@ -1,15 +1,12 @@
 import Foundation
 
-// In-memory cache in front of a secret backend (the Keychain) so a BYOK key is decrypted at most once
-// per process rather than on every rewrite attempt — decrypting is what triggers the login keychain's
-// ACL prompt. Concurrent cold reads of the same keyRef coalesce behind a per-keyRef load lock, so two
-// paths racing on a fresh key still prompt only once. A load runs outside the map lock (it can block on
-// the ACL prompt), so a mutation can land while a cold load is in flight; a per-key generation (set/
-// delete) plus a global epoch (deleteAll) let the returning load detect that and drop its now-stale
-// value instead of clobbering the mutation — so the cache never falls out of step with the backend.
-// Only successful decrypts are cached (a miss is cheap, never prompts, and stays re-readable so an
-// out-of-band key is still seen). In-memory only, never persisted (mirrors TokenCommandCache).
-// Thread-safe via NSLock, so freely Sendable.
+// In-memory cache in front of a secret backend (the Keychain) so a BYOK key is decrypted (and thus prompts
+// the login keychain's ACL) at most once per process, not per rewrite. Concurrent cold reads of the same
+// keyRef coalesce behind a per-keyRef load lock, so a race prompts once. The load runs outside the map lock
+// (it can block on the ACL prompt), so a mutation can land mid-load; a per-key generation (set/delete) plus
+// a global epoch (deleteAll) let the returning load drop its now-stale value instead of clobbering the
+// mutation. Only successful decrypts are cached (a miss is cheap and stays re-readable, so an out-of-band
+// key is still seen). Never persisted. Thread-safe via NSLock.
 public final class CachingSecretStore: @unchecked Sendable {
     public struct Backend: Sendable {
         public var load: @Sendable (_ keyRef: String) -> String?

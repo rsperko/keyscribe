@@ -97,10 +97,8 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
 }
 
 extension Connection {
-    // A structural misconfiguration detectable without any network call (distinct from a wrong key,
-    // which only a Test Connection reveals). Every provider needs a model; an OpenAI-compatible
-    // connection also needs a base URL to reach. A missing key is *not* here — it is legitimate for a
-    // local/no-auth endpoint.
+    // Structural misconfiguration detectable without a network call (unlike a wrong key, which only Test
+    // Connection reveals). A missing key is NOT here — it's legitimate for a local/no-auth endpoint.
     public enum ConfigIssue: Equatable, Sendable {
         case missingModel
         case missingBaseURL

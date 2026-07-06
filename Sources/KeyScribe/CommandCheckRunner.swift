@@ -3,14 +3,11 @@ import Foundation
 import KeyScribeKit
 
 // Dev tool: `KeyScribe --commands-check <dir>`. Drives every installed SpeechEngine over recorded
-// utterances that contain a spoken command — "scratch that", "verbatim …", "insert new line/
-// paragraph/tab", "insert clipboard contents", and whole-utterance replacements — runs the REAL
-// local (no-LLM) dictation pipeline the DictationController builds for a plain live-edits mode, and
-// checks each case's declarative assertions (CommandCheck). It verifies the commands on the exact
-// transcripts real engines produce (spurious terminators, casing, clause segmentation), not
-// synthetic ones — the thing unit tests structurally cannot cover. Adding a checked case is a
-// manifest row, not code (principles.md §2). Headless: reads wavs, never touches mic/insertion/TCC/
-// clipboard; the clipboard value is supplied by the manifest. Engines that aren't installed are skipped.
+// command utterances, runs the REAL local (no-LLM) dictation pipeline for a plain live-edits mode, and
+// checks each case's declarative assertions (CommandCheck) against the exact transcripts real engines
+// produce (spurious terminators, casing, clause segmentation) — what unit tests structurally can't cover.
+// Adding a case is a manifest row, not code (principles.md §2). Headless: reads wavs, never touches
+// mic/insertion/TCC/clipboard (clipboard value from the manifest). Uninstalled engines are skipped.
 enum CommandCheckRunner {
     struct Manifest: Decodable {
         let context: Context?
@@ -86,16 +83,15 @@ enum CommandCheckRunner {
         })
     }
 
-    // The local (no-LLM) dictation pipeline DictationController builds for a plain live-edits mode:
-    // live edits + replacements (before verbatim/clipboard tokenize), then restore. Mirrors
-    // dictationPipeline + produceDictationText, including the whole-utterance replacement bypass:
-    // when one rule owns the entire utterance the generated value is inserted verbatim, skipping the
-    // reverse pass — the same short-circuit production takes on `PipelineContext.bareReplacement`.
+    // The local (no-LLM) pipeline DictationController builds for a plain live-edits mode. Mirrors
+    // dictationPipeline + produceDictationText, including the whole-utterance replacement bypass (a rule
+    // owning the entire utterance is inserted verbatim, skipping the reverse pass — the `bareReplacement`
+    // short-circuit).
     static func process(transcript: String, clipboard: String, rules: [ReplacementRule]) -> String {
         var stages: [any PipelineStage] = [LiveEditsStage(), ReplacementsStage(rules: rules)]
         stages.append(TokenizingStage.verbatim())
-        // The clipboard stage sorts after verbatim and gates its own read on the post-verbatim text, so
-        // a phrase inside a verbatim span stays literal — exactly as dictationPipeline decides.
+        // Clipboard sorts after verbatim and reads the post-verbatim text, so a phrase inside a verbatim
+        // span stays literal — exactly as dictationPipeline decides.
         stages.append(TokenizingStage.clipboard(read: { clipboard }))
         let pipeline = Pipeline(stages)
         let payload = pipeline.forward(transcript)

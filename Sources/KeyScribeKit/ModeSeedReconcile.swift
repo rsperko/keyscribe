@@ -1,27 +1,23 @@
 import Foundation
 import TOMLKit
 
-// Seed reconcile (design.md §5.1): a fresh install seeds the whole starter catalog once
-// (`seedStartersIfEmpty`). After that, the catalog can drift — modes get renamed, new starters are
-// added — and existing installs must carry forward *without* clobbering a user's edits or
-// resurrecting a mode they deleted. That distinction needs persistent state: the **seed ledger**
-// records, per seed id this install has ever been offered, the catalog version it was written at and
-// a fingerprint of the exact bytes written. The ledger lives OUTSIDE the watched `modes/` dir (a
-// stray .toml there would decode as a phantom mode) and is cleared by a reset along with the LKG
-// store, so a reset re-seeds clean.
+// Seed reconcile (design.md §5.1): a fresh install seeds the starter catalog once
+// (`seedStartersIfEmpty`); after that the catalog drifts (renames, new starters) and existing installs
+// must carry forward without clobbering user edits or resurrecting a deleted mode. That distinction
+// needs the **seed ledger**: per seed id ever offered, the catalog version written and a fingerprint of
+// the bytes. It lives OUTSIDE the watched `modes/` dir (a stray .toml there decodes as a phantom mode)
+// and is cleared by a reset along with the LKG store, so a reset re-seeds clean.
 extension ModeStore {
-    // The starter ids any pre-ledger install was seeded with (the catalog before the ledger existed).
-    // Known history, not a guess — `seedStartersIfEmpty` wrote exactly these. Used to bootstrap the
-    // ledger for an install that predates it, so a mode the user deleted under the old build is not
-    // resurrected by the additive step.
+    // Starter ids a pre-ledger install was seeded with (known history — `seedStartersIfEmpty` wrote
+    // exactly these). Bootstraps the ledger for a pre-ledger install so a mode deleted under the old
+    // build is not resurrected by the additive step.
     static let legacySeedIds: Set<String> = [
         "plain-dictation", "polished-dictation", "message", "email",
         "prompt", "work-on-selection", "markdown", "shell",
     ]
 
-    // Catalog renames: an old seed id that was carried forward to a new one. Drives both
-    // rename-migration and additive-suppression (so the new id is not seeded alongside a surviving
-    // old-id file). `oldName` is the old seed's display name, needed to recognize an unedited file.
+    // An old seed id carried forward to a new one. Drives rename-migration and additive-suppression (the
+    // new id is not seeded alongside a surviving old-id file). `oldName` recognizes an unedited file.
     struct SeedRename: Sendable {
         let old: String
         let oldName: String
@@ -34,14 +30,12 @@ extension ModeStore {
         .init(old: "work-on-selection", oldName: "Work on Selection", new: "edit-selection"),
     ]
 
-    // The seed templates exactly as the pre-rename builds (v0.1.0–v0.1.6) wrote them to disk — frozen
-    // as data, never re-derived from the live catalog. The rename step matches an on-disk old-id file
-    // against THESE, not today's template: today's `polish`/`ai-prompt`/`edit-selection` have drifted
-    // (longer prompts, new trigger keys, higher seedVersion), so a genuinely unedited pre-rename file
-    // would never match the current template and the mode would stay frozen at its old id forever.
-    // Comparison is `templateNormalized` (connection/enabled excluded), so a connected-and-enabled but
-    // otherwise untouched file still matches. Fails safe: an unrecognized (hand-edited or newer) file
-    // matches nothing here and is left where it is.
+    // Seed templates exactly as the pre-rename builds (v0.1.0–v0.1.6) wrote them — frozen as data, not
+    // re-derived from the live catalog. The rename step matches an on-disk old-id file against THESE, not
+    // today's template, which has drifted (prompts, keys, seedVersion): a genuinely unedited pre-rename
+    // file would never match the current template and would stay frozen at its old id forever. Compared
+    // via `templateNormalized` (connection/enabled excluded). Fails safe: an unrecognized file matches
+    // nothing and is left in place.
     static func preRenameTemplate(for oldId: String) -> Mode? {
         switch oldId {
         case "polished-dictation":
@@ -123,8 +117,7 @@ extension ModeStore {
         public var isEmpty: Bool { renamed.isEmpty && added.isEmpty && updated.isEmpty }
     }
 
-    // FNV-1a over the raw TOML bytes — a dependency-free fingerprint for "did the file change since we
-    // wrote it." Not a security hash; edit detection only.
+    // FNV-1a over the raw TOML bytes — dependency-free edit detection, not a security hash.
     static func seedFingerprint(_ toml: String) -> String {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in toml.utf8 {
@@ -162,9 +155,8 @@ extension ModeStore {
         seedRenames.filter { $0.new == newId }.map(\.old)
     }
 
-    // The two fields onboarding sets on a seed for the user: `connection` (which AI service) and
-    // `enabled`. The seed's *template* identity is everything else (prompt, fragments, keys, shape).
-    // Normalizing these out is how we tell a hand-edited seed from one the user merely connected/enabled.
+    // Normalize out the two fields onboarding sets (`connection`, `enabled`) so a hand-edited seed can be
+    // told from one the user merely connected/enabled. Everything else is the seed's template identity.
     private static func templateNormalized(_ mode: Mode) -> Mode {
         var m = mode
         m.enabled = true
@@ -172,29 +164,24 @@ extension ModeStore {
         return m
     }
 
-    // A mode is "seed-shaped" for `expected` when its template matches — i.e. the user only connected
-    // or enabled it, never hand-edited it. Any real edit (prompt, keys, source) fails this and the file
-    // is left untouched. Fails safe: a wrong `expected` can only make an unedited file look edited.
+    // "Seed-shaped": template matches `expected`, so the user only connected/enabled it, never edited it.
+    // Fails safe — a wrong `expected` can only make an unedited file look edited.
     private static func isSeedShaped(_ mode: Mode, like expected: Mode) -> Bool {
         templateNormalized(mode) == templateNormalized(expected)
     }
 
-    // Fingerprint of the seed's *template* only (connection/enabled excluded). Onboarding rewrites a
-    // connected starter's file with the user's connection + `enabled = true`; hashing the raw bytes
-    // would make that write defeat every future update for exactly the starters most users keep. The
-    // template fingerprint is invariant to those two knobs, so a connected-but-unedited seed still
-    // matches its seed-time fingerprint and stays eligible for a silent update.
+    // Fingerprint of the template only (connection/enabled excluded). Hashing raw bytes would let
+    // onboarding's connection + `enabled = true` write defeat every future update for exactly the
+    // starters most users keep; the template fingerprint is invariant to those two knobs.
     static func seedTemplateFingerprint(_ mode: Mode) -> String {
         guard let toml = try? encode(templateNormalized(mode)) else { return "" }
         return seedFingerprint(toml)
     }
 
-    // Carry the user-owned knobs from the on-disk file onto the new seed: connection, enabled, and — as
-    // critically — the trigger keys. Trigger bindings are the user's, exactly like connection/enabled: a
-    // seed update (rename or version bump) refreshes prompt/behavior but must NEVER silently rebind a
+    // Carry user-owned knobs from the on-disk file onto the new seed: connection, enabled, and trigger
+    // keys. A seed update (rename/version bump) refreshes prompt/behavior but must NEVER silently rebind a
     // global hotkey the user did not choose (P2-16 — v0.1.17 pushed right_option/right_command this way).
-    // A fresh install still gets the catalog default trigger: it is written whole through the additive
-    // path, which never calls carryForward.
+    // A fresh install still gets the catalog default trigger via the additive path (never carryForward).
     private static func carryForward(_ newSeed: Mode, from existing: Mode) -> Mode {
         var carried = newSeed
         if let connection = existing.aiRewrite?.connection { carried.aiRewrite?.connection = connection }
@@ -216,8 +203,8 @@ extension ModeStore {
         return true
     }
 
-    // Reconcile the on-disk seeded modes against the current starter catalog. Idempotent: a second run
-    // changes nothing. `settingsDir` is retained for call-site compatibility.
+    // Reconcile on-disk seeded modes against the current starter catalog. Idempotent. `settingsDir` is
+    // retained for call-site compatibility.
     @discardableResult
     public static func reconcileSeeds(modesDir: URL, ledgerDir: URL, settingsDir: URL?,
                                       catalog: [Mode] = starterModes()) -> ReconcileOutcome {
@@ -267,11 +254,10 @@ extension ModeStore {
             }
         }
 
-        // 2.5 Re-baseline: a seed whose template still matches the *current* catalog (the user only
-        //     connected/enabled it, never edited it) has its ledger entry pinned to the current version
-        //     and template fingerprint. Self-heals two cases without ever touching an edited file: a
-        //     pre-fix ledger that stored a raw-byte fingerprint, and a starter the user connected via
-        //     onboarding (whose bytes drifted from seed time). Idempotent; never appears in `outcome`.
+        // 2.5 Re-baseline: a seed whose template still matches the current catalog (connected/enabled but
+        //     unedited) gets its ledger entry pinned to the current version + template fingerprint.
+        //     Self-heals a pre-fix raw-byte fingerprint and an onboarding-connected starter (bytes drifted
+        //     from seed time) without touching an edited file. Idempotent; never appears in `outcome`.
         for mode in catalog {
             let url = modesDir.appendingPathComponent("\(mode.id).toml")
             guard ledger.contains(mode.id),

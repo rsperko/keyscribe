@@ -65,10 +65,8 @@ final class HotkeyMonitor {
 
     func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
         // Carry live gesture state across a rebuild for any binding whose descriptor + press style are
-        // unchanged. A Settings toggle (or a watcher-driven reload) rebuilds the monitor with fresh
-        // PressGestures; without this, a key that is currently held/latched loses its in-progress gesture
-        // and its release edge is dropped (a tap-to-toggle "stop" tap would be misread as a new "start"),
-        // stranding the recording. Only a binding whose key or style actually changed gets a fresh gesture.
+        // unchanged, so a held/latched key keeps its in-progress gesture; otherwise its release edge is
+        // dropped (a tap-to-toggle "stop" misread as a new "start"), stranding the recording.
         let previous = self.bindings
         self.bindings = bindings.map { incoming in
             guard let match = previous.first(where: {
@@ -97,32 +95,26 @@ final class HotkeyMonitor {
         bindings.contains { $0.gesture.isPhysicallyDown }
     }
 
-    // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`.
-    // Once Accessibility is granted, a `.listenOnly` session tap that only observes modifiers runs on
-    // Accessibility — KeyScribe never requests Input Monitoring. But the authorization is one-directional:
-    // calling `tapCreate` *before* the grant cannot succeed AND makes tccd write a *denied* ListenEvent
-    // (Input Monitoring) record plus a spurious Input Monitoring prompt; that denied record then suppresses
-    // the tap permanently — even after Accessibility is later granted — until ListenEvent is reset. So
-    // `start()` gates `tapCreate` on `isProcessTrusted()` and never touches it untrusted (see the gate
-    // below). `.listenOnly` (not `.defaultTap`): we never consume or modify an event, and a listen-only tap
-    // is delivered asynchronously — the window server does NOT block the system input stream waiting on our
-    // callback, so a busy/wedged main thread can never hold global input hostage (it would only delay our
-    // own observation). Chords → `CarbonHotKeys`; ESC-to-cancel → the recording HUD.
-    // True once the modifier-only `.flagsChanged` tap exists. `false` while Accessibility reads granted
-    // means either the verdict was launch-cached as denied, or a denied ListenEvent record is suppressing
-    // the tap — both repaired by the permission relaunch (which resets ListenEvent first); the readiness
-    // signal AppDelegate/Settings surface, since the live `AXIsProcessTrusted` would otherwise say "Ready".
+    // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`; once
+    // Accessibility is granted a `.listenOnly` modifier-only tap runs on Accessibility alone — KeyScribe never
+    // requests Input Monitoring. Footgun: `tapCreate` *before* the grant fails AND makes tccd write a *denied*
+    // ListenEvent record that then suppresses the tap permanently, even after Accessibility is later granted,
+    // until ListenEvent is reset — so `start()` gates on `isProcessTrusted()` and never touches it untrusted.
+    // `.listenOnly` (not `.defaultTap`): we never consume an event, and it is delivered async, so a wedged
+    // main thread can never hold global input hostage. Chords → `CarbonHotKeys`; ESC-to-cancel → the HUD.
+    // isTapActive false while Accessibility reads granted means a launch-cached denied verdict or a suppressing
+    // ListenEvent record, both repaired by the permission relaunch — the readiness signal AppDelegate/Settings
+    // surface (live `AXIsProcessTrusted` would wrongly say "Ready").
     var isTapActive: Bool { tap != nil }
 
     @discardableResult
     func start() -> Bool {
         defer { rebuildCarbon(); rebuildMouse() }
         if tap != nil { return true }
-        // Never create the tap untrusted: tapCreate would fail anyway AND can leave a denied ListenEvent
-        // record that suppresses it for good (see the isTapActive comment above). The post-grant relaunch
-        // re-invokes start() with the verdict present, so the tap comes up enabled. Carbon chords register
-        // via the defer with no permission at all; the mouse tap DOES need Accessibility (it self-gates on
-        // the same trust check in MouseEventTap.ensureRunning, so it comes up once granted).
+        // Never create the tap untrusted: it fails AND can leave a denied ListenEvent record that suppresses
+        // it for good (see isTapActive). The post-grant relaunch re-invokes start() with the verdict present.
+        // Carbon chords register via the defer with no permission; the mouse tap self-gates on the same trust
+        // check in MouseEventTap.ensureRunning.
         guard isProcessTrusted() else {
             hotkeyLog.info("modifier-key event tap deferred until Accessibility is granted")
             return false
@@ -248,11 +240,9 @@ final class HotkeyMonitor {
         }
     }
 
-    // Run a gesture/action callback off the event-tap callback. `onStart`/`onCommit`/`onAction` do real
-    // work (engine resolve, audio start, SwiftUI HUD); even on a listen-only tap, doing that inline would
-    // run it on the tap's delivery context and risk a `tapDisabledByTimeout`. Gesture *state* already
-    // advanced synchronously above; only the side-effect is deferred, FIFO on the main queue so a start
-    // always runs before its commit.
+    // Run a gesture/action callback off the event-tap delivery context: `onStart`/`onCommit`/`onAction` do
+    // real work (engine resolve, audio start, HUD) that inline would risk a `tapDisabledByTimeout`. Gesture
+    // state already advanced synchronously; only the side-effect is deferred, FIFO so a start precedes its commit.
     private func dispatchSideEffect(_ work: @escaping @MainActor () -> Void) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated(work)

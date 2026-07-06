@@ -1,12 +1,9 @@
 import Foundation
 
-// Pure assertion model for the `--commands-check` dev harness. The harness transcribes recorded
-// audio, runs the real local dictation pipeline, and hands each case's final output here to check
-// that a spoken command behaved. Assertions are declarative data (a manifest row), so exercising a
-// new command is adding a case, not code (principles.md §2). Matching for presence/absence is
-// case-insensitive — STT casing varies (a sentence-initial "Insert new line" vs mid-utterance
-// "insert new line"), and "was the trigger phrase consumed" must not hinge on how the engine cased
-// it; `equals` stays exact because a whole-utterance replacement's output is generated, not heard.
+// Pure assertion model for the `--commands-check` dev harness: it transcribes recorded audio, runs the
+// real dictation pipeline, and hands each case's output here. Assertions are declarative data, so a new
+// command is a case not code (principles.md §2). Presence/absence match is case-insensitive (STT casing
+// varies); `equals` stays exact because a whole-utterance replacement's output is generated, not heard.
 public enum CommandCheck {
     public struct Assertion: Equatable, Sendable, Decodable {
         // Substrings that MUST appear (the inserted control char, clipboard value, or a literal that
@@ -120,9 +117,8 @@ public struct CommandCheckReport: Equatable, Sendable {
 }
 
 // A per-engine record of how many command checks were clean on a known-good run. Ground truth, not a
-// guessed threshold: the corpus clips are transcription-sensitive, so no absolute pass-rate is
-// meaningful across engines (a weak engine that mishears "scratch that" fails a clip its WER, not a
-// bug). "This clip passed on this engine last time" is the real bar; the gate flags only a *drop*.
+// guessed threshold: no absolute pass-rate is meaningful across engines (a weak engine fails a clip on
+// its WER, not a bug), so the gate flags only a *drop* from last time.
 public struct CommandCheckBaseline: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
         public var clean: Int
