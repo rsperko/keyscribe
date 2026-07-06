@@ -16,6 +16,10 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var modeName: String
     // Display name of the STT engine that produced `heard`. nil on older entries (detail shows "On-device").
     public var engine: String?
+    // Human-readable name of the input device this dictation actually recorded from (the truly-bound
+    // device, not the preferred selection — a disconnected preferred mic falls back to the default here).
+    // Recorded so a "my transcripts got worse" report can be traced to the mic. nil on older entries.
+    public var device: String?
     public var heard: String
     // Local text after replacements and spoken edits, before any AI rewrite — the middle of Heard →
     // Transformed → Result (ui_design.md §8). Recorded on every entry (equals Heard when nothing changed)
@@ -34,6 +38,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case timestamp
         case modeName = "mode"
         case engine
+        case device
         case heard
         case transformed
         case result
@@ -47,7 +52,8 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     }
 
     public init(
-        timestamp: Date, modeName: String, engine: String? = nil, heard: String, transformed: String? = nil,
+        timestamp: Date, modeName: String, engine: String? = nil, device: String? = nil,
+        heard: String, transformed: String? = nil,
         result: String, outcome: Outcome,
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
         connection: String? = nil, model: String? = nil, prompt: String? = nil
@@ -55,6 +61,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.timestamp = timestamp
         self.modeName = modeName
         self.engine = engine
+        self.device = device
         self.heard = heard
         self.transformed = transformed
         self.result = result

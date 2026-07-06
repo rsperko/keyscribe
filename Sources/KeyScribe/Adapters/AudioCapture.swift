@@ -20,6 +20,9 @@ protocol AudioCapturing: AnyObject, Sendable {
                onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
     // Latest perceptual mic level (0…1), published from the realtime thread.
     var currentLevel: Float { get }
+    // Human-readable name of the device the current/most-recent capture actually bound (not the preferred
+    // selection — reflects a default-follow or disconnected-preferred fallback). nil until a device binds.
+    var currentInputName: String? { get }
     func stop() -> URL?
     // Commit-on-release stop: let the callback deliver the buffer that holds the final word.
     func finishDraining() async -> URL?
@@ -40,6 +43,7 @@ extension AudioCapturing {
     func takeDrainedSamples() -> [Float]? { nil }
     func setPreferredInputUID(_ uid: String?) {}
     var currentLevel: Float { 0 }
+    var currentInputName: String? { nil }
     // Default: ignore the admission boundary. Test doubles inherit this; AudioCapture overrides it.
     func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL {
         try await start(sampleRate: sampleRate)
@@ -96,6 +100,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private let lock = NSLock()
     // Nil follows the system default; an absent preferred device falls back until it returns.
     private var preferredInputUID: String?
+    // Display name of the device the current/most-recent bring-up actually bound. Published under `lock`
+    // whenever a device binds (fresh arm or mid-recording restart) and read at history-build time.
+    private var boundInputName: String?
     private var session: CaptureSession?
 
     // Realtime-thread transport, touched lock-free from the CoreAudio IO thread. `ring` may be resized only
@@ -177,6 +184,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // Latest perceptual level (0…1), published by the RT callback into an atomic and polled by the HUD meter.
     var currentLevel: Float { Float(bitPattern: levelBits.load(ordering: .relaxed)) }
+
+    var currentInputName: String? { lock.withLock { boundInputName } }
+
+    // Resolve and publish the bound device's display name so history can label the mic actually used.
+    private func publishBoundInputName(for deviceID: AudioDeviceID) {
+        let name = AudioInputDevices.name(forDeviceID: deviceID)
+        lock.withLock { boundInputName = name }
+    }
 
     func start(sampleRate: Int) async throws -> URL {
         try await start(sampleRate: sampleRate, admitAfterHostTime: 0, onSamples: nil)
@@ -326,6 +341,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             try? FileManager.default.removeItem(at: url)
             throw error
         }
+        publishBoundInputName(for: boundDeviceID)
 
         // Quiescent window for resetting/replacing the shared ring before the IOProc starts.
         producerGeneration.store(-1, ordering: .releasing)
@@ -1031,6 +1047,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                     fresh.dispose()
                     return
                 }
+                publishBoundInputName(for: deviceID)
                 installActiveDeviceListener(deviceID: deviceID)
             } catch {
                 // A restart fails transiently precisely because the device is mid-transition (the Bluetooth

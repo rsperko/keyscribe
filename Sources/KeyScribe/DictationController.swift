@@ -71,6 +71,9 @@ final class DictationController {
         var capturedSnapshot: TargetSnapshot?
         var capturedPlan: ResolvedConfig?
         var capturedEngine: (any SpeechEngine)?
+        // Name of the input device this dictation bound, snapshotted when the mic goes live so history
+        // records the mic actually used even after the session moves on. nil until capture is live.
+        var capturedInputDevice: String?
         var capturedDictionaryRecovery: Bool?
         var activeMode: Mode?
         var eligibleModes: [Mode] = []
@@ -630,6 +633,7 @@ final class DictationController {
             guard let self else { return }
             do {
                 _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples)
+                self.session?.capturedInputDevice = self.audio.currentInputName
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
                 // already moved us on — only report the mic error if we are still arming.
@@ -1234,6 +1238,7 @@ final class DictationController {
         }
         let entry = HistoryEntry(
             timestamp: Date(), modeName: currentModeName, engine: activeEngine.displayName,
+            device: session?.capturedInputDevice,
             heard: heard, transformed: transformed,
             result: result, outcome: outcome,
             cloudInvolved: rewrite != nil, redaction: rewrite?.redaction ?? false,

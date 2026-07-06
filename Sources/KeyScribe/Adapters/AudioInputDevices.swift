@@ -58,6 +58,12 @@ enum AudioInputDevices {
         return Device(id: id, uid: uid, name: name(of: id) ?? uid)
     }
 
+    // Human-readable name of a live device by its (transient) AudioDeviceID, for labeling the
+    // actually-bound capture device in history. nil if the device is gone or unnamed.
+    static func name(forDeviceID id: AudioDeviceID) -> String? {
+        name(of: id)
+    }
+
     static func isBluetooth(_ id: AudioDeviceID) -> Bool {
         guard let transport = transportType(of: id) else { return false }
         return transport == kAudioDeviceTransportTypeBluetooth

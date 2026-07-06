@@ -711,6 +711,9 @@ private struct HistoryDetailView: View {
                 detailRow("AI rewrite", rewriteSummary)
                 detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
                 detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")
+                if let device = entry.device {
+                    detailRow("Input device", device)
+                }
                 detailRow("Context sent", entry.contextLabels.isEmpty ? "None" : entry.contextLabels.joined(separator: ", "))
             }
             if let prompt = entry.prompt {
