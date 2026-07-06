@@ -242,7 +242,7 @@ final class DictationController {
         effects: DuringDictationEffects? = nil,
         insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String, Bool) async -> Bool = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
-        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = TextInserter.captureSelection,
+        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { await TextInserter.captureSelection(modifier: $0) },
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         snapshot: @escaping @MainActor () -> TargetSnapshot = { ContextProbe.snapshot() },
@@ -1541,6 +1541,9 @@ final class DictationController {
 
     func pasteLast() {
         guard let lastResult else { return }
+        // Without Accessibility a synthesized ⌘V is silently dropped and the settle restores the prior clipboard —
+        // the user gets nothing. Divert to a clipboard copy (mirrors finishInsertion's fallback).
+        guard accessibilityGranted() else { _ = TextInserter.copyToClipboard(lastResult); return }
         hud?.relinquishKeyFocus()
         Task { await TextInserter.insertViaPaste(lastResult) }
     }

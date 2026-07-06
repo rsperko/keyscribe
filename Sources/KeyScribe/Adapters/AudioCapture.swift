@@ -205,15 +205,17 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
             Log.audio.debug("bringUp=\(ms, privacy: .public)ms\(band, privacy: .public)")
             return url
-        } catch is DeadlineExceeded {
-            // The bring-up wedged (main thread was never blocked; the stuck CoreAudio call is abandoned on the
-            // now-unusable control queue). Swap to a fresh generation + queue EAGERLY so a late un-wedge is
-            // superseded: every armSync/armUnit/bringUpUnit mutation is gated on its generation and no-ops (no
-            // stranded hot mic, no clobber of a newer capture). Then drop the half-open file and fail cleanly.
-            Log.audio.error("bringUp timed out after \(Self.elapsedMs(since: started), privacy: .public)ms")
+        } catch let error where Self.bringUpAbortSupersedes(error) {
+            // Watchdog timeout OR cancel/release before capture went live: the queued armSync completes
+            // regardless, so supersede it eagerly (generation-gated mutations then no-op — no stranded hot mic),
+            // then drop the half-open file. Rethrow the original error so the controller still tells a timeout
+            // from a cancellation.
+            if error is DeadlineExceeded {
+                Log.audio.error("bringUp timed out after \(Self.elapsedMs(since: started), privacy: .public)ms")
+            }
             swapToFreshGeneration()
             discardPendingCapture()
-            throw AudioCaptureError.bringUpTimedOut
+            throw error is DeadlineExceeded ? AudioCaptureError.bringUpTimedOut : error
         }
     }
 
@@ -586,17 +588,20 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         removeActiveDeviceListener()
-        s?.writer.finish(flushConverter: flushConverter)
+        // Single-flight: stop()'s resumeDrain() can wake a suspended commit drain, racing two calls here. The
+        // session is claimed once under the lock above; a second entrant must not touch the strong `ring` var below.
+        guard let s else { return }
+        s.writer.finish(flushConverter: flushConverter)
         // The writer thread has joined; its accumulated PCM is now stable. Keep it only on the commit path
         // (flushConverter) — cancel/stop/discard pass false and their audio is dropped with the session — and
         // only when the writer actually accumulated (nil when the engine can't consume samples, P2-2).
-        if flushConverter, let samples = s?.writer.drainedSamples() {
+        if flushConverter, let samples = s.writer.drainedSamples() {
             lock.withLock { lastDrainedSamples = samples }
         }
         // Samples now held by lastDrainedSamples; drop the writer's own reference so the writer retained via
         // lastWriter until the next arm doesn't pin a redundant idle copy (P2-1). Sealed/backstop paths can't
         // clear in run(), so clear here.
-        s?.writer.releaseSamples()
+        s.writer.releaseSamples()
         // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
         // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
         // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
@@ -742,11 +747,18 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // device or a failed read falls back to the baseline, so it never under-provisions.
     private static func ringGeometry(for deviceID: AudioDeviceID?) -> AudioSampleRing.RingGeometry {
         guard let deviceID else { return baselineRingGeometry() }
+        let deviceFrames = Int(deviceBufferFrameSize(deviceID))
         return AudioSampleRing.geometry(
-            deviceBufferFrames: Int(deviceBufferFrameSize(deviceID)),
+            deviceBufferFrames: deviceFrames,
             deviceSampleRate: deviceNativeSampleRate(deviceID),
             minHeadroom: ringMinHeadroom, minSlots: ringMinSlots, maxSlots: ringMaxSlots,
-            maxFramesPerSlot: ringMaxFramesPerSlot, maxChannels: ringMaxChannels)
+            maxFramesPerSlot: ringSlotFrameCeiling(deviceBufferFrames: deviceFrames), maxChannels: ringMaxChannels)
+    }
+
+    // Honor a device IO period above the 8192 ceiling (as scratch does): else AudioSampleRing.write rejects the
+    // larger buffers scratch accommodates, silently dropping 100% of a virtual/aggregate device's capture.
+    static func ringSlotFrameCeiling(deviceBufferFrames: Int) -> Int {
+        max(ringMaxFramesPerSlot, deviceBufferFrames)
     }
 
     // The device's current IO buffer size in frames (one RT period = one ring slot); 0 on a failed read.
@@ -1043,5 +1055,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     static func shouldAcceptRealtimeBuffer(capturing: Bool, producerGeneration: Int, unitGeneration: Int) -> Bool {
         capturing && producerGeneration == unitGeneration
+    }
+
+    static func bringUpAbortSupersedes(_ error: Error) -> Bool {
+        error is DeadlineExceeded || error is CancellationError
     }
 }

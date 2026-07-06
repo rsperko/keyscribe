@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import Testing
 @testable import KeyScribe
+@testable import KeyScribeKit
 
 // A degenerate input format (0 ch / 0 Hz, an output-only device) must be rejected before installTap,
 // which would otherwise raise an uncatchable NSException → SIGABRT.
@@ -68,6 +69,24 @@ struct CaptureReplacementUnitStartTests {
     @Test func currentUnitCanWriteDuringCapture() {
         #expect(AudioCapture.shouldAcceptRealtimeBuffer(
             capturing: true, producerGeneration: 5, unitGeneration: 5))
+    }
+}
+
+// A bring-up abandoned by its awaiter must supersede the in-flight arm (swap generation + discard) for BOTH
+// ways it can happen: the watchdog timeout AND a cancel/release before capture went live. A cancel that only
+// superseded on DeadlineExceeded strands a live hot mic + growing WAV until the next dictation.
+struct BringUpAbortSupersedeTests {
+    @Test func watchdogTimeoutSupersedes() {
+        #expect(AudioCapture.bringUpAbortSupersedes(DeadlineExceeded()))
+    }
+
+    @Test func cancellationSupersedes() {
+        #expect(AudioCapture.bringUpAbortSupersedes(CancellationError()))
+    }
+
+    @Test func aRealDeviceErrorDoesNotSupersede() {
+        #expect(!AudioCapture.bringUpAbortSupersedes(AudioCaptureError.preferredInputFailed))
+        #expect(!AudioCapture.bringUpAbortSupersedes(AudioCaptureError.formatUnavailable))
     }
 }
 
@@ -162,6 +181,19 @@ struct ClientStreamFormatTests {
         #expect(AudioCapture.clientStreamFormat(nativeSampleRate: 0, nativeChannels: 0) == nil)
         #expect(AudioCapture.clientStreamFormat(nativeSampleRate: 48_000, nativeChannels: 0) == nil)
         #expect(AudioCapture.clientStreamFormat(nativeSampleRate: 0, nativeChannels: 2) == nil)
+    }
+}
+
+// The ring's per-slot frame ceiling must track scratch: a device IO period above the 8192 baseline is honored
+// so its buffers are not rejected by AudioSampleRing.write (which would drop 100% of the capture, silently).
+struct RingSlotFrameCeilingTests {
+    @Test func inSpecPeriodFloorsAtTheBaseline() {
+        #expect(AudioCapture.ringSlotFrameCeiling(deviceBufferFrames: 128) == 8192)
+        #expect(AudioCapture.ringSlotFrameCeiling(deviceBufferFrames: 8192) == 8192)
+    }
+
+    @Test func largePeriodIsHonoredSoNoBufferIsDropped() {
+        #expect(AudioCapture.ringSlotFrameCeiling(deviceBufferFrames: 16384) == 16384)
     }
 }
 

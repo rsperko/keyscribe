@@ -4,7 +4,9 @@ import SwiftUI
 
 // The standalone correction surfaces (design.md §4.7): a panel to add a dictionary term or replacement without
 // opening Settings. The Heard/term field is pre-filled best-effort from the current selection, captured before
-// KeyScribe activates so the synthetic ⌘C still reaches the app the user was working in.
+// KeyScribe activates so the synthetic ⌘C still reaches the app the user was working in. The prefill is a
+// convenience only: it reads the selection via Accessibility, and where a ⌘C would be needed (AX-unavailable) only
+// when the clipboard restores perfectly — it never risks a rich/image clipboard to prefill a word the user can type.
 //
 // "Add & Correct" saves the entry, then pastes the corrected value back over that selection via the shared safe
 // insertion path (single ⌘Z) — only once the stashed source app is confirmed frontmost, never blind. If focus
@@ -23,7 +25,7 @@ final class CorrectionPanelController {
         destinations: @escaping () -> [CorrectionDestination] = { [.global] },
         addDictionaryWord: @escaping (String, CorrectionDestination) -> Void,
         addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Void,
-        captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection() }
+        captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) }
     ) {
         self.destinations = destinations
         self.addDictionaryWord = addDictionaryWord

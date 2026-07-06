@@ -101,7 +101,7 @@ public enum InverseTextNormalizer {
         guard !run.isEmpty else { return nil }
 
         var fractional = ""
-        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx]) == "point" {
+        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx]) == "point" && !hasTrailingPunct(tokens[idx]) {
             var j = idx + 1
             var digits = ""
             var digitStopped = false

@@ -400,7 +400,8 @@ else
     info "  2. Launch the just-built notarized app against the sandbox:"
     info "       open $APP_PATH --args --config-dir '$PF_CFG' --first-run"
     info "  3. Finish onboarding (a model downloads), grant Mic + Accessibility, relaunch if asked."
-    info "When done, quit the sandbox instance and reopen your normal app — back to normal."
+    info "All Tier C checks below should use that same app + config dir unless a prompt says otherwise."
+    info "When done, quit the sandbox instance and reopen whichever KeyScribe you normally use."
     act "Sandbox app is launched, onboarded, and permissions granted"
   else
     info "all Tier C checks already green for this build — nothing to drive."
@@ -411,9 +412,12 @@ else
   # auto-detects the AX false-success data-loss path. Retry re-does the dictation.
   chk_c_plain_dictation() {
     local MARKER AFTER
+    if ! ask "Run plain dictation smoke now?"; then result skip "plain dictation skipped by operator"; return; fi
+    info "  Expected: use the sandbox app launched above ($APP_PATH with --config-dir '$PF_CFG')."
+    info "  In TextEdit, dictate a short phrase with your normal hotkey. Confirm text appears, then press ⌘Z once."
     MARKER="KS-PREFLIGHT-$$-DO-NOT-TYPE"
     printf '%s' "$MARKER" | pbcopy
-    act "In TextEdit, dictate a short phrase with your normal hotkey, then press ⌘Z once"
+    act "Plain dictation was performed and ⌘Z was pressed"
     AFTER="$(pbpaste)"
     if [ "$AFTER" != "$MARKER" ]; then
       result fail "clipboard marker changed → not the save/restore paste path (AX false-success or fallback ran); now holds: '$AFTER'"; return
@@ -430,10 +434,11 @@ else
   # history of THE MOST RECENT dictation, so this must be your last dictation before answering (retry
   # re-does it, which makes it the latest again — that is the fix for the "wrong entry" false-fail).
   chk_c_private_rewrite() {
-    if ! ask "Set up a privacy+cloud mode in the sandbox to test redaction (add a BYOK connection + privacy mode)"; then
-      result skip "redaction path — no privacy+cloud mode to test (set one up before shipping the privacy feature)"; return
-    fi
-    act "In that mode dictate (make this your LAST dictation):  email jane dot doe at example dot com begin verbatim KeyScribe TDT v3 end verbatim"
+    if ! ask "Run private cloud rewrite/redaction smoke now?"; then result skip "private rewrite skipped by operator"; return; fi
+    info "  Expected: in the sandbox config, add/select a privacy+cloud mode with a BYOK connection."
+    info "  Dictate the exact phrase below in that mode, and make it your LAST dictation before continuing."
+    info "  Phrase: email jane dot doe at example dot com begin verbatim KeyScribe TDT v3 end verbatim"
+    act "Private rewrite dictation was performed as the latest dictation"
     local H LAST PF
     H="$(latest_history)"; LAST="$(tail -1 "$H" 2>/dev/null)"
     if [ -z "$LAST" ] || ! printf '%s' "$LAST" | grep -q '⟦SN:REDACT:'; then
@@ -458,12 +463,16 @@ else
   printf '\n'; bold "  Spot-checks — run only for what you touched this release:"
   chk_c_trigger_matrix() {
     if ! ask "Changed hotkey / trigger code this release?"; then result skip "trigger matrix (hotkey code unchanged)"; return; fi
+    info "  Expected: using the same sandbox app/config, verify all trigger types you ship."
+    info "  Start and stop one dictation with each: modifier-only trigger, chord trigger, and mouse-button trigger."
     if ask "  modifier-only, chord, AND mouse-button triggers each start+stop a dictation"; then result pass "trigger matrix"; else result fail "a trigger type did not fire"; fi
   }
   guard c-trigger-matrix "$AS" chk_c_trigger_matrix
 
   chk_c_qwen_hardened() {
     if ! ask "Changed STT engines / deps this release?"; then result skip "Qwen load / silence guard (STT unchanged)"; return; fi
+    info "  Expected: using the same sandbox app/config, select Qwen3-ASR and dictate a short phrase."
+    info "  This proves mlx.metallib loads from the hardened-runtime release app."
     info "  Also re-run the --raw silence recipe (AGENTS.md 'Silence / no-speech') — no NEW lexical hallucination."
     if ask "  Qwen3-ASR selected loads + transcribes (proves mlx.metallib runs under hardened runtime)"; then result pass "Qwen loads under hardened runtime"; else result fail "Qwen failed to load — check metallib signing"; fi
   }
@@ -471,16 +480,19 @@ else
 
   chk_c_edit_in_place() {
     if ! ask "Changed insertion / selection code this release?"; then result skip "edit-in-place (insertion code unchanged)"; return; fi
+    info "  Expected: using the same sandbox app/config, select text in an editor and run replace-selection mode."
+    info "  Confirm the selected text is replaced, not appended beside the selection."
     if ask "  edit-in-place (select text → replace-selection mode) rewrites the selection"; then result pass "edit-in-place"; else result fail "edit-in-place did not replace the selection"; fi
   }
   guard c-edit-in-place "$AS" chk_c_edit_in_place
 
-  # Optional + DISRUPTIVE — replaces your /Applications copy to test the true download experience.
   chk_c_quarantine() {
-    if ! ask "Validate the real /Applications download launch too? (replaces your installed copy)"; then result skip "quarantine /Applications launch (spctl in Tier A already proved notarization)"; return; fi
-    info "  hdiutil attach KeyScribe-<ver>.dmg → drag to /Applications"
-    info "  xattr -w com.apple.quarantine '0081;0;preflight;' /Applications/KeyScribe.app ; open it"
-    if ask "  quarantined /Applications copy launched with no 'unidentified developer' block"; then result pass "quarantined download launches clean"; else result fail "Gatekeeper blocked the quarantined copy"; fi
+    if ! ask "Validate quarantined launch of the repo-local release app too?"; then result skip "quarantine launch skipped (spctl in Tier A already proved notarization)"; return; fi
+    info "  Expected: quit KeyScribe, mark the repo-local release app as quarantined, then launch it with the same sandbox config."
+    info "  Run:"
+    info "    xattr -w com.apple.quarantine '0081;0;preflight;' '$APP_PATH'"
+    info "    open '$APP_PATH' --args --config-dir '$PF_CFG'"
+    if ask "  quarantined repo-local app launched with no 'unidentified developer' block and used '$PF_CFG'"; then result pass "quarantined repo-local app launches clean"; else result fail "Gatekeeper blocked the quarantined repo-local app"; fi
   }
   guard c-quarantine "$AS" chk_c_quarantine
 fi

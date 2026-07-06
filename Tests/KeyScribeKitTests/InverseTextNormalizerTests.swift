@@ -132,6 +132,13 @@ struct InverseTextNormalizerTests {
         #expect(itn("three point five. Percent") == "3.5. Percent")
     }
 
+    @Test func decimalPointDoesNotCrossSentenceBoundary() {
+        #expect(itn("We were up by one point. Five minutes later they tied it.")
+            == "We were up by one point. Five minutes later they tied it.")
+        #expect(itn("The score was twenty one point. Five seconds remained.")
+            == "The score was 21 point. Five seconds remained.")
+    }
+
     @Test func isCaseInsensitive() {
         #expect(itn("Twenty Five") == "25")
         #expect(itn("Fifty Percent") == "50%")
