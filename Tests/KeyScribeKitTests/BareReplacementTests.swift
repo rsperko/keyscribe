@@ -75,6 +75,66 @@ struct BareReplacementTests {
         #expect(detect(rules, on: "slash dog") == "/dog")
     }
 
+    // A mid-utterance pause ("Duct tape. Get") must not defeat a whole-utterance clamp.
+    @Test func internalPauseDoesNotDefeatWholeUtteranceClamp() {
+        let rules = [ReplacementRule(heard: #"duc[kt] tape get"#, replace: "dt get", isRegex: true)]
+        #expect(detect(rules, on: "Duck tape get.") == "dt get")
+        #expect(detect(rules, on: "Duct tape. Get.") == "dt get")
+        #expect(detect(rules, on: "Duct tape, get") == "dt get")
+        #expect(detect(rules, on: "Duct. Tape. Get.") == "dt get")
+    }
+
+    // Every boundary mark is handled the same whether internal or trailing; dash is not a pause mark.
+    @Test func allSentencePunctuationBridgesOrTrims() {
+        let rules = [ReplacementRule(heard: #"duc[kt] tape get"#, replace: "dt get", isRegex: true)]
+        for boundary in [".", ",", "!", "?", ";", ":"] {
+            #expect(detect(rules, on: "Duct tape\(boundary) get") == "dt get")   // internal pause
+            #expect(detect(rules, on: "Duct tape get\(boundary)") == "dt get")   // trailing residue
+        }
+        #expect(detect(rules, on: "Duct tape - get") == nil)                     // dash: not a pause mark
+    }
+
+    // The pause tolerance is still whole-utterance only: leading/trailing word residue does not clamp
+    // even once the internal pause is bridged.
+    @Test func internalPauseStillRequiresWholeUtteranceOwnership() {
+        let rules = [ReplacementRule(heard: #"duc[kt] tape get"#, replace: "dt get", isRegex: true)]
+        #expect(detect(rules, on: "please duct tape. get") == nil)
+        #expect(detect(rules, on: "duct tape. get me some") == nil)
+    }
+
+    // End-to-end through apply(): a paused whole-utterance command is reported as a bare replacement
+    // on the context even though the inline transform left the punctuated text unchanged.
+    @Test func applyReportsPausedWholeUtteranceReplacement() {
+        let rules = [ReplacementRule(heard: #"duc[kt] tape get"#, replace: "dt get", isRegex: true)]
+        var context = PipelineContext(text: "Duct tape. Get.")
+        ReplacementsStage(rules: rules).apply(&context)
+        #expect(context.bareReplacement == "dt get")
+    }
+
+    // Pause tolerance covers literal rules too, through the real apply() gate (a literal non-identity rule
+    // makes the inline transform a no-op on paused input, exercising the gate's pause-mark clause).
+    @Test func applyCoversLiteralPausedWholeUtteranceReplacement() {
+        let rules = [ReplacementRule(heard: "duct tape get", replace: "dt get", isRegex: false)]
+        func clamp(_ text: String) -> String? {
+            var context = PipelineContext(text: text)
+            ReplacementsStage(rules: rules).apply(&context)
+            return context.bareReplacement
+        }
+        #expect(clamp("Duct tape get.") == "dt get")
+        #expect(clamp("Duct tape. Get.") == "dt get")
+        #expect(clamp("Duct tape, get") == "dt get")
+        #expect(clamp("please duct tape. get") == nil)
+    }
+
+    // Whole-utterance only: a paused command embedded in a real sentence is not rewritten inline.
+    @Test func inlineTransformStaysExactAcrossAPause() {
+        let rules = [ReplacementRule(heard: "duct tape get", replace: "dt get", isRegex: false)]
+        var context = PipelineContext(text: "I use duct tape. Get some coffee.")
+        ReplacementsStage(rules: rules).apply(&context)
+        #expect(context.bareReplacement == nil)
+        #expect(context.text == "I use duct tape. Get some coffee.")
+    }
+
     @Test func noRulesNeverClamp() {
         #expect(detect([], on: "hello") == nil)
         #expect(detect([ReplacementRule(heard: "x", replace: "y", isRegex: false)], on: "hello") == nil)

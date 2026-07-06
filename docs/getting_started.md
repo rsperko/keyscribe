@@ -435,6 +435,7 @@ Use these as templates for your own setup.
 
 ## Where to go next
 
+- [Tips & Tricks](tips.md) for small techniques that are easy to miss.
 - [FAQ.md](../FAQ.md) for permissions, Globe-key conflicts, engine choice, and troubleshooting.
 - [PRIVACY.md](../PRIVACY.md) for the exact local/cloud boundary.
 - [Speech Model Benchmarks](reference/stt_benchmarks.md) for speech-model benchmarks and the local benchmark

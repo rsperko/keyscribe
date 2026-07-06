@@ -76,6 +76,10 @@ text you always want swapped (expansions, fixes), add a **Replacement**. When Ke
 something, the global correction shortcut lets you add a dictionary entry or replacement without
 leaving what you're doing — and the fix sticks for next time.
 
+The dictionary and replacements do different jobs — dictionary improves how a word is *heard*, a
+replacement controls how it's *written*. If a word comes out correctly spelled but mis-capitalized or
+punctuated (say `pi` → `Pi.`), see [Tips & Tricks](docs/tips.md) for how to pin the exact output.
+
 ### Can I edit text I've already written?
 
 Yes — select the text, trigger an edit-in-place mode, and speak an instruction. KeyScribe rewrites

@@ -64,9 +64,10 @@ public struct ReplacementsStage: PipelineStage {
         let input = context.text
         let transformed = transform(input)
         context.text = transformed
-        // Skip the whole-utterance scan when text was unchanged and no identity replacement could own it.
-        // Otherwise hand `transformed` in so owner-verification reuses it rather than re-running the battery.
-        context.bareReplacement = (transformed != input || mayHaveIdentityReplacement)
+        // Scan for a whole-utterance owner unless nothing could match: text unchanged, no identity rule,
+        // and no pause punctuation to bridge.
+        let mayOwnUtterance = transformed != input || mayHaveIdentityReplacement || Self.containsPauseMark(input)
+        context.bareReplacement = mayOwnUtterance
             ? bareReplacement(for: input, transformedInput: transformed)
             : nil
     }
@@ -96,16 +97,68 @@ public struct ReplacementsStage: PipelineStage {
         // A protected token (verbatim/clipboard) means no single rule cleanly owns the utterance — fall
         // through rather than let a rule match across the opaque token.
         guard !SentinelText.containsSentinel(core) else { return nil }
+        // core == input ⇒ reuse the transform we already ran.
+        let reusable = (transformedInput != nil && core == input) ? transformedInput : nil
+        if let generated = wholeUtteranceOutput(of: core, transformedInput: reusable) {
+            return leading + generated + trailing
+        }
+        // A mid-utterance pause is sentence punctuation the contiguous match can't cross; retry across a
+        // de-paused core (whole-utterance only — still requires an end-to-end match).
+        let dePaused = Self.dePause(core)
+        if dePaused != core, let generated = wholeUtteranceOutput(of: dePaused, transformedInput: nil) {
+            return leading + generated + trailing
+        }
+        return nil
+    }
+
+    // One rule matches `core` end-to-end AND every rule over `core` reproduces that output, else nil.
+    private func wholeUtteranceOutput(of core: String, transformedInput: String?) -> String? {
         let coreRange = NSRange(core.startIndex..., in: core)
         for rule in prepared {
             guard let match = rule.regex.firstMatch(in: core, range: coreRange), match.range == coreRange else { continue }
             let generated = rule.regex.replacementString(for: match, in: core, offset: 0, template: rule.template)
-            // Verify no later rule mutates the owner's output. When core == input, transform(input) already
-            // equals transform(core), so reuse it rather than re-running the battery.
-            let coreTransformed = (transformedInput != nil && core == input) ? transformedInput! : transform(core)
-            return coreTransformed == generated ? leading + generated + trailing : nil
+            let coreTransformed = transformedInput ?? transform(core)
+            return coreTransformed == generated ? generated : nil
         }
         return nil
+    }
+
+    // Sentence punctuation STT inserts at a boundary — one set for both trailing-trim and pause-bridging.
+    // Dash excluded: word-internal (ranges, compounds), not a pause mark.
+    static let sentencePunctuation: Set<Character> = [".", ",", "!", "?", ";", ":"]
+
+    // A boundary mark adjacent to whitespace is a pause; one inside a word ("e.g.", "12:30") is not.
+    private static func isPauseMark(_ chars: [Character], at i: Int) -> Bool {
+        guard sentencePunctuation.contains(chars[i]) else { return false }
+        let prevSpace = i == 0 || chars[i - 1].isWhitespace
+        let nextSpace = i == chars.count - 1 || chars[i + 1].isWhitespace
+        return prevSpace || nextSpace
+    }
+
+    // Gate predicate: lets a literal-only rule set reach the de-pause fallback.
+    static func containsPauseMark(_ s: String) -> Bool {
+        let chars = Array(s)
+        return chars.indices.contains { isPauseMark(chars, at: $0) }
+    }
+
+    // "Duct tape. Get" → "Duct tape Get": drop pause marks, collapse whitespace.
+    private static func dePause(_ core: String) -> String {
+        let chars = Array(core)
+        var out = ""
+        var lastWasSpace = false
+        for i in chars.indices {
+            if isPauseMark(chars, at: i) { continue }
+            let c = chars[i]
+            if c.isWhitespace {
+                if !lastWasSpace && !out.isEmpty { out.append(" ") }
+                lastWasSpace = true
+            } else {
+                out.append(c)
+                lastWasSpace = false
+            }
+        }
+        if out.last == " " { out.removeLast() }
+        return out
     }
 
     // Matches regex `\w` closely enough for boundary placement: ASCII/Unicode letters, digits, "_".
@@ -115,9 +168,9 @@ public struct ReplacementsStage: PipelineStage {
 
     // A LiveEdits control char (`\n` from "insert new line", `\t` from "insert tab") is command output, not
     // STT cruft: trim it off the core so a rule can own the words, then re-attach as `leading`/`trailing` so
-    // the dictated newline/tab survives. Ordinary STT residue (whitespace, trailing `.!?`) is discarded.
+    // the dictated newline/tab survives. Ordinary STT residue (whitespace, trailing sentence punctuation) is
+    // discarded.
     private static let liveEditControl: Set<Character> = ["\n", "\t"]
-    private static let trailingCruft: Set<Character> = [".", "!", "?"]
     private func utteranceCore(of input: String) -> (core: String, leading: String, trailing: String) {
         let chars = Array(input)
         var lo = 0, hi = chars.count
@@ -131,7 +184,7 @@ public struct ReplacementsStage: PipelineStage {
         while hi > lo {
             let c = chars[hi - 1]
             if Self.liveEditControl.contains(c) { trailing.insert(c, at: trailing.startIndex); hi -= 1 }
-            else if c.isWhitespace || Self.trailingCruft.contains(c) { hi -= 1 }
+            else if c.isWhitespace || Self.sentencePunctuation.contains(c) { hi -= 1 }
             else { break }
         }
         return (String(chars[lo..<hi]), leading, trailing)
