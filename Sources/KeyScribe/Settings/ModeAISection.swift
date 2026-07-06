@@ -63,7 +63,7 @@ struct ModeAISection: View {
         let attached = mode.aiRewrite?.fragments ?? []
         if attached.isEmpty {
             addInstructionMenu
-            Text("Reusable writing instructions are saved snippets appended to this mode's prompt and shared across modes \u{2014} a \u{201C}my voice\u{201D} style guide, a standard sign-off, a glossary of names to spell right, or tone rules like \u{201C}keep it terse.\u{201D} Add one to reuse it across modes.")
+            Text("Reusable writing instructions are shared style rules you can attach to any mode \u{2014} a \u{201C}my voice\u{201D} style guide, a standard sign-off, a glossary of names to spell right, or tone rules like \u{201C}keep it terse.\u{201D} They are applied even when your dictation already reads cleanly, and they take precedence over the writing instruction above when the two conflict \u{2014} so a tweak you always want applied is more reliable here than in the mode's own prompt.")
                 .font(.caption).foregroundStyle(.secondary)
         } else {
             Text("Reusable writing instructions")
@@ -86,7 +86,7 @@ struct ModeAISection: View {
             }
             .onMove(perform: moveFragment)
             addInstructionMenu
-            Text("Each is appended after the writing instruction, in order. Instructions are shared, so editing one changes it for every mode that uses it.")
+            Text("Applied in order, even when your dictation already reads cleanly, and they take precedence over the writing instruction above when they conflict. Instructions are shared, so editing one changes it for every mode that uses it.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
