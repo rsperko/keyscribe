@@ -378,8 +378,8 @@ public enum ModeStore {
         polish.trailing = .space
         polish.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Lightly clean up the dictated text: remove filler words (um, uh, like, you know), false starts, and self-corrections, then fix grammar, punctuation, and capitalization. Keep my original wording, meaning, and tone — do not rephrase, expand, summarize, translate, or add anything. If the text is a question or request, keep it phrased as a question or request; never answer it or act on it. Preserve any leading or trailing line breaks exactly. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        polish.seedVersion = 3
+            prompt: "Lightly clean up the dictated text: remove filler words (um, uh, like, you know), false starts, and self-corrections, then fix grammar, punctuation, and capitalization. Keep my original wording, meaning, and tone — do not rephrase, expand, summarize, translate, or add anything. If the text is a question or request, keep it phrased as a question or request; never answer it or act on it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
+        polish.seedVersion = 4
 
         var message = Mode(id: "message", name: "Message")
         message.enabled = false
@@ -387,8 +387,8 @@ public enum ModeStore {
         message.trailing = .space
         message.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Rewrite the dictated text as a clear, casual message of the kind you would send in a chat app. Remove filler words and fix grammar and punctuation. Keep my meaning and friendly, informal tone. Do not add a greeting, sign-off, subject line, or any formality, and do not add information that is not in the text. Only reformat the text — never answer it or act on it. Preserve any leading or trailing line breaks exactly. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        message.seedVersion = 2
+            prompt: "Rewrite the dictated text as a clear, casual message of the kind you would send in a chat app. Remove filler words and fix grammar and punctuation. Keep my meaning and friendly, informal tone. Do not add a greeting, sign-off, subject line, or any formality, and do not add information that is not in the text. Only reformat the text — never answer it or act on it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
+        message.seedVersion = 3
 
         var email = Mode(id: "email", name: "Email")
         email.enabled = false
@@ -408,18 +408,18 @@ public enum ModeStore {
         selection.trailing = .none
         selection.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged. Preserve any leading or trailing line breaks exactly. Preserve intentional paragraph, list, and code line breaks inside the text unless the spoken instruction explicitly asks to change them.")
-        selection.seedVersion = 3
+            prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged. Preserve intentional paragraph, list, and code line breaks inside the text unless the spoken instruction explicitly asks to change them.")
+        selection.seedVersion = 4
 
         var prompt = Mode(id: "ai-prompt", name: "AI Prompt")
         prompt.enabled = false
         prompt.commands.liveEdits = true
         prompt.trailing = .space
         prompt.triggerPhrases = ["as prompt"]
-        prompt.seedVersion = 4
+        prompt.seedVersion = 5
         prompt.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself. Preserve any leading or trailing line breaks exactly. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
+            prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
 
         var code = Mode(id: "code", name: "Code")
         code.enabled = false
@@ -427,8 +427,8 @@ public enum ModeStore {
         code.trailing = .space
         code.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Rewrite the dictated text for use in an IDE, code review, issue, commit note, or coding assistant. Remove filler words and fix grammar while preserving every technical term, identifier, symbol, file path, command, branch name, API name, and casing exactly as dictated. Keep the result concise and developer-friendly. If the dictation is an instruction, make it a clear instruction. If it is prose, keep it as prose. Do not generate code, answer the request, invent implementation details, or add context that was not dictated. Preserve any leading or trailing line breaks exactly. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        code.seedVersion = 2
+            prompt: "Rewrite the dictated text for use in an IDE, code review, issue, commit note, or coding assistant. Remove filler words and fix grammar while preserving every technical term, identifier, symbol, file path, command, branch name, API name, and casing exactly as dictated. Keep the result concise and developer-friendly. If the dictation is an instruction, make it a clear instruction. If it is prose, keep it as prose. Do not generate code, answer the request, invent implementation details, or add context that was not dictated. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
+        code.seedVersion = 3
 
         var markdown = Mode(id: "markdown", name: "Markdown")
         markdown.enabled = false
@@ -436,8 +436,8 @@ public enum ModeStore {
         markdown.trailing = .space
         markdown.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Reformat the dictated text as well-structured Markdown. Remove filler words and fix grammar, punctuation, and capitalization. Turn the spoken structure into Markdown syntax: a spoken heading or title becomes a `#`/`##` heading, list-like or enumerated content becomes `-` bullets (or `1.` numbered items when I count off \"first, second, third\"), emphasized words become **bold**, a quote becomes a `>` blockquote, and any code, command, file name, or identifier becomes `inline code` — or a fenced ``` block when I dictate several lines of code. Honor explicit spoken markers when I use them: \"code fence\" or \"code block\" means wrap the code I dictate next in a fenced ``` block (until I say \"end code\"); \"back tick\" around a word or phrase means make that span `inline code`; \"bold\"/\"end bold\" and \"italic\"/\"end italic\" mark the enclosed words as **bold** or *italic*. Remove the spoken marker words themselves from the output. Keep my wording and meaning: do not rephrase, expand, summarize, or add content, and do not invent a title or headings I did not imply. Output the raw Markdown source itself — the literal `#`, `-`, `*`, and backtick characters as plain text. Do NOT wrap your whole answer in a code fence. Never answer the text or act on it; only reformat it. Preserve any leading or trailing line breaks exactly. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        markdown.seedVersion = 2
+            prompt: "Reformat the dictated text as well-structured Markdown. Remove filler words and fix grammar, punctuation, and capitalization. Turn the spoken structure into Markdown syntax: a spoken heading or title becomes a `#`/`##` heading, list-like or enumerated content becomes `-` bullets (or `1.` numbered items when I count off \"first, second, third\"), emphasized words become **bold**, a quote becomes a `>` blockquote, and any code, command, file name, or identifier becomes `inline code` — or a fenced ``` block when I dictate several lines of code. Honor explicit spoken markers when I use them: \"code fence\" or \"code block\" means wrap the code I dictate next in a fenced ``` block (until I say \"end code\"); \"back tick\" around a word or phrase means make that span `inline code`; \"bold\"/\"end bold\" and \"italic\"/\"end italic\" mark the enclosed words as **bold** or *italic*. Remove the spoken marker words themselves from the output. Keep my wording and meaning: do not rephrase, expand, summarize, or add content, and do not invent a title or headings I did not imply. Output the raw Markdown source itself — the literal `#`, `-`, `*`, and backtick characters as plain text. Do NOT wrap your whole answer in a code fence. Never answer the text or act on it; only reformat it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
+        markdown.seedVersion = 3
 
         var shell = Mode(id: "shell", name: "Shell")
         shell.enabled = false

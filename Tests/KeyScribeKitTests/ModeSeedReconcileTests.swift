@@ -226,18 +226,25 @@ struct ModeSeedReconcileTests {
         }
     }
 
+    // One past the starter's current shipped version — the smallest bump that actually exercises the
+    // update path, derived so these tests never go stale the next time a starter's seed_version rises.
+    private func nextVersion(_ id: String) -> Int {
+        (ModeStore.starterModes().first { $0.id == id }?.seedVersion ?? 1) + 1
+    }
+
     @Test func versionBumpRefreshesAnUneditedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
         ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
 
-        let v3 = catalog(bumping: "message", prompt: "revised message prompt", to: 3)
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v3)
+        let future = nextVersion("message")
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: future)
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
 
         #expect(outcome.updated.contains("message"))
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         #expect(after.aiRewrite?.prompt == "revised message prompt")
-        #expect(ModeStore.loadLedger(in: d.ledger)?.entry("message")?.version == 3)
+        #expect(ModeStore.loadLedger(in: d.ledger)?.entry("message")?.version == future)
     }
 
     // The headline guarantee: a starter the user connected (and onboarding enabled) is NOT shielded from
@@ -254,8 +261,8 @@ struct ModeSeedReconcileTests {
         message.enabled = true
         try ModeStore.write(message, to: d.modes)
 
-        let v3 = catalog(bumping: "message", prompt: "revised message prompt", to: 3)
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v3)
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: nextVersion("message"))
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
 
         #expect(outcome.updated.contains("message"))
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
@@ -281,10 +288,11 @@ struct ModeSeedReconcileTests {
 
         // A revision that bumps the version AND adds a global bare-modifier trigger — the shape of the
         // change that shipped right_option/right_command onto polish/edit-selection in v0.1.17.
+        let future = nextVersion("message")
         let bumped = ModeStore.starterModes().map { mode -> Mode in
             guard mode.id == "message" else { return mode }
             var revised = mode
-            revised.seedVersion = 3
+            revised.seedVersion = future
             revised.triggerKeys = [.init(key: "right_option")]
             return revised
         }
@@ -295,7 +303,7 @@ struct ModeSeedReconcileTests {
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         #expect(after.triggerKeys.isEmpty)   // the pushed right_option is NOT silently bound
         #expect(after.enabled == true)       // user-owned knobs preserved …
-        #expect(after.seedVersion == 3)      // … while the version/behavior update still lands
+        #expect(after.seedVersion == future) // … while the version/behavior update still lands
     }
 
     @Test func versionBumpSkipsAnEditedSeed() throws {
@@ -307,8 +315,8 @@ struct ModeSeedReconcileTests {
         message.aiRewrite?.prompt = "my own message prompt"
         try ModeStore.write(message, to: d.modes)
 
-        let v3 = catalog(bumping: "message", prompt: "revised message prompt", to: 3)
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: v3)
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: nextVersion("message"))
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
 
         #expect(!outcome.updated.contains("message"))
         let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
@@ -344,13 +352,13 @@ struct ModeSeedReconcileTests {
     // it. The connection/enabled user-knobs are excluded, so onboarding never trips this.
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
-            "polish": (3, "860af5078e3ce64f"),
-            "message": (2, "9969a0d54481e459"),
+            "polish": (4, "5f3ef1df08c7f3ed"),
+            "message": (3, "ef585b77ce46bf0d"),
             "email": (2, "817ac3f600010afb"),
-            "edit-selection": (3, "308d918735608ba2"),
-            "ai-prompt": (4, "6169c51528e6af0d"),
-            "code": (2, "79d9b345a4e4f542"),
-            "markdown": (2, "846d2bd3aec77421"),
+            "edit-selection": (4, "8a301c3a95672266"),
+            "ai-prompt": (5, "bce63766ad4c94fd"),
+            "code": (3, "eb67c0911268db8"),
+            "markdown": (3, "da1bf73e80b3f2b1"),
             "shell": (1, "debf79feb745f80b"),
         ]
         let catalog = ModeStore.starterModes()

@@ -1487,8 +1487,7 @@ final class DictationController {
         let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(client: llmClient).rewrite(
             payload: payload, inputs: request.inputs, connection: request.sized,
-            allowedTokens: instructionTokens, prompt: request.prompt,
-            preserveBoundaryLayout: mode.commands.liveEdits)
+            allowedTokens: instructionTokens, prompt: request.prompt)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
         let gateApproved: String
         let fellBack: Bool

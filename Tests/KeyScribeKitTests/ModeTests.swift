@@ -144,11 +144,11 @@ struct ModeTests {
         #expect(result.transcript == "summarize this thread")
     }
 
-    @Test func fragmentStarterPromptsPreserveDocumentBoundaryLineBreaks() throws {
+    @Test func starterPromptsDropRedundantBoundaryLineBreakSentence() throws {
         let ids = ["polish", "message", "edit-selection", "ai-prompt", "code", "markdown"]
         for id in ids {
             let mode = try #require(ModeStore.starterModes().first { $0.id == id })
-            #expect(mode.aiRewrite?.prompt.contains("Preserve any leading or trailing line breaks exactly") == true)
+            #expect(mode.aiRewrite?.prompt.contains("Preserve any leading or trailing line breaks exactly") == false)
         }
     }
 
