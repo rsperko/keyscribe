@@ -250,6 +250,11 @@ MainActor.assumeIsolated {
     app.setActivationPolicy(.accessory)
     app.mainMenu = EditMenu.make()
     let delegate = AppDelegate()
+    #if canImport(Sparkle)
+    if AppVariant(bundleID: Bundle.main.bundleIdentifier).injectsBundledUpdater {
+        delegate.updater = SparkleUpdater()
+    }
+    #endif
     app.delegate = delegate
     app.run()
 }

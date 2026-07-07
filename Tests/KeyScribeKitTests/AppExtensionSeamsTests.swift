@@ -28,6 +28,14 @@ final class AppExtensionSeamsTests: XCTestCase {
         XCTAssertEqual(updater.performedCount, 1)
     }
 
+    func testOnlyProductionInjectsBundledUpdater() {
+        XCTAssertTrue(AppVariant.production.injectsBundledUpdater)
+        XCTAssertTrue(AppVariant(bundleID: "com.keyscribe.app").injectsBundledUpdater)
+        XCTAssertFalse(AppVariant.dev.injectsBundledUpdater)
+        XCTAssertFalse(AppVariant(bundleID: "com.keyscribe.app.dev").injectsBundledUpdater)
+        XCTAssertFalse(AppVariant(bundleID: "com.acme.customvoice", bundleName: "CustomVoice").injectsBundledUpdater)
+    }
+
     struct FakeImporter: LegacyConfigImporter {
         final class Box { var imported: URL? }
         let box = Box()

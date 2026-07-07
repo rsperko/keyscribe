@@ -106,6 +106,23 @@ if [ -f "$METALLIB" ]; then
 else
   echo "warning: $METALLIB missing — Qwen3-ASR will crash at runtime" >&2
 fi
+# Sparkle.framework is present in the build products ONLY for the public production build
+# (KEYSCRIBE_SPARKLE=1 adds Sparkle to the SwiftPM graph). Embed it keyed off that presence, NOT the
+# variant, so this is a clean no-op for dev/custom builds and a downstream white-label build that builds
+# via `make-app.sh KEYSCRIBE_VARIANT=custom` needs no change here. See agent_notes/distribution_plan/sparkle.md.
+SPARKLE_FW=".build/$CONFIG/Sparkle.framework"
+if [ -d "$SPARKLE_FW" ]; then
+  echo "== embedding Sparkle.framework =="
+  mkdir -p "$APP/Contents/Frameworks"
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
+  cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
+  # The binary loads Sparkle as @rpath/Sparkle.framework/..., but SwiftPM only emits @loader_path
+  # (= Contents/MacOS) rpaths for an executable target — it never adds the app-bundle Frameworks rpath,
+  # so without this dyld cannot find the embedded framework and the app crashes at launch. Add it before
+  # signing (install_name_tool invalidates the signature; we sign below). Fresh binary copy each build,
+  # so no duplicate rpath accumulates.
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/KeyScribe"
+fi
 # Bundled model self-test clip (loaded via Bundle.main at runtime).
 cp Resources/model-selftest.wav "$APP/Contents/Resources/model-selftest.wav"
 # First-party "now listening" start cue (loaded via Bundle.main at runtime).
@@ -158,6 +175,21 @@ fi
 # restricted entitlement like keychain-access-groups (AMFI SIGKILLs the app at launch). M7
 # notarization (Developer ID cert) adds `--options runtime --entitlements KeyScribe.entitlements`:
 #   codesign --force --options runtime --entitlements KeyScribe.entitlements --sign "$ID" ...
+# Sparkle embeds nested code (XPC services, Autoupdate, Updater.app) inside its framework; sign
+# inside-out (deepest first) then the framework, before the metallib/binary/bundle — a nested code
+# object left unsigned fails bundle signing with "code object is not signed at all". Paths go through
+# Versions/Current so they are version-letter agnostic. Dev signs plain like the rest of the bundle;
+# release.sh layers the hardened-runtime + per-XPC-entitlements re-sign on top for notarization.
+EMBEDDED_FW="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$EMBEDDED_FW" ]; then
+  echo "== signing Sparkle.framework (inside-out) =="
+  FWV="$EMBEDDED_FW/Versions/Current"
+  codesign --force --sign "$ID" "$FWV/XPCServices/Downloader.xpc"
+  codesign --force --sign "$ID" "$FWV/XPCServices/Installer.xpc"
+  codesign --force --sign "$ID" "$FWV/Updater.app"
+  codesign --force --sign "$ID" "$FWV/Autoupdate"
+  codesign --force --sign "$ID" "$EMBEDDED_FW"
+fi
 [ -f "$APP/Contents/MacOS/mlx.metallib" ] && codesign --force --sign "$ID" "$APP/Contents/MacOS/mlx.metallib"
 codesign --force --sign "$ID" "$APP/Contents/MacOS/KeyScribe"
 codesign --force --sign "$ID" "$APP"
