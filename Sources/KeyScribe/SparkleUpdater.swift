@@ -9,7 +9,10 @@ import Sparkle
 // build at KeyScribe's feed. See agent_notes/distribution_plan/sparkle.md.
 @MainActor
 final class SparkleUpdater: NSObject, AppUpdater {
-    static let defaultFeedURL = "https://github.com/rsperko/keyscribe/releases/latest/download/appcast.xml"
+    // Served from the default branch (raw), NOT a GitHub Release asset: pre-1.0 releases are marked
+    // --prerelease, and GitHub's /releases/latest/ path excludes prereleases, so a release-asset feed
+    // would 404 until 1.0. The raw-branch feed is prerelease-agnostic and needs no extra infra.
+    static let defaultFeedURL = "https://raw.githubusercontent.com/rsperko/keyscribe/main/appcast.xml"
 
     var onUpdateAvailable: (@MainActor () -> Void)?
 

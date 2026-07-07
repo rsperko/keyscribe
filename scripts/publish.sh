@@ -60,6 +60,20 @@ else
   git -C "$TAP_DIR" push
 fi
 
+# Refresh the Sparkle appcast (EdDSA-sign the DMG, upsert this version) and commit it to main — the feed
+# is served from raw.githubusercontent main/appcast.xml. This lands as a follow-up commit after the
+# release tag, which is fine: the DMG-vs-tag gate above already passed, and the enclosure now points at
+# the release asset just uploaded. Idempotent, so re-running publish is safe.
+echo "== refresh + push appcast =="
+./scripts/appcast.sh
+git add appcast.xml
+if git diff --cached --quiet; then
+  echo "  appcast unchanged — nothing to push"
+else
+  git commit -m "appcast: KeyScribe $VERSION"
+  git push origin HEAD:main
+fi
+
 echo
 echo "Published $TAG → https://github.com/$REPO/releases/tag/$TAG"
 echo "Install:  brew install rsperko/tap/keyscribe"

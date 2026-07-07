@@ -119,7 +119,10 @@ elif [ -n "${NOTARY_KEY_P8:-}" ] && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTAR
 fi
 
 echo "== build + assemble (KeyScribe $SHORT_VERSION) =="
-KEYSCRIBE_VARIANT=release KEYSCRIBE_SIGN_ID="$ID" ./make-app.sh release
+# KEYSCRIBE_SPARKLE=1 pulls Sparkle into the production build so the shipped app can self-update
+# (make-app.sh then embeds + signs the framework). Only the production release sets it — see
+# agent_notes/distribution_plan/sparkle.md.
+KEYSCRIBE_VARIANT=release KEYSCRIBE_SPARKLE=1 KEYSCRIBE_SIGN_ID="$ID" ./make-app.sh release
 
 # Re-sign for distribution: hardened runtime (--options runtime), secure timestamp, and the
 # entitlements make-app.sh's dev signing omits. Nested object first (the metallib is a nested code
