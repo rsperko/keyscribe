@@ -34,6 +34,8 @@ cask "keyscribe" do
 
   depends_on macos: ">= :sequoia"
 
+  auto_updates true
+
   app "KeyScribe.app"
 
   zap trash: [
