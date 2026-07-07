@@ -5,5 +5,12 @@
     <link>https://raw.githubusercontent.com/rsperko/keyscribe/main/appcast.xml</link>
     <description>KeyScribe app updates</description>
     <language>en</language>
+    <item>
+      <title>0.2.0</title>
+      <sparkle:version>152</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/rsperko/keyscribe/releases/download/v0.2.0/KeyScribe-0.2.0.dmg" sparkle:edSignature="orF9gY+hwwLOXHlOxf4UpPYRBhRI9EJ7Xng0zMgqZDWzBMgmQInFKK5upEwmJ3STBNm82xzzQE5pGClQsUrrAw==" length="76469401" type="application/octet-stream" />
+    </item>
   </channel>
 </rss>
