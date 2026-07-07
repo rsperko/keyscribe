@@ -16,6 +16,10 @@
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <!-- Sparkle EdDSA public key for verifying update payloads. Read by Sparkle only in the production
+       build (KEYSCRIBE_SPARKLE=1 + .production); inert in dev/custom builds, which never run Sparkle.
+       A downstream white-label distributor replaces this with their own key. -->
+  <key>SUPublicEDKey</key><string>+r7hBgfwcyF27UVPd5GY5VcTkg0p/v4HE2ae5NenyTY=</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>__BUNDLE_NAME__ transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
   <key>NSAppleEventsUsageDescription</key>

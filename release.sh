@@ -126,6 +126,26 @@ KEYSCRIBE_VARIANT=release KEYSCRIBE_SIGN_ID="$ID" ./make-app.sh release
 # object beside the binary), then the binary, then the bundle. No --deep (the Swift linker pre-signs
 # the binary and --deep mishandles it).
 echo "== re-sign for distribution =="
+# Sparkle is present only in the KEYSCRIBE_SPARKLE=1 production build. Re-sign its nested code with
+# hardened runtime + secure timestamp for notarization, inside-out (deepest first) then the framework,
+# ahead of the metallib/binary/bundle. Sparkle's helpers are separate executables and must NOT inherit
+# the app's entitlements (Microphone / Apple Events) — they sign with runtime only. Keyed off the
+# framework's presence so a Sparkle-free build skips it. If notarization rejects an XPC service for
+# library validation, add com.apple.security.cs.disable-library-validation per
+# agent_notes/distribution_plan/sparkle.md (not preemptively). NEEDS a real notarization run to confirm.
+EMBEDDED_FW="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$EMBEDDED_FW" ]; then
+  echo "== re-sign Sparkle.framework (hardened, inside-out) =="
+  FWV="$EMBEDDED_FW/Versions/Current"
+  for item in \
+    "$FWV/XPCServices/Downloader.xpc" \
+    "$FWV/XPCServices/Installer.xpc" \
+    "$FWV/Updater.app" \
+    "$FWV/Autoupdate" \
+    "$EMBEDDED_FW"; do
+    codesign --force --options runtime --timestamp --sign "$ID" "$item"
+  done
+fi
 codesign --force --options runtime --timestamp \
   --sign "$ID" "$APP/Contents/MacOS/mlx.metallib"
 codesign --force --options runtime --timestamp --entitlements "$ENT" \
