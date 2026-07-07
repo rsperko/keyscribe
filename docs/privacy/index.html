@@ -56,13 +56,13 @@
     <div class="section__inner">
       <div class="section__head">
         <h2>The boundary is explicit.</h2>
-        <p>Privacy mode disables context sharing. Best-effort redaction tokenizes recognizable sensitive spans before optional rewrite and restores them locally afterward.</p>
+        <p>Privacy mode disables context sharing. Best-effort redaction can hide recognizable sensitive patterns before optional rewrite, but it is not a guarantee.</p>
       </div>
       <ul class="list">
         <li>Saved API keys live in macOS Keychain.</li>
         <li>History is local JSONL under Application Support.</li>
-        <li>Redaction maps live in memory only.</li>
-        <li>Redaction is best-effort, not a security guarantee.</li>
+        <li>Redaction maps live in memory only when a recognizable span is found.</li>
+        <li>Redaction depends on what speech recognition produced, so it can miss sensitive content.</li>
         <li>For content that must never reach a provider, use Plain Dictation or another no-rewrite mode.</li>
       </ul>
       <p><a href="https://github.com/rsperko/keyscribe/blob/main/PRIVACY.md">Read the full privacy document</a></p>

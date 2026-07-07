@@ -18,15 +18,15 @@ KeyScribe is not a scripting or plugin platform (YAGNI, `principles.md` §7).
 
 Speech recognition always runs **on-device** — audio never goes to the cloud. The text that
 STT produces then flows through a **staged command pipeline** that is as much of the product
-as the recognition itself: dictionaries, replacements, live edits, verbatim spans, and
-**privacy redaction with restoration**. An **optional** BYOK LLM rewrite step can polish the
-result — and because that step *can* be cloud, best-effort redaction lowers what leaves the machine:
-recognizable sensitive content is tokenized out before the request and restored after.
+as the recognition itself: dictionaries, replacements, live edits, verbatim spans, and explicit
+data-boundary handling. An **optional** BYOK LLM rewrite step can polish the result — and because
+that step *can* be cloud, recognizable sensitive patterns get a best-effort tokenization pass before
+the request and are restored after when they are found.
 
 ### Positioning in one line
 > *"Apple Dictation's simplicity, Superwhisper's power, and a privacy story neither cloud
-> tool can match — STT always local, sensitive data tokenized before any optional cloud
-> rewrite."*
+> tool can match — STT always local, rewrite is explicit and BYOK, and the data boundary is visible
+> before any optional cloud call."*
 
 ### The wedge
 1. **Privacy-first, simple** — STT is always local; the default experience is clean and
@@ -446,7 +446,8 @@ Events per browser, not AX — feeds `url_pattern` only, §4.3/§4.5.)
 checkboxes are **disabled and locked off** — visible/app/selection text is never attached. This is
 the deliberate resolution to the payload-leak problem: rather than run redaction over large untrusted
 context blocks (and miss things, best-effort), privacy mode simply **prevents context from leaving at
-all**, so the redacted transcript is the only user content in the cloud payload. Context-aware
+all**, so the transcript after best-effort recognizable-span redaction is the only user content in
+the cloud payload. Context-aware
 rewrite and privacy are therefore mutually exclusive per mode by design.
 
 - Opted-in context chunks are appended as **fixed, clearly-delimited blocks** in a stable order,
@@ -583,9 +584,9 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
     JSONL.
 - **Distribution & updates:** direct distribution, **notarized** (Developer ID) — **not** Mac App
   Store, whose App Sandbox restricts the AX APIs KeyScribe depends on. The menu-bar update badge +
-  "Update Available…" item and the `AppUpdater` injection seam are built, but KeyScribe itself ships
-  **no in-app update check** — public updates go through **Homebrew**, and no updater is injected by
-  default (Sparkle is no longer the plan; the seam lets a downstream build run its own check).
+  "Update Available…" item and the `AppUpdater` injection seam are built. Sparkle is back on the
+  table for the public app, so the update mechanism must be decided and wired deliberately before
+  1.0 rather than left as a downstream-only seam.
 - **License: GPLv3.** Compatible with the deps (Apache-2.0 and MIT code flow into a GPLv3 project;
   weights are runtime-downloaded *data*, not linked code, so the source tree stays clean), and it
   permits selling notarized binaries provided source is offered. The legal obligation is four things:
@@ -631,7 +632,7 @@ carries a **`schema_version`**.
 | Pluggable engines | ✅ 8 | ✅ 2 | ❌ | ✅ 1 | n/a |
 | Per-context modes (data-driven) | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Staged pipeline (pre/post STT+LLM) | ✅ **unique** | partial | ❌ | ❌ | ❌ |
-| Redaction + restoration (cloud-safe) | ✅ **unique** | ❌ | ❌ | ❌ | ❌ |
+| Best-effort recognizable-span redaction | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Dynamic, state-driven system prompt | ✅ **unique** | ❌ | ❌ | ❌ | ❌ |
 | Voice-edit selected text | ✅ | partial | ✅ | ❌ | ❌ |
 | BYOK rewrite | ✅ | ✅ | ❌ | ✅ (opt) | ❌ |

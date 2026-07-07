@@ -277,8 +277,9 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 > **`Add to Vocabulary…`** opens the standalone vocabulary panel; it is
 > always present here and is also bound to a global chord shortcut (default ⌃⌥⇧V, rebindable
 > in General ▸ Shortcuts; `[shortcuts]` in `config_schema.md`). An **`Update Available…`** item and the update
-> badge below are a passive affordance: both render only when an injected updater reports an update. KeyScribe
-> ships no updater by default (public updates go through Homebrew), so neither appears in a stock build.
+> badge below are a passive affordance: both render only when the app's updater reports an update.
+> Sparkle is back on the table for the public build; until that implementation lands, stock builds keep
+> this affordance inert.
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI

@@ -438,9 +438,7 @@ final class DictationController {
     // (readiness ≠ residency). Only when the model is on disk or system-managed: warming an uninstalled
     // engine would DOWNLOAD it at launch, racing the first-run wizard's download.
     func preloadActiveEngineIfNeeded() {
-        let id = activeEngine.id
-        let systemManaged = SpeechModelCatalog.entry(for: id)?.systemManaged ?? false
-        guard systemManaged || ModelInstallStore.installedIds().contains(id) else { return }
+        guard InstalledEngineFilter.shouldRun(engineId: activeEngine.id) else { return }
         warmActiveEngine()
     }
 

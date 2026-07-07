@@ -33,7 +33,6 @@ final class SpeechModelsModel: ObservableObject {
     private var set: SpeechModelSet
     private var downloading: [String: ModelLoadProgress] = [:]
     private var verifying: Set<String> = []
-    private var verifyFailed: Set<String> = []
     private var verifiedOk: Set<String> = []
     private var errors: [String: String] = [:]
     private var installedSizes: [String: Int64] = [:]
@@ -49,6 +48,8 @@ final class SpeechModelsModel: ObservableObject {
     private let removeFiles: (String) -> Void
     private let markInstalled: (String) -> Void
     private let markRemoved: (String) -> Void
+    private let markFailed: (String) -> Void
+    private let clearFailed: (String) -> Void
     // Runs `work` when idle, else parks it until the current dictation finishes, so a model delete never
     // removes files an in-flight dictation still needs.
     private let deferWhileBusy: (@escaping () -> Void) -> Void
@@ -63,9 +64,12 @@ final class SpeechModelsModel: ObservableObject {
         onDictionaryMatchingChange: @escaping (Settings.STT) -> Void,
         deferWhileBusy: @escaping (@escaping () -> Void) -> Void = { $0() },
         initialInstalledIds: Set<String>? = nil,
+        initialFailedIds: Set<String>? = nil,
         removeFiles: @escaping (String) -> Void = { ModelInstallStore.removeFiles(for: $0) },
         markInstalled: @escaping (String) -> Void = { ModelInstallStore.markInstalled($0) },
-        markRemoved: @escaping (String) -> Void = { ModelInstallStore.markRemoved($0) }
+        markRemoved: @escaping (String) -> Void = { ModelInstallStore.markRemoved($0) },
+        markFailed: @escaping (String) -> Void = { ModelHealthStore.markFailed($0) },
+        clearFailed: @escaping (String) -> Void = { ModelHealthStore.clearFailed($0) }
     ) {
         self.stt = stt
         self.download = download
@@ -77,10 +81,13 @@ final class SpeechModelsModel: ObservableObject {
         self.removeFiles = removeFiles
         self.markInstalled = markInstalled
         self.markRemoved = markRemoved
+        self.markFailed = markFailed
+        self.clearFailed = clearFailed
         set = SpeechModelSet(
             catalog: EngineRegistry.availableCatalog,
             installed: initialInstalledIds ?? ModelInstallStore.installedIds(),
-            activeId: activeId)
+            activeId: activeId,
+            failed: initialFailedIds ?? ModelHealthStore.failedIds())
         refreshSizes()
         rebuild()
     }
@@ -91,7 +98,7 @@ final class SpeechModelsModel: ObservableObject {
         sizeRefreshGeneration &+= 1
         let generation = sizeRefreshGeneration
         let ids = EngineRegistry.availableCatalog
-            .filter { !$0.systemManaged && set.isUsable($0.id) }
+            .filter { !$0.systemManaged && (set.isUsable($0.id) || set.isFailed($0.id)) }
             .map(\.id)
         Task.detached(priority: .utility) { [weak self] in
             var sizes: [String: Int64] = [:]
@@ -168,7 +175,8 @@ final class SpeechModelsModel: ObservableObject {
             SpeechModelCatalog.entry(for: id)?.systemManaged == false else { return }
         downloading[id] = ModelLoadProgress(phase: "Starting…", fraction: 0)
         errors[id] = nil
-        verifyFailed.remove(id)
+        clearFailed(id)
+        set.clearFailed(id)
         rebuild()
         Log.models.notice("download started: \(id, privacy: .public)")
         Task {
@@ -211,8 +219,9 @@ final class SpeechModelsModel: ObservableObject {
             await evictEngine(id)
             removeFiles(id)
             markRemoved(id)
+            clearFailed(id)
+            set.clearFailed(id)
             set.delete(id)
-            verifyFailed.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             rebuild()
             startDownload(id)
@@ -228,21 +237,20 @@ final class SpeechModelsModel: ObservableObject {
         verifying.remove(id)
 
         if result == false {
-            verifyFailed.insert(id)
-            errors[id] = "This model failed its self-test — reinstall it."
-            // A model that can't transcribe the known clip must not stay selectable. Remove files, not just
-            // the marker, so launch reconcile can't re-adopt the failed install.
-            if SpeechModelCatalog.entry(for: id)?.systemManaged == false {
-                let wasActive = set.activeId == id
-                await evictEngine(id)
-                removeFiles(id)
-                markRemoved(id)
-                set.delete(id)
-                if wasActive { onActiveChange(set.activeId) }
-            }
+            // Quarantine, don't delete: a model that can't transcribe the known clip must not stay
+            // selectable, but it keeps its (possibly multi-GB) files so the user can re-test cheaply or
+            // reinstall. markFailed persists the verdict across relaunch and hands the active slot off to a
+            // usable engine if this one was active.
+            let wasActive = set.activeId == id
+            markFailed(id)
+            set.markFailed(id)
+            // The verify loaded the engine into RAM; it's now quarantined, so release it.
+            await evictEngine(id)
+            if wasActive && set.activeId != id { onActiveChange(set.activeId) }
         } else {
-            // Passed, or skipped (no clip bundled, dev runs) — treat as installed.
-            verifyFailed.remove(id)
+            // Passed, or skipped (no clip bundled, dev runs) — treat as installed and clear any prior failure.
+            clearFailed(id)
+            set.clearFailed(id)
             markInstalled(id)
             set.markInstalled(id)
             // Verifying loaded the engine into RAM. A non-active model verified here would stay resident
@@ -298,8 +306,8 @@ final class SpeechModelsModel: ObservableObject {
             // update immediately for the UI.
             deferWhileBusy { [removeFiles] in removeFiles(id) }
             markRemoved(id)
+            clearFailed(id)
             set.delete(id)
-            verifyFailed.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             refreshSizes()
             rebuild()
@@ -318,8 +326,18 @@ final class SpeechModelsModel: ObservableObject {
         rows[index] = makeRow(info)
     }
 
+    // A model that failed its self-test can't be used until it passes; the actions convey the way out.
+    private static func failedMessage(systemManaged: Bool) -> String {
+        systemManaged
+            ? "This model can’t be used until it passes its self-test. Try testing it again."
+            : "This model can’t be used until it passes its self-test. Test it again, or reinstall it if it stays broken."
+    }
+
     private func makeRow(_ info: SpeechModelInfo) -> Row {
-        let installed = !info.systemManaged && set.isUsable(info.id) && downloading[info.id] == nil
+        let failed = set.isFailed(info.id)
+        // Failed models are quarantined (not usable) but stay on disk — still size them so the row can show
+        // what deleting would reclaim.
+        let onDisk = !info.systemManaged && (set.isUsable(info.id) || failed) && downloading[info.id] == nil
         return Row(
             info: info,
             isActive: set.activeId == info.id,
@@ -327,10 +345,10 @@ final class SpeechModelsModel: ObservableObject {
             downloadFraction: downloading[info.id]?.fraction,
             downloadPhase: downloading[info.id]?.phase,
             verifying: verifying.contains(info.id),
-            verificationFailed: verifyFailed.contains(info.id),
+            verificationFailed: failed,
             testPassed: verifiedOk.contains(info.id),
-            errorText: errors[info.id],
-            installedBytes: installed ? installedSizes[info.id] : nil,
+            errorText: errors[info.id] ?? (failed ? Self.failedMessage(systemManaged: info.systemManaged) : nil),
+            installedBytes: onDisk ? installedSizes[info.id] : nil,
             recognitionBiasOn: stt.recognitionBiasEnabled(for: info),
             dictionaryRecoveryOn: stt.dictionaryRecoveryEnabled(for: info),
             dictionaryMatchingRecommended: stt.dictionaryMatchingUsesRecommendedSettings(for: info))

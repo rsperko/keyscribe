@@ -43,8 +43,8 @@ When it runs:
 - The request goes to **the provider and endpoint you configured**, authenticated using the
   credential method you selected: a Keychain-backed API key, no auth for local/no-auth endpoints, or
   a command-generated bearer token. KeyScribe has no LLM service of its own.
-- Before the request is sent, sensitive spans are **tokenized out** of the transcript (the redaction
-  wedge, below) and restored locally in the response.
+- Before the request is sent, recognizable sensitive spans may be **tokenized out** of the
+  transcript (the redaction wedge, below) and restored locally in the response.
 - Turn the cleanup off and KeyScribe makes no network calls at all after the initial one-time model
   downloads.
 
@@ -62,23 +62,25 @@ license check.
 
 ## The redaction wedge — and its limits
 
-When LLM cleanup is enabled, KeyScribe attempts to keep sensitive spans out of the request: matching
-spans are replaced with nonce tokens *before* the transcript is sent, and the original text is
-substituted back in locally *after* the response returns. The mapping from token to original lives in
-memory only — it is **never logged and never written to history**. A validation gate checks that
-every issued token comes back exactly once before the result is used; on failure KeyScribe retries
-once more strictly, then falls back to the local transcript with a HUD notice.
+When LLM cleanup is enabled, KeyScribe attempts to keep recognizable sensitive spans out of the
+request: matching spans are replaced with nonce tokens *before* the transcript is sent, and the
+original text is substituted back in locally *after* the response returns. The mapping from token to
+original lives in memory only — it is **never logged and never written to history**. A validation gate
+checks that every issued token comes back exactly once before the result is used; on failure
+KeyScribe retries once more strictly, then falls back to the local transcript with a HUD notice.
 
 **This is best-effort redaction, not a security guarantee.** It reduces what a third-party model
-sees; it cannot promise that every sensitive span is caught. Treat it as a safety margin, not a
+sees when a span is recognized, but it cannot promise that every sensitive span is caught. It works
+on the text produced by speech recognition, so it can miss content the recognizer verbalizes or
+normalizes, such as an email address transcribed as words. Treat it as a safety margin, not a
 boundary you can rely on for regulated or high-stakes data. If something must never reach a
-third-party provider, use **privacy mode** or simply leave LLM cleanup off.
+third-party provider, use Plain Dictation or another mode with LLM cleanup off.
 
 ## Privacy mode and context are mutually exclusive
 
-Some modes can attach context (such as a browser URL or selected text) to the LLM request to improve
-the rewrite. When a mode's **privacy toggle** is on, those context options are forced off and locked:
-the redacted transcript is the only user content that can leave the machine for that mode.
+Some modes can attach context to the LLM request to improve the rewrite. When a mode's **privacy
+toggle** is on, those context options are forced off and locked: the transcript, after best-effort
+recognizable-span redaction, is the only user content that can leave the machine for that mode.
 
 ## Where your data lives
 

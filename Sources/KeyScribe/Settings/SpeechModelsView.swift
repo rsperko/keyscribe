@@ -209,7 +209,12 @@ private struct EngineRow: View {
     }
 
     @ViewBuilder private var statusFooter: some View {
-        if let status = installStatus {
+        if row.verificationFailed {
+            if let bytes = row.installedBytes {
+                Text("On disk · \(ByteCountFormatter.fileStyle.string(fromByteCount: bytes))")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        } else if let status = installStatus {
             Label(status, systemImage: "checkmark.circle.fill")
                 .font(.caption2).foregroundStyle(.green)
         } else if !row.info.systemManaged, !row.isUsable, row.downloadFraction == nil {
@@ -236,10 +241,12 @@ private struct EngineRow: View {
         } else if row.verifying {
             Text("Testing…").font(.caption).foregroundStyle(.secondary)
         } else if row.verificationFailed {
-            if row.info.systemManaged {
-                Button("Test Again") { model.test(row.id) }
-            } else {
+            Button("Test Again") { model.test(row.id) }
+                .help("Re-runs the on-device self-test without re-downloading.")
+            if !row.info.systemManaged {
                 Button("Reinstall") { model.reinstall(row.id) }
+                    .help("Deletes the files and downloads the model again.")
+                Button("Delete", role: .destructive) { model.requestDelete(row.id) }
             }
         } else if row.isUsable {
             if !row.isActive {

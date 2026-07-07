@@ -10,16 +10,20 @@ final class SpeechModelsModelTests: XCTestCase {
         var removed: [String] = []
         var markedInstalled: [String] = []
         var markedRemoved: [String] = []
+        var markedFailed: [String] = []
+        var clearedFailed: [String] = []
         var activeChanges: [String] = []
     }
 
     private func makeModel(
         recorder: Recorder,
         verifyResult: Bool? = nil,
+        activeId: String = "parakeet-tdt-ctc-110m",
+        initialFailedIds: Set<String>? = nil,
         deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil
     ) -> SpeechModelsModel {
         SpeechModelsModel(
-            activeId: "parakeet-tdt-ctc-110m",
+            activeId: activeId,
             stt: Settings.defaults.stt,
             download: { _, _ in },
             verify: { _ in verifyResult },
@@ -28,9 +32,12 @@ final class SpeechModelsModelTests: XCTestCase {
             onDictionaryMatchingChange: { _ in },
             deferWhileBusy: deferWhileBusy ?? { $0() },
             initialInstalledIds: ["parakeet-tdt-ctc-110m", "parakeet"],
+            initialFailedIds: initialFailedIds,
             removeFiles: { recorder.removed.append($0) },
             markInstalled: { recorder.markedInstalled.append($0) },
-            markRemoved: { recorder.markedRemoved.append($0) })
+            markRemoved: { recorder.markedRemoved.append($0) },
+            markFailed: { recorder.markedFailed.append($0) },
+            clearFailed: { recorder.clearedFailed.append($0) })
     }
 
     private func settleTasks() async {
@@ -84,7 +91,9 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.evicted, [])
     }
 
-    func testFailedSelfTestRemovesFilesImmediately() async throws {
+    // A failed self-test quarantines the model: it becomes unusable and is persisted as failed, but its
+    // files are kept (not removed) so the user can re-test cheaply or reinstall.
+    func testFailedSelfTestQuarantinesButKeepsFiles() async throws {
         let recorder = Recorder()
         let model = makeModel(
             recorder: recorder,
@@ -94,11 +103,48 @@ final class SpeechModelsModelTests: XCTestCase {
         model.test("parakeet")
         await settleTasks()
 
+        XCTAssertEqual(recorder.markedFailed, ["parakeet"])
         XCTAssertEqual(recorder.evicted, ["parakeet"])
-        XCTAssertEqual(recorder.removed, ["parakeet"])
-        XCTAssertEqual(recorder.markedRemoved, ["parakeet"])
-        XCTAssertEqual(recorder.deferred.count, 0)
+        XCTAssertEqual(recorder.removed, [])
+        XCTAssertEqual(recorder.markedRemoved, [])
         XCTAssertFalse(try row("parakeet", in: model).isUsable)
         XCTAssertTrue(try row("parakeet", in: model).verificationFailed)
+        XCTAssertNotNil(try row("parakeet", in: model).errorText)
+    }
+
+    func testFailingTheActiveModelHandsOffToAUsableEngine() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: false, activeId: "parakeet")
+
+        model.test("parakeet")   // the active engine
+        await settleTasks()
+
+        XCTAssertEqual(recorder.markedFailed, ["parakeet"])
+        XCTAssertFalse(recorder.activeChanges.isEmpty)
+        XCTAssertNotEqual(recorder.activeChanges.last, "parakeet")
+        XCTAssertFalse(try row("parakeet", in: model).isUsable)
+    }
+
+    // A persisted failure hydrates into the row on launch so the error indicator survives a restart.
+    func testPersistedFailureHydratesIntoRow() throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, initialFailedIds: ["parakeet"])
+
+        XCTAssertTrue(try row("parakeet", in: model).verificationFailed)
+        XCTAssertFalse(try row("parakeet", in: model).isUsable)
+        XCTAssertNotNil(try row("parakeet", in: model).errorText)
+    }
+
+    // Re-testing a quarantined model that now passes clears the persisted failure and restores usability.
+    func testPassingReTestClearsPersistedFailure() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: true, initialFailedIds: ["parakeet"])
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.clearedFailed, ["parakeet"])
+        XCTAssertTrue(try row("parakeet", in: model).isUsable)
+        XCTAssertFalse(try row("parakeet", in: model).verificationFailed)
     }
 }

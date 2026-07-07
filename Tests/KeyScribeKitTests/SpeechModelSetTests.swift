@@ -111,4 +111,61 @@ struct SpeechModelSetTests {
         s.markInstalled("whisper")
         #expect(s.isUsable("whisper"))
     }
+
+    // Failed overlay: a model that failed its self-test stays installed (on disk) but is not usable and
+    // not selectable, for both downloadable and system-managed engines.
+    @Test func failedModelIsNotUsable() {
+        let s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple", failed: ["parakeet"])
+        #expect(s.installed.contains("parakeet"))
+        #expect(!s.isUsable("parakeet"))
+        #expect(s.isFailed("parakeet"))
+    }
+
+    @Test func failedSystemManagedModelIsNotUsable() {
+        let s = SpeechModelSet(catalog: realCatalog, installed: [], activeId: "apple", failed: ["apple"])
+        #expect(!s.isUsable("apple"))
+    }
+
+    @Test func selectingFailedModelThrows() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple", failed: ["parakeet"])
+        #expect(throws: ModelSelectionError.notUsable("parakeet")) { try s.select("parakeet") }
+    }
+
+    @Test func markFailedActiveHandsOffToUsableEngine() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["whisper"], activeId: "whisper")
+        s.markFailed("whisper")
+        #expect(!s.isUsable("whisper"))
+        #expect(s.activeId == "apple")   // reassigned to the still-usable system floor
+    }
+
+    @Test func markFailedInactiveLeavesActiveUnchanged() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "parakeet")
+        s.markFailed("whisper")
+        #expect(s.activeId == "parakeet")
+        #expect(!s.isUsable("whisper"))
+    }
+
+    // Failing the only usable engine strands activeId on the now-unusable id — the same "no usable model"
+    // state deleting the last engine produces; callers surface it as the active-engine-unavailable banner.
+    @Test func markFailedOnlyUsableStrandsActive() {
+        let cat = [info("only", system: false, defaultEnglish: true)]
+        var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
+        s.markFailed("only")
+        #expect(!s.isUsable("only"))
+        #expect(!s.isUsable(s.activeId))
+    }
+
+    @Test func clearFailedRestoresUsability() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple", failed: ["parakeet"])
+        s.clearFailed("parakeet")
+        #expect(s.isUsable("parakeet"))
+        #expect(!s.isFailed("parakeet"))
+    }
+
+    @Test func deletingAFailedModelClearsItsFailedFlag() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "parakeet", failed: ["whisper"])
+        s.delete("whisper")
+        #expect(!s.installed.contains("whisper"))
+        #expect(!s.isFailed("whisper"))
+    }
 }

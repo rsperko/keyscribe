@@ -336,14 +336,15 @@ Privacy controls:
 
 - Speech recognition is always local.
 - AI rewrite is optional and uses your configured service.
-- Best-effort redaction tokenizes recognizable sensitive spans before a rewrite and restores them on
-  your Mac afterward.
-- Redaction is pattern matching. It can miss content.
+- Best-effort redaction can tokenize recognizable sensitive spans before a rewrite and restore them
+  on your Mac afterward.
+- Redaction is pattern matching over the STT transcript. It can miss content.
 - When privacy mode is on for a mode, context is forced off.
 - A mode can be excluded from local history.
 
-Use privacy mode for sensitive rewrite modes where the transcript itself can be redacted and context
-should not leave the Mac. Leave AI rewrite off entirely for content that must never reach a provider.
+Use privacy mode when a rewrite should send only the transcript, with context forced off and
+recognizable-span redaction attempted. Leave AI rewrite off entirely for content that must never
+reach a provider.
 
 Checkpoint: open History after a rewritten dictation and inspect Details. You should be able to tell
 which mode ran, whether redaction applied, whether context was sent, and which provider/model handled
