@@ -13,6 +13,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     case accessibilityPermission
     case accessibilityNeedsRelaunch
     case activeEngineUnavailable
+    case modelSelfTestFailed
     case aiConnectionTestFailed
     case aiConnectionMisconfigured
     case modeNeedsAIService
@@ -23,7 +24,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         switch self {
         case .malformedConfig: .advanced
         case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
-        case .activeEngineUnavailable: .speechModels
+        case .activeEngineUnavailable, .modelSelfTestFailed: .speechModels
         case .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
         case .modeNeedsAIService, .modeUsesFailedConnection: .modes
         case .hotkeyConflict: .general
@@ -38,6 +39,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         accessibilityGranted: Bool,
         accessibilityTapActive: Bool = true,
         activeEngineUsable: Bool = true,
+        modelSelfTestFailed: Bool = false,
         aiConnectionTestFailed: Bool = false,
         aiConnectionMisconfigured: Bool = false, modeNeedsAIService: Bool = false,
         modeUsesFailedConnection: Bool = false,
@@ -49,6 +51,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         if !accessibilityGranted { problems.append(.accessibilityPermission) }
         else if !accessibilityTapActive { problems.append(.accessibilityNeedsRelaunch) }
         if !activeEngineUsable { problems.append(.activeEngineUnavailable) }
+        if modelSelfTestFailed { problems.append(.modelSelfTestFailed) }
         if aiConnectionTestFailed { problems.append(.aiConnectionTestFailed) }
         if aiConnectionMisconfigured { problems.append(.aiConnectionMisconfigured) }
         if modeNeedsAIService { problems.append(.modeNeedsAIService) }
@@ -227,9 +230,13 @@ struct SettingsRootView: View {
                     Spacer()
                     if problems.flaggedPanes.contains(destination) {
                         Circle().fill(.red).frame(width: 7, height: 7)
-                            .accessibilityLabel("Needs attention")
+                            .accessibilityHidden(true)
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(problems.flaggedPanes.contains(destination)
+                    ? "\(destination.title), needs attention"
+                    : destination.title)
                 .tag(destination)
             }
             .disabled(recordingState.isRecording)

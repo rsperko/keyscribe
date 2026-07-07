@@ -135,6 +135,36 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertNotNil(try row("parakeet", in: model).errorText)
     }
 
+    // hasFailedModel feeds the Settings problem badge / menu-bar error dot. It reflects any failed row —
+    // hydrated from persisted state on launch, flipped live by a failing test, and cleared by a passing one.
+    func testHasFailedModelHydratesFromPersistedFailure() {
+        let recorder = Recorder()
+        XCTAssertFalse(makeModel(recorder: recorder).hasFailedModel)
+        XCTAssertTrue(makeModel(recorder: recorder, initialFailedIds: ["parakeet"]).hasFailedModel)
+    }
+
+    func testHasFailedModelFlipsLiveOnAFailingTest() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: false)
+        XCTAssertFalse(model.hasFailedModel)
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertTrue(model.hasFailedModel)
+    }
+
+    func testHasFailedModelClearsWhenTheOnlyFailurePasses() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: true, initialFailedIds: ["parakeet"])
+        XCTAssertTrue(model.hasFailedModel)
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertFalse(model.hasFailedModel)
+    }
+
     // Re-testing a quarantined model that now passes clears the persisted failure and restores usability.
     func testPassingReTestClearsPersistedFailure() async throws {
         let recorder = Recorder()

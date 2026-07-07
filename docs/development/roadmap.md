@@ -14,6 +14,28 @@
 
 ---
 
+## Recently resolved
+
+- **Release packaging floor alignment.** The app bundle and `Package.swift` declare macOS 15.0, and
+  Apple Speech is availability-gated to macOS 26+. The Homebrew cask now relaxes to the app floor
+  (`depends_on macos: ">= :sequoia"` in `scripts/update-cask.sh`) so Sequoia users can install;
+  Apple Speech simply stays hidden on 15 via its `@available` gate.
+- **Immediate-apply settings model.** The old "add explicit Save" note was stale. Ordinary text
+  fields commit on Return, focus loss, or teardown; Escape reverts to the last committed value;
+  multiline prompt editors commit on focus loss except where a dismissing popover needs a dependable
+  live/flush save; credentials keep explicit actions such as **Save key**, **Fetch Models**, and
+  **Test Connection**.
+- **Model self-test health.** Model self-test failures are persisted in `model-health.json`, failed
+  models are quarantined until they pass a re-test or are reinstalled, and the menu/settings problem
+  detector flags Speech Models when any installed model has a failed health marker.
+- **Verbatim close-marker resilience.** `VerbatimTokenizer` absorbs pause punctuation around markers,
+  strips begin-marker-glued terminators, avoids folding spans into the previous clause, collapses
+  redundant post-`end verbatim` terminators, lets exact `end verbatim` win, and conservatively treats
+  real observed close-marker mishears such as `"and verbatim"` / `"en verbatim"` as closes after an
+  open `begin verbatim` while rejecting non-end lookalikes such as `"send verbatim"`.
+
+---
+
 ## Remaining work
 
 ### Distribution & updates
@@ -33,16 +55,6 @@
   first run, Settings, HUD actions, and the correction surfaces. Pay particular attention to problem
   indicators, data-boundary badges, microphone/accessibility recovery actions, and the permission
   relaunch flow.
-- **Verbatim span coverage.** Current behavior lives in `VerbatimTokenizer`: pause punctuation around
-  markers is absorbed, begin-marker-glued terminators are stripped, spans do not fold into the
-  previous clause, redundant post-`end verbatim` terminators collapse into the content's own
-  terminator, exact `end verbatim` wins over fuzzy rescue, and misheard closes such as `"and
-  verbatim"` / `"en verbatim"` are accepted. A truly unclosed span still protects to the end of the
-  utterance and restores with `begin verbatim` visible. The remaining work is validation, not design:
-  add real-voice `--commands-check` clips for the misheard-close cases. Keep the ambiguous content
-  terminator case as-is: when STT glues a terminator to the content before `end verbatim` and there
-  is no post-marker terminator to collapse against, it is indistinguishable from an intended
-  terminator (`contentTerminatorIsPreserved`).
 
 ### AI rewrite
 - **AI Services polish:** the pane now uses progressive sections for service, endpoint,

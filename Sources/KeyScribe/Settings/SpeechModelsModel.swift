@@ -29,6 +29,7 @@ final class SpeechModelsModel: ObservableObject {
     // False means the active model was deleted out from under us and dictation is silently on a fallback —
     // flagged per ui_design.md §6.
     var activeEngineUsable: Bool { self.set.isUsable(self.set.activeId) }
+    var hasFailedModel: Bool { rows.contains { $0.verificationFailed } }
 
     private var set: SpeechModelSet
     private var downloading: [String: ModelLoadProgress] = [:]

@@ -55,6 +55,14 @@ struct SettingsProblemTests {
         #expect(problems.first?.pane == .speechModels)
     }
 
+    @Test func failedModelSelfTestFlagsSpeechModels() {
+        let problems = SettingsProblem.detect(
+            hasConfigError: false, microphoneGranted: true,
+            accessibilityGranted: true, modelSelfTestFailed: true)
+        #expect(problems == [.modelSelfTestFailed])
+        #expect(problems.first?.pane == .speechModels)
+    }
+
     @Test func failedConnectionTestFlagsAIServices() {
         let problems = SettingsProblem.detect(
             hasConfigError: false, microphoneGranted: true,

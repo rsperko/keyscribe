@@ -600,6 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityGranted: Permissions.accessibilityStatus() == .granted,
             accessibilityTapActive: hotkey?.isTapActive ?? true,
             activeEngineUsable: speechModels?.activeEngineUsable ?? true,
+            modelSelfTestFailed: speechModels?.hasFailedModel ?? false,
             aiConnectionTestFailed: failedConnectionIds.isEmpty == false,
             aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
             modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
