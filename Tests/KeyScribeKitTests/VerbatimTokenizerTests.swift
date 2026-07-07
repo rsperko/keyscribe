@@ -109,10 +109,11 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "X")
     }
 
-    @Test func unterminatedTrimsLeadingCommaAndPrecedingComma() {
+    // Unclosed span keeps "begin verbatim" visible; the preceding pause comma is still absorbed.
+    @Test func unterminatedTrimsLeadingCommaAndKeepsMarker() {
         let (out, t) = tokenize("the note, begin verbatim my secret")
         #expect(out == "the note ⟦SN:VERB:1⟧")
-        #expect(t.restore(out) == "the note my secret")
+        #expect(t.restore(out) == "the note begin verbatim my secret")
     }
 
     @Test func commaDirectlyAttachedToMarkersIsAbsorbed() {
@@ -150,10 +151,19 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "say KeepThis done")
     }
 
-    @Test func unterminatedTokenizesToEnd() {
-        let (out, t) = tokenize("the password is begin verbatim hunter2 and more")
+    // No end heard: protect to end of utterance, keeping "begin verbatim" visible as the tell.
+    @Test func unterminatedTokenizesToEndKeepingMarker() {
+        let (out, t) = tokenize("the password is begin verbatim hunter2 more")
         #expect(out == "the password is ⟦SN:VERB:1⟧")
-        #expect(t.restore(out) == "the password is hunter2 and more")
+        #expect(t.restore(out) == "the password is begin verbatim hunter2 more")
+    }
+
+    // The kept marker is INSIDE the token value (not plain text beside it), so it survives an LLM
+    // rewrite — the post-LLM gate only guarantees nonce tokens, not surrounding prose.
+    @Test func unterminatedMarkerIsProtectedInsideToken() {
+        let (out, t) = tokenize("begin verbatim my secret")
+        #expect(!out.contains("begin verbatim"))
+        #expect(t.restore(out) == "begin verbatim my secret")
     }
 
     // Only "begin verbatim" / "end verbatim" are triggers now — the start/stop aliases are dropped
@@ -179,14 +189,67 @@ struct VerbatimTokenizerTests {
         #expect(!out.contains("TopSecret"))
     }
 
-    @Test func unterminatedAtStartHasNoLeadingSpace() {
+    @Test func unterminatedAtStartKeepsMarkerNoLeadingSpace() {
         let (out, t) = tokenize("begin verbatim secret stuff")
         #expect(out == "⟦SN:VERB:1⟧")
-        #expect(t.restore(out) == "secret stuff")
+        #expect(t.restore(out) == "begin verbatim secret stuff")
     }
 
     @Test func bareBeginVerbatimWithNoContentIsLeftAlone() {
         let (out, _) = tokenize("just text begin verbatim")
         #expect(out == "just text begin verbatim")
+    }
+
+    // A misheard "end verbatim" (Apple's "and"↔"end" vowel swap) still closes the span.
+    @Test func rescueClosesOnEndLikeAndVerbatim() {
+        let (out, t) = tokenize("begin verbatim foo and verbatim bar")
+        #expect(out == "⟦SN:VERB:1⟧ bar")
+        #expect(t.restore(out) == "foo bar")
+    }
+
+    // Parakeet's real mishear drops the final consonant ("en verbatim"); the phonetic prefix still closes it.
+    @Test func rescueClosesOnEnVerbatim() {
+        let (out, t) = tokenize("begin verbatim foo en verbatim bar")
+        #expect(out == "⟦SN:VERB:1⟧ bar")
+        #expect(t.restore(out) == "foo bar")
+    }
+
+    // A non-"end" lookalike ("send" → phonetic key "253", not a prefix of "53") is not a closer.
+    @Test func rescueRejectsNonEndLikeLookalike() {
+        let (out, t) = tokenize("begin verbatim send verbatim files")
+        #expect(out == "⟦SN:VERB:1⟧")
+        #expect(t.restore(out) == "begin verbatim send verbatim files")
+    }
+
+    // Exact "end verbatim" wins: a stray "and verbatim" earlier stays content, not an early close.
+    @Test func exactEndPreferredOverRescue() {
+        let (out, t) = tokenize("begin verbatim foo and verbatim bar end verbatim baz")
+        #expect(out == "⟦SN:VERB:1⟧ baz")
+        #expect(t.restore(out) == "foo and verbatim bar baz")
+    }
+
+    // With no open begin there is nothing to rescue — prose containing "and verbatim" is untouched.
+    @Test func loneEndLikePhraseWithoutBeginIsInert() {
+        let (out, _) = tokenize("quote it and verbatim please")
+        #expect(out == "quote it and verbatim please")
+    }
+
+    // Characterization: spans are flat (first begin ↔ first end); a leftover marker stays literal.
+    @Test func nestedBeginsTakeFirstEndAndLeaveTrailingMarkerLiteral() {
+        let (out, t) = tokenize("begin verbatim outer begin verbatim inner end verbatim tail end verbatim")
+        #expect(out == "⟦SN:VERB:1⟧ tail end verbatim")
+        #expect(t.restore(out) == "outer begin verbatim inner tail end verbatim")
+    }
+
+    @Test func twoEndsOneBeginLeavesSecondEndLiteral() {
+        let (out, t) = tokenize("begin verbatim A end verbatim B end verbatim")
+        #expect(out == "⟦SN:VERB:1⟧ B end verbatim")
+        #expect(t.restore(out) == "A B end verbatim")
+    }
+
+    @Test func twoBeginsOneEndSwallowsInnerBeginAsContent() {
+        let (out, t) = tokenize("begin verbatim A begin verbatim B end verbatim")
+        #expect(out == "⟦SN:VERB:1⟧")
+        #expect(t.restore(out) == "A begin verbatim B")
     }
 }

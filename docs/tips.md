@@ -52,6 +52,10 @@ begin verbatim insert new line scratch that end verbatim
 That inserts the words `insert new line scratch that` instead of acting on them. A verbatim span is
 also protected from the AI rewrite, so it survives exactly as spoken.
 
+If KeyScribe misses the closing "end verbatim," it protects the rest of the utterance as literal
+text and leaves "begin verbatim" visible so you can spot the miss. One ⌘Z removes the whole
+dictation; undo and say it again.
+
 ## Fix a mishearing without leaving what you're doing
 
 When KeyScribe gets a word wrong, you don't have to open Settings. Use the **Add to Vocabulary**

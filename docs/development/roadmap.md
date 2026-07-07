@@ -1,17 +1,16 @@
-# KeyScribe — Build Status & Remaining Work
+# KeyScribe — Current Status & Roadmap
 
-> Companion to `design.md`. The full feature set ships: the whole pipeline works end-to-end —
+> Companion to `design.md`. The core feature set is built: the whole pipeline works end-to-end —
 > local dictation → modes (Phase-A app/URL/window-title routing + Phase-B trigger-phrase routing + per-mode
 > trigger keys) → dictionary / replacements / live edits / numbers / fuzzy → optional **BYOK
 > rewrite** with explicit data-boundary UI → **verbatim spans** and best-effort sensitive-text
 > tokenization for recognizable patterns → atomic insert. Plus edit-in-place, up to 8 STT
-> models with
-> recognition bias on every offered model except Moonshine and dictionary recovery for Moonshine, the
-> Settings UI
-> (General · Speech Models · Vocabulary · AI Services · Modes · Permissions · Advanced), local
-> history with the correction surface, and the standalone correction panel.
+> models, recognition bias on every offered model except Moonshine, dictionary recovery for
+> Moonshine, the Settings UI (General · Speech Models · Vocabulary · AI Services · Modes ·
+> Permissions · Advanced), local history with the correction surface, and the standalone correction
+> panel.
 >
-> What follows is the work that is **not** done.
+> What follows is the work that remains open.
 
 ---
 
@@ -20,49 +19,30 @@
 ### Distribution & updates
 - **Sparkle decision and implementation.** The menu-bar **update badge** (amber dot, top-right —
   `ui_design.md` §6), the matching update menu item, and the `AppUpdater` injection seam
-  (`Sources/KeyScribeKit/AppUpdater.swift`) are built and wired. Sparkle is now on the table for the
-  public app, so the stale "Homebrew only, no updater" plan is retired. Before 1.0, decide and land
-  the actual update contract: appcast hosting, EdDSA signing keys, release-note source, update cadence,
-  failure UX, and release/preflight coverage.
-- **Release packaging floor alignment — resolved.** The app bundle and `Package.swift` declare macOS
-  15.0, and Apple Speech is availability-gated to macOS 26+. The Homebrew cask now relaxes to the app
-  floor (`depends_on macos: ">= :sequoia"` in `scripts/update-cask.sh`) so Sequoia users can install;
-  Apple Speech simply stays hidden on 15 via its `@available` gate.
+  (`Sources/KeyScribeKit/AppUpdater.swift`) are built and wired. Before 1.0, decide whether the
+  public app uses Sparkle and, if so, land the update contract: appcast hosting, EdDSA signing keys,
+  release-note source, update cadence, failure UX, and release/preflight coverage.
 
 ### Polish
-- **Mode editor simplification — mostly resolved.** The editor now uses a progressive surface:
-  common settings are visible, routing and recognition/replacements carry the remaining disclosures,
-  cloud-boundary controls are grouped under "Data sent with AI", and riskier escape hatches stay
-  TOML-only with read-only notes. Remaining 1.0 work is visual QA across every seeded mode, especially
-  long names, disabled dependency reasons, and small-window wrapping.
-- **Accessibility / error-state / onboarding polish — partially resolved.** Done: Settings has
-  accessibility labels for problem indicators/data-boundary badges, the HUD respects Reduce Motion
-  and offers concrete repair actions for microphone/accessibility failures, first run has
-  **Skip for now** paths, and permission setup explains the Accessibility relaunch requirement.
-  Remaining 1.0 work is a real VoiceOver/keyboard pass through first run, Settings, HUD actions,
-  and the correction surfaces.
-- **Verbatim pause-artifact punctuation — mostly done.** Pausing around the markers makes the STT
-  terminate each clause with a period (`…sentence. Begin verbatim. …contents. End verbatim. This…`).
-  Handled in `VerbatimTokenizer` + `spliceAbsorbing(foldBracketedTerminators:collapseTrailingTerminator:)`:
-  begin-marker-glued terminators are stripped, verbatim spans no longer fold into the preceding clause,
-  and a redundant post-`end verbatim` terminator collapses into the content's own (never stripping the
-  content's, so an intended `Hello!` survives). Validated on real audio — `corpus/commands`
-  `vb_pause_sentence`, clean on Whisper. Two things remain:
-  - **Deferred (ambiguous):** a pause terminator the STT glues to the *content* before `end verbatim`
-    with no post-marker terminator to collapse against is indistinguishable from an intended one
-    (`contentTerminatorIsPreserved`), so it is left as-is.
-  - **Trigger-recognition gap:** when an engine mishears the `end verbatim` trigger (Parakeet
-    `"En verbatim"`, Apple `"and verbatim"`), the span runs unterminated and swallows the tail — a
-    fuzzy-end-marker matching problem, not punctuation. Any future work here needs `--commands-check`
-    with a real-voice recording (`say` cannot reproduce the mid-utterance pause periods).
-
-### Settings-editor follow-ups
-- **Immediate-apply settings model — resolved.** The old "add explicit Save" note was stale. The
-  current UI follows the macOS Settings model better: ordinary text fields commit on Return, focus
-  loss, or teardown; Escape reverts to the last committed value; multiline prompt editors commit on
-  focus loss except where a dismissing popover needs a dependable live/flush save; credentials keep
-  explicit actions such as **Save key**, **Fetch Models**, and **Test Connection**. Keep this model
-  unless user testing shows data loss or surprising writes.
+- **Mode editor visual QA.** The editor uses a progressive surface: common settings are visible,
+  routing and recognition/replacements carry the remaining disclosures, cloud-boundary controls are
+  grouped under "Data sent with AI", and riskier escape hatches stay TOML-only with read-only notes.
+  Before 1.0, verify every seeded mode, especially long names, disabled dependency reasons, and
+  small-window wrapping.
+- **Accessibility / error-state / onboarding pass.** Run a real VoiceOver and keyboard pass through
+  first run, Settings, HUD actions, and the correction surfaces. Pay particular attention to problem
+  indicators, data-boundary badges, microphone/accessibility recovery actions, and the permission
+  relaunch flow.
+- **Verbatim span coverage.** Current behavior lives in `VerbatimTokenizer`: pause punctuation around
+  markers is absorbed, begin-marker-glued terminators are stripped, spans do not fold into the
+  previous clause, redundant post-`end verbatim` terminators collapse into the content's own
+  terminator, exact `end verbatim` wins over fuzzy rescue, and misheard closes such as `"and
+  verbatim"` / `"en verbatim"` are accepted. A truly unclosed span still protects to the end of the
+  utterance and restores with `begin verbatim` visible. The remaining work is validation, not design:
+  add real-voice `--commands-check` clips for the misheard-close cases. Keep the ambiguous content
+  terminator case as-is: when STT glues a terminator to the content before `end verbatim` and there
+  is no post-marker terminator to collapse against, it is indistinguishable from an intended
+  terminator (`contentTerminatorIsPreserved`).
 
 ### AI rewrite
 - **AI Services polish:** the pane now uses progressive sections for service, endpoint,

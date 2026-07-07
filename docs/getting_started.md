@@ -140,7 +140,9 @@ Use verbatim spans when the words sound like commands but should stay literal:
 begin verbatim insert new line scratch that end verbatim
 ```
 
-That inserts the words `insert new line scratch that` instead of treating them as edits.
+That inserts the words `insert new line scratch that` instead of treating them as edits. If
+KeyScribe misses the closing "end verbatim," it protects the rest of the utterance as literal text
+and leaves "begin verbatim" visible so you can spot the miss. One ⌘Z undoes the whole dictation.
 
 Say `insert clipboard contents` to drop whatever is on your clipboard into the dictation at that
 point. Two guarantees:
