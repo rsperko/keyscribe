@@ -276,10 +276,12 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 
 > **`Add to Vocabulary…`** opens the standalone vocabulary panel; it is
 > always present here and is also bound to a global chord shortcut (default ⌃⌥⇧V, rebindable
-> in General ▸ Shortcuts; `[shortcuts]` in `config_schema.md`). An **`Update Available…`** item and the update
-> badge below are a passive affordance: both render only when the app's updater reports an update.
-> Sparkle is back on the table for the public build; until that implementation lands, stock builds keep
-> this affordance inert.
+> in General ▸ Shortcuts; `[shortcuts]` in `config_schema.md`). The update UX is two complementary
+> pieces: a **`Check for Updates…`** item (between `Settings…` and `About & Notices…`) is an on-demand
+> check, shown whenever an updater is present (the public build; inert dev/white-label builds omit it);
+> and an **`Update Available…`** item plus the amber badge below are the passive "an update is waiting"
+> affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
+> a build with no injected updater shows neither.
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI

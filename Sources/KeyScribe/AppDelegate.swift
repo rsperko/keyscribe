@@ -117,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             })
 
+        menu.showsUpdateCheck = updater != nil
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
         menu.onOpenHistory = { [weak self] in self?.historyController.present() }

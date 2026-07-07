@@ -97,6 +97,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         item.image = updateIndicatorImage
         return item
     }()
+    // Always-present on-demand check, shown only when an updater is injected (production). The passive
+    // `updateItem` + amber dot above remain the "an update is waiting" affordance; this is the "look now".
+    private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: nil, keyEquivalent: "")
+    var showsUpdateCheck = false
     private var appMenu: NSMenu?
 
     var onPasteLast: (() -> Void)?
@@ -172,6 +176,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
+
+        if showsUpdateCheck {
+            checkForUpdatesItem.target = self
+            checkForUpdatesItem.action = #selector(triggerUpdate)
+            menu.addItem(checkForUpdatesItem)
+        }
+
         let notices = NSMenuItem(title: "About & Notices…", action: #selector(openNotices), keyEquivalent: "")
         notices.target = self
         menu.addItem(notices)

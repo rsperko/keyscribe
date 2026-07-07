@@ -27,6 +27,30 @@ struct MenuBarIconTests {
         #expect(controller.updateItem.image === MenuBarController.updateIndicatorImage)
     }
 
+    @Test func checkForUpdatesItemAbsentWithoutAnUpdater() {
+        let controller = MenuBarController()
+        controller.install()
+
+        let titles = controller.mainMenu?.items.map(\.title) ?? []
+        #expect(!titles.contains("Check for Updates…"))
+    }
+
+    @Test func checkForUpdatesItemSitsBetweenSettingsAndAbout() {
+        let controller = MenuBarController()
+        controller.showsUpdateCheck = true
+        controller.install()
+
+        let titles = controller.mainMenu?.items.map(\.title) ?? []
+        guard let settings = titles.firstIndex(of: "Settings…"),
+              let check = titles.firstIndex(of: "Check for Updates…"),
+              let about = titles.firstIndex(of: "About & Notices…")
+        else {
+            Issue.record("expected Settings…, Check for Updates…, and About & Notices… items")
+            return
+        }
+        #expect(settings < check && check < about)
+    }
+
     // H1: without `autoenablesItems = false`, AppKit force-enables "Paste Last Dictation" at display
     // time (its target responds to its action), overriding `setHasResult(false)` — clicking it would
     // call `onPasteLast` with nothing to paste. `NSMenu.update()` runs the same validation pass AppKit

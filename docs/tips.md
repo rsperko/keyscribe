@@ -28,6 +28,47 @@ dictionary for the ears, replacement for the mouth.
 as written — no added capitalization, no trailing period, and it skips the AI rewrite entirely. That's
 what makes `slash resume` → `/resume` land as a clean `/resume` you can paste straight into a shell.
 
+## Insert symbols that land with the right spacing
+
+Speech-to-text scatters little periods, commas, and spaces around the words you say — so a plain
+replacement for a symbol often comes out with a stray space or comma clinging to it. A **regex**
+replacement can swallow that surrounding punctuation so the symbol lands clean.
+
+The trick is a boundary class — `[\s,.]*` means "any run of spaces, commas, or periods, or none at
+all" — placed on the side you want the symbol to hug. Two things matter: use `*` (or `?`), never `+`,
+so the rule still fires when you say the phrase by itself; and put the class on the side that should
+hug. Use a whitespace-only `\s*` on a side where you want to *keep* the punctuation you dictated.
+
+**Smart quotes.** Two rules, one hugging each side (mark them **Regex**):
+
+| Say | heard | replace |
+|---|---|---|
+| begin quote | `begin quote[\s.,]*` | `"` |
+| end quote | `[\s,.]*end quote[,.]?` | `"` |
+
+Now "begin quote the dog jumped over the moon end quote and then the end of the sentence" comes out as
+`"the dog jumped over the moon" and then the end of the sentence` — the opening quote against the
+first word, the closing quote against the last, no stray spaces.
+
+**Code fence.** One rule drops a Markdown code fence on its own line. The backticks make a table
+awkward, so here it is as config:
+
+```toml
+[[rules]]
+heard = '\s*code fence[\s.,]*'
+replace = '\n```\n'
+regex = true
+```
+
+Say "code fence" to open a block, dictate your code, say "code fence" again to close it. Because the
+replacement is written with a TOML **literal** (single-quoted) string, the `\n` becomes a real
+newline (Regex mode) instead of the two characters backslash-n.
+
+These recipes are most predictable in a mode with AI rewrite **off**, where output is inserted exactly
+as the rules produce it; with rewrite on, the model tends to fix quote spacing on its own. And spoken
+entirely on their own — just "code fence," nothing else — they come out bare, skipping the rewrite
+(the same whole-utterance behavior that makes `slash resume` land as a clean `/resume`).
+
 ## Inject a secret or URL mid-dictation without it reaching the AI
 
 Say `insert clipboard contents` while dictating to drop whatever you've copied into the text at that

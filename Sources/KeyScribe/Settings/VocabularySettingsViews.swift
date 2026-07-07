@@ -191,10 +191,18 @@ final class DictionarySettingsModel: ObservableObject {
     @Published private(set) var error: String?
 
     private let repository: ConfigRepository
+    private var isApplyingLocalMutation = false
 
     init(repository: ConfigRepository) {
         self.repository = repository
         reload()
+        // The global Add-to-Vocabulary hotkey writes through the same repository while this pane is open;
+        // reload on any external write so the list reflects the just-added word without waiting for a
+        // pane revisit or an in-pane mutation. Skip the reentrant reload our own writes fire.
+        repository.addChangeObserver { [weak self] in
+            guard let self, !self.isApplyingLocalMutation else { return }
+            self.reload()
+        }
     }
 
     func reload() {
@@ -214,6 +222,8 @@ final class DictionarySettingsModel: ObservableObject {
     // and invalidates the ConfigCache. The global Add-to-Vocabulary hotkey writes through the same repository
     // while this pane is open, so mutating stale in-memory state would silently drop that just-added word.
     private func mutate(_ transform: (DictionarySet) -> DictionarySet) {
+        isApplyingLocalMutation = true
+        defer { isApplyingLocalMutation = false }
         do {
             words = try repository.mutateDictionary(transform).words
             error = nil
@@ -229,10 +239,18 @@ final class ReplacementsSettingsModel: ObservableObject {
     @Published private(set) var error: String?
 
     private let repository: ConfigRepository
+    private var isApplyingLocalMutation = false
 
     init(repository: ConfigRepository) {
         self.repository = repository
         reload()
+        // The global Add-to-Vocabulary hotkey writes through the same repository while this pane is open;
+        // reload on any external write so the list reflects the just-added rule without waiting for a
+        // pane revisit or an in-pane mutation. Skip the reentrant reload our own writes fire.
+        repository.addChangeObserver { [weak self] in
+            guard let self, !self.isApplyingLocalMutation else { return }
+            self.reload()
+        }
     }
 
     func reload() {
@@ -260,6 +278,8 @@ final class ReplacementsSettingsModel: ObservableObject {
     // resolves the displayed row to a rule value first, then removes the matching rule from the
     // freshly-read set, so a rule the global hotkey appended concurrently is preserved.
     private func mutate(_ transform: (inout ReplacementsSet) -> Void) {
+        isApplyingLocalMutation = true
+        defer { isApplyingLocalMutation = false }
         do {
             rules = try repository.mutateReplacements(transform).rules
             error = nil
