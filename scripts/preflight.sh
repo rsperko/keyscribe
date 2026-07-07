@@ -179,7 +179,7 @@ will_run() {
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
 REQ_CORE="a-swift-test a-artifact a-codesign a-metallib a-plist b-commands b-benchmark"
-REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg c-plain-dictation c-private-rewrite"
+REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
   bold "checks (tier A/B automated, tier C human):"
@@ -302,6 +302,32 @@ else
     fi
   }
   guard a-dmg "$(sig_dmg "$DMG")" chk_a_dmg
+
+  # The production build ships Sparkle for in-app updates; a broken updater is invisible until a user
+  # tries to update (or the app crashes at launch on a missing rpath). Gate the three ways it silently
+  # breaks: framework not embedded (release built without KEYSCRIBE_SPARKLE=1), the load-bearing
+  # @executable_path/../Frameworks rpath missing (dyld can't find it → launch crash), or SUPublicEDKey
+  # absent/placeholder (updates can't be EdDSA-verified). See agent_notes/distribution_plan/sparkle.md.
+  chk_a_sparkle() {
+    [ -d "$APP_PATH" ] || { result skip "Sparkle updater — artifact missing"; return; }
+    local BIN FW PL KEY
+    BIN="$APP_PATH/Contents/$APP_BIN"
+    FW="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+    PL="$APP_PATH/Contents/Info.plist"
+    KEY=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PL" 2>/dev/null || echo "")
+    if ! otool -L "$BIN" 2>/dev/null | grep -q "Sparkle.framework"; then
+      result fail "binary does not link Sparkle — release built without KEYSCRIBE_SPARKLE=1; the app cannot self-update"
+    elif [ ! -d "$FW" ]; then
+      result fail "binary links Sparkle but Sparkle.framework is NOT embedded — dyld will fail at launch"
+    elif ! otool -l "$BIN" 2>/dev/null | grep -q "@executable_path/../Frameworks"; then
+      result fail "missing @executable_path/../Frameworks rpath — dyld cannot load Sparkle.framework; the app crashes at launch"
+    elif [ -z "$KEY" ] || [[ "$KEY" == *"__"* ]]; then
+      result fail "SUPublicEDKey absent/placeholder in Info.plist — updates cannot be EdDSA-verified"
+    else
+      result pass "Sparkle updater intact: binary links Sparkle, framework embedded, Frameworks rpath present, SUPublicEDKey set"
+    fi
+  }
+  guard a-sparkle "$(sig_artifact)" chk_a_sparkle
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════

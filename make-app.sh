@@ -111,7 +111,11 @@ fi
 # variant, so this is a clean no-op for dev/custom builds and a downstream white-label build that builds
 # via `make-app.sh KEYSCRIBE_VARIANT=custom` needs no change here. See agent_notes/distribution_plan/sparkle.md.
 SPARKLE_FW=".build/$CONFIG/Sparkle.framework"
-if [ -d "$SPARKLE_FW" ]; then
+# Key off the BINARY actually linking Sparkle, not just the framework being present in .build — a prior
+# KEYSCRIBE_SPARKLE=1 build can leave a stale Sparkle.framework in .build that a later flag-off build
+# would otherwise embed into an app whose binary does not link it (dead weight, and it fools a presence
+# check). The otool linkage test only passes when this build actually linked Sparkle.
+if otool -L "$APP/Contents/MacOS/KeyScribe" 2>/dev/null | grep -q "Sparkle.framework" && [ -d "$SPARKLE_FW" ]; then
   echo "== embedding Sparkle.framework =="
   mkdir -p "$APP/Contents/Frameworks"
   rm -rf "$APP/Contents/Frameworks/Sparkle.framework"

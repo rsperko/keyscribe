@@ -66,6 +66,11 @@ fi
 # the release asset just uploaded. Idempotent, so re-running publish is safe.
 echo "== refresh + push appcast =="
 ./scripts/appcast.sh
+# A malformed appcast breaks the update feed for every installed client — validate before committing.
+python3 -c "import xml.dom.minidom; xml.dom.minidom.parse('appcast.xml')" \
+  || { echo "error: appcast.xml is not valid XML — refusing to publish a broken feed." >&2; exit 1; }
+grep -q "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" appcast.xml \
+  || { echo "error: appcast.xml has no item for $VERSION — appcast.sh did not upsert this release." >&2; exit 1; }
 git add appcast.xml
 if git diff --cached --quiet; then
   echo "  appcast unchanged — nothing to push"
