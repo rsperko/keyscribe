@@ -70,6 +70,7 @@ struct BareReplacementInsertionTests {
 
     private let slashReplace = [ReplacementsSet.Rule(heard: "slash replace", replace: "/replace", regex: false)]
     private let slashWord = [ReplacementsSet.Rule(heard: #"slash (\w+)"#, replace: "/$1", regex: true)]
+    private let codeFence = [ReplacementsSet.Rule(heard: "insert code fence", replace: #"```\n"#, regex: true)]
 
     // The whole utterance is the replacement → bare, no trailing space, despite trailing = .space.
     @Test func wholeUtteranceLiteralIsBare() async {
@@ -101,5 +102,9 @@ struct BareReplacementInsertionTests {
     // instead of missing and falling through to "Slash Dog. ".
     @Test func capitalizedSTTStillClampsBare() async {
         #expect(await run(transcript: "Slash dog.", rules: slashWord) == "/dog")
+    }
+
+    @Test func wholeUtteranceEscapeExpandedNewlineIsBare() async {
+        #expect(await run(transcript: "insert code fence", rules: codeFence) == "```\n")
     }
 }

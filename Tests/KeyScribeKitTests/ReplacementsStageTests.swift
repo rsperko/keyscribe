@@ -91,6 +91,23 @@ struct ReplacementsStageTests {
         #expect(run([rule], on: "slash dog") == "/dog")
     }
 
+    @Test func regexReplacementInterpretsEscapes() {
+        #expect(run([ReplacementRule(heard: "insert code fence", replace: #"```\n"#, isRegex: true)],
+                    on: "insert code fence") == "```\n")
+        #expect(run([ReplacementRule(heard: "tab here", replace: #"\t"#, isRegex: true)], on: "tab here")
+            == "\t")
+    }
+
+    // `\\n` is the escape hatch for a literal backslash + n.
+    @Test func regexEscapedBackslashStaysLiteral() {
+        #expect(run([ReplacementRule(heard: "back", replace: #"\\n"#, isRegex: true)], on: "back") == #"\n"#)
+    }
+
+    @Test func literalReplacementDoesNotInterpretEscapes() {
+        #expect(run([ReplacementRule(heard: "fence", replace: #"```\n"#, isRegex: false)], on: "fence")
+            == #"```\n"#)
+    }
+
     @Test func rulesApplyInOrder() {
         let rules = [
             ReplacementRule(heard: "cat", replace: "dog", isRegex: false),

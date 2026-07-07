@@ -336,6 +336,24 @@ How a rule behaves once it matches:
   `\$` for a literal `$`) works as usual. Note the capture preserves the *matched* text's case — the
   replacement template has no case-folding, so `slash (\w+)` → `/$1` on a spoken "Dog" yields `/Dog`,
   not `/dog`.
+- **Regex rules interpret `\n` / `\t` / `\r` in the replacement as real newline / tab / carriage
+  return** — the same convention as an editor's regex-mode replace field (VS Code, Sublime). A
+  literal rule does *not* interpret them; write `\\` for a literal backslash. **Spell the escape with a
+  TOML literal (single-quoted) string** so the backslash reaches the rule intact — this is also how the
+  Settings editor writes it:
+
+  ```toml
+  [[rules]]
+  heard = 'insert code fence'
+  replace = '```\n'      # regex mode: inserts a fenced line + a newline
+  regex = true
+  ```
+
+  Dictate it alone and it comes out **bare** (see below), so the trailing newline is not trimmed. A
+  *basic* (double-quoted) string is a TOML footgun here: TOML itself decodes `"...\n"` to a newline
+  before any rule runs, so `"```\n"` would insert a newline even on a *literal* rule — use `'...\n'`
+  (or `"...\\n"`) to keep the `regex` flag in control. Note a control char is inserted as-is only on
+  the whole-utterance (bare) path; used mid-sentence it flows through the AI rewrite like any text.
 
 - **A replacement that owns the WHOLE utterance is inserted exactly — bare.** When the entire
   dictation (ignoring surrounding whitespace and a trailing `.` / `!` / `?`) reduces to a single

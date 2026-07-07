@@ -14,9 +14,9 @@ public struct ReplacementRule: Sendable, Equatable {
 
 // Post-STT text stage. Literal matches are case-insensitive and word-boundary constrained ("pipe" never
 // replaces inside "pipeline"; use a regex rule for substring matching). Literal replacement text is inserted
-// verbatim ($ / \ are not template refs); regex rules use NSRegularExpression template substitution ($1, \$).
-// An invalid regex is skipped, not fatal. Runs before tokenization (design.md §4.2.1); not protected from a
-// later LLM rewrite (design.md §4.2).
+// verbatim ($ / \ are not template refs); regex rules use NSRegularExpression template substitution ($1, \$)
+// and interpret `\n`/`\t`/`\r` as control chars (see ReplacementEscapes). An invalid regex is skipped, not
+// fatal. Runs before tokenization (design.md §4.2.1); not protected from a later LLM rewrite (design.md §4.2).
 public struct ReplacementsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.replacements
@@ -40,7 +40,7 @@ public struct ReplacementsStage: PipelineStage {
                 // a case-sensitive pattern would silently miss. Opt back in with an inline `(?-i)`.
                 guard ReplacementSafety.isSafe(rule.heard),
                       let re = RegexCache.regex(rule.heard, options: [.caseInsensitive]) else { return nil }
-                return (re, rule.replace)
+                return (re, ReplacementEscapes.expandTemplate(rule.replace))
             }
             guard let first = rule.heard.first, let last = rule.heard.last else { return nil }
             // `\b` only exists between a word and a non-word char, so wrapping a term whose edge is already

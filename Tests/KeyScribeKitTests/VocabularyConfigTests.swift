@@ -25,6 +25,55 @@ struct VocabularyConfigTests {
         #expect(r.toRules() == [ReplacementRule(heard: "teh", replace: "the", isRegex: false)])
     }
 
+    // A single-quoted TOML literal string keeps `\n` as backslash+n, so the regex expansion (not TOML's own
+    // basic-string decoding) is what produces the newline through the stage.
+    @Test func regexEscapeExpansionRunsThroughTheTomlLiteralStringPath() throws {
+        let toml = """
+        schema_version = 1
+        [[rules]]
+        heard = 'insert code fence'
+        replace = '```\\n'
+        regex = true
+        """
+        let rules = try ReplacementsStore.decode(from: toml).toRules()
+        #expect(rules[0].replace == #"```\n"#)
+        var ctx = PipelineContext(text: "insert code fence")
+        ReplacementsStage(rules: rules).apply(&ctx)
+        #expect(ctx.text == "```\n")
+        #expect(ctx.bareReplacement == "```\n")
+    }
+
+    @Test func literalRuleThroughTomlLeavesEscapeUninterpreted() throws {
+        let toml = """
+        schema_version = 1
+        [[rules]]
+        heard = 'fence'
+        replace = '```\\n'
+        regex = false
+        """
+        let rules = try ReplacementsStore.decode(from: toml).toRules()
+        var ctx = PipelineContext(text: "fence")
+        ReplacementsStage(rules: rules).apply(&ctx)
+        #expect(ctx.text == #"```\n"#)
+    }
+
+    // TOMLKit encodes a backslash value as a literal string, so the Settings-UI write→load round-trip
+    // preserves the `\n` the regex expansion needs.
+    @Test func settingsWriteRoundTripPreservesBackslashEscape() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-replacements-escape-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let set = ReplacementsSet(rules: [.init(heard: "insert code fence", replace: #"```\n"#, regex: true)])
+        try ReplacementsStore.write(set, to: dir)
+        guard case let .loaded(reloaded) = ReplacementsStore.load(supportDir: dir) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(reloaded.rules[0].replace == #"```\n"#)
+        var ctx = PipelineContext(text: "insert code fence")
+        ReplacementsStage(rules: reloaded.toRules()).apply(&ctx)
+        #expect(ctx.bareReplacement == "```\n")
+    }
+
     @Test func missingSchemaVersionThrows() {
         #expect(throws: ConfigError.missingSchemaVersion) {
             try DictionaryStore.decode(from: "words = []")

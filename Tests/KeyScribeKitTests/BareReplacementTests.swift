@@ -168,6 +168,12 @@ struct BareReplacementTests {
         #expect(detect(rules, on: "slash resume \t") == "/resume\t")
     }
 
+    @Test func wholeUtteranceRegexEscapeExpandsInClamp() {
+        let rules = [ReplacementRule(heard: "insert code fence", replace: #"```\n"#, isRegex: true)]
+        #expect(detect(rules, on: "insert code fence") == "```\n")
+        #expect(detect(rules, on: "Insert code fence.") == "```\n")
+    }
+
     // Pure punctuation/whitespace reduces to empty core → no clamp, no crash.
     @Test func emptyCoreNeverClamps() {
         let rules = [ReplacementRule(heard: "slash replace", replace: "/replace", isRegex: false)]
