@@ -39,11 +39,15 @@
 ## Remaining work
 
 ### Distribution & updates
-- **Sparkle decision and implementation.** The menu-bar **update badge** (amber dot, top-right —
-  `ui_design.md` §6), the matching update menu item, and the `AppUpdater` injection seam
-  (`Sources/KeyScribeKit/AppUpdater.swift`) are built and wired. Before 1.0, decide whether the
-  public app uses Sparkle and, if so, land the update contract: appcast hosting, EdDSA signing keys,
-  release-note source, update cadence, failure UX, and release/preflight coverage.
+- **Sparkle in-app updates — decided and wired; publish pipeline remaining.** The menu-bar **update
+  badge** (amber dot — `ui_design.md` §6), the update menu item, and the `AppUpdater` seam are built.
+  The public app uses **Sparkle 2, EdDSA-verified**, added as a manifest-gated dependency
+  (`KEYSCRIBE_SPARKLE=1`) injected only for `.production` — dev and downstream white-label builds carry
+  no Sparkle (`agent_notes/distribution_plan/sparkle.md`). Done: `SparkleUpdater` adapter, EdDSA key +
+  `SUPublicEDKey`, `make-app.sh` framework embed/sign, `release.sh` hardened re-sign. **Remaining before
+  1.0:** stand up `appcast.xml` + `sign_update` publish step, verify a real A→B update on an install,
+  a notarization run confirming the nested-XPC signing, `release/preflight` coverage, and the Homebrew
+  cask `auto_updates true`.
 
 ### Polish
 - **Mode editor visual QA.** The editor uses a progressive surface: common settings are visible,

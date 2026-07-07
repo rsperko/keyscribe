@@ -50,15 +50,20 @@ When it runs:
 
 ## Network use, in full
 
-KeyScribe touches the network in exactly two situations:
+KeyScribe touches the network in exactly three situations:
 
 1. **Downloading speech models** — on-device engine weights are fetched on demand from their
    publishers (e.g. Hugging Face) the first time you select an engine, then cached locally and reused
    offline.
 2. **The optional BYOK LLM cleanup** — described above, to your own provider.
+3. **Checking for app updates** — KeyScribe periodically fetches a small update feed to see whether a
+   newer version is available, and downloads it only if you choose to install one. It asks before the
+   first automatic check and you can turn it off. It carries no speech, transcript, or usage data —
+   only the metadata any HTTP request unavoidably reveals (your IP address and the app/OS version); the
+   updater's optional anonymous system profiling is left disabled. Updates are cryptographically
+   verified before they run.
 
-There is no background phone-home, update ping (in-app updates are a planned, opt-in feature), or
-license check.
+There is no background phone-home or license check.
 
 ## The redaction wedge — and its limits
 
