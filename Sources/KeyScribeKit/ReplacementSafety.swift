@@ -3,14 +3,17 @@ import Foundation
 // Static guard against catastrophic-backtracking ("evil") user regexes on the hot path. A pattern like
 // `(a+)+$` can hang `NSRegularExpression` for seconds with no way to interrupt a synchronous match, so the
 // only safe defence is to refuse it before it runs. Flags the dominant failure mode — a repetition
-// quantifier applied to a group whose body already contains a repetition (nested quantifiers). Conservative:
-// never rejects a non/singly-quantified pattern, and misses rarer alternation-overlap evils like `(a|a)*`.
+// quantifier applied to a group whose body is itself ambiguous: it either repeats (`*`/`+`/`{n≥2}`) or is
+// nullable (`?`/`{0,…}`). A nullable body under a counted outer quantifier (`(a?){25}`) is the same
+// combinatorial explosion as `(a+)+`. Conservative: never rejects a non/singly-quantified pattern, over-
+// rejects benign shapes like `(https?)+`, and misses rarer alternation-overlap evils like `(a|a)*`.
 public enum ReplacementSafety {
     public static func isSafe(_ pattern: String) -> Bool {
         let chars = Array(pattern)
-        var stack: [Bool] = []          // per open group: does its body contain a repetition?
-        var poppedHadRepeat = false     // did the group that just closed contain a repetition?
+        var stack: [Bool] = []          // per open group: is its body ambiguous (repeats or nullable)?
+        var poppedHadRepeat = false     // was the group that just closed ambiguous?
         var lastWasGroupClose = false
+        var lastWasGroupOpen = false
         var i = 0
 
         func markEnclosingGroupRepeats() {
@@ -20,7 +23,7 @@ public enum ReplacementSafety {
         while i < chars.count {
             let c = chars[i]
 
-            if c == "\\" { i += 2; lastWasGroupClose = false; continue }
+            if c == "\\" { i += 2; lastWasGroupClose = false; lastWasGroupOpen = false; continue }
 
             if c == "[" {
                 i += 1
@@ -31,15 +34,17 @@ public enum ReplacementSafety {
                 }
                 i += 1
                 lastWasGroupClose = false
+                lastWasGroupOpen = false
                 continue
             }
 
-            if c == "(" { stack.append(false); lastWasGroupClose = false; i += 1; continue }
+            if c == "(" { stack.append(false); lastWasGroupClose = false; lastWasGroupOpen = true; i += 1; continue }
 
             if c == ")" {
                 poppedHadRepeat = stack.popLast() ?? false
                 if poppedHadRepeat { markEnclosingGroupRepeats() }
                 lastWasGroupClose = true
+                lastWasGroupOpen = false
                 i += 1
                 continue
             }
@@ -48,33 +53,45 @@ public enum ReplacementSafety {
                 if lastWasGroupClose && poppedHadRepeat { return false }
                 markEnclosingGroupRepeats()
                 lastWasGroupClose = false
+                lastWasGroupOpen = false
+                i += 1
+                continue
+            }
+
+            // `?` after `(` is group syntax (`(?:`/`(?i)`/`(?=`), not a quantifier. Elsewhere it makes the
+            // preceding atom nullable → mark the enclosing group (but `?` alone never triggers a reject).
+            if c == "?" {
+                if !lastWasGroupOpen { markEnclosingGroupRepeats() }
+                lastWasGroupClose = false
+                lastWasGroupOpen = false
                 i += 1
                 continue
             }
 
             if c == "{" {
-                if let (end, allowsRepetition) = parseBrace(chars, from: i) {
-                    if allowsRepetition {
-                        if lastWasGroupClose && poppedHadRepeat { return false }
-                        markEnclosingGroupRepeats()
-                    }
+                if let (end, allowsRepetition, isNullable) = parseBrace(chars, from: i) {
+                    if allowsRepetition && lastWasGroupClose && poppedHadRepeat { return false }
+                    if allowsRepetition || isNullable { markEnclosingGroupRepeats() }
                     i = end + 1
                     lastWasGroupClose = false
+                    lastWasGroupOpen = false
                     continue
                 }
             }
 
             lastWasGroupClose = false
+            lastWasGroupOpen = false
             i += 1
         }
         return true
     }
 
-    // Parses a `{...}` quantifier from `from`. Returns the closing brace index and whether it permits ≥2
-    // repetitions (`{n,}`, `{n,m}` m≥2, `{n}` n≥2) — any such quantifier on a group whose body already
-    // repeats is the same `(a+)+` combinatorial danger regardless of bound (e.g. `(a+){2,999}`).
-    // `{0,1}`/`{1,1}`/`{0}`/`{1}` permit ≤1 and are safe. nil if `{` is not a valid quantifier (literal brace).
-    private static func parseBrace(_ chars: [Character], from: Int) -> (end: Int, allowsRepetition: Bool)? {
+    // Parses a `{...}` quantifier from `from`. Returns the closing brace index, whether it permits ≥2
+    // repetitions (`{n,}`, `{n,m}` m≥2, `{n}` n≥2), and whether it is nullable (`{0,…}` / `{0}`). Either
+    // property makes a group body ambiguous — `(a+){2,999}` explodes on the repeat, `(a?){25}` on the
+    // nullable — so both feed the same `(a+)+` danger check. `{1}`/`{1,1}` permit exactly one and are safe.
+    // nil if `{` is not a valid quantifier (literal brace).
+    private static func parseBrace(_ chars: [Character], from: Int) -> (end: Int, allowsRepetition: Bool, isNullable: Bool)? {
         var j = from + 1
         var body = ""
         while j < chars.count && chars[j] != "}" { body.append(chars[j]); j += 1 }
@@ -90,6 +107,7 @@ public enum ReplacementSafety {
         } else {
             allowsRepetition = (Int(parts[0]) ?? 0) >= 2                       // {n}
         }
-        return (j, allowsRepetition)
+        let isNullable = (parts[0].isEmpty || (Int(parts[0]) ?? 0) == 0)       // {0,…} / {0}
+        return (j, allowsRepetition, isNullable)
     }
 }

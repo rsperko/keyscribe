@@ -20,7 +20,8 @@ enum ModelSelfTestRunner {
     // transcribe is injected so the caller can serialize it against live dictation on the same non-actor
     // engine instance; a bare engine.transcribe here would race it.
     static func verify(
-        _ engine: any SpeechEngine, transcribe: @Sendable (URL, [String]) async throws -> String
+        _ engine: any SpeechEngine, clipURL: URL? = ModelSelfTestRunner.clipURL,
+        transcribe: @Sendable (URL, [String]) async throws -> String
     ) async -> Bool? {
         guard let url = clipURL else {
             Log.models.notice("self-test \(engine.id, privacy: .public): skipped (no bundled clip)")

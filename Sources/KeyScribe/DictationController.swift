@@ -48,6 +48,12 @@ final class DictationController {
     private var transcribeBusyStreakStartedAt: Double?
     private static let transcribeBusyStreakLimit = 3
     private static let transcribeBusyBackstopSeconds: Double = 600
+    // A counter, not a flag: several model rows can verify at once, and each holder must keep occupancy up
+    // until its own use settles.
+    private var selfTestGateUsers = 0
+    private static let selfTestSettlePollMs = 20
+    private static let selfTestClearancePolls = 150
+    var selfTestClipURLOverride: URL?
     private weak var hud: HUDPresenting?
 
     private var machine = DictationMachine()
@@ -354,7 +360,9 @@ final class DictationController {
     func selfTestForSettings(_ engine: any SpeechEngine) async -> Bool? {
         guard !isBusy else { return nil }
         let gate = transcribeGate
-        return await ModelSelfTestRunner.verify(engine) { url, biasTerms in
+        let clip = selfTestClipURLOverride ?? ModelSelfTestRunner.clipURL
+        selfTestGateUsers += 1
+        let result = await ModelSelfTestRunner.verify(engine, clipURL: clip) { url, biasTerms in
             do {
                 return try await gate.run(seconds: Self.selfTestTimeoutSeconds) {
                     try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
@@ -363,8 +371,24 @@ final class DictationController {
                 throw ModelSelfTestRunner.Skipped()
             }
         }
+        // The gate releases on a detached task just after gate.run returns, so hold occupancy until it truly
+        // clears — a waiting dictation must re-enter a free gate, not race the release window.
+        if result != nil {
+            for _ in 0..<Self.selfTestClearancePolls where await gate.isBusy {
+                try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
+            }
+        }
+        selfTestGateUsers -= 1
+        return result
     }
     private static let selfTestTimeoutSeconds: Double = 30
+
+    // Bounded, so a genuinely wedged engine still falls through to the Busy → error path.
+    private func awaitSelfTestClearance() async {
+        for _ in 0..<Self.selfTestClearancePolls where selfTestGateUsers > 0 {
+            try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
+        }
+    }
 
     // Warm the active STT engine at press, overlapping model load (CoreML/MLX compile, ANE warmup) with
     // speech instead of paying it after release. Idempotent; never blocks recording (failures surface later
@@ -838,6 +862,7 @@ final class DictationController {
     // reports "Still finishing…". Stamps .streamFinalize on success.
     private func finalizeStreamingIfActive(audioSeconds: Double) async -> StreamingFinalizeOutcome {
         guard let driver = session?.streamingDriver else { return .batch }
+        await awaitSelfTestClearance()
         let continuation = session?.streamingSampleContinuation
         let feedTask = session?.streamingFeedTask
         let finalizeStart = DispatchTime.now()
@@ -969,6 +994,7 @@ final class DictationController {
     // cancellation is abandoned at the deadline; a late result no-ops. An abandoned transcribe may still run,
     // so the gate refuses a second concurrent call (throws `Busy`) until it settles — two never run at once.
     private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL, samples: [Float]?) async throws -> String {
+        await awaitSelfTestClearance()
         let timeout = max(30, audioSeconds * 20)
         return try await transcribeGate.run(seconds: timeout) {
             // Prefer the in-memory PCM when the engine accepts it (P2-1); fall back to the WAV otherwise.
@@ -1108,8 +1134,11 @@ final class DictationController {
         // and is stripped from the transcript; otherwise the Phase-A mode stands.
         let eligible = session?.eligibleModes ?? []
         let routed = ModeResolver.resolvePhaseB(eligibleModes: eligible, transcript: raw, context: session?.routingContext ?? RoutingContext())
-        let finalMode = routed.routedModeId.flatMap { id in eligible.first { $0.id == id } } ?? activeMode
-        if let finalMode { activeMode = securePolicyApplied(finalMode) }
+        // Neuter the routed mode BEFORE it drives the rewrite: produceFinalText resolves the connection off
+        // this mode, so a Phase-B re-route to a cloud mode from a secure field must be local-only here, not
+        // only on the stored activeMode.
+        let finalMode = securePolicyApplied(routed.routedModeId.flatMap { id in eligible.first { $0.id == id } } ?? activeMode)
+        activeMode = finalMode
         session?.pendingHeardTranscript = raw
         let (final, rewrite, transformed) = await produceFinalText(routed: routed, mode: finalMode)
 

@@ -64,9 +64,8 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
                 try? FileManager.default.removeItem(at: local)
             }
         }
-        let base = modelsDir.appendingPathComponent(installDir, isDirectory: true)
         let folder = try await WhisperKit.download(
-            variant: variant, downloadBase: base,
+            variant: variant, downloadBase: installBase,
             progressCallback: { p in
                 progress?(.init(phase: "Downloading speech model…", fraction: p.fractionCompleted * downloadShare))
             })
@@ -84,10 +83,16 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         // saving dominates for an intermittent dictation model; bias (promptTokens) is unaffected.
         let compute = ModelComputeOptions(
             melCompute: .cpuAndGPU, audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndGPU)
+        // Pin the tokenizer under installBase; the Hub default writes it to ~/Documents/huggingface
+        // (Documents TCC prompt, cold-load refetch, orphan).
         let config = WhisperKitConfig(
-            modelFolder: folder.path, computeOptions: compute,
+            modelFolder: folder.path, tokenizerFolder: installBase, computeOptions: compute,
             verbose: false, prewarm: false, load: true, download: false)
         return try await WhisperKit(config)
+    }
+
+    private var installBase: URL {
+        modelsDir.appendingPathComponent(installDir, isDirectory: true)
     }
 
     // WhisperKit.download snapshots the whisperkit-coreml repo under downloadBase, so the variant's

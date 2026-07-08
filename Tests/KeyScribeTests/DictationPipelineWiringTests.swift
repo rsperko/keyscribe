@@ -49,6 +49,15 @@ struct DictationPipelineWiringTests {
         }
     }
 
+    // Records whether the cloud rewrite was ever invoked.
+    private actor SpyLLM: LLMClient {
+        private(set) var called = false
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            called = true
+            return user
+        }
+    }
+
     // Ignores the preserve-tokens rule — the gate must reject it and fall back to local.
     private struct DropTokenLLM: LLMClient {
         func complete(system: String, user: String, connection: Connection) async throws -> String {
@@ -656,6 +665,19 @@ struct DictationPipelineWiringTests {
         let out = await run(transcript: "define a function in code mode",
                             modes: [plain, coder], defaultModeId: plain.id)
         #expect(out.lastResult == "define a func")
+    }
+
+    @Test func phaseBRouteToCloudModeIsLocalOnlyInASecureField() async {
+        let plain = mode(id: "plain")
+        let pig = mode(id: "pig", connectionId: "c", triggerPhrases: ["as pig latin"])
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let spy = SpyLLM()
+        let out = await run(
+            transcript: "my password is hunter2 as pig latin",
+            modes: [plain, pig], defaultModeId: plain.id, connection: conn, llm: spy,
+            snapshotProvider: { TargetSnapshot(bundleId: "test.bundle", isSecureField: true) })
+        #expect(await spy.called == false)
+        #expect(out.lastResult == "my password is hunter2")
     }
 
     // ── Edit-in-place (selection mode) ─────────────────────────────────────────────────────────────

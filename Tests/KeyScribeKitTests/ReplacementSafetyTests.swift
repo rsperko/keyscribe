@@ -35,6 +35,22 @@ struct ReplacementSafetyTests {
         #expect(!ReplacementSafety.isSafe(#"(a+){2}"#))
     }
 
+    @Test func rejectsNullableGroupUnderCountedQuantifier() {
+        #expect(!ReplacementSafety.isSafe(#"(a?){25}b"#))
+        #expect(!ReplacementSafety.isSafe(#"(a{0,1}){25}b"#))
+        #expect(!ReplacementSafety.isSafe(#"(a?)*b"#))
+        #expect(!ReplacementSafety.isSafe(#"(a?)+b"#))
+        #expect(!ReplacementSafety.isSafe(#"(\w?){20}x"#))
+        #expect(!ReplacementSafety.isSafe(#"(a{0}){25}b"#))
+    }
+
+    @Test func acceptsOptionalOutsideAQuantifiedGroup() {
+        #expect(ReplacementSafety.isSafe(#"https?://x"#))
+        #expect(ReplacementSafety.isSafe(#"a?b?c?"#))
+        #expect(ReplacementSafety.isSafe(#"(ab)?"#))
+        #expect(ReplacementSafety.isSafe(#"(a{1,1}){25}"#))
+    }
+
     @Test func bracketedQuantifierCharsAreLiteral() {
         #expect(ReplacementSafety.isSafe(#"[+*]+"#))             // + and * inside class are literal
     }
