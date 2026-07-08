@@ -74,6 +74,9 @@ final class CaptureWriter: @unchecked Sendable {
     private var droppedFrames = 0
     private var loggedFirstDrop = false
     private var converterBuildError: Error?
+    // Ring overruns as of the seal; post-seal RT pushes overrun a ring this sealed writer no longer drains, so
+    // they must not reach the ringDropped canary. nil until sealed.
+    private var ringDropsAtSeal: Int?
 
     init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
          admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0, cueWindowSeconds: Double = .infinity,
@@ -180,6 +183,9 @@ final class CaptureWriter: @unchecked Sendable {
         write(input)
         let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
         if observeHostTime(host) {
+            // Snapshot before the tail flush: the RT thread keeps pushing during the flush, and those overruns
+            // are post-release too, so they must not reach the seal snapshot.
+            ringDropsAtSeal = ring.droppedCount
             flushConverterTail()
             sealed = true
         }
@@ -219,6 +225,10 @@ final class CaptureWriter: @unchecked Sendable {
 
     // Safe only after finish() has joined the thread.
     func writerDroppedFrames() -> Int { droppedFrames }
+
+    // nil when the gate never tripped (backstop/cancel drained to the end → the live count is already accurate).
+    // Safe only after finish() has joined the thread.
+    func ringDropCountAtSeal() -> Int? { ringDropsAtSeal }
 
     private func write(_ input: AVAudioPCMBuffer) {
         guard let file else { return }

@@ -7,8 +7,8 @@ import Synchronization
 private final class HALRenderContext {
     var unit: AudioUnit?
     var scratch: AVAudioPCMBuffer?
-    // Buffers dropped because the device grew its IO period past scratch mid-capture: the RT callback must
-    // not reallocate, so it drops (counted). Read off-RT for diagnostics.
+    // Frames dropped because the device grew its IO period past scratch mid-capture: the RT callback must not
+    // reallocate, so it drops (counted). Read off-RT for diagnostics.
     let oversizeDrops = Atomic<UInt64>(0)
     let handler: (AVAudioPCMBuffer, UInt64?) -> Void
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) { self.handler = handler }
@@ -31,6 +31,9 @@ final class HALInputUnit {
     static let scratchFrameCeiling: AVAudioFrameCount = 8192
 
     var oversizeDropCount: Int { Int(context.oversizeDrops.load(ordering: .relaxed)) }
+
+    // Zero the per-capture drop count at arm; a reused (non-Bluetooth) unit carries its context across captures.
+    func resetOversizeDropCount() { context.oversizeDrops.store(0, ordering: .relaxed) }
 
     init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) {
         self.context = HALRenderContext(handler: handler)
@@ -164,7 +167,7 @@ private let halInputRenderCallback: AURenderCallback = {
     // No allocation on the RT thread: if the device grew its IO period past scratch, drop (counted) rather
     // than reallocate.
     guard let buffer = context.scratch, buffer.frameCapacity >= inNumberFrames else {
-        context.oversizeDrops.add(1, ordering: .relaxed)
+        context.oversizeDrops.add(UInt64(inNumberFrames), ordering: .relaxed)
         return noErr
     }
     buffer.frameLength = inNumberFrames

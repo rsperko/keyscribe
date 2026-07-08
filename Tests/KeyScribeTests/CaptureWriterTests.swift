@@ -243,6 +243,48 @@ struct CaptureWriterTests {
         #expect(writer.writerDroppedFrames() == 300)
     }
 
+    // AUD-5: post-seal ring overruns (RT keeps pushing after the writer sealed) must not reach the seal snapshot.
+    @Test func postSealRingOverrunsAreExcludedFromTheSealSnapshot() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = recordFormat(16_000)
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 1024, maxChannels: 2)
+        // Seal on the first slot's host time, with no pre-seal ring drops.
+        let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { ($0 ?? 0) >= 1 })
+        writer.start()
+        ring.write(channelCount: 1, frameCount: 100, sampleRate: 16_000, hostTime: 1) { _, dest in
+            for k in 0..<dest.count { dest[k] = 0.25 }
+        }
+        writer.finish(flushConverter: true)
+        // Stand in for the RT thread still pushing post-seal: nothing drains these, so they overrun the ring.
+        for i in 2...20 {
+            ring.write(channelCount: 1, frameCount: 100, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
+                for k in 0..<dest.count { dest[k] = 0.25 }
+            }
+        }
+        #expect(ring.droppedCount > 0)              // post-seal overruns hit the live counter
+        #expect(writer.ringDropCountAtSeal() == 0)  // but the sealed snapshot excludes them
+    }
+
+    // AUD-5: a capture whose gate never trips (backstop/cancel) has no seal snapshot → caller uses the live count.
+    @Test func anUnsealedCaptureHasNoSealSnapshot() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = recordFormat(16_000)
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
+        let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
+        writer.start()
+        for i in 1...4 {
+            ring.write(channelCount: 1, frameCount: 100, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
+                for k in 0..<dest.count { dest[k] = 0.25 }
+            }
+        }
+        writer.finish(flushConverter: true)
+        #expect(writer.ringDropCountAtSeal() == nil)
+    }
+
     @Test func finishIsIdempotentAcrossMultipleCallers() throws {
         // Both the teardown path and the next capture's arm can call finish() — every caller must return only
         // after the thread has exited, and repeat calls must not hang or corrupt the file.

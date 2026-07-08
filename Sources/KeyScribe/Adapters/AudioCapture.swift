@@ -143,6 +143,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Stashed at teardown so diagnostics survive resizing the ring back to baseline.
     private var lastRingDroppedCount = 0
     private var lastWriterDroppedCount = 0
+    private var lastOversizeDroppedCount = 0
+    // A mid-capture restart disposes the unit that accrued the oversize drops, so harvest its count here before
+    // the dispose; teardown adds the surviving unit's count. Reset per arm. Guarded by `lock`.
+    private var oversizeDropsAccumulated = 0
     // The committed capture's in-memory mono PCM (P2-1), kept only on the commit path (flushConverter == true)
     // and consumed once via takeDrainedSamples() after finishDraining(); cancel/stop discard it. Guarded by `lock`.
     private var lastDrainedSamples: [Float]?
@@ -174,8 +178,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var activeDeviceDebounce: DispatchWorkItem?
     // Bounds flapping-device restarts per capture.
     private static let maxConfigRestarts = 5
+    // BufferFrameSize: a mid-capture IO-period growth past scratch triggers the restart (rebuilds scratch at the
+    // new period) instead of silently dropping the rest.
     private static let activeDeviceSelectors: [AudioObjectPropertySelector] =
-        [kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyNominalSampleRate]
+        [kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyNominalSampleRate,
+         kAudioDevicePropertyBufferFrameSize]
 
     init() {
         registerInputListeners()
@@ -385,6 +392,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 "ring resized: slots=\(desiredRing.slotCount, privacy: .public) framesPerSlot=\(desiredRing.maxFramesPerSlot, privacy: .public)")
         }
         overloadCount.store(0, ordering: .relaxed)
+        lock.withLock { unit?.resetOversizeDropCount(); oversizeDropsAccumulated = 0 }
         levelBits.store(Float(0).bitPattern, ordering: .relaxed)
         // The previous capture's samples are consumed by the controller right after finishDraining; clear any
         // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
@@ -440,7 +448,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             throw error
         }
         guard isGeneration(generation) else { return url }
-        installActiveDeviceListener(deviceID: boundDeviceID)
+        installActiveDeviceListener(deviceID: boundDeviceID, generation: generation)
         return url
     }
 
@@ -656,13 +664,18 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // lastWriter until the next arm doesn't pin a redundant idle copy (P2-1). Sealed/backstop paths can't
         // clear in run(), so clear here.
         s.writer.releaseSamples()
-        // Capture-health telemetry: both should be 0 in a healthy run. A non-zero `ringDropped` means the
-        // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
-        // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
-        lastRingDroppedCount = ring.droppedCount
+        // Capture-health telemetry: all should be 0 in a healthy run. A non-zero `ringDropped` means the writer
+        // thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback miss its
+        // deadline. Report ring drops AS OF the seal so post-release overruns the sealed writer discards anyway
+        // don't trip the canary; backstop/cancel paths drained to the end (no seal) → live count.
+        lastRingDroppedCount = s.writer.ringDropCountAtSeal() ?? ring.droppedCount
         lastWriterDroppedCount = s.writer.writerDroppedFrames()
+        // Snapshot before teardown disposes the unit's context; add drops harvested from any unit a mid-capture
+        // restart already disposed. `oversizeDropped` is a silent-loss class upstream of the ring (device grew
+        // its IO period past scratch mid-capture).
+        lastOversizeDroppedCount = lock.withLock { oversizeDropsAccumulated + (unit?.oversizeDropCount ?? 0) }
         Log.audio.debug(
-            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public) writerDropped=\(self.lastWriterDroppedCount, privacy: .public)")
+            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public) writerDropped=\(self.lastWriterDroppedCount, privacy: .public) oversizeDropped=\(self.lastOversizeDroppedCount, privacy: .public)")
         // Writer joined and `capturing` false → ring is quiescent (the window armSync reassigns in). A small-period
         // pro interface can have grown it to ~16.7 MiB that a menu-bar app would retain for its lifetime, so shrink
         // back to baseline here; the next arm re-grows it for the bound device if needed. Zero hot-path cost.
@@ -672,8 +685,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     // Valid from capture end until the next arm resets the counters.
-    func captureDiagnostics() -> (ringDropped: Int, overloads: Int, writerDropped: Int) {
-        (lastRingDroppedCount, overloadCount.load(ordering: .relaxed), lastWriterDroppedCount)
+    func captureDiagnostics() -> (ringDropped: Int, overloads: Int, writerDropped: Int, oversizeDropped: Int) {
+        (lastRingDroppedCount, overloadCount.load(ordering: .relaxed), lastWriterDroppedCount, lastOversizeDroppedCount)
     }
 
     func takeDrainedSamples() -> [Float]? {
@@ -697,6 +710,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
         producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
+        // Remove listeners a completed-then-superseded arm installed, rather than leak them until the next arm.
+        removeActiveDeviceListener()
         s?.writer.finish(flushConverter: false)
         if let s { try? FileManager.default.removeItem(at: s.url) }
     }
@@ -975,7 +990,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // MARK: - Mid-recording device-change recovery
 
-    private func installActiveDeviceListener(deviceID: AudioDeviceID) {
+    private func installActiveDeviceListener(deviceID: AudioDeviceID, generation: Int) {
         removeActiveDeviceListener()
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.handleActiveDeviceChanged() }
         for selector in Self.activeDeviceSelectors {
@@ -995,9 +1010,14 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             mSelector: kAudioDeviceProcessorOverload, mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
         AudioObjectAddPropertyListenerBlock(deviceID, &overloadAddr, deviceListenerQueue, overload)
-        lock.withLock {
+        // Publish only if this generation still owns the capture; a cancel/watchdog that superseded the arm
+        // mid-install gets the just-added blocks unregistered rather than leaked to the device.
+        let stored = lock.withLock { () -> Bool in
+            guard self.generation == generation else { return false }
             activeDeviceListenerBlock = block; activeListenedDeviceID = deviceID; overloadListenerBlock = overload
+            return true
         }
+        if !stored { removeDeviceListenerBlocks(block: block, overload: overload, deviceID: deviceID) }
     }
 
     private func removeActiveDeviceListener() {
@@ -1013,6 +1033,12 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // start a fresh, ownerless capture unit after the mic was supposed to be released (a stranded hot mic).
         pending?.cancel()
         guard let deviceID else { return }
+        removeDeviceListenerBlocks(block: block, overload: overload, deviceID: deviceID)
+    }
+
+    private func removeDeviceListenerBlocks(
+        block: AudioObjectPropertyListenerBlock?, overload: AudioObjectPropertyListenerBlock?, deviceID: AudioDeviceID
+    ) {
         if let block {
             for selector in Self.activeDeviceSelectors {
                 var addr = AudioObjectPropertyAddress(
@@ -1060,6 +1086,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             }
             guard let deviceID = effectiveDeviceID() else { return }
             Log.audio.debug("mid-recording device change → restart attempt \(attempts, privacy: .public)")
+            lock.withLock {
+                oversizeDropsAccumulated += unit?.oversizeDropCount ?? 0
+            }
             disposeUnitInline()
             do {
                 let fresh = makeUnit(generation: generation)
@@ -1087,7 +1116,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                     return
                 }
                 publishBoundInputName(for: deviceID)
-                installActiveDeviceListener(deviceID: deviceID)
+                installActiveDeviceListener(deviceID: deviceID, generation: generation)
             } catch {
                 // A restart fails transiently precisely because the device is mid-transition (the Bluetooth
                 // A2DP↔HFP case that triggered it), and giving up records dead air. Schedule a bounded retry

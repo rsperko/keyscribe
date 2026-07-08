@@ -50,7 +50,7 @@ enum CaptureProbeRunner {
         let m = CaptureProbeScoring.score(samples: samples, toneHz: Double(toneHz), sampleRate: Double(rate))
         let durationS = Double(m.sampleCount) / Double(rate)
         let clean = diag.ringDropped == 0 && diag.overloads == 0 && diag.writerDropped == 0
-            && m.glitchCount == 0 && samplesMatchWAV
+            && diag.oversizeDropped == 0 && m.glitchCount == 0 && samplesMatchWAV
 
         let samplesLine: String
         if let drained {
@@ -71,6 +71,7 @@ enum CaptureProbeRunner {
           ring dropped      : \(diag.ringDropped)   (writer-keep-up canary; must be 0)
           CoreAudio overloads: \(diag.overloads)   (RT-deadline canary; must be 0)
           writer dropped    : \(diag.writerDropped)   (WAV-write/converter canary; must be 0)
+          oversize dropped  : \(diag.oversizeDropped)   (RT IO-period-growth canary; must be 0)
           verdict           : \(clean ? "CLEAN" : "SUSPECT — investigate the non-zero counters above")
         """)
         if m.peak < 0.001 {

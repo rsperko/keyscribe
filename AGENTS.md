@@ -134,10 +134,13 @@ This file is the entry point. Read the design docs before writing code — they 
   before the unit stop, so a wedged unit stop can't return an open file to transcription), then stop/dispose
   the unit. Because a capture defect here is INAUDIBLE (audio goes straight to STT), validate with
   **`KeyScribe --capture-probe`** (drives the real capture path over a known tone and scores glitches/SINAD),
-  the teardown `Log.audio` line `ringDropped=N overloads=M writerDropped=K` (all must be 0 — the writer-keep-up,
-  CoreAudio-RT-deadline, and downstream WAV-write/converter canaries; `writerDropped` counts frames the writer
-  accepted off the ring but failed to persist, e.g. a disk-full or odd-format-converter failure that is invisible
-  to the ring counters), and `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection.
+  the teardown `Log.audio` line `ringDropped=N overloads=M writerDropped=K oversizeDropped=J` (all must be 0 —
+  the writer-keep-up, CoreAudio-RT-deadline, downstream WAV-write/converter, and RT IO-period-growth canaries;
+  `writerDropped` counts frames the writer accepted off the ring but failed to persist, e.g. a disk-full or
+  odd-format-converter failure that is invisible to the ring counters; `oversizeDropped` counts frames the RT
+  callback dropped because the device grew its IO period past scratch mid-capture — upstream of the ring, so
+  invisible to `ringDropped`, and now watched for recovery via a `BufferFrameSize` restart), and
+  `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection.
   See `agent_notes/fable_review/audio-capture.md` H4 and the W17 entry in `worklist.md`.
 - **HAL unit bring-up/teardown run off the main thread on a serial queue, watchdogged — never move them
   back onto `@MainActor`.** `AudioUnitInitialize`/`AudioOutputUnitStart`/`Stop`/`AudioComponentInstanceDispose`
@@ -168,8 +171,9 @@ This file is the entry point. Read the design docs before writing code — they 
   than queueing a commit against audio that was not recording yet. Two idle HAL listeners
   (`kAudioHardwarePropertyDefaultInputDevice` + the device list) re-prewarm on a device change while idle;
   **while recording**, raw AUHAL posts no `AVAudioEngineConfigurationChange`, so a per-capture listener on
-  the BOUND device (`DeviceIsAlive` + `NominalSampleRate`, for disconnect and a Bluetooth A2DP↔HFP flip)
-  restarts capture into the same file on the control queue, bounded by `maxConfigRestarts`.
+  the BOUND device (`DeviceIsAlive` + `NominalSampleRate` + `BufferFrameSize`, for disconnect, a Bluetooth
+  A2DP↔HFP flip, and a mid-capture IO-period growth past scratch) restarts capture into the same file on the
+  control queue, bounded by `maxConfigRestarts`.
 - **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs in `finishInsertion`, in `rewriteSelection`, in
