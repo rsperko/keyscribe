@@ -127,6 +127,34 @@ struct SingleFlightDeadlineTests {
         #expect(value == "ok")
     }
 
+    @Test func backToBackRunsOnTheSameTaskNeverObserveBusy() async throws {
+        let gate = SingleFlightDeadline()
+        for i in 0..<2000 {
+            let value = try await gate.run(seconds: 5) { i }
+            #expect(value == i)
+        }
+    }
+
+    @Test func reEntryAfterOperationErrorNeverObservesBusy() async throws {
+        struct Boom: Error {}
+        let gate = SingleFlightDeadline()
+        for _ in 0..<500 {
+            _ = try? await gate.run(seconds: 5) { throw Boom() }
+            let value = try await gate.run(seconds: 5) { "ok" }
+            #expect(value == "ok")
+        }
+    }
+
+    @Test func reEntryAfterOperationThrownCancellationNeverObservesBusy() async throws {
+        let gate = SingleFlightDeadline()
+        for _ in 0..<500 {
+            _ = try? await gate.run(seconds: 5) { throw CancellationError() }
+            _ = try? await gate.run(seconds: 5) { throw DeadlineExceeded() }
+            let value = try await gate.run(seconds: 5) { "ok" }
+            #expect(value == "ok")
+        }
+    }
+
     // A cancel landing before the gate is entered must NOT launch the operation. The transcribe/finalize
     // op runs as an unstructured task that keeps the engine lock until it truly settles, so starting one
     // for a dictation the user already cancelled would hold the gate `Busy` against the next dictation

@@ -84,6 +84,7 @@ final class DictationController {
         // records the mic actually used even after the session moves on. nil until capture is live.
         var capturedInputDevice: String?
         var capturedDictionaryRecovery: Bool?
+        var capturedRecognitionBias: Bool?
         var activeMode: Mode?
         var eligibleModes: [Mode] = []
         var routingContext = RoutingContext()
@@ -558,6 +559,8 @@ final class DictationController {
         protectedEngineIds.insert(engine.id)
         session?.capturedDictionaryRecovery = settings.stt.dictionaryRecoveryEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
+        session?.capturedRecognitionBias = settings.stt.recognitionBiasEnabled(
+            engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
         // Resolve the Phase-A mode. The only slow step is the browser-URL probe (synchronous AppleScript)
         // for URL-routed modes; without one we resolve inline so the mode is known before capture. When a
@@ -567,6 +570,7 @@ final class DictationController {
             session?.modeResolveTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
+                guard !Task.isCancelled else { return }
                 if self.machine.state == .recording {
                     self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel)))
                 } else if self.machine.state == .arming {
@@ -1038,8 +1042,9 @@ final class DictationController {
     // known here — a Phase-B route resolves post-STT and can't bias recognition (design.md §4.3). Normalized
     // once (trims, drops blanks). Engines without bias ignore these.
     private func recognitionBiasTerms() -> [String] {
-        guard settings.stt.recognitionBiasEnabled(
-            engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias) else { return [] }
+        let enabled = session?.capturedRecognitionBias ?? settings.stt.recognitionBiasEnabled(
+            engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
+        guard enabled else { return [] }
         return plan.recognitionBiasTerms(for: activeMode)
     }
 

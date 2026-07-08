@@ -85,7 +85,11 @@ public func runWithDeadline<T: Sendable>(
 // instead of starting a concurrent transcribe that would double the engine/model/PCM footprint.
 public actor SingleFlightDeadline {
     public struct Busy: Error, Sendable {}
+    // Distinguishes an operation's own throw (settled) from the deadline/cancel machinery's throws by origin,
+    // not type, so an op that itself throws Cancellation/Deadline still releases synchronously.
+    private struct OperationFailure: Error, @unchecked Sendable { let underlying: any Error }
     private var inFlight = false
+    private var generation = 0
 
     public init() {}
 
@@ -93,7 +97,9 @@ public actor SingleFlightDeadline {
     // one has not yet truly settled. Read-only; used by tests to observe that a wedged call holds the gate.
     public var isBusy: Bool { inFlight }
 
-    private func release() { inFlight = false }
+    private func release(generation gen: Int) {
+        if gen == generation { inFlight = false }
+    }
 
     public func run<T: Sendable>(
         seconds: Double, operation: @escaping @Sendable () async throws -> T
@@ -104,8 +110,22 @@ public actor SingleFlightDeadline {
         try Task.checkCancellation()
         if inFlight { throw Busy() }
         inFlight = true
-        return try await runWithDeadline(seconds: seconds, operation: operation) {
-            Task { await self.release() }
+        generation += 1
+        let gen = generation
+        do {
+            let result = try await runWithDeadline(seconds: seconds, operation: {
+                do { return try await operation() }
+                catch { throw OperationFailure(underlying: error) }
+            }) {
+                Task { await self.release(generation: gen) }
+            }
+            release(generation: gen)
+            return result
+        } catch let failure as OperationFailure {
+            release(generation: gen)
+            throw failure.underlying
+        } catch {
+            throw error
         }
     }
 }
