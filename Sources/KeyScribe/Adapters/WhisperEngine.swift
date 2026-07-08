@@ -15,13 +15,16 @@ struct WhisperModelProfile {
     let displayName: String
     let variant: String
     let installDir: String
+    let tokenizerRepo: String
 
     static let largeV3Turbo = WhisperModelProfile(
         id: "whisper", displayName: "Whisper Large v3 Turbo",
-        variant: "openai_whisper-large-v3-v20240930_turbo_632MB", installDir: "whisper")
+        variant: "openai_whisper-large-v3-v20240930_turbo_632MB", installDir: "whisper",
+        tokenizerRepo: "openai/whisper-large-v3")
     static let smallEnglish = WhisperModelProfile(
         id: "whisper-small-en", displayName: "Whisper Small (English)",
-        variant: "openai_whisper-small.en_217MB", installDir: "whisper-small-en")
+        variant: "openai_whisper-small.en_217MB", installDir: "whisper-small-en",
+        tokenizerRepo: "openai/whisper-small.en")
 }
 
 final class WhisperEngine: SpeechEngine, @unchecked Sendable {
@@ -32,6 +35,7 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
 
     private let variant: String
     private let installDir: String
+    private let tokenizerRepo: String
     private let modelsDir: URL
     nonisolated(unsafe) private var pipe: WhisperKit?
 
@@ -40,29 +44,41 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         self.displayName = profile.displayName
         self.variant = profile.variant
         self.installDir = profile.installDir
+        self.tokenizerRepo = profile.tokenizerRepo
         self.installDirNames = [profile.installDir]
         self.modelsDir = modelsDir
     }
 
     func loadIfNeeded() async throws {
-        try await load(progress: nil)
+        try await load(progress: nil, allowRepair: false)
     }
 
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
+        try await load(progress: progress, allowRepair: true)
+    }
+
+    private func load(progress: (@Sendable (ModelLoadProgress) -> Void)?, allowRepair: Bool) async throws {
         guard pipe == nil else { return }
         // Reserve a tail of the bar for the opaque CoreML load/compile step (no progress callback), so the
         // download doesn't show 100% while WhisperKit loads ~632 MB.
         let downloadShare = 0.9
         let local = localModelFolder(in: modelsDir)
-        if modelFilesPresent(at: local) {
+        if installComplete(in: modelsDir) {
             do {
                 pipe = try await loadPipe(folder: local, progress: progress, downloadShare: downloadShare)
                 progress?(.init(phase: "Ready", fraction: 1))
                 return
             } catch {
-                Log.models.notice("whisper: offline load from present folder failed (\(error.localizedDescription, privacy: .public)); re-downloading")
+                guard allowRepair else {
+                    Log.models.error("whisper: load from present install failed (\(error.localizedDescription, privacy: .public)); not repairing on the dictation path")
+                    throw error
+                }
+                Log.models.notice("whisper: install present but load failed (\(error.localizedDescription, privacy: .public)); re-downloading")
                 try? FileManager.default.removeItem(at: local)
             }
+        } else if !allowRepair {
+            Log.models.error("whisper: install incomplete on the dictation path; not downloading")
+            throw EngineError.notInitialized
         }
         let folder = try await WhisperKit.download(
             variant: variant, downloadBase: installBase,
@@ -118,10 +134,21 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         }
     }
 
-    // The CoreML bundles are a checkable footprint, so a completed-but-unmarked download is adopted, not
-    // deleted.
+    private func tokenizerPresent(in modelsDir: URL) -> Bool {
+        let path = modelsDir
+            .appendingPathComponent(installDir, isDirectory: true)
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent(tokenizerRepo, isDirectory: true)
+            .appendingPathComponent("tokenizer.json")
+        return FileManager.default.fileExists(atPath: path.path)
+    }
+
+    private func installComplete(in modelsDir: URL) -> Bool {
+        modelFilesPresent(at: localModelFolder(in: modelsDir)) && tokenizerPresent(in: modelsDir)
+    }
+
     func verifyInstalled(in modelsDir: URL) -> Bool? {
-        modelFilesPresent(at: localModelFolder(in: modelsDir))
+        installComplete(in: modelsDir)
     }
 
     nonisolated var supportsSampleInput: Bool { true }

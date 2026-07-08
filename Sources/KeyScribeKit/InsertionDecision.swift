@@ -43,6 +43,14 @@ public func decideInsertion(captured: TargetSnapshot, current: TargetSnapshot) -
     return .insert
 }
 
+public func pasteLastDivertsToClipboard(
+    frontmostBundleId: String?, ownBundleId: String?, accessibilityGranted: Bool
+) -> Bool {
+    if !accessibilityGranted { return true }
+    if let ownBundleId, frontmostBundleId == ownBundleId { return true }
+    return false
+}
+
 public enum InsertionAction: Equatable, Sendable {
     case paste
     case ax

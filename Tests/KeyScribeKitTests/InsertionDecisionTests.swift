@@ -72,4 +72,24 @@ struct InsertionDecisionTests {
             #expect(insertionAction(decision: .clipboardFallback(reason: .appChanged), method: method) == .clipboard)
         }
     }
+
+    @Test func pasteLastDivertsWhenAccessibilityDenied() {
+        #expect(pasteLastDivertsToClipboard(
+            frontmostBundleId: "com.apple.mail", ownBundleId: "com.keyscribe.app", accessibilityGranted: false))
+    }
+
+    @Test func pasteLastDivertsWhenKeyScribeIsFrontmost() {
+        #expect(pasteLastDivertsToClipboard(
+            frontmostBundleId: "com.keyscribe.app", ownBundleId: "com.keyscribe.app", accessibilityGranted: true))
+    }
+
+    @Test func pasteLastPastesIntoAnotherFrontmostApp() {
+        #expect(!pasteLastDivertsToClipboard(
+            frontmostBundleId: "com.apple.mail", ownBundleId: "com.keyscribe.app", accessibilityGranted: true))
+    }
+
+    @Test func pasteLastPastesWhenFrontmostUnknown() {
+        #expect(!pasteLastDivertsToClipboard(
+            frontmostBundleId: nil, ownBundleId: "com.keyscribe.app", accessibilityGranted: true))
+    }
 }

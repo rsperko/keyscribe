@@ -87,17 +87,16 @@ public final class Tokenizer: @unchecked Sendable {
             var out = ""
             out.reserveCapacity(result.count)
             var cursor = result.startIndex
-            while let open = result.range(of: Self.tokenOpen, range: cursor..<result.endIndex),
-                  let close = result.range(of: Self.tokenClose, range: open.upperBound..<result.endIndex) {
-                let token = String(result[open.lowerBound..<close.upperBound])
-                out += result[cursor..<open.lowerBound]
+            while let tokenRange = SentinelText.firstToken(in: result, from: cursor) {
+                let token = String(result[tokenRange])
+                out += result[cursor..<tokenRange.lowerBound]
                 if let original = originals[token] {
                     out += original
                     didRestore = true
                 } else {
                     out += token
                 }
-                cursor = close.upperBound
+                cursor = tokenRange.upperBound
             }
             out += result[cursor..<result.endIndex]
             result = out
@@ -107,6 +106,5 @@ public final class Tokenizer: @unchecked Sendable {
     }
 
     private static let tokenOpen = "⟦SN:"
-    private static let tokenClose = "⟧"
     private static func token(type: TokenType, n: Int) -> String { "⟦SN:\(type.rawValue):\(n)⟧" }
 }

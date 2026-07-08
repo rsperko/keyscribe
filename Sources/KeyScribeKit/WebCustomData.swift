@@ -50,4 +50,8 @@ public enum WebCustomData {
         else { return nil }
         return object["isFromEmptySelection"] as? Bool
     }
+
+    public static func copyIsTrustworthySelection(_ data: Data?) -> Bool {
+        vscodeIsFromEmptySelection(data) != true
+    }
 }

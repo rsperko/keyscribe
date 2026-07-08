@@ -64,4 +64,30 @@ struct SentinelOpacityTests {
         let stage = ReplacementsStage(rules: [ReplacementRule(heard: "verb", replace: "X", isRegex: false)])
         #expect(stage.bareReplacement(for: "⟦SN:VERB:1⟧") == nil)
     }
+
+    @Test func lookalikeOpenIsTransformedNotTreatedAsOpaque() {
+        let out = SentinelText.mappingOutsideSentinels("⟦SN: x foo ⟦SN:VERB:1⟧ bar") { $0.uppercased() }
+        #expect(out == "⟦SN: X FOO ⟦SN:VERB:1⟧ BAR")
+    }
+
+    @Test func unknownTypeOrMissingIndexIsNotAToken() {
+        #expect(SentinelText.mappingOutsideSentinels("⟦SN:BOGUS:1⟧") { _ in "T" } == "T")
+        #expect(SentinelText.mappingOutsideSentinels("⟦SN:VERB⟧") { _ in "T" } == "T")
+        #expect(SentinelText.mappingOutsideSentinels("⟦SN:VERB:x⟧") { _ in "T" } == "T")
+        #expect(SentinelText.mappingOutsideSentinels("⟦SN:⟦SN:VERB:1⟧") { _ in "T" } == "T⟦SN:VERB:1⟧T")
+    }
+
+    @Test func replacementOutputSentinelIsNeutralized() {
+        var ctx = PipelineContext(text: "foo")
+        ReplacementsStage(rules: [ReplacementRule(heard: "foo", replace: "⟦SN:REDACT:1⟧", isRegex: false)]).apply(&ctx)
+        #expect(!ctx.text.contains("⟦SN:REDACT:1⟧"))
+        #expect(!SentinelText.containsSentinel(ctx.text))
+        #expect(ctx.text.contains("SN:REDACT:1⟧"))
+    }
+
+    @Test func regexConstructedSentinelIsNeutralized() {
+        var ctx = PipelineContext(text: "dog")
+        ReplacementsStage(rules: [ReplacementRule(heard: "()dog", replace: "⟦$1SN:VERB:1⟧", isRegex: true)]).apply(&ctx)
+        #expect(!SentinelText.containsSentinel(ctx.text))
+    }
 }

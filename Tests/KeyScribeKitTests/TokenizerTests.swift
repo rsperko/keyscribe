@@ -90,6 +90,12 @@ struct TokenizerTests {
         #expect(t.restore("\(known) and ⟦SN:REDACT:99⟧") == "real and ⟦SN:REDACT:99⟧")
     }
 
+    @Test func restoreDoesNotStrandRealTokenAfterLookalikeOpen() {
+        let t = Tokenizer()
+        let tok = t.tokenize("secret", type: .redact)   // ⟦SN:REDACT:1⟧
+        #expect(t.restore("⟦SN: x \(tok) y") == "⟦SN: x secret y")
+    }
+
     @Test func restoreHandlesManyTokens() {
         let t = Tokenizer()
         let tokens = (0..<50).map { t.tokenize("v\($0)", type: .redact) }

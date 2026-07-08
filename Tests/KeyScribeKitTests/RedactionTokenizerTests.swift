@@ -149,6 +149,15 @@ struct RedactionTokenizerTests {
         #expect(t.restore(out) == "password: s3cr3t-body-value")
     }
 
+    @Test func unpairedSentinelLookalikeDoesNotHideSecretFromRedaction() {
+        let t = Tokenizer()
+        let verb = t.tokenize("keep", type: .verbatim)   // ⟦SN:VERB:1⟧
+        let out = RedactionTokenizer.apply("⟦SN: x sk-abcdefghijklmnop1234 \(verb) tail", into: t)
+        #expect(!out.contains("sk-abcdefghijklmnop1234"))
+        #expect(out.contains("⟦SN:REDACT:1⟧"))
+        #expect(out.contains(verb))
+    }
+
     // A real secret sitting between two sentinel tokens is still redacted normally.
     @Test func redactsSecretBetweenSentinelTokens() {
         let t = Tokenizer()

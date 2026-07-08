@@ -52,7 +52,9 @@ final class WebCustomDataTests: XCTestCase {
 
     func testNoVSCodeEntryReturnsNil() {
         // Obsidian (and other Electron editors) write web-custom-data keyed by content type, with no
-        // emptiness flag — so we cannot tell a real selection from a whole-line copy and must not use it.
+        // emptiness flag. `nil` means "not a VS Code-family editor" — the caller trusts such a copy, because
+        // a genuinely empty selection there copies nothing and is caught by the changeCount timeout before
+        // the trust check runs.
         let data = pickle([("text/markdown", "some selected text")])
         XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(data))
     }
@@ -61,5 +63,17 @@ final class WebCustomDataTests: XCTestCase {
         XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(nil))
         XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(Data([0x01, 0x02, 0x03])))
         XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(Data()))
+    }
+
+    func testCopyTrustDiscardsOnlyVSCodeEmptySelection() {
+        func vscode(_ empty: Bool) -> Data {
+            pickle([("vscode-editor-data",
+                     "{\"version\":1,\"isFromEmptySelection\":\(empty),\"multicursorText\":null,\"mode\":\"tex\"}")])
+        }
+        XCTAssertFalse(WebCustomData.copyIsTrustworthySelection(vscode(true)))
+        XCTAssertTrue(WebCustomData.copyIsTrustworthySelection(vscode(false)))
+        XCTAssertTrue(WebCustomData.copyIsTrustworthySelection(pickle([("text/markdown", "selected in Obsidian")])))
+        XCTAssertTrue(WebCustomData.copyIsTrustworthySelection(nil))
+        XCTAssertTrue(WebCustomData.copyIsTrustworthySelection(Data([0x01, 0x02, 0x03])))
     }
 }

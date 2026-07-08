@@ -5,7 +5,7 @@ import KeyScribeKit
 
 // Guards the on-disk install detection that both reconcile (adopt a completed-but-unmarked model
 // instead of deleting it) and the offline cold-load gate (load with zero network when installed)
-// depend on. Whisper detects its CoreML bundles; Qwen detects its safetensors weights.
+// depend on. Whisper detects its CoreML bundles + tokenizer; Qwen detects its safetensors weights.
 final class EngineInstallDetectionTests: XCTestCase {
     private var dir: URL!
 
@@ -33,6 +33,12 @@ final class EngineInstallDetectionTests: XCTestCase {
         }
     }
 
+    private func writeTokenizer(installDir: String, repo: String) throws {
+        let folder = dir.appendingPathComponent("\(installDir)/models/\(repo)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data().write(to: folder.appendingPathComponent("tokenizer.json"))
+    }
+
     func testWhisperUnverifiedWhenAbsent() {
         let engine = WhisperEngine(profile: .largeV3Turbo, modelsDir: dir)
         XCTAssertEqual(engine.verifyInstalled(in: dir), false)
@@ -41,6 +47,7 @@ final class EngineInstallDetectionTests: XCTestCase {
     func testWhisperVerifiedWhenAllRequiredBundlesPresent() throws {
         try writeBundles(Self.whisperBundles,
             into: variantDir("whisper", "openai_whisper-large-v3-v20240930_turbo_632MB"))
+        try writeTokenizer(installDir: "whisper", repo: "openai/whisper-large-v3")
         XCTAssertEqual(WhisperEngine(profile: .largeV3Turbo, modelsDir: dir).verifyInstalled(in: dir), true)
     }
 
@@ -51,9 +58,16 @@ final class EngineInstallDetectionTests: XCTestCase {
         XCTAssertEqual(WhisperEngine(profile: .largeV3Turbo, modelsDir: dir).verifyInstalled(in: dir), false)
     }
 
+    func testWhisperUnverifiedWhenTokenizerMissing() throws {
+        try writeBundles(Self.whisperBundles,
+            into: variantDir("whisper", "openai_whisper-large-v3-v20240930_turbo_632MB"))
+        XCTAssertEqual(WhisperEngine(profile: .largeV3Turbo, modelsDir: dir).verifyInstalled(in: dir), false)
+    }
+
     func testWhisperVariantsAreIsolated() throws {
         // Small.en install must not make the turbo model look installed (each owns its own subdir).
         try writeBundles(Self.whisperBundles, into: variantDir("whisper-small-en", "openai_whisper-small.en_217MB"))
+        try writeTokenizer(installDir: "whisper-small-en", repo: "openai/whisper-small.en")
         XCTAssertEqual(WhisperEngine(profile: .smallEnglish, modelsDir: dir).verifyInstalled(in: dir), true)
         XCTAssertEqual(WhisperEngine(profile: .largeV3Turbo, modelsDir: dir).verifyInstalled(in: dir), false)
     }

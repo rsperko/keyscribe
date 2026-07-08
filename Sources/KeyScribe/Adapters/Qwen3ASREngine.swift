@@ -57,10 +57,14 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     }
 
     func loadIfNeeded() async throws {
-        try await load(progress: nil)
+        try await load(progress: nil, allowRepair: false)
     }
 
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
+        try await load(progress: progress, allowRepair: true)
+    }
+
+    private func load(progress: (@Sendable (ModelLoadProgress) -> Void)?, allowRepair: Bool) async throws {
         guard model == nil else { return }
         // Download fills 0–0.9 of the bar; the MLX weight load/first-op warm-up fills the tail.
         let downloadShare = 0.9
@@ -84,6 +88,10 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
                 modelId: modelId, cacheDir: cacheDir, offlineMode: offline, progressHandler: bridge)
         } catch {
             guard offline else { throw error }
+            guard allowRepair else {
+                Log.models.error("qwen3asr: load from present install failed (\(error.localizedDescription, privacy: .public)); not repairing on the dictation path")
+                throw error
+            }
             Log.models.notice("qwen3asr: offline load failed (\(error.localizedDescription, privacy: .public)); re-downloading")
             try? FileManager.default.removeItem(at: cacheDir)
             model = try await Qwen3ASRModel.fromPretrained(

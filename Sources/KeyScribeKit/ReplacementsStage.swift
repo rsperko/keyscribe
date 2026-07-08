@@ -82,7 +82,7 @@ public struct ReplacementsStage: PipelineStage {
                 guard rule.regex.firstMatch(in: result, range: range) != nil else { continue }
                 result = rule.regex.stringByReplacingMatches(in: result, range: range, withTemplate: rule.template)
             }
-            return result
+            return SentinelText.neutralizeOpen(result)
         }
     }
 
@@ -116,7 +116,8 @@ public struct ReplacementsStage: PipelineStage {
         let coreRange = NSRange(core.startIndex..., in: core)
         for rule in prepared {
             guard let match = rule.regex.firstMatch(in: core, range: coreRange), match.range == coreRange else { continue }
-            let generated = rule.regex.replacementString(for: match, in: core, offset: 0, template: rule.template)
+            let generated = SentinelText.neutralizeOpen(
+                rule.regex.replacementString(for: match, in: core, offset: 0, template: rule.template))
             let coreTransformed = transformedInput ?? transform(core)
             return coreTransformed == generated ? generated : nil
         }

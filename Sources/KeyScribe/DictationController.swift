@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import KeyScribeKit
@@ -35,6 +36,7 @@ final class DictationController {
     private let snapshotAsync: @MainActor () async -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
+    private let frontmostBundleId: @MainActor () -> String?
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let llmClient: any LLMClient
     // Durable sink for a model-load failure surviving both retries. Injected so tests assert it was
@@ -258,6 +260,7 @@ final class DictationController {
         snapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
+        frontmostBundleId: @escaping @MainActor () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
             InstalledEngineFilter.shouldRun(engineId: engine.id)
         },
@@ -283,6 +286,7 @@ final class DictationController {
         self.snapshotAsync = snapshotAsync ?? { snapshot() }
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
+        self.frontmostBundleId = frontmostBundleId
         self.activeEngineUsable = activeEngineUsable
         self.llmClient = llmClient
         self.recordModelLoadFailure = recordModelLoadFailure
@@ -1572,9 +1576,11 @@ final class DictationController {
 
     func pasteLast() {
         guard let lastResult else { return }
-        // Without Accessibility a synthesized ⌘V is silently dropped and the settle restores the prior clipboard —
-        // the user gets nothing. Divert to a clipboard copy (mirrors finishInsertion's fallback).
-        guard accessibilityGranted() else { _ = TextInserter.copyToClipboard(lastResult); return }
+        guard !pasteLastDivertsToClipboard(
+            frontmostBundleId: frontmostBundleId(),
+            ownBundleId: Bundle.main.bundleIdentifier,
+            accessibilityGranted: accessibilityGranted()
+        ) else { _ = TextInserter.copyToClipboard(lastResult); return }
         hud?.relinquishKeyFocus()
         Task { await TextInserter.insertViaPaste(lastResult) }
     }

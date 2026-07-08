@@ -13,11 +13,10 @@ enum TextInserter {
     private static var pendingRestoreGeneration = 0
 
     // Reads the target app's current selection. Native apps expose it via AX, read directly (no ⌘C, so an
-    // empty selection can't beep or grab the current line). AX-unavailable (Electron/Chromium) falls back
-    // to a muted ⌘C, trusted only if it came from a real selection: VS Code-family editors copy the whole
-    // line on empty ⌘C but flag it in `vscode-editor-data.isFromEmptySelection`; a copy without that flag
-    // is discarded rather than insert a line the user never selected. Drains any in-flight detached restore
-    // first so the snapshot is the user's real clipboard, not a prior paste's scratch text.
+    // empty selection can't beep or grab the current line). AX-unavailable (Electron/Chromium) falls back to
+    // a muted ⌘C, the universal selection capture (design.md §4.3), trusted per `copyIsTrustworthySelection`.
+    // Drains any in-flight detached restore first so the snapshot is the user's real clipboard, not a prior
+    // paste's scratch text.
     static func captureSelection(modifier: Mode.ClipboardModifier = .command, requirePerfectRestore: Bool = false) async -> String? {
         if case .text(let selection) = axSelectedText() {
             return selection.isEmpty ? nil : selection
@@ -38,8 +37,8 @@ enum TextInserter {
             let copied = pb.string(forType: .string)
             let editorData = pb.pasteboardItems?.first?.data(forType: webCustomDataType)
             snapshot.restore()
-            guard WebCustomData.vscodeIsFromEmptySelection(editorData) == false else {
-                Log.insertion.debug("captureSelection: discarding non-AX copy with no real-selection flag")
+            guard WebCustomData.copyIsTrustworthySelection(editorData) else {
+                Log.insertion.debug("captureSelection: discarding VS Code empty-selection whole-line copy")
                 return nil
             }
             return copied
