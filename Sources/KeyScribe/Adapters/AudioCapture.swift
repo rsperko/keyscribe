@@ -71,6 +71,34 @@ private final class UnitBox: @unchecked Sendable {
     init(_ unit: HALInputUnit) { self.unit = unit }
 }
 
+final class TeardownLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var signaled = false
+
+    func signal() {
+        let c: CheckedContinuation<Void, Never>? = lock.withLock {
+            guard !signaled else { return nil }
+            signaled = true
+            let c = continuation
+            continuation = nil
+            return c
+        }
+        c?.resume()
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let alreadySignaled: Bool = lock.withLock {
+                if signaled { return true }
+                continuation = cont
+                return false
+            }
+            if alreadySignaled { cont.resume() }
+        }
+    }
+}
+
 private final class CaptureSession: @unchecked Sendable {
     let url: URL
     let file: AVAudioFile
@@ -114,6 +142,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private let overloadCount = Atomic<Int>(0)
     // Stashed at teardown so diagnostics survive resizing the ring back to baseline.
     private var lastRingDroppedCount = 0
+    private var lastWriterDroppedCount = 0
     // The committed capture's in-memory mono PCM (P2-1), kept only on the commit path (flushConverter == true)
     // and consumed once via takeDrainedSamples() after finishDraining(); cancel/stop discard it. Guarded by `lock`.
     private var lastDrainedSamples: [Float]?
@@ -555,26 +584,34 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Bluetooth A2DP→HFP flip) can block teardown for a long time, so abandon it after the deadline and flag a
     // rebuild — the NEXT dictation then starts on a fresh queue instead of waiting out the full bring-up window.
     private func scheduleWatchdoggedTeardown(queue: DispatchQueue, generation: Int) {
+        let latch = Self.enqueueTeardown(
+            { queue.async(execute: $0) }, teardown: { [self] in teardownUnit(generation: generation) })
         Task { [self] in
             do {
-                try await runWithDeadline(seconds: Self.bringUpTimeout) {
-                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                        queue.async { [self] in
-                            teardownUnit(generation: generation)
-                            cont.resume()
-                        }
-                    }
-                }
+                try await runWithDeadline(seconds: Self.bringUpTimeout) { await latch.wait() }
             } catch {
                 markRebuild()
             }
         }
     }
 
+    // Enqueue synchronously so serial-queue FIFO orders teardown ahead of any later armSync; a deferred enqueue
+    // could land after the next dictation re-adopted the resident unit and stop a live capture.
+    static func enqueueTeardown(
+        _ enqueue: (@escaping @Sendable () -> Void) -> Void, teardown: @escaping @Sendable () -> Void
+    ) -> TeardownLatch {
+        let latch = TeardownLatch()
+        enqueue { teardown(); latch.signal() }
+        return latch
+    }
+
     // Non-Bluetooth units are stopped for reuse; Bluetooth units are disposed to release HFP.
     private func teardownUnit(generation: Int) {
-        guard lock.withLock({ Self.shouldTeardownUnit(generation: generation, currentGeneration: self.generation) })
-        else { return }
+        let proceed = lock.withLock {
+            Self.shouldTeardownUnit(
+                generation: generation, currentGeneration: self.generation, captureActive: session != nil)
+        }
+        guard proceed else { return }
         let bound = lock.withLock { configuredDeviceID }
         switch Self.teardownAction(boundDeviceIsBluetooth: bound.map(AudioInputDevices.isBluetooth)) {
         case .dispose:
@@ -584,8 +621,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    static func shouldTeardownUnit(generation: Int, currentGeneration: Int) -> Bool {
-        generation == currentGeneration
+    // A live session means a newer arm re-adopted the resident unit, so a late teardown must not stop it.
+    static func shouldTeardownUnit(generation: Int, currentGeneration: Int, captureActive: Bool) -> Bool {
+        generation == currentGeneration && !captureActive
     }
 
     enum TeardownAction: Equatable {
@@ -622,8 +660,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // writer thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback
         // miss its deadline. Either is the RT-path canary the ring split is meant to keep quiet.
         lastRingDroppedCount = ring.droppedCount
+        lastWriterDroppedCount = s.writer.writerDroppedFrames()
         Log.audio.debug(
-            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public)")
+            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public) writerDropped=\(self.lastWriterDroppedCount, privacy: .public)")
         // Writer joined and `capturing` false → ring is quiescent (the window armSync reassigns in). A small-period
         // pro interface can have grown it to ~16.7 MiB that a menu-bar app would retain for its lifetime, so shrink
         // back to baseline here; the next arm re-grows it for the bound device if needed. Zero hot-path cost.
@@ -633,8 +672,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     // Valid from capture end until the next arm resets the counters.
-    func captureDiagnostics() -> (ringDropped: Int, overloads: Int) {
-        (lastRingDroppedCount, overloadCount.load(ordering: .relaxed))
+    func captureDiagnostics() -> (ringDropped: Int, overloads: Int, writerDropped: Int) {
+        (lastRingDroppedCount, overloadCount.load(ordering: .relaxed), lastWriterDroppedCount)
     }
 
     func takeDrainedSamples() -> [Float]? {

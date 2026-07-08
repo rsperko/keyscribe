@@ -99,6 +99,23 @@ struct CaptureWriterTests {
         return writer.drainedSamples()
     }
 
+    // failWriteIndex < 0 ⇒ no write fails.
+    private func droppedFramesFromFlakyCapture(to url: URL, frames: Int, count: Int, failWriteIndex: Int) throws -> Int {
+        let format = recordFormat(16_000)
+        let real = try AVAudioFile(forWriting: url, settings: format.settings)
+        let flaky = FlakyFileWriter(real, failWriteIndex: failWriteIndex)
+        let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
+        let writer = CaptureWriter(ring: ring, file: flaky, recordFormat: format, observeHostTime: { _ in false })
+        writer.start()
+        for i in 1...count {
+            ring.write(channelCount: 1, frameCount: frames, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
+                for k in 0..<dest.count { dest[k] = 0.25 }
+            }
+        }
+        writer.finish(flushConverter: true)
+        return writer.writerDroppedFrames()
+    }
+
     private func readMonoFloat(_ url: URL) throws -> [Float] {
         let file = try AVAudioFile(forReading: url)
         let frames = AVAudioFrameCount(file.length)
@@ -193,6 +210,37 @@ struct CaptureWriterTests {
         let wav = try readMonoFloat(url)
         #expect(wav.count == 400)   // 5 × 100 − the dropped 100-frame write
         #expect(drained == wav)     // in-memory samples never include the un-written chunk
+    }
+
+    @Test func aFailedWriteIsCountedInTheWriterDropCounter() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let dropped = try droppedFramesFromFlakyCapture(to: url, frames: 100, count: 5, failWriteIndex: 2)
+        #expect(dropped == 100)
+    }
+
+    @Test func aHealthyCaptureReportsNoWriterDrops() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let dropped = try droppedFramesFromFlakyCapture(to: url, frames: 100, count: 5, failWriteIndex: -1)
+        #expect(dropped == 0)
+    }
+
+    @Test func anUnusableFormatSlotIsCountedAsAWriterDrop() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = recordFormat(16_000)
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
+        let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
+        writer.start()
+        for i in 1...3 {
+            ring.write(channelCount: 1, frameCount: 100, sampleRate: 0, hostTime: UInt64(i)) { _, dest in
+                for k in 0..<dest.count { dest[k] = 0.25 }
+            }
+        }
+        writer.finish(flushConverter: true)
+        #expect(writer.writerDroppedFrames() == 300)
     }
 
     @Test func finishIsIdempotentAcrossMultipleCallers() throws {

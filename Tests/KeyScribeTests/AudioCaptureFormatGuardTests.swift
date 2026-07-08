@@ -93,11 +93,29 @@ struct BringUpAbortSupersedeTests {
 // V1: the queued step-4 unit teardown may only touch the unit while its scheduling generation is current.
 struct CaptureUnitTeardownGuardTests {
     @Test func currentGenerationTearsDownUnit() {
-        #expect(AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 3))
+        #expect(AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 3, captureActive: false))
     }
 
     @Test func supersededGenerationSkipsTeardown() {
-        #expect(!AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 4))
+        #expect(!AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 4, captureActive: false))
+    }
+
+    @Test func liveCaptureOnTheReusedUnitSkipsTeardown() {
+        #expect(!AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 3, captureActive: true))
+    }
+
+    // A regression to a Task-wrapped enqueue would leave `enqueued` false at the first expectation.
+    @Test func teardownIsEnqueuedSynchronouslyAndLatchReleasesOnRun() async {
+        final class Box: @unchecked Sendable { var enqueued = false; var ran = false }
+        let box = Box()
+        var captured: (@Sendable () -> Void)?
+        let latch = AudioCapture.enqueueTeardown(
+            { block in box.enqueued = true; captured = block }, teardown: { box.ran = true })
+        #expect(box.enqueued)
+        #expect(!box.ran)
+        captured?()
+        #expect(box.ran)
+        await latch.wait()
     }
 
     @Test func bluetoothBoundUnitIsDisposedEvenIfTheCurrentDefaultChanged() {

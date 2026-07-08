@@ -134,8 +134,10 @@ This file is the entry point. Read the design docs before writing code — they 
   before the unit stop, so a wedged unit stop can't return an open file to transcription), then stop/dispose
   the unit. Because a capture defect here is INAUDIBLE (audio goes straight to STT), validate with
   **`KeyScribe --capture-probe`** (drives the real capture path over a known tone and scores glitches/SINAD),
-  the teardown `Log.audio` line `ringDropped=N overloads=M` (both must be 0 — the writer-keep-up and
-  CoreAudio-RT-deadline canaries), and `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection.
+  the teardown `Log.audio` line `ringDropped=N overloads=M writerDropped=K` (all must be 0 — the writer-keep-up,
+  CoreAudio-RT-deadline, and downstream WAV-write/converter canaries; `writerDropped` counts frames the writer
+  accepted off the ring but failed to persist, e.g. a disk-full or odd-format-converter failure that is invisible
+  to the ring counters), and `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection.
   See `agent_notes/fable_review/audio-capture.md` H4 and the W17 entry in `worklist.md`.
 - **HAL unit bring-up/teardown run off the main thread on a serial queue, watchdogged — never move them
   back onto `@MainActor`.** `AudioUnitInitialize`/`AudioOutputUnitStart`/`Stop`/`AudioComponentInstanceDispose`

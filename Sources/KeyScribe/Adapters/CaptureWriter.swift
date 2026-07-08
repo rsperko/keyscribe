@@ -70,6 +70,11 @@ final class CaptureWriter: @unchecked Sendable {
     // wiring is a bounded AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
     private let onSamples: (@Sendable ([Float]) -> Void)?
 
+    // Frames accepted off the ring but not persisted — invisible to the ring canaries, so surfaced at teardown.
+    private var droppedFrames = 0
+    private var loggedFirstDrop = false
+    private var converterBuildError: Error?
+
     init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
          admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0, cueWindowSeconds: Double = .infinity,
          wantsSamples: Bool = true,
@@ -143,7 +148,10 @@ final class CaptureWriter: @unchecked Sendable {
 
     private func consume(_ info: AudioSampleRing.SlotInfo, channel: (Int) -> UnsafeBufferPointer<Float>) {
         guard AudioCapture.isUsableInputFormat(
-            sampleRate: info.sampleRate, channelCount: AVAudioChannelCount(info.channelCount)) else { return }
+            sampleRate: info.sampleRate, channelCount: AVAudioChannelCount(info.channelCount)) else {
+            recordDrop(frames: info.frameCount, reason: "unusable input format")
+            return
+        }
         // Head admission: drop/trim cue-window frames before the boundary, before conversion/write.
         var offset = 0
         var count = info.frameCount
@@ -157,7 +165,11 @@ final class CaptureWriter: @unchecked Sendable {
             case .admitTrailing(let dropFrames): offset = dropFrames; count = info.frameCount - dropFrames
             }
         }
-        guard count > 0, let input = inputBuffer(for: info) else { return }
+        guard count > 0 else { return }
+        guard let input = inputBuffer(for: info) else {
+            recordDrop(frames: count, reason: "input buffer unavailable")
+            return
+        }
         input.frameLength = AVAudioFrameCount(count)
         if let dst = input.floatChannelData {
             for c in 0..<info.channelCount {
@@ -193,8 +205,20 @@ final class CaptureWriter: @unchecked Sendable {
 
     // Write to the file and report whether it landed, so callers only expose samples the WAV actually holds.
     private func writeToFile(_ file: any CaptureFileWriting, _ buffer: AVAudioPCMBuffer) -> Bool {
-        do { try file.write(from: buffer); return true } catch { return false }
+        do { try file.write(from: buffer); return true }
+        catch { recordDrop(frames: Int(buffer.frameLength), reason: error.localizedDescription); return false }
     }
+
+    private func recordDrop(frames: Int, reason: String) {
+        guard frames > 0 else { return }
+        droppedFrames += frames
+        guard !loggedFirstDrop else { return }
+        loggedFirstDrop = true
+        Log.audio.error("capture writer dropped a chunk: \(reason, privacy: .public)")
+    }
+
+    // Safe only after finish() has joined the thread.
+    func writerDroppedFrames() -> Int { droppedFrames }
 
     private func write(_ input: AVAudioPCMBuffer) {
         guard let file else { return }
@@ -207,16 +231,21 @@ final class CaptureWriter: @unchecked Sendable {
         }
         if converter == nil {
             var built: AVAudioConverter?
-            try? ObjCException.catching { built = AVAudioConverter(from: inFmt, to: recordFormat) }
+            do { try ObjCException.catching { built = AVAudioConverter(from: inFmt, to: recordFormat) } }
+            catch { converterBuildError = error }
             converter = built
         }
-        guard let converter else { return }
+        guard let converter else {
+            recordDrop(frames: Int(input.frameLength),
+                       reason: converterBuildError?.localizedDescription ?? "converter unavailable")
+            return
+        }
         let ratio = recordFormat.sampleRate / inFmt.sampleRate
         let needed = AVAudioFrameCount(Double(input.frameLength) * ratio) + 1024
         if outBuffer == nil || outBuffer!.frameCapacity < needed {
             outBuffer = AVAudioPCMBuffer(pcmFormat: recordFormat, frameCapacity: needed)
         }
-        guard let outBuffer else { return }
+        guard let outBuffer else { recordDrop(frames: Int(input.frameLength), reason: "output buffer unavailable"); return }
         outBuffer.frameLength = 0
         feed.buffer = input
         feed.consumed = false
@@ -227,7 +256,10 @@ final class CaptureWriter: @unchecked Sendable {
             status.pointee = .haveData
             return self.feed.buffer
         }
-        guard convError == nil, outBuffer.frameLength > 0 else { return }
+        guard convError == nil, outBuffer.frameLength > 0 else {
+            if let convError { recordDrop(frames: Int(input.frameLength), reason: convError.localizedDescription) }
+            return
+        }
         if writeToFile(file, outBuffer) { appendSamples(from: outBuffer) }
     }
 
