@@ -40,7 +40,7 @@ struct GeneralSettingsView: View {
                     help: "Optional global shortcut. With text selected when you press it, the word or heard phrase is pre-filled. Leave unset to use the menu instead.")
                 {
                     VStack(alignment: .trailing, spacing: 4) {
-                        HotkeyRecorder(key: $model.addVocabularyShortcut)
+                        ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord)
                         if vocabularyShadowed { ShadowedHotkeyNote() }
                     }
                 }
@@ -50,7 +50,7 @@ struct GeneralSettingsView: View {
                     help: "Optional global shortcut. Leave unset to use the menu instead.")
                 {
                     VStack(alignment: .trailing, spacing: 4) {
-                        HotkeyRecorder(key: $model.pasteLastShortcut)
+                        ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord)
                         if pasteLastShadowed { ShadowedHotkeyNote() }
                     }
                 }

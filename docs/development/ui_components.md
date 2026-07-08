@@ -146,6 +146,32 @@ copied without rewriting), error.
 **Behavior:** pre-fill source text, show the resulting rule before save, and state global versus
 mode-local scope. Do not make the user reconstruct a dictation from scratch.
 
+### Shortcut well
+
+**Use for:** every keyboard/mouse shortcut binding — the mode trigger (`Start this mode with`) and
+the global action shortcuts (`Add to Vocabulary`, `Paste Last Dictation`).
+
+**Anatomy:** one control that always shows the current binding, with an attached menu. It never swaps
+between a picker and a recorder — predefined vs custom is just a value, not a mode.
+
+**Behavior:**
+
+- Clicking the well body, or choosing `Record…` from the menu, starts capture in place immediately,
+  regardless of the current value.
+- While recording it shows a prompt (`Press keys or a mouse button…  Esc cancels`, or `Press a key
+  combo…  Esc cancels` where mouse is not allowed). A valid capture is the only thing that changes
+  the value from recording; `Esc`, clicking away, and the view disappearing all revert to the exact
+  prior binding.
+- The menu lists `None` (the single clear affordance) and — for the mode trigger only — the
+  modifier-only named keys `Fn (Globe)`, `Right Option`, `Right Command`, `Hyper (⌃⌥⇧⌘)`, with a
+  checkmark on the current one. Action shortcuts offer `None` and `Record…` only.
+- **Profiles** gate what a capture accepts, with an inline hint on rejection rather than a silently
+  dead binding: the mode trigger accepts named keys, chords, and extra mouse buttons; an action
+  shortcut accepts chords only (a mouse button is rejected with `Mouse buttons can't be used for this
+  shortcut`). A bare key hints `Hold a modifier (⌃⌥⇧⌘) with the key`.
+- Any parseable value renders with its glyphs; an unrecognized stored value renders the raw string
+  with a `Not a recognized shortcut` caption — never a blank control.
+
 ### Permission row
 
 **Use for:** microphone, and Accessibility-dependent features (modifier-key trigger detection +

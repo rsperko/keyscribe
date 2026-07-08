@@ -2,77 +2,35 @@ import AppKit
 import SwiftUI
 import KeyScribeKit
 
-private let customTriggerTag = "__custom__"
-
-// The shortcut row: the menu, or — for a custom chord — the recorder in place. Choosing "Custom
-// shortcut…" arms it immediately; Esc or clearing reverts to the menu. Shared by the normal and
-// system-mode editors.
 struct ModeTriggerRow: View {
     let mode: Mode
     let onUpdate: (Mode) -> Void
-    @State private var capturingCustom = false
+    @State private var rememberedStyle: String?
+    @State private var rememberedThreshold: Int?
 
     var body: some View {
-        if isCustom {
-            LabeledContent("Start this mode with") {
-                HotkeyRecorder(
-                    key: triggerKey, autostart: capturingCustom,
-                    onCancel: { capturingCustom = false })
-            }
-        } else {
-            Picker("Start this mode with", selection: triggerSelection) {
-                Text("No mode shortcut").tag("")
-                Text("Fn (Globe)").tag("fn")
-                Text("Right Option").tag("right_option")
-                Text("Right Command").tag("right_command")
-                Text("Custom shortcut…").tag(customTriggerTag)
-            }
+        LabeledContent("Start this mode with") {
+            ShortcutWell(key: triggerKey, profile: .modeTrigger)
         }
-    }
-
-    private var triggerSelection: Binding<String> {
-        Binding(
-            get: {
-                if capturingCustom { return customTriggerTag }
-                let key = mode.triggerKeys.first?.key ?? ""
-                guard !key.isEmpty else { return "" }
-                if let descriptor = try? KeyDescriptor(parsing: key), case .named = descriptor {
-                    return descriptor.canonical
-                }
-                return customTriggerTag
-            },
-            set: { selection in
-                if selection == customTriggerTag {
-                    capturingCustom = true
-                } else {
-                    capturingCustom = false
-                    triggerKey.wrappedValue = selection
-                }
-            })
-    }
-
-    private var isCustom: Bool {
-        if capturingCustom { return true }
-        guard let descriptor = try? KeyDescriptor(parsing: mode.triggerKeys.first?.key ?? "") else { return false }
-        if case .chord = descriptor { return true }
-        if case .mouseButton = descriptor { return true }
-        return false
     }
 
     private var triggerKey: Binding<String> {
         Binding(
             get: { mode.triggerKeys.first?.key ?? "" },
             set: { key in
-                capturingCustom = false
                 var updated = mode
                 if key.isEmpty {
+                    if let existing = mode.triggerKeys.first {
+                        rememberedStyle = existing.pressStyle
+                        rememberedThreshold = existing.tapThresholdMs
+                    }
                     updated.triggerKeys = []
                 } else {
                     let existing = mode.triggerKeys.first
                     updated.triggerKeys = [.init(
                         key: key,
-                        pressStyle: existing?.pressStyle ?? "hold-or-tap",
-                        tapThresholdMs: existing?.tapThresholdMs ?? 250)]
+                        pressStyle: existing?.pressStyle ?? rememberedStyle ?? "hold-or-tap",
+                        tapThresholdMs: existing?.tapThresholdMs ?? rememberedThreshold ?? 250)]
                 }
                 onUpdate(updated)
             })

@@ -364,10 +364,10 @@ Show only commonly changed behavior initially:
 - Mute system audio while dictating
 - History enabled and retention
 - **Shortcuts** — global chords for **Add to Vocabulary** and **Paste Last Dictation** (both also
-  always in the menu). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste Last Dictation defaults off.
-  Both are rebindable or clearable. A chord that collides with a
-  higher-precedence hotkey, such as a Mode trigger, shows
-  an inline **shadowed** breadcrumb and will not fire — mode triggers win.
+  always in the menu), each set with a chord-only **shortcut well** (`None` in its menu clears it; a
+  mouse button is rejected at capture with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste
+  Last Dictation defaults off. A chord that collides with a higher-precedence hotkey, such as a Mode
+  trigger, shows an inline **shadowed** breadcrumb and will not fire — mode triggers win.
 
 Model eviction moves behind `Advanced model behavior` within General. Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff, not as cache terminology.
@@ -441,8 +441,11 @@ sections:
 1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
-2. **When this mode is used** — the direct shortcut stays visible; app/URL/window-title rules,
-   custom shortcut behavior, and spoken routing live under `Advanced routing`.
+2. **When this mode is used** — the direct shortcut uses a **shortcut well** (one control: its menu
+   offers `None` and the modifier-only keys Fn, Right Option, Right Command, and Hyper, and clicking it
+   or choosing `Record…` captures a custom chord or extra mouse button in place — no separate picker/
+   recorder swap); app/URL/window-title rules, press style, and spoken routing live under `Advanced
+   routing`.
 3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
    (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
    under `Recognition and replacements`. (Dictionary recovery is no longer a mode setting — it is a

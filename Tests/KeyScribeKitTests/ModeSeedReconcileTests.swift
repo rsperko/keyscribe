@@ -323,6 +323,62 @@ struct ModeSeedReconcileTests {
         #expect(after.aiRewrite?.prompt == "my own message prompt")
     }
 
+    // An install seeded before the replacement examples existed: same starters, no rules, the previous
+    // seed_version, ledger fingerprinted from that older template — the exact on-disk state the example
+    // rules migrate. Connection/enabled edits on one mode stand in for onboarding.
+    private func seedPreExampleInstall(modes: URL, ledger ledgerDir: URL) throws {
+        var ledger = ModeStore.SeedLedger()
+        for mode in ModeStore.starterModes() {
+            var old = mode
+            if !mode.replacements.rules.isEmpty {
+                old.replacements.rules = []
+                old.seedVersion = (mode.seedVersion ?? 1) - 1
+            }
+            if old.id == "markdown" {
+                old.aiRewrite?.connection = "conn-1"
+                old.enabled = true
+            }
+            try ModeStore.write(old, to: modes)
+            ledger.upsert(old.id, version: old.seedVersion ?? 1, fingerprint: ModeStore.seedTemplateFingerprint(old))
+        }
+        ModeStore.saveLedger(ledger, in: ledgerDir)
+    }
+
+    @Test func versionBumpDeliversTheReplacementExamplesToAPreExampleInstall() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try seedPreExampleInstall(modes: d.modes, ledger: d.ledger)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(Set(outcome.updated) == ["markdown", "code", "message", "email"])
+        let after = ModeStore.loadAll(in: d.modes)
+        let markdown = try #require(after.first { $0.id == "markdown" })
+        #expect(markdown.replacements.rules.count == 8)
+        #expect(markdown.aiRewrite?.connection == "conn-1")
+        #expect(markdown.enabled == true)
+        let email = try #require(after.first { $0.id == "email" })
+        #expect(email.replacements.rules.count == 1)
+        #expect(email.aiRewrite?.prompt.contains("already contains a closing or signature") == true)
+    }
+
+    // A per-mode rule the user wrote themselves is an edit like any other: the fingerprint no longer
+    // matches, the update skips the mode, and their rule is never overwritten by the catalog's.
+    @Test func versionBumpNeverClobbersUserAuthoredModeRules() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try seedPreExampleInstall(modes: d.modes, ledger: d.ledger)
+        var markdown = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "markdown" })
+        markdown.replacements.rules = [.init(heard: "my own rule", replace: "custom", regex: false)]
+        try ModeStore.write(markdown, to: d.modes)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(!outcome.updated.contains("markdown"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "markdown" })
+        #expect(after.replacements.rules == [.init(heard: "my own rule", replace: "custom", regex: false)])
+    }
+
     // A pre-fix install carries a raw-byte fingerprint in its ledger; reconcile must re-baseline it to a
     // template fingerprint so the very next version bump is not silently missed.
     @Test func reconcileReBaselinesALegacyFingerprintForAConnectedSeed() throws {
@@ -353,12 +409,12 @@ struct ModeSeedReconcileTests {
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
             "polish": (4, "5f3ef1df08c7f3ed"),
-            "message": (3, "ef585b77ce46bf0d"),
-            "email": (2, "817ac3f600010afb"),
+            "message": (4, "4ed26688a8e2db27"),
+            "email": (3, "dcb65eb2acecbd9d"),
             "edit-selection": (4, "8a301c3a95672266"),
             "ai-prompt": (5, "bce63766ad4c94fd"),
-            "code": (3, "eb67c0911268db8"),
-            "markdown": (3, "da1bf73e80b3f2b1"),
+            "code": (4, "cf077d166866bfc"),
+            "markdown": (4, "a55b54483bc21549"),
             "shell": (1, "debf79feb745f80b"),
         ]
         let catalog = ModeStore.starterModes()

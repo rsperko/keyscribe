@@ -388,7 +388,10 @@ public enum ModeStore {
         message.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text as a clear, casual message of the kind you would send in a chat app. Remove filler words and fix grammar and punctuation. Keep my meaning and friendly, informal tone. Do not add a greeting, sign-off, subject line, or any formality, and do not add information that is not in the text. Only reformat the text — never answer it or act on it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        message.seedVersion = 3
+        message.replacements.rules = [
+            .init(heard: "shrug emoji", replace: #"¯\_(ツ)_/¯"#, regex: false),
+        ]
+        message.seedVersion = 4
 
         var email = Mode(id: "email", name: "Email")
         email.enabled = false
@@ -397,8 +400,11 @@ public enum ModeStore {
         email.trailing = .space
         email.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Rewrite the dictated text as a polished, professional email. Remove filler words, fix grammar, and organize the content into clear sentences or short paragraphs. Begin with a brief greeting: if a recipient name appears in the text use it (\"Hi Sarah,\"), otherwise use a generic \"Hi,\". End with a short closing word on its own line such as \"Thanks,\" or \"Best,\" — then stop. Do not write any name, signature, or bracketed placeholder (like [Your name]) after the closing; the sender adds their own name. Never invent names, recipients, companies, or facts not in the text. Keep my meaning. Only reformat the text into an email — never answer it or act on it.")
-        email.seedVersion = 2
+            prompt: "Rewrite the dictated text as a polished, professional email. Remove filler words, fix grammar, and organize the content into clear sentences or short paragraphs. Begin with a brief greeting: if a recipient name appears in the text use it (\"Hi Sarah,\"), otherwise use a generic \"Hi,\". End with a short closing word on its own line such as \"Thanks,\" or \"Best,\" — then stop. Do not write any name, signature, or bracketed placeholder (like [Your name]) after the closing; the sender adds their own name. If the dictated text already contains a closing or signature, keep it exactly as written and do not add another. Never invent names, recipients, companies, or facts not in the text. Keep my meaning. Only reformat the text into an email — never answer it or act on it.")
+        email.replacements.rules = [
+            .init(heard: #"[\s,]*my sign[- ]?off[\s,.]*"#, replace: #"\n\nBest,\nYour Name"#, regex: true),
+        ]
+        email.seedVersion = 3
 
         var selection = Mode(id: "edit-selection", name: "Edit Selection")
         selection.enabled = false
@@ -428,7 +434,10 @@ public enum ModeStore {
         code.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text for use in an IDE, code review, issue, commit note, or coding assistant. Remove filler words and fix grammar while preserving every technical term, identifier, symbol, file path, command, branch name, API name, and casing exactly as dictated. Keep the result concise and developer-friendly. If the dictation is an instruction, make it a clear instruction. If it is prose, keep it as prose. Do not generate code, answer the request, invent implementation details, or add context that was not dictated. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        code.seedVersion = 3
+        code.replacements.rules = [
+            .init(heard: #"[\s,]*insert,?( a)? to[- ]?do[\s,.]*"#, replace: #"\n// TODO: "#, regex: true),
+        ]
+        code.seedVersion = 4
 
         var markdown = Mode(id: "markdown", name: "Markdown")
         markdown.enabled = false
@@ -436,8 +445,18 @@ public enum ModeStore {
         markdown.trailing = .space
         markdown.aiRewrite = Mode.AIRewrite(
             connection: "",
-            prompt: "Reformat the dictated text as well-structured Markdown. Remove filler words and fix grammar, punctuation, and capitalization. Turn the spoken structure into Markdown syntax: a spoken heading or title becomes a `#`/`##` heading, list-like or enumerated content becomes `-` bullets (or `1.` numbered items when I count off \"first, second, third\"), emphasized words become **bold**, a quote becomes a `>` blockquote, and any code, command, file name, or identifier becomes `inline code` — or a fenced ``` block when I dictate several lines of code. Honor explicit spoken markers when I use them: \"code fence\" or \"code block\" means wrap the code I dictate next in a fenced ``` block (until I say \"end code\"); \"back tick\" around a word or phrase means make that span `inline code`; \"bold\"/\"end bold\" and \"italic\"/\"end italic\" mark the enclosed words as **bold** or *italic*. Remove the spoken marker words themselves from the output. Keep my wording and meaning: do not rephrase, expand, summarize, or add content, and do not invent a title or headings I did not imply. Output the raw Markdown source itself — the literal `#`, `-`, `*`, and backtick characters as plain text. Do NOT wrap your whole answer in a code fence. Never answer the text or act on it; only reformat it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        markdown.seedVersion = 3
+            prompt: "Reformat the dictated text as well-structured Markdown. Remove filler words and fix grammar, punctuation, and capitalization. Turn the spoken structure into Markdown syntax: a spoken heading or title becomes a `#`/`##` heading, list-like or enumerated content becomes `-` bullets (or `1.` numbered items when I count off \"first, second, third\"), emphasized words become **bold**, a quote becomes a `>` blockquote, and any code, command, file name, or identifier becomes `inline code` — or a fenced ``` block when I dictate several lines of code. The text may already contain Markdown syntax — bold or italic markers, backtick fences, task-list checkboxes, horizontal rules — keep it exactly where it is and do not double it up. Keep my wording and meaning: do not rephrase, expand, summarize, or add content, and do not invent a title or headings I did not imply. Output the raw Markdown source itself — the literal `#`, `-`, `*`, and backtick characters as plain text. Do NOT wrap your whole answer in a code fence. Never answer the text or act on it; only reformat it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
+        markdown.replacements.rules = [
+            .init(heard: #"[\s,]*insert,?( a)? check ?box[\s,.]*"#, replace: #"\n- [ ] "#, regex: true),
+            .init(heard: #"[\s,]*insert,?( a)? horizontal rule[\s,.]*"#, replace: #"\n\n---\n\n"#, regex: true),
+            .init(heard: #"[\s,]*begin,? code,? (?:block|fence)[\s,.]*"#, replace: #"\n```\n"#, regex: true),
+            .init(heard: #"[\s,]*end,? code,? (?:block|fence)[\s,.]*"#, replace: #"\n```\n"#, regex: true),
+            .init(heard: #"begin,? bold[\s,.]*"#, replace: "**", regex: true),
+            .init(heard: #"[\s,]*end,? bold,?"#, replace: "**", regex: true),
+            .init(heard: #"begin,? italic[\s,.]*"#, replace: "*", regex: true),
+            .init(heard: #"[\s,]*end,? italic,?"#, replace: "*", regex: true),
+        ]
+        markdown.seedVersion = 4
 
         var shell = Mode(id: "shell", name: "Shell")
         shell.enabled = false

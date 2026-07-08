@@ -236,6 +236,32 @@ default English engine plus **Direct** is the minimum first-run target (`ui_desi
 Mode prompts instruct, never answer, keep redaction tokens intact, and avoid bracketed signature
 placeholders.
 
+### Seeded example replacements
+
+Four starters ship worked **per-mode replacement rules** — ordinary, user-editable data in the mode's
+`[replacements]` table, each teaching one technique behind a deliberate trigger phrase that plain
+prose can't fire. The phrase language is uniform: point insertions say **"insert …"** (optional "a",
+like the live-edit commands) and paired spans say **"begin …" / "end …"** (like verbatim):
+
+| Mode | Say | Inserts | Teaches |
+|---|---|---|---|
+| `markdown` | "insert checkbox" | `\n- [ ] ` | `\n` output + boundary classes that absorb STT pause punctuation; `check ?box` covers both spellings |
+| `markdown` | "insert horizontal rule" | `\n\n---\n\n` | the left class is `[\s,]*` (space/comma only) so a preceding sentence period survives |
+| `markdown` | "begin/end bold", "begin/end italic" | `**` / `*` hugging the span | the smart-quote recipe (tips doc): the open marker hugs the next word, the close marker the previous one |
+| `markdown` | "begin/end code block" (or "… code fence") | `\n```\n` | a symmetric block marker eats both sides so fences land on their own lines |
+| `code` | "insert todo" | `\n// TODO: ` | `to[- ]?do` alternation for STT's "todo" / "to do" / "to-do" renderings |
+| `message` | "shrug emoji" | `¯\_(ツ)_/¯` | a literal rule inserts its output verbatim; spoken alone it is a whole-utterance replacement and skips the rewrite |
+| `email` | "my sign off" | `\n\nBest,\nYour Name` | a personalizable stub — say it once, then edit the rule into your own signature |
+
+There is deliberately **no bare "begin/end code"** inline pair — "front end code" is everyday dev
+prose and would false-fire; inline code stays a judgment call in the Markdown prompt. The prompts
+pair with their rules: Markdown's no longer interprets spoken markers, it only preserves the Markdown
+syntax the rules emitted (and still converts *implicit* structure — headings, lists, blockquotes,
+inline code); Email's explicitly keeps a closing or signature already present in the dictated text
+(the model is otherwise told never to add one). As with any replacement, output that flows into an AI
+rewrite is not protected — only a whole-utterance match bypasses the model. Editing or deleting these
+rules marks the mode edited and opts it out of future template updates, like any other seed edit.
+
 ### Seed reconcile & the `seed_version` discipline
 
 Each starter carries `seed_id` (its catalog lineage) and `seed_version` (the catalog revision it was
