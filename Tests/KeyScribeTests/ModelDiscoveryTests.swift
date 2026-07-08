@@ -43,7 +43,7 @@ struct ModelDiscoveryTests {
             let body = #"{"object":"list","data":[{"id":"qwen"},{"id":"llama"}]}"#.data(using: .utf8)!
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
         }
-        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "local-key" })
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("local-key") })
         let connection = Connection(
             id: "local", name: "Local", provider: .openaiCompatible,
             model: "", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
@@ -62,7 +62,7 @@ struct ModelDiscoveryTests {
         }
         let lister = HTTPModelLister(
             session: session(),
-            keyProvider: { _ in "stale-token" },
+            keyProvider: { _ in .found("stale-token") },
             tokenCommandRunner: { command in
                 #expect(command == "print-token")
                 return #"{"access_token":"fresh-token"}"#
@@ -92,7 +92,7 @@ struct ModelDiscoveryTests {
             """.data(using: .utf8)!
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
         }
-        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "gemini-key" })
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("gemini-key") })
         let connection = Connection(
             id: "gemini", name: "Gemini", provider: .gemini,
             model: "", keyRef: "k")
@@ -115,7 +115,7 @@ struct ModelDiscoveryTests {
             """.data(using: .utf8)!
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
         }
-        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "gemini-key" })
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("gemini-key") })
         let connection = Connection(
             id: "gemini", name: "Gemini", provider: .gemini, model: "", keyRef: "k")
 
@@ -134,7 +134,7 @@ struct ModelDiscoveryTests {
             """.data(using: .utf8)!
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
         }
-        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "anthropic-key" })
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("anthropic-key") })
         let connection = Connection(
             id: "anthropic", name: "Anthropic", provider: .anthropic, model: "", keyRef: "k")
 
@@ -158,7 +158,7 @@ struct ModelDiscoveryTests {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     body.data(using: .utf8)!)
         }
-        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "anthropic-key" })
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("anthropic-key") })
         let connection = Connection(
             id: "anthropic", name: "Anthropic", provider: .anthropic, model: "", keyRef: "k")
 
@@ -187,7 +187,7 @@ struct ModelDiscoveryTests {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     body.data(using: .utf8)!)
         }
-        let lister = HTTPModelLister(session: session(), keyProvider: { _ in "gemini-key" })
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("gemini-key") })
         let connection = Connection(
             id: "gemini", name: "Gemini", provider: .gemini, model: "", keyRef: "k")
 

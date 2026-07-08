@@ -15,16 +15,16 @@ import SwiftUI
 final class CorrectionPanelController {
     private var window: NSWindow?
     private let destinations: () -> [CorrectionDestination]
-    private let addDictionaryWord: (String, CorrectionDestination) -> Void
-    private let addReplacement: (String, String, Bool, CorrectionDestination) -> Void
+    private let addDictionaryWord: (String, CorrectionDestination) -> Bool
+    private let addReplacement: (String, String, Bool, CorrectionDestination) -> Bool
     private let captureSelection: () async -> String?
     private var previousApp: NSRunningApplication?
     private let status = CorrectionPanelStatus()
 
     init(
         destinations: @escaping () -> [CorrectionDestination] = { [.global] },
-        addDictionaryWord: @escaping (String, CorrectionDestination) -> Void,
-        addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Void,
+        addDictionaryWord: @escaping (String, CorrectionDestination) -> Bool,
+        addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Bool,
         captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) }
     ) {
         self.destinations = destinations
@@ -55,8 +55,12 @@ final class CorrectionPanelController {
             destinations: destinations(),
             status: status,
             onSave: { [weak self] result in
-                self?.apply(result)
-                self?.window?.close()
+                guard let self else { return }
+                if self.apply(result) {
+                    self.window?.close()
+                } else {
+                    self.status.message = Self.saveFailedMessage(for: Self.destination(of: result))
+                }
             },
             onCorrect: { [weak self] result, pasteText in self?.applyAndCorrect(result, pasteText: pasteText) },
             onCancel: { [weak self] in self?.window?.close() })
@@ -70,16 +74,35 @@ final class CorrectionPanelController {
         self.window = window
     }
 
-    private func apply(_ result: CorrectionPanelView.SaveResult) {
+    private func apply(_ result: CorrectionPanelView.SaveResult) -> Bool {
         switch result {
-        case .dictionary(let word, let destination): addDictionaryWord(word, destination)
+        case .dictionary(let word, let destination): return addDictionaryWord(word, destination)
         case .replacement(let heard, let replace, let regex, let destination):
-            addReplacement(heard, replace, regex, destination)
+            return addReplacement(heard, replace, regex, destination)
+        }
+    }
+
+    static func saveFailedMessage(for destination: CorrectionDestination) -> String {
+        switch destination.scope {
+        case .global:
+            return "\(Branding.appName) could not save this — a configuration file may be malformed. Open Settings ▸ Advanced to fix it."
+        case .mode:
+            return "\(Branding.appName) could not save this to \(destination.title). Its mode file may be malformed. Open Settings ▸ Modes to fix it."
+        }
+    }
+
+    private static func destination(of result: CorrectionPanelView.SaveResult) -> CorrectionDestination {
+        switch result {
+        case .dictionary(_, let d): return d
+        case .replacement(_, _, _, let d): return d
         }
     }
 
     private func applyAndCorrect(_ result: CorrectionPanelView.SaveResult, pasteText: String) {
-        apply(result)
+        guard apply(result) else {
+            status.message = Self.saveFailedMessage(for: Self.destination(of: result))
+            return
+        }
         status.message = nil
         guard hasPasteTarget, let target = previousApp, !pasteText.isEmpty else {
             window?.close()

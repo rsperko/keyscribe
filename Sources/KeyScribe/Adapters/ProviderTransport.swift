@@ -3,6 +3,7 @@ import KeyScribeKit
 
 enum ProviderTransportError: Error, CustomStringConvertible {
     case missingKey(String)
+    case keychainDenied(String, status: Int32)
     case missingBaseURL
     case http(Int, body: String?)
     case badResponse
@@ -11,6 +12,8 @@ enum ProviderTransportError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .missingKey(let ref): return "No API key stored for \(ref)."
+        case .keychainDenied(let ref, _):
+            return "The keychain would not release the API key for \(ref) — it may be locked or access was denied. Unlock your login keychain or re-authorize the key."
         case .missingBaseURL: return "This connection needs a base URL."
         case .http(let code, let body):
             if let body, !body.isEmpty { return "The model service returned an error (\(code)): \(body)" }
@@ -23,7 +26,7 @@ enum ProviderTransportError: Error, CustomStringConvertible {
 
 struct ProviderTransport: Sendable {
     var session: URLSession
-    var keyProvider: @Sendable (String) -> String?
+    var keyProvider: @Sendable (String) -> SecretLookup
     var tokenCommandRunner: @Sendable (String) async throws -> String
     var tokenCache: TokenCommandCache
     var now: @Sendable () -> Date
@@ -44,7 +47,11 @@ struct ProviderTransport: Sendable {
             if let override = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty {
                 return override
             }
-            return keyProvider(connection.keyRef)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch keyProvider(connection.keyRef) {
+            case .found(let secret): return secret.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .absent: return nil
+            case .denied(let status): throw ProviderTransportError.keychainDenied(connection.keyRef, status: status)
+            }
         case .tokenCommand:
             guard let command = connection.tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
                 throw TokenCommandError.emptyCommand

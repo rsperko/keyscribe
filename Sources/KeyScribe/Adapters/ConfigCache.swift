@@ -45,7 +45,7 @@ final class ConfigCache {
     // User-facing summary of any config file that failed to decode this generation, or nil if all loaded
     // (or absent). Forces the vocabulary/connection loads so the answer is complete regardless of call order.
     var configFileError: String? {
-        _ = dictionary; _ = replacements; _ = connections
+        _ = dictionary; _ = replacements; _ = connections; _ = modes
         return loadFailures.isEmpty ? nil : loadFailures.joined(separator: "; ")
     }
 
@@ -96,7 +96,10 @@ final class ConfigCache {
             in: supportDir.appendingPathComponent("modes", isDirectory: true),
             previous: lastGoodModes, lkgDir: lkgModesDir)
         for failure in result.failures {
-            log.error("mode '\(failure.id, privacy: .public)' failed to load\(failure.usedLastKnownGood ? " (kept last-known-good)" : " (skipped)", privacy: .public): \(failure.message, privacy: .public)")
+            let recovery = failure.usedLastKnownGood ? " (kept last-known-good)" : " (skipped)"
+            log.error("mode '\(failure.id, privacy: .public)' failed to load\(recovery, privacy: .public): \(failure.message, privacy: .public)")
+            let message = "\(failure.id).toml — \(failure.message)\(recovery)"
+            if !loadFailures.contains(message) { loadFailures.append(message) }
         }
         modesCache = result.modes
         lastGoodModes = result.modes

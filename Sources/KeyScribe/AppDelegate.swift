@@ -95,25 +95,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         historyController = HistoryController(
             store: history,
-            addDictionaryWord: { [weak self] word in _ = self?.configRepository.addDictionaryWord(word) },
-            addReplacement: { [weak self] heard, replace in _ = self?.configRepository.addReplacement(heard: heard, replace: replace) },
+            addDictionaryWord: { [weak self] word in self?.configRepository.addDictionaryWord(word) ?? false },
+            addReplacement: { [weak self] heard, replace in self?.configRepository.addReplacement(heard: heard, replace: replace) ?? false },
             openSettings: { [weak self] destination in self?.settingsController.present(destination) })
         correctionPanel = CorrectionPanelController(
             destinations: { [weak self] in self?.correctionDestinations() ?? [.global] },
             addDictionaryWord: { [weak self] word, destination in
                 switch destination.scope {
                 case .global:
-                    _ = self?.configRepository.addDictionaryWord(word)
+                    return self?.configRepository.addDictionaryWord(word) ?? false
                 case .mode(let id):
-                    _ = self?.configRepository.addDictionaryWord(word, toMode: id)
+                    return self?.configRepository.addDictionaryWord(word, toMode: id) ?? false
                 }
             },
             addReplacement: { [weak self] heard, replace, regex, destination in
                 switch destination.scope {
                 case .global:
-                    _ = self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex)
+                    return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex) ?? false
                 case .mode(let id):
-                    _ = self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, toMode: id)
+                    return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, toMode: id) ?? false
                 }
             })
 

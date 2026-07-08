@@ -13,12 +13,15 @@ private final class FakeSecretBackend: @unchecked Sendable {
 
     init(_ seed: [String: String] = [:]) { store = seed }
 
+    var loadResult: SecretLookup?
+
     func backend() -> CachingSecretStore.Backend {
         CachingSecretStore.Backend(
             load: { [self] keyRef in
                 lock.withLock {
                     loadCalls.append(keyRef)
-                    return store[keyRef]
+                    if let loadResult { return loadResult }
+                    return store[keyRef].map(SecretLookup.found) ?? .absent
                 }
             },
             save: { [self] secret, keyRef, cachedOld in
@@ -86,7 +89,7 @@ private final class RaceHarness: @unchecked Sendable {
                     entered.signal()
                     release.wait()
                 }
-                return snapshot
+                return snapshot.map(SecretLookup.found) ?? .absent
             },
             save: { [self] secret, _, _ in lock.withLock { value = secret }; return true },
             remove: { [self] _ in lock.withLock { value = nil } },
@@ -182,7 +185,7 @@ private final class RaceHarness: @unchecked Sendable {
                 loadCount.increment()
                 entered.signal()
                 release.wait()
-                return "sk-secret"
+                return .found("sk-secret")
             },
             save: { _, _, _ in true },
             remove: { _ in },
@@ -258,6 +261,16 @@ private final class RaceHarness: @unchecked Sendable {
 
         #expect(store.get("k") == nil)
         #expect(harness.stored == nil)
+    }
+
+    @Test func lookupSurfacesDenialWithoutCachingIt() {
+        let fake = FakeSecretBackend()
+        fake.loadResult = .denied(status: -25308)
+        let store = CachingSecretStore(backend: fake.backend())
+
+        #expect(store.lookup("k") == .denied(status: -25308))
+        #expect(store.get("k") == nil)
+        #expect(fake.loadCalls == ["k", "k"])
     }
 
     @Test func deleteAllClearsEveryCachedEntryAndReturnsTheCount() {

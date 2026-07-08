@@ -96,7 +96,7 @@ struct ConnectionTesterTests {
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
-        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in nil })
+        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in .absent })
         let tester = ConnectionTester(client: client)
         let connection = Connection(
             id: "local", name: "Local", provider: .openaiCompatible,
@@ -113,7 +113,7 @@ struct ConnectionTesterTests {
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
-        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in "stored-key" })
+        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in .found("stored-key") })
         let tester = ConnectionTester(client: client)
         let connection = Connection(
             id: "local", name: "Local", provider: .openaiCompatible,
@@ -134,7 +134,7 @@ struct ConnectionTesterTests {
         config.protocolClasses = [StubURLProtocol.self]
         let client = HTTPLLMClient(
             session: URLSession(configuration: config),
-            keyProvider: { _ in "stale-token" },
+            keyProvider: { _ in .found("stale-token") },
             tokenCommandRunner: { command in
                 #expect(command == "print-token")
                 return "fresh-token\n"
@@ -156,7 +156,7 @@ struct ConnectionTesterTests {
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
-        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in nil })
+        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in .absent })
         let connection = Connection(
             id: "openai", name: "OpenAI", provider: .openai, model: "gpt-4o-mini", keyRef: "k")
 

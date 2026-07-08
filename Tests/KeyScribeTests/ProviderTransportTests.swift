@@ -7,6 +7,13 @@ private func transport(
     keyProvider: @escaping @Sendable (String) -> String?,
     session: URLSession = URLSession(configuration: .ephemeral)
 ) -> ProviderTransport {
+    lookupTransport(keyProvider: { keyProvider($0).map(SecretLookup.found) ?? .absent }, session: session)
+}
+
+private func lookupTransport(
+    keyProvider: @escaping @Sendable (String) -> SecretLookup,
+    session: URLSession = URLSession(configuration: .ephemeral)
+) -> ProviderTransport {
     ProviderTransport(
         session: session,
         keyProvider: keyProvider,
@@ -61,6 +68,28 @@ struct ProviderTransportTests {
         let t = transport(keyProvider: { _ in "stored" })
         let key = try await t.credential(for: noAuth, apiKey: "override")
         #expect(key == nil)
+    }
+
+    @Test func aDeniedKeychainThrowsKeychainDeniedNotMissingKey() async {
+        let t = lookupTransport(keyProvider: { _ in .denied(status: -25308) })
+        await #expect {
+            _ = try await t.credential(for: connection, apiKey: nil)
+        } throws: { error in
+            guard case ProviderTransportError.keychainDenied(let ref, let status) = error else { return false }
+            return ref == "ref" && status == -25308
+        }
+    }
+
+    @Test func anAbsentKeyStillResolvesToNil() async throws {
+        let t = lookupTransport(keyProvider: { _ in .absent })
+        let key = try await t.credential(for: connection, apiKey: nil)
+        #expect(key == nil)
+    }
+
+    @Test func aDeniedKeychainIsBypassedByAnExplicitOverride() async throws {
+        let t = lookupTransport(keyProvider: { _ in .denied(status: -25308) })
+        let key = try await t.credential(for: connection, apiKey: "override")
+        #expect(key == "override")
     }
 
     @Test func httpErrorDescriptionSurfacesTheProviderBody() {

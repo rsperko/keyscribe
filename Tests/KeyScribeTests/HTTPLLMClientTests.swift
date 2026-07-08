@@ -30,7 +30,9 @@ private final class LLMStubProtocol: URLProtocol, @unchecked Sendable {
 private func stubbedClient(keyProvider: @escaping @Sendable (String) -> String? = { _ in "secret" }) -> HTTPLLMClient {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [LLMStubProtocol.self]
-    return HTTPLLMClient(session: URLSession(configuration: config), keyProvider: keyProvider)
+    return HTTPLLMClient(
+        session: URLSession(configuration: config),
+        keyProvider: { keyProvider($0).map(SecretLookup.found) ?? .absent })
 }
 
 private func okBody(_ content: String, finishReason: String? = nil) -> Data {

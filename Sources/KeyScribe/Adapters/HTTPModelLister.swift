@@ -3,7 +3,7 @@ import KeyScribeKit
 
 struct HTTPModelLister {
     var session: URLSession = ProviderTransport.makeSession(requestTimeout: 10, resourceTimeout: 15)
-    var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
+    var keyProvider: @Sendable (String) -> SecretLookup = { KeychainStore.lookup($0) }
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared
     var now: @Sendable () -> Date = { Date() }

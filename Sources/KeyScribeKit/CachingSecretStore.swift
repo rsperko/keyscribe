@@ -1,21 +1,29 @@
 import Foundation
 
+// A stored value, a genuine absence, or a denial — distinct so a caller can tell "key unreachable" (locked
+// keychain / declined ACL) from "no key stored" instead of collapsing both to nil.
+public enum SecretLookup: Sendable, Equatable {
+    case found(String)
+    case absent
+    case denied(status: Int32)
+}
+
 // In-memory cache in front of a secret backend (the Keychain) so a BYOK key is decrypted (and thus prompts
 // the login keychain's ACL) at most once per process, not per rewrite. Concurrent cold reads of the same
 // keyRef coalesce behind a per-keyRef load lock, so a race prompts once. The load runs outside the map lock
 // (it can block on the ACL prompt), so a mutation can land mid-load; a per-key generation (set/delete) plus
 // a global epoch (deleteAll) let the returning load drop its now-stale value instead of clobbering the
-// mutation. Only successful decrypts are cached (a miss is cheap and stays re-readable, so an out-of-band
-// key is still seen). Never persisted. Thread-safe via NSLock.
+// mutation. Only successful decrypts are cached (a miss or a denial is cheap and stays re-readable, so an
+// out-of-band key or a later keychain unlock is still seen). Never persisted. Thread-safe via NSLock.
 public final class CachingSecretStore: @unchecked Sendable {
     public struct Backend: Sendable {
-        public var load: @Sendable (_ keyRef: String) -> String?
+        public var load: @Sendable (_ keyRef: String) -> SecretLookup
         public var save: @Sendable (_ secret: String, _ keyRef: String, _ cachedOld: String?) -> Bool
         public var remove: @Sendable (_ keyRef: String) -> Void
         public var removeAll: @Sendable () -> Int
 
         public init(
-            load: @escaping @Sendable (String) -> String?,
+            load: @escaping @Sendable (String) -> SecretLookup,
             save: @escaping @Sendable (String, String, String?) -> Bool,
             remove: @escaping @Sendable (String) -> Void,
             removeAll: @escaping @Sendable () -> Int
@@ -42,7 +50,12 @@ public final class CachingSecretStore: @unchecked Sendable {
     public init(backend: Backend) { self.backend = backend }
 
     public func get(_ keyRef: String) -> String? {
-        if let cached = lock.withLock({ cache[keyRef] }) { return cached }
+        if case .found(let value) = lookup(keyRef) { return value }
+        return nil
+    }
+
+    public func lookup(_ keyRef: String) -> SecretLookup {
+        if let cached = lock.withLock({ cache[keyRef] }) { return .found(cached) }
         let perKeyLoad = lock.withLock { loadLock(for: keyRef) }
         perKeyLoad.lock()
         defer { perKeyLoad.unlock() }
@@ -53,15 +66,16 @@ public final class CachingSecretStore: @unchecked Sendable {
         }
         switch probe {
         case .hit(let value):
-            return value
+            return .found(value)
         case .miss(let capturedGeneration, let capturedEpoch):
-            guard let secret = backend.load(keyRef) else { return nil }
+            let result = backend.load(keyRef)
+            guard case .found(let secret) = result else { return result }
             lock.withLock {
                 if (generation[keyRef] ?? 0) == capturedGeneration, epoch == capturedEpoch {
                     cache[keyRef] = secret
                 }
             }
-            return secret
+            return .found(secret)
         }
     }
 

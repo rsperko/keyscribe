@@ -105,7 +105,7 @@ struct SentinelSurvivalProbeTests {
     static func env(_ k: String) -> String? { ProcessInfo.processInfo.environment[k] }
 
     static func makeClient(key: String) -> HTTPLLMClient {
-        HTTPLLMClient(keyProvider: { _ in key })
+        HTTPLLMClient(keyProvider: { _ in .found(key) })
     }
 
     static func provider() -> Connection.Provider {

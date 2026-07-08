@@ -60,6 +60,19 @@ struct ConfigCacheErrorTests {
         #expect(cache.configFileError != nil)
     }
 
+    @Test func malformedModeFileSurfacesAsFileError() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modesDir = dir.appendingPathComponent("modes", isDirectory: true)
+        try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        try "name = \"Broken\"\nnot = [valid".write(
+            to: modesDir.appendingPathComponent("broken.toml"), atomically: true, encoding: .utf8)
+
+        let cache = ConfigCache(supportDir: dir)
+        let message = try #require(cache.configFileError)
+        #expect(message.contains("broken"))
+    }
+
     @Test func newerSchemaConnectionsSurfacesAsFileError() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

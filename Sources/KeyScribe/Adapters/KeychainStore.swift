@@ -37,6 +37,10 @@ enum KeychainStore {
         cache.get(keyRef)
     }
 
+    static func lookup(_ keyRef: String) -> SecretLookup {
+        cache.lookup(keyRef)
+    }
+
     static func delete(_ keyRef: String) {
         cache.delete(keyRef)
     }
@@ -73,15 +77,23 @@ enum KeychainStore {
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
-    private static func rawGet(_ keyRef: String) -> String? {
+    // `errSecItemNotFound` is a genuine absence; any other non-success (locked keychain, declined ACL) is a
+    // denial the caller must not read as "no key stored".
+    private static func rawGet(_ keyRef: String) -> SecretLookup {
         var query = baseQuery(keyRef)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data, let secret = String(data: data, encoding: .utf8)
-        else { return nil }
-        return secret
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data, let secret = String(data: data, encoding: .utf8) else { return .absent }
+            return .found(secret)
+        case errSecItemNotFound:
+            return .absent
+        default:
+            return .denied(status: status)
+        }
     }
 
     private static func rawDelete(_ keyRef: String) {

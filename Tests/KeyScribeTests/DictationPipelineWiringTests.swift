@@ -853,7 +853,7 @@ struct DictationPipelineWiringTests {
 
         var conn = Connection(id: "omlx", name: "oMLX", provider: .openaiCompatible, model: model, keyRef: "omlx")
         conn.baseUrl = base
-        let client = HTTPLLMClient(keyProvider: { _ in key })
+        let client = HTTPLLMClient(keyProvider: { _ in .found(key) })
 
         let m = mode(id: "formal", connectionId: "omlx",
                      prompt: "Rewrite the text to be more formal and grammatical. Return ONLY the rewritten text.")

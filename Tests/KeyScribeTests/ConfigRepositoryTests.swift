@@ -136,6 +136,36 @@ struct ConfigRepositoryTests {
         #expect((try String(contentsOf: file, encoding: .utf8)) == "not = [valid")
     }
 
+    @Test func addDictionaryWordReturnsFalseWhenFileMalformed() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(DictionaryStore.fileName)
+        try Data("not = [valid".utf8).write(to: file)
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+
+        #expect(repo.addDictionaryWord("Redis") == false)
+        #expect((try String(contentsOf: file, encoding: .utf8)) == "not = [valid")
+    }
+
+    @Test func addReplacementReturnsFalseWhenFileMalformed() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(ReplacementsStore.fileName)
+        try Data("[[rules]\nheard = \"x".utf8).write(to: file)
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+
+        #expect(repo.addReplacement(heard: "teh", replace: "the") == false)
+    }
+
+    @Test func addDictionaryWordReturnsTrueOnSuccess() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+
+        #expect(repo.addDictionaryWord("Redis") == true)
+        #expect(DictionaryStore.loadOrDefault(supportDir: dir).words.contains("Redis"))
+    }
+
     @Test func deletingAModeRemovesTheFileAndInvalidates() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

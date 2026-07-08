@@ -8,7 +8,7 @@ struct HTTPLLMClient: LLMClient {
     // Bounded session, not URLSession.shared (60s default, doubled by the gate's stricter-retry). A hung
     // BYOK endpoint must fall back to the local transcript promptly, so cap each attempt.
     var session: URLSession = ProviderTransport.makeSession(requestTimeout: 30, resourceTimeout: 45)
-    var keyProvider: @Sendable (String) -> String? = { KeychainStore.get($0) }
+    var keyProvider: @Sendable (String) -> SecretLookup = { KeychainStore.lookup($0) }
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared
     var now: @Sendable () -> Date = { Date() }

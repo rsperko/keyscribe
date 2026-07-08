@@ -16,8 +16,8 @@ final class HistoryController {
 
     init(
         store: HistoryStore,
-        addDictionaryWord: @escaping (String) -> Void,
-        addReplacement: @escaping (String, String) -> Void,
+        addDictionaryWord: @escaping (String) -> Bool,
+        addReplacement: @escaping (String, String) -> Bool,
         openSettings: @escaping (SettingsDestination) -> Void
     ) {
         model = HistoryViewModel(
@@ -166,8 +166,8 @@ private final class HistoryViewModel: ObservableObject {
     private var loadGeneration = 0
 
     private let store: HistoryStore
-    let addDictionaryWord: (String) -> Void
-    let addReplacement: (String, String) -> Void
+    let addDictionaryWord: (String) -> Bool
+    let addReplacement: (String, String) -> Bool
     let openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
@@ -184,8 +184,8 @@ private final class HistoryViewModel: ObservableObject {
 
     init(
         store: HistoryStore,
-        addDictionaryWord: @escaping (String) -> Void,
-        addReplacement: @escaping (String, String) -> Void,
+        addDictionaryWord: @escaping (String) -> Bool,
+        addReplacement: @escaping (String, String) -> Bool,
         openSettings: @escaping (SettingsDestination) -> Void
     ) {
         self.store = store
@@ -368,6 +368,9 @@ private final class HistoryViewModel: ObservableObject {
         }
     }
 
+    static let saveFailedMessage =
+        "Couldn't save — a configuration file may be malformed. Open Settings ▸ Advanced to fix it."
+
     func flash(_ message: String) {
         statusMessage = message
         statusTask?.cancel()
@@ -544,14 +547,20 @@ private struct HistoryDetailView: View {
         }
         .sheet(isPresented: $showReplacementSheet) {
             CreateReplacementSheet(initialSource: replacementSource) { heard, replace in
-                model.addReplacement(heard, replace)
-                model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : replace)\u{201D}.")
+                if model.addReplacement(heard, replace) {
+                    model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : replace)\u{201D}.")
+                } else {
+                    model.flash(HistoryViewModel.saveFailedMessage)
+                }
             }
         }
         .sheet(isPresented: $showDictionarySheet) {
             AddToDictionarySheet(initialTerm: dictionarySource) { term in
-                model.addDictionaryWord(term)
-                model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
+                if model.addDictionaryWord(term) {
+                    model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
+                } else {
+                    model.flash(HistoryViewModel.saveFailedMessage)
+                }
             }
         }
     }
