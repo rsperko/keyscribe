@@ -4,6 +4,12 @@ import Foundation
 // the connection's key_ref) is an app-side adapter; the orchestration below is provider-agnostic and testable.
 public protocol LLMClient: Sendable {
     func complete(system: String, user: String, connection: Connection) async throws -> String
+    // Optional: warm the endpoint's connection during recording so the rewrite doesn't pay setup. No content.
+    func preconnect(connection: Connection) async
+}
+
+public extension LLMClient {
+    func preconnect(connection: Connection) async {}
 }
 
 public enum RewriteOutcome: Equatable, Sendable {

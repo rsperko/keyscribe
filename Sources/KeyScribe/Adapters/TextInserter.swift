@@ -9,7 +9,8 @@ enum TextInserter {
     private static let cKeyCode: CGKeyCode = 8
     private static let returnKeyCode: CGKeyCode = 36
 
-    private static var pendingRestore: Task<Void, Never>?
+    private static var pendingRestore: ScratchPaste?
+    private static var pendingRestoreBackstop: Task<Void, Never>?
     private static var pendingRestoreGeneration = 0
 
     // Reads the target app's current selection. Native apps expose it via AX, read directly (no ⌘C, so an
@@ -179,11 +180,11 @@ enum TextInserter {
     }
 
     private static let maxSnapshotStabilizeAttempts = 3
-    private static let restoreWindowMs = 250
     private static let submitSettleMs = 120
+    private static let restoreBackstopMs = 1500
 
-    // The clipboard restore always runs detached, off the user-felt path; awaitSettle additionally holds a
-    // short window inline so a following submit Return lands after the target consumed ⌘V.
+    // The clipboard restore runs off the user-felt path; awaitSettle only holds a short window inline so a
+    // following submit Return lands after the target consumed ⌘V.
     static func settleScratch(_ scratch: ScratchPaste, awaitSettle: Bool) async {
         detachRestore(scratch)
         if awaitSettle {
@@ -191,34 +192,36 @@ enum TextInserter {
         }
     }
 
+    // Not on a short fixed timer: the concealed scratch stays until the next clipboard interaction
+    // (drainPendingRestore) or, failing that, a backstop — giving a lagging target time to consume ⌘V
+    // before the restore. A target that stalls past the backstop can still read the restored clipboard.
     private static func detachRestore(_ scratch: ScratchPaste) {
         pendingRestoreGeneration &+= 1
-        pendingRestore = Task {
-            if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: restoreWindowMs, stepMs: 25) {
-                scratch.snapshot.restore(to: scratch.pb)
-            }
+        let generation = pendingRestoreGeneration
+        pendingRestore = scratch
+        pendingRestoreBackstop = Task {
+            try? await Task.sleep(for: .milliseconds(restoreBackstopMs))
+            guard !Task.isCancelled, pendingRestoreGeneration == generation else { return }
+            restoreIfScratchIntact(scratch)
+            pendingRestore = nil
+            pendingRestoreBackstop = nil
+        }
+    }
+
+    // Restores immediately unless a later copy replaced the scratch (changeCount moved), preserving that copy.
+    private static func restoreIfScratchIntact(_ scratch: ScratchPaste) {
+        if scratch.pb.changeCount == scratch.stamp {
+            scratch.snapshot.restore(to: scratch.pb)
         }
     }
 
     static func drainPendingRestore() async {
-        while let pending = pendingRestore {
-            let generation = pendingRestoreGeneration
-            await pending.value
-            if pendingRestoreGeneration == generation {
-                pendingRestore = nil
-                break
-            }
-        }
-    }
-
-    private static func scratchSurvived(_ stamp: Int, on pb: NSPasteboard = .general, timeoutMs: Int, stepMs: Int) async -> Bool {
-        var waited = 0
-        while waited < timeoutMs {
-            try? await Task.sleep(for: .milliseconds(stepMs))
-            waited += stepMs
-            if pb.changeCount != stamp { return false }
-        }
-        return pb.changeCount == stamp
+        guard let scratch = pendingRestore else { return }
+        pendingRestoreGeneration &+= 1
+        pendingRestoreBackstop?.cancel()
+        pendingRestoreBackstop = nil
+        pendingRestore = nil
+        restoreIfScratchIntact(scratch)
     }
 
     // Temporary clipboard write for the paste, read-back verified. Transient + concealed so clipboard

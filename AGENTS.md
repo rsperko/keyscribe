@@ -15,7 +15,15 @@ This file is the entry point. Read the design docs before writing code — they 
 - **Exactly one STT engine is active globally** (user-selected). Multiple named *LLMs* are
   allowed; the STT engine is singular. Resolve it through one provider (seam for per-mode later,
   not built — YAGNI).
-- **The only outbound network call is an explicit BYOK LLM rewrite**, over a redacted payload.
+- **The only outbound network call that carries content is an explicit BYOK LLM rewrite**, over a
+  redacted payload. One content-free exception: when the **Phase-A resolved mode is wired to a BYOK
+  connection** — and only after the secure-aware snapshot has confirmed the field is not a password
+  field — a **bodyless, auth-less HEAD preconnect** to that connection's host may fire during recording
+  to warm the TLS connection (`HTTPLLMClient.preconnect`, gated by `DictationController.maybePreconnect`
+  on the resolved mode AND the adopted snapshot). It carries no user content and touches only the host
+  that mode's connection points at. The rewrite may not ultimately fire (cancel, no speech, a
+  whole-utterance replacement, or a Phase-B route to a local mode); the preconnect stays content-free
+  regardless, and a focused secure field neuters the mode so none fires there.
 - **No telemetry, no analytics.** Speech, transcripts, and usage are never collected.
 - **Dictation is batch (commit-on-release) and inserts atomically** — one ⌘Z undoes the whole
   dictation.

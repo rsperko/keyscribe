@@ -103,6 +103,10 @@ final class DictationController {
         var streamingDriver: StreamingDictationDriver?
         var streamingSampleContinuation: AsyncStream<[Float]>.Continuation?
         var streamingFeedTask: Task<Void, Never>?
+        // Preconnect fires only once both are set: mode resolved AND secure-aware snapshot adopted.
+        var preconnectModeReady = false
+        var preconnectSnapshotReady = false
+        var preconnectFired = false
     }
     // Non-nil only while a dictation is in flight. Per-dictation state is `session?.field`; the façade
     // accessors below stay for call-site ergonomics (building/capturedSnapshot/activeMode) and because tests
@@ -125,6 +129,9 @@ final class DictationController {
     var captureBringUpTask: Task<Void, Never>? {
         get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
     }
+    var snapshotAdoptionTask: Task<Void, Never>? {
+        get { session?.snapshotAdoptionTask } set { session?.snapshotAdoptionTask = newValue }
+    }
     var dictationTask: Task<Void, Never>? {
         get { session?.dictationTask } set { session?.dictationTask = newValue }
     }
@@ -140,6 +147,8 @@ final class DictationController {
 
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
+    // BYOK endpoint warm-up (see maybePreconnect); one in flight at a time.
+    private var preconnectTask: Task<Void, Never>?
     private var idleEvictionEngine: (any SpeechEngine)?
     // Re-realizes the audio input binding while idle so the first dictation after a long idle/sleep doesn't
     // pay a stale unit-realization on the hot path. See scheduleCaptureRefresh.
@@ -583,7 +592,8 @@ final class DictationController {
     }
 
     private func adoptFullSnapshot() {
-        guard shouldAdoptFullSnapshot else { return }
+        // No async adoption: the press snapshot is already authoritative (incl. its secure-field flag).
+        guard shouldAdoptFullSnapshot else { markPreconnectSnapshotReady(); return }
         let captured = capturedSnapshot?.bundleId
         session?.snapshotAdoptionTask?.cancel()
         session?.snapshotAdoptionTask = Task { @MainActor [weak self] in
@@ -594,6 +604,7 @@ final class DictationController {
             self.capturedSnapshot = full
             self.building.targetBundleId = full.bundleId
             self.activeMode = self.securePolicyApplied(self.activeMode)
+            self.markPreconnectSnapshotReady()   // a bail-out above leaves the gate closed (no preconnect)
         }
     }
 
@@ -952,6 +963,23 @@ final class DictationController {
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
         activeMode = securePolicyApplied(override ?? resolved)
+        session?.preconnectModeReady = true
+        maybePreconnect()
+    }
+
+    private func markPreconnectSnapshotReady() {
+        session?.preconnectSnapshotReady = true
+        maybePreconnect()
+    }
+
+    // Warm the resolved mode's endpoint once the mode and the secure-aware snapshot are both settled; a
+    // secure field neuters the mode (no connection → no preconnect).
+    private func maybePreconnect() {
+        guard let session, session.preconnectModeReady, session.preconnectSnapshotReady, !session.preconnectFired,
+              let mode = activeMode, let connection = connection(for: mode) else { return }
+        self.session?.preconnectFired = true
+        preconnectTask?.cancel()
+        preconnectTask = Task { [llmClient] in await llmClient.preconnect(connection: connection) }
     }
 
     // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no

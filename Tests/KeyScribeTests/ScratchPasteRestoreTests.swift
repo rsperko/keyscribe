@@ -7,8 +7,10 @@ import Testing
 // the next paste snapshot its still-present scratch text as the user's clipboard — otherwise that scratch
 // text (which can hold a just-restored redacted span) gets restored back and persists. These drive the
 // scratch/restore coordinator on a PRIVATE pasteboard, so no real clipboard is touched and no ⌘V is
-// synthesized (postKey, orthogonal to the restore ordering, is skipped).
+// synthesized (postKey, orthogonal to the restore ordering, is skipped). Serialized because the coordinator
+// keeps process-wide pending-restore state that the dictation state machine only ever touches one at a time.
 @MainActor
+@Suite(.serialized)
 struct ScratchPasteRestoreTests {
     private func makePasteboard() -> NSPasteboard {
         NSPasteboard(name: NSPasteboard.Name("keyscribe-test-\(UUID().uuidString)"))
@@ -82,6 +84,26 @@ struct ScratchPasteRestoreTests {
         await TextInserter.drainPendingRestore()
 
         #expect(pb.string(forType: .string) == "COPY_2")
+    }
+
+    // With no next interaction to drain it, the scratch stays put (a stalled target still reads our ⌘V,
+    // not the user's old clipboard) and the backstop restores the user's clipboard on its own.
+    @Test func theBackstopRestoresWhenNothingElseDrains() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        let scratch = await TextInserter.beginScratchPaste("dictation", on: pb)
+        #expect(scratch != nil)
+        await TextInserter.settleScratch(scratch!, awaitSettle: false)
+        #expect(pb.string(forType: .string) == "dictation")   // held, not restored on a short timer
+
+        var restored = false
+        for _ in 0..<40 {
+            if pb.string(forType: .string) == "USER_ORIGINAL" { restored = true; break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(restored)
     }
 
     // A clipboard that changes on every capture never stabilizes; the paste fails closed rather than write

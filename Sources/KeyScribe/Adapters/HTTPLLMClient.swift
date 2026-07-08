@@ -18,6 +18,27 @@ struct HTTPLLMClient: LLMClient {
                           tokenCommandRunner: tokenCommandRunner, tokenCache: tokenCache, now: now)
     }
 
+    // Open the pooled connection to the host (no auth, no body) so a rewrite moments later reuses it.
+    func preconnect(connection: Connection) async {
+        guard let url = preconnectURL(for: connection) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "HEAD"
+        _ = try? await session.data(for: req)
+    }
+
+    private func preconnectURL(for connection: Connection) -> URL? {
+        switch connection.provider {
+        case .openai, .openaiCompatible:
+            let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines).removingTrailingSlash
+                ?? (connection.provider == .openai ? "https://api.openai.com/v1" : nil)
+            return base.flatMap { URL(string: $0) }
+        case .anthropic:
+            return URL(string: "https://api.anthropic.com")
+        case .gemini:
+            return URL(string: "https://generativelanguage.googleapis.com")
+        }
+    }
+
     func complete(system: String, user: String, connection: Connection) async throws -> String {
         let key = try await transport.credential(for: connection)
         if connection.provider != .openaiCompatible, key?.isEmpty != false {
