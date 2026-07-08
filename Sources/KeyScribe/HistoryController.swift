@@ -114,6 +114,7 @@ final class HistoryController {
                 model.flash("Could not return to the app — copied to clipboard instead.")
                 return
             }
+            window?.close()
         }
     }
 }

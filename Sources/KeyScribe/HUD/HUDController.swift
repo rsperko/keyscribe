@@ -52,6 +52,7 @@ final class HUDController: HUDPresenting {
         if case .recording(_, let level) = state { levelModel.level = level }
         model.state = state
         if case .hidden = state {
+            if panel?.isKeyWindow == true { relinquishKeyFocus() }
             fadeOutPanel()
         } else {
             showPanelIfNeeded()

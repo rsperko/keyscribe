@@ -303,14 +303,30 @@ enum TextInserter {
               let focusedRef else { return false }
         let element = focusedRef as! AXUIElement
         guard let before = axValue(element) else { return false }
+        let selectedBefore = axSelectedTextValue(element)
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success
         else { return false }
-        return axValue(element).map { $0 != before } ?? false
+        return axInsertLandedInPlace(before: before, after: axValue(element), selectedBefore: selectedBefore,
+                                     selectedAfter: axSelectedTextValue(element), inserted: text)
+    }
+
+    static func axInsertLandedInPlace(before: String, after: String?, selectedBefore: String?,
+                                      selectedAfter: String?, inserted: String) -> Bool {
+        if let after, after != before { return true }
+        guard !inserted.isEmpty, selectedBefore == inserted, let selectedAfter else { return false }
+        return selectedAfter != inserted
     }
 
     private static func axValue(_ element: AXUIElement) -> String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success else { return nil }
+        return value as? String
+    }
+
+    private static func axSelectedTextValue(_ element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success
+        else { return nil }
         return value as? String
     }
 
