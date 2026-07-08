@@ -9,6 +9,11 @@ public enum RegexCache {
     nonisolated(unsafe) private static var failed: Set<String> = []
     private static let lock = NSLock()
 
+    // Compile-check without memoizing — for interactive validation, so transient input never fills the cache.
+    public static func isValidPattern(_ pattern: String, options: NSRegularExpression.Options = []) -> Bool {
+        (try? NSRegularExpression(pattern: pattern, options: options)) != nil
+    }
+
     public static func regex(_ pattern: String, options: NSRegularExpression.Options = []) -> NSRegularExpression? {
         let key = "\(options.rawValue)\u{1}\(pattern)"
         lock.lock()

@@ -94,7 +94,7 @@ struct VocabularyComposer: View {
     private var heardTrimmed: String { heard.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var replaceTrimmed: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var regexInvalid: Bool {
-        regex && !heardTrimmed.isEmpty && RegexCache.regex(heardTrimmed) == nil
+        regex && !heardTrimmed.isEmpty && !RegexCache.isValidPattern(heardTrimmed)
     }
     private var canAdd: Bool { !heardTrimmed.isEmpty && (!regex || !replaceTrimmed.isEmpty) && !regexInvalid }
 

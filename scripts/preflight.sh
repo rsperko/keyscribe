@@ -2,8 +2,8 @@
 #
 # preflight.sh — the release gate. Runs every check that CAN be automated against the artifact you
 # are about to ship, then walks the human smoke checks that only a person driving the real app can
-# confirm, and — only if the whole thing passes — writes a stamp keyed to the current commit that
-# scripts/publish.sh refuses to publish without.
+# confirm, and writes a stamp keyed to the current commit once required checks are recorded satisfied.
+# scripts/publish.sh refuses to publish without that stamp.
 #
 # The reason this exists: `swift test` is green on the DEV build, but releases break on the things
 # that ONLY exist in the notarized production artifact — TCC grants rebinding to the new signature,
@@ -20,7 +20,7 @@
 #   B  Functional gates          — automated, needs models + a quiet room. Hard gate where it can run;
 #                                   loudly SKIPPED (never silently passed) where the corpus/hardware is absent.
 #   C  Human smoke on the real    — interactive checklist against the freshly-installed notarized app.
-#      installed app                Must be signed off for the stamp to be written.
+#      installed app                Sign off for routine releases; any skip/override is recorded.
 #
 # Usage:
 #   ./scripts/preflight.sh                full run against the RELEASE artifact (KeyScribe.app), writes the stamp
@@ -575,8 +575,8 @@ if [ -n "$OUTSTANDING" ]; then
   exit 0
 fi
 
-# Everything required is green or overridden → write the stamp keyed to this exact commit. First line
-# stays the raw SHA (publish.sh matches on it); the breakdown below records any overrides truthfully.
+# Everything required is pass / override / skip → write the stamp keyed to this exact commit. First line
+# stays the raw SHA (publish.sh matches on it); the breakdown below records overrides and skips truthfully.
 SHA="$(git rev-parse HEAD)"
 TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo '(untagged)')"
 {
@@ -588,4 +588,4 @@ TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo '(untagged)')"
 } > "$STAMP"
 bold "PREFLIGHT PASSED — stamp written for $TAG @ ${SHA:0:12}."
 [ "$OVERRIDDEN" -gt 0 ] && info "$OVERRIDDEN check(s) were overridden by hand (recorded in the stamp)."
-info "publish.sh will now allow this commit. Re-run preflight if you rebuild or move HEAD."
+info "publish.sh will now allow this commit. Re-run preflight if you rebuild the artifact or move HEAD."

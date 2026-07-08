@@ -259,7 +259,9 @@ make this shorter and warmer
 ```
 
 The selected text is captured, rewritten, and replaced in place. Selection capture uses the same
-clipboard path as normal Mac copy/paste, so there must be selected text for this mode to act on.
+clipboard path as normal Mac copy/paste, so there must be selected text for this mode to act on. For
+ordinary text clipboards this is preserved; very large or unusual clipboard contents may not restore
+perfectly.
 
 Good instructions:
 

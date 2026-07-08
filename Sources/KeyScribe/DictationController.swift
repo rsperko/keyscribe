@@ -147,6 +147,8 @@ final class DictationController {
     private static let captureRefreshIdleSeconds: Double = 240
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var lastUsedAt: Double = 0
+    // Retention only changes at a day boundary, so sweep once per day rather than per dictation.
+    private var lastRetentionSweepDay: String?
     private(set) var lastResult: String?
     // Published diagnostics record for the most recent COMPLETED dictation (finalizeRecord copies `building`
     // here at each terminal); survives past the session for the menu/log. Privacy as above.
@@ -1277,10 +1279,13 @@ final class DictationController {
             connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt)
         guard let history else { return }
         let retentionDays = settings.history.retentionDays
+        let today = HistoryStore.todayString()
+        let sweepRetention = lastRetentionSweepDay != today
+        lastRetentionSweepDay = today
         historyWriteQueue.async { [log] in
             do {
-                try history.append(entry)
-                history.applyRetention(retentionDays: retentionDays)
+                try history.append(entry, today: today)
+                if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays) }
             }
             catch { log.error("history append failed: \(error.localizedDescription, privacy: .public)") }
         }

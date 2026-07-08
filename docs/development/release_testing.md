@@ -114,7 +114,9 @@ Where a corpus or the hardware is absent, Tier B prints a loud **SKIP** — neve
 
 Kept deliberately **short so it actually gets run** — an arduous checklist gets skipped, which defeats
 the point. The routine path is **two script-verified dictations (~3 min)**, each chosen because a
-single natural action proves a whole cluster of release-only invariants:
+single natural action proves a whole cluster of release-only invariants. For a real release, do not
+skip these two routine checks; use an override with a reason only when you are intentionally shipping
+without that smoke coverage.
 
 1. **One plain dictation** on the notarized app, launched against the sandbox config dir
    (`open KeyScribe.app --args --config-dir .preflight-run --first-run`) so onboarding runs fresh
@@ -179,7 +181,8 @@ sanity) · `preflight.sh --auto` (Tier A + B only, non-interactive, no stamp —
 `--only <ids>` / `--force [ids]` / `--list-checks` / `--reset` (per-check re-run, see "Resumable" above).
 
 The stamp (`.preflight-pass`, gitignored) records the verified commit SHA on its first line (what
-`publish.sh` matches) plus a per-check breakdown, incl. any hand overrides. Rebuilding or moving HEAD
-invalidates it — re-run preflight (cached-green checks are skipped, so this is cheap). Per-check override
-is preferred over the full-bypass `KEYSCRIBE_SKIP_PREFLIGHT=1 make publish` (which ships wholly
-unverified — say so).
+`publish.sh` matches) plus a per-check breakdown, incl. any hand overrides. Moving HEAD invalidates it.
+The stamp is commit-keyed, not artifact-keyed, so rebuilding the DMG at the same commit does not
+invalidate it automatically; if you rebuild after preflight, delete the stamp or rerun preflight before
+publishing. Per-check override is preferred over the full-bypass `KEYSCRIBE_SKIP_PREFLIGHT=1 make
+publish` (which ships wholly unverified — say so).

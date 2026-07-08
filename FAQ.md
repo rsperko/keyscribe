@@ -24,12 +24,13 @@ that permission list and re-add it, or reset it with `tccutil reset <Service> co
 That is the focus-race fallback. If focus changes during dictation, KeyScribe copies the result
 instead of inserting it into the wrong app. Paste it where you want it.
 
-### Can KeyScribe preserve my clipboard while inserting?
+### Can KeyScribe preserve my clipboard while inserting or editing a selection?
 
 The default `paste` insertion method briefly uses the macOS clipboard to stage the text, then restores
-what was there. This is usually safe for ordinary text and small rich clipboards, but very large,
-non-text, or unusual clipboard contents can degrade to plain text or be cleared if KeyScribe cannot
-snapshot and restore them.
+what was there. Edit Selection modes also briefly use normal copy/paste to capture the selected text.
+This is usually safe for ordinary text and small rich clipboards, but very large, non-text, or unusual
+clipboard contents can degrade to plain text or be cleared if KeyScribe cannot snapshot and restore
+them.
 
 If preserving the clipboard matters more than insertion speed, set that mode's TOML to
 `insertion = "type"`. This types characters directly instead of staging text on the clipboard. The

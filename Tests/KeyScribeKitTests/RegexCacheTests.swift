@@ -27,6 +27,14 @@ struct RegexCacheTests {
         #expect(plain !== dotAll)
     }
 
+    @Test func isValidPatternReportsValidityWithoutMemoizing() {
+        let valid = "cat(?:s)?-\(#function)"
+        let invalid = "(unclosed-\(#function)"
+        #expect(RegexCache.isValidPattern(valid))
+        #expect(!RegexCache.isValidPattern(invalid))
+        #expect(!RegexCache.isKnownInvalid(invalid))   // not memoized
+    }
+
     @Test func compiledRegexStillMatches() {
         let re = RegexCache.regex(#"\bcat\b"#)
         let text = "the cat sat"

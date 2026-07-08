@@ -235,14 +235,15 @@ not static. As stages run they contribute constraints:
 This is the mechanism that keeps tokenization and vocabulary intact through rewrite.
 
 **Post-LLM validation gate (hard).** Token survival is enforced at runtime, not only tested. Before
-restore, a deterministic gate checks the LLM output: every token KeyScribe issued returns **exactly
-once** (unless the mode explicitly allows deletion), no **stray sentinel-like tokens** KeyScribe did
-not issue are present, and the output is **non-empty**. On failure the rewrite is **retried once**
-with a stricter minimal prompt; if it still fails, KeyScribe **falls back to the local (un-rewritten)
-text** with a HUD notice and never inserts partially-restored text. A dropped redaction token would
-leak the protected span; a dropped verbatim token would corrupt the insert — so this gate is a
-**safety requirement**, not output normalization. Opted-in context (visible/selected text) is treated
-as **untrusted data, not instructions** — kept in separate delimited blocks (`prompt_design.md`); the
+restore, a deterministic gate checks the LLM output: every token that was actually sent to the model
+returns **exactly once** (unless the mode explicitly allows deletion), no **stray sentinel-like
+tokens** are present — including an issued token that was not in the sent payload — and the output is
+**non-empty**. On failure the rewrite is **retried once** with a stricter minimal prompt; if it still
+fails, KeyScribe **falls back to the local (un-rewritten) text** with a HUD notice and never inserts
+partially-restored text. A dropped redaction token would leak the protected span; a dropped verbatim
+token would corrupt the insert — so this gate is a **safety requirement**, not output normalization.
+Opted-in context (visible/selected text) is treated as **untrusted data, not instructions** — kept in
+separate delimited blocks (`prompt_design.md`); the
 gate is the cheap guardrail against context steering the rewrite or dropping tokens (indirect prompt
 injection). There is no prompt-injection classifier — the deterministic checks are the guardrail that
 fits the product.
@@ -275,8 +276,9 @@ order is fixed and explicit:
 7. pre-LLM        final payload assembly
 8. LLM            optional BYOK rewrite
 9. post-LLM       output normalization
-10. validate      HARD gate: every issued token returns exactly once; no stray ⟦SN:…⟧ KeyScribe
-                  didn't issue; non-empty. Fail → one stricter retry → else local fallback + HUD.
+10. validate      HARD gate: every token present in the model payload returns exactly once; no stray
+                  ⟦SN:…⟧ tokens, including issued-but-unsent tokens; non-empty. Fail → one stricter
+                  retry → else local fallback + HUD.
 11. restore       run every command's `post` in STRICT REVERSE of apply — redaction restored first,
                   verbatim last (LIFO). Runs on EVERY path (rewrite, fallback, and no-LLM).
 12. insertion     paste (primary) / insert / type — atomic, one ⌘Z
@@ -513,9 +515,9 @@ in `ui_design.md` and `ui_components.md`.
 
 ### 4.7 Local history
 Optional, **on-device only** (a **`history/` directory with one JSONL file per day**, append-only),
-never synced. A **simple retention policy** bounds it (delete day-files older than N days, or cap
-entries). Per-mode "exclude from history." Password-field dictations are never written to history,
-regardless of the global or per-mode setting.
+never synced. A **simple retention policy** bounds it (delete day-files older than N days). Per-mode "exclude from
+history." Password-field dictations are never written to history, regardless of the global or
+per-mode setting.
 
 **Stored per entry:** raw transcription, the mode used, the **exact prompt sent to the LLM**, and the
 **final text pasted/inserted**. History can be searched, summarized, and exported as Markdown, plain
@@ -600,12 +602,16 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
 ### 5.1 Config schema versioning & migration
 Every persisted config file (**modes, LLM connections, dictionary/replacements, general settings**)
 carries a **`schema_version`**.
-- On load, files below the current version are upgraded through an **ordered, forward-only migration
-  chain** (v1 → v2 → …) and rewritten. Each file type owns its own version and migration steps, run by
-  **one shared migration runner** (DRY).
+- On load, older files are normalized by an **idempotent read transform** before decoding. A migration
+  is not a one-time on-disk step: a read-only file can remain at its old schema version until the user
+  edits or saves it, and the current decoder/migration path must understand every still-supported old
+  version directly. Where a file type needs shared migration steps, it runs them through the shared
+  migration runner before type-specific decoding.
 - A file from a **newer** version than the app understands is **not silently downgraded** — the app
   surfaces it and leaves it untouched.
-- A **pre-migration backup** is written so a failed or unwanted migration is recoverable.
+- KeyScribe does **not** rewrite files solely because a read migration ran, and it does **not** write
+  pre-migration backups today. Any future destructive or write-on-migrate path must add an explicit
+  backup or recovery step.
 - User-editable files are **validated** on load; invalid files surface a clear error rather than being
   silently dropped.
 - **Last-known-good recovery (modes):** every clean mode decode is copied to a recovery store

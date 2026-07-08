@@ -155,9 +155,22 @@ enum TextInserter {
     // Snapshots the clipboard and writes the scratch value ⌘V will paste. Drains any in-flight detached
     // restore first so the snapshot is the user's real clipboard, not a prior paste's scratch text
     // (restoring that would leak dictated content). nil ⇒ scratch write unverified, caller must not ⌘V.
-    static func beginScratchPaste(_ text: String, on pb: NSPasteboard) async -> ScratchPaste? {
+    static func beginScratchPaste(_ text: String, on pb: NSPasteboard, afterCapture: (() -> Void)? = nil) async -> ScratchPaste? {
         await drainPendingRestore()
-        let snapshot = await PasteboardSnapshot.capture(from: pb)
+        var snapshot = await PasteboardSnapshot.capture(from: pb)
+        afterCapture?()
+        // Re-capture until a snapshot spans no concurrent copy, so the scratch write can't clobber a copy
+        // that landed mid-capture. If it never stabilizes within the cap, fail closed below rather than
+        // clobber an actively-changing clipboard.
+        var stabilizeAttempts = 0
+        while pb.changeCount != snapshot.changeCount && stabilizeAttempts < maxSnapshotStabilizeAttempts {
+            snapshot = await PasteboardSnapshot.capture(from: pb)
+            afterCapture?()
+            stabilizeAttempts += 1
+        }
+        // A still-unstable clipboard means a copy is landing right now; skip the paste (recoverable via Paste
+        // Last) rather than write scratch over that copy and later restore a stale snapshot.
+        guard pb.changeCount == snapshot.changeCount else { return nil }
         guard writeScratchVerified(text, to: pb) else {
             snapshot.restore(to: pb)
             return nil
@@ -165,24 +178,29 @@ enum TextInserter {
         return ScratchPaste(pb: pb, snapshot: snapshot, stamp: pb.changeCount)
     }
 
-    // Restores the user's clipboard once the scratch survived the settle window. Inline when a submit Return
-    // must land after ⌘V; otherwise detached (the next paste drains it before snapshotting).
+    private static let maxSnapshotStabilizeAttempts = 3
+    private static let restoreWindowMs = 250
+    private static let submitSettleMs = 120
+
+    // The clipboard restore always runs detached, off the user-felt path; awaitSettle additionally holds a
+    // short window inline so a following submit Return lands after the target consumed ⌘V.
     static func settleScratch(_ scratch: ScratchPaste, awaitSettle: Bool) async {
+        detachRestore(scratch)
         if awaitSettle {
-            if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: 250, stepMs: 25) {
-                scratch.snapshot.restore(to: scratch.pb)
-            }
-            return
+            try? await Task.sleep(for: .milliseconds(submitSettleMs))
         }
+    }
+
+    private static func detachRestore(_ scratch: ScratchPaste) {
         pendingRestoreGeneration &+= 1
         pendingRestore = Task {
-            if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: 250, stepMs: 25) {
+            if await scratchSurvived(scratch.stamp, on: scratch.pb, timeoutMs: restoreWindowMs, stepMs: 25) {
                 scratch.snapshot.restore(to: scratch.pb)
             }
         }
     }
 
-    private static func drainPendingRestore() async {
+    static func drainPendingRestore() async {
         while let pending = pendingRestore {
             let generation = pendingRestoreGeneration
             await pending.value

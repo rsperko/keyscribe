@@ -275,7 +275,7 @@ private struct CorrectionPanelView: View {
     }
 
     private var regexInvalid: Bool {
-        regex && !trimmedTerm.isEmpty && RegexCache.regex(trimmedTerm) == nil
+        regex && !trimmedTerm.isEmpty && !RegexCache.isValidPattern(trimmedTerm)
     }
 
     private var canSave: Bool {

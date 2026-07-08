@@ -18,7 +18,7 @@ public enum GateRecovery: Equatable, Sendable {
 }
 
 // The hard post-LLM gate (design.md §4.2). A dropped redaction token leaks the protected span and a dropped
-// verbatim token corrupts the insert, so this is a safety check, not normalization: every issued nonce token
+// verbatim token corrupts the insert, so this is a safety check, not normalization: every required nonce token
 // must return exactly once (unless the mode allows deletion), no invented sentinel-like tokens, non-empty output.
 public enum ValidationGate {
     private static let sentinelPattern = "⟦SN:[^⟧]*⟧"

@@ -123,8 +123,9 @@ with the wording instruction above, the style rule wins:
 
 ## Post-LLM validation
 The output passes a deterministic gate before insertion (`design.md` §4.2):
-- **Token integrity** — every token KeyScribe issued returns exactly once (unless the mode allows
-  deletion); no stray `⟦SN:…⟧`-style tokens the app did not issue.
+- **Token integrity** — every token present in the model payload returns exactly once (unless the
+  mode allows deletion); no stray `⟦SN:…⟧`-style tokens. If KeyScribe issued a token but did not send
+  it in this request, the output must not invent it.
 - **Non-empty** — a refusal or empty response is a failure.
 - **On failure** — retry once with a stricter minimal prompt, then fall back to the local
   (un-rewritten) text with a HUD notice. Never insert partially-restored text.
@@ -138,12 +139,13 @@ is the second line of defense, catching context that still tries to steer the re
 (indirect prompt injection). No classifier in v1.
 
 ## Context & token budget
-Large context causes latency, cost, and truncation artifacts. The policy is explicit and
+Large context causes latency, cost, and provider-side context limits. The policy is explicit and
 **never silently truncates user content**:
 - **Instructions and mode prompt are never truncated** — they define the task.
 - **Selected text is content** and takes priority over other context.
-- **If assembled content exceeds budget, refuse the rewrite** and offer local paste/copy — do
-  not silently cut the user's selection or transcript.
+- **Assembled content is sent as-is rather than cut client-side.** If the provider rejects it or
+  returns a truncated response, the rewrite fails and KeyScribe falls back to the local text/copy path
+  with a HUD notice.
 - **`max_tokens` scales with edit-in-place** — a long selection needs output room ≥ its own
   length; the connection default (`config_schema.md`, 2048) is a floor, raised per request when
   the content demands it.

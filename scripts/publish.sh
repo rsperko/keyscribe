@@ -24,8 +24,9 @@ if [ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
 fi
 
 # Hard gate: refuse to publish unless the release preflight passed for THIS exact commit. The stamp is
-# written by ./scripts/preflight.sh only after Tier A+B (automated) and Tier C (human smoke) all pass,
-# and is keyed to the commit SHA so a rebuild or a moved HEAD invalidates it. Emergency override:
+# written by ./scripts/preflight.sh only after the required Tier A+B+C checks are recorded satisfied,
+# and is keyed to the commit SHA. Moving HEAD invalidates it; rebuilding the artifact at the same commit
+# requires rerunning preflight before publish. Emergency override:
 # KEYSCRIBE_SKIP_PREFLIGHT=1 (say so out loud — you are shipping unverified).
 STAMP=".preflight-pass"
 if [ "${KEYSCRIBE_SKIP_PREFLIGHT:-0}" = "1" ]; then

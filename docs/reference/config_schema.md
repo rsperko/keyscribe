@@ -2,7 +2,8 @@
 
 > Companion to `../development/design.md` (§4.3 modes, §4.6 settings, §5 storage, §5.1 versioning).
 > Defines the on-disk config: one TOML file per mode plus the shared config files modes
-> reference. Every file carries `schema_version` and migrates forward (`../development/design.md` §5.1).
+> reference. Every config file carries `schema_version`; older versions are normalized on read
+> (`../development/design.md` §5.1).
 
 ---
 
@@ -22,7 +23,6 @@
     pig-latin.toml
   history/                 # append-only local history, one JSONL file per day
     2026-06-20.jsonl
-  backups/                 # pre-migration backups (design.md §5.1)
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
     parakeet-tdt-0.6b-v3/
@@ -156,7 +156,7 @@ context = { app = true, preceding_text = false }
 
 | Field | Type | Notes |
 |---|---|---|
-| `schema_version` | int | Required. Migrated forward on load. |
+| `schema_version` | int | Required. Older versions are normalized on read. |
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
 | `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
@@ -378,11 +378,11 @@ How a rule behaves once it matches:
 ```toml
 schema_version = 1
 
-load_on_login = true
+load_on_login = false
 
 [stt]
 engine = "parakeet-tdt-ctc-110m"  # the single active engine (default: the compact 110M tier)
-eviction = "frugal"             # "fastest" | "balanced" | "frugal" (default: frugal)
+eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fastest)
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 # Per-engine "Dictionary Matching" overrides. Defaults follow model capability (recognition bias on
 # where supported, dictionary recovery on where not), so only deviations are recorded — a fresh
@@ -399,7 +399,7 @@ sounds = true                   # start/end sounds
 
 [history]
 enabled = true
-retention_days = 7              # default; delete day-files older than this (or retention_entries)
+retention_days = 7              # default; delete day-files older than this
 
 [shortcuts]                                 # global shortcuts for menu-bar actions
 add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
@@ -419,14 +419,14 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > The tap falls back to listen-only when an active tap can't be created (Accessibility not yet granted),
 > in which case the chord passes through until Accessibility is granted. Set in Settings ▸ General.
 
-> **Note:** `load_on_login` defaults to **false** in code (KeyScribe does not install a login item
-> unless the user opts in via General settings / first-run), even though the example above shows `true`.
-
 ---
 
 ## Conventions
-- **Unknown keys** in a user-edited file are preserved on rewrite where possible, but a file
-  whose `schema_version` exceeds the app's is left untouched and surfaced (`design.md` §5.1).
+- **Older schema versions** are normalized on read. KeyScribe does not rewrite a file just because a
+  read migration ran, and it does not create pre-migration backups today; a later save writes the
+  current schema.
+- **Rewrites normalize to this schema** and drop unknown keys and comments. A file whose
+  `schema_version` exceeds the app's is left untouched and surfaced (`design.md` §5.1).
 - **Secrets never in TOML** — saved LLM keys live in Keychain; command-generated tokens live only in
   memory. TOML stores `key_ref`, `auth_method`, and the command to run, never key or token material.
 - **kebab-case ids**, snake_case fields, consistently.

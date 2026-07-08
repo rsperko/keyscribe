@@ -43,8 +43,9 @@ This file is the entry point. Read the design docs before writing code — they 
   `apply`/`post`; one-way text stages leave `post` a no-op. Wrong order silently corrupts output or
   leaks a redacted span — never improvise it.
 - **Tokenization is safety, not cosmetics.** The token→original map is **in-memory only, never
-  logged or written to history**, and the **post-LLM validation gate** (every issued `⟦SN:…⟧`
-  returns exactly once; non-empty) is a hard check, not normalization: a dropped redaction token
+  logged or written to history**, and the **post-LLM validation gate** (every issued `⟦SN:…⟧` that was
+  sent to the model returns exactly once; an issued-but-unsent token appearing in the output is stray;
+  non-empty) is a hard check, not normalization: a dropped redaction token
   leaks the protected span, a dropped verbatim token corrupts the insert. On failure → one
   stricter retry → else local fallback + HUD notice (`docs/development/design.md` §4.2).
 - **Privacy mode and context are mutually exclusive.** When a mode's privacy toggle is on, the
@@ -161,8 +162,8 @@ This file is the entry point. Read the design docs before writing code — they 
   restarts capture into the same file on the control queue, bounded by `maxConfigRestarts`.
 - **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
-  `HUDController.relinquishKeyFocus()` runs at the top of `transcribeAndInsert`, in
-  `finishInsertion`, in `pasteLast`, and on every non-recording `render`.
+  `HUDController.relinquishKeyFocus()` runs in `finishInsertion`, in `rewriteSelection`, in
+  `pasteLast`, and on every non-recording `render`.
   `CorrectionPanelController`/`HistoryController` solve the same problem by capturing `previousApp`
   + selection first, then orderOut → activate → wait → paste.
 
@@ -458,8 +459,8 @@ Config lives under `~/Library/Application Support/<KeyScribe|KeyScribeDev>/` (pe
 watcher (no per-dictation I/O). File-based storage, **no SQLite**: config
 as TOML (modes/connections/dictionary/replacements), fragments as markdown+YAML, history as
 JSONL-per-day, downloaded STT weights consolidated in `models/` (`docs/reference/config_schema.md`). Every persisted
-*config* file carries `schema_version` and migrates forward (`docs/development/design.md` §5.1); `models/` is
-runtime-downloaded, never committed.
+*config* file carries `schema_version`; older versions are normalized on read (`docs/development/design.md` §5.1);
+`models/` is runtime-downloaded, never committed.
 
 **Config migrations — there is no migration *framework*, so don't assume one.** `ConfigDecode.table`
 only **gates** versions (it rejects a file newer than the app; it does not transform). "Migrating
