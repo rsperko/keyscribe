@@ -37,6 +37,7 @@ final class DictationController {
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
     private let frontmostBundleId: @MainActor () -> String?
+    private let precedingTextProbe: @MainActor (String) async -> String?
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let llmClient: any LLMClient
     // Durable sink for a model-load failure surviving both retries. Injected so tests assert it was
@@ -103,10 +104,12 @@ final class DictationController {
         var streamingDriver: StreamingDictationDriver?
         var streamingSampleContinuation: AsyncStream<[Float]>.Continuation?
         var streamingFeedTask: Task<Void, Never>?
-        // Preconnect fires only once both are set: mode resolved AND secure-aware snapshot adopted.
-        var preconnectModeReady = false
-        var preconnectSnapshotReady = false
+        // Preconnect and the preceding-text probe fire only once both are set: mode resolved AND secure-aware
+        // snapshot adopted (so a secure field neuters the mode first).
+        var modeReady = false
+        var snapshotReady = false
         var preconnectFired = false
+        var precedingTextTask: Task<String?, Never>?
     }
     // Non-nil only while a dictation is in flight. Per-dictation state is `session?.field`; the façade
     // accessors below stay for call-site ergonomics (building/capturedSnapshot/activeMode) and because tests
@@ -272,6 +275,7 @@ final class DictationController {
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         frontmostBundleId: @escaping @MainActor () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
+        precedingTextProbe: @escaping @MainActor (String) async -> String? = { await ContextProbe.precedingText(forBundleId: $0) },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
             InstalledEngineFilter.shouldRun(engineId: engine.id)
         },
@@ -298,6 +302,7 @@ final class DictationController {
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
         self.frontmostBundleId = frontmostBundleId
+        self.precedingTextProbe = precedingTextProbe
         self.activeEngineUsable = activeEngineUsable
         self.llmClient = llmClient
         self.recordModelLoadFailure = recordModelLoadFailure
@@ -593,7 +598,7 @@ final class DictationController {
 
     private func adoptFullSnapshot() {
         // No async adoption: the press snapshot is already authoritative (incl. its secure-field flag).
-        guard shouldAdoptFullSnapshot else { markPreconnectSnapshotReady(); return }
+        guard shouldAdoptFullSnapshot else { markSnapshotReady(); return }
         let captured = capturedSnapshot?.bundleId
         session?.snapshotAdoptionTask?.cancel()
         session?.snapshotAdoptionTask = Task { @MainActor [weak self] in
@@ -604,7 +609,7 @@ final class DictationController {
             self.capturedSnapshot = full
             self.building.targetBundleId = full.bundleId
             self.activeMode = self.securePolicyApplied(self.activeMode)
-            self.markPreconnectSnapshotReady()   // a bail-out above leaves the gate closed (no preconnect)
+            self.markSnapshotReady()   // a bail-out above leaves the gate closed (no preconnect / probe)
         }
     }
 
@@ -754,6 +759,7 @@ final class DictationController {
         captureBringUpTask?.cancel()
         session?.levelPollTask?.cancel()
         session?.rewriteEscapeTask?.cancel()
+        session?.precedingTextTask?.cancel()
         // Streaming teardown on EVERY terminal (commit, cancel, error, over-limit): finish the feed and
         // cancel the driver so a session still holding the SerializedEngine lock releases it. Idempotent — a
         // committed dictation already finalized (driver.finish marked it done), so cancel is a no-op there;
@@ -963,23 +969,38 @@ final class DictationController {
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
         activeMode = securePolicyApplied(override ?? resolved)
-        session?.preconnectModeReady = true
-        maybePreconnect()
+        session?.modeReady = true
+        onModeAndSnapshotReady()
     }
 
-    private func markPreconnectSnapshotReady() {
-        session?.preconnectSnapshotReady = true
+    private func markSnapshotReady() {
+        session?.snapshotReady = true
+        onModeAndSnapshotReady()
+    }
+
+    private func onModeAndSnapshotReady() {
         maybePreconnect()
+        maybeStartPrecedingProbe()
     }
 
     // Warm the resolved mode's endpoint once the mode and the secure-aware snapshot are both settled; a
     // secure field neuters the mode (no connection → no preconnect).
     private func maybePreconnect() {
-        guard let session, session.preconnectModeReady, session.preconnectSnapshotReady, !session.preconnectFired,
+        guard let session, session.modeReady, session.snapshotReady, !session.preconnectFired,
               let mode = activeMode, let connection = connection(for: mode) else { return }
         self.session?.preconnectFired = true
         preconnectTask?.cancel()
         preconnectTask = Task { [llmClient] in await llmClient.preconnect(connection: connection) }
+    }
+
+    // Overlap the preceding-text AX walk with drain+transcribe. A secure field has neutered the mode by here,
+    // so effectiveContext.precedingText is off and the field is never read.
+    private func maybeStartPrecedingProbe() {
+        guard let session, session.modeReady, session.snapshotReady, session.precedingTextTask == nil,
+              activeMode?.effectiveContext.precedingText == true,
+              let bundleId = capturedSnapshot?.bundleId else { return }
+        let probe = precedingTextProbe
+        self.session?.precedingTextTask = Task { await probe(bundleId) }
     }
 
     // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no
@@ -1540,7 +1561,8 @@ final class DictationController {
         // selection itself issued none.
         let request = await RewriteRequestBuilder(
             mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
-            capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection).build()
+            capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection,
+            precedingTextTask: session?.precedingTextTask, precedingTextProbe: precedingTextProbe).build()
 
         if mode.source != .selection {
             session?.pendingLocalRewriteDetails = RewriteDetails(

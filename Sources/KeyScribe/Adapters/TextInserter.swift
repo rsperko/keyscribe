@@ -93,14 +93,23 @@ enum TextInserter {
 
     private static func alertVolume() -> Int? {
         var error: NSDictionary?
-        guard let result = NSAppleScript(source: "alert volume of (get volume settings)")?
+        guard let result = cachedScript("alert volume of (get volume settings)")?
             .executeAndReturnError(&error), error == nil else { return nil }
         return Int(result.int32Value)
     }
 
     private static func setAlertVolume(_ volume: Int) {
         var error: NSDictionary?
-        _ = NSAppleScript(source: "set volume alert volume \(volume)")?.executeAndReturnError(&error)
+        _ = cachedScript("set volume alert volume \(volume)")?.executeAndReturnError(&error)
+    }
+
+    // Reuse compiled scripts so the muted ⌘C fallback doesn't recompile per call; bounded (read + volume 0...100).
+    private static var scriptCache: [String: NSAppleScript] = [:]
+    private static func cachedScript(_ source: String) -> NSAppleScript? {
+        if let cached = scriptCache[source] { return cached }
+        let script = NSAppleScript(source: source)
+        scriptCache[source] = script
+        return script
     }
 
     // The user's clipboard as text, for "insert clipboard contents". Read at pipeline time (before any

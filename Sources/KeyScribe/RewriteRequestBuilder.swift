@@ -13,6 +13,8 @@ struct RewriteRequestBuilder {
     let capturedBundleId: String?
     let plan: ResolvedConfig
     let connection: Connection
+    var precedingTextTask: Task<String?, Never>? = nil
+    var precedingTextProbe: @MainActor (String) async -> String? = { await ContextProbe.precedingText(forBundleId: $0) }
 
     struct Assembled {
         let sized: Connection
@@ -51,7 +53,8 @@ struct RewriteRequestBuilder {
         let precedingBundleId = ctx.precedingText ? capturedBundleId : nil
         let precedingText: String? = await {
             guard let precedingBundleId else { return nil }
-            return await ContextProbe.precedingText(forBundleId: precedingBundleId)
+            if let precedingTextTask { return await precedingTextTask.value }
+            return await precedingTextProbe(precedingBundleId)
         }()
         if ctx.precedingText {
             Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")

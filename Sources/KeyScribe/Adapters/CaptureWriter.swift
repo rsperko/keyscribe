@@ -293,7 +293,9 @@ final class CaptureWriter: @unchecked Sendable {
             status.pointee = .endOfStream
             return nil
         }
-        if convError == nil, outBuffer.frameLength > 0, writeToFile(file, outBuffer) {
+        // Tail-frame count is unknown at end-of-stream; count a failed flush as one event so it isn't silent.
+        if let convError { recordDrop(frames: 1, reason: "tail flush: \(convError.localizedDescription)"); return }
+        if outBuffer.frameLength > 0, writeToFile(file, outBuffer) {
             appendSamples(from: outBuffer)
         }
     }
