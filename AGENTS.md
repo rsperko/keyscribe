@@ -398,14 +398,18 @@ streaming is disabled.)
 
 ### Forked / pinned STT deps
 
-Three forks + one pinned binary dep; the forks work live and cost nothing day-to-day:
+Two forks + two upstream deps (one a pinned binary); the forks work live and cost nothing day-to-day:
 - **WhisperKit** → `rsperko/argmax-oss-swift` (upstream v1.0.0): a one-line `!isPrefill` fix for the
   empty-output-with-`promptTokens` bug (#372) that breaks Whisper bias in every stock release.
   Depending on just the `WhisperKit` product keeps Vapor/openapi out of resolution (gated behind
-  `BUILD_ALL`).
-- **FluidAudio** → `rsperko/FluidAudio` (upstream 0.15.4): adds an `enableSpotterRescue` toggle to
-  `ctcTokenRescore` so the weaker `ctc110m` can skip the acoustic-only rescue pass (which
-  false-fired). Parakeet bias is **CTC-WS** (NeMo constrained-CTC keyword spotting).
+  `BUILD_ALL`). Still essential: upstream added `!isPrefill` guards elsewhere but NOT on the
+  `isSegmentCompleted` break our patch guards, so #372 is live for bias (verified 2026-07-08).
+- **FluidAudio** → `FluidInference/FluidAudio` (upstream, **no fork**): the `spotterRescueEnabled`
+  toggle on `ctcTokenRescore` — which lets the weaker `ctc110m` skip the acoustic-only rescue pass
+  that false-fired — **was upstreamed in #724**, so the former `rsperko/FluidAudio` fork was dropped
+  (2026-07-08) and `Package.swift` pins upstream directly at the same revision. Read the toggle via
+  `VocabularyRescorer.Config.spotterRescueEnabled` (`ParakeetEngine.swift`). Parakeet bias is
+  **CTC-WS** (NeMo constrained-CTC keyword spotting).
 - **speech-swift (Qwen3-ASR)** → `rsperko/speech-swift` (upstream `soniqo/speech-swift`, package
   `Qwen3Speech`): the fork only gates the `AsrBenchmark`/`AudioServer` targets behind `BUILD_ALL`
   so stock `speech-swift`'s `argmaxinc/WhisperKit` doesn't collide with our WhisperKit fork.

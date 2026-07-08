@@ -11,7 +11,7 @@ import Foundation
 let sparkleEnabled = ProcessInfo.processInfo.environment["KEYSCRIBE_SPARKLE"] == "1"
 
 var packageDependencies: [Package.Dependency] = [
-    .package(url: "https://github.com/rsperko/FluidAudio.git", revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"),
     .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),
     .package(url: "https://github.com/rsperko/argmax-oss-swift.git", revision: "7cc6ea2d321c7610f856be5bcebe337baef7a214"),
     .package(url: "https://github.com/rsperko/speech-swift.git", revision: "96273cd375783531129e5bb97a7ec25a7e717994"),

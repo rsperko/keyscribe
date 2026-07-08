@@ -1,5 +1,5 @@
 {
-  "originHash" : "d969e2b0089c31b84c7642b85eed0ec614c65bcb7867c47a3c294d91352f1872",
+  "originHash" : "18ea18c16fca5d7d13d7c6071c6bb7e7386405e96bf20587ff699e4ba9fff1d0",
   "pins" : [
     {
       "identity" : "argmax-oss-swift",
@@ -21,7 +21,7 @@
     {
       "identity" : "fluidaudio",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/rsperko/FluidAudio.git",
+      "location" : "https://github.com/FluidInference/FluidAudio.git",
       "state" : {
         "revision" : "a95ec26ee05f19b5f6e69c62e1d4fae420537730"
       }
@@ -41,15 +41,6 @@
       "location" : "https://github.com/moonshine-ai/moonshine-swift.git",
       "state" : {
         "revision" : "0fb16ccb64252b23b17f87c2a8a61228df9e7ebd"
-      }
-    },
-    {
-      "identity" : "sparkle",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/sparkle-project/Sparkle",
-      "state" : {
-        "revision" : "b6496a74a087257ef5e6da1c5b29a447a60f5bd7",
-        "version" : "2.9.4"
       }
     },
     {

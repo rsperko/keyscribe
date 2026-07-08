@@ -175,8 +175,9 @@ has no on-device bias path and uses dictionary recovery instead:
   same-tier CTC model re-scores dictionary terms against the acoustic frames and swaps a word only
   when CTC evidence **and** string similarity clear confidence thresholds. Acoustically grounded and
   confidence-gated. Two models (TDT v3 ↔ ctc06b, TDT-CTC 110M ↔ ctc110m); per-model tuning lives in
-  `ParakeetModelProfile`. Uses the FluidAudio fork's `enableSpotterRescue` toggle (off for the weaker
-  ctc110m, where the acoustic-only rescue pass false-fired).
+  `ParakeetModelProfile`. Uses FluidAudio's `VocabularyRescorer.Config.spotterRescueEnabled` toggle
+  (off for the weaker ctc110m, where the acoustic-only rescue pass false-fired) — upstreamed in
+  FluidAudio #724, so KeyScribe depends on upstream `FluidInference/FluidAudio` with no fork.
 - **Qwen3-ASR** — native on-device bias (`Qwen3DecodingOptions.context`).
 
 Only single-pass mechanisms (Whisper, Apple, Qwen3) bias for free; Parakeet's CTC-WS runs a second
