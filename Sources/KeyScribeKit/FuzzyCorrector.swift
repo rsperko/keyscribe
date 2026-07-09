@@ -29,14 +29,50 @@ public enum FuzzyCorrector {
         return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength)
     }
 
+    public struct Candidate: Sendable, Equatable {
+        public let heard: String
+        public let canonical: String
+        public init(heard: String, canonical: String) { self.heard = heard; self.canonical = canonical }
+    }
+
     public static func apply(_ text: String, prepared: Prepared) -> String {
         guard !prepared.isEmpty else { return text }
-        let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-
         var out: [String] = []
+        walk(text, prepared: prepared,
+             match: { out.append(leadingPunct($0.first!) + $1.canonical + trailingPunct($0.last!)) },
+             pass: { out.append($0) })
+        return out.joined(separator: " ")
+    }
+
+    // Every near-miss apply() would snap, reported instead of rewritten. Deduped by (heard, canonical);
+    // a term already present verbatim is not a candidate (bestMatch requires a real difference), so this
+    // never overlaps the verbatim validTerms hint.
+    public static func candidates(_ text: String, prepared: Prepared) -> [Candidate] {
+        guard !prepared.isEmpty else { return [] }
+        var result: [Candidate] = []
+        var seen = Set<String>()
+        walk(text, prepared: prepared,
+             match: { window, term in
+                 let heard = window.map(stripPunct).joined(separator: " ")
+                 if seen.insert(heard.lowercased() + "\u{0}" + term.canonical).inserted {
+                     result.append(Candidate(heard: heard, canonical: term.canonical))
+                 }
+             },
+             pass: { _ in })
+        return result
+    }
+
+    // The shared token walk both apply() and candidates() drive: emit each matched window with its term,
+    // else pass the token through. The match rules are load-bearing (design.md §4.2) — do not fork them.
+    private static func walk(
+        _ text: String, prepared: Prepared,
+        match: (_ window: [String], _ term: Term) -> Void,
+        pass: (_ token: String) -> Void
+    ) {
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         var i = 0
         while i < tokens.count {
-            var replaced = false
+            var matched = false
             for span in stride(from: min(2, tokens.count - i), through: 1, by: -1) {
                 let window = Array(tokens[i..<i + span])
                 // A ⟦SN:…⟧ nonce is opaque (design.md §4.2): never fuzzy-snap a window touching one, else a
@@ -56,14 +92,13 @@ public enum FuzzyCorrector {
                       term.norm != norm || term.canonical != core else {
                     continue
                 }
-                out.append(leadingPunct(window.first!) + term.canonical + trailingPunct(window.last!))
+                match(window, term)
                 i += span
-                replaced = true
+                matched = true
                 break
             }
-            if !replaced { out.append(tokens[i]); i += 1 }
+            if !matched { pass(tokens[i]); i += 1 }
         }
-        return out.joined(separator: " ")
     }
 
     fileprivate struct Term: Sendable { let canonical: String; let norm: String; let key: String }

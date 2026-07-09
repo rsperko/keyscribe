@@ -11,7 +11,10 @@ struct HTTPLLMClient: LLMClient {
     var keyProvider: @Sendable (String) -> SecretLookup = { KeychainStore.lookup($0) }
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared
+    var adaptationCache: RequestAdaptationCache = .shared
     var now: @Sendable () -> Date = { Date() }
+
+    private static let maxRemediations = 4
 
     private var transport: ProviderTransport {
         ProviderTransport(session: session, keyProvider: keyProvider,
@@ -44,12 +47,51 @@ struct HTTPLLMClient: LLMClient {
         if connection.provider != .openaiCompatible, key?.isEmpty != false {
             throw ProviderTransportError.missingKey(connection.keyRef)
         }
-        let request = try buildRequest(system: system, user: user, connection: connection, key: key)
-        let data = try await transport.send(request)
-        return try parse(data, provider: connection.provider)
+        switch connection.provider {
+        case .openai, .openaiCompatible:
+            return try await completeOpenAI(system: system, user: user, connection: connection, key: key)
+        case .anthropic, .gemini:
+            let request = try buildRequest(
+                system: system, user: user, connection: connection, key: key,
+                adaptations: .default(for: connection.provider))
+            let data = try await transport.send(request)
+            return try parse(data, provider: connection.provider)
+        }
     }
 
-    private func buildRequest(system: String, user: String, connection: Connection, key: String?) throws -> URLRequest {
+    private func completeOpenAI(system: String, user: String, connection: Connection, key: String?) async throws -> String {
+        let cacheKey = adaptationCacheKey(for: connection)
+        var adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
+        var attempts = 0
+        while true {
+            let request = try buildRequest(
+                system: system, user: user, connection: connection, key: key, adaptations: adaptations)
+            do {
+                let data = try await transport.send(request)
+                return try parse(data, provider: connection.provider)
+            } catch let ProviderTransportError.http(status, body) where status == 400 {
+                guard attempts < Self.maxRemediations,
+                      let apiError = OpenAIAPIError.parse(body: body),
+                      let next = remediatedAdaptations(adaptations, for: apiError) else {
+                    throw ProviderTransportError.http(status, body: body)
+                }
+                adaptations = next
+                await adaptationCache.remember(next, for: cacheKey)
+                attempts += 1
+            }
+        }
+    }
+
+    private func adaptationCacheKey(for connection: Connection) -> String {
+        let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines).removingTrailingSlash
+            ?? (connection.provider == .openai ? "https://api.openai.com/v1" : "")
+        let host = URL(string: base)?.host()?.lowercased() ?? base
+        return host + "\n" + connection.model
+    }
+
+    private func buildRequest(
+        system: String, user: String, connection: Connection, key: String?, adaptations: RequestAdaptations
+    ) throws -> URLRequest {
         let temp = connection.params.temperature
         let maxTokens = connection.params.maxTokens
 
@@ -62,18 +104,15 @@ struct HTTPLLMClient: LLMClient {
             }
             var req = jsonRequest(url)
             transport.applyAuth(key, for: connection.provider, to: &req)
-            let tokenLimitKey = usesHostedOpenAIParameterNames(provider: connection.provider, baseURL: base)
-                ? "max_completion_tokens"
-                : "max_tokens"
-            req.httpBody = try body([
+            applyOpenRouterHeaders(to: &req, host: url.host())
+            let sizedTokens = adaptations.indicatesReasoningModel ? reasoningSafeMaxTokens(maxTokens) : maxTokens
+            var payload: [String: Any] = [
                 "model": connection.model,
-                "temperature": temp,
-                tokenLimitKey: maxTokens,
-                "messages": [
-                    ["role": "system", "content": system],
-                    ["role": "user", "content": user],
-                ],
-            ])
+                adaptations.tokenLimitField.jsonKey: sizedTokens,
+                "messages": chatMessages(system: system, user: user, fold: adaptations.foldSystemIntoUser),
+            ]
+            if adaptations.includeTemperature { payload["temperature"] = temp }
+            req.httpBody = try body(payload)
             return req
 
         case .anthropic:
@@ -105,13 +144,22 @@ struct HTTPLLMClient: LLMClient {
         }
     }
 
-    private func usesHostedOpenAIParameterNames(provider: Connection.Provider, baseURL: String) -> Bool {
-        if provider == .openai { return true }
-        guard provider == .openaiCompatible, let host = URL(string: baseURL)?.host()?.lowercased() else {
-            return false
+    private func chatMessages(system: String, user: String, fold: Bool) -> [[String: String]] {
+        guard fold else {
+            return [["role": "system", "content": system], ["role": "user", "content": user]]
         }
-        return host == "api.openai.com"
+        let combined = system.isEmpty ? user : system + "\n\n" + user
+        return [["role": "user", "content": combined]]
     }
+
+    private func applyOpenRouterHeaders(to req: inout URLRequest, host: String?) {
+        guard let host = host?.lowercased(),
+              host == "openrouter.ai" || host.hasSuffix(".openrouter.ai") else { return }
+        req.setValue(Self.openRouterReferer, forHTTPHeaderField: "HTTP-Referer")
+        req.setValue(Branding.appName, forHTTPHeaderField: "X-Title")
+    }
+
+    private static let openRouterReferer = "https://keyscribe.app"
 
     private func parse(_ data: Data, provider: Connection.Provider) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -119,6 +167,9 @@ struct HTTPLLMClient: LLMClient {
         }
         switch provider {
         case .openai, .openaiCompatible:
+            if json["error"] is [String: Any] {
+                throw ProviderTransportError.http(400, body: String(data: data, encoding: .utf8))
+            }
             guard let choices = json["choices"] as? [[String: Any]],
                   let choice = choices.first,
                   let message = choice["message"] as? [String: Any],
@@ -126,11 +177,12 @@ struct HTTPLLMClient: LLMClient {
             // A response cut off at max_tokens passes the gate when no sentinels were issued (common
             // privacy-off case), pasting half a sentence. Treat truncation as an error → local fallback.
             if (choice["finish_reason"] as? String) == "length" { throw ProviderTransportError.truncated }
-            return content
+            guard let cleaned = ReasoningOutput.clean(content) else { throw ProviderTransportError.badResponse }
+            return cleaned
         case .anthropic:
             if (json["stop_reason"] as? String) == "max_tokens" { throw ProviderTransportError.truncated }
             guard let content = json["content"] as? [[String: Any]],
-                  let text = content.first?["text"] as? String else { throw ProviderTransportError.badResponse }
+                  let text = anthropicText(from: content) else { throw ProviderTransportError.badResponse }
             return text
         case .gemini:
             guard let candidates = json["candidates"] as? [[String: Any]],
@@ -141,6 +193,15 @@ struct HTTPLLMClient: LLMClient {
             if (candidate["finishReason"] as? String) == "MAX_TOKENS" { throw ProviderTransportError.truncated }
             return text
         }
+    }
+
+    private func anthropicText(from blocks: [[String: Any]]) -> String? {
+        let joined = blocks
+            .filter { ($0["type"] as? String) == "text" }
+            .compactMap { $0["text"] as? String }
+            .joined()
+        if !joined.isEmpty { return joined }
+        return blocks.compactMap { $0["text"] as? String }.first
     }
 
     private func jsonRequest(_ url: URL) -> URLRequest {

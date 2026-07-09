@@ -5,6 +5,10 @@ private func fix(_ s: String, _ terms: [String]) -> String {
     FuzzyCorrector.apply(s, prepared: FuzzyCorrector.prepare(terms))
 }
 
+private func candidates(_ s: String, _ terms: [String]) -> [FuzzyCorrector.Candidate] {
+    FuzzyCorrector.candidates(s, prepared: FuzzyCorrector.prepare(terms))
+}
+
 struct FuzzyCorrectorTests {
     @Test func snapsSplitProperNoun() {
         #expect(fix("we use charge bee for billing", ["ChargeBee"]) == "we use ChargeBee for billing")
@@ -122,5 +126,44 @@ struct FuzzyCorrectorTests {
 
     @Test func stillSnapsAcrossOrdinarySpace() {
         #expect(fix("git hub", ["GitHub"]) == "GitHub")
+    }
+
+    // candidates() shares apply()'s exact walk + gates, but surfaces each near-miss as a
+    // (heard → canonical) pair for the LLM to adjudicate instead of rewriting the text.
+    @Test func candidatesSurfacesSplitProperNoun() {
+        #expect(candidates("we use charge bee for billing", ["ChargeBee"])
+            == [.init(heard: "charge bee", canonical: "ChargeBee")])
+    }
+
+    @Test func candidatesSurfacesFuzzyMishearing() {
+        #expect(candidates("install postgress now", ["Postgres"])
+            == [.init(heard: "postgress", canonical: "Postgres")])
+    }
+
+    // A term already spelled correctly is not a recovery candidate — it is covered by the
+    // separate validTerms "treat as correct" hint. Only genuine near-misses surface here.
+    @Test func candidatesExcludesVerbatimTerm() {
+        #expect(candidates("we use ChargeBee for billing", ["ChargeBee"]).isEmpty)
+    }
+
+    @Test func candidatesLeavesUnrelatedWordsAlone() {
+        #expect(candidates("the cat sat on the mat", ["ChargeBee", "Kubernetes"]).isEmpty)
+    }
+
+    // Same phonetic gate as apply(): a common word one edit from a term but distinct in sound
+    // is not surfaced (no "lava" → Java).
+    @Test func candidatesRespectsPhoneticGate() {
+        #expect(candidates("i bought a lava lamp", ["Java"]).isEmpty)
+    }
+
+    @Test func candidatesDedupesRepeatedMishearing() {
+        #expect(candidates("postgress and postgress again", ["Postgres"])
+            == [.init(heard: "postgress", canonical: "Postgres")])
+    }
+
+    // Inherited from the shared walk: a window overlapping a ⟦SN:…⟧ nonce is never matched, so a
+    // near-miss glued to a token is not surfaced as a candidate.
+    @Test func candidatesSkipsWindowTouchingANonce() {
+        #expect(candidates("in spring \(SentinelText.open)V:1⟧ camp", ["Spring Boot"]).isEmpty)
     }
 }

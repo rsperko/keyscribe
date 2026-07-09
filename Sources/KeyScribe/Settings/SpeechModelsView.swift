@@ -79,7 +79,6 @@ private struct EngineRow: View {
                         Text(row.info.displayName).font(.headline)
                         if row.info.isDefaultEnglish { SpeechBadge(text: "Recommended", prominent: true) }
                         SpeechBadge(text: row.info.languageCount <= 1 ? "English" : "Multilingual")
-                        SpeechBadge(text: sizeClass)
                         if !row.info.supportsRecognitionBias {
                             SpeechBadge(text: "No recognition bias")
                                 .help("Dictionary recovery can still fix close matches after transcription.")
@@ -111,6 +110,13 @@ private struct EngineRow: View {
                         Text("This model cannot use recognition hints.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                    } else if row.info.biasCompanionDiskBytes > 0 {
+                        Text("Recognition hints use a companion model bundled with this one — "
+                             + "\(fmt(row.info.biasCompanionDiskBytes)) on disk. It loads about "
+                             + "\(fmt(row.info.biasMemoryBytes)) into memory only while this is on.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Toggle(isOn: dictionaryRecoveryBinding) {
                         Text("Recover close dictionary matches after transcription").font(.caption)
@@ -207,11 +213,6 @@ private struct EngineRow: View {
         }
     }
 
-    private var sizeClass: String {
-        if row.info.systemManaged { return "Standard" }
-        return row.info.approxDownloadBytes <= 500_000_000 ? "Compact" : "Large"
-    }
-
     private var languageScope: String {
         row.info.languageCount <= 1 ? "English" : "\(row.info.languageCount) languages"
     }
@@ -219,28 +220,93 @@ private struct EngineRow: View {
     @ViewBuilder private var statusFooter: some View {
         if row.verificationFailed {
             if let bytes = row.installedBytes {
-                Text("On disk · \(ByteCountFormatter.fileStyle.string(fromByteCount: bytes))")
+                Text("On disk · \(fmt(bytes))")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-        } else if let status = installStatus {
-            Label(status, systemImage: "checkmark.circle.fill")
-                .font(.caption2).foregroundStyle(.green)
-        } else if !row.info.systemManaged, !row.isUsable, row.downloadFraction == nil {
-            Text("~\(ByteCountFormatter.fileStyle.string(fromByteCount: row.info.approxDownloadBytes)) download")
-                .font(.caption2).foregroundStyle(.secondary)
+        } else if row.downloadFraction != nil || row.verifying {
+            EmptyView()
+        } else if row.info.systemManaged {
+            if row.isUsable {
+                Text("Built into macOS · No download, needs almost no memory")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.sizeStatus(row.id))
+            }
+        } else {
+            sizeAndFit
         }
     }
 
-    private var installStatus: String? {
-        guard row.downloadFraction == nil, !row.verifying else { return nil }
-        if row.info.systemManaged {
-            return row.isUsable ? "Available · managed by macOS" : nil
+    // One quiet line: the familiar disk figure, then a plain verdict answering "will this run on my Mac?"
+    // computed against this Mac's installed RAM. The exact memory number lives in the hover/VoiceOver detail,
+    // so the surface never shows two competing gigabyte counts.
+    private var sizeAndFit: some View {
+        HStack(spacing: 6) {
+            Text(diskLabel).foregroundStyle(.secondary)
+            Text("·").foregroundStyle(.tertiary)
+            fitClause
         }
-        guard row.isUsable else { return nil }
-        if let bytes = row.installedBytes {
-            return "Installed · \(ByteCountFormatter.fileStyle.string(fromByteCount: bytes))"
+        .font(.caption2)
+        .help(memoryDetailText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityStatus)
+        .accessibilityIdentifier(AccessibilityID.Settings.Speech.sizeStatus(row.id))
+    }
+
+    @ViewBuilder private var fitClause: some View {
+        switch fitVerdict {
+        case .comfortable:
+            HStack(spacing: 5) {
+                Circle().fill(.green).frame(width: 6, height: 6)
+                Text("Runs comfortably on your Mac").foregroundStyle(.secondary)
+            }
+        case .heavy:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text("Uses ~\(fmt(peakMemoryBytes)) memory — heavy on this Mac")
+            }
+            .foregroundStyle(.orange)
         }
-        return "Installed"
+    }
+
+    private var diskLabel: String {
+        if row.isUsable {
+            return "\(fmt(row.installedBytes ?? row.info.approxDownloadBytes)) on disk"
+        }
+        return "~\(fmt(row.info.approxDownloadBytes)) download"
+    }
+
+    private var biasActive: Bool { row.info.supportsRecognitionBias && row.recognitionBiasOn }
+
+    private var peakMemoryBytes: Int64 {
+        ModelMemory.peakBytes(
+            baseBytes: row.info.approxMemoryBytes, biasBytes: row.info.biasMemoryBytes, biasOn: biasActive)
+    }
+
+    private var fitVerdict: ModelFitVerdict {
+        ModelMemory.verdict(peakBytes: peakMemoryBytes, physicalBytes: ProcessInfo.processInfo.physicalMemory)
+    }
+
+    private var memoryDetailText: String {
+        guard row.info.approxMemoryBytes > 0 else { return "" }
+        var s = "Loads into memory only while you dictate — about \(fmt(peakMemoryBytes)) — then releases."
+        if biasActive, row.info.biasMemoryBytes > 0 {
+            s += " About \(fmt(row.info.biasMemoryBytes)) of that is the dictionary-bias model, "
+                + "used only when Dictionary Matching is on."
+        }
+        return s
+    }
+
+    // VoiceOver can't hover the tooltip, so fold the disk size, the verdict, and the memory detail into one
+    // spoken label.
+    private var accessibilityStatus: String {
+        let verdict = fitVerdict == .comfortable
+            ? "Runs comfortably on your Mac."
+            : "Uses about \(fmt(peakMemoryBytes)) of memory. Heavy on this Mac."
+        return "\(diskLabel). \(verdict) \(memoryDetailText)"
+    }
+
+    private func fmt(_ bytes: Int64) -> String {
+        ByteCountFormatter.fileStyle.string(fromByteCount: bytes)
     }
 
     @ViewBuilder private var actions: some View {

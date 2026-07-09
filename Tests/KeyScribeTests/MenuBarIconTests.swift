@@ -1,9 +1,88 @@
 import AppKit
+import KeyScribeKit
 import Testing
 @testable import KeyScribe
 
 @MainActor
 struct MenuBarIconTests {
+    @Test func modeItemTitleShowsAModifierOnlyShortcut() {
+        let title = MenuBarController.modeItemTitle(
+            name: "Polish", trigger: try? KeyDescriptor(parsing: "right_option"), inertReason: nil)
+
+        #expect(title == "Polish — Right-⌥")
+    }
+
+    @Test func modeItemTitleShowsAChordShortcut() {
+        let title = MenuBarController.modeItemTitle(
+            name: "Email", trigger: try? KeyDescriptor(parsing: "control+option+e"), inertReason: nil)
+
+        #expect(title == "Email — ⌃⌥E")
+    }
+
+    // The menu, the Settings mode list, and the hotkey recorder share one label source:
+    // KeyDescriptor.displayString.
+    @Test func modeItemShortcutMatchesTheSharedLabelSource() {
+        for token in ["fn", "right_option", "right_command", "hyper", "control+option+e", "mouse2"] {
+            guard let descriptor = try? KeyDescriptor(parsing: token) else {
+                Issue.record("could not parse \(token)")
+                continue
+            }
+            let title = MenuBarController.modeItemTitle(
+                name: "Mode", trigger: descriptor, inertReason: nil)
+            #expect(title == "Mode — \(descriptor.displayString)")
+        }
+    }
+
+    @Test func modeItemTitleIsBareWhenNoShortcutIsAssigned() {
+        let title = MenuBarController.modeItemTitle(name: "Direct", trigger: nil, inertReason: nil)
+
+        #expect(title == "Direct")
+    }
+
+    @Test func modeItemTitleKeepsShortcutAndInertReasonTogether() {
+        let title = MenuBarController.modeItemTitle(
+            name: "Email", trigger: try? KeyDescriptor(parsing: "fn"),
+            inertReason: "needs an AI service")
+
+        #expect(title == "Email — Fn (Globe) · needs an AI service")
+    }
+
+    @Test func modeItemDimsTheShortcutButNotTheName() {
+        let attributed = MenuBarController.modeItemAttributedTitle(
+            name: "Polish", trigger: try? KeyDescriptor(parsing: "right_option"), inertReason: nil)
+
+        #expect(attributed.string == "Polish — Right-⌥")
+        let nameColor = attributed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        let shortcutColor = attributed.attribute(
+            .foregroundColor, at: attributed.length - 1, effectiveRange: nil) as? NSColor
+        #expect(nameColor == nil)
+        #expect(shortcutColor == NSColor.secondaryLabelColor)
+    }
+
+    @Test func modeItemAttributedTitleIsBareWhenNoShortcutIsAssigned() {
+        let attributed = MenuBarController.modeItemAttributedTitle(
+            name: "Direct", trigger: nil, inertReason: nil)
+
+        #expect(attributed.string == "Direct")
+        #expect(attributed.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
+    }
+
+    @Test func dictateWithMenuRendersEachModesShortcut() {
+        let controller = MenuBarController()
+        controller.install()
+
+        var polish = Mode(id: "polish", name: "Polish")
+        polish.triggerKeys = [.init(key: "right_option")]
+        var direct = Mode(id: "direct", name: "Direct")
+        direct.triggerKeys = []
+
+        controller.setModes([polish, direct], automaticName: "Direct", overrideName: nil)
+
+        let titles = controller.modeMenuItems.map { $0.attributedTitle?.string ?? $0.title }
+        #expect(titles.contains("Polish — Right-⌥"))
+        #expect(titles.contains("Direct"))
+    }
+
     @Test func statusIconIsTemplateSizedForTheMenuBar() {
         let image = MenuBarController.statusIcon
 

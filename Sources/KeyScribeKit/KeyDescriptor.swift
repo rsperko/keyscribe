@@ -182,9 +182,9 @@ extension KeyDescriptor {
     public var displayString: String {
         switch self {
         case .named(.fn): return "Fn (Globe)"
-        case .named(.hyper): return "Hyper (⌃⌥⇧⌘)"
-        case .named(.rightOption): return "Right ⌥"
-        case .named(.rightCommand): return "Right ⌘"
+        case .named(.hyper): return "⌃⌥⇧⌘"
+        case .named(.rightOption): return "Right-⌥"
+        case .named(.rightCommand): return "Right-⌘"
         case .chord(let mods, let key):
             let glyphs = Modifier.allCases.filter { mods.contains($0) }.map(\.glyph).joined()
             return glyphs + key.displayString

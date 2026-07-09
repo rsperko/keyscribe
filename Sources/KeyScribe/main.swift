@@ -47,6 +47,13 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                               ring-drop and CoreAudio-overload counts. Needs Microphone permission.
         --seconds <n>           Record for n seconds (default 5).
         --tone <hz>             Expected input tone in Hz (default 440).
+      --mem-probe             Measure each installed engine's in-memory footprint (phys_footprint) on the
+                              real load/transcribe paths and report the recognition-bias companion's memory
+                              cost as a delta. No mic/network. Run one engine at a time for clean absolute
+                              numbers. Honors --engines.
+        --clip <wav>            Transcribe this recording instead of a synthesized tone (more representative
+                                working set).
+        --seconds <n>           Length of the synthesized probe tone (default 5).
       --keep-capture <dir>    Save a copy of each committed capture WAV to <dir> for offline inspection
                               (off unless set). Rides `open --args`, so it survives a LaunchServices
                               launch (which Microphone TCC needs) where an env var would not. Equivalent
@@ -225,6 +232,28 @@ if let i = CommandLine.arguments.firstIndex(of: "--samples-parity"), i + 1 < Com
     }
     done.wait()
     exit(ok.load(ordering: .relaxed) ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--mem-probe") {
+    var only: Set<String>?
+    if let e = CommandLine.arguments.firstIndex(of: "--engines"), e + 1 < CommandLine.arguments.count {
+        only = Set(CommandLine.arguments[e + 1].split(separator: ",").map(String.init))
+    }
+    var clip: URL?
+    if let c = CommandLine.arguments.firstIndex(of: "--clip"), c + 1 < CommandLine.arguments.count {
+        clip = URL(fileURLWithPath: CommandLine.arguments[c + 1])
+    }
+    var seconds = 5.0
+    if let s = CommandLine.arguments.firstIndex(of: "--seconds"), s + 1 < CommandLine.arguments.count {
+        seconds = Double(CommandLine.arguments[s + 1]) ?? seconds
+    }
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await MemProbeRunner.run(only: only, clip: clip, seconds: seconds)
+        done.signal()
+    }
+    done.wait()
+    exit(0)
 }
 
 if CommandLine.arguments.contains("--capture-probe") {

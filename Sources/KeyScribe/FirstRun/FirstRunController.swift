@@ -348,8 +348,8 @@ final class FirstRunModel: ObservableObject {
     private static let playgroundLessonOrder = ["polish", "edit-selection"]
 
     private static let playgroundHints: [String: String] = [
-        "polish": "Try: \"Um I think we should maybe send the notes tomorrow because the meeting moved.\" Then hold Right Option and speak.",
-        "edit-selection": "The sentence above is selected for you. Hold Right Command and say \"make this shorter.\"",
+        "polish": "Try: \"Um I think we should maybe send the notes tomorrow because the meeting moved.\" Then hold Right-⌥ and speak.",
+        "edit-selection": "The sentence above is selected for you. Hold Right-⌘ and say \"make this shorter.\"",
     ]
 
     private func preparePlaygroundTextIfNeeded(for lessonId: String) {

@@ -80,7 +80,7 @@ struct ProviderTransport: Sendable {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ProviderTransportError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
-            throw ProviderTransportError.http(http.statusCode, body: Self.errorSnippet(from: data))
+            throw ProviderTransportError.http(http.statusCode, body: Self.errorSnippet(from: data, limit: 1000))
         }
         return data
     }

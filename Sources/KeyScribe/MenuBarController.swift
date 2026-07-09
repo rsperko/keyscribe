@@ -205,6 +205,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     var mainMenu: NSMenu? { appMenu }
     var pasteLastMenuItem: NSMenuItem { pasteLastItem }
+    var modeMenuItems: [NSMenuItem] { modesMenu.items }
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
 
@@ -310,9 +311,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             // A rewrite-using starter mode stays listed but inert until its AI service exists, and
             // says so in place rather than disappearing (ui_design.md §6).
             let reason = inertReasons[mode.id]
-            let title = reason.map { "\(mode.name) — \($0)" } ?? mode.name
+            let trigger = (mode.triggerKeys.first?.key).flatMap { try? KeyDescriptor(parsing: $0) }
             let item = NSMenuItem(
-                title: title, action: reason == nil ? #selector(selectMode) : nil, keyEquivalent: "")
+                title: Self.modeItemTitle(name: mode.name, trigger: trigger, inertReason: reason),
+                action: reason == nil ? #selector(selectMode) : nil, keyEquivalent: "")
+            item.attributedTitle = Self.modeItemAttributedTitle(
+                name: mode.name, trigger: trigger, inertReason: reason)
             item.target = self
             item.representedObject = mode.id
             item.isEnabled = reason == nil
@@ -326,6 +330,34 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let manage = NSMenuItem(title: "Manage Modes…", action: #selector(openModes), keyEquivalent: "")
         manage.target = self
         modesMenu.addItem(manage)
+    }
+
+    // A mode's trigger is shown inline rather than as a native keyEquivalent because the common
+    // triggers are modifier-only (Fn / Right-⌥ / Right-⌘) or a mouse button, which cannot be a
+    // keyEquivalent. KeyDescriptor.displayString is the single label source, so the glyphs match the
+    // Settings mode list and hotkey recorder exactly; the inert reason follows it.
+    static func modeItemAnnotation(trigger: KeyDescriptor?, inertReason: String?) -> String? {
+        let parts = [trigger?.displayString, inertReason].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    static func modeItemTitle(name: String, trigger: KeyDescriptor?, inertReason: String?) -> String {
+        guard let annotation = modeItemAnnotation(trigger: trigger, inertReason: inertReason) else { return name }
+        return "\(name) — \(annotation)"
+    }
+
+    // The shortcut/reason are secondary metadata, dimmed after the name so the mode name stays the
+    // primary target and the shortcut reads as a hint (like a native keyEquivalent's muted glyph).
+    static func modeItemAttributedTitle(
+        name: String, trigger: KeyDescriptor?, inertReason: String?
+    ) -> NSAttributedString {
+        let title = NSMutableAttributedString(string: name)
+        if let annotation = modeItemAnnotation(trigger: trigger, inertReason: inertReason) {
+            title.append(NSAttributedString(
+                string: " — \(annotation)",
+                attributes: [.foregroundColor: NSColor.secondaryLabelColor]))
+        }
+        return title
     }
 
     @objc private func pasteLast() { onPasteLast?() }

@@ -7,6 +7,7 @@ private func inputs(
     content: String = "hello there",
     tokens: [String] = [],
     validTerms: [String] = [],
+    fuzzyCandidates: [FuzzyCorrector.Candidate] = [],
     styleRules: [String] = [],
     appName: String? = nil, bundleId: String? = nil,
     fieldRole: String? = nil, selected: String? = nil,
@@ -15,7 +16,8 @@ private func inputs(
 ) -> PromptInputs {
     PromptInputs(
         modePrompt: modePrompt, dictatedInstructions: dictated, content: content,
-        tokens: tokens, validTerms: validTerms, styleRules: styleRules, language: "English",
+        tokens: tokens, validTerms: validTerms, fuzzyCandidates: fuzzyCandidates,
+        styleRules: styleRules, language: "English",
         modeSystemInstructions: modeSystem,
         appName: appName, bundleId: bundleId, fieldRole: fieldRole,
         selectedText: selected, precedingText: preceding)
@@ -97,6 +99,16 @@ struct PromptAssemblerTests {
         let p = PromptAssembler.assemble(inputs(validTerms: ["KeyScribe", "Parakeet"]))
         #expect(p.system.contains("not misspellings"))
         #expect(p.system.contains("KeyScribe, Parakeet"))
+    }
+
+    @Test func fuzzyCandidateLineOnlyWhenPresent() {
+        #expect(!PromptAssembler.assemble(inputs()).system.contains("may have misheard"))
+        let p = PromptAssembler.assemble(inputs(
+            fuzzyCandidates: [.init(heard: "charge bee", canonical: "ChargeBee"),
+                              .init(heard: "postgress", canonical: "Postgres")]))
+        #expect(p.system.contains("may have misheard"))
+        #expect(p.system.contains("\"charge bee\" → ChargeBee"))
+        #expect(p.system.contains("\"postgress\" → Postgres"))
     }
 
     @Test func modeSystemInstructionsAppended() {

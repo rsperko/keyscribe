@@ -106,7 +106,9 @@ struct KeyDescriptorTests {
         #expect(try KeyDescriptor(parsing: "control+option+shift+command+k").displayString == "⌃⌥⇧⌘K")
         #expect(try KeyDescriptor(parsing: "f5").displayString == "F5")
         #expect(KeyDescriptor.named(.fn).displayString == "Fn (Globe)")
-        #expect(KeyDescriptor.named(.rightOption).displayString == "Right ⌥")
+        #expect(KeyDescriptor.named(.rightOption).displayString == "Right-⌥")
+        #expect(KeyDescriptor.named(.rightCommand).displayString == "Right-⌘")
+        #expect(KeyDescriptor.named(.hyper).displayString == "⌃⌥⇧⌘")
     }
 
     @Test func collidesWhenSamePhysicalEvent() throws {

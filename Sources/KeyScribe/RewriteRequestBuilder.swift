@@ -37,9 +37,13 @@ struct RewriteRequestBuilder {
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
         // Lowercase the content once rather than per term.
+        let dictionary = plan.mergedDictionary(for: mode)
         let lowerContent = content.lowercased()
-        let validTerms = plan.mergedDictionary(for: mode)
-            .filter { lowerContent.contains($0.lowercased()) }
+        let validTerms = dictionary.filter { lowerContent.contains($0.lowercased()) }
+        // Near-misses the STT left in the content (verbatim terms are validTerms above, not candidates) →
+        // surfaced for the LLM to adjudicate. Capped so a pathological transcript can't bloat the prompt.
+        let fuzzyCandidates = Array(
+            FuzzyCorrector.candidates(content, prepared: FuzzyCorrector.prepare(dictionary)).prefix(10))
 
         // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity is a context
         // channel; the browser URL is a local routing key only, never sent to the LLM (design.md §4.3/§4.4).
@@ -62,7 +66,8 @@ struct RewriteRequestBuilder {
 
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
-            tokens: issuedTokens, validTerms: validTerms, styleRules: styleRules, language: "English",
+            tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: fuzzyCandidates,
+            styleRules: styleRules, language: "English",
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText)

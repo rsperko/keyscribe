@@ -213,10 +213,10 @@ bar).
 
 | id | name | Shape | Rewrite |
 |---|---|---|---|
-| `polish` | Polish | `source = dictation`, `output = cursor`, trigger `right_option` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Auto-enabled and connected when the first AI service is added; reachable on **Right ⌥**. |
+| `polish` | Polish | `source = dictation`, `output = cursor`, trigger `right_option` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Auto-enabled and connected when the first AI service is added; reachable on **Right-⌥**. |
 | `message` | Message | `source = dictation`, `output = cursor` | **disabled by default.** casual chat-style message; no greeting/sign-off. A discoverable example enabled in Settings. |
 | `email` | Email | `source = dictation`, `output = cursor`, phrase `as an email` | **disabled by default.** polished professional email with greeting + closing; never invents names/facts. A discoverable example enabled in Settings; once enabled, route to it by ending a dictation with **"as an email"**. |
-| `edit-selection` | Edit Selection | `source = selection`, `output = replace_selection`, trigger `right_command` | transforms the selection from a spoken instruction. Auto-enabled and connected when the first AI service is added; reachable on **Right ⌘**. |
+| `edit-selection` | Edit Selection | `source = selection`, `output = replace_selection`, trigger `right_command` | transforms the selection from a spoken instruction. Auto-enabled and connected when the first AI service is added; reachable on **Right-⌘**. |
 | `ai-prompt` | AI Prompt | `source = dictation`, `output = cursor` | **disabled by default.** Cleans dictation into a clear instruction for an AI assistant, preserving technical terms; never answers it. Intended as a smart-model example. |
 | `code` | Code | `source = dictation`, `output = cursor` | **disabled by default.** Cleans dictation for IDEs, code review, issues, commits, and coding assistants while preserving technical identifiers. |
 | `markdown` | Markdown | `source = dictation`, `output = cursor` | **disabled by default.** Reformats dictation into raw Markdown (headings, bullet/numbered lists, bold, blockquotes, inline/fenced code) without wrapping the output in a code fence. |
@@ -225,7 +225,7 @@ bar).
 `message`, `email`, `ai-prompt`, `code`, `markdown`, and `shell` ship **disabled** (`enabled = false`)
 as discoverable examples — the resolver ignores disabled modes, so the user enables one only after
 editing it to taste and attaching a connection. `polish` and `edit-selection` ship disabled too but
-already carry a default reach (Right ⌥ and Right ⌘ respectively), so the first AI connection makes
+already carry a default reach (Right-⌥ and Right-⌘ respectively), so the first AI connection makes
 them usable without any further setup. `email` keeps a default reach as well (the "as an email"
 phrase) but is not auto-connected — enable it in Settings when you want it.
 

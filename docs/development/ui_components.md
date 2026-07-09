@@ -163,7 +163,7 @@ between a picker and a recorder — predefined vs custom is just a value, not a 
   the value from recording; `Esc`, clicking away, and the view disappearing all revert to the exact
   prior binding.
 - The menu lists `None` (the single clear affordance) and — for the mode trigger only — the
-  modifier-only named keys `Fn (Globe)`, `Right Option`, `Right Command`, `Hyper (⌃⌥⇧⌘)`, with a
+  modifier-only named keys `Fn (Globe)`, `Right-⌥`, `Right-⌘`, `⌃⌥⇧⌘`, with a
   checkmark on the current one. Action shortcuts offer `None` and `Record…` only.
 - **Profiles** gate what a capture accepts, with an inline hint on rejection rather than a silently
   dead binding: the mode trigger accepts named keys, chords, and extra mouse buttons; an action

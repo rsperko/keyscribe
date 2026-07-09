@@ -442,7 +442,7 @@ sections:
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
 2. **When this mode is used** — the direct shortcut uses a **shortcut well** (one control: its menu
-   offers `None` and the modifier-only keys Fn, Right Option, Right Command, and Hyper, and clicking it
+   offers `None` and the modifier-only keys Fn (Globe), Right-⌥, Right-⌘, and ⌃⌥⇧⌘, and clicking it
    or choosing `Record…` captures a custom chord or extra mouse button in place — no separate picker/
    recorder swap); app/URL/window-title rules, press style, and spoken routing live under `Advanced
    routing`.

@@ -10,13 +10,20 @@ struct ModeSummaryTests {
         #expect(ModeSummary.whenRuns(mode) == "Triggered by ⌃⌥⇧⌘M")
     }
 
-    @Test func namedModifierKeysRemainPlainLanguage() throws {
-        #expect(ModeSummary.triggerLabel(try KeyDescriptor(parsing: "right_option")) == "Right Option")
-        #expect(ModeSummary.triggerLabel(try KeyDescriptor(parsing: "right_command")) == "Right Command")
+    @Test func namedModifierKeysUseCompactSymbols() {
+        var option = Mode(id: "opt", name: "Opt")
+        option.triggerKeys = [.init(key: "right_option")]
+        #expect(ModeSummary.whenRuns(option) == "Triggered by Right-⌥")
+
+        var command = Mode(id: "cmd", name: "Cmd")
+        command.triggerKeys = [.init(key: "right_command")]
+        #expect(ModeSummary.whenRuns(command) == "Triggered by Right-⌘")
     }
 
-    @Test func hyperSummaryUsesItsModifierSymbols() throws {
-        #expect(ModeSummary.triggerLabel(try KeyDescriptor(parsing: "hyper")) == "⌃⌥⇧⌘")
+    @Test func hyperSummaryUsesItsModifierSymbols() {
+        var mode = Mode(id: "hyper", name: "Hyper")
+        mode.triggerKeys = [.init(key: "hyper")]
+        #expect(ModeSummary.whenRuns(mode) == "Triggered by ⌃⌥⇧⌘")
     }
 
     @Test func appRuleWithoutAShortcutDoesNotLookAutomatic() {

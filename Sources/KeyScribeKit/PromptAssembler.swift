@@ -6,6 +6,7 @@ public struct PromptInputs: Sendable {
     public var content: String
     public var tokens: [String]
     public var validTerms: [String]
+    public var fuzzyCandidates: [FuzzyCorrector.Candidate]
     // Shared fragment bodies, in order. Rendered as labeled style rules inside <instructions> rather than
     // flattened into modePrompt, so the model treats them as overlays, not part of the cleanup instruction.
     public var styleRules: [String]
@@ -19,7 +20,8 @@ public struct PromptInputs: Sendable {
 
     public init(
         modePrompt: String, dictatedInstructions: String, content: String,
-        tokens: [String], validTerms: [String], styleRules: [String] = [], language: String,
+        tokens: [String], validTerms: [String], fuzzyCandidates: [FuzzyCorrector.Candidate] = [],
+        styleRules: [String] = [], language: String,
         modeSystemInstructions: String,
         appName: String?, bundleId: String?, fieldRole: String?,
         selectedText: String?, precedingText: String? = nil
@@ -29,6 +31,7 @@ public struct PromptInputs: Sendable {
         self.content = content
         self.tokens = tokens
         self.validTerms = validTerms
+        self.fuzzyCandidates = fuzzyCandidates
         self.styleRules = styleRules
         self.language = language
         self.modeSystemInstructions = modeSystemInstructions
@@ -66,6 +69,10 @@ public enum PromptAssembler {
         }
         if !i.validTerms.isEmpty {
             rules.append("- These terms are valid and intentional, not misspellings — treat them as correct: \(i.validTerms.joined(separator: ", ")). You may still transform them if the instructions require it.")
+        }
+        if !i.fuzzyCandidates.isEmpty {
+            let pairs = i.fuzzyCandidates.map { "\"\($0.heard)\" → \($0.canonical)" }.joined(separator: ", ")
+            rules.append("- The transcription may have misheard these dictionary terms. Where the text clearly refers to one, replace it with the term shown; otherwise leave the text unchanged: \(pairs).")
         }
         rules.append("- Write in \(i.language).")
 

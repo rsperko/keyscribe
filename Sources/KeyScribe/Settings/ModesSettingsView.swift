@@ -194,30 +194,20 @@ enum ModeSummary {
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
         if mode.isSystem {
             if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-                return "Triggered by \(triggerLabel(descriptor)) · fallback"
+                return "Triggered by \(descriptor.displayString) · fallback"
             }
             return "Fallback when no mode matches"
         }
         // A shortcut is what makes a mode run automatically. A constrained mode with NO shortcut/phrase never
         // auto-runs (Fn goes to Plain Dictation) — it's menu-reachable, so don't imply it's automatic.
         if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-            return constrained ? "Triggered by \(triggerLabel(descriptor)) in matching apps"
-                               : "Triggered by \(triggerLabel(descriptor))"
+            return constrained ? "Triggered by \(descriptor.displayString) in matching apps"
+                               : "Triggered by \(descriptor.displayString)"
         }
         if !mode.triggerPhrases.isEmpty {
             return constrained ? "Spoken phrase in matching apps" : "Spoken phrase"
         }
         if constrained { return "App rule — add a shortcut to use it" }
         return "Pick from the menu"
-    }
-
-    static func triggerLabel(_ descriptor: KeyDescriptor) -> String {
-        switch descriptor.canonical {
-        case "fn": "Fn (Globe)"
-        case "right_option": "Right Option"
-        case "right_command": "Right Command"
-        case "hyper": "⌃⌥⇧⌘"
-        default: descriptor.displayString
-        }
     }
 }

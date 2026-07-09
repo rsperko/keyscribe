@@ -49,7 +49,7 @@ whole dictation.
 
 If the Globe key opens Emoji, Apple Dictation, or the input-source switcher, change the system Globe
 action to "Do Nothing" in System Settings > Keyboard. The simpler alternative is to use KeyScribe >
-Settings > Modes > Plain Dictation and change the trigger to `Right Option`.
+Settings > Modes > Plain Dictation and change the trigger to `Right-⌥`.
 
 Plain Dictation is the built-in floor. It runs on-device, uses no AI service, and catches dictations
 that no other enabled mode claims.
@@ -67,7 +67,7 @@ important safety properties:
 Recommended setup:
 
 1. Open KeyScribe > Settings > Modes > Plain Dictation.
-2. Choose the trigger you can use without thinking: `Fn (Globe)`, `Right Option`, `Right Command`, a
+2. Choose the trigger you can use without thinking: `Fn (Globe)`, `Right-⌥`, `Right-⌘`, a
    custom shortcut, or an extra mouse button.
 3. Choose how the shortcut works: hold-or-tap, hold only, or tap to toggle.
 4. Open KeyScribe > Settings > General and optionally assign a shortcut for `Paste Last Dictation`.
@@ -408,7 +408,7 @@ Use these as templates for your own setup.
 
 ### Fast local default
 
-- Plain Dictation on `Right Option`.
+- Plain Dictation on `Right-⌥`.
 - Live edits on.
 - History on with short retention.
 - No AI rewrite.

@@ -101,12 +101,7 @@ struct ShortcutWell: View {
 }
 
 private func namedMenuLabel(_ named: NamedKey) -> String {
-    switch named {
-    case .fn: return "Fn (Globe)"
-    case .rightOption: return "Right Option"
-    case .rightCommand: return "Right Command"
-    case .hyper: return "Hyper (⌃⌥⇧⌘)"
-    }
+    KeyDescriptor.named(named).displayString
 }
 
 private struct RecorderButton: NSViewRepresentable {
