@@ -45,6 +45,7 @@ struct FirstRunView: View {
             Spacer()
             Button("Get Started") { model.step = .model }
                 .keyboardShortcut(.defaultAction).controlSize(.large)
+                .accessibilityIdentifier(AccessibilityID.FirstRun.Intro.getStarted)
         }
     }
 
@@ -63,11 +64,14 @@ struct FirstRunView: View {
                     }
                 }
                 .labelsHidden()
+                .accessibilityIdentifier(AccessibilityID.FirstRun.Model.enginePicker)
             }
+            .accessibilityIdentifier(AccessibilityID.FirstRun.Model.advancedDisclosure)
             if model.downloading {
                 ProgressView(value: model.downloadProgress) {
                     Text("Downloading… \(Int(model.downloadProgress * 100))%")
                 }
+                .accessibilityIdentifier(AccessibilityID.FirstRun.Model.progress)
             }
             if let error = model.downloadError {
                 Text(error).foregroundStyle(.red).font(.callout)
@@ -78,6 +82,7 @@ struct FirstRunView: View {
                     Button("Use Apple Speech") { model.skipModelDownload() }
                         .buttonStyle(.link)
                         .disabled(model.downloading)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.Model.useAppleSpeech)
                 }
                 Spacer()
                 Button(model.downloading ? "Downloading…" : modelDownloadButtonTitle) {
@@ -85,6 +90,7 @@ struct FirstRunView: View {
                 }
                 .keyboardShortcut(.defaultAction).controlSize(.large)
                 .disabled(model.downloading)
+                .accessibilityIdentifier(AccessibilityID.FirstRun.Model.download)
             }
             Text("Apple Speech is built into macOS and needs no download. It works as a fallback, but the recommended recognizer is usually more accurate.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -159,22 +165,27 @@ struct FirstRunView: View {
             HStack {
                 Button("Skip for now") { model.finish() }
                     .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.skip)
                 Spacer()
                 if model.permissionsOnly {
                     if model.allPermissionsGranted {
                         Button("Done") { model.finish() }
                             .keyboardShortcut(.defaultAction).controlSize(.large)
+                            .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.done)
                     } else {
                         Button("Quit & Relaunch to Apply") { model.relaunch() }
                             .keyboardShortcut(.defaultAction).controlSize(.large)
+                            .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.relaunch)
                     }
                 } else if model.needsRelaunch {
                     Button("Quit & Relaunch to Apply") { model.relaunch() }
                         .keyboardShortcut(.defaultAction).controlSize(.large)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.relaunch)
                 } else {
                     Button("Continue") { model.continueFromPermissions() }
                         .keyboardShortcut(.defaultAction).controlSize(.large)
                         .disabled(!model.allPermissionsGranted)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.continue)
                 }
             }
         }
@@ -183,11 +194,11 @@ struct FirstRunView: View {
     @ViewBuilder private var permissionStep: some View {
         switch model.nextPermission {
         case .microphone:
-            permissionRow("Microphone", "So \(Branding.appName) can hear you.",
+            permissionRow("microphone", "Microphone", "So \(Branding.appName) can hear you.",
                           "Dictation cannot start without it.", model.micStatus,
                           openSettings: { model.openMicrophoneSettings() }) { model.requestMicrophone() }
         case .accessibility:
-            permissionRow("Accessibility", "So finished text can be pasted into the focused field.",
+            permissionRow("accessibility", "Accessibility", "So finished text can be pasted into the focused field.",
                           "Dictation can be transcribed, but it will be copied instead of inserted.", model.axStatus,
                           openSettings: { model.openAccessibilitySettings() }) {
                 model.requestAccessibility()
@@ -195,7 +206,7 @@ struct FirstRunView: View {
         }
     }
 
-    private func permissionRow(_ title: String, _ detail: String, _ unavailable: String, _ status: PermissionStatus,
+    private func permissionRow(_ permID: String, _ title: String, _ detail: String, _ unavailable: String, _ status: PermissionStatus,
                                openSettings: @escaping () -> Void, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 12) {
             statusIcon(status)
@@ -210,11 +221,14 @@ struct FirstRunView: View {
             if status != .granted {
                 VStack(alignment: .trailing, spacing: 4) {
                     Button("Grant", action: action)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.grant(permID))
                     Button("Open System Settings", action: openSettings)
                         .buttonStyle(.link).font(.caption)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.openSettings(permID))
                 }
             }
         }
+        .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.row(permID))
     }
 
     private func statusIcon(_ status: PermissionStatus) -> some View {
@@ -235,6 +249,7 @@ struct FirstRunView: View {
                 .frame(height: 110)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($trialFieldFocused)
+                .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.field)
             if model.trialSucceeded {
                 Label("Dictation worked — you're set up.", systemImage: "checkmark.circle.fill")
                     .font(.callout).foregroundStyle(.green)
@@ -246,10 +261,12 @@ struct FirstRunView: View {
             HStack {
                 Button("Skip for now") { model.finish() }
                     .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.skip)
                 Spacer()
                 Button("Done") { model.finish() }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
                     .disabled(!model.trialSucceeded)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.done)
             }
         }
     }
@@ -274,6 +291,7 @@ struct FirstRunView: View {
                 testState: model.aiTesting ? .testing : nil,
                 onCommit: { _, _ in },
                 onFetchModels: { _ in Task { await model.fetchAIModels() } })
+                .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connectionEditor)
 
             if let error = model.aiSetupError {
                 Text(error).font(.callout).foregroundStyle(.red)
@@ -284,6 +302,7 @@ struct FirstRunView: View {
                 Button("Set Up Later") { model.skipAISetup() }
                     .buttonStyle(.link)
                     .disabled(model.aiTesting)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.AI.skip)
                 Spacer()
                 if model.aiTesting { ProgressView().controlSize(.small) }
                 Button(model.aiTesting ? "Testing…" : "Connect AI Service") {
@@ -291,6 +310,7 @@ struct FirstRunView: View {
                 }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
                     .disabled(!model.aiCanConnect || model.aiTesting)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connect)
             }
         }
     }
@@ -306,6 +326,7 @@ struct FirstRunView: View {
                 .frame(height: 76)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($playgroundFieldFocused)
+                .accessibilityIdentifier(AccessibilityID.FirstRun.Playground.field)
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(model.playgroundLessons) { lesson in
                     lessonAccordion(lesson)
@@ -316,6 +337,7 @@ struct FirstRunView: View {
                 Spacer()
                 Button("Done") { model.finish() }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.Playground.done)
             }
         }
     }
@@ -355,6 +377,7 @@ struct FirstRunView: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(AccessibilityID.FirstRun.Playground.lesson(lesson.modeId))
             if expanded {
                 Divider().padding(.leading, 32)
                 if let outcome {
@@ -383,6 +406,7 @@ struct FirstRunView: View {
                         Button("Next") { model.advancePlayground() }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
+                            .accessibilityIdentifier(AccessibilityID.FirstRun.Playground.next)
                     }
                 }
             }
