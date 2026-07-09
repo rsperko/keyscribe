@@ -67,6 +67,7 @@ struct AIConnectionDraftEditor: View {
                     HStack {
                         Button("Test Connection", action: onTest)
                             .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
+                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
                         if testState == .testing { ProgressView().controlSize(.small) }
                         Spacer()
                         testStatus
@@ -84,6 +85,7 @@ struct AIConnectionDraftEditor: View {
                     .font(.caption).foregroundStyle(.secondary)
                 if let onDelete {
                     Button("Delete AI Service", role: .destructive, action: onDelete)
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
                 }
             }
         }
@@ -98,6 +100,7 @@ struct AIConnectionDraftEditor: View {
 
     @ViewBuilder private var serviceRows: some View {
         textRow("Name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
         if presentation == .onboarding { thinDivider }
         HStack {
             Text("Provider")
@@ -110,6 +113,7 @@ struct AIConnectionDraftEditor: View {
             }
             .labelsHidden()
             .frame(maxWidth: 230, alignment: .trailing)
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.provider)
         }
     }
 
@@ -126,6 +130,7 @@ struct AIConnectionDraftEditor: View {
     private var endpointRows: some View {
         VStack(alignment: .leading, spacing: 4) {
             textRow("Base URL", value: draft.baseURL, prompt: "http://127.0.0.1:11234/v1") { draft.baseURL = $0 }
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.baseURL)
             Text("Example: http://127.0.0.1:11234/v1")
                 .font(.caption).foregroundStyle(.secondary)
             if draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -151,6 +156,7 @@ struct AIConnectionDraftEditor: View {
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .frame(width: draft.provider == .openaiCompatible ? 310 : 220)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.auth)
             }
             credentialFields
         }
@@ -178,6 +184,7 @@ struct AIConnectionDraftEditor: View {
                         .multilineTextAlignment(.trailing)
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 260)
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.apiKey)
                 }
                 if !hasStoredKey, !draft.hasUnsavedAPIKey {
                     requiredLabel("Enter an API key before connecting.")
@@ -193,6 +200,7 @@ struct AIConnectionDraftEditor: View {
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 360)
                         .onSubmit(saveKey)
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.apiKey)
                 }
                 HStack {
                     let status = apiKeyStatus
@@ -201,6 +209,7 @@ struct AIConnectionDraftEditor: View {
                     Spacer()
                     Button("Save key", action: saveKey)
                         .disabled(!draft.hasUnsavedAPIKey)
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.saveKey)
                 }
                 Text(draft.provider == .openaiCompatible
                      ? "Use No Auth if this endpoint accepts unauthenticated requests."
@@ -220,6 +229,7 @@ struct AIConnectionDraftEditor: View {
                 draft.authMethod = .tokenCommand
                 draft.tokenCommand = value.trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.tokenCommand)
             if draft.tokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 requiredLabel(
                     presentation == .onboarding
@@ -236,6 +246,7 @@ struct AIConnectionDraftEditor: View {
     private var modelRows: some View {
         VStack(alignment: .leading, spacing: presentation == .onboarding ? 4 : 6) {
             textRow("Model ID", value: draft.model, prompt: "Choose or type a model ID") { draft.model = $0 }
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.model)
             if draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 requiredLabel("Model ID is required.")
             }
@@ -244,6 +255,7 @@ struct AIConnectionDraftEditor: View {
                     onFetchModels(draft.requestAPIKey)
                 }
                 .disabled(fetchModelsDisabled)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.fetchModels)
                 if draft.isFetchingModels { ProgressView().controlSize(.small) }
                 Spacer()
                 if presentation == .onboarding, !draft.availableModels.isEmpty {
@@ -270,6 +282,7 @@ struct AIConnectionDraftEditor: View {
                             Text(model).tag(model)
                         }
                     }
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.foundModel)
                 }
             }
             if let reason = modelFetchDisabledReason {

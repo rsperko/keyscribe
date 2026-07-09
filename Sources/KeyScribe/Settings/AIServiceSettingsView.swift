@@ -267,13 +267,16 @@ struct AIServiceSettingsView: View {
                             .foregroundStyle(usage == 0 ? .tertiary : .secondary)
                     }
                     .tag(connection.id)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.row(connection.id))
                 }
             }
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.list)
             .safeAreaInset(edge: .bottom) {
                 Button("Add AI Service", systemImage: "plus", action: model.create)
                     .buttonStyle(.borderless)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.add)
             }
             .frame(width: 240)
 

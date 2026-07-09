@@ -14,6 +14,7 @@ struct SpeechModelsView: View {
                     EngineRow(row: row, model: model)
                 }
             }
+            .accessibilityIdentifier(AccessibilityID.Settings.Speech.list)
         }
         .formStyle(.grouped)
         .padding(16)
@@ -26,7 +27,9 @@ struct SpeechModelsView: View {
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) { model.confirmDelete() }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.deleteConfirmConfirm)
             Button("Cancel", role: .cancel) { model.cancelDelete() }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.deleteConfirmCancel)
         } message: {
             Text(model.pendingDeleteLeavesNoEngine
                 ? "This is your only usable model. Deleting it leaves no model to dictate with."
@@ -103,6 +106,7 @@ private struct EngineRow: View {
                     }
                     .toggleStyle(.checkbox)
                     .disabled(!row.info.supportsRecognitionBias)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.recognitionBias(row.id))
                     if !row.info.supportsRecognitionBias {
                         Text("This model cannot use recognition hints.")
                             .font(.caption2)
@@ -112,6 +116,7 @@ private struct EngineRow: View {
                         Text("Recover close dictionary matches after transcription").font(.caption)
                     }
                     .toggleStyle(.checkbox)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.dictionaryRecovery(row.id))
                     Text("Uses your dictionary after transcription to fix close matches, like "
                          + "\"charge bee\" to \"ChargeBee\". Best effort; turn this off if it changes ordinary words.")
                         .font(.caption2)
@@ -119,6 +124,7 @@ private struct EngineRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Reset to Recommended") { model.resetDictionaryMatching(for: row.id) }
                         .disabled(row.dictionaryMatchingRecommended)
+                        .accessibilityIdentifier(AccessibilityID.Settings.Speech.resetDictionary(row.id))
                 }
                 .padding(.top, 2)
             } label: {
@@ -131,6 +137,7 @@ private struct EngineRow: View {
                 }
             }
             .padding(.leading, 36)
+            .accessibilityIdentifier(AccessibilityID.Settings.Speech.dictionaryDisclosure(row.id))
 
             if let frac = row.downloadFraction {
                 VStack(alignment: .leading, spacing: 2) {
@@ -178,6 +185,7 @@ private struct EngineRow: View {
                     .offset(x: -8)
             }
         }
+        .accessibilityIdentifier(AccessibilityID.Settings.Speech.row(row.id))
     }
 
     private var dictionaryRecoveryBinding: Binding<Bool> {
@@ -243,22 +251,29 @@ private struct EngineRow: View {
         } else if row.verificationFailed {
             Button("Test Again") { model.test(row.id) }
                 .help("Re-runs the on-device self-test without re-downloading.")
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.testAgain(row.id))
             if !row.info.systemManaged {
                 Button("Reinstall") { model.reinstall(row.id) }
                     .help("Deletes the files and downloads the model again.")
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.reinstall(row.id))
                 Button("Delete", role: .destructive) { model.requestDelete(row.id) }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.delete(row.id))
             }
         } else if row.isUsable {
             if !row.isActive {
                 Button("Use This Model") { model.select(row.id) }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
             }
             Button("Test") { model.test(row.id) }
                 .help("Runs a quick on-device self-test to confirm this model can transcribe.")
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.test(row.id))
             if !row.info.systemManaged {
                 Button("Delete", role: .destructive) { model.requestDelete(row.id) }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.delete(row.id))
             }
         } else {
             Button("Download") { model.startDownload(row.id) }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
         }
     }
 }

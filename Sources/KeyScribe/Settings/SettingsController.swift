@@ -237,6 +237,7 @@ struct SettingsRootView: View {
                 .accessibilityLabel(problems.flaggedPanes.contains(destination)
                     ? "\(destination.title), needs attention"
                     : destination.title)
+                .accessibilityIdentifier(AccessibilityID.Settings.Sidebar.id(for: destination))
                 .tag(destination)
             }
             .disabled(recordingState.isRecording)
@@ -315,13 +316,16 @@ private struct AdvancedSettingsView: View {
         Form {
             Section("Configuration") {
                 Button("Reveal Config in Finder") { model.revealConfig() }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Advanced.revealConfig)
                 Button("Reload Configuration") { model.reload() }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Advanced.reloadConfig)
                 Text("Config edits are detected automatically. A malformed file is surfaced as an error rather than silently ignored.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Section("Dictation HUD") {
                 Button("Reset HUD Position") { model.resetHUDPosition() }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Advanced.resetHUDPosition)
                 Text("Drag the HUD to flick it to any edge or corner; it stays there. Reset returns it to the bottom center.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -337,6 +341,7 @@ private struct AdvancedSettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.feature(feature.id))
                     }
                     Text("Opt in to features still under development. They default off and may change or be removed.")
                         .font(.caption)
@@ -345,6 +350,7 @@ private struct AdvancedSettingsView: View {
             }
             Section("Erase Data") {
                 Button("Erase All \(Branding.appName) Data…", role: .destructive) { confirmingErase = true }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Advanced.eraseAllData)
                 Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -354,7 +360,9 @@ private struct AdvancedSettingsView: View {
         .padding(16)
         .alert("Erase all \(Branding.appName) data?", isPresented: $confirmingErase) {
             Button("Erase All Data", role: .destructive) { model.eraseAllData() }
+                .accessibilityIdentifier(AccessibilityID.Settings.Advanced.eraseConfirmConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(AccessibilityID.Settings.Advanced.eraseConfirmCancel)
         } message: {
             Text("This permanently deletes your modes, settings, AI services, saved keys, and dictation history, and restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")
         }

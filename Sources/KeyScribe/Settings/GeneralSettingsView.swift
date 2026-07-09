@@ -9,8 +9,11 @@ struct GeneralSettingsView: View {
         Form {
             Section("While dictating") {
                 Toggle("Start and end sounds", isOn: $model.sounds)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
                 Toggle("Keep display awake", isOn: $model.keepDisplayAwake)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.keepDisplayAwake)
                 Toggle("Mute system audio", isOn: $model.muteSystemAudio)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.muteSystemAudio)
             }
 
             Section {
@@ -19,6 +22,7 @@ struct GeneralSettingsView: View {
                         Text(option.label).tag(option.id)
                     }
                 }
+                .accessibilityIdentifier(AccessibilityID.Settings.General.inputDevice)
                 Text(model.microphoneStatusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -31,6 +35,7 @@ struct GeneralSettingsView: View {
 
             Section("Startup") {
                 Toggle("Start \(Branding.appName) at login", isOn: $model.loadOnLogin)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.loadOnLogin)
             }
 
             Section {
@@ -40,7 +45,7 @@ struct GeneralSettingsView: View {
                     help: "Optional global shortcut. With text selected when you press it, the word or heard phrase is pre-filled. Leave unset to use the menu instead.")
                 {
                     VStack(alignment: .trailing, spacing: 4) {
-                        ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord)
+                        ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.addVocabularyShortcut)
                         if vocabularyShadowed { ShadowedHotkeyNote() }
                     }
                 }
@@ -50,7 +55,7 @@ struct GeneralSettingsView: View {
                     help: "Optional global shortcut. Leave unset to use the menu instead.")
                 {
                     VStack(alignment: .trailing, spacing: 4) {
-                        ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord)
+                        ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.pasteLastShortcut)
                         if pasteLastShadowed { ShadowedHotkeyNote() }
                     }
                 }
@@ -68,9 +73,11 @@ struct GeneralSettingsView: View {
                     help: "Stores transcripts and final text locally so you can search and correct them. Nothing leaves this Mac. Password-field dictations are never saved; for other sensitive work, lower retention below or exclude a mode in its Result handling.")
                 {
                     Toggle("", isOn: $model.historyEnabled).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
                 }
                 if model.historyEnabled {
                     Stepper("Keep for \(model.retentionDays) days", value: $model.retentionDays, in: 1...365)
+                        .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
                 }
             }
 
@@ -78,6 +85,7 @@ struct GeneralSettingsView: View {
                 Picker("Model memory", selection: $model.eviction) {
                     ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
                 }
+                .accessibilityIdentifier(AccessibilityID.Settings.General.eviction)
             } header: {
                 Text("Performance")
             } footer: {

@@ -10,7 +10,7 @@ struct ModeTriggerRow: View {
 
     var body: some View {
         LabeledContent("Start this mode with") {
-            ShortcutWell(key: triggerKey, profile: .modeTrigger)
+            ShortcutWell(key: triggerKey, profile: .modeTrigger, accessibilityID: AccessibilityID.Mode.Editor.shortcutWell)
         }
     }
 

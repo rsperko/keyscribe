@@ -15,6 +15,7 @@ struct PermissionsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 PermissionRow(
+                    permID: "microphone",
                     title: "Microphone", status: microphoneStatus,
                     purpose: "Lets \(Branding.appName) hear a dictation.",
                     unavailable: "Dictation cannot start without microphone access.",
@@ -29,9 +30,10 @@ struct PermissionsSettingsView: View {
                 // to detect a grant made after launch (unlike Accessibility below), so surface the relaunch
                 // step proactively whenever access is missing.
                 if microphoneStatus == .denied {
-                    relaunchBanner("If you just enabled Microphone for \(Branding.appName) in System Settings, quit and reopen it to apply the change — macOS only recognizes a new grant after a relaunch.")
+                    relaunchBanner("If you just enabled Microphone for \(Branding.appName) in System Settings, quit and reopen it to apply the change — macOS only recognizes a new grant after a relaunch.", permID: "microphone")
                 }
                 PermissionRow(
+                    permID: "accessibility",
                     title: "Accessibility", status: accessibilityStatus,
                     purpose: "Lets \(Branding.appName) detect a modifier-key trigger and paste finished text into the focused field.",
                     unavailable: "Modifier-key triggers won't start dictation, and finished text is copied instead of inserted.",
@@ -40,7 +42,7 @@ struct PermissionsSettingsView: View {
                     },
                     openSettings: { Permissions.openSettings(.accessibility) })
                 if accessibilityStatus == .granted && !tapActive {
-                    relaunchBanner("Accessibility is granted, but it only takes effect after a relaunch. Until then, modifier-key triggers won't start dictation.")
+                    relaunchBanner("Accessibility is granted, but it only takes effect after a relaunch. Until then, modifier-key triggers won't start dictation.", permID: "accessibility")
                 }
             }
         }
@@ -69,18 +71,20 @@ struct PermissionsSettingsView: View {
 
     // A grant that only takes effect after a relaunch (TCC verdicts are cached for the process lifetime).
     @ViewBuilder
-    private func relaunchBanner(_ message: String) -> some View {
+    private func relaunchBanner(_ message: String, permID: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(message, systemImage: "arrow.clockwise.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.orange)
             Button("Quit & Relaunch to Apply", action: onRelaunch)
+                .accessibilityIdentifier(AccessibilityID.Settings.Permissions.relaunch(permID))
         }
         .padding(.vertical, 4)
     }
 }
 
 private struct PermissionRow: View {
+    let permID: String
     let title: String
     let status: PermissionStatus
     let purpose: String
@@ -102,14 +106,17 @@ private struct PermissionRow: View {
                 HStack {
                     if status == .notDetermined {
                         Button("Allow", action: request)
+                            .accessibilityIdentifier(AccessibilityID.Settings.Permissions.allow(permID))
                     }
                     Button("Open System Settings", action: openSettings)
+                        .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings(permID))
                 }
             }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(title): \(status.label). \(purpose)")
+        .accessibilityIdentifier(AccessibilityID.Settings.Permissions.row(permID))
     }
 }
 

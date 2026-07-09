@@ -22,6 +22,7 @@ private let unlistedMenuTag = "\u{1}unlisted"
 struct ShortcutWell: View {
     @Binding var key: String
     var profile: ShortcutProfile = .modeTrigger
+    var accessibilityID: String
     @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var hint: String?
     @State private var recording = false
@@ -34,6 +35,7 @@ struct ShortcutWell: View {
                     key: $key, hint: $hint, recording: $recording,
                     profile: profile, recordToken: recordToken, recordingState: recordingState)
                     .frame(width: 240, height: 24)
+                    .accessibilityIdentifier(accessibilityID)
                 Menu {
                     Picker(selection: namedSelection, label: EmptyView()) {
                         Text("None").tag(noneMenuTag)

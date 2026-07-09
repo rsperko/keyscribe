@@ -56,6 +56,7 @@ struct VocabularyComposer: View {
                     .focused($focus, equals: .heard)
                     .onSubmit(commit)
                     .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerTerm)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(regex ? "Use instead" : "Use instead (optional)")
@@ -66,9 +67,11 @@ struct VocabularyComposer: View {
                     .focused($focus, equals: .replace)
                     .onSubmit(commit)
                     .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerUseInstead)
             }
             Toggle("Match heard phrase as a regular expression", isOn: $regex)
                 .toggleStyle(.checkbox)
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerRegexToggle)
             Text(helpText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -86,6 +89,7 @@ struct VocabularyComposer: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                     .disabled(!canAdd)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdd)
             }
         }
         .onAppear { focus = .heard }
@@ -154,6 +158,7 @@ struct VocabularySettingsView: View {
                 Text("Names, product terms, and jargon \(Branding.appName) should recognize as written. Keep this list short; too many terms can reduce recognition accuracy.")
                     .font(.caption).foregroundStyle(.secondary)
                 DictionaryRows(words: dictionary.words, onRemove: dictionary.remove)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
                     Label("You have \(dictionary.words.count) entries. Large dictionaries can make recognition less accurate, not more. Remove words \(Branding.appName) now gets right, or move always-misheard phrases to Replacements.", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
@@ -169,6 +174,7 @@ struct VocabularySettingsView: View {
                 ReplacementRows(
                     rules: replacements.rules,
                     onRemove: replacements.remove(at:))
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementsList)
                 if let error = replacements.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)

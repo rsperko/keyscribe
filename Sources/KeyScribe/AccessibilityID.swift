@@ -85,10 +85,10 @@ enum AccessibilityID {
 
         enum Permissions {
             static let list = "settings.permissions.list"
-            static let relaunch = "settings.permissions.relaunch"
             static func row(_ permID: String) -> String { "settings.permissions.row.\(permID)" }
             static func allow(_ permID: String) -> String { "settings.permissions.row.\(permID).allow" }
             static func openSettings(_ permID: String) -> String { "settings.permissions.row.\(permID).openSettings" }
+            static func relaunch(_ permID: String) -> String { "settings.permissions.row.\(permID).relaunch" }
         }
 
         enum Advanced {
@@ -275,7 +275,7 @@ enum AccessibilityID {
         Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey,
         Settings.AI.Editor.tokenCommand, Settings.AI.Editor.model, Settings.AI.Editor.fetchModels,
         Settings.AI.Editor.foundModel, Settings.AI.Editor.testConnection, Settings.AI.Editor.delete,
-        Settings.Permissions.list, Settings.Permissions.relaunch,
+        Settings.Permissions.list,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
         Mode.List.list, Mode.List.add,
