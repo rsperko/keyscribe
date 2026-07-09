@@ -399,6 +399,7 @@ private struct HistoryView: View {
                         Text("Future dictations appear here when history is enabled.")
                     } actions: {
                         Button("Open History Settings") { model.openSettings(.general) }
+                            .accessibilityIdentifier(AccessibilityID.History.emptyOpenSettings)
                     }
                 } else if model.groups.isEmpty {
                     ContentUnavailableView(
@@ -414,9 +415,11 @@ private struct HistoryView: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier(AccessibilityID.History.list)
                 }
             }
             .searchable(text: $model.query, placement: .sidebar, prompt: "Search history")
+            .accessibilityIdentifier(AccessibilityID.History.search)
             .frame(minWidth: 280)
             .safeAreaInset(edge: .bottom) { footer }
         } detail: {
@@ -447,6 +450,7 @@ private struct HistoryView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.History.export)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -517,6 +521,7 @@ private struct HistoryDetailView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .accessibilityIdentifier(AccessibilityID.History.stagePicker)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     stageContent
@@ -581,6 +586,7 @@ private struct HistoryDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .accessibilityIdentifier(AccessibilityID.History.comparisonPicker)
             }
             ComparisonSectionView(section: selectedComparisonSection) { role, text in
                 selectedRole = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : role
@@ -668,10 +674,13 @@ private struct HistoryDetailView: View {
         HStack(spacing: 8) {
             Button { model.copyResult() } label: { Label("Copy Result", systemImage: "doc.on.doc") }
                 .disabled(!canReuseResult)
+                .accessibilityIdentifier(AccessibilityID.History.copyResult)
             Button { model.pasteResult() } label: { Label("Paste Result", systemImage: "arrow.down.doc") }
                 .disabled(!canReuseResult)
+                .accessibilityIdentifier(AccessibilityID.History.pasteResult)
             if canCopyHeard {
                 Button { model.copyHeard() } label: { Label("Copy Heard", systemImage: "text.quote") }
+                    .accessibilityIdentifier(AccessibilityID.History.copyHeard)
             }
             Spacer()
             if let message = model.statusMessage {
@@ -680,6 +689,7 @@ private struct HistoryDetailView: View {
             Button(role: .destructive) { model.deleteSelected() } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .accessibilityIdentifier(AccessibilityID.History.delete)
         }
     }
 
@@ -693,10 +703,13 @@ private struct HistoryDetailView: View {
                 }
                 .buttonStyle(.link)
                 .font(.caption)
+                .accessibilityIdentifier(AccessibilityID.History.manageVocabulary)
             }
             HStack {
                 Button("Create Replacement…") { showReplacementSheet = true }
+                    .accessibilityIdentifier(AccessibilityID.History.createReplacement)
                 Button("Add to Dictionary…") { showDictionarySheet = true }
+                    .accessibilityIdentifier(AccessibilityID.History.addToDictionary)
             }
             Text(correctionHint)
                 .font(.caption).foregroundStyle(.secondary)
@@ -735,6 +748,7 @@ private struct HistoryDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 }
+                .accessibilityIdentifier(AccessibilityID.History.promptDisclosure)
             }
             Text("Redaction maps are never shown or stored.")
                 .font(.caption2).foregroundStyle(.secondary)

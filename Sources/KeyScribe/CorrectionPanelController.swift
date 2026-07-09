@@ -212,6 +212,7 @@ private struct CorrectionPanelView: View {
                         .focused($focus, equals: .term)
                         .onSubmit(commitSave)
                         .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier(AccessibilityID.Correction.term)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(regex ? "Use instead" : "Use instead (optional)")
@@ -222,11 +223,13 @@ private struct CorrectionPanelView: View {
                         .focused($focus, equals: .replace)
                         .onSubmit(commitSave)
                         .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier(AccessibilityID.Correction.useInstead)
                 }
             }
 
             Toggle("Match heard phrase as a regular expression", isOn: $regex)
                 .toggleStyle(.checkbox)
+                .accessibilityIdentifier(AccessibilityID.Correction.regexToggle)
 
             HStack(spacing: 10) {
                 Text("Save to")
@@ -244,6 +247,7 @@ private struct CorrectionPanelView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .accessibilityIdentifier(AccessibilityID.Correction.destination)
                 }
                 Spacer()
             }
@@ -273,11 +277,14 @@ private struct CorrectionPanelView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier(AccessibilityID.Correction.cancel)
                 if canCorrect && hasReplacementValue {
                     Button("Add & Replace Selection") { onCorrect(buildResult(), correctionPasteText()) }.disabled(!canCorrectNow)
+                        .accessibilityIdentifier(AccessibilityID.Correction.addAndReplace)
                 }
                 Button("Add", action: commitSave)
                     .keyboardShortcut(.defaultAction).disabled(!canSave)
+                    .accessibilityIdentifier(AccessibilityID.Correction.add)
             }
         }
         .padding(20)

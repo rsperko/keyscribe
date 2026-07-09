@@ -295,6 +295,7 @@ private struct HUDView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(AccessibilityID.HUD.panel)
     }
 
     private var hasAction: Bool {
@@ -306,16 +307,19 @@ private struct HUDView: View {
             Button { onInsertLocalTranscript() } label: {
                 Label("Insert without rewriting", systemImage: "text.insert")
             }
+            .accessibilityIdentifier(AccessibilityID.HUD.insertWithoutRewriting)
         }
         if model.state.offersPasteLast {
             Button { onPasteLast() } label: {
                 Label("Paste last dictation", systemImage: "doc.on.clipboard")
             }
+            .accessibilityIdentifier(AccessibilityID.HUD.pasteLast)
         }
         if let action = model.state.errorAction {
             Button { onErrorAction(action) } label: {
                 Label(action.buttonTitle, systemImage: "gearshape")
             }
+            .accessibilityIdentifier(AccessibilityID.HUD.repairAction)
         }
     }
 

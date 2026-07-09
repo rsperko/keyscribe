@@ -32,11 +32,13 @@ struct CreateReplacementSheet: View {
                 Text("When \(Branding.appName) hears").font(.caption).foregroundStyle(.secondary)
                 TextField("The misheard words", text: $source)
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .source).onSubmit { save() }
+                    .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.source)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Replace with").font(.caption).foregroundStyle(.secondary)
                 TextField("What it should say", text: $replace)
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .replace).onSubmit { save() }
+                    .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.replace)
             }
             if isNoop {
                 Text("That is the same as what was heard, so it would do nothing.")
@@ -49,6 +51,7 @@ struct CreateReplacementSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create Replacement") { save() }
                     .keyboardShortcut(.defaultAction).disabled(!canSave)
+                    .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.save)
             }
         }
         .padding(20).frame(width: 400)
@@ -85,6 +88,7 @@ struct AddToDictionarySheet: View {
                 TextField("A name, product term, or jargon", text: $term)
                     .textFieldStyle(.roundedBorder).focused($termFocused)
                     .onSubmit { save() }
+                    .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.term)
             }
             Text("A best-effort recognition hint for future dictations; its strength varies by model. When a phrase is always misheard the same way, a replacement fixes it exactly.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -93,6 +97,7 @@ struct AddToDictionarySheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Add to Dictionary") { save() }
                     .keyboardShortcut(.defaultAction).disabled(trimmed.isEmpty)
+                    .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.save)
             }
         }
         .padding(20).frame(width: 400)
