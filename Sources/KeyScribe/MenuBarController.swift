@@ -133,7 +133,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         if let button = statusItem.button {
             button.image = idleIcon
             button.image?.accessibilityDescription = variant.displayName
-            button.setAccessibilityIdentifier(AccessibilityID.Menu.statusButton)
             refreshStatusAccessibility()
             button.addSubview(badgeDot)
             button.addSubview(updateDot)
@@ -156,58 +155,48 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         speechModelsMenu.autoenablesItems = false
         modesMenu.autoenablesItems = false
         statusLine.isEnabled = false
-        statusLine.setAccessibilityIdentifier(AccessibilityID.Menu.status)
         menu.addItem(statusLine)
 
         let speechModel = NSMenuItem(title: "Speech Model", action: nil, keyEquivalent: "")
         speechModel.submenu = speechModelsMenu
-        speechModel.setAccessibilityIdentifier(AccessibilityID.Menu.speechModel)
         menu.addItem(speechModel)
 
         let dictateWith = NSMenuItem(title: "Dictate with", action: nil, keyEquivalent: "")
         dictateWith.submenu = modesMenu
-        dictateWith.setAccessibilityIdentifier(AccessibilityID.Menu.modes)
         menu.addItem(dictateWith)
 
         menu.addItem(.separator())
         pasteLastItem.target = self
         pasteLastItem.action = #selector(pasteLast)
         pasteLastItem.isEnabled = false
-        pasteLastItem.setAccessibilityIdentifier(AccessibilityID.Menu.pasteLast)
         menu.addItem(pasteLastItem)
 
         let history = NSMenuItem(title: "History…", action: #selector(openHistory), keyEquivalent: "y")
         history.target = self
-        history.setAccessibilityIdentifier(AccessibilityID.Menu.history)
         menu.addItem(history)
 
         menu.addItem(.separator())
         addVocabularyItem.target = self
         addVocabularyItem.action = #selector(addVocabulary)
-        addVocabularyItem.setAccessibilityIdentifier(AccessibilityID.Menu.addVocabulary)
         menu.addItem(addVocabularyItem)
 
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
-        settings.setAccessibilityIdentifier(AccessibilityID.Menu.settings)
         menu.addItem(settings)
 
         if showsUpdateCheck {
             checkForUpdatesItem.target = self
             checkForUpdatesItem.action = #selector(triggerUpdate)
-            checkForUpdatesItem.setAccessibilityIdentifier(AccessibilityID.Menu.checkForUpdates)
             menu.addItem(checkForUpdatesItem)
         }
 
         let notices = NSMenuItem(title: "About & Notices…", action: #selector(openNotices), keyEquivalent: "")
         notices.target = self
-        notices.setAccessibilityIdentifier(AccessibilityID.Menu.notices)
         menu.addItem(notices)
 
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit \(Branding.appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        quit.setAccessibilityIdentifier(AccessibilityID.Menu.quit)
         menu.addItem(quit)
 
         menu.delegate = self
@@ -229,7 +218,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.target = self
             item.representedObject = row.id
             item.state = row.isActive ? .on : .off
-            item.setAccessibilityIdentifier(AccessibilityID.Menu.speechModelRow(row.id))
             speechModelsMenu.addItem(item)
         }
         if speechModelsMenu.items.isEmpty {
@@ -240,7 +228,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         speechModelsMenu.addItem(.separator())
         let manage = NSMenuItem(title: "Manage Speech Models…", action: #selector(openSpeechModels), keyEquivalent: "")
         manage.target = self
-        manage.setAccessibilityIdentifier(AccessibilityID.Menu.speechModelManage)
         speechModelsMenu.addItem(manage)
     }
 
@@ -303,7 +290,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         if available, !present {
             updateItem.target = self
             updateItem.action = #selector(triggerUpdate)
-            updateItem.setAccessibilityIdentifier(AccessibilityID.Menu.updateAvailable)
             appMenu.insertItem(updateItem, at: 0)
         } else if !available, present {
             appMenu.removeItem(updateItem)
@@ -318,7 +304,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let automatic = NSMenuItem(title: "Automatic\(automaticName.map { " — \($0)" } ?? "")", action: #selector(selectAutomatic), keyEquivalent: "")
         automatic.target = self
         automatic.state = overrideName == nil ? .on : .off
-        automatic.setAccessibilityIdentifier(AccessibilityID.Menu.modesAutomatic)
         modesMenu.addItem(automatic)
         modesMenu.addItem(.separator())
         for mode in modes {
@@ -332,7 +317,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.representedObject = mode.id
             item.isEnabled = reason == nil
             item.state = overrideName == mode.id ? .on : .off
-            item.setAccessibilityIdentifier(AccessibilityID.Menu.modeRow(mode.id))
             modesMenu.addItem(item)
         }
         modesMenu.addItem(.separator())
@@ -341,7 +325,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         modesMenu.addItem(hint)
         let manage = NSMenuItem(title: "Manage Modes…", action: #selector(openModes), keyEquivalent: "")
         manage.target = self
-        manage.setAccessibilityIdentifier(AccessibilityID.Menu.modesManage)
         modesMenu.addItem(manage)
     }
 

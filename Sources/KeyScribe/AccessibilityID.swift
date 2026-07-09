@@ -238,25 +238,11 @@ enum AccessibilityID {
         static let cancel = "correction.cancel"
     }
 
-    enum Menu {
-        static let status = "menu.status"
-        static let statusButton = "menu.statusButton"
-        static let speechModel = "menu.speechModel"
-        static let speechModelManage = "menu.speechModel.manage"
-        static let modes = "menu.modes"
-        static let modesAutomatic = "menu.modes.automatic"
-        static let modesManage = "menu.modes.manage"
-        static let pasteLast = "menu.pasteLast"
-        static let history = "menu.history"
-        static let addVocabulary = "menu.addVocabulary"
-        static let settings = "menu.settings"
-        static let checkForUpdates = "menu.checkForUpdates"
-        static let updateAvailable = "menu.updateAvailable"
-        static let notices = "menu.notices"
-        static let quit = "menu.quit"
-        static func speechModelRow(_ engineID: String) -> String { "menu.speechModel.\(engineID)" }
-        static func modeRow(_ modeID: String) -> String { "menu.modes.\(modeID)" }
-    }
+    // The status menu is pure AppKit (NSMenu / NSMenuItem / NSStatusBarButton). Empirically, macOS does
+    // NOT surface a custom accessibilityIdentifier for these: AppKit derives a menu item's AXIdentifier
+    // from its action selector (e.g. "openSettings"), and the status button's AXMenuBarItem exposes no
+    // identifier at all. So the menu bar has no entries here — items are addressed by title (or by their
+    // action-derived id / representedObject for dynamic rows). See a11y-worklist.md for the finding.
 
     static let all: [String] = [
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
@@ -304,8 +290,5 @@ enum AccessibilityID {
         History.DictionarySheet.term, History.DictionarySheet.save,
         Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination,
         Correction.add, Correction.addAndReplace, Correction.cancel,
-        Menu.status, Menu.statusButton, Menu.speechModel, Menu.speechModelManage, Menu.modes,
-        Menu.modesAutomatic, Menu.modesManage, Menu.pasteLast, Menu.history, Menu.addVocabulary,
-        Menu.settings, Menu.checkForUpdates, Menu.updateAvailable, Menu.notices, Menu.quit,
     ]
 }

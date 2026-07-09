@@ -270,6 +270,31 @@ Use these terms consistently:
 
 ---
 
+## 3.1 Accessibility identifiers
+
+Every load-bearing control carries a stable **accessibility identifier** so UI automation (Peekaboo,
+XCUITest, Accessibility Inspector, System Events) can address it exactly instead of fuzzy-matching a
+label. These are frozen API once shipped — pick a name you would keep forever; a rename breaks the
+harness.
+
+- **Single source of truth:** all identifiers are `static let` (or `static func` for dynamic rows)
+  constants in `Sources/KeyScribe/AccessibilityID.swift`, nested by surface. **Never** write an id
+  string literal at a call site — reference the constant.
+- **Naming:** hierarchical, dot-separated, lowercase-leading camelCase segments, never user-visible
+  (`settings.sidebar.speechModels`, `mode.editor.routing.disclosure`). `AccessibilityID.all` is the
+  registry; `AccessibilityIDTests` asserts uniqueness + the naming pattern.
+- **Dynamic rows** interpolate the **stable domain id** — engine id, mode id, connection id, feature
+  id, permission id — never the display name (`AccessibilityID.Settings.Speech.row(engine.id)`). The
+  domain segment may contain `-`/`_`; the pattern check applies to the fixed prefix.
+- **SwiftUI:** `.accessibilityIdentifier(_:)` on the control (or the element you want addressable).
+  A shared control that appears more than once (e.g. `ShortcutWell`) takes the id as a parameter so
+  each instance is distinct.
+- **AppKit:** `setAccessibilityIdentifier(_:)` on the `NSView`/`NSControl`. **`NSMenuItem` is an
+  exception** — macOS ignores a custom identifier on menu items (AppKit derives `AXIdentifier` from
+  the action selector), so status-menu items are addressed by title / action-derived id /
+  `representedObject`, not by a catalog id. State that is otherwise color/glyph-only (the menu-bar
+  badges) is exposed to VoiceOver via `setAccessibilityLabel` instead.
+
 ## 4. Implementation checklist
 
 For each new screen or control, establish:
