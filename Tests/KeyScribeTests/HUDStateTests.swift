@@ -122,4 +122,25 @@ struct HUDStateTests {
         #expect(state.secondaryText == "Accessibility is off — copied to the clipboard. Paste with ⌘V.")
         #expect(state.offersPasteLast == false)
     }
+
+    @Test func stateChangesCarryAStableVoiceOverAnnouncement() {
+        #expect(HUDState.recording(mode: "Polish", level: 0.4).voiceOverAnnouncement == "Recording")
+        #expect(HUDState.transcribing(mode: "Email").voiceOverAnnouncement == "Transcribing")
+        #expect(HUDState.loadingModel(mode: "Email").voiceOverAnnouncement == "Loading speech model")
+        #expect(HUDState.rewriting(
+            connection: "Gemini", mode: "Email", redacted: false,
+            contextCategories: [], offerLocalTranscript: false).voiceOverAnnouncement == "Rewriting with Gemini")
+        #expect(HUDState.complete(outcome: .inserted, mode: "Polish").voiceOverAnnouncement == "Inserted. Polish")
+        #expect(HUDState.complete(outcome: .copied(.focusChanged), mode: "Polish").voiceOverAnnouncement
+            == "Copied instead of inserted. Focus changed while \(Branding.appName) was working")
+        #expect(HUDState.localFallback(outcome: .inserted, mode: "Polish").voiceOverAnnouncement
+            == "Inserted without rewriting. Rewrite could not be completed")
+        #expect(HUDState.error(message: "Transcription failed", action: nil).voiceOverAnnouncement == "Transcription failed")
+    }
+
+    @Test func transientAndDismissalStatesAreNotAnnounced() {
+        #expect(HUDState.hidden.voiceOverAnnouncement == nil)
+        #expect(HUDState.ready(mode: "Edit Selection").voiceOverAnnouncement == nil)
+        #expect(HUDState.arming(mode: "Plain Dictation").voiceOverAnnouncement == nil)
+    }
 }

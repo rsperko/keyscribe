@@ -51,6 +51,7 @@ final class HUDController: HUDPresenting {
         let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
         if case .recording(_, let level) = state { levelModel.level = level }
         model.state = state
+        announce(state)
         if case .hidden = state {
             if panel?.isKeyWindow == true { relinquishKeyFocus() }
             fadeOutPanel()
@@ -128,6 +129,22 @@ final class HUDController: HUDPresenting {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.isRepositioning = false }
         }
+    }
+
+    // Post a VoiceOver announcement on a state-change edge. The HUD panel is non-activating and usually
+    // not the focused element, so a changed accessibilityLabel is not read automatically — an explicit
+    // announcement is the only reliable cue for a state change (ui_design.md §9). Continuous level ticks
+    // never reach here (render early-returns on a pure level update).
+    private func announce(_ state: HUDState) {
+        guard let text = state.voiceOverAnnouncement, !text.isEmpty else { return }
+        let element: Any = panel ?? NSApp as Any
+        NSAccessibility.post(
+            element: element,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: text,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ])
     }
 
     func relinquishKeyFocus() {
@@ -474,10 +491,18 @@ private struct LevelIndicator: View {
     var body: some View {
         let l = CGFloat(min(1, max(0, level)))
         ZStack {
-            Circle().fill(.red.opacity(0.14 + l * 0.34))
-                .frame(width: 16 + l * 14, height: 16 + l * 14)
-            Circle().fill(.red)
-                .frame(width: 7 + l * 17, height: 7 + l * 17)
+            // Reduce Motion (ui_design.md §4/§9): the indicator must become a changing value without
+            // bouncing or pulsing, so geometry is fixed and the level is carried by fill intensity alone —
+            // the dot does not grow/shrink per audio buffer.
+            if reduceMotion {
+                Circle().fill(.red.opacity(0.16 + l * 0.34)).frame(width: 30, height: 30)
+                Circle().fill(.red).frame(width: 16, height: 16)
+            } else {
+                Circle().fill(.red.opacity(0.14 + l * 0.34))
+                    .frame(width: 16 + l * 14, height: 16 + l * 14)
+                Circle().fill(.red)
+                    .frame(width: 7 + l * 17, height: 7 + l * 17)
+            }
         }
         .frame(width: 30, height: 30)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)

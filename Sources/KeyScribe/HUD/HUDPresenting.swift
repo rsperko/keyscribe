@@ -165,6 +165,28 @@ extension HUDState {
         return dataBoundaryBadges.isEmpty ? 64 : 78
     }
 
+    // A stable VoiceOver announcement for a state-change edge (ui_design.md §9): recording started, the
+    // processing path, inserted, copied instead, and failure. The per-buffer input level is deliberately
+    // NOT announced (HUDController.render early-returns on a pure level tick before this is read), so a
+    // recording announcement fires once on entry, never per level update. Transient acknowledgements
+    // (ready/arming) and dismissal (hidden) carry no announcement.
+    var voiceOverAnnouncement: String? {
+        switch self {
+        case .hidden, .ready, .arming:
+            return nil
+        case .recording:
+            return "Recording"
+        case .loadingModel:
+            return "Loading speech model"
+        case .transcribing:
+            return "Transcribing"
+        case .rewriting(let connection, _, _, _, _):
+            return "Rewriting with \(connection)"
+        case .localFallback, .complete, .error:
+            return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
+        }
+    }
+
     // The cancellable states (mirrors DictationController.isCancellable, which keeps machine.state at
     // .transcribing through the cloud rewrite). The HUD takes key focus in these so ESC cancels locally.
     var holdsKeyFocus: Bool {

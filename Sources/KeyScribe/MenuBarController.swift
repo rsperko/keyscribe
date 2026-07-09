@@ -103,6 +103,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var showsUpdateCheck = false
     private var appMenu: NSMenu?
 
+    // The menu-bar glyph carries recording/error/update state as color badges and a tint (ui_design.md §6).
+    // Those are color/glyph-only signals; mirror them into the status button's accessibility label so the
+    // state is available as text to VoiceOver even while the menu is closed (ui_design.md §9).
+    private var isDictating = false
+    private var hasErrorBadge = false
+    private var hasUpdateAvailable = false
+
     var onPasteLast: (() -> Void)?
     var onOpenHistory: (() -> Void)?
     var onOpenSettings: (() -> Void)?
@@ -127,6 +134,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             button.image = idleIcon
             button.image?.accessibilityDescription = variant.displayName
             button.setAccessibilityIdentifier(AccessibilityID.Menu.statusButton)
+            refreshStatusAccessibility()
             button.addSubview(badgeDot)
             button.addSubview(updateDot)
             NSLayoutConstraint.activate([
@@ -260,17 +268,36 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let image = active ? Self.recordingIcon : idleIcon
         image.accessibilityDescription = variant.displayName
         statusItem.button?.image = image
+        isDictating = active
+        refreshStatusAccessibility()
+    }
+
+    // Mirror the color/glyph state badges into the button's accessibility label so a screen reader can read
+    // the current state (recording / needs attention / update available) as text (ui_design.md §9).
+    private func refreshStatusAccessibility() {
+        var states: [String] = []
+        if isDictating { states.append("recording") }
+        if hasErrorBadge { states.append("needs attention") }
+        if hasUpdateAvailable { states.append("update available") }
+        let label = states.isEmpty ? variant.displayName : "\(variant.displayName), \(states.joined(separator: ", "))"
+        statusItem.button?.setAccessibilityLabel(label)
     }
 
     // The error badge — a small red dot, top-left (ui_design.md §6) — for a configuration, model, or
     // permission problem. A separate colored layer so it survives the recording tint and the template
     // glyph's appearance adaptation.
-    func setErrorBadge(_ visible: Bool) { badgeDot.isHidden = !visible }
+    func setErrorBadge(_ visible: Bool) {
+        badgeDot.isHidden = !visible
+        hasErrorBadge = visible
+        refreshStatusAccessibility()
+    }
 
     // Inert by default: with no updater injected this is never called, so no dot and no menu item
     // render. When set, a passive dot appears on the glyph and an "Update…" item is added to the menu.
     func setUpdateAvailable(_ available: Bool) {
         updateDot.isHidden = !available
+        hasUpdateAvailable = available
+        refreshStatusAccessibility()
         guard let appMenu else { return }
         let present = appMenu.items.contains(updateItem)
         if available, !present {

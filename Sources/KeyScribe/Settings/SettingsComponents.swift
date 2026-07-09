@@ -4,11 +4,12 @@ struct DisclosureSection<Label: View, Content: View>: View {
     @Binding var isExpanded: Bool
     @ViewBuilder var label: () -> Label
     @ViewBuilder var content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) { isExpanded.toggle() }
             } label: {
                 HStack {
                     label()
@@ -56,6 +57,7 @@ struct SettingRow<Control: View>: View {
     var dependencyReason: String? = nil
     @ViewBuilder var control: () -> Control
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -68,7 +70,7 @@ struct SettingRow<Control: View>: View {
                 control()
             }
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 4) {
                     Text(expanded ? "Hide details" : "Learn more")
