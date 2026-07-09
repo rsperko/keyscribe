@@ -129,7 +129,7 @@ struct AIConnectionDraftEditor: View {
 
     private var endpointRows: some View {
         VStack(alignment: .leading, spacing: 4) {
-            textRow("Base URL", value: draft.baseURL, prompt: "http://127.0.0.1:11234/v1") { draft.baseURL = $0 }
+            textRow("Base URL", value: draft.baseURL, prompt: "Required") { draft.baseURL = $0 }
                 .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.baseURL)
             Text("Example: http://127.0.0.1:11234/v1")
                 .font(.caption).foregroundStyle(.secondary)
@@ -245,8 +245,7 @@ struct AIConnectionDraftEditor: View {
 
     private var modelRows: some View {
         VStack(alignment: .leading, spacing: presentation == .onboarding ? 4 : 6) {
-            textRow("Model ID", value: draft.model, prompt: "Choose or type a model ID") { draft.model = $0 }
-                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.model)
+            modelComboRow
             if draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 requiredLabel("Model ID is required.")
             }
@@ -258,32 +257,7 @@ struct AIConnectionDraftEditor: View {
                 .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.fetchModels)
                 if draft.isFetchingModels { ProgressView().controlSize(.small) }
                 Spacer()
-                if presentation == .onboarding, !draft.availableModels.isEmpty {
-                    Text("\(draft.availableModels.count) found")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Menu("Choose") {
-                        ForEach(draft.availableModels, id: \.self) { id in
-                            Button(id) {
-                                draft.model = id
-                                commit(nil)
-                            }
-                        }
-                    }
-                    .menuStyle(.borderlessButton)
-                } else {
-                    modelDiscoveryStatus
-                }
-            }
-            if !draft.availableModels.isEmpty {
-                if presentation == .settings {
-                    Picker("Found Model", selection: foundModelBinding) {
-                        Text("Manual / current").tag("")
-                        ForEach(draft.availableModels, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.foundModel)
-                }
+                modelDiscoveryStatus
             }
             if let reason = modelFetchDisabledReason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
@@ -291,9 +265,28 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
+    private var modelComboRow: some View {
+        let combo = ModelComboBox(
+            text: $draft.model, items: draft.availableModels,
+            prompt: "Choose or type a model ID", onCommit: { commit(nil) })
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.model)
+        return Group {
+            switch presentation {
+            case .onboarding:
+                HStack {
+                    Text("Model")
+                    Spacer()
+                    combo.frame(maxWidth: 260)
+                }
+            case .settings:
+                LabeledContent("Model") { combo }
+            }
+        }
+    }
+
     @ViewBuilder private var modelDiscoveryStatus: some View {
         switch draft.modelDiscoveryState {
-        case .loaded where presentation == .settings && !draft.availableModels.isEmpty:
+        case .loaded where !draft.availableModels.isEmpty:
             Text("\(draft.availableModels.count) found").font(.caption).foregroundStyle(.secondary)
         case .failed(let message):
             Text(message).font(.caption).foregroundStyle(.orange)
@@ -357,16 +350,6 @@ struct AIConnectionDraftEditor: View {
         Binding(
             get: { draft.apiKey },
             set: { draft.apiKey = $0 })
-    }
-
-    private var foundModelBinding: Binding<String> {
-        Binding(
-            get: { draft.availableModels.contains(draft.model) ? draft.model : "" },
-            set: { value in
-                guard !value.isEmpty else { return }
-                draft.model = value
-                commit(nil)
-            })
     }
 
     private var fetchModelsDisabled: Bool {

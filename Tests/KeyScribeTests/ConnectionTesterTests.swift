@@ -79,6 +79,27 @@ struct ConnectionTesterTests {
         #expect(await tester.test(connection) == .failed("The model service returned an error (401)."))
     }
 
+    @Test func chatCompletions404ExplainsTheEndpointRequirement() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k",
+            baseUrl: "http://127.0.0.1:11234/v1")
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(404, body: nil))))
+        guard case .failed(let message) = await tester.test(compat) else {
+            Issue.record("expected a 404 to be a failure")
+            return
+        }
+        #expect(message.contains("Chat Completions API"))
+        #expect(message.contains("/chat/completions"))
+    }
+
+    @Test func nonChatCompletionsStatusKeepsTheGenericMessage() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k",
+            baseUrl: "http://127.0.0.1:11234/v1")
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(500, body: nil))))
+        #expect(await tester.test(compat) == .failed("The model service returned an error (500)."))
+    }
+
     @Test func emptyReplyIsFailure() async {
         let tester = ConnectionTester(client: FakeClient(result: .success("   \n")))
         guard case .failed = await tester.test(connection) else {

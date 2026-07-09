@@ -17,6 +17,8 @@ enum BenchmarkRunner {
         var termClips = 0
         var recallUnbiased = 0.0
         var recallBiased = 0.0
+        var falseFiresUnbiased = 0.0
+        var falseFiresBiased = 0.0
     }
 
     static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false, fuzzy: Bool = false) async {
@@ -83,6 +85,10 @@ enum BenchmarkRunner {
                     let recB = BenchmarkScoring.termRecall(terms: entry.biasTerms, in: biasedH)
                     r.recallBiased += recB
                     r.recallUnbiased += BenchmarkScoring.termRecall(terms: entry.biasTerms, in: unbiasedH)
+                    r.falseFiresBiased += Double(BenchmarkScoring.termFalseFires(
+                        terms: entry.biasTerms, reference: entry.text, hypothesis: biasedH))
+                    r.falseFiresUnbiased += Double(BenchmarkScoring.termFalseFires(
+                        terms: entry.biasTerms, reference: entry.text, hypothesis: unbiasedH))
                     if verbose, recB < 1 {
                         let missed = entry.biasTerms.filter { biasedH.range(of: $0, options: .caseInsensitive) == nil }
                         print("  [\(engine.id) \(entry.id)] MISS \(missed)")
@@ -96,7 +102,8 @@ enum BenchmarkRunner {
             results[engine.id] = r
         }
         printTable(results, engineOrder: engines.map(\.id))
-        writeJSON(results, to: dir.appendingPathComponent("results.json"))
+        let jsonName = fuzzy ? "results-fuzzy.json" : "results.json"
+        writeJSON(results, to: dir.appendingPathComponent(jsonName), fuzzy: fuzzy)
     }
 
     private static func runRaw(dir: URL, manifest: BenchmarkManifest, engines: [any SpeechEngine]) async {
@@ -260,8 +267,8 @@ enum BenchmarkRunner {
 
     private static func printTable(_ results: [String: EngineResult], engineOrder: [String]) {
         func pct(_ v: Double) -> String { String(format: "%5.1f%%", v * 100) }
-        print("\nengine                  clips  WER(unbias)  WER(bias)  recall(unbias)  recall(bias)   RTF")
-        print(String(repeating: "─", count: 92))
+        print("\nengine                  clips  WER(unbias)  WER(bias)  recall(unbias)  recall(bias)  ff(unbias)  ff(bias)   RTF")
+        print(String(repeating: "─", count: 116))
         for id in engineOrder {
             guard let r = results[id] else { continue }
             guard r.status == "ok", r.clips > 0 else {
@@ -272,29 +279,36 @@ enum BenchmarkRunner {
             let tn = max(Double(r.termClips), 1)
             let recallU = r.termClips > 0 ? pct(r.recallUnbiased / tn) : "   n/a"
             let recallB = r.termClips > 0 ? pct(r.recallBiased / tn) : "   n/a"
+            let ffU = r.termClips > 0 ? String(format: "%6d", Int(r.falseFiresUnbiased)) : "   n/a"
+            let ffB = r.termClips > 0 ? String(format: "%6d", Int(r.falseFiresBiased)) : "   n/a"
             print(
                 "\(id.padding(toLength: 22, withPad: " ", startingAt: 0))  "
                 + "\(String(format: "%4d", r.clips))   "
                 + "\(pct(r.werUnbiased / n))       \(pct(r.werBiased / n))      "
-                + "\(recallU)         \(recallB)     \(String(format: "%.3f", r.rtfSum / n))")
+                + "\(recallU)         \(recallB)     \(ffU)     \(ffB)   \(String(format: "%.3f", r.rtfSum / n))")
         }
-        print("\n(RTF < 1.0 = faster than real time. recall = fraction of bias terms recovered.)")
+        print("\n(RTF < 1.0 = faster than real time. recall = fraction of bias terms recovered.")
+        print(" ff = total false fires: bias terms in the hypothesis that were absent from the reference.)")
     }
 
-    private static func writeJSON(_ results: [String: EngineResult], to url: URL) {
-        var obj: [String: [String: Double]] = [:]
+    private static func writeJSON(_ results: [String: EngineResult], to url: URL, fuzzy: Bool) {
+        var engineObj: [String: [String: Double]] = [:]
         for (id, r) in results where r.clips > 0 {
             let n = Double(r.clips)
             let tn = max(Double(r.termClips), 1)
-            obj[id] = [
+            engineObj[id] = [
                 "clips": Double(r.clips),
+                "termClips": Double(r.termClips),
                 "werUnbiased": r.werUnbiased / n,
                 "werBiased": r.werBiased / n,
                 "recallUnbiased": r.termClips > 0 ? r.recallUnbiased / tn : -1,
                 "recallBiased": r.termClips > 0 ? r.recallBiased / tn : -1,
+                "falseFiresUnbiased": r.falseFiresUnbiased,
+                "falseFiresBiased": r.falseFiresBiased,
                 "rtf": r.rtfSum / n,
             ]
         }
+        let obj: [String: Any] = ["fuzzy": fuzzy, "engines": engineObj]
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url)
             print("\nwrote \(url.path)")

@@ -20,9 +20,10 @@ models/
 # scripts) IS committed so every corpus is reproducible against your own voice.
 # stt/ engine-accuracy (WER benchmark) corpus: recorded clips + run output stay local
 corpus/stt/*.wav
-# BenchmarkRunner writes results.json into whatever sub-corpus dir it is pointed at (stt, commands,
-# a silence sweep) — never committed regardless of which one
+# BenchmarkRunner writes results.json (and results-fuzzy.json for the --fuzzy arm) into whatever
+# sub-corpus dir it is pointed at (stt, commands, a silence sweep) — never committed regardless
 corpus/*/results.json
+corpus/*/results-fuzzy.json
 # voices/ "scratch that" study: generated + recorded clips + local TTS venv stay local (manifest.json
 # IS committed — it holds the hand-recorded human takes + prosody notes, and is the record.sh --voices source)
 corpus/voices/*.wav
@@ -30,6 +31,10 @@ corpus/voices/.ttsenv
 corpus/voices/.tmpwav
 # commands/ verbal-command verification corpus: recorded/TTS clips stay local; manifest.json IS committed
 corpus/commands/*.wav
+# distractors/ recognition-bias false-fire corpus: generated TTS clips stay local; manifest.json +
+# gen.py + README.md IS committed (reproducible via gen.py)
+corpus/distractors/*.wav
+corpus/distractors/.tmpwav
 # bias/ recognition-bias corpus (ContextASR-Bench derived): extracted TTS clips + the fetched shard/
 # metadata stay local; manifest.json + build.py + fetch.sh IS committed (reproducible via fetch.sh)
 corpus/bias/*.wav

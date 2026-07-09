@@ -44,4 +44,16 @@ public enum BenchmarkScoring {
         let hits = wanted.filter { hypothesis.range(of: $0, options: .caseInsensitive) != nil }.count
         return Double(hits) / Double(wanted.count)
     }
+
+    // Harm-side counterpart to termRecall: how many bias terms surfaced in the hypothesis (same
+    // case-insensitive containment) that were NOT in the reference — i.e. the dictionary put a term
+    // into the output that was never spoken. On a distractor clip (reference has no dictionary term)
+    // every such fire is a false accept.
+    public static func termFalseFires(terms: [String], reference: String, hypothesis: String) -> Int {
+        let wanted = terms.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return wanted.filter {
+            hypothesis.range(of: $0, options: .caseInsensitive) != nil
+                && reference.range(of: $0, options: .caseInsensitive) == nil
+        }.count
+    }
 }

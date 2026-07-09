@@ -13,9 +13,17 @@ struct ConnectionTester {
                 ? .failed("The model service returned an empty response.")
                 : .passed
         } catch {
-            let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
-            return .failed(message)
+            return .failed(Self.failureMessage(for: error, connection: connection))
         }
+    }
+
+    static func failureMessage(for error: Error, connection: Connection) -> String {
+        if case let ProviderTransportError.http(status, _) = error,
+           status == 404 || status == 405,
+           connection.provider == .openai || connection.provider == .openaiCompatible {
+            return "This endpoint did not respond to the Chat Completions API (POST /chat/completions). Check the Base URL — KeyScribe needs a chat model; text-completions-only models will not work."
+        }
+        return (error as? ProviderTransportError)?.description ?? error.localizedDescription
     }
 }
 
@@ -447,7 +455,10 @@ private struct AIServiceEditor: View {
             onConsumeFocus: onConsumeFocus,
             onDelete: onDelete)
             .onChange(of: connection) { _, connection in refreshDraft(from: connection) }
-            .onChange(of: modelSuggestions) { _, _ in refreshDraft(from: connection) }
+            .onChange(of: modelSuggestions) { _, suggestions in
+                guard !suggestions.isEmpty else { return }
+                draft.applyFetchedModels(suggestions)
+            }
             .onChange(of: modelDiscoveryState) { _, _ in refreshDraft(from: connection) }
     }
 

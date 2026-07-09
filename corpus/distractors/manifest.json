@@ -1,0 +1,2417 @@
+{
+  "schemaVersion": 1,
+  "corpus": "distractors",
+  "description": "Sound-alike distractor + control clips to measure recognition-bias false fires.",
+  "dictionary": [
+    "GitHub",
+    "Cloudflare",
+    "Kubernetes",
+    "TypeScript",
+    "Grafana",
+    "Redis",
+    "TextField",
+    "CodeBase"
+  ],
+  "clips": [
+    {
+      "id": "d_getup1__say_samantha",
+      "file": "d_getup1__say_samantha.wav",
+      "text": "I need to get up early tomorrow",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup2__say_samantha",
+      "file": "d_getup2__say_samantha.wav",
+      "text": "did you get up on time this morning",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup3__say_samantha",
+      "file": "d_getup3__say_samantha.wav",
+      "text": "he could not get up this morning",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud1__say_samantha",
+      "file": "d_cloud1__say_samantha.wav",
+      "text": "we watched a bright flare light up the cloudy sky",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud2__say_samantha",
+      "file": "d_cloud2__say_samantha.wav",
+      "text": "the cloud was there when we looked up",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud3__say_samantha",
+      "file": "d_cloud3__say_samantha.wav",
+      "text": "a solar flare lit up the cloud cover",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm1__say_samantha",
+      "file": "d_comm1__say_samantha.wav",
+      "text": "our local communities came together",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm2__say_samantha",
+      "file": "d_comm2__say_samantha.wav",
+      "text": "the youth communities need more support",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm3__say_samantha",
+      "file": "d_comm3__say_samantha.wav",
+      "text": "small communities often work harder",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script1__say_samantha",
+      "file": "d_script1__say_samantha.wav",
+      "text": "what type of script did you use",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script2__say_samantha",
+      "file": "d_script2__say_samantha.wav",
+      "text": "that is the type of script I like",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script3__say_samantha",
+      "file": "d_script3__say_samantha.wav",
+      "text": "any type of script works fine here",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna1__say_samantha",
+      "file": "d_gonna1__say_samantha.wav",
+      "text": "we are gonna have a great time",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna2__say_samantha",
+      "file": "d_gonna2__say_samantha.wav",
+      "text": "I am gonna have another coffee soon",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna3__say_samantha",
+      "file": "d_gonna3__say_samantha.wav",
+      "text": "they are gonna have a party tonight",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus1__say_samantha",
+      "file": "d_readus1__say_samantha.wav",
+      "text": "please read us the final results",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus2__say_samantha",
+      "file": "d_readus2__say_samantha.wav",
+      "text": "he read us a bedtime story",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus3__say_samantha",
+      "file": "d_readus3__say_samantha.wav",
+      "text": "can you read us the menu please",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field1__say_samantha",
+      "file": "d_field1__say_samantha.wav",
+      "text": "click the text field above the button",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field2__say_samantha",
+      "file": "d_field2__say_samantha.wav",
+      "text": "leave the text field empty for now",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field3__say_samantha",
+      "file": "d_field3__say_samantha.wav",
+      "text": "the text field turned red suddenly",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base1__say_samantha",
+      "file": "d_base1__say_samantha.wav",
+      "text": "review the whole code base before merging",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base2__say_samantha",
+      "file": "d_base2__say_samantha.wav",
+      "text": "we moved the code base to a new server",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base3__say_samantha",
+      "file": "d_base3__say_samantha.wav",
+      "text": "keep the code base clean and simple",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup1__say_daniel",
+      "file": "d_getup1__say_daniel.wav",
+      "text": "I need to get up early tomorrow",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup2__say_daniel",
+      "file": "d_getup2__say_daniel.wav",
+      "text": "did you get up on time this morning",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup3__say_daniel",
+      "file": "d_getup3__say_daniel.wav",
+      "text": "he could not get up this morning",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud1__say_daniel",
+      "file": "d_cloud1__say_daniel.wav",
+      "text": "we watched a bright flare light up the cloudy sky",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud2__say_daniel",
+      "file": "d_cloud2__say_daniel.wav",
+      "text": "the cloud was there when we looked up",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud3__say_daniel",
+      "file": "d_cloud3__say_daniel.wav",
+      "text": "a solar flare lit up the cloud cover",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm1__say_daniel",
+      "file": "d_comm1__say_daniel.wav",
+      "text": "our local communities came together",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm2__say_daniel",
+      "file": "d_comm2__say_daniel.wav",
+      "text": "the youth communities need more support",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm3__say_daniel",
+      "file": "d_comm3__say_daniel.wav",
+      "text": "small communities often work harder",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script1__say_daniel",
+      "file": "d_script1__say_daniel.wav",
+      "text": "what type of script did you use",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script2__say_daniel",
+      "file": "d_script2__say_daniel.wav",
+      "text": "that is the type of script I like",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script3__say_daniel",
+      "file": "d_script3__say_daniel.wav",
+      "text": "any type of script works fine here",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna1__say_daniel",
+      "file": "d_gonna1__say_daniel.wav",
+      "text": "we are gonna have a great time",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna2__say_daniel",
+      "file": "d_gonna2__say_daniel.wav",
+      "text": "I am gonna have another coffee soon",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna3__say_daniel",
+      "file": "d_gonna3__say_daniel.wav",
+      "text": "they are gonna have a party tonight",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus1__say_daniel",
+      "file": "d_readus1__say_daniel.wav",
+      "text": "please read us the final results",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus2__say_daniel",
+      "file": "d_readus2__say_daniel.wav",
+      "text": "he read us a bedtime story",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus3__say_daniel",
+      "file": "d_readus3__say_daniel.wav",
+      "text": "can you read us the menu please",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field1__say_daniel",
+      "file": "d_field1__say_daniel.wav",
+      "text": "click the text field above the button",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field2__say_daniel",
+      "file": "d_field2__say_daniel.wav",
+      "text": "leave the text field empty for now",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field3__say_daniel",
+      "file": "d_field3__say_daniel.wav",
+      "text": "the text field turned red suddenly",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base1__say_daniel",
+      "file": "d_base1__say_daniel.wav",
+      "text": "review the whole code base before merging",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base2__say_daniel",
+      "file": "d_base2__say_daniel.wav",
+      "text": "we moved the code base to a new server",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base3__say_daniel",
+      "file": "d_base3__say_daniel.wav",
+      "text": "keep the code base clean and simple",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup1__say_karen",
+      "file": "d_getup1__say_karen.wav",
+      "text": "I need to get up early tomorrow",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup2__say_karen",
+      "file": "d_getup2__say_karen.wav",
+      "text": "did you get up on time this morning",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_getup3__say_karen",
+      "file": "d_getup3__say_karen.wav",
+      "text": "he could not get up this morning",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud1__say_karen",
+      "file": "d_cloud1__say_karen.wav",
+      "text": "we watched a bright flare light up the cloudy sky",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud2__say_karen",
+      "file": "d_cloud2__say_karen.wav",
+      "text": "the cloud was there when we looked up",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_cloud3__say_karen",
+      "file": "d_cloud3__say_karen.wav",
+      "text": "a solar flare lit up the cloud cover",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm1__say_karen",
+      "file": "d_comm1__say_karen.wav",
+      "text": "our local communities came together",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm2__say_karen",
+      "file": "d_comm2__say_karen.wav",
+      "text": "the youth communities need more support",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_comm3__say_karen",
+      "file": "d_comm3__say_karen.wav",
+      "text": "small communities often work harder",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script1__say_karen",
+      "file": "d_script1__say_karen.wav",
+      "text": "what type of script did you use",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script2__say_karen",
+      "file": "d_script2__say_karen.wav",
+      "text": "that is the type of script I like",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_script3__say_karen",
+      "file": "d_script3__say_karen.wav",
+      "text": "any type of script works fine here",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna1__say_karen",
+      "file": "d_gonna1__say_karen.wav",
+      "text": "we are gonna have a great time",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna2__say_karen",
+      "file": "d_gonna2__say_karen.wav",
+      "text": "I am gonna have another coffee soon",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_gonna3__say_karen",
+      "file": "d_gonna3__say_karen.wav",
+      "text": "they are gonna have a party tonight",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus1__say_karen",
+      "file": "d_readus1__say_karen.wav",
+      "text": "please read us the final results",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus2__say_karen",
+      "file": "d_readus2__say_karen.wav",
+      "text": "he read us a bedtime story",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_readus3__say_karen",
+      "file": "d_readus3__say_karen.wav",
+      "text": "can you read us the menu please",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field1__say_karen",
+      "file": "d_field1__say_karen.wav",
+      "text": "click the text field above the button",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field2__say_karen",
+      "file": "d_field2__say_karen.wav",
+      "text": "leave the text field empty for now",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_field3__say_karen",
+      "file": "d_field3__say_karen.wav",
+      "text": "the text field turned red suddenly",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base1__say_karen",
+      "file": "d_base1__say_karen.wav",
+      "text": "review the whole code base before merging",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base2__say_karen",
+      "file": "d_base2__say_karen.wav",
+      "text": "we moved the code base to a new server",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_base3__say_karen",
+      "file": "d_base3__say_karen.wav",
+      "text": "keep the code base clean and simple",
+      "source": "tts:say:Karen",
+      "tags": [
+        "distractor",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_github__say_samantha",
+      "file": "c_github__say_samantha.wav",
+      "text": "I pushed the changes to GitHub this morning",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_cloudflare__say_samantha",
+      "file": "c_cloudflare__say_samantha.wav",
+      "text": "we put the site behind Cloudflare last week",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_kubernetes__say_samantha",
+      "file": "c_kubernetes__say_samantha.wav",
+      "text": "the service runs on Kubernetes in production",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_typescript__say_samantha",
+      "file": "c_typescript__say_samantha.wav",
+      "text": "we rewrote the whole app in TypeScript",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_grafana__say_samantha",
+      "file": "c_grafana__say_samantha.wav",
+      "text": "the dashboard is built with Grafana",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_redis__say_samantha",
+      "file": "c_redis__say_samantha.wav",
+      "text": "we cache the session data in Redis",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_textfield__say_samantha",
+      "file": "c_textfield__say_samantha.wav",
+      "text": "bind the input value to the TextField",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_codebase__say_samantha",
+      "file": "c_codebase__say_samantha.wav",
+      "text": "the CodeBase is clean and well organized",
+      "source": "tts:say:Samantha",
+      "tags": [
+        "control",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_github__say_daniel",
+      "file": "c_github__say_daniel.wav",
+      "text": "I pushed the changes to GitHub this morning",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_cloudflare__say_daniel",
+      "file": "c_cloudflare__say_daniel.wav",
+      "text": "we put the site behind Cloudflare last week",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_kubernetes__say_daniel",
+      "file": "c_kubernetes__say_daniel.wav",
+      "text": "the service runs on Kubernetes in production",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_typescript__say_daniel",
+      "file": "c_typescript__say_daniel.wav",
+      "text": "we rewrote the whole app in TypeScript",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_grafana__say_daniel",
+      "file": "c_grafana__say_daniel.wav",
+      "text": "the dashboard is built with Grafana",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_redis__say_daniel",
+      "file": "c_redis__say_daniel.wav",
+      "text": "we cache the session data in Redis",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_textfield__say_daniel",
+      "file": "c_textfield__say_daniel.wav",
+      "text": "bind the input value to the TextField",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_codebase__say_daniel",
+      "file": "c_codebase__say_daniel.wav",
+      "text": "the CodeBase is clean and well organized",
+      "source": "tts:say:Daniel",
+      "tags": [
+        "control",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_github__say_karen",
+      "file": "c_github__say_karen.wav",
+      "text": "I pushed the changes to GitHub this morning",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "GitHub"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_cloudflare__say_karen",
+      "file": "c_cloudflare__say_karen.wav",
+      "text": "we put the site behind Cloudflare last week",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "Cloudflare"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_kubernetes__say_karen",
+      "file": "c_kubernetes__say_karen.wav",
+      "text": "the service runs on Kubernetes in production",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "Kubernetes"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_typescript__say_karen",
+      "file": "c_typescript__say_karen.wav",
+      "text": "we rewrote the whole app in TypeScript",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "TypeScript"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_grafana__say_karen",
+      "file": "c_grafana__say_karen.wav",
+      "text": "the dashboard is built with Grafana",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "Grafana"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_redis__say_karen",
+      "file": "c_redis__say_karen.wav",
+      "text": "we cache the session data in Redis",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "Redis"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_textfield__say_karen",
+      "file": "c_textfield__say_karen.wav",
+      "text": "bind the input value to the TextField",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "TextField"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_codebase__say_karen",
+      "file": "c_codebase__say_karen.wav",
+      "text": "the CodeBase is clean and well organized",
+      "source": "tts:say:Karen",
+      "tags": [
+        "control",
+        "CodeBase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "GitHub",
+            "Cloudflare",
+            "Kubernetes",
+            "TypeScript",
+            "Grafana",
+            "Redis",
+            "TextField",
+            "CodeBase"
+          ],
+          "tier": "distractor"
+        }
+      }
+    }
+  ]
+}

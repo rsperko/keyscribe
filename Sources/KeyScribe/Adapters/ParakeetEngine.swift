@@ -178,14 +178,17 @@ actor ParakeetEngine: SpeechEngine {
             }
 
             let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocab.terms.count)
+            let env = ProcessInfo.processInfo.environment
+            let benchCbw = Float(env["KEYSCRIBE_BENCH_CBW"] ?? "") ?? vocabConfig.cbw
+            let benchMinSim = Float(env["KEYSCRIBE_BENCH_MINSIM"] ?? "") ?? vocabConfig.minSimilarity
             let rescorer = try await rescorer(for: biasTerms, vocab: vocab, ctcDir: ctcDir, spotter: spotter)
             let rescored = rescorer.ctcTokenRescore(
                 transcript: result.text,
                 tokenTimings: timings,
                 logProbs: spot.logProbs,
                 frameDuration: spot.frameDuration,
-                cbw: vocabConfig.cbw,
-                minSimilarity: vocabConfig.minSimilarity)
+                cbw: benchCbw,
+                minSimilarity: benchMinSim)
 
             Log.bias.info(
                 "\(self.id, privacy: .public) terms=\(biasTerms.joined(separator: "|"), privacy: .private) applied=\(rescored.wasModified, privacy: .public) replacements=\(rescored.replacements.count, privacy: .public)"

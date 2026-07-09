@@ -35,4 +35,38 @@ struct BenchmarkScoringTests {
         let r = BenchmarkScoring.termRecall(terms: ["KeyScribe", "Kubernetes"], in: "KeyScribe runs locally")
         #expect(abs(r - 0.5) < 1e-9)
     }
+
+    @Test func falseFireWhenTermInHypButNotReference() {
+        // "GitHub" surfaced in the transcript but the sentence was about getting up early → false fire.
+        let n = BenchmarkScoring.termFalseFires(
+            terms: ["GitHub"], reference: "I need to get up early", hypothesis: "I need to GitHub early")
+        #expect(n == 1)
+    }
+
+    @Test func noFalseFireWhenTermLegitimatelySpoken() {
+        // The term is in the reference, so its presence in the hypothesis is correct, not a false fire.
+        let n = BenchmarkScoring.termFalseFires(
+            terms: ["GitHub"], reference: "I pushed to GitHub", hypothesis: "I pushed to GitHub")
+        #expect(n == 0)
+    }
+
+    @Test func noFalseFireWhenTermAbsentFromBoth() {
+        let n = BenchmarkScoring.termFalseFires(
+            terms: ["GitHub"], reference: "I need to get up early", hypothesis: "I need to get up early")
+        #expect(n == 0)
+    }
+
+    @Test func falseFiresCountsEachOffendingTerm() {
+        let n = BenchmarkScoring.termFalseFires(
+            terms: ["GitHub", "Kubernetes", "TypeScript"],
+            reference: "our local communities use that type of script",
+            hypothesis: "our local Kubernetes use that TypeScript")
+        #expect(n == 2)
+    }
+
+    @Test func falseFiresIsCaseInsensitiveAndIgnoresBlankTerms() {
+        let n = BenchmarkScoring.termFalseFires(
+            terms: ["GitHub", "  "], reference: "get up now", hypothesis: "github now")
+        #expect(n == 1)
+    }
 }
