@@ -70,6 +70,11 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
         hint = nil
     }
 
+    public mutating func noKeyOnModifierRelease() {
+        guard phase == .recording else { return }
+        hint = "No key received — another app may already use this shortcut."
+    }
+
     public mutating func select(_ newValue: KeyDescriptor?) {
         phase = .idle
         value = newValue

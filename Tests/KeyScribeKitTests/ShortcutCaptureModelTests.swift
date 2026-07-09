@@ -176,6 +176,30 @@ import Testing
         #expect(model.rawFallback == "wat+nonsense")
     }
 
+    @Test func noKeyOnModifierReleaseSetsHintWhileRecording() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
+        model.beginRecording()
+        model.noKeyOnModifierRelease()
+        #expect(model.hint == "No key received — another app may already use this shortcut.")
+        #expect(model.phase == .recording)
+        #expect(model.value == nil)
+    }
+
+    @Test func noKeyOnModifierReleaseIsNoOpWhenIdle() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "fn")
+        model.noKeyOnModifierRelease()
+        #expect(model.hint == nil)
+    }
+
+    @Test func captureClearsNoKeyHint() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
+        model.beginRecording()
+        model.noKeyOnModifierRelease()
+        #expect(model.hint != nil)
+        _ = model.keyEvent(keyCode: 9, modifiers: [.control, .option])
+        #expect(model.hint == nil)
+    }
+
     @Test func actionChordProfileOffersNoNamedKeys() {
         #expect(ShortcutProfile.actionChord.namedKeyOptions.isEmpty)
         #expect(ShortcutProfile.modeTrigger.namedKeyOptions == [.fn, .rightOption, .rightCommand, .hyper])

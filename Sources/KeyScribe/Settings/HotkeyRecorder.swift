@@ -28,38 +28,47 @@ struct ShortcutWell: View {
     @State private var recordToken = 0
 
     var body: some View {
-        HStack(spacing: 8) {
-            RecorderButton(
-                key: $key, hint: $hint, recording: $recording,
-                profile: profile, recordToken: recordToken, recordingState: recordingState)
-                .frame(width: 220, height: 24)
-            Menu {
-                Picker(selection: namedSelection, label: EmptyView()) {
-                    Text("None").tag(noneMenuTag)
-                    ForEach(profile.namedKeyOptions, id: \.self) { named in
-                        Text(namedMenuLabel(named)).tag(KeyDescriptor.named(named).canonical)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                RecorderButton(
+                    key: $key, hint: $hint, recording: $recording,
+                    profile: profile, recordToken: recordToken, recordingState: recordingState)
+                    .frame(width: 240, height: 24)
+                Menu {
+                    Picker(selection: namedSelection, label: EmptyView()) {
+                        Text("None").tag(noneMenuTag)
+                        ForEach(profile.namedKeyOptions, id: \.self) { named in
+                            Text(namedMenuLabel(named)).tag(KeyDescriptor.named(named).canonical)
+                        }
+                        if isUnlisted { Text("Custom").tag(unlistedMenuTag) }
                     }
-                    if isUnlisted { Text("Custom").tag(unlistedMenuTag) }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Button(profile.allowsNamedKeys ? "Record Custom Shortcut…" : "Record Shortcut…") {
+                        recordToken += 1
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
                 }
-                .pickerStyle(.inline)
-                Divider()
-                Button(profile.allowsNamedKeys ? "Record Custom Shortcut…" : "Record Shortcut…") {
-                    recordToken += 1
-                }
-            } label: {
-                Image(systemName: "chevron.up.chevron.down")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(recording)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .disabled(recording)
 
-            if let hint {
-                Text(hint).font(.caption).foregroundStyle(.secondary)
-            } else if isUnparseable {
-                Text("Not a recognized shortcut").font(.caption).foregroundStyle(.secondary)
+            if let caption {
+                Text(caption)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: 288, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .onDisappear { recordingState.isRecording = false }
+    }
+
+    private var caption: String? {
+        if let hint { return hint }
+        if isUnparseable { return "Not a recognized shortcut" }
+        return nil
     }
 
     private var descriptor: KeyDescriptor? { try? KeyDescriptor(parsing: key) }
@@ -147,6 +156,7 @@ final class RecorderButtonView: NSButton {
     private var didCommit = false
     private var storedKey = ""
     private var monitor: Any?
+    private var peakModifierCount = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -186,6 +196,7 @@ final class RecorderButtonView: NSButton {
     private func start() {
         recording = true
         didCommit = false
+        peakModifierCount = 0
         model = ShortcutCaptureModel(profile: profile, stored: storedKey)
         model.beginRecording()
         recordingState?.isRecording = true
@@ -194,16 +205,35 @@ final class RecorderButtonView: NSButton {
         window?.makeFirstResponder(self)
         // A local monitor sees the keystroke before SwiftUI's List type-select (which runs ahead of
         // performKeyEquivalent and ignores first responder). Returning nil swallows the event, so
-        // recording a shortcut never navigates the mode/sidebar list.
+        // recording a shortcut never navigates the mode/sidebar list. flagsChanged is observed, not
+        // swallowed: a chord another app reserved globally is consumed before its keyDown reaches this
+        // monitor, so a held-then-released modifier combo with no key is the only signal that fires.
         monitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .otherMouseDown]
+            matching: [.keyDown, .otherMouseDown, .flagsChanged]
         ) { [weak self] event in
-            guard let self, self.recording, event.window === self.window else { return event }
+            guard let self, self.recording else { return event }
+            if event.type == .flagsChanged { self.handleFlags(event); return event }
+            guard event.window === self.window else { return event }
             if event.type == .keyDown { self.handleKey(event) }
             else if event.type == .otherMouseDown { self.handleMouse(event) }
             return nil
         }
         refreshTitle()
+    }
+
+    private func handleFlags(_ event: NSEvent) {
+        guard recording else { return }
+        let count = RecorderButtonView.modifierSet(event.modifierFlags).count
+        if count == 0 {
+            if peakModifierCount >= 2, !didCommit {
+                model.noKeyOnModifierRelease()
+                onHint?(model.hint)
+                refreshTitle()
+            }
+            peakModifierCount = 0
+        } else {
+            peakModifierCount = max(peakModifierCount, count)
+        }
     }
 
     private func stop() {
@@ -273,7 +303,7 @@ final class RecorderButtonView: NSButton {
     private var label: String {
         if recording {
             return profile.allowsMouseButtons
-                ? "Press keys or a mouse button…  Esc cancels"
+                ? "Press a shortcut…  Esc cancels"
                 : "Press a key combo…  Esc cancels"
         }
         if let value = model.value { return value.displayString }
