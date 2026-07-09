@@ -11,8 +11,8 @@ struct SpeechModelCatalogTests {
 
     @Test func exactlyOneDefaultEnglishEngine() {
         #expect(SpeechModelCatalog.all.filter(\.isDefaultEnglish).count == 1)
-        #expect(SpeechModelCatalog.defaultEnglishId == "parakeet-tdt-ctc-110m")
-        #expect(SpeechModelCatalog.entry(for: "parakeet-tdt-ctc-110m")?.isDefaultEnglish == true)
+        #expect(SpeechModelCatalog.defaultEnglishId == "parakeet")
+        #expect(SpeechModelCatalog.entry(for: "parakeet")?.isDefaultEnglish == true)
     }
 
     @Test func appleIsSystemManagedWithNoDownload() {

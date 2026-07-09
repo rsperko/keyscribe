@@ -35,14 +35,14 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
 public enum SpeechModelCatalog {
     public static let all: [SpeechModelInfo] = [
         SpeechModelInfo(
-            id: "parakeet-tdt-ctc-110m", kind: .parakeet, displayName: "Parakeet TDT-CTC 110M",
-            summary: "Compact English model — fast, accurate, and small.",
-            languageCount: 1, approxDownloadBytes: 440_000_000, systemManaged: false,
-            isDefaultEnglish: true, supportsRecognitionBias: true),
-        SpeechModelInfo(
             id: "parakeet", kind: .parakeet, displayName: "Parakeet TDT v3",
             summary: "Larger multilingual Parakeet; slightly stronger raw accuracy.",
             languageCount: 25, approxDownloadBytes: 1_800_000_000, systemManaged: false,
+            isDefaultEnglish: true, supportsRecognitionBias: true),
+        SpeechModelInfo(
+            id: "parakeet-tdt-ctc-110m", kind: .parakeet, displayName: "Parakeet TDT-CTC 110M",
+            summary: "Compact English model — fast, accurate, and small.",
+            languageCount: 1, approxDownloadBytes: 440_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true),
         SpeechModelInfo(
             id: "whisper-small-en", kind: .whisper, displayName: "Whisper Small (English)",
