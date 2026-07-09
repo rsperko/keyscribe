@@ -58,6 +58,7 @@ struct ModeRoutingSection: View {
                         Button("Enter Bundle ID…") { enteringBundleId = true }
                     }
                     .fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addAppRule)
                     .onAppear { if runningApps.isEmpty { runningApps = InstalledApps.running() } }
                     Spacer()
                 }
@@ -66,23 +67,29 @@ struct ModeRoutingSection: View {
                         TextField("Bundle ID, e.g. com.apple.Safari", text: $manualBundleId)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit(commitManualBundleId)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleID)
                         Button("Add", action: commitManualBundleId)
                             .disabled(manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleIDAdd)
                     }
                 }
                 HStack {
                     TextField("URL regex, e.g. github\\.com", text: $newURLPattern)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitURLConstraint)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPattern)
                     Button("Add", action: commitURLConstraint)
                         .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
                 }
                 HStack {
                     TextField("Window title regex, e.g. (?i)pull request", text: $newWindowTitlePattern)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitWindowTitleConstraint)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitle)
                     Button("Add", action: commitWindowTitleConstraint)
                         .disabled(newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitleAdd)
                 }
 
                 Divider().padding(.vertical, 4)
@@ -92,8 +99,10 @@ struct ModeRoutingSection: View {
                     TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitPhrase)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
                     Button("Add", action: commitPhrase)
                         .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
                 }
                 ForEach(mode.triggerPhrases, id: \.self) { phrase in
                     HStack {
@@ -107,6 +116,7 @@ struct ModeRoutingSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.disclosure)
         }
     }
 

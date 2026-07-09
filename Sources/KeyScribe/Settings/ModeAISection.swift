@@ -44,6 +44,7 @@ struct ModeAISection: View {
                         }
                     }
                     .labelsHidden().fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.aiService)
                 }
                 if mode.aiRewrite != nil {
                     PromptEditor(
@@ -53,6 +54,7 @@ struct ModeAISection: View {
                     ) { value in
                         updateRewrite { $0.prompt = value }
                     }
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.instruction)
                     reusableInstructions
                 }
             }
@@ -107,6 +109,7 @@ struct ModeAISection: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityIdentifier(AccessibilityID.Mode.Editor.addInstruction)
         .alert("New reusable instruction", isPresented: $creatingFragment) {
             TextField("Name, e.g. Email style", text: $newFragmentName)
             Button("Create", action: commitNewFragment)

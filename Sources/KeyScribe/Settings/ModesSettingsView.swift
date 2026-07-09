@@ -32,13 +32,16 @@ struct ModesSettingsView: View {
                 ForEach(model.modes) { mode in
                     ModeSummaryRow(mode: mode, issue: issue(for: mode))
                         .tag(mode.id)
+                        .accessibilityIdentifier(AccessibilityID.Mode.List.row(mode.id))
                 }
             }
+            .accessibilityIdentifier(AccessibilityID.Mode.List.list)
             .safeAreaInset(edge: .bottom) {
                 Button("Add Mode", systemImage: "plus", action: model.create)
                     .buttonStyle(.borderless)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
+                    .accessibilityIdentifier(AccessibilityID.Mode.List.add)
             }
             .disabled(recordingState.isRecording)
             .frame(width: 240)

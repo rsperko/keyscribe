@@ -51,6 +51,7 @@ struct PressStyleRow: View {
             Text("Tap to toggle").tag("tap-to-toggle")
         }
         .disabled(disabled)
+        .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
     }
 }
 

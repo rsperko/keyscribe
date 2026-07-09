@@ -54,6 +54,7 @@ struct ModeEditorView: View {
                     help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D}, \u{201C}scratch that\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)
                 }
             }
             Section("Result handling") {
@@ -63,6 +64,7 @@ struct ModeEditorView: View {
                     help: "When on, Direct's dictations are never written to local history. Otherwise it records per your global History setting.")
                 {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
                 }
                 finishingControls
             }
@@ -79,7 +81,9 @@ struct ModeEditorView: View {
                 CommittedTextField("Name", text: mode.name, autofocus: autofocusName) { value in
                     var updated = mode; updated.name = value; onUpdate(updated)
                 }
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.name)
                 Toggle("Enabled", isOn: bind.binding(\.enabled))
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.enabled)
             }
 
             ModeRoutingSection(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
@@ -90,12 +94,14 @@ struct ModeEditorView: View {
                     help: "When on, this mode edits the currently selected text using your spoken instruction instead of inserting new text at the cursor — for \u{201C}make this more formal\u{201D} style edits. The selection is captured with ⌘C, so there must be something selected for it to act on.")
                 {
                     Toggle("", isOn: selectionMode).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.rewriteSelection)
                 }
                 SettingRow(
                     title: "Turn spoken commands into edits",
                     help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D}, \u{201C}scratch that\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)
                 }
                 recognitionDisclosure
             }
@@ -117,13 +123,16 @@ struct ModeEditorView: View {
                     help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
                 {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
                 }
                 finishingControls
             }
 
             Section {
                 Button("Duplicate Mode", systemImage: "plus.square.on.square", action: onDuplicate)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.duplicate)
                 Button("Delete Mode", role: .destructive, action: onDelete)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.delete)
             }
         }
         .formStyle(.grouped)
@@ -209,6 +218,7 @@ struct ModeEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.disclosure)
     }
 
     private var recognitionSummary: String {
@@ -227,6 +237,7 @@ struct ModeEditorView: View {
             help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
         {
             Toggle("", isOn: bind.binding(\.trimTrailingPunctuation)).labelsHidden()
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.trimTrailingPunctuation)
         }
         SettingRow(
             title: "End with",
@@ -238,6 +249,7 @@ struct ModeEditorView: View {
                 Text("Line break").tag(Mode.Trailing.newline)
             }
             .labelsHidden().fixedSize()
+            .accessibilityIdentifier(AccessibilityID.Mode.Editor.trailing)
         }
         nonDefaultSubmitNotice
     }
@@ -276,6 +288,7 @@ struct ModeEditorView: View {
                     dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
                 {
                     Toggle("", isOn: bind.contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Context.app)
                 }
                 SettingRow(
                     title: "Send text before the cursor",
@@ -283,6 +296,7 @@ struct ModeEditorView: View {
                     dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
                 {
                     Toggle("", isOn: bind.contextBinding(\.precedingText)).labelsHidden().disabled(mode.commands.privacy)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Context.precedingText)
                 }
                 SettingRow(
                     title: "Hide recognizable sensitive text",
@@ -290,6 +304,7 @@ struct ModeEditorView: View {
                     dependencyReason: mode.commands.privacy ? "All context is off while this is on." : nil)
                 {
                     Toggle("", isOn: privacyMode).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.privacy)
                 }
             }
         }
