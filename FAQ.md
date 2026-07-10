@@ -63,6 +63,10 @@ Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs
   only on macOS 26+.
 
 You can switch engines anytime in **Settings ▸ Speech Models**; each is downloaded on first use.
+Alongside your first speech model, KeyScribe also fetches a tiny (~1 MB) voice-activity-detection model
+that runs on-device to tell whether a recording actually contains speech — so an accidental trigger with
+no talking inserts nothing instead of pasting stray text. Like every speech model, it never sends audio
+off your machine.
 
 ### How do I make KeyScribe spell my names and jargon correctly?
 

@@ -51,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
         ModelInstallStore.deleteRetiredCtcCompanions()
+        if !ModelInstallStore.installedIds().isEmpty {
+            VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
+        }
         provider = resolveProvider(engines: engines)
         ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))

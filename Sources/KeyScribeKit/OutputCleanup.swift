@@ -64,7 +64,9 @@ public enum OutputCleanup {
     // `(water running)`). Collapse an utterance that is nothing but such annotations so the no-speech guard
     // short-circuits it. Whole-utterance ONLY: a transcript that merely *contains* one ("the array[0] value")
     // is unchanged — partial stripping would corrupt legitimate text. Lexical hallucinations ("Thank you.",
-    // "No") are out of scope; they need an audio-side VAD gate, not a string denylist.
+    // "No") are out of scope here: a string denylist cannot safely strip real words. They are handled
+    // upstream by the audio-side no-speech gate (SpeechPresenceGate / SpeechPresenceDetector), which
+    // suppresses a take with no speech before it reaches STT; this annotation collapse is the second line.
     public static func blankingNonSpeechAnnotation(_ text: String) -> String {
         let range = NSRange(text.startIndex..., in: text)
         let stripped = nonSpeechAnnotation.stringByReplacingMatches(in: text, range: range, withTemplate: "")

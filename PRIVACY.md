@@ -54,7 +54,9 @@ KeyScribe touches the network in exactly three situations:
 
 1. **Downloading speech models** — on-device engine weights are fetched on demand from their
    publishers (e.g. Hugging Face) the first time you select an engine, then cached locally and reused
-   offline.
+   offline. A tiny (~1 MB) voice-activity-detection model is fetched the same way, alongside your first
+   speech model; it runs entirely on-device to detect whether a recording contains any speech (so a
+   silent trigger inserts nothing) and never sends audio anywhere.
 2. **The optional BYOK LLM cleanup** — described above, to your own provider.
 3. **Checking for app updates** — KeyScribe periodically fetches a small update feed to see whether a
    newer version is available, and downloads it only if you choose to install one. It asks before the

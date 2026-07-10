@@ -17,6 +17,11 @@ public struct PromptInputs: Sendable {
     public var fieldRole: String?
     public var selectedText: String?
     public var precedingText: String?
+    // Inputs for the experimental assembler options below — inert unless the matching option is on,
+    // so production callers can carry them before a feature graduates.
+    public var locale: String?
+    public var fieldSingleLine: Bool?
+    public var fieldPlainText: Bool?
 
     public init(
         modePrompt: String, dictatedInstructions: String, content: String,
@@ -24,7 +29,8 @@ public struct PromptInputs: Sendable {
         styleRules: [String] = [], language: String,
         modeSystemInstructions: String,
         appName: String?, bundleId: String?, fieldRole: String?,
-        selectedText: String?, precedingText: String? = nil
+        selectedText: String?, precedingText: String? = nil,
+        locale: String? = nil, fieldSingleLine: Bool? = nil, fieldPlainText: Bool? = nil
     ) {
         self.modePrompt = modePrompt
         self.dictatedInstructions = dictatedInstructions
@@ -40,6 +46,9 @@ public struct PromptInputs: Sendable {
         self.fieldRole = fieldRole
         self.selectedText = selectedText
         self.precedingText = precedingText
+        self.locale = locale
+        self.fieldSingleLine = fieldSingleLine
+        self.fieldPlainText = fieldPlainText
     }
 }
 
@@ -52,11 +61,31 @@ public struct RewritePrompt: Equatable, Sendable {
 // dynamic constraints go in the system message; the instruction, opt-in context blocks, and content go in
 // the user message. Empty children are omitted; the whole <context> block drops if all are empty.
 public enum PromptAssembler {
-    public static func assemble(_ inputs: PromptInputs) -> RewritePrompt {
-        RewritePrompt(system: system(inputs), user: user(inputs))
+    // Candidate prompt changes under evaluation (`--rewrite-eval`). All off by default: `.baseline`
+    // must produce today's shipped prompt byte-for-byte. A feature that wins its eval graduates by
+    // making its branch unconditional and deleting the flag.
+    public struct Options: Sendable, Equatable {
+        public var appendFinalReminder: Bool
+        public var fieldAffordanceRule: Bool
+        public var localeRule: Bool
+
+        public static let baseline = Options()
+
+        public init(
+            appendFinalReminder: Bool = false, fieldAffordanceRule: Bool = false,
+            localeRule: Bool = false
+        ) {
+            self.appendFinalReminder = appendFinalReminder
+            self.fieldAffordanceRule = fieldAffordanceRule
+            self.localeRule = localeRule
+        }
     }
 
-    private static func system(_ i: PromptInputs) -> String {
+    public static func assemble(_ inputs: PromptInputs, options: Options = .baseline) -> RewritePrompt {
+        RewritePrompt(system: system(inputs, options), user: user(inputs))
+    }
+
+    private static func system(_ i: PromptInputs, _ o: Options) -> String {
         var rules = [
             "- Output ONLY the transformed text — no preamble, no explanation, no surrounding quotes, code fences, or XML tags.",
             "- Rewrite only the text inside <content>: apply every instruction fully, but make no change an instruction does not call for. Return it unchanged only when the instructions call for no change to already-correct text."
@@ -74,7 +103,19 @@ public enum PromptAssembler {
             let pairs = i.fuzzyCandidates.map { "\"\($0.heard)\" → \($0.canonical)" }.joined(separator: ", ")
             rules.append("- The transcription may have misheard these dictionary terms. Where the text clearly refers to one, replace it with the term shown; otherwise leave the text unchanged: \(pairs).")
         }
-        rules.append("- Write in \(i.language).")
+        if o.fieldAffordanceRule {
+            if i.fieldSingleLine == true {
+                rules.append("- The destination is a single-line field: return exactly one line, with no newline characters.")
+            }
+            if i.fieldPlainText == true {
+                rules.append("- The destination field is plain text: use no Markdown or markup syntax (#, *, backticks, bullet markers) — plain prose only.")
+            }
+        }
+        if o.localeRule, let locale = nonEmpty(i.locale) {
+            rules.append("- Write in \(i.language) (\(locale) spelling conventions).")
+        } else {
+            rules.append("- Write in \(i.language).")
+        }
 
         var msg = """
         You are KeyScribe's text transformation engine. You transform text exactly as instructed and return only the transformed text.
@@ -84,6 +125,11 @@ public enum PromptAssembler {
         """
         let extra = i.modeSystemInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !extra.isEmpty { msg += "\n\(extra)" }
+        if o.appendFinalReminder {
+            msg += "\n" + (i.tokens.isEmpty
+                ? "Final reminder: output ONLY the transformed text itself — nothing else."
+                : "Final reminder: output ONLY the transformed text itself — nothing else — and reproduce every ⟦SN:…⟧ token verbatim, exactly once.")
+        }
         return msg
     }
 

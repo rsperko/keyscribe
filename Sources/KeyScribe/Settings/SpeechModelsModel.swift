@@ -118,6 +118,7 @@ final class SpeechModelsModel: ObservableObject {
     func noteInstalled(_ id: String) {
         markInstalled(id)
         set.markInstalled(id)
+        VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
         refreshSizes()
         rebuild()
     }
@@ -186,6 +187,7 @@ final class SpeechModelsModel: ObservableObject {
             Log.models.notice("download complete: \(id, privacy: .public)")
             downloading[id] = nil
             markInstalled(id)
+            VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
             await runVerification(id, markInstalledOnPass: true)
         }
     }

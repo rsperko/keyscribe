@@ -185,3 +185,64 @@ struct PromptAssemblerTests {
         #expect(p.user.contains("<selection>yo what's up</selection>"))
     }
 }
+
+// Experimental assembler options (rewrite-prompt eval variants). Off by default: baseline output must
+// stay byte-identical to today's prompt even when the inputs carry the new fields.
+struct PromptAssemblerOptionsTests {
+    @Test func baselineOptionsAddNoExperimentalRules() {
+        var i = inputs(validTerms: ["KeyScribe"])
+        i.locale = "en-US"
+        i.fieldSingleLine = true
+        i.fieldPlainText = true
+        let def = PromptAssembler.assemble(i)
+        #expect(def == PromptAssembler.assemble(i, options: .baseline))
+        #expect(!def.system.contains("spelling conventions"))
+        #expect(!def.system.contains("single-line field"))
+        #expect(!def.system.contains("Final reminder"))
+    }
+
+    @Test func finalReminderIsLastLine() {
+        let p = PromptAssembler.assemble(
+            inputs(modeSystem: "Be terse."), options: .init(appendFinalReminder: true))
+        #expect(p.system.hasSuffix("Final reminder: output ONLY the transformed text itself — nothing else."))
+    }
+
+    @Test func finalReminderIsTokenAware() {
+        let p = PromptAssembler.assemble(
+            inputs(tokens: ["⟦SN:ab12⟧"]), options: .init(appendFinalReminder: true))
+        #expect(p.system.hasSuffix("and reproduce every ⟦SN:…⟧ token verbatim, exactly once."))
+    }
+
+    @Test func localeRuleExtendsLanguageLine() {
+        var i = inputs()
+        i.locale = "en-US"
+        let p = PromptAssembler.assemble(i, options: .init(localeRule: true))
+        #expect(p.system.contains("- Write in English (en-US spelling conventions)."))
+        #expect(!p.system.contains("- Write in English.\n"))
+    }
+
+    @Test func localeRuleWithoutLocaleLeavesLanguageLine() {
+        let p = PromptAssembler.assemble(inputs(), options: .init(localeRule: true))
+        #expect(p.system.contains("- Write in English."))
+        #expect(!p.system.contains("spelling conventions"))
+    }
+
+    @Test func fieldAffordanceRulesRenderOnlyForSetFlags() {
+        var i = inputs()
+        i.fieldSingleLine = true
+        let p = PromptAssembler.assemble(i, options: .init(fieldAffordanceRule: true))
+        #expect(p.system.contains("single-line field"))
+        #expect(!p.system.contains("no Markdown or markup syntax"))
+
+        i.fieldPlainText = true
+        let both = PromptAssembler.assemble(i, options: .init(fieldAffordanceRule: true))
+        #expect(both.system.contains("single-line field"))
+        #expect(both.system.contains("no Markdown or markup syntax"))
+    }
+
+    @Test func fieldAffordanceRuleAbsentWithoutFlags() {
+        let p = PromptAssembler.assemble(inputs(), options: .init(fieldAffordanceRule: true))
+        #expect(!p.system.contains("single-line field"))
+        #expect(!p.system.contains("no Markdown or markup syntax"))
+    }
+}

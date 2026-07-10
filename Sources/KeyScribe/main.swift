@@ -36,6 +36,20 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                                 engine cleans fewer clips than its baseline (a command-pipeline
                                 regression) or the clip count changed (re-baseline). Ground truth, not
                                 an absolute pass-rate — the clips are transcription-sensitive.
+      --rewrite-eval <dir>    Run the LLM rewrite-prompt eval over the text cases in <dir>/cases.json
+                              against a saved BYOK connection, score each output with the corpus's
+                              deterministic checks, and print a baseline-vs-variant report split by
+                              scenario tag. Writes attempts to <dir>/results/ (gitignored). Headless:
+                              network only, no mic/insertion. Exits non-zero on transport errors.
+        --connection <id>       Saved connection to call (required when more than one is saved).
+        --variants <a,b,...>    Limit to these prompt variants (default: all, including baseline).
+        --repeat <n>            Attempts per case × variant (default 1).
+        --raw                   Emit each model output as RAW <variant> <case> <verdict> <text>.
+      --vad-probe <dir>       Run the no-speech VAD gate over the recordings in <dir> (manifest.json)
+                              and exit: per clip verdict (speech/noSpeech), max probability, and gate
+                              latency, plus the minimum take-level max probability over speech clips
+                              (the safety margin above the gate threshold). Downloads the VAD model if
+                              missing. Headless: no mic/insertion.
       --samples-parity <dir>  Verify the in-memory samples transcription path matches the WAV path for
                               every installed sample-capable engine over the *.wav files in <dir> (P2-1).
                               Exits non-zero on any mismatch. Honors --engines.
@@ -162,6 +176,44 @@ if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandL
         } else {
             await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
         }
+        done.signal()
+    }
+    done.wait()
+    exit(0)
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--rewrite-eval"), i + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    var variants = RewriteEvalVariants.all.map(\.id)
+    if let v = CommandLine.arguments.firstIndex(of: "--variants"), v + 1 < CommandLine.arguments.count {
+        variants = CommandLine.arguments[v + 1].split(separator: ",").map(String.init)
+    }
+    var connectionId: String?
+    if let c = CommandLine.arguments.firstIndex(of: "--connection"), c + 1 < CommandLine.arguments.count {
+        connectionId = CommandLine.arguments[c + 1]
+    }
+    var repeats = 1
+    if let r = CommandLine.arguments.firstIndex(of: "--repeat"), r + 1 < CommandLine.arguments.count {
+        repeats = max(1, Int(CommandLine.arguments[r + 1]) ?? 1)
+    }
+    let raw = CommandLine.arguments.contains("--raw")
+    let done = DispatchSemaphore(value: 0)
+    let ok = Atomic<Bool>(false)
+    Task.detached {
+        let passed = await RewriteEvalRunner.run(
+            dir: dir, variantIds: variants, connectionId: connectionId, repeats: repeats, raw: raw)
+        ok.store(passed, ordering: .relaxed)
+        done.signal()
+    }
+    done.wait()
+    exit(ok.load(ordering: .relaxed) ? 0 : 1)
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await VadProbeRunner.run(dir: dir)
         done.signal()
     }
     done.wait()

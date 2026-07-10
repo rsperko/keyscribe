@@ -348,12 +348,25 @@ benchmark rank — a single-voice ranking can't carry that authority and would f
 
 ### Silence / no-speech behavior — exercise every new model
 
-**Every STT model added to the catalog must be exercised against silent/near-silent audio before it
-ships**, because engines disagree wildly on what they emit for "nothing was said" and KeyScribe's
-`.noSpeech` guard (`DictationMachine.outcomeForTranscript`) keys off the **heard (raw) transcript**, not
-the final text: silence short-circuits only because its heard transcript is whitespace-empty, so any
-non-empty artifact an engine emits gets pasted, atomically-undoable, and (worse) is indistinguishable
-from a real short dictation. (The guard deliberately does **not** whitespace-test the final text — that
+**First line of defense: the audio-side no-speech gate.** A finished take runs once through Silero VAD
+(`SpeechPresenceDetector` adapter over FluidAudio's `VadManager`; verdict logic in the pure
+`SpeechPresenceGate`, KeyScribeKit) BEFORE transcription — `DictationController.gateSuppressesNoSpeech`,
+at the commit call site after `finishDraining()` and before `finalizeStreamingIfActive`. If no chunk's
+speech probability clears `0.30` (take-level max; a digital-silence peak short-circuits without even
+invoking the model), the dictation is suppressed with the same `.noSpeech` UX as an empty transcript —
+nothing is transcribed or pasted. This closes the whole engine-silence-artifact class in one move
+(Qwen3's biased-dictionary echo on silence, Whisper's `Thank you.`, Apple's `No`), which a string
+denylist provably cannot (see below). The gate **fails open**: a missing VAD model, an error, or a
+timeout proceeds to transcription unchanged, so the transcript-level checks below remain the mandatory
+second line. The ~1 MB model downloads alongside speech models into the shared `models/silero-vad/`.
+
+Because the gate is fail-open, **every STT model added to the catalog must STILL be exercised against
+silent/near-silent audio before it ships** — the artifact table below is the second line of defense, not
+optional. Engines disagree wildly on what they emit for "nothing was said" and KeyScribe's `.noSpeech`
+guard (`DictationMachine.outcomeForTranscript`) keys off the **heard (raw) transcript**, not the final
+text: silence short-circuits only because its heard transcript is whitespace-empty, so any non-empty
+artifact an engine emits gets pasted, atomically-undoable, and (worse) is indistinguishable from a real
+short dictation. (The guard deliberately does **not** whitespace-test the final text — that
 would drop a command-only utterance whose output is a bare control char like `"\n"`; it checks the final
 text only for emptiness.) Reproduce with the `--raw` benchmark over generated silence:
 
@@ -361,8 +374,10 @@ text only for emptiness.) Reproduce with the `--raw` benchmark over generated si
 # 16k mono clips: pure silence at several durations + quiet hiss + a faint blip
 for d in 1 2 3 5; do ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t $d -c:a pcm_s16le sil_${d}s.wav; done
 ffmpeg -f lavfi -i "anoisesrc=r=16000:a=0.02:d=3:seed=33" -c:a pcm_s16le hiss.wav
-# manifest.json: one { "id": "<wav-basename>", "text": "", "biasTerms": [] } per clip (text ignored in --raw)
+# manifest.json: { "schemaVersion": 1, "clips": [{ "id": "<wav-basename>", "file": "<wav>", "text": "" }, …] }
 ./KeyScribeDev.app/Contents/MacOS/KeyScribe --benchmark <dir> --engines <new-id> --raw   # RAW\t<engine>\t<clip>\t<literal output>
+# And exercise the gate itself over the same clips (verdict + max probability + latency per clip):
+./KeyScribeDev.app/Contents/MacOS/KeyScribe --vad-probe <dir>   # silences/hiss → suppressed; real speech → 100% speech
 ```
 
 Empirically observed no-speech output (2026-07-01, one machine — deterministic per fixed input, but
@@ -383,9 +398,15 @@ non-lexical annotations no user dictates — bracketed/parenthetical tags like `
 `(water running)`, `[Music]` (note WhisperKit **does** emit `[BLANK_AUDIO]` here despite upstream docs
 calling it a whisper.cpp-only construct — verified empirically, do not trust the docs). The dangerous
 outputs (`Thank you.`, `No`, `.`) are real words and must **not** be denylisted — filtering them would
-silently drop legitimate one-word dictations. The robust guard for those is an **energy/VAD pre-gate**
-(was there speech in the audio?) upstream of the transcript, not string matching. Re-run this the moment
-a model is added or an STT dep is bumped — the marker set is engine- and version-specific.
+silently drop legitimate one-word dictations. The robust guard for those is the **audio-side VAD pre-gate**
+above (was there speech in the audio?) upstream of the transcript, not string matching — now shipped
+(`SpeechPresenceGate` / `SpeechPresenceDetector`). This annotation collapse remains for the safe
+bracketed/parenthetical strings and as the gate's fail-open backstop. Re-run this the moment a model is
+added or an STT dep is bumped — the marker set is engine- and version-specific, and the gate being
+fail-open means a new engine's artifacts must still be swept. Validated separation (2026-07-09, one
+voice): over `corpus/stt` (107 clips) every clip read `speech` with a minimum take-level max probability
+of 0.397 (margin 0.097 above the 0.30 threshold); generated silence/hiss all read `noSpeech` (hiss max
+probability 0.198) — a clean gap around 0.30.
 
 **A streaming session is a DISTINCT no-speech path — sweep it separately.** An engine's `makeStreamingSession`
 feed→finalize can emit different silence artifacts than its batch `transcribe`, so a model that ships a
@@ -397,7 +418,11 @@ session live — the benchmark's streaming replay opens one for every clip, so i
 Apple: streaming output was byte-identical to batch — clean-empty except a deterministic `No` on 3 s
 silence, the same documented Apple lexical artifact — so streaming added no new marker class. Do not assume
 that generalizes; a slower/looping engine like Moonshine could differ, which is one more reason its
-streaming is disabled.)
+streaming is disabled.) The no-speech gate also covers the streamed path: it runs at commit on the
+finished take before `finalizeStreamingIfActive`, so a silent streamed session is suppressed there (its
+partials are never inserted before commit) and its driver is cancelled through the normal terminal — the
+gate is engine- and path-independent, but the per-engine streaming sweep still stands because the gate is
+fail-open.
 
 ### Recognition bias — the distractor false-fire gate (exercise every bias-capable model)
 

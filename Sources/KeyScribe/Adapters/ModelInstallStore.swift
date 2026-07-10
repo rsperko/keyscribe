@@ -68,7 +68,7 @@ enum ModelInstallStore {
         // candidate set instead of walking the multi-GB shared models tree every launch.
         let plan = ModelMaintenance.reconcile(
             knownIds: Array(owned.keys), owned: owned, completeIds: complete,
-            dirsOnDisk: directoriesOnDisk(), markedIds: marked, keep: [markerFile])
+            dirsOnDisk: directoriesOnDisk(), markedIds: marked, keep: [markerFile, VADModel.dirName])
         let adopted = plan.installed.subtracting(marked)
         let dropped = marked.subtracting(plan.installed)
         write(plan.installed)

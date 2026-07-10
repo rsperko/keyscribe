@@ -54,7 +54,9 @@ the request and are restored after when they are found.
 - **Silence-based auto-stop (VAD endpointing).** Evaluated and declined — few valuable use cases,
   only a saved keystroke over the existing tap-to-toggle, the premium category deliberately avoids
   it, and its natural use (long-form) fights our batch/paste model. Revisit only as an accessibility
-  feature.
+  feature. (Distinct from the shipped **post-capture no-speech gate**, which runs Silero VAD once on
+  the finished take to suppress a dictation that contained no speech — it never stops recording, it
+  only decides whether to transcribe what was already recorded.)
 - File/batch transcription as a primary surface (diarization capability exists via the STT
   library, but the product is live dictation first).
 

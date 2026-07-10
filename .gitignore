@@ -41,6 +41,9 @@ corpus/bias/*.wav
 corpus/bias/shard.tar
 corpus/bias/ContextASR-Speech_English.jsonl
 
+# rewrite-prompt eval (`KeyScribe --rewrite-eval`): cases.json + README ARE committed; per-run
+# attempt dumps (model outputs, connection/model identity) stay local
+evals/rewrite/results/
 
 # direnv: local env (real .envrc may hold the notary API key); commit .envrc.example instead
 .envrc

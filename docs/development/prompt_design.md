@@ -164,6 +164,16 @@ Large context causes latency, cost, and provider-side context limits. The policy
   (`RUN_SENTINEL_PROBE=1 GEMINI_API_KEY=… swift test --filter sentinelSurvival`).
 - **Few-shot:** zero-shot by default for speed/cost; per-mode examples only if a task needs it.
 
+## Changing this prompt
+
+Candidate prompt changes are **eval-gated, not adopted on judgment**: implement the change as a
+`PromptAssembler.Options` flag (off by default — `.baseline` stays byte-identical to the shipped
+prompt, test-enforced), add it as a variant in `RewriteEvalVariants`, and run
+`KeyScribe --rewrite-eval evals/rewrite` (harness, corpus, and check semantics in
+`evals/rewrite/README.md`) against a local model and the Gemini floor. A variant that wins graduates
+by making its option unconditional and deleting the flag; one that loses is deleted. Findings live in
+`agent_notes/prompt_eval/`.
+
 ## Sources
 - [Prompt design strategies — Gemini API](https://ai.google.dev/gemini-api/docs/prompting-strategies)
 - [Best practices for prompt engineering with Gemini 2.5 (Google Cloud / Medium)](https://medium.com/google-cloud/best-practices-for-prompt-engineering-with-gemini-2-5-pro-755cb473de70)

@@ -24,6 +24,7 @@ final class DictationController {
     // Serial so concurrent dictations can't interleave or reorder appends within a day file.
     private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
     private let audio: AudioCapturing
+    private let presenceDetector: SpeechPresenceDetecting
     private let insert: (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String, Bool) async -> Bool
     private let submitKey: (Mode.Submit) async -> Void
     private let captureSelection: (Mode.ClipboardModifier) async -> String?
@@ -264,6 +265,7 @@ final class DictationController {
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
         audio: AudioCapturing? = nil,
+        presenceDetector: SpeechPresenceDetecting? = nil,
         effects: DuringDictationEffects? = nil,
         insert: @escaping (InsertionDecision, Mode.Insertion, Mode.ClipboardModifier, String, Bool) async -> Bool = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
@@ -291,6 +293,7 @@ final class DictationController {
         self.history = history
         self.hud = hud
         self.audio = audio ?? AudioCapture()
+        self.presenceDetector = presenceDetector ?? SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir)
         self.effects = effects ?? DuringDictationEffects()
         self.insert = insert
         self.submitKey = submitKey
@@ -472,6 +475,12 @@ final class DictationController {
     func preloadActiveEngineIfNeeded() {
         guard InstalledEngineFilter.shouldRun(engineId: activeEngine.id) else { return }
         warmActiveEngine()
+        prewarmPresenceDetector()
+    }
+
+    private func prewarmPresenceDetector() {
+        let detector = presenceDetector
+        Task { await detector.prewarm() }
     }
 
     // Realize the audio input unit before the first press so the first capture starts instantly (the
@@ -569,6 +578,7 @@ final class DictationController {
 
         warmActiveEngine()
         prepareActiveEngineForDictation()
+        prewarmPresenceDetector()
 
         // Option A cue gating, overlapped (P1-1): the cue plays and the mic comes up UNDER it, but the writer
         // admits only frames at/after the cue-end host time so the cue never lands in the recording. `.arming`
@@ -819,6 +829,12 @@ final class DictationController {
             } else {
                 self.log.error("wav unreadable at \(url.path, privacy: .public)")
             }
+            if await self.gateSuppressesNoSpeech(samples: samples, url: url) {
+                try? FileManager.default.removeItem(at: url)
+                if Task.isCancelled { return }
+                self.finishNoSpeech()
+                return
+            }
             // If a streaming session opened, its finalize (post-release inference) produces the transcript;
             // else the driver degraded to batch. Runs after finishDraining, so every sample (incl. the tail)
             // is fed. Bounded by the transcribe deadline gate (finalizeStreamingIfActive): a wedged finalize
@@ -846,6 +862,23 @@ final class DictationController {
                 try? FileManager.default.removeItem(at: url)
             }
         }
+    }
+
+    private func gateSuppressesNoSpeech(samples: [Float]?, url: URL) async -> Bool {
+        let reading = await presenceDetector.read(
+            samples: samples, url: url, sampleRate: activeEngine.captureSampleRate)
+        Log.audio.debug("vad \(reading.presence == .noSpeech ? "noSpeech" : "speech", privacy: .public) maxP=\(reading.maxProbability, privacy: .public) model=\(reading.modelUsed, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
+        return reading.presence == .noSpeech
+    }
+
+    private func finishNoSpeech() {
+        guard machine.beginInserting() else { return }
+        hud?.relinquishKeyFocus()
+        let completion = DictationCompletion(
+            outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
+        finish(machine: .finish(.noSpeech), cue: .cancel,
+               state: .complete(outcome: .noSpeech, mode: currentModeName),
+               hideAfter: 2, record: (.noSpeech, nil), evict: true, completion: completion)
     }
 
     private enum StreamingFinalizeOutcome {
