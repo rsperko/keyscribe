@@ -161,7 +161,15 @@ This file is the entry point. Read the design docs before writing code — they 
   NOT start the IOProc, so the mic indicator never lights; it is skipped for Bluetooth so idle never forces
   HFP.) A complementary idle/wake **binding refresh** attacks the same staleness proactively:
   `refreshBinding()` rebuilds + re-prewarms the idle unit, driven by `DictationController` on a ~4 min idle
-  timer and by an `NSWorkspace.didWakeNotification` observer. To diagnose the next occurrence rather than
+  timer and by an `NSWorkspace.didWakeNotification` observer. **All of this idle mic warm-up is gated on the
+  `Eviction` performance tier (`settings.stt.eviction`) via `EvictionPolicy` — the same dial that governs STT
+  model residency**: only `.fastest` runs the ~4 min periodic refresh (`periodicallyRefreshesCapture`);
+  `.frugal` never prewarms at all (`shouldPrewarmCapture` false → mic opened only on the trigger's `start()`,
+  paying the cold realization the grace window absorbs); `.balanced` prewarms around use but drops the periodic
+  refresh and disposes the warm unit at the model's idle-eviction checkpoint (`releaseWarm()`, gated by
+  `releasesWarmCaptureOnIdle`). This exists because the periodic dispose→re-init cycle is observable to
+  mic-usage monitors as a repeated grab/release; Balanced/Frugal exist for coexistence with mic-sensitive apps.
+  To diagnose the next occurrence rather than
   infer it, `start()` logs `bringUp=<ms>ms` on the `audio` category (`Log.audio`, `.debug`): a healthy
   prewarmed start is a few ms; a value **past `bringUpTimeout` is tagged ` grace-adopted`** (subject to the
   `log show` unreliability footgun below — capture it live or via `log stream --predicate 'category ==

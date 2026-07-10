@@ -32,6 +32,8 @@ protocol AudioCapturing: AnyObject, Sendable {
     func prewarm()
     // Rebuild and prewarm the idle unit after wake or long idle.
     func refreshBinding()
+    // Free the idle prewarmed unit (its device hold) without rebuilding — the Balanced tier's idle release.
+    func releaseWarm()
     // Empty/nil follows the system default.
     func setPreferredInputUID(_ uid: String?)
 }
@@ -39,6 +41,7 @@ protocol AudioCapturing: AnyObject, Sendable {
 extension AudioCapturing {
     func prewarm() {}
     func refreshBinding() {}
+    func releaseWarm() {}
     func finishDraining() async -> URL? { stop() }
     func takeDrainedSamples() -> [Float]? { nil }
     func setPreferredInputUID(_ uid: String?) {}
@@ -986,6 +989,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard !recording else { return }
         markRebuild()
         prewarm()
+    }
+
+    // Balanced-tier idle release: free the resident prewarmed unit (its device hold) WITHOUT rebuilding, so
+    // the mic is not held while idle. Serialized on the control queue with arm/prewarm and re-guarded there
+    // against a capture starting; the next prewarm/arm reconfigures a fresh unit.
+    func releaseWarm() {
+        let (queue, generation) = currentQueueAndGeneration()
+        queue.async { [self] in
+            guard isGeneration(generation) else { return }
+            let recording = lock.withLock { session != nil } || capturing.load(ordering: .acquiring)
+            guard !recording else { return }
+            disposeUnitInline()
+        }
     }
 
     // MARK: - Mid-recording device-change recovery

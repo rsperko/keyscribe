@@ -432,6 +432,10 @@ load_on_login = false
 [stt]
 engine = "parakeet"             # the single active engine (default: Parakeet TDT v3)
 eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fastest)
+# Governs both STT-model residency AND idle microphone warm-up (the input unit is kept prewarmed for
+# instant starts). Fastest = model loaded + mic held warm (periodic binding refresh); Balanced = both
+# released after eviction_idle_seconds idle; Frugal = mic opened only while dictating, model freed each
+# dictation.
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 # The one dictionary-mechanism control: recognition bias is default-ON for the engines that support it
 # (both Qwen3, both Whisper) and can be disabled per engine. Post-STT dictionary recovery has no toggle

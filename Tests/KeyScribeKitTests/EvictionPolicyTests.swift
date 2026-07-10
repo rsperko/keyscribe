@@ -42,6 +42,25 @@ struct EvictionPolicyTests {
         #expect(EvictionPolicy.afterDictation(mode: .balanced, idleSeconds: nil)
             == .scheduleIdleCheck(afterSeconds: EvictionPolicy.defaultIdleSeconds))
     }
+
+    // Idle microphone warm-up rides the same tier as model residency.
+    @Test func onlyFrugalSkipsPrewarm() {
+        #expect(EvictionPolicy.shouldPrewarmCapture(mode: .fastest))
+        #expect(EvictionPolicy.shouldPrewarmCapture(mode: .balanced))
+        #expect(!EvictionPolicy.shouldPrewarmCapture(mode: .frugal))
+    }
+
+    @Test func onlyFastestRefreshesPeriodically() {
+        #expect(EvictionPolicy.periodicallyRefreshesCapture(mode: .fastest))
+        #expect(!EvictionPolicy.periodicallyRefreshesCapture(mode: .balanced))
+        #expect(!EvictionPolicy.periodicallyRefreshesCapture(mode: .frugal))
+    }
+
+    @Test func onlyBalancedReleasesWarmOnIdle() {
+        #expect(!EvictionPolicy.releasesWarmCaptureOnIdle(mode: .fastest))
+        #expect(EvictionPolicy.releasesWarmCaptureOnIdle(mode: .balanced))
+        #expect(!EvictionPolicy.releasesWarmCaptureOnIdle(mode: .frugal))
+    }
 }
 
 struct EvictionCopyTests {
@@ -52,13 +71,14 @@ struct EvictionCopyTests {
         #expect(s.contains("Keeps Qwen3-ASR 1.7B loaded"))
         #expect(s.contains("on disk, similar in memory"))
         #expect(s.contains("1.8 GB"))
+        #expect(s.contains("microphone"))
     }
 
     @Test func balancedUsesIdleLabel() {
         let s = EvictionCopy.footer(
             policy: .balanced, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
             systemManaged: false, idleLabel: "30 min")
-        #expect(s.contains("frees it after 30 min idle"))
+        #expect(s.contains("releases the microphone after 30 min idle"))
         #expect(s.contains("1.8 GB"))
     }
 
@@ -68,6 +88,7 @@ struct EvictionCopyTests {
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("Frees Whisper Large v3 Turbo"))
         #expect(s.contains("after each dictation"))
+        #expect(s.contains("microphone"))
     }
 
     // A model under the small threshold collapses to the "costs you little" line regardless of policy.

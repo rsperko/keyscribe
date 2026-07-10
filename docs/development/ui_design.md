@@ -369,8 +369,9 @@ Show only commonly changed behavior initially:
   Last Dictation defaults off. A chord that collides with a higher-precedence hotkey, such as a Mode
   trigger, shows an inline **shadowed** breadcrumb and will not fire — mode triggers win.
 
-Model eviction moves behind `Advanced model behavior` within General. Explain Fastest,
-Balanced, and Frugal as a memory/first-response tradeoff, not as cache terminology.
+The warm-up tier moves behind `Advanced model behavior` within General. Explain Fastest,
+Balanced, and Frugal as a memory/first-response tradeoff (it governs both the STT model's memory
+residency and idle microphone warm-up), not as cache terminology.
 
 ### Speech Models
 

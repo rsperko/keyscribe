@@ -441,9 +441,9 @@ final class SettingsModel: ObservableObject {
 
     var evictions: [(id: String, label: String)] {
         [
-            ("fastest", "Fastest — keep model in memory"),
-            ("balanced", "Balanced — free memory after \(Self.idleLabel(settings.stt.evictionIdleSeconds)) idle"),
-            ("frugal", "Frugal — free memory after each dictation"),
+            ("fastest", "Fastest — keep model and mic ready"),
+            ("balanced", "Balanced — release after \(Self.idleLabel(settings.stt.evictionIdleSeconds)) idle"),
+            ("frugal", "Frugal — load only when dictating"),
         ]
     }
 

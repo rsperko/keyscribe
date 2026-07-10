@@ -490,7 +490,8 @@ final class DictationController {
     // one-time HAL realization is otherwise paid on the hot path). Only when mic is granted — never touch
     // the input subsystem unauthorized; no stream is opened.
     func prewarmCapture() {
-        guard micStatus() == .granted else { return }
+        guard micStatus() == .granted,
+              EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) else { return }
         audio.prewarm()
         scheduleCaptureRefresh()
     }
@@ -499,7 +500,8 @@ final class DictationController {
     // device-topology change to trip the adapter's listeners. Rebuild + re-prewarm WHILE IDLE so the next
     // dictation finds a fresh binding, not a rotted unit. Never touches an in-flight dictation.
     func refreshCaptureBinding() {
-        guard micStatus() == .granted, !isBusy else { return }
+        guard micStatus() == .granted, !isBusy,
+              EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) else { return }
         audio.refreshBinding()
         scheduleCaptureRefresh()
     }
@@ -510,6 +512,7 @@ final class DictationController {
     // rather than more idle rebuilds.
     private func scheduleCaptureRefresh() {
         captureRefreshTask?.cancel()
+        guard EvictionPolicy.periodicallyRefreshesCapture(mode: settings.stt.eviction) else { return }
         captureRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(Self.captureRefreshIdleSeconds))
             guard let self, !Task.isCancelled, !self.isBusy, self.micStatus() == .granted else { return }
@@ -1402,6 +1405,7 @@ final class DictationController {
             case .evictNow:
                 self.invalidateWarm(active.id)
                 await active.evict()
+                if EvictionPolicy.releasesWarmCaptureOnIdle(mode: mode) { self.audio.releaseWarm() }
                 self.idleEvictionEngine = nil
             case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again, engine: active)
             case .keepLoaded: self.idleEvictionEngine = nil

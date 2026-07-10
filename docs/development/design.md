@@ -495,8 +495,10 @@ than risk inserting in the wrong place.
   overlapping insertions.
 
 ### 4.6 Settings
-- **General:** load on login; **STT model eviction** (Fastest = keep loaded, no eviction; Balanced =
-  evict after an idle timer; Frugal = evict after each dictation); during-dictation (mute system
+- **General:** load on login; **warm-up / eviction tier** — governs STT-model residency *and* idle
+  microphone warm-up together (Fastest = model kept loaded + mic held warm; Balanced = both released
+  after an idle timer; Frugal = model freed each dictation + mic opened only while dictating);
+  during-dictation (mute system
   audio, keep display awake, sound on start/end); local history; optional correction-panel shortcuts.
 - **Speech models:** download/select/delete.
 - **Vocabulary:** global Dictionary & Replacements.

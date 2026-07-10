@@ -82,7 +82,7 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Picker("Model memory", selection: $model.eviction) {
+                Picker("Warm-up", selection: $model.eviction) {
                     ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.General.eviction)

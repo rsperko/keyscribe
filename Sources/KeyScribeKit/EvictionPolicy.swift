@@ -30,6 +30,15 @@ public enum EvictionPolicy {
             return .scheduleIdleCheck(afterSeconds: limit - idle)
         }
     }
+
+    // Idle microphone warm-up rides the same tier as model residency: Fastest holds the input unit
+    // warm (and periodically refreshes its binding), Balanced warms around use and releases at the
+    // model's idle checkpoint, Frugal never warms and opens the mic only on trigger.
+    public static func shouldPrewarmCapture(mode: Eviction) -> Bool { mode != .frugal }
+
+    public static func periodicallyRefreshesCapture(mode: Eviction) -> Bool { mode == .fastest }
+
+    public static func releasesWarmCaptureOnIdle(mode: Eviction) -> Bool { mode == .balanced }
 }
 
 public enum EvictionCopy {
@@ -49,11 +58,11 @@ public enum EvictionCopy {
         }
         switch policy {
         case .fastest:
-            return "Keeps \(modelName) loaded (~\(size) on disk, similar in memory). Every dictation starts instantly."
+            return "Keeps \(modelName) loaded (~\(size) on disk, similar in memory) and the microphone connection ready. Every dictation starts instantly; some apps may see the mic as in use."
         case .balanced:
-            return "Keeps \(modelName) loaded (~\(size)), then frees it after \(idleLabel) idle. The next dictation reloads it with a brief delay."
+            return "Keeps \(modelName) loaded (~\(size)), then frees it and releases the microphone after \(idleLabel) idle. The next dictation reloads with a brief delay."
         case .frugal:
-            return "Frees \(modelName)’s ~\(size) after each dictation and reloads it next time — lowest memory use, with a brief delay before each."
+            return "Frees \(modelName)’s ~\(size) after each dictation and opens the microphone only while dictating — lowest memory use, with a brief delay before each."
         }
     }
 
