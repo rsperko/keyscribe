@@ -6,13 +6,13 @@ import Foundation
 // self-test, and memory-pressure paths violate (concurrent loads race the handle; an evict under a live
 // transcribe is a use-after-close for Moonshine's ONNX session). This actor decorator enforces:
 //
-//  - **Two load levels, forwarded faithfully:** a cheap runtime warm (`loadIfNeeded()`) vs the install
-//    path (`load(progress:)`, which also loads the bias/CTC model). Forwarded separately, not collapsed,
-//    so an empty-dictionary warm-on-press never pays the bias model's CoreML load; the install still
-//    eager-loads it even after a warm (base loads idempotent).
+//  - **Two load levels, forwarded faithfully:** a cheap runtime warm (`loadIfNeeded()`, no progress) vs
+//    the install path (`load(progress:)`, which reports download/compile progress). Forwarded separately,
+//    not collapsed, so a warm-on-press stays silent while the Settings install still reports progress and
+//    verifies a complete download (base loads idempotent).
 //  - **Single-flight load, per level:** concurrent warms share one `base.loadIfNeeded`, installs one
 //    `base.load`. A runtime waiter may ride an install (superset); an install waiter never rides a
-//    runtime load (would skip the bias model).
+//    runtime load (would skip the install's download/verify).
 //  - **Exclusive base access:** an async lock serializes `base.load*`/`transcribe`/`evict` so the
 //    non-Sendable handle is never touched by two ops at once.
 //  - **Evict awaits settlement:** waits for in-flight loads (both levels) and the transcribe lock, so it
@@ -48,14 +48,6 @@ public actor SerializedEngine: SpeechEngine {
         await acquire()
         defer { release() }
         await base.prepareForDictation()
-    }
-
-    // Same as prepareForDictation: without the override the protocol no-op swallows Parakeet's impl, and
-    // building the CTC vocab/rescorer touches the non-Sendable handle so it must not race a transcribe.
-    public func prewarmBias(termSets: [[String]]) async {
-        await acquire()
-        defer { release() }
-        await base.prewarmBias(termSets: termSets)
     }
 
     private func acquire() async {

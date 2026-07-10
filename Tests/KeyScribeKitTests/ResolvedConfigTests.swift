@@ -32,9 +32,9 @@ struct ResolvedConfigTests {
     @Test func nilModeFallsBackToGlobalDictionaryAndDefaultStages() {
         let rc = resolved(dictionary: ["Global"])
         #expect(rc.mergedDictionary(for: nil) == ["Global"])
-        // nil mode defaults: live edits on, replacements, no numbers → LiveEdits + Replacements.
-        let stages = rc.postSTTTextStages(for: nil, dictionaryRecovery: false)
-        #expect(stages.count == 2)
+        // nil mode defaults: live edits on, replacements, no numbers, plus FuzzyStage (dictionary non-empty).
+        let stages = rc.postSTTTextStages(for: nil)
+        #expect(stages.count == 3)
     }
 
     @Test func textStagesReflectModeCommands() {
@@ -42,24 +42,25 @@ struct ResolvedConfigTests {
         mode.commands.liveEdits = true
         mode.commands.numbers = true
         let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        // LiveEdits + Replacements + Numbers (dictionary recovery off).
-        #expect(rc.postSTTTextStages(for: mode, dictionaryRecovery: false).count == 3)
+        // LiveEdits + Replacements + Numbers + FuzzyStage (dictionary non-empty).
+        #expect(rc.postSTTTextStages(for: mode).count == 4)
     }
 
-    @Test func dictionaryRecoveryAddsFuzzyStageRegardlessOfMode() {
+    @Test func fuzzyStageAppendedOnlyWhenMergedDictionaryNonEmpty() {
         var mode = Mode(id: "m", name: "M")  // no mode-level fuzzy command exists anymore
         mode.commands.liveEdits = true
-        let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        // Off → LiveEdits + Replacements; on → + FuzzyStage. The gate is the host-supplied flag.
-        #expect(rc.postSTTTextStages(for: mode, dictionaryRecovery: false).count == 2)
-        #expect(rc.postSTTTextStages(for: mode, dictionaryRecovery: true).count == 3)
+        // Non-empty dictionary → LiveEdits + Replacements + FuzzyStage; empty → no FuzzyStage.
+        let withDict = resolved(modes: [mode], dictionary: ["ChargeBee"])
+        #expect(withDict.postSTTTextStages(for: mode).count == 3)
+        let empty = resolved(modes: [mode], dictionary: [])
+        #expect(empty.postSTTTextStages(for: mode).count == 2)
     }
 
     @Test func postSTTTextStagesAreMemoizedSameInstanceReused() {
         let mode = Mode(id: "m", name: "M")
         let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        let first = rc.postSTTTextStages(for: mode, dictionaryRecovery: true)
-        let second = rc.postSTTTextStages(for: mode, dictionaryRecovery: true)
+        let first = rc.postSTTTextStages(for: mode)
+        let second = rc.postSTTTextStages(for: mode)
         #expect(first.count == second.count)
     }
 
@@ -78,31 +79,6 @@ struct ResolvedConfigTests {
     @Test func recognitionBiasTermsFallBackToGlobalForNilMode() {
         let rc = resolved(dictionary: ["Global"])
         #expect(rc.recognitionBiasTerms(for: nil) == ["Global"])
-    }
-
-    @Test func allBiasTermSetsCoverGlobalAndEachEnabledModeDeduped() {
-        var withLocal = Mode(id: "a", name: "A")
-        withLocal.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["Metaobject"])
-        let globalOnly = Mode(id: "b", name: "B")  // includeGlobal, no local words → set == global
-        let rc = resolved(modes: [withLocal, globalOnly], dictionary: ["Metafield"])
-        // Global first, then the mode that adds a term; the global-equal mode is deduped away.
-        #expect(rc.allRecognitionBiasTermSets() == [["Metafield"], ["Metafield", "Metaobject"]])
-    }
-
-    @Test func allBiasTermSetsSkipDisabledModesAndEmptySets() {
-        var disabled = Mode(id: "a", name: "A")
-        disabled.enabled = false
-        disabled.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["Never"])
-        var localOnly = Mode(id: "b", name: "B")
-        localOnly.dictionary = Mode.ModeDictionary(includeGlobal: false, words: ["OnlyLocal"])
-        // Empty global → the global set is dropped; the disabled mode never contributes.
-        let rc = resolved(modes: [disabled, localOnly], dictionary: [])
-        #expect(rc.allRecognitionBiasTermSets() == [["OnlyLocal"]])
-    }
-
-    @Test func allBiasTermSetsEmptyWhenNoTermsAnywhere() {
-        let rc = resolved(dictionary: [])
-        #expect(rc.allRecognitionBiasTermSets().isEmpty)
     }
 
     // mergedDictionary delegates to the same lock-held path recognitionBias/textStages use, sharing one

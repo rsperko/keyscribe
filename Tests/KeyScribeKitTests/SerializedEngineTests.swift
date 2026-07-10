@@ -18,10 +18,10 @@ private actor Gate {
 }
 
 // Records what the base engine actually did, and whether an evict ever overlapped a running transcribe.
-// Models the two-level load split the real engines have (Parakeet): `loadIfNeeded()` loads only the
-// runtime/transcription model, while `load(progress:)` is the install path that ALSO loads the bias
-// (CTC) model. `loadBodies` counts the full/install bodies (the historical meaning); `runtimeBodies`
-// counts the runtime-only bodies; `ctcLoaded` proves whether the bias model was loaded.
+// Models the two-level load split the real engines have: `loadIfNeeded()` is a silent runtime warm, while
+// `load(progress:)` is the install path that also reports progress and verifies a complete download.
+// `loadBodies` counts the full/install bodies; `runtimeBodies` counts the runtime-only bodies;
+// `installBodyRan` proves whether the install body ran.
 private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     let id = "spy"
     let displayName = "Spy"
@@ -31,7 +31,7 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     private var _loadBodies = 0
     private var _runtimeBodies = 0
     private var _loaded = false
-    private var _ctcLoaded = false
+    private var _installBodyRan = false
     private var _evicted = false
     private var _transcribing = false
     private var _evictOverlappedTranscribe = false
@@ -66,7 +66,7 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     var loadBodies: Int { lock.withLock { _loadBodies } }
     var runtimeBodies: Int { lock.withLock { _runtimeBodies } }
     var loaded: Bool { lock.withLock { _loaded } }
-    var ctcLoaded: Bool { lock.withLock { _ctcLoaded } }
+    var installBodyRan: Bool { lock.withLock { _installBodyRan } }
     var evicted: Bool { lock.withLock { _evicted } }
     var evictOverlappedTranscribe: Bool { lock.withLock { _evictOverlappedTranscribe } }
     var maxConcurrentTranscribes: Int { lock.withLock { _maxConcurrentTranscribes } }
@@ -75,9 +75,6 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     var prepareCount: Int { lock.withLock { _prepareCount } }
     func prepareForDictation() async { lock.withLock { _prepareCount += 1 } }
 
-    private var _prewarmedTermSets: [[String]]?
-    var prewarmedTermSets: [[String]]? { lock.withLock { _prewarmedTermSets } }
-    func prewarmBias(termSets: [[String]]) async { lock.withLock { _prewarmedTermSets = termSets } }
     // Opt out to prove the wrapper forwards the metadata rather than returning the protocol default.
     let benefitsFromWarmupClip = false
 
@@ -100,7 +97,7 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
         if shouldFail { throw FakeLoadError() }
     }
 
-    // Runtime-only warm: loads the transcription model, never the bias (CTC) model.
+    // Runtime-only warm: runs the runtime body, never the install body.
     func loadIfNeeded() async throws {
         lock.withLock { _runtimeBodies += 1 }
         if let loadGate { await loadGate.wait() }
@@ -108,13 +105,13 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
         lock.withLock { _loaded = true }
     }
 
-    // Install path: loads the transcription model AND the bias model (idempotent — safe after a warm).
+    // Install path: runs the runtime body AND the install body (idempotent — safe after a warm).
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         lock.withLock { _loadBodies += 1 }
         if let loadGate { await loadGate.wait() }
         try failIfRequested()
         progress?(ModelLoadProgress(phase: "Ready", fraction: 1))
-        lock.withLock { _loaded = true; _ctcLoaded = true }
+        lock.withLock { _loaded = true; _installBodyRan = true }
     }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
@@ -136,7 +133,7 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
             if _transcribing { _evictOverlappedTranscribe = true }
             _evicted = true
             _loaded = false
-            _ctcLoaded = false
+            _installBodyRan = false
         }
     }
 }
@@ -187,15 +184,6 @@ struct SerializedEngineTests {
         #expect(spy.prepareCount == 1)
     }
 
-    // P3-2a: the wrapper must forward prewarmBias to the base, else the protocol-extension no-op on the
-    // wrapper silently swallows Parakeet's per-mode bias prewarm and every mode's first dictation rebuilds.
-    @Test func prewarmBiasForwardsToBase() async {
-        let spy = SpyEngine()
-        let engine = SerializedEngine(spy)
-        await engine.prewarmBias(termSets: [["Metafield"], ["Metafield", "Metaobject"]])
-        #expect(spy.prewarmedTermSets == [["Metafield"], ["Metafield", "Metaobject"]])
-    }
-
     // P1-2: benefitsFromWarmupClip must reflect the base, not the protocol default (true) — otherwise the
     // controller would run a warmup transcribe that consumes Apple's prepared analyzer.
     @Test func benefitsFromWarmupClipForwardsFromBase() {
@@ -221,7 +209,7 @@ struct SerializedEngineTests {
         #expect(spy.sampleTranscribeCalled)
         #expect(spy.lastSampleRate == 24000)
         #expect(spy.runtimeBodies == 1)   // ensureRuntimeLocked ran before the base transcribe
-        #expect(spy.loadBodies == 0)      // never the install/bias body
+        #expect(spy.loadBodies == 0)      // never the install body
     }
 
     // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.
@@ -449,38 +437,38 @@ struct SerializedEngineTests {
         #expect(engine.supportsRecognitionBias == false)
     }
 
-    // P1-7: a runtime warm must NOT eager-load the bias (CTC) model — the whole point of Parakeet's
-    // loadIfNeeded/load split. Before the fix, loadIfNeeded funneled into base.load and always loaded CTC.
-    @Test func runtimeWarmLoadsOnlyTheTranscriptionModelNotBias() async throws {
+    // P1-7: a runtime warm must NOT run the install body — the whole point of the loadIfNeeded/load
+    // split. Before the fix, loadIfNeeded funneled into base.load and always ran the install body.
+    @Test func runtimeWarmRunsOnlyTheRuntimeBodyNotInstall() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
         try await engine.loadIfNeeded()
         #expect(spy.runtimeBodies == 1)
         #expect(spy.loadBodies == 0)   // the install/full body never ran
         #expect(spy.loaded)
-        #expect(!spy.ctcLoaded)        // bias model stays unloaded for empty-dictionary users
+        #expect(!spy.installBodyRan)        // install body stays un-run for a runtime warm
     }
 
-    // The install path eager-loads the bias model so the first biased dictation never stalls.
-    @Test func installLoadLoadsTheBiasModel() async throws {
+    // The install path runs the install body (download/verify/compile) so the first dictation never stalls.
+    @Test func installLoadRunsTheInstallBody() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
         try await engine.load(progress: nil)
         #expect(spy.loadBodies == 1)
-        #expect(spy.ctcLoaded)
+        #expect(spy.installBodyRan)
     }
 
     // The load-flavor distinction must survive across levels: a warm that already loaded the runtime
-    // model must NOT let a later install short-circuit the bias load. Before the fix a single `loaded`
-    // bool would skip base.load here, leaving CTC uncompiled until it stalled a live dictation.
-    @Test func installAfterAWarmStillLoadsTheBiasModel() async throws {
+    // model must NOT let a later install short-circuit the install body. Before the fix a single `loaded`
+    // bool would skip base.load here, leaving the install work undone until it stalled a live dictation.
+    @Test func installAfterAWarmStillRunsTheInstallBody() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
         try await engine.loadIfNeeded()
-        #expect(!spy.ctcLoaded)
+        #expect(!spy.installBodyRan)
         try await engine.load(progress: nil)
         #expect(spy.loadBodies == 1)   // the install body ran despite the runtime already being loaded
-        #expect(spy.ctcLoaded)
+        #expect(spy.installBodyRan)
     }
 
     // A full/install load satisfies a later runtime warm — the warm is a no-op, never a second load.
@@ -493,15 +481,15 @@ struct SerializedEngineTests {
         #expect(spy.loadBodies == 1)
     }
 
-    // Transcribe only needs the runtime model resident; the bias model loads lazily inside the base
-    // engine's transcribe when (and only when) bias terms are present.
+    // Transcribe only needs the runtime model resident, so it ensures the runtime body and never the
+    // install body.
     @Test func transcribeEnsuresOnlyTheRuntimeModel() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
         _ = try await engine.transcribe(wavURL: URL(fileURLWithPath: "/x"), biasTerms: [])
         #expect(spy.runtimeBodies == 1)
         #expect(spy.loadBodies == 0)
-        #expect(!spy.ctcLoaded)
+        #expect(!spy.installBodyRan)
     }
 
     // Concurrent warms coalesce to a single runtime load (single-flight, at the runtime level).
@@ -517,6 +505,6 @@ struct SerializedEngineTests {
         _ = try await (a, b)
         #expect(spy.runtimeBodies == 1)
         #expect(spy.loaded)
-        #expect(!spy.ctcLoaded)
+        #expect(!spy.installBodyRan)
     }
 }

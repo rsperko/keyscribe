@@ -88,8 +88,12 @@ public enum FuzzyCorrector {
                 guard norm.count >= 4 else { continue }
                 // Multi-token windows only snap on an exact normalized match (split/spacing fix); fuzzy
                 // distance is single-token only, so a short glue word ("to kubernetes") is never merged away.
-                guard let term = bestMatch(norm, in: prepared, allowFuzzy: span == 1),
-                      term.norm != norm || term.canonical != core else {
+                guard let term = bestMatch(norm, in: prepared, allowFuzzy: span == 1) else { continue }
+                // Skip only a genuine no-op: the reconstructed snap is byte-identical to the window. Keying on
+                // "join equals canonical" instead would wrongly skip a correctly-cased split ("Fluid Audio" →
+                // FluidAudio), whose join matches the canonical yet still needs the inter-token space removed.
+                if leadingPunct(window.first!) + term.canonical + trailingPunct(window.last!)
+                    == window.joined(separator: " ") {
                     continue
                 }
                 match(window, term)

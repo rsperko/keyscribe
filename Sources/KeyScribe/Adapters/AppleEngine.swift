@@ -7,7 +7,7 @@ import KeyScribeKit
 actor AppleEngine: SpeechEngine {
     nonisolated let id = "apple"
     nonisolated let displayName = "Apple Speech"
-    nonisolated let supportsRecognitionBias = true
+    nonisolated let supportsRecognitionBias = false
 
     nonisolated let benefitsFromWarmupClip = false
 
@@ -45,8 +45,7 @@ actor AppleEngine: SpeechEngine {
     }
 
     // SpeechAnalyzer's native design is a live input sequence (start(inputSequence:) of AnalyzerInput),
-    // volatile results discarded, finalized results collected — so it streams with the lowest bias risk of
-    // any engine (contextualStrings applies to the session, we consume only finalized text). This is also
+    // volatile results discarded, finalized results collected — we consume only finalized text. This is also
     // the engine where streaming helps most: per-call session setup dominates release→text today (P3-1).
     nonisolated var supportsStreaming: Bool { true }
 
@@ -56,15 +55,10 @@ actor AppleEngine: SpeechEngine {
     // batch. Generous headroom (many seconds at ~5 ms writer chunks), far past streaming's latency win.
     static let maxPendingAnalyzerInputs = 512
 
+    // biasTerms are ignored — Apple recognition bias (contextualStrings) was removed.
     func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
         try await loadIfNeeded()
         let (analyzer, transcriber) = takePreparedOrBuild()
-        Log.bias.info("apple streaming terms=\(biasTerms.joined(separator: "|"), privacy: .private) applied=\(!biasTerms.isEmpty, privacy: .public)")
-        if !biasTerms.isEmpty {
-            let context = AnalysisContext()
-            context.contextualStrings = [.general: biasTerms]
-            try await analyzer.setContext(context)
-        }
         guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
               let captureFormat = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)
@@ -85,22 +79,12 @@ actor AppleEngine: SpeechEngine {
             captureFormat: captureFormat, analyzerFormat: analyzerFormat)
     }
 
+    // biasTerms are ignored — Apple recognition bias (contextualStrings) was removed.
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
 
         let (analyzer, transcriber) = takePreparedOrBuild()
         let audioFile = try AVAudioFile(forReading: wavURL)
-
-        // Recognition bias (design.md §4.2): dictionary terms become contextual strings the analyzer
-        // weights toward during recognition. Skipped when there are no terms. Must use
-        // `DictationTranscriber` — `SpeechTranscriber` silently ignores `contextualStrings` (confirmed
-        // by Apple dev forums), which is why bias appeared applied but had no effect.
-        Log.bias.info("apple terms=\(biasTerms.joined(separator: "|"), privacy: .private) applied=\(!biasTerms.isEmpty, privacy: .public)")
-        if !biasTerms.isEmpty {
-            let context = AnalysisContext()
-            context.contextualStrings = [.general: biasTerms]
-            try await analyzer.setContext(context)
-        }
 
         try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 

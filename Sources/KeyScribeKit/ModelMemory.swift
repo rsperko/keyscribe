@@ -15,12 +15,6 @@ public enum ModelMemory {
     // user's real work, so under-warning is worse than a gentle heads-up.
     public static let heavyFraction = 0.40
 
-    // Resident memory while dictating: the base model, plus the recognition-bias companion only when it is
-    // on (it loads lazily on the first biased dictation and releases with the model).
-    public static func peakBytes(baseBytes: Int64, biasBytes: Int64, biasOn: Bool) -> Int64 {
-        baseBytes + (biasOn ? biasBytes : 0)
-    }
-
     public static func verdict(
         peakBytes: Int64, physicalBytes: UInt64, heavyFraction: Double = ModelMemory.heavyFraction
     ) -> ModelFitVerdict {

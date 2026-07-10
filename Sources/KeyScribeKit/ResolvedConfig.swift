@@ -55,33 +55,18 @@ public final class ResolvedConfig: @unchecked Sendable {
         return terms
     }
 
-    // Every distinct non-empty bias term set across global + each enabled mode, global first, deduped by
-    // value. Lets an engine with a per-term-set bias cost (Parakeet's CTC vocab/rescorer) pre-build a slot
-    // per set on warm-on-press so a mode's first biased dictation hits the cache, not mid-transcription.
-    public func allRecognitionBiasTermSets() -> [[String]] {
-        var seen = Set<[String]>()
-        var result: [[String]] = []
-        func add(_ terms: [String]) {
-            guard !terms.isEmpty, seen.insert(terms).inserted else { return }
-            result.append(terms)
-        }
-        add(recognitionBiasTerms(for: nil))
-        for mode in modes where mode.enabled { add(recognitionBiasTerms(for: mode)) }
-        return result
-    }
-
-    // Post-STT text stages for a mode, memoized per (mode, dictionaryRecovery). Verbatim/redaction
-    // tokenizers are per-dictation and added separately by the host; these stages are pure config.
-    public func postSTTTextStages(for mode: Mode?, dictionaryRecovery: Bool) -> [any PipelineStage] {
-        let key = "\(mode?.id ?? Self.nilModeKey)|\(dictionaryRecovery)"
+    // Post-STT text stages for a mode, memoized per mode. Verbatim/redaction tokenizers are
+    // per-dictation and added separately by the host; these stages are pure config.
+    public func postSTTTextStages(for mode: Mode?) -> [any PipelineStage] {
+        let key = mode?.id ?? Self.nilModeKey
         lock.lock(); defer { lock.unlock() }
         if let cached = textStageCache[key] { return cached }
-        let stages = buildTextStages(for: mode, dictionaryRecovery: dictionaryRecovery)
+        let stages = buildTextStages(for: mode)
         textStageCache[key] = stages
         return stages
     }
 
-    private func buildTextStages(for mode: Mode?, dictionaryRecovery: Bool) -> [any PipelineStage] {
+    private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
         let rules = VocabularyMerge.rules(
@@ -90,9 +75,8 @@ public final class ResolvedConfig: @unchecked Sendable {
             includeGlobal: mode?.replacements.includeGlobal ?? true)
         stages.append(ReplacementsStage(rules: rules))
         if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
-        if dictionaryRecovery {
-            stages.append(FuzzyStage(terms: mergedDictionaryUnlocked(for: mode)))
-        }
+        let terms = mergedDictionaryUnlocked(for: mode)
+        if !terms.isEmpty { stages.append(FuzzyStage(terms: terms)) }
         return stages
     }
 

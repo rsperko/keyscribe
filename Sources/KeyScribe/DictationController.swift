@@ -83,7 +83,6 @@ final class DictationController {
         // Name of the input device this dictation bound, snapshotted when the mic goes live so history
         // records the mic actually used even after the session moves on. nil until capture is live.
         var capturedInputDevice: String?
-        var capturedDictionaryRecovery: Bool?
         var capturedRecognitionBias: Bool?
         var activeMode: Mode?
         var eligibleModes: [Mode] = []
@@ -433,12 +432,10 @@ final class DictationController {
     private func warm(_ engine: any SpeechEngine) -> Task<Void, Error> {
         if warmEngineId == engine.id, let task = warmTask { return task }
         let clip = Self.warmupClipURL
-        // Warm with the user's actual global dictionary, not []. For bias-capable engines this compiles the
-        // bias path — notably Parakeet, whose CTC-WS model is NOT loaded by loadIfNeeded() and would
-        // otherwise compile on the first biased transcribe. Empty dictionary ⇒ [] ⇒ Parakeet keeps skipping
-        // the CTC load, preserving that optimization for non-bias users.
+        // Warm with the user's actual global dictionary, not []. For the bias-capable engines (Whisper,
+        // Qwen3) this compiles the biased decode path on the warmup clip so the first real dictation
+        // doesn't pay it. Empty dictionary ⇒ [] ⇒ the warmup runs unbiased.
         let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
-        let biasTermSets = Self.warmupBiasTermSets(settings: settings, engine: engine, plan: plan)
         let task = Task {
             try await engine.loadIfNeeded()
             // Warm the inference graph on a throwaway clip so the first real dictation doesn't pay the
@@ -447,10 +444,6 @@ final class DictationController {
             // (e.g. clip absent under `swift run`) must never fail the load. The commit-time await of this
             // task serializes warmup before the real transcribe, so non-actor engines are never reentered.
             if let clip, engine.benefitsFromWarmupClip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
-            // Pre-build the CTC vocab/rescorer for EVERY enabled mode's bias set (P3-2a), not just the global
-            // set the warmup transcribe covered, so the first biased dictation in a mode with local terms hits
-            // the cache instead of building mid-transcription. No-op off Parakeet / when bias is off.
-            if !biasTermSets.isEmpty { await engine.prewarmBias(termSets: biasTermSets) }
         }
         warmEngineId = engine.id
         warmTask = task
@@ -465,12 +458,6 @@ final class DictationController {
         guard settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias) else { return [] }
         return plan.recognitionBiasTerms(for: nil)
-    }
-
-    static func warmupBiasTermSets(settings: Settings, engine: any SpeechEngine, plan: ResolvedConfig) -> [[String]] {
-        guard settings.stt.recognitionBiasEnabled(
-            engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias) else { return [] }
-        return plan.allRecognitionBiasTermSets()
     }
 
     private func invalidateWarm(_ engineId: String) {
@@ -557,8 +544,6 @@ final class DictationController {
         session?.capturedPlan = config.resolved
         session?.capturedEngine = engine
         protectedEngineIds.insert(engine.id)
-        session?.capturedDictionaryRecovery = settings.stt.dictionaryRecoveryEnabled(
-            engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
         session?.capturedRecognitionBias = settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
@@ -1602,12 +1587,7 @@ final class DictationController {
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
     private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
-        // Dictionary recovery is captured at record start so a settings change mid-dictation cannot
-        // change which post-STT stages run.
-        let dictionaryRecovery = session?.capturedDictionaryRecovery
-            ?? settings.stt.dictionaryRecoveryEnabled(
-                engineId: activeEngine.id, supportsRecognitionBias: activeEngine.supportsRecognitionBias)
-        var stages = plan.postSTTTextStages(for: mode, dictionaryRecovery: dictionaryRecovery)
+        var stages = plan.postSTTTextStages(for: mode)
         if mode?.commands.liveEdits ?? true {
             stages.append(TokenizingStage.verbatim())
             // Read the clipboard ONLY when the command actually survives to the clipboard stage — an

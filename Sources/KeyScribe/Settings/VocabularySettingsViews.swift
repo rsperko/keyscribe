@@ -155,12 +155,12 @@ struct VocabularySettingsView: View {
                     onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) })
             }
             Section("Words to Recognize") {
-                Text("Names, product terms, and jargon \(Branding.appName) should recognize as written. Keep this list short; too many terms can reduce recognition accuracy.")
+                Text("Names, product terms, and jargon. When you say one, \(Branding.appName) prefers your spelling — as it transcribes and when it cleans up afterward. Entries are shared with your AI service, marked as intended spellings rather than typos, whenever a rewrite runs — including in privacy modes.")
                     .font(.caption).foregroundStyle(.secondary)
                 DictionaryRows(words: dictionary.words, onRemove: dictionary.remove)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
-                    Label("You have \(dictionary.words.count) entries. Large dictionaries can make recognition less accurate, not more. Remove words \(Branding.appName) now gets right, or move always-misheard phrases to Replacements.", systemImage: "info.circle")
+                    Label("You have \(dictionary.words.count) entries. That is fine — but a phrase \(Branding.appName) always mishears the same way works better as a Replacement, which changes it exactly.", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let error = dictionary.error {

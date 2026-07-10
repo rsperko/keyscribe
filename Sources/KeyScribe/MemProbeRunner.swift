@@ -12,11 +12,12 @@ import KeyScribeKit
 //
 // Per engine it walks four phases and reports the deltas — deltas isolate each cost far better than the
 // contaminated absolute footprint of a shared process:
-//   baseline → load (warm; Parakeet loads TDT only) → unbiased transcribe → biased transcribe.
-// The biased→unbiased delta is exactly the recognition-bias companion cost (Parakeet's CTC model, which
-// loads lazily on the first biased dictation and then stays resident); it is ~0 noise for engines with no
-// companion. For pristine absolute numbers run one engine per invocation (`--engines <id>`): a shared
-// process retains MLX/CoreML pages across engines, so a later engine's baseline is inflated by an earlier one.
+//   baseline → load (warm) → unbiased transcribe → biased transcribe.
+// The biased→unbiased delta is the recognition-bias cost. No shipping engine loads a separate bias model
+// anymore (Qwen3's native context and Whisper's prompt tokens both reuse the loaded model), so the delta is
+// ~0 for every installed engine. For pristine absolute numbers run one engine per invocation (`--engines
+// <id>`): a shared process retains MLX/CoreML pages across engines, so a later engine's baseline is inflated
+// by an earlier one.
 enum MemProbeRunner {
     private struct Sample {
         var phys: Int64 = 0   // phys_footprint (Activity Monitor "Memory"): dirty + compressed, NOT clean mmap'd
@@ -40,8 +41,8 @@ enum MemProbeRunner {
         var status = "ok"
     }
 
-    // Arbitrary terms just have to be non-empty to route through the biased path and force the companion to
-    // load; whether they actually match the audio is irrelevant to the footprint.
+    // Arbitrary terms just have to be non-empty to route through the biased path (native context / prompt
+    // tokens on the engines that bias); whether they actually match the audio is irrelevant to the footprint.
     private static let probeBiasTerms = ["Kubernetes", "Postgres", "ChargeBee"]
 
     static func run(only: Set<String>? = nil, clip: URL? = nil, seconds: Double = 5) async {
@@ -191,15 +192,15 @@ enum MemProbeRunner {
         printMetric("resident_size (RSS) — all resident pages incl. paged-in mmap'd model weights",
                     results, order, \.rss, peak: \.peakRSS)
         printHostDelta(results, order)
-        print("\nbase(load) = warm model in memory · +bias = recognition-bias companion (loads on first")
-        print("biased dictation) · peak = max seen · deltas isolate each cost. Run one engine per")
+        print("\nbase(load) = warm model in memory · +bias = recognition-bias cost (no separate model, ~0)")
+        print("· peak = max seen · deltas isolate each cost. Run one engine per")
         print("invocation for clean absolute numbers.")
     }
 
     // System-wide RAM movement (noisy, but a model load dominates). wired = pinned/unswappable RAM the
     // ANE/GPU needs the weights to occupy — the true accelerator memory cost, invisible to this process's
-    // footprint. anon = committed CPU/host memory. Split by phase: load = TDT/main model, +bias = CTC
-    // companion. This is where the on-disk↔RAM gap resolves.
+    // footprint. anon = committed CPU/host memory. Split by phase: load = main model, +bias = the
+    // recognition-bias path (no separate model, ~0). This is where the on-disk↔RAM gap resolves.
     private static func printHostDelta(_ results: [String: Phases], _ order: [String]) {
         print("\n── system-wide RAM Δ — wired = pinned accelerator RAM · anon = committed host RAM")
         print("engine                  wired(load)  wired(+bias) anon(load)   anon(+bias)")

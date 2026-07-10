@@ -12,9 +12,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-# Neutral, public tech terms only (repo hygiene: no employer/vendor-internal terms). 8 terms keeps
-# the vocabulary at the loosest <=10-term CTC-WS gate (minSimilarity 0.50).
-DICT = ["GitHub", "Cloudflare", "Kubernetes", "TypeScript", "Grafana", "Redis", "TextField", "CodeBase"]
+# Neutral, public tech terms only (repo hygiene: no employer/vendor-internal terms). Java/Rust are the
+# short single-token terms whose common-word neighbors ("lava", "dust") sit in the classic edit-distance
+# false-positive band the fuzzy phonetic gate must reject.
+DICT = ["GitHub", "Cloudflare", "Kubernetes", "TypeScript", "Grafana", "Redis", "TextField", "CodeBase",
+        "Java", "Rust"]
 
 SAY_VOICES = {"samantha": "Samantha", "daniel": "Daniel", "karen": "Karen"}
 
@@ -44,6 +46,21 @@ DISTRACTORS = [
     ("d_base1",    "CodeBase",   "review the whole code base before merging"),
     ("d_base2",    "CodeBase",   "we moved the code base to a new server"),
     ("d_base3",    "CodeBase",   "keep the code base clean and simple"),
+    # Single-token near-misses (edit distance 1, phonetically distinct): the fuzzy phonetic gate must
+    # leave these common words alone. "rusty" is deliberately omitted -- it contains "rust", so the
+    # substring-containment false-fire metric cannot score it (see README).
+    ("d_lava1",    "Java",       "the lava flow blocked the road"),
+    ("d_lava2",    "Java",       "molten lava poured down the hillside"),
+    ("d_lava3",    "Java",       "we watched the lava glow at night"),
+    ("d_dust1",    "Rust",       "the dust settled on the old shelf"),
+    ("d_dust2",    "Rust",       "a thick layer of dust covered the table"),
+    ("d_dust3",    "Rust",       "please wipe the dust off the screen"),
+    # Long-word (norm >= 7) distance-3 probes for Grafana: blocked today; the future threshold
+    # loosening (distance 3 + phonetic-key slack) must keep them blocked.
+    ("d_graft1",   "Grafana",    "the grafting process takes several weeks"),
+    ("d_graft2",   "Grafana",    "grafting fruit trees is an old craft"),
+    ("d_graffiti1","Grafana",    "the graffiti covered the whole wall"),
+    ("d_graffiti2","Grafana",    "someone sprayed graffiti on the bridge"),
 ]
 
 # (id, term, text) where the dictionary term IS spoken -> a fire here is correct, not a false fire.
@@ -56,6 +73,8 @@ CONTROLS = [
     ("c_redis",      "Redis",      "we cache the session data in Redis"),
     ("c_textfield",  "TextField",  "bind the input value to the TextField"),
     ("c_codebase",   "CodeBase",   "the CodeBase is clean and well organized"),
+    ("c_java",       "Java",       "we wrote the backend service in Java"),
+    ("c_rust",       "Rust",       "the systems layer is written in Rust"),
 ]
 
 

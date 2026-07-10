@@ -48,9 +48,8 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
         --seconds <n>           Record for n seconds (default 5).
         --tone <hz>             Expected input tone in Hz (default 440).
       --mem-probe             Measure each installed engine's in-memory footprint (phys_footprint) on the
-                              real load/transcribe paths and report the recognition-bias companion's memory
-                              cost as a delta. No mic/network. Run one engine at a time for clean absolute
-                              numbers. Honors --engines.
+                              real load/transcribe paths, reporting per-phase deltas. No mic/network. Run
+                              one engine at a time for clean absolute numbers. Honors --engines.
         --clip <wav>            Transcribe this recording instead of a synthesized tone (more representative
                                 working set).
         --seconds <n>           Length of the synthesized probe tone (default 5).

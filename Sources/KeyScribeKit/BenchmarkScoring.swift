@@ -56,4 +56,30 @@ public enum BenchmarkScoring {
                 && reference.range(of: $0, options: .caseInsensitive) == nil
         }.count
     }
+
+    // Classifies each false fire (see termFalseFires) into two kinds. A fire is ORTHOGRAPHIC when the fired
+    // term, whitespace-collapsed and lowercased, is contained in the whitespace-collapsed lowercased
+    // reference — the speaker said those words and the dictionary only snapped their spacing/casing
+    // ("text field" spoken, "TextField" emitted). It is a SUBSTITUTION when the term's collapsed form is
+    // absent from the reference — different words the dictionary put in the speaker's mouth ("review" →
+    // "Redis"). Substitution is the disqualifying class; orthographic snaps are the dictionary working as
+    // intended. ortho + subst == termFalseFires.
+    public static func termFalseFireBreakdown(
+        terms: [String], reference: String, hypothesis: String
+    ) -> (orthographic: Int, substitution: Int) {
+        let wanted = terms.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let collapsedRef = collapsed(reference)
+        var ortho = 0, subst = 0
+        for t in wanted {
+            let fires = hypothesis.range(of: t, options: .caseInsensitive) != nil
+                && reference.range(of: t, options: .caseInsensitive) == nil
+            guard fires else { continue }
+            if collapsedRef.contains(collapsed(t)) { ortho += 1 } else { subst += 1 }
+        }
+        return (ortho, subst)
+    }
+
+    private static func collapsed(_ s: String) -> String {
+        String(s.lowercased().unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) })
+    }
 }

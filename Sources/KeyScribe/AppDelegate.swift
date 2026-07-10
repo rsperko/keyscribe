@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loadSettings()
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
+        ModelInstallStore.deleteRetiredCtcCompanions()
         provider = resolveProvider(engines: engines)
         ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))

@@ -65,9 +65,9 @@ struct ModelMaintenanceTests {
         #expect(plan.installed == ["parakeet", "future-engine"])
     }
 
-    @Test func keepsPartialBiasDirOfInstalledEngine() {
-        // The CTC bias dir is owned by an installed engine, so it survives reconciliation even if
-        // partial — FluidAudio re-downloads it on the next biased dictation.
+    @Test func keepsPartialSecondaryDirOfInstalledEngine() {
+        // A secondary dir owned by an installed (complete) engine survives reconciliation even if partial;
+        // reconcile only removes an owned dir of a known-but-incomplete engine.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["parakeet"],
             dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml"])

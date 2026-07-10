@@ -69,4 +69,43 @@ struct BenchmarkScoringTests {
             terms: ["GitHub", "  "], reference: "get up now", hypothesis: "github now")
         #expect(n == 1)
     }
+
+    @Test func breakdownCountsOrthographicSnapWhenWordsMatchReference() {
+        // "text field" spoken, "TextField" emitted — the collapsed reference contains "textfield", so the
+        // fire is the dictionary snapping spacing, not putting in a different word.
+        let b = BenchmarkScoring.termFalseFireBreakdown(
+            terms: ["TextField"],
+            reference: "click the text field above the button",
+            hypothesis: "click the TextField above the button")
+        #expect(b == (orthographic: 1, substitution: 0))
+    }
+
+    @Test func breakdownCountsSubstitutionWhenWordsDiffer() {
+        // "review" spoken, "Redis" emitted — "redis" is not in the collapsed reference, a different word.
+        let b = BenchmarkScoring.termFalseFireBreakdown(
+            terms: ["Redis"],
+            reference: "review the whole code base before merging",
+            hypothesis: "Redis the whole code base before merging")
+        #expect(b == (orthographic: 0, substitution: 1))
+    }
+
+    @Test func breakdownSplitsAMixedUtteranceAndSumsToTotalFalseFires() {
+        // One sentence, two fires: "code base"→"CodeBase" (orthographic) and "review"→"Redis" (substitution).
+        let terms = ["CodeBase", "Redis"]
+        let reference = "review the whole code base before merging"
+        let hypothesis = "Redis the whole CodeBase before merging"
+        let b = BenchmarkScoring.termFalseFireBreakdown(
+            terms: terms, reference: reference, hypothesis: hypothesis)
+        #expect(b == (orthographic: 1, substitution: 1))
+        #expect(b.orthographic + b.substitution
+            == BenchmarkScoring.termFalseFires(terms: terms, reference: reference, hypothesis: hypothesis))
+    }
+
+    @Test func breakdownIgnoresTermsThatDidNotFire() {
+        // A term legitimately spoken (present in the reference) is not a fire and is classified as neither.
+        let b = BenchmarkScoring.termFalseFireBreakdown(
+            terms: ["Kubernetes"],
+            reference: "we deploy on Kubernetes", hypothesis: "we deploy on Kubernetes")
+        #expect(b == (orthographic: 0, substitution: 0))
+    }
 }

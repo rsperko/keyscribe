@@ -75,64 +75,46 @@ struct SettingsTests {
         #expect(try SettingsStore.decode(from: SettingsStore.encode(s)).stt.evictionIdleSeconds == 45)
     }
 
-    @Test func dictionaryMatchingDefaultsFollowModelCapabilities() throws {
+    @Test func recognitionBiasDefaultsOnForCapableModelsOffForOthers() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1")
-        let biased = try #require(SpeechModelCatalog.entry(for: "parakeet"))
-        let biasless = try #require(SpeechModelCatalog.entry(for: "moonshine-base-en"))
-
-        #expect(s.stt.recognitionBiasEnabled(for: biased))
-        #expect(!s.stt.dictionaryRecoveryEnabled(for: biased))
-        #expect(!s.stt.recognitionBiasEnabled(for: biasless))
-        #expect(s.stt.dictionaryRecoveryEnabled(for: biasless))
-        #expect(s.stt.dictionaryMatchingUsesRecommendedSettings(for: biased))
-        #expect(s.stt.dictionaryMatchingUsesRecommendedSettings(for: biasless))
+        let capable = try #require(SpeechModelCatalog.entry(for: "qwen3-asr-1.7b"))
+        let incapable = try #require(SpeechModelCatalog.entry(for: "parakeet"))
+        #expect(s.stt.recognitionBiasEnabled(for: capable))
+        #expect(!s.stt.recognitionBiasEnabled(for: incapable))
     }
 
-    @Test func dictionaryMatchingOverridesRoundTrip() throws {
+    @Test func recognitionBiasDisableRoundTrips() throws {
         var s = Settings.defaults
-        let biased = try #require(SpeechModelCatalog.entry(for: "parakeet"))
-        let biasless = try #require(SpeechModelCatalog.entry(for: "moonshine-base-en"))
-        s.stt.setRecognitionBias(false, for: biased)
-        s.stt.setDictionaryRecovery(true, for: biased)
-        s.stt.setDictionaryRecovery(false, for: biasless)
+        let capable = try #require(SpeechModelCatalog.entry(for: "qwen3-asr-1.7b"))
+        s.stt.setRecognitionBias(false, for: capable)
+        #expect(!s.stt.recognitionBiasEnabled(for: capable))
 
         let decoded = try SettingsStore.decode(from: SettingsStore.encode(s))
-        #expect(!decoded.stt.recognitionBiasEnabled(for: biased))
-        #expect(decoded.stt.dictionaryRecoveryEnabled(for: biased))
-        #expect(!decoded.stt.dictionaryRecoveryEnabled(for: biasless))
-        #expect(!decoded.stt.dictionaryMatchingUsesRecommendedSettings(for: biased))
-        #expect(!decoded.stt.dictionaryMatchingUsesRecommendedSettings(for: biasless))
+        #expect(!decoded.stt.recognitionBiasEnabled(for: capable))
     }
 
-    @Test func resetDictionaryMatchingRestoresRecommendedDefaults() throws {
-        var s = Settings.defaults
-        let biased = try #require(SpeechModelCatalog.entry(for: "parakeet"))
-        let biasless = try #require(SpeechModelCatalog.entry(for: "moonshine-base-en"))
-        s.stt.setRecognitionBias(false, for: biased)
-        s.stt.setDictionaryRecovery(true, for: biased)
-        s.stt.setDictionaryRecovery(false, for: biasless)
-        #expect(!s.stt.dictionaryMatchingUsesRecommendedSettings(for: biased))
-        #expect(!s.stt.dictionaryMatchingUsesRecommendedSettings(for: biasless))
-
-        s.stt.resetDictionaryMatching(for: biased)
-        s.stt.resetDictionaryMatching(for: biasless)
-        #expect(s.stt.dictionaryMatchingUsesRecommendedSettings(for: biased))
-        #expect(s.stt.dictionaryMatchingUsesRecommendedSettings(for: biasless))
-        #expect(s.stt.recognitionBiasEnabled(for: biased))
-        #expect(!s.stt.dictionaryRecoveryEnabled(for: biased))
-        #expect(s.stt.dictionaryRecoveryEnabled(for: biasless))
-    }
-
-    @Test func legacyDictionaryRecoveryEnginesDecodeAsOverrides() throws {
-        let s = try SettingsStore.decode(from: """
+    // Rev2: the per-engine dictionary-recovery keys were removed (recovery now runs unconditionally in the
+    // pipeline). A settings file written by an older build still carries them; it must decode cleanly, drop
+    // them on re-encode, and leave the recognition-bias disable list untouched.
+    @Test func legacyRecoveryKeysAreIgnoredAndDroppedWhileBiasSurvives() throws {
+        let toml = """
         schema_version = 1
         [stt]
+        recognition_bias_disabled_engines = ["qwen3-asr-1.7b"]
+        dictionary_recovery_enabled_engines = ["parakeet"]
+        dictionary_recovery_disabled_engines = ["whisper"]
         dictionary_recovery_engines = ["parakeet"]
-        """)
-        let biased = try #require(SpeechModelCatalog.entry(for: "parakeet"))
-        let biasless = try #require(SpeechModelCatalog.entry(for: "moonshine-base-en"))
-        #expect(s.stt.dictionaryRecoveryEnabled(for: biased))
-        #expect(!s.stt.dictionaryRecoveryEnabled(for: biasless))
+        """
+        let s = try SettingsStore.decode(from: toml)
+        let capable = try #require(SpeechModelCatalog.entry(for: "qwen3-asr-1.7b"))
+        #expect(!s.stt.recognitionBiasEnabled(for: capable))
+
+        let reencoded = try SettingsStore.encode(s)
+        #expect(!reencoded.contains("dictionary_recovery"))
+        #expect(reencoded.contains("recognition_bias_disabled_engines"))
+
+        let round = try SettingsStore.decode(from: reencoded)
+        #expect(!round.stt.recognitionBiasEnabled(for: capable))
     }
 
     @Test func shortcutsRoundTrip() throws {

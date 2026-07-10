@@ -100,9 +100,9 @@ Where to add them:
 3. Settings > General to assign an `Add to Vocabulary` shortcut.
 4. History > select the misheard words > Create Replacement or Add to Dictionary.
 
-Dictionary strength varies by speech model. Most engines support recognition bias directly.
-Moonshine does not, so KeyScribe can apply dictionary recovery after transcription to fix close
-matches.
+The dictionary works on every speech model: KeyScribe fixes near-misses right after transcription on
+all of them, and the Whisper and Qwen3 models additionally steer recognition toward your terms as
+they listen. Either way, when you say a term you added, KeyScribe prefers your spelling.
 
 Checkpoint: after adding a term, dictate the same phrase in a new sentence. If the engine still gets
 it wrong the same way, use a replacement instead of adding more dictionary entries.

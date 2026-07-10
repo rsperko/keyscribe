@@ -36,10 +36,6 @@ public protocol SpeechEngine: Sendable {
     // Only Apple's one-shot SpeechAnalyzer needs it today.
     func prepareForDictation() async
 
-    // Pre-build per-term-set bias artifacts (Parakeet's CTC vocab/rescorer) at warm time so the first biased
-    // dictation doesn't build them mid-transcription. Default no-op; only Parakeet overrides. Best-effort.
-    func prewarmBias(termSets: [[String]]) async
-
     // False for Apple: its analyzer is one-shot, so a warmup transcribe would consume the pair prepared for
     // the real dictation (prepareForDictation is its warmup instead).
     var benefitsFromWarmupClip: Bool { get }
@@ -63,7 +59,6 @@ public extension SpeechEngine {
     var captureSampleRate: Int { 16000 }
 
     func prepareForDictation() async {}
-    func prewarmBias(termSets: [[String]]) async {}
     var benefitsFromWarmupClip: Bool { true }
 
     var supportsSampleInput: Bool { false }

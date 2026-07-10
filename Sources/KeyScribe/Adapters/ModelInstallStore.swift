@@ -1,8 +1,43 @@
+import FluidAudio
 import Foundation
 import KeyScribeKit
 
 // Durable install bookkeeping for downloadable engines, independent of each SDK's directory layout.
 enum ModelInstallStore {
+    // One-shot cleanup of the retired Parakeet CTC 0.6B recognition-bias companion (the large
+    // parakeet-ctc-0.6b-coreml dir). The CTC-WS spotter was removed, so it is stranded on existing installs
+    // and nothing re-populates it (only the tdt-ctc-110m load path pulls a CtcHead, and only from the 110m
+    // repo) — while `reconcile` will NOT remove it (it deliberately preserves dirs no engine claims, since
+    // models/ is shared across variants). We deliberately do NOT touch parakeet-ctc-110m-coreml: FluidAudio's
+    // tdt-ctc-110m load re-downloads it as its [Beta] CTC head on every load, so deleting it only churns a
+    // re-download — the 110m engine simply never uses that head. Target the 0.6B dir by its known FluidAudio
+    // name only, never a blanket sweep. Idempotent (a missing dir is a no-op), so it runs every launch; logs
+    // once when it actually frees space.
+    // The CTC companion dirs safe to reclaim: only the 0.6B spotter model, which nothing re-downloads.
+    // Deliberately excludes parakeet-ctc-110m-coreml — the tdt-ctc-110m load re-fetches that as its [Beta]
+    // CTC head, so deleting it churns; it is owned by the 110m engine's installDirNames instead.
+    static var retiredCtcCompanionDirNames: [String] {
+        [CtcModelVariant.ctc06b].map {
+            CtcModels.defaultCacheDirectory(for: $0).lastPathComponent
+        }
+    }
+
+    static func deleteRetiredCtcCompanions() {
+        let names = retiredCtcCompanionDirNames
+        var freed: [String] = []
+        for name in names {
+            let url = KeyScribePaths.modelsDir.appendingPathComponent(name, isDirectory: true)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            do { try FileManager.default.removeItem(at: url); freed.append(name) }
+            catch {
+                Log.models.error(
+                    "ctc cleanup: \(name, privacy: .public) delete failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        if !freed.isEmpty {
+            Log.models.notice("removed retired Parakeet CTC bias companions: \(freed.sorted(), privacy: .public)")
+        }
+    }
     private static var markerURL: URL {
         KeyScribePaths.modelsDir.appendingPathComponent(markerFile)
     }

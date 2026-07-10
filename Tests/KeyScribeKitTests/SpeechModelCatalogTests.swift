@@ -51,13 +51,11 @@ struct SpeechModelCatalogTests {
     }
 
     @Test func recognitionBiasSupportIsPerEngine() {
-        // Moonshine has no on-device bias path; every other engine does.
-        let biasExempt: Set<String> = ["moonshine-base-en"]
-        for id in biasExempt {
-            #expect(SpeechModelCatalog.entry(for: id)?.supportsRecognitionBias == false)
-        }
-        for e in SpeechModelCatalog.all where !biasExempt.contains(e.id) {
-            #expect(e.supportsRecognitionBias == true)
+        // Only Qwen3 (native context) and Whisper (prompt tokens) bias recognition; Parakeet, Apple, and
+        // Moonshine do not — the dictionary reaches them only through after-transcription recovery.
+        let biasCapable: Set<String> = ["qwen3-asr-0.6b", "qwen3-asr-1.7b", "whisper", "whisper-small-en"]
+        for e in SpeechModelCatalog.all {
+            #expect(e.supportsRecognitionBias == biasCapable.contains(e.id))
         }
     }
 }

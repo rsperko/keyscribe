@@ -79,11 +79,6 @@ private struct EngineRow: View {
                         Text(row.info.displayName).font(.headline)
                         if row.info.isDefaultEnglish { SpeechBadge(text: "Recommended", prominent: true) }
                         SpeechBadge(text: row.info.languageCount <= 1 ? "English" : "Multilingual")
-                        if !row.info.supportsRecognitionBias {
-                            SpeechBadge(text: "No recognition bias")
-                                .help("Dictionary recovery can still fix close matches after transcription.")
-                        }
-                        SpeechBadge(text: row.dictionaryMatchingRecommended ? "Dictionary recommended" : "Dictionary custom")
                         Spacer(minLength: 0)
                         if row.isActive {
                             Label("In use", systemImage: "checkmark.circle.fill")
@@ -98,52 +93,22 @@ private struct EngineRow: View {
                 }
             }
 
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 8) {
+            if row.info.supportsRecognitionBias {
+                VStack(alignment: .leading, spacing: 4) {
                     Toggle(isOn: recognitionBiasBinding) {
-                        Text("Use recognition hints while transcribing").font(.caption)
+                        Text("Use dictionary during recognition").font(.caption)
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(!row.info.supportsRecognitionBias)
                     .accessibilityIdentifier(AccessibilityID.Settings.Speech.recognitionBias(row.id))
-                    if !row.info.supportsRecognitionBias {
-                        Text("This model cannot use recognition hints.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    } else if row.info.biasCompanionDiskBytes > 0 {
-                        Text("Recognition hints use a companion model bundled with this one — "
-                             + "\(fmt(row.info.biasCompanionDiskBytes)) on disk. It loads about "
-                             + "\(fmt(row.info.biasMemoryBytes)) into memory only while this is on.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Toggle(isOn: dictionaryRecoveryBinding) {
-                        Text("Recover close dictionary matches after transcription").font(.caption)
-                    }
-                    .toggleStyle(.checkbox)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.dictionaryRecovery(row.id))
-                    Text("Uses your dictionary after transcription to fix close matches, like "
-                         + "\"charge bee\" to \"ChargeBee\". Best effort; turn this off if it changes ordinary words.")
+                    Text("Guides this model toward your dictionary terms as it listens. Rarely, it may "
+                         + "prefer a term over a similar-sounding phrase — turn this off if that happens "
+                         + "with your voice.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Reset to Recommended") { model.resetDictionaryMatching(for: row.id) }
-                        .disabled(row.dictionaryMatchingRecommended)
-                        .accessibilityIdentifier(AccessibilityID.Settings.Speech.resetDictionary(row.id))
                 }
-                .padding(.top, 2)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "text.badge.checkmark")
-                    Text("Dictionary Matching").font(.caption)
-                    Text(row.dictionaryMatchingRecommended ? "Recommended" : "Custom")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                .padding(.leading, 36)
             }
-            .padding(.leading, 36)
-            .accessibilityIdentifier(AccessibilityID.Settings.Speech.dictionaryDisclosure(row.id))
 
             if let frac = row.downloadFraction {
                 VStack(alignment: .leading, spacing: 2) {
@@ -192,12 +157,6 @@ private struct EngineRow: View {
             }
         }
         .accessibilityIdentifier(AccessibilityID.Settings.Speech.row(row.id))
-    }
-
-    private var dictionaryRecoveryBinding: Binding<Bool> {
-        Binding(
-            get: { row.dictionaryRecoveryOn },
-            set: { model.setDictionaryRecovery($0, for: row.id) })
     }
 
     private var recognitionBiasBinding: Binding<Bool> {
@@ -275,12 +234,7 @@ private struct EngineRow: View {
         return "~\(fmt(row.info.approxDownloadBytes)) download"
     }
 
-    private var biasActive: Bool { row.info.supportsRecognitionBias && row.recognitionBiasOn }
-
-    private var peakMemoryBytes: Int64 {
-        ModelMemory.peakBytes(
-            baseBytes: row.info.approxMemoryBytes, biasBytes: row.info.biasMemoryBytes, biasOn: biasActive)
-    }
+    private var peakMemoryBytes: Int64 { row.info.approxMemoryBytes }
 
     private var fitVerdict: ModelFitVerdict {
         ModelMemory.verdict(peakBytes: peakMemoryBytes, physicalBytes: ProcessInfo.processInfo.physicalMemory)
@@ -288,12 +242,7 @@ private struct EngineRow: View {
 
     private var memoryDetailText: String {
         guard row.info.approxMemoryBytes > 0 else { return "" }
-        var s = "Loads into memory only while you dictate — about \(fmt(peakMemoryBytes)) — then releases."
-        if biasActive, row.info.biasMemoryBytes > 0 {
-            s += " About \(fmt(row.info.biasMemoryBytes)) of that is the dictionary-bias model, "
-                + "used only when Dictionary Matching is on."
-        }
-        return s
+        return "Loads into memory only while you dictate — about \(fmt(peakMemoryBytes)) — then releases."
     }
 
     // VoiceOver can't hover the tooltip, so fold the disk size, the verdict, and the memory detail into one

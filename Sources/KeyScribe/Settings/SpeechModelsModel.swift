@@ -16,8 +16,6 @@ final class SpeechModelsModel: ObservableObject {
         let errorText: String?
         let installedBytes: Int64?
         let recognitionBiasOn: Bool
-        let dictionaryRecoveryOn: Bool
-        let dictionaryMatchingRecommended: Bool
     }
 
     @Published private(set) var rows: [Row] = []
@@ -140,20 +138,6 @@ final class SpeechModelsModel: ObservableObject {
         guard let info = SpeechModelCatalog.entry(for: id) else { return }
         var updated = stt
         updated.setRecognitionBias(on, for: info)
-        applySTTUpdate(updated)
-    }
-
-    func setDictionaryRecovery(_ on: Bool, for id: String) {
-        guard let info = SpeechModelCatalog.entry(for: id) else { return }
-        var updated = stt
-        updated.setDictionaryRecovery(on, for: info)
-        applySTTUpdate(updated)
-    }
-
-    func resetDictionaryMatching(for id: String) {
-        guard let info = SpeechModelCatalog.entry(for: id) else { return }
-        var updated = stt
-        updated.resetDictionaryMatching(for: info)
         applySTTUpdate(updated)
     }
 
@@ -350,8 +334,6 @@ final class SpeechModelsModel: ObservableObject {
             testPassed: verifiedOk.contains(info.id),
             errorText: errors[info.id] ?? (failed ? Self.failedMessage(systemManaged: info.systemManaged) : nil),
             installedBytes: onDisk ? installedSizes[info.id] : nil,
-            recognitionBiasOn: stt.recognitionBiasEnabled(for: info),
-            dictionaryRecoveryOn: stt.dictionaryRecoveryEnabled(for: info),
-            dictionaryMatchingRecommended: stt.dictionaryMatchingUsesRecommendedSettings(for: info))
+            recognitionBiasOn: stt.recognitionBiasEnabled(for: info))
     }
 }

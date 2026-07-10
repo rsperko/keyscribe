@@ -90,7 +90,7 @@ struct AddToDictionarySheet: View {
                     .onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.term)
             }
-            Text("A best-effort recognition hint for future dictations; its strength varies by model. When a phrase is always misheard the same way, a replacement fixes it exactly.")
+            Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()

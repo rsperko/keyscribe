@@ -13,13 +13,8 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     public let approxDownloadBytes: Int64
     // Resident memory while dictating (wired-inclusive, measured via `--mem-probe`). On Apple Silicon the
     // accelerator wires model weights into RAM outside this process's footprint, so this is far more honest
-    // than Activity Monitor's per-app figure. `approxMemoryBytes` is the base model; `biasMemoryBytes` is the
-    // extra the recognition-bias companion adds while it is on; `biasCompanionDiskBytes` is that companion's
-    // on-disk share of the download (0 for engines whose bias is native, i.e. no separate model). Single
-    // machine, ±20%.
+    // than Activity Monitor's per-app figure. Single machine, ±20%.
     public let approxMemoryBytes: Int64
-    public let biasMemoryBytes: Int64
-    public let biasCompanionDiskBytes: Int64
     public let systemManaged: Bool
     public let isDefaultEnglish: Bool
     public let supportsRecognitionBias: Bool
@@ -27,8 +22,7 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     public init(
         id: String, kind: EngineKind, displayName: String, summary: String, languageCount: Int,
         approxDownloadBytes: Int64, systemManaged: Bool, isDefaultEnglish: Bool,
-        supportsRecognitionBias: Bool,
-        approxMemoryBytes: Int64 = 0, biasMemoryBytes: Int64 = 0, biasCompanionDiskBytes: Int64 = 0
+        supportsRecognitionBias: Bool, approxMemoryBytes: Int64 = 0
     ) {
         self.id = id
         self.kind = kind
@@ -37,8 +31,6 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
         self.languageCount = languageCount
         self.approxDownloadBytes = approxDownloadBytes
         self.approxMemoryBytes = approxMemoryBytes
-        self.biasMemoryBytes = biasMemoryBytes
-        self.biasCompanionDiskBytes = biasCompanionDiskBytes
         self.systemManaged = systemManaged
         self.isDefaultEnglish = isDefaultEnglish
         self.supportsRecognitionBias = supportsRecognitionBias
@@ -50,17 +42,15 @@ public enum SpeechModelCatalog {
         SpeechModelInfo(
             id: "parakeet", kind: .parakeet, displayName: "Parakeet TDT v3",
             summary: "Larger multilingual Parakeet; slightly stronger raw accuracy.",
-            languageCount: 25, approxDownloadBytes: 2_860_000_000, systemManaged: false,
-            isDefaultEnglish: true, supportsRecognitionBias: true,
-            approxMemoryBytes: 550_000_000, biasMemoryBytes: 600_000_000,
-            biasCompanionDiskBytes: 2_370_000_000),
+            languageCount: 25, approxDownloadBytes: 480_000_000, systemManaged: false,
+            isDefaultEnglish: true, supportsRecognitionBias: false,
+            approxMemoryBytes: 515_000_000),
         SpeechModelInfo(
             id: "parakeet-tdt-ctc-110m", kind: .parakeet, displayName: "Parakeet TDT-CTC 110M",
             summary: "Compact English model — fast, accurate, and small.",
-            languageCount: 1, approxDownloadBytes: 331_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: true,
-            approxMemoryBytes: 250_000_000, biasMemoryBytes: 120_000_000,
-            biasCompanionDiskBytes: 104_000_000),
+            languageCount: 1, approxDownloadBytes: 330_000_000, systemManaged: false,
+            isDefaultEnglish: false, supportsRecognitionBias: false,
+            approxMemoryBytes: 250_000_000),
         SpeechModelInfo(
             id: "whisper-small-en", kind: .whisper, displayName: "Whisper Small (English)",
             summary: "Compact English Whisper — smaller and faster than Turbo, lower accuracy.",
@@ -89,7 +79,7 @@ public enum SpeechModelCatalog {
             id: "apple", kind: .apple, displayName: "Apple Speech",
             summary: "Native macOS transcription. No download, fastest startup.",
             languageCount: 20, approxDownloadBytes: 0, systemManaged: true,
-            isDefaultEnglish: false, supportsRecognitionBias: true),
+            isDefaultEnglish: false, supportsRecognitionBias: false),
         SpeechModelInfo(
             id: "moonshine-base-en", kind: .moonshine, displayName: "Moonshine Base (English)",
             summary: "Lightweight English model; dictionary recovery available.",

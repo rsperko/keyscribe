@@ -9,34 +9,44 @@
 
 **Corpus:** 107 clips (the committed `manifest.json` corpus, Tiers 1–3).
 **Recorded:** 2026-06-30, single speaker, quiet room, built-in mic, normal pace.
-**Metrics:** WER = word error rate (lower is better); recall = bias-term recall (higher is
+**Metrics:** WER = word error rate (lower is better); recall = dictionary-term recall (higher is
 better); RTF = real-time factor (lower is faster; < 1.0 means faster than real time).
-"bias" columns are with the dictionary active; "unbiased" is plain accuracy.
+Numbers are **as shipped** — the dictionary active with default settings (after-transcription recovery
+on every engine, plus recognition bias on the Whisper and Qwen3 models). "Recall — no dictionary" is the
+raw engine with an empty dictionary, so the two recall columns show the dictionary's total lift.
 Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26+.
 
-| Model | WER (bias) | WER (unbiased) | Recall (bias) | RTF | Download |
+> **Regenerated 2026-07-09**, after recognition bias was narrowed to the **Whisper and Qwen3** models
+> (Parakeet's CTC-WS spotter and Apple's contextual-strings bias were removed for false-firing dictionary
+> terms — see [`agent_notes/fable_bias_test/`](../../agent_notes/fable_bias_test/)). The dictionary still
+> lifts recall on **every** engine via after-transcription recovery; on Whisper and Qwen3 recognition
+> bias lifts it further. So the recall gap between the two columns below is the dictionary's whole effect,
+> and it is largest on the bias-capable models.
+
+| Model | WER (as shipped) | Recall — with dictionary | Recall — no dictionary | RTF | Download |
 |---|---|---|---|---|---|
-| Whisper Large v3 Turbo | 5.7% | 6.9% | 0.96 | 0.114 | 632 MB |
-| Qwen3-ASR 1.7B | 5.8% | 6.9% | 0.94 | 0.037 | 2.0 GB |
-| Whisper Small (English) | 6.0% | 7.7% | 0.95 | 0.061 | 217 MB |
-| Parakeet TDT v3 | 7.4% | 8.2% | 0.90 | 0.045 | 1.8 GB |
-| Qwen3-ASR 0.6B | 8.4% | 10.0% | 0.93 | 0.014 | 1.5 GB |
-| Parakeet TDT-CTC 110M (default) | 9.3% | 11.5% | 0.93 | 0.016 | 440 MB |
-| Apple Speech | 12.2% | 13.5% | 0.74 | 0.031 | managed |
-| Moonshine Base (English) | 15.5% | 14.6% | 0.66 | 0.019 | 141 MB |
+| Whisper Large v3 Turbo | 5.7% | 0.96 | 0.81 | 0.119 | 632 MB |
+| Qwen3-ASR 1.7B | 5.8% | 0.96 | 0.84 | 0.040 | 2.0 GB |
+| Whisper Small (English) | 6.0% | 0.97 | 0.78 | 0.063 | 217 MB |
+| Parakeet TDT v3 (default) | 7.1% | 0.89 | 0.77 | 0.014 | 480 MB |
+| Qwen3-ASR 0.6B | 8.3% | 0.96 | 0.78 | 0.014 | 1.5 GB |
+| Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 227 MB |
+| Apple Speech | 12.8% | 0.62 | 0.53 | 0.032 | managed |
+| Moonshine Base (English) | 14.9% | 0.74 | 0.66 | 0.024 | 141 MB |
 
 ## What to read into this (and what not to)
 
 - **The top three are a wash.** 5.7 / 5.8 / 6.0% biased WER is well inside the noise of a
   single-speaker corpus. Don't pick between them on these numbers alone.
-- **Bias is decisive for dictionary terms.** Every bias-capable engine gains real recall from the
-  dictionary. Moonshine has **no on-device recognition bias** (its recall doesn't move), so it
-  leans on post-STT dictionary recovery instead.
+- **The dictionary helps on every engine.** The Whisper and Qwen3 models steer recognition toward
+  your terms as they listen; Parakeet, Apple, and Moonshine do not, and reach the dictionary through
+  after-transcription recovery, which runs by default on all engines. So a dictionary term is never a
+  no-op — the mechanism just differs by model.
 - **Everything is faster than real time.** Every RTF is well under 1.0, so on this corpus speed is
   rarely the deciding factor — footprint and accuracy are.
-- **The default isn't the most accurate, by design.** Parakeet TDT-CTC 110M is the recommended
-  default because it's small (440 MB), fast, English-first, and good enough out of the box — not
-  because it tops the table. "Recommended" means *sensible default*, not *highest score*.
+- **The default isn't the most accurate, by design.** Parakeet TDT v3 is the recommended default
+  because it's compact (~480 MB), fast, multilingual, and good enough out of the box — not because it
+  tops the table. "Recommended" means *sensible default*, not *highest score*.
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
   `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 

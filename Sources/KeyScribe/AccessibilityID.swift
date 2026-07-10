@@ -48,10 +48,7 @@ enum AccessibilityID {
             static func reinstall(_ engineID: String) -> String { "settings.speech.row.\(engineID).reinstall" }
             static func delete(_ engineID: String) -> String { "settings.speech.row.\(engineID).delete" }
             static func recognitionBias(_ engineID: String) -> String { "settings.speech.row.\(engineID).recognitionBias" }
-            static func dictionaryRecovery(_ engineID: String) -> String { "settings.speech.row.\(engineID).dictionaryRecovery" }
-            static func dictionaryDisclosure(_ engineID: String) -> String { "settings.speech.row.\(engineID).dictionaryDisclosure" }
             static func sizeStatus(_ engineID: String) -> String { "settings.speech.row.\(engineID).sizeStatus" }
-            static func resetDictionary(_ engineID: String) -> String { "settings.speech.row.\(engineID).resetDictionary" }
         }
 
         enum Vocabulary {

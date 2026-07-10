@@ -64,22 +64,26 @@ Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs
 
 You can switch engines anytime in **Settings ▸ Speech Models**; each is downloaded on first use.
 
-### Why is one model badged "no recognition bias"?
-
-Recognition bias teaches the model your names, jargon, and acronyms while it transcribes. Every
-model except Moonshine supports it. Moonshine has no on-device bias path, so KeyScribe can instead
-run dictionary recovery after transcription to fix close matches.
-
 ### How do I make KeyScribe spell my names and jargon correctly?
 
-Add them to the **Dictionary** (Settings ▸ Vocabulary, or the on-the-spot correction shortcut). For
-text you always want swapped (expansions, fixes), add a **Replacement**. When KeyScribe mishears
-something, the global correction shortcut lets you add a dictionary entry or replacement without
-leaving what you're doing — and the fix sticks for next time.
+Add them to the **Dictionary** (Settings ▸ Vocabulary, or the on-the-spot correction shortcut). When
+you say a term you added, KeyScribe prefers your spelling — the way you wrote it. That works on every
+speech model: two of the model families (Whisper and Qwen3) also steer recognition toward your terms
+as they listen, and on every model KeyScribe fixes near-misses right after transcription. The fix
+sticks for next time.
 
-The dictionary and replacements do different jobs — dictionary improves how a word is *heard*, a
-replacement controls how it's *written*. If a word comes out correctly spelled but mis-capitalized or
-punctuated (say `pi` → `Pi.`), see [Tips & Tricks](docs/tips.md) for how to pin the exact output.
+If a word comes out correctly spelled but mis-capitalized or punctuated (say `pi` → `Pi.`), see
+[Tips & Tricks](docs/tips.md) for how to pin the exact output.
+
+### What does the dictionary do — and not do?
+
+One thing, honestly: when you say a term you added, KeyScribe writes it your way. It is best-effort,
+not a guarantee — a phrase the model badly mangles belongs in **Replacements** instead, which changes
+it exactly, every time. A dictionaried compound also snaps its spoken form ("text field" →
+"TextField") whenever you say those words; if you only *sometimes* want that, add the term to a
+**per-mode** dictionary so it applies only in that mode. And when a mode runs an AI rewrite, your
+dictionary terms are shared with your own AI service — marked as intended spellings, not typos, so it
+does not "fix" them — including in privacy modes, which turn context off but still send that term hint.
 
 ### Can I edit text I've already written?
 

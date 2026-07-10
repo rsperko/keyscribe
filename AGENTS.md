@@ -323,10 +323,13 @@ keyscribe/
 ## STT engines
 
 KeyScribe ships **8 curated models across 5 engine kinds**, all with in-app download/install:
-Parakeet TDT v3, Parakeet TDT-CTC 110M (English default), Whisper Large v3 Turbo,
+Parakeet TDT v3 (English default), Parakeet TDT-CTC 110M, Whisper Large v3 Turbo,
 Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and
-Moonshine Base (English). Seven are bias-capable; **Moonshine has no recognition bias**
-(`supportsRecognitionBias = false`, dictionary recovery available in Settings). Engines are
+Moonshine Base (English). **Four are bias-capable** — both Qwen3 models (native context) and both
+Whisper models (prompt tokens); **Parakeet, Apple, and Moonshine have no recognition bias**
+(`supportsRecognitionBias = false`). The dictionary still prefers a user's spellings on **every**
+engine via after-transcription recovery (`FuzzyStage`), which now runs whenever the mode's merged
+dictionary is non-empty — no per-engine toggle. Engines are
 wired through a single **`EngineRegistry`** descriptor list (catalog ↔ constructor) that the
 provider, download path, install reconcile/delete, and the benchmark all derive from — adding an
 engine is one descriptor + one catalog entry. `load(progress:)` is on the `SpeechEngine` protocol;
@@ -336,8 +339,8 @@ each engine owns its install footprint (`installDirNames` / `installState`); aud
 A dev **STT benchmark** (`KeyScribe --benchmark <dir> [--engines …]`, runner + pure scoring in
 KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorded clips. On a
 107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
-Small) cluster around 5.7–6.0% biased WER; bias is decisive (Moonshine without recognition bias
-~15%). These numbers are speaker/mic/room dependent — reference table + caveats in
+Small) cluster around 5.7–6.0% biased WER; the weakest (Moonshine) is ~15%. These numbers are
+speaker/mic/room dependent — reference table + caveats in
 `docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
@@ -396,6 +399,22 @@ silence, the same documented Apple lexical artifact — so streaming added no ne
 that generalizes; a slower/looping engine like Moonshine could differ, which is one more reason its
 streaming is disabled.)
 
+### Recognition bias — the distractor false-fire gate (exercise every bias-capable model)
+
+**Any engine that ships `supportsRecognitionBias = true` must pass the distractor false-fire sweep
+before bias ships enabled.** Run `--benchmark corpus/distractors` (a real phrase acoustically adjacent
+to a dictionary term, term never spoken) and `--benchmark corpus/distractors --fuzzy`. The gate is
+**substitution fires ≈ 0** over the engine's unbiased baseline — the `sub(bias)` column, fires whose
+words are absent from the reference (different words the dictionary put in the speaker's mouth).
+**Orthographic snaps are reported but tolerated**: a fire whose words ARE in the reference is the
+dictionary snapping spacing/casing ("text field" → "TextField"), which is the dictionary system's
+intended behavior — after-transcription recovery does the same by design. The bar and the
+counter-example are in `agent_notes/fable_bias_test/results.md`: Qwen3 native context = 0 substitution
+fires (kept); the removed Parakeet CTC-WS spotter substituted on 53% of ordinary sentences (removed).
+The `supportsRecognitionBias` seam, the `biasTerms` plumbing through the pipeline, and this corpus ARE
+the re-entry path for a future engine that biases cleanly — nothing else is kept for that purpose; the
+removed spotter lives in git history only.
+
 ### Forked / pinned STT deps
 
 Two forks + two upstream deps (one a pinned binary); the forks work live and cost nothing day-to-day:
@@ -404,12 +423,13 @@ Two forks + two upstream deps (one a pinned binary); the forks work live and cos
   Depending on just the `WhisperKit` product keeps Vapor/openapi out of resolution (gated behind
   `BUILD_ALL`). Still essential: upstream added `!isPrefill` guards elsewhere but NOT on the
   `isSegmentCompleted` break our patch guards, so #372 is live for bias (verified 2026-07-08).
-- **FluidAudio** → `FluidInference/FluidAudio` (upstream, **no fork**): the `spotterRescueEnabled`
-  toggle on `ctcTokenRescore` — which lets the weaker `ctc110m` skip the acoustic-only rescue pass
-  that false-fired — **was upstreamed in #724**, so the former `rsperko/FluidAudio` fork was dropped
-  (2026-07-08) and `Package.swift` pins upstream directly at the same revision. Read the toggle via
-  `VocabularyRescorer.Config.spotterRescueEnabled` (`ParakeetEngine.swift`). Parakeet bias is
-  **CTC-WS** (NeMo constrained-CTC keyword spotting).
+- **FluidAudio** → `FluidInference/FluidAudio` (upstream, **no fork**): provides Parakeet TDT
+  transcription. Historical: KeyScribe once paired it with FluidAudio's **CTC-WS** keyword spotter
+  (NeMo constrained-CTC) for Parakeet recognition bias, gated by `spotterRescueEnabled`. That spotter
+  was **removed** (2026-07-09) — it false-fired a dictionary term into a majority of ordinary
+  sentences (`agent_notes/fable_bias_test/`); Parakeet now transcribes **TDT-only** and ignores
+  `biasTerms` (`supportsRecognitionBias = false`), with the companion CTC download and disk footprint
+  gone.
 - **speech-swift (Qwen3-ASR)** → `rsperko/speech-swift` (upstream `soniqo/speech-swift`, package
   `Qwen3Speech`): the fork only gates the `AsrBenchmark`/`AudioServer` targets behind `BUILD_ALL`
   so stock `speech-swift`'s `argmaxinc/WhisperKit` doesn't collide with our WhisperKit fork.

@@ -119,9 +119,9 @@ privacy    = false          # best-effort redaction (the mode's privacy toggle).
                             #   When true, context is forced off (see [ai_rewrite].context).
 numbers    = false          # inverse text normalization: "twenty five" -> "25"
                             #   (leaves year idioms like "twenty twenty six" as words)
-# (Dictionary recovery is no longer a mode command — it is a per-engine "Dictionary Matching"
-#  setting under settings.toml [stt]; see recognition_bias_disabled_engines /
-#  dictionary_recovery_enabled_engines / dictionary_recovery_disabled_engines.)
+# (Dictionary recovery is not a mode command and has no toggle: it runs automatically whenever the
+#  mode's merged dictionary is non-empty. The one mechanism control is the per-engine recognition-bias
+#  disable under settings.toml [stt]; see recognition_bias_disabled_engines.)
 
 # ── Vocabulary (mode-local; may exclude the global sets) ─────────────────────
 [dictionary]
@@ -407,16 +407,16 @@ schema_version = 1
 load_on_login = false
 
 [stt]
-engine = "parakeet-tdt-ctc-110m"  # the single active engine (default: the compact 110M tier)
+engine = "parakeet"             # the single active engine (default: Parakeet TDT v3)
 eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fastest)
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
-# Per-engine "Dictionary Matching" overrides. Defaults follow model capability (recognition bias on
-# where supported, dictionary recovery on where not), so only deviations are recorded — a fresh
-# install writes all three empty. Each list holds engine ids:
-# recognition_bias_disabled_engines    = []  # bias-capable engines with recognition bias turned OFF
-# dictionary_recovery_enabled_engines  = []  # engines with post-STT dictionary recovery turned ON
-# dictionary_recovery_disabled_engines = []  # bias-less engines with dictionary recovery turned OFF
-# (Legacy `dictionary_recovery_engines` is read once and migrated into the lists above, then dropped.)
+# The one dictionary-mechanism control: recognition bias is default-ON for the engines that support it
+# (both Qwen3, both Whisper) and can be disabled per engine. Post-STT dictionary recovery has no toggle
+# — it runs whenever the mode's dictionary is non-empty. Only deviations are recorded (fresh install
+# writes the list empty):
+# recognition_bias_disabled_engines = []  # bias-capable engines with recognition bias turned OFF
+# (The former dictionary_recovery_enabled_engines / dictionary_recovery_disabled_engines /
+#  dictionary_recovery_engines keys are obsolete: ignored on read and dropped on the next write.)
 
 [during_dictation]
 mute_system_audio = true        # ducks other audio (FaceTime-style, cannot strand); lands after the start sound, instant when sounds = false

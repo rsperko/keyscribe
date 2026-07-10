@@ -19,6 +19,21 @@ struct FuzzyCorrectorTests {
         #expect(fix("the chargebee invoice", ["ChargeBee"]) == "the ChargeBee invoice")
     }
 
+    // A correctly-cased split whose join equals the canonical exactly ("Fluid Audio" → FluidAudio)
+    // must still merge — the only change is removing the inter-token space, which is a real edit, not
+    // a no-op. The skip gate keys off "output identical to input", not "join equals canonical".
+    @Test func mergesCorrectlyCasedSplit() {
+        #expect(fix("we ship Fluid Audio today", ["FluidAudio"]) == "we ship FluidAudio today")
+        #expect(fix("the web hook fired", ["webhook"]) == "the webhook fired")
+    }
+
+    // A single token already equal to the canonical is a true no-op and stays untouched, and a
+    // casing-only single-token fix still snaps (the gate only skips when the output would be identical).
+    @Test func leavesTrueSingleTokenNoOpUntouched() {
+        #expect(fix("Redis is fast", ["Redis"]) == "Redis is fast")
+        #expect(fix("redis, mostly", ["Redis"]) == "Redis, mostly")
+    }
+
     @Test func correctsSmallMisspelling() {
         #expect(fix("install postgress now", ["Postgres"]) == "install Postgres now")
     }
