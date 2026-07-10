@@ -82,11 +82,11 @@ struct HTTPLLMClient: LLMClient {
         }
     }
 
+    // Adaptations are what a specific SERVER accepts (temperature support, token-limit field name,
+    // system-fold). Editing a connection's base URL points it at a different server, so the base URL is
+    // part of the identity — keying on id+model alone would replay adaptations learned from the old host.
     private func adaptationCacheKey(for connection: Connection) -> String {
-        let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines).removingTrailingSlash
-            ?? (connection.provider == .openai ? "https://api.openai.com/v1" : "")
-        let host = URL(string: base)?.host()?.lowercased() ?? base
-        return host + "\n" + connection.model
+        [connection.id, connection.model, connection.baseUrl ?? ""].joined(separator: "\n")
     }
 
     private func buildRequest(

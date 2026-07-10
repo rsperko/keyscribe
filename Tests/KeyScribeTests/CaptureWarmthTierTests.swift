@@ -32,15 +32,32 @@ struct CaptureWarmthTierTests {
         func setPreferredInputUID(_ uid: String?) {}
     }
 
-    private func makeController(eviction: Eviction, audio: AudioCapturing) -> DictationController {
+    private func makeController(
+        eviction: Eviction, idleSeconds: Int? = nil, audio: AudioCapturing
+    ) -> DictationController {
         var settings = Settings.defaults
         settings.stt.eviction = eviction
+        if let idleSeconds { settings.stt.evictionIdleSeconds = idleSeconds }
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-warmth-\(UUID().uuidString)", isDirectory: true)
         let provider = try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny")
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: dir),
             history: nil, hud: nil, audio: audio, micStatus: { .granted })
+    }
+
+    private func settings(eviction: Eviction, idleSeconds: Int? = nil) -> Settings {
+        var settings = Settings.defaults
+        settings.stt.eviction = eviction
+        if let idleSeconds { settings.stt.evictionIdleSeconds = idleSeconds }
+        return settings
+    }
+
+    private func poll(until condition: @escaping () -> Bool) async {
+        for _ in 0..<200 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     @Test func fastestPrewarmsOnDemand() {
@@ -71,5 +88,36 @@ struct CaptureWarmthTierTests {
         let audio = RecordingAudio()
         makeController(eviction: .balanced, audio: audio).refreshCaptureBinding()
         #expect(audio.refreshes == 1)
+    }
+
+    // Fastest holds the unit warm via its periodic refresh with no pending idle-eviction checkpoint, so a
+    // downgrade must actively dispose it — else the mic stays held after the user picked a mic-friendlier tier.
+    @Test func switchingFromFastestToFrugalDisposesTheWarmUnit() {
+        let audio = RecordingAudio()
+        let controller = makeController(eviction: .fastest, audio: audio)
+        controller.prewarmCapture()
+        #expect(audio.releases == 0)
+        controller.updateSettings(settings(eviction: .frugal))
+        #expect(audio.releases == 1)
+    }
+
+    @Test func switchingFromFastestToBalancedKeepsItWarmThenReleasesOnIdle() async {
+        let audio = RecordingAudio()
+        let controller = makeController(eviction: .fastest, audio: audio)
+        controller.prewarmCapture()
+        controller.updateSettings(settings(eviction: .balanced, idleSeconds: 0))
+        #expect(audio.prewarms == 2)
+        await poll { audio.releases >= 1 }
+        #expect(audio.releases >= 1)
+    }
+
+    // The launch/prewarm case: a Balanced prewarm outside a dictation has no post-dictation checkpoint, so
+    // the release must be scheduled at prewarm time or the mic is held until the first dictation.
+    @Test func balancedPrewarmDoesNotHoldTheMicIndefinitely() async {
+        let audio = RecordingAudio()
+        let controller = makeController(eviction: .balanced, idleSeconds: 0, audio: audio)
+        controller.prewarmCapture()
+        await poll { audio.releases >= 1 }
+        #expect(audio.releases >= 1)
     }
 }

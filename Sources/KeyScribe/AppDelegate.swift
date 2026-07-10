@@ -57,7 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
         ModelInstallStore.deleteRetiredCtcCompanions()
-        if !ModelInstallStore.installedIds().isEmpty {
+        let hasUsableEngine = !ModelInstallStore.installedIds().isEmpty
+            || (SpeechModelCatalog.entry(for: settings.stt.engine)?.systemManaged ?? false)
+        if hasUsableEngine {
             VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
         }
         provider = resolveProvider(engines: engines)

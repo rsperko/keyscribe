@@ -52,6 +52,13 @@ public struct OpenAIAPIError: Equatable, Sendable {
         guard code != nil || param != nil else { return nil }
         return OpenAIAPIError(code: code, param: param)
     }
+
+    public var indicatesMissingModel: Bool {
+        switch code {
+        case "model_not_found", "model_not_available", "invalid_model": true
+        default: param == "model"
+        }
+    }
 }
 
 public func remediatedAdaptations(

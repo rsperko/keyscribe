@@ -44,6 +44,17 @@ struct OpenAICompatTests {
         #expect(OpenAIAPIError.parse(body: #"{"error":{"message":"x"}}"#) == nil)
     }
 
+    @Test func detectsMissingModelErrors() {
+        let notFound = #"{"error":{"message":"The model `bogus` does not exist","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#
+        #expect(OpenAIAPIError.parse(body: notFound)?.indicatesMissingModel == true)
+
+        let paramModel = #"{"error":{"message":"unknown model","type":"invalid_request_error","param":"model","code":null}}"#
+        #expect(OpenAIAPIError.parse(body: paramModel)?.indicatesMissingModel == true)
+
+        let unsupported = OpenAIAPIError(code: "unsupported_parameter", param: "max_tokens")
+        #expect(!unsupported.indicatesMissingModel)
+    }
+
     @Test func remediatesMaxTokensThenTemperature() {
         let start = RequestAdaptations.default(for: .openaiCompatible)
         let afterTokens = remediatedAdaptations(start, for: OpenAIAPIError(code: "unsupported_parameter", param: "max_tokens"))

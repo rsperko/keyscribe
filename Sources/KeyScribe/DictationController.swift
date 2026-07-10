@@ -336,10 +336,26 @@ final class DictationController {
     }
 
     func updateSettings(_ settings: Settings) {
+        let previousEviction = self.settings.stt.eviction
         self.settings = settings
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         if !isBusy, let engine = idleEvictionEngine {
             scheduleIdleEviction(after: 0, engine: engine)
+        }
+        if settings.stt.eviction != previousEviction { reconcileCaptureWarmth() }
+    }
+
+    // Bring the warm capture unit in line with a just-changed eviction tier. Without this a downgrade from
+    // Fastest strands the unit: Fastest holds it via the periodic refresh with no pending idle-eviction
+    // checkpoint, so switching to Balanced/Frugal has nothing to release it. Fastest re-prewarms + refreshes
+    // and Balanced re-prewarms + schedules the idle release (both via prewarmCapture); Frugal disposes it.
+    private func reconcileCaptureWarmth() {
+        guard !isBusy else { return }
+        if EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) {
+            prewarmCapture()
+        } else {
+            captureRefreshTask?.cancel()
+            audio.releaseWarm()
         }
     }
 
@@ -512,11 +528,24 @@ final class DictationController {
     // rather than more idle rebuilds.
     private func scheduleCaptureRefresh() {
         captureRefreshTask?.cancel()
-        guard EvictionPolicy.periodicallyRefreshesCapture(mode: settings.stt.eviction) else { return }
-        captureRefreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(Self.captureRefreshIdleSeconds))
-            guard let self, !Task.isCancelled, !self.isBusy, self.micStatus() == .granted else { return }
-            self.audio.refreshBinding()
+        let mode = settings.stt.eviction
+        if EvictionPolicy.periodicallyRefreshesCapture(mode: mode) {
+            captureRefreshTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(Self.captureRefreshIdleSeconds))
+                guard let self, !Task.isCancelled, !self.isBusy, self.micStatus() == .granted else { return }
+                self.audio.refreshBinding()
+            }
+        } else if EvictionPolicy.releasesWarmCaptureOnIdle(mode: mode) {
+            // Balanced disposes the warm unit at the idle checkpoint. After a dictation the engine's
+            // idle-eviction task does that; but a prewarm OUTSIDE a dictation (launch, wake, a switch into
+            // Balanced) has no such task, so schedule the release here — else the mic stays held until the
+            // first dictation, which for a tier chosen to coexist with mic-sensitive apps is a leak.
+            let after = settings.stt.evictionIdleSeconds.map(Double.init) ?? EvictionPolicy.defaultIdleSeconds
+            captureRefreshTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(after))
+                guard let self, !Task.isCancelled, !self.isBusy else { return }
+                self.audio.releaseWarm()
+            }
         }
     }
 
@@ -1387,6 +1416,10 @@ final class DictationController {
         case .evictNow:
             invalidateWarm(engine.id)
             Task { await engine.evict() }
+            // Frugal (the only tier that evicts immediately) opens the mic only while dictating, so dispose
+            // the warm capture unit the commit path left stopped-but-realized — including when the user
+            // switched to Frugal mid-dictation, where reconcileCaptureWarmth deferred to this terminal.
+            audio.releaseWarm()
         case .scheduleIdleCheck(let after): scheduleIdleEviction(after: after, engine: engine)
         }
     }
@@ -1405,7 +1438,9 @@ final class DictationController {
             case .evictNow:
                 self.invalidateWarm(active.id)
                 await active.evict()
-                if EvictionPolicy.releasesWarmCaptureOnIdle(mode: mode) { self.audio.releaseWarm() }
+                // Only Fastest holds the mic warm, and it never reaches evictNow — so any idle eviction
+                // (Balanced past its window, or a tier switched to Frugal) also disposes the warm unit.
+                self.audio.releaseWarm()
                 self.idleEvictionEngine = nil
             case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again, engine: active)
             case .keepLoaded: self.idleEvictionEngine = nil

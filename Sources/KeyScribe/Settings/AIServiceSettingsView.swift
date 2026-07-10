@@ -18,9 +18,12 @@ struct ConnectionTester {
     }
 
     static func failureMessage(for error: Error, connection: Connection) -> String {
-        if case let ProviderTransportError.http(status, _) = error,
+        if case let ProviderTransportError.http(status, body) = error,
            status == 404 || status == 405,
            connection.provider == .openai || connection.provider == .openaiCompatible {
+            if OpenAIAPIError.parse(body: body)?.indicatesMissingModel == true {
+                return "The service could not find the model “\(connection.model)”. Check the Model ID — it may be misspelled or unavailable on this endpoint."
+            }
             return "This endpoint did not respond to the Chat Completions API (POST /chat/completions). Check the Base URL — KeyScribe needs a chat model; text-completions-only models will not work."
         }
         return (error as? ProviderTransportError)?.description ?? error.localizedDescription
@@ -101,15 +104,26 @@ final class AIServiceSettingsModel: ObservableObject {
         modelDiscoveryStates[id] = .loading
         do {
             let models = try await listModels(connection, apiKey)
+            // Re-read the live connection by id: a text field's focus-loss commit can land between the
+            // snapshot and here. The fetched list describes the endpoint we queried, so if the provider or
+            // base URL changed (or the connection was deleted) while the fetch was in flight, it is a stale
+            // server's list — neither offer it as suggestions for the now-different endpoint nor auto-select
+            // from it. Reset discovery to idle so the user re-fetches against the new endpoint.
+            guard let latest = connections.first(where: { $0.id == id }),
+                  latest.provider == connection.provider, latest.baseUrl == connection.baseUrl else {
+                modelDiscoveryStates[id] = nil
+                return
+            }
             modelSuggestionsByConnection[id] = models
             modelDiscoveryStates[id] = .loaded
-            // Re-read the live connection by id before writing: a text field's focus-loss commit can land
-            // between the snapshot and here, and saving the snapshot would clobber that edit.
-            if !models.isEmpty, var latest = connections.first(where: { $0.id == id }) {
+            // The auto-select additionally requires the model to be unchanged — a changed model is the
+            // user's own deliberate pick, so models[0] must not overwrite it.
+            if !models.isEmpty, latest.model == connection.model {
+                var updated = latest
                 let current = latest.model.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !models.contains(current) {
-                    latest.model = models[0]
-                    save(latest)
+                    updated.model = models[0]
+                    save(updated)
                 }
             }
         } catch {

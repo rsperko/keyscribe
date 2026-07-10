@@ -92,6 +92,21 @@ struct ConnectionTesterTests {
         #expect(message.contains("/chat/completions"))
     }
 
+    @Test func modelNotFound404PointsAtTheModelID() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "bogus-model", keyRef: "k",
+            baseUrl: "http://127.0.0.1:11234/v1")
+        let body = #"{"error":{"message":"The model `bogus-model` does not exist","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))))
+        guard case .failed(let message) = await tester.test(compat) else {
+            Issue.record("expected a 404 to be a failure")
+            return
+        }
+        #expect(message.contains("Model ID"))
+        #expect(message.contains("bogus-model"))
+        #expect(!message.contains("Base URL"))
+    }
+
     @Test func nonChatCompletionsStatusKeepsTheGenericMessage() async {
         let compat = Connection(
             id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k",
@@ -325,7 +340,9 @@ struct AIServiceTestStateTests {
         connection.baseUrl = "http://old:11234/v1"
         model.update(connection, apiKey: nil)
 
-        // Snapshot the connection, then simulate a focus-loss commit landing before the fetch saves.
+        // Snapshot the connection, then simulate a focus-loss commit repointing the base URL before the
+        // fetch saves. The fetched list belongs to the OLD endpoint, so the auto-select must not apply it
+        // to the new one — the base-URL edit survives and the model is left for a re-fetch, not clobbered.
         let stale = model.selected!
         var edited = stale
         edited.baseUrl = "http://new:11234/v1"
@@ -335,6 +352,6 @@ struct AIServiceTestStateTests {
         let saved = model.selected!
 
         #expect(saved.baseUrl == "http://new:11234/v1")
-        #expect(saved.model == "qwen3")
+        #expect(saved.model == "")
     }
 }

@@ -221,6 +221,70 @@ struct HTTPLLMClientTests {
         #expect(secondRun[0]?["max_tokens"] == nil)
     }
 
+    @Test func adaptationCacheIsolatesDistinctConnectionsOnSameHost() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let portA = Connection(
+            id: "a", name: "A", provider: .openaiCompatible, model: "qwen", keyRef: "k",
+            baseUrl: "http://127.0.0.1:8080/v1")
+        let portB = Connection(
+            id: "b", name: "B", provider: .openaiCompatible, model: "qwen", keyRef: "k",
+            baseUrl: "http://127.0.0.1:8081/v1")
+
+        nonisolated(unsafe) var firstRun: [[String: Any]?] = []
+        let firstSteps: [(Int, Data)] = [(400, errBody("unsupported_parameter", "max_tokens")), (200, okBody("OK"))]
+        LLMStubProtocol.handler = { request in
+            let idx = firstRun.count
+            firstRun.append(request.decodedBody())
+            let step = firstSteps[min(idx, firstSteps.count - 1)]
+            return (resp(request.url!, step.0), step.1)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: portA)
+        #expect(firstRun.count == 2)
+
+        nonisolated(unsafe) var secondRun: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            secondRun.append(request.decodedBody())
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: portB)
+        #expect(secondRun.count == 1)
+        #expect(secondRun[0]?["max_tokens"] != nil)
+        #expect(secondRun[0]?["max_completion_tokens"] == nil)
+    }
+
+    @Test func editingBaseURLDoesNotReplayAdaptationsFromTheOldServer() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let oldServer = Connection(
+            id: "svc", name: "Svc", provider: .openaiCompatible, model: "qwen", keyRef: "k",
+            baseUrl: "http://127.0.0.1:8080/v1")
+        let newServer = Connection(
+            id: "svc", name: "Svc", provider: .openaiCompatible, model: "qwen", keyRef: "k",
+            baseUrl: "http://127.0.0.1:9090/v1")
+
+        nonisolated(unsafe) var firstRun: [[String: Any]?] = []
+        let firstSteps: [(Int, Data)] = [(400, errBody("unsupported_parameter", "max_tokens")), (200, okBody("OK"))]
+        LLMStubProtocol.handler = { request in
+            let idx = firstRun.count
+            firstRun.append(request.decodedBody())
+            let step = firstSteps[min(idx, firstSteps.count - 1)]
+            return (resp(request.url!, step.0), step.1)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: oldServer)
+        #expect(firstRun.count == 2)
+
+        nonisolated(unsafe) var secondRun: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            secondRun.append(request.decodedBody())
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: newServer)
+        #expect(secondRun.count == 1)
+        #expect(secondRun[0]?["max_tokens"] != nil)
+        #expect(secondRun[0]?["max_completion_tokens"] == nil)
+    }
+
     @Test func reasoningTagsAreStrippedFromContent() async throws {
         LLMStubProtocol.handler = { request in
             (resp(request.url!, 200), okBody("<think>plan the reply</think>Result text"))
