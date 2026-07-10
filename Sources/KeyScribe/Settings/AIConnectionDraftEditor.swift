@@ -276,10 +276,10 @@ struct AIConnectionDraftEditor: View {
                 HStack {
                     Text("Model")
                     Spacer()
-                    combo.frame(maxWidth: 260)
+                    combo.frame(maxWidth: 420)
                 }
             case .settings:
-                LabeledContent("Model") { combo }
+                LabeledContent("Model") { combo.frame(minWidth: 360) }
             }
         }
     }
