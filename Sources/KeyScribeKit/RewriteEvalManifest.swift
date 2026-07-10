@@ -19,6 +19,7 @@ public struct RewriteEvalCase: Sendable, Equatable {
     public let precedingText: String?
     public let selectedText: String?
     public let userName: String?
+    public let currentDateTime: String?
     public let checks: Checks
 
     public struct Checks: Sendable, Equatable {
@@ -45,7 +46,7 @@ public struct RewriteEvalCase: Sendable, Equatable {
         screenTerms: [String], tokens: [String], language: String, locale: String?,
         fieldSingleLine: Bool?, fieldPlainText: Bool?,
         appName: String?, precedingText: String?, selectedText: String?, userName: String?,
-        checks: Checks
+        currentDateTime: String? = nil, checks: Checks
     ) {
         self.id = id
         self.tags = tags
@@ -61,6 +62,7 @@ public struct RewriteEvalCase: Sendable, Equatable {
         self.precedingText = precedingText
         self.selectedText = selectedText
         self.userName = userName
+        self.currentDateTime = currentDateTime
         self.checks = checks
     }
 }
@@ -111,6 +113,7 @@ public struct RewriteEvalManifest: Sendable, Equatable {
                 fieldSingleLine: c.field?.singleLine, fieldPlainText: c.field?.plainText,
                 appName: c.appName, precedingText: c.precedingText,
                 selectedText: c.selectedText, userName: c.userName,
+                currentDateTime: c.currentDateTime,
                 checks: RewriteEvalCase.Checks(
                     mustContain: c.checks?.mustContain ?? [],
                     mustNotContain: c.checks?.mustNotContain ?? [],
@@ -141,6 +144,7 @@ public struct RewriteEvalManifest: Sendable, Equatable {
         let precedingText: String?
         let selectedText: String?
         let userName: String?
+        let currentDateTime: String?
         let checks: RawChecks?
 
         struct RawField: Decodable {

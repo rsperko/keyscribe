@@ -59,6 +59,10 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                               result for dropped/corrupted audio you cannot hear. Feed a pure tone into
                               the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,
                               ring-drop and CoreAudio-overload counts. Needs Microphone permission.
+      --hud-preview <state>  Render a stable HUD fixture for visual review without starting dictation.
+                              States: ready, arming, recording, loading-model, transcribing, rewriting,
+                              redacted-rewrite, rewriting-with-local-transcript, inserted, copied,
+                              no-speech, failed, rewrite-fallback, microphone-error, accessibility-error.
         --seconds <n>           Record for n seconds (default 5).
         --tone <hz>             Expected input tone in Hz (default 440).
       --mem-probe             Measure each installed engine's in-memory footprint (phys_footprint) on the

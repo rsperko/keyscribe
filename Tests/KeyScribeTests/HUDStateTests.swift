@@ -4,6 +4,24 @@ import Testing
 
 @MainActor
 struct HUDStateTests {
+    @Test func previewFixturesCoverEveryVisibleHUDState() {
+        #expect(HUDPreview.names == [
+            "ready", "arming", "recording", "loading-model", "transcribing",
+            "rewriting", "redacted-rewrite", "rewriting-with-local-transcript",
+            "inserted", "copied", "no-speech", "failed", "rewrite-fallback",
+            "microphone-error", "accessibility-error",
+        ])
+        for name in HUDPreview.names {
+            #expect(HUDPreview.state(named: name) != nil)
+        }
+        #expect(HUDPreview.state(named: "unknown") == nil)
+    }
+
+    @Test func previewLaunchIsUnavailableOutsideDevelopmentBuilds() {
+        #expect(HUDPreview.state(
+            from: ["KeyScribe", "--hud-preview", "recording"], isDevelopmentBuild: false) == nil)
+    }
+
     @Test func completedInsertedCarriesTheResolvedModeName() {
         let state = HUDState.complete(outcome: .inserted, mode: "Polish")
         #expect(state.primaryText == "Inserted")

@@ -30,6 +30,8 @@ that wins its eval graduates by making its option unconditional and deleting the
 | `field-hint` | destination-field rules from the case's `field` flags (single-line / plain text) |
 | `locale` | "Write in {language}" carries the case's `locale` spelling variant |
 | `user-name` | the case's `userName` hinted as a valid term |
+| `datetime` | the case's `currentDateTime` supplied with a use-only-when-asked rule (case-supplied and fixed, never wall-clock, so date-dependent checks stay deterministic) |
+| `fence-strong` | context-isolation rule reworded to explicitly neutralize instruction-shaped context (the BANANA-injection class) |
 | `temp-0` | baseline prompt at temperature 0 (connections default to 0.2) |
 
 ## Case schema (`cases.json`)
@@ -38,7 +40,8 @@ that wins its eval graduates by making its option unconditional and deleting the
 (unique), `tags[]`, `prompt` (inline) or `promptId`, `transcript` (with realistic STT errors —
 seed new ones from real engine output, not invented typos), and optional variant inputs:
 `screenTerms[]`, `tokens[]` (literal `⟦SN:…⟧` strings, present in the transcript), `locale`,
-`field.singleLine` / `field.plainText`, `appName`, `precedingText`, `selectedText`, `userName`.
+`field.singleLine` / `field.plainText`, `appName`, `precedingText`, `selectedText`, `userName`,
+`currentDateTime` (a fixed formatted string — checks may then reference absolute dates).
 
 ### Checks
 

@@ -38,12 +38,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
     private let forceResumeOnboarding = CommandLine.arguments.contains("--resume-onboarding")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
+    private let hudPreview = HUDPreview.state(from: CommandLine.arguments)
 
     func applicationWillTerminate(_: Notification) {
         controller?.cancel()
     }
 
     func applicationDidFinishLaunching(_: Notification) {
+        if let hudPreview {
+            hud.render(hudPreview)
+            return
+        }
         audioRestorer = SystemAudioStateRestorer(markerURL: KeyScribePaths.pendingSystemRestoreFile)
         audioRestorer.reconcile()
         runLegacyImportIfNeeded()

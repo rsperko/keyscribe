@@ -207,6 +207,23 @@ struct RewriteEvalVariantsTests {
         #expect(field.options == PromptAssembler.Options(fieldAffordanceRule: true))
         let locale = try #require(RewriteEvalVariants.build(c, variant: "locale"))
         #expect(locale.options == PromptAssembler.Options(localeRule: true))
+        let dateTime = try #require(RewriteEvalVariants.build(c, variant: "datetime"))
+        #expect(dateTime.options == PromptAssembler.Options(dateTimeRule: true))
+        let fence = try #require(RewriteEvalVariants.build(c, variant: "fence-strong"))
+        #expect(fence.options == PromptAssembler.Options(strongContextFence: true))
+    }
+
+    @Test func caseDateTimeReachesInputsInEveryVariant() throws {
+        var c = makeCase()
+        c = RewriteEvalCase(
+            id: c.id, tags: c.tags, modePrompt: c.modePrompt, transcript: c.transcript,
+            screenTerms: c.screenTerms, tokens: c.tokens, language: c.language, locale: c.locale,
+            fieldSingleLine: c.fieldSingleLine, fieldPlainText: c.fieldPlainText,
+            appName: c.appName, precedingText: c.precedingText, selectedText: c.selectedText,
+            userName: c.userName, currentDateTime: "Friday, July 10, 2026, 9:00 AM", checks: c.checks)
+        let baseline = try #require(RewriteEvalVariants.build(c, variant: "baseline"))
+        #expect(baseline.inputs.currentDateTime == "Friday, July 10, 2026, 9:00 AM")
+        #expect(baseline.options == .baseline)
     }
 
     @Test func unknownVariantReturnsNil() {
