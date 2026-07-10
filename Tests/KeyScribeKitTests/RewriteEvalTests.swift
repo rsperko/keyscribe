@@ -205,12 +205,6 @@ struct RewriteEvalVariantsTests {
         #expect(reAnchor.options == PromptAssembler.Options(appendFinalReminder: true))
         let field = try #require(RewriteEvalVariants.build(c, variant: "field-hint"))
         #expect(field.options == PromptAssembler.Options(fieldAffordanceRule: true))
-        let locale = try #require(RewriteEvalVariants.build(c, variant: "locale"))
-        #expect(locale.options == PromptAssembler.Options(localeRule: true))
-        let dateTime = try #require(RewriteEvalVariants.build(c, variant: "datetime"))
-        #expect(dateTime.options == PromptAssembler.Options(dateTimeRule: true))
-        let fence = try #require(RewriteEvalVariants.build(c, variant: "fence-strong"))
-        #expect(fence.options == PromptAssembler.Options(strongContextFence: true))
     }
 
     @Test func caseDateTimeReachesInputsInEveryVariant() throws {

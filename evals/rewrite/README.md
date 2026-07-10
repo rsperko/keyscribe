@@ -28,10 +28,7 @@ that wins its eval graduates by making its option unconditional and deleting the
 | `re-anchor` | output-only reminder appended as the system prompt's last line |
 | `screen-terms-re-anchor` | both — the reminder's value only shows when term lists lengthen the system prompt |
 | `field-hint` | destination-field rules from the case's `field` flags (single-line / plain text) |
-| `locale` | "Write in {language}" carries the case's `locale` spelling variant |
 | `user-name` | the case's `userName` hinted as a valid term |
-| `datetime` | the case's `currentDateTime` supplied with a use-only-when-asked rule (case-supplied and fixed, never wall-clock, so date-dependent checks stay deterministic) |
-| `fence-strong` | context-isolation rule reworded to explicitly neutralize instruction-shaped context (the BANANA-injection class) |
 | `temp-0` | baseline prompt at temperature 0 (connections default to 0.2) |
 
 ## Case schema (`cases.json`)
@@ -67,5 +64,22 @@ distance (≤2, phonetic-gated) is single-token only ("postgress" → Postgres).
 never pair to ClaudeCode and a 3-word split can never pair at all — `recall-cloudcode-unpairable`
 exists to keep that limit visible in results. When adding term-recall cases, pick mishearings the
 channel can actually deliver, or you are measuring nothing.
+
+## Known corpus gaps (fix these before trusting the affected verdicts)
+
+- **Field-format cases are too easy.** Every `field-format` case passes at baseline on every model
+  tested, so the `field-hint` variant has never had a failure to fix — its "+0" verdict is
+  *unproven*, not negative. Needed: cases where baseline actually emits markdown or newlines into a
+  constrained field (e.g. explicitly list-shaped dictation with a Markdown-leaning mode prompt).
+- **Passive-echo cases are too easy.** The greeting/name/selection echo probes pass at baseline;
+  only instruction-shaped injection ever failed (now fixed by the graduated fence). Harder passive
+  probes (a name the transcript *almost* mentions, context topically identical to the dictation)
+  would keep the fence honest.
+- **Locale cases conflate two things.** `locale-colour`/`locale-ize` mix inflectional spelling
+  (-ise/-ize — the shipped locale clause fixes these) with lexical variants (catalogue/programme —
+  it does not). Split the checks before judging any future locale-rule refinement.
+- **Repeat noise:** Gemini flakes ~1 attempt in 20 even at temperature 0 (observed: "Postgress"
+  kept once under two variants whose prompts were baseline-identical). Use `--repeat 2`+ and treat
+  any ±1-case delta that doesn't reproduce across models as noise.
 
 Findings and ship/no-ship calls per variant land in `agent_notes/prompt_eval/`.

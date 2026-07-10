@@ -21,10 +21,7 @@ public enum RewriteEvalVariants {
         .init(id: "re-anchor", summary: "Output-only reminder appended as the system prompt's last line."),
         .init(id: "screen-terms-re-anchor", summary: "Screen terms plus the trailing reminder — the reminder's value shows only when term lists lengthen the system prompt."),
         .init(id: "field-hint", summary: "Single-line / plain-text destination-field rules."),
-        .init(id: "locale", summary: "Language rule carries the locale spelling variant."),
         .init(id: "user-name", summary: "The user's name hinted as a valid term."),
-        .init(id: "datetime", summary: "Current date/time supplied with a use-only-when-asked rule."),
-        .init(id: "fence-strong", summary: "Context fence reworded to neutralize instruction-shaped context."),
         .init(id: "temp-0", summary: "Baseline prompt at temperature 0."),
     ]
 
@@ -50,12 +47,6 @@ public enum RewriteEvalVariants {
             options.appendFinalReminder = true
         case "field-hint":
             options.fieldAffordanceRule = true
-        case "locale":
-            options.localeRule = true
-        case "datetime":
-            options.dateTimeRule = true
-        case "fence-strong":
-            options.strongContextFence = true
         default:
             break
         }

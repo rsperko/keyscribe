@@ -15,6 +15,10 @@ struct RewriteRequestBuilder {
     let connection: Connection
     var precedingTextTask: Task<String?, Never>? = nil
     var precedingTextProbe: @MainActor (String) async -> String? = { await ContextProbe.precedingText(forBundleId: $0) }
+    // Clock/locale seam so tests can pin the date/time line and spelling variant.
+    var now: () -> Date = { Date() }
+    var locale: Locale = .current
+    var timeZone: TimeZone = .current
 
     struct Assembled {
         let sized: Connection
@@ -64,13 +68,17 @@ struct RewriteRequestBuilder {
             Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")
         }
 
+        let language = "English"
+        let localeIdentifier = language == "English" ? locale.identifier(.bcp47) : nil
+
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
             tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: fuzzyCandidates,
-            styleRules: styleRules, language: "English",
+            styleRules: styleRules, language: language,
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
-            selectedText: nil, precedingText: precedingText)
+            selectedText: nil, precedingText: precedingText,
+            locale: localeIdentifier, currentDateTime: Self.formattedDateTime(now(), locale: locale, timeZone: timeZone))
 
         // The exact prompt stored in history (design.md §4.7) — tokens, not their originals. Assembled once
         // and handed to RewriteService so the inputs aren't assembled twice.
@@ -80,5 +88,13 @@ struct RewriteRequestBuilder {
         return Assembled(
             sized: sized, inputs: inputs, prompt: assembled, promptForHistory: promptForHistory,
             contextCategories: contextCategories)
+    }
+
+    nonisolated static func formattedDateTime(_ date: Date, locale: Locale, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEEE, MMMM d, yyyy, h:mm a"
+        return "\(formatter.string(from: date)) (\(timeZone.identifier))"
     }
 }
