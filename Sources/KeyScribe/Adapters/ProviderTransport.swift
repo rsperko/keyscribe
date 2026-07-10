@@ -16,7 +16,11 @@ enum ProviderTransportError: Error, CustomStringConvertible {
             return "The keychain would not release the API key for \(ref) — it may be locked or access was denied. Unlock your login keychain or re-authorize the key."
         case .missingBaseURL: return "This connection needs a base URL."
         case .http(let code, let body):
-            if let body, !body.isEmpty { return "The model service returned an error (\(code)): \(body)" }
+            // The stored body is the FULL provider payload (kept parseable for OpenAIAPIError.parse and the
+            // remediation loop); truncate only here, at display time, through the shared snippet cap.
+            if let body, let snippet = ProviderTransport.errorSnippet(from: Data(body.utf8)) {
+                return "The model service returned an error (\(code)): \(snippet)"
+            }
             return "The model service returned an error (\(code))."
         case .badResponse: return "The model service returned an unexpected response."
         case .truncated: return "The model service cut the response off at its length limit."
@@ -80,17 +84,23 @@ struct ProviderTransport: Sendable {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ProviderTransportError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
-            throw ProviderTransportError.http(http.statusCode, body: Self.errorSnippet(from: data, limit: 1000))
+            throw ProviderTransportError.http(http.statusCode, body: Self.errorBody(from: data))
         }
         return data
     }
 
-    // Length-capped snippet of the provider's error payload so a failure shows the provider's own message
-    // (e.g. "invalid model") instead of a bare status code. Provider's response body, never user content.
-    static func errorSnippet(from data: Data, limit: Int = 300) -> String? {
+    // The provider's raw error payload, trimmed but NOT truncated: the error machinery (OpenAIAPIError.parse,
+    // the 400-remediation loop, model-not-found detection) needs valid JSON, so a >1000-char body from a local
+    // vLLM/oMLX server must stay parseable. Display-time truncation happens in ProviderTransportError.description.
+    // Provider's response body, never user content.
+    static func errorBody(from data: Data) -> String? {
         guard let raw = String(data: data, encoding: .utf8) else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return trimmed.count > limit ? String(trimmed.prefix(limit)) + "…" : trimmed
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    // Length-capped snippet of the provider's error payload for display surfaces that want a bounded string.
+    static func errorSnippet(from data: Data, limit: Int = 300) -> String? {
+        errorBody(from: data).map { $0.count > limit ? String($0.prefix(limit)) + "…" : $0 }
     }
 }

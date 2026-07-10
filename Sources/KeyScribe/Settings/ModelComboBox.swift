@@ -42,6 +42,7 @@ struct ModelComboBox: NSViewRepresentable {
     final class Coordinator: NSObject, NSComboBoxDelegate {
         var parent: ModelComboBox
         var allItems: [String] = []
+        private var popupOpen = false
 
         init(_ parent: ModelComboBox) { self.parent = parent }
 
@@ -56,6 +57,7 @@ struct ModelComboBox: NSViewRepresentable {
 
         func comboBoxWillPopUp(_ notification: Notification) {
             MainActor.assumeIsolated {
+                popupOpen = true
                 guard let combo = notification.object as? NSComboBox else { return }
                 let query = combo.currentEditor()?.string ?? combo.stringValue
                 let values = allItems.contains(query) ? allItems : ModelFilter.filter(allItems, query: query)
@@ -63,12 +65,25 @@ struct ModelComboBox: NSViewRepresentable {
             }
         }
 
+        func comboBoxWillDismiss(_ notification: Notification) {
+            MainActor.assumeIsolated { popupOpen = false }
+        }
+
+        // Fires on every keyboard browse through the OPEN list as well as on a confirmed pick, so committing
+        // here directly saves once per arrow key. Defer to the next runloop turn: by then a real pick (mouse
+        // click / Return) has dismissed the popup, while an in-progress browse leaves it open — commit only the
+        // former. Enter and focus-loss are also caught by controlTextDidEndEditing; the value guard dedups.
         func comboBoxSelectionDidChange(_ notification: Notification) {
             MainActor.assumeIsolated {
                 guard let combo = notification.object as? NSComboBox else { return }
                 let index = combo.indexOfSelectedItem
                 guard index >= 0, let value = combo.itemObjectValue(at: index) as? String else { return }
-                commit(value)
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, !self.popupOpen else { return }
+                        self.commit(value)
+                    }
+                }
             }
         }
 

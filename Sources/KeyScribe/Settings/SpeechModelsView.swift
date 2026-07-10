@@ -201,8 +201,10 @@ private struct EngineRow: View {
     private var sizeAndFit: some View {
         HStack(spacing: 6) {
             Text(diskLabel).foregroundStyle(.secondary)
-            Text("·").foregroundStyle(.tertiary)
-            fitClause
+            if fitVerdict != nil {
+                Text("·").foregroundStyle(.tertiary)
+                fitClause
+            }
         }
         .font(.caption2)
         .help(memoryDetailText)
@@ -224,6 +226,8 @@ private struct EngineRow: View {
                 Text("Uses ~\(fmt(peakMemoryBytes)) memory — heavy on this Mac")
             }
             .foregroundStyle(.orange)
+        case .none:
+            EmptyView()
         }
     }
 
@@ -236,22 +240,29 @@ private struct EngineRow: View {
 
     private var peakMemoryBytes: Int64 { row.info.approxMemoryBytes }
 
-    private var fitVerdict: ModelFitVerdict {
-        ModelMemory.verdict(peakBytes: peakMemoryBytes, physicalBytes: ProcessInfo.processInfo.physicalMemory)
+    // Nil when the model's resident footprint is unmeasured (0) — better to show no verdict than a green
+    // "runs comfortably" claim we can't stand behind.
+    private var fitVerdict: ModelFitVerdict? {
+        guard peakMemoryBytes > 0 else { return nil }
+        return ModelMemory.verdict(peakBytes: peakMemoryBytes, physicalBytes: ProcessInfo.processInfo.physicalMemory)
     }
 
     private var memoryDetailText: String {
         guard row.info.approxMemoryBytes > 0 else { return "" }
-        return "Loads into memory only while you dictate — about \(fmt(peakMemoryBytes)) — then releases."
+        return "Uses about \(fmt(peakMemoryBytes)) of memory while the model is loaded."
     }
 
     // VoiceOver can't hover the tooltip, so fold the disk size, the verdict, and the memory detail into one
     // spoken label.
     private var accessibilityStatus: String {
-        let verdict = fitVerdict == .comfortable
-            ? "Runs comfortably on your Mac."
-            : "Uses about \(fmt(peakMemoryBytes)) of memory. Heavy on this Mac."
-        return "\(diskLabel). \(verdict) \(memoryDetailText)"
+        var parts = ["\(diskLabel)."]
+        switch fitVerdict {
+        case .comfortable: parts.append("Runs comfortably on your Mac.")
+        case .heavy: parts.append("Uses about \(fmt(peakMemoryBytes)) of memory. Heavy on this Mac.")
+        case .none: break
+        }
+        if !memoryDetailText.isEmpty { parts.append(memoryDetailText) }
+        return parts.joined(separator: " ")
     }
 
     private func fmt(_ bytes: Int64) -> String {

@@ -133,4 +133,21 @@ struct ReplacementsStageTests {
     @Test func emptyHeardIsIgnored() {
         #expect(run([ReplacementRule(heard: "", replace: "X", isRegex: false)], on: "abc") == "abc")
     }
+
+    // A regex rule with a mid-template (non-terminal) <CR> is invalid config: it is dropped from matching
+    // AND surfaced on droppedForReturnMarker so the host can log the vanished rule.
+    @Test func nonTerminalReturnMarkerRuleIsDroppedAndSurfaced() {
+        let bad = ReplacementRule(heard: "go", replace: "a<CR>b", isRegex: true)
+        let stage = ReplacementsStage(rules: [bad])
+        var ctx = PipelineContext(text: "go now")
+        stage.apply(&ctx)
+        #expect(ctx.text == "go now")
+        #expect(stage.droppedForReturnMarker == [bad])
+    }
+
+    // A terminal <CR> is valid (it presses Return), so it applies and is NOT reported as dropped.
+    @Test func terminalReturnMarkerRuleIsNotReportedAsDropped() {
+        let stage = ReplacementsStage(rules: [ReplacementRule(heard: "go", replace: "x<CR>", isRegex: true)])
+        #expect(stage.droppedForReturnMarker.isEmpty)
+    }
 }

@@ -89,7 +89,7 @@ Rules:
   is a **hint** (dictionary terms are valid, not misspellings) — the model may still transform
   them per the instructions. Both are injected only when present (`design.md` §4.2).
 - The **current date/time** line carries the formatted wall-clock now plus the timezone identifier
-  (e.g. `Friday, July 10, 2026, 9:00 AM (America/Chicago)`), injected for AI modes so a mode that
+  (e.g. `Friday, July 10, 2026 at 9:00 AM (America/Chicago)`), injected for AI modes so a mode that
   asks for "next Friday" or "tomorrow" can resolve it. Its guard — "never insert dates, times, or
   the timezone otherwise" — is load-bearing: without the line, weak models hallucinate dates; without
   the guard, the line itself leaks a date/time into output that never asked for one. The formatted

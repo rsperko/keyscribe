@@ -51,6 +51,9 @@ final class DictationController {
     private var transcribeGate = SingleFlightDeadline()
     private var transcribeBusyStreak = 0
     private var transcribeBusyStreakStartedAt: Double?
+    // Modes whose dropped-for-<CR> replacement rules have already been logged, so a vanished rule is
+    // surfaced once per mode rather than on every dictation.
+    private var loggedReturnMarkerDropModes: Set<String> = []
     private static let transcribeBusyStreakLimit = 3
     private static let transcribeBusyBackstopSeconds: Double = 600
     // A counter, not a flag: several model rows can verify at once, and each holder must keep occupancy up
@@ -1298,7 +1301,24 @@ final class DictationController {
         var outcome = initialOutcome
         switch initialOutcome {
         case .noSpeech:
-            machine.finish(.noSpeech)
+            // A whole-utterance replacement whose entire output is `<CR>` (e.g. "press enter" → Return)
+            // trims to empty text, so there is nothing to insert — but the requested keystroke must still
+            // land. Fire the submit under the same guards as the insert path (real target, focus unmoved).
+            if let submitOverride, transcript.isEmpty {
+                if decision == .insert, await submitTargetStillFocused() {
+                    await submitKey(submitOverride)
+                    outcome = .inserted
+                    machine.finish(.inserted)
+                } else {
+                    // The command WAS heard and the app deliberately declined the Return — that is a refusal,
+                    // not silence. Finish truthfully with the real cause instead of "No speech detected".
+                    let refusal = submitRefusal(for: decision)
+                    finishError(refusal.message, action: refusal.action)
+                    return
+                }
+            } else {
+                machine.finish(.noSpeech)
+            }
         case .inserted, .copied:
             lastResult = transcript
             // Trailing text rides inside the atomic insert (still one ⌘Z). The submit keystroke lands
@@ -1363,6 +1383,20 @@ final class DictationController {
         if decision == .insert { return true }
         log.notice("submit skipped: focus moved before Return (\(String(describing: decision), privacy: .public))")
         return false
+    }
+
+    // Truthful copy for a refused bare-`<CR>` submit, keyed off the guard that declined it (ui_components.md
+    // vocabulary — name the concrete cause, never "secure"/"safe"). `.insert` here means the pre-insert
+    // decision passed but the post-decision focus re-check moved the target out from under the Return.
+    private func submitRefusal(for decision: InsertionDecision) -> (message: String, action: HUDErrorAction?) {
+        switch decision {
+        case .clipboardFallback(.accessibilityDenied):
+            return ("Accessibility is off — \(Branding.appName) can't press Return for you.", .openAccessibilitySettings)
+        case .clipboardFallback(.secureField):
+            return ("Return not sent — the focused field is a password field.", nil)
+        case .clipboardFallback, .insert:
+            return ("Return not sent — the target window changed.", nil)
+        }
     }
 
     // Local history (design.md §4.7): one append per dictation that produced text, unless history is
@@ -1672,6 +1706,7 @@ final class DictationController {
     // fresh here; the text stages are pure config and reused from the plan.
     private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
         var stages = plan.postSTTTextStages(for: mode)
+        logDroppedReturnMarkerRules(in: stages, mode: mode)
         if mode?.commands.liveEdits ?? true {
             stages.append(TokenizingStage.verbatim())
             // Read the clipboard ONLY when the command actually survives to the clipboard stage — an
@@ -1684,6 +1719,17 @@ final class DictationController {
         }
         if (mode?.commands.privacy ?? false) && willRewrite { stages.append(TokenizingStage.redaction()) }
         return Pipeline(stages)
+    }
+
+    // A replacement rule with an unescaped mid-template `<CR>` is invalid config and ReplacementsStage silently
+    // drops it — surface that here (KeyScribeKit has no os.Logger) so a vanished rule is diagnosable. Once per mode.
+    private func logDroppedReturnMarkerRules(in stages: [any PipelineStage], mode: Mode?) {
+        let dropped = stages.compactMap { $0 as? ReplacementsStage }.flatMap(\.droppedForReturnMarker)
+        guard !dropped.isEmpty else { return }
+        guard loggedReturnMarkerDropModes.insert(mode?.id ?? "").inserted else { return }
+        for rule in dropped {
+            Log.config.notice("replacement rule dropped: '\(rule.heard, privacy: .public)' has a <CR> that is not at the end of the replacement — a Return marker is only valid as the final token")
+        }
     }
 
     // Edit-in-place pipeline: the selection IS the content, so no post-STT text stages run — only the

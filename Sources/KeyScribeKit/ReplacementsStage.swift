@@ -32,20 +32,31 @@ public struct ReplacementsStage: PipelineStage {
     // ways we can't cheaply rule out, so every regex is treated as identity-capable.
     private let mayHaveIdentityReplacement: Bool
 
+    // Rules dropped specifically because their expanded template has an unescaped non-terminal `<CR>` (a key
+    // action is only valid at the very end). Surfaced so the host can log a vanished rule — the drop itself is
+    // unchanged. Other drop reasons (unsafe/invalid regex) are not tracked here.
+    public let droppedForReturnMarker: [ReplacementRule]
+
     public init(rules: [ReplacementRule]) {
         self.rules = rules
-        self.prepared = rules.compactMap { rule in
+        var prepared: [(regex: NSRegularExpression, template: String, submit: Mode.Submit?)] = []
+        var droppedForReturnMarker: [ReplacementRule] = []
+        for rule in rules {
             if rule.isRegex {
                 // Case-insensitive by default: match input is STT output, whose casing the engine chooses, so
                 // a case-sensitive pattern would silently miss. Opt back in with an inline `(?-i)`.
                 guard ReplacementSafety.isSafe(rule.heard),
-                      let re = RegexCache.regex(rule.heard, options: [.caseInsensitive]) else { return nil }
+                      let re = RegexCache.regex(rule.heard, options: [.caseInsensitive]) else { continue }
                 // Recognize a terminal `<CR>` submit marker after escape expansion; an unescaped
                 // non-terminal marker is invalid config and drops the rule (agent_notes/replace_with_return).
-                guard let parsed = ReturnSuffix.parse(ReplacementEscapes.expandTemplate(rule.replace)) else { return nil }
-                return (re, parsed.template, parsed.submit)
+                guard let parsed = ReturnSuffix.parse(ReplacementEscapes.expandTemplate(rule.replace)) else {
+                    droppedForReturnMarker.append(rule)
+                    continue
+                }
+                prepared.append((re, parsed.template, parsed.submit))
+                continue
             }
-            guard let first = rule.heard.first, let last = rule.heard.last else { return nil }
+            guard let first = rule.heard.first, let last = rule.heard.last else { continue }
             // `\b` only exists between a word and a non-word char, so wrapping a term whose edge is already
             // punctuation ("/resume", "c++") in `\b` makes it unmatchable. Anchor `\b` only on a word-char
             // edge; a punctuation/space edge stays a plain substring boundary. So "pipe" still skips
@@ -54,10 +65,12 @@ public struct ReplacementsStage: PipelineStage {
             let lead = Self.isWordCharacter(first) ? #"\b"# : ""
             let trail = Self.isWordCharacter(last) ? #"\b"# : ""
             let pattern = "\(lead)\(NSRegularExpression.escapedPattern(for: rule.heard))\(trail)"
-            guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
+            guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { continue }
             // Literal rules are never interpreted: `<CR>` in a literal replacement is inserted verbatim.
-            return (re, NSRegularExpression.escapedTemplate(for: rule.replace), nil)
+            prepared.append((re, NSRegularExpression.escapedTemplate(for: rule.replace), nil))
         }
+        self.prepared = prepared
+        self.droppedForReturnMarker = droppedForReturnMarker
         self.mayHaveIdentityReplacement = rules.contains { rule in
             guard !rule.heard.isEmpty else { return false }
             return rule.isRegex || rule.heard.lowercased() == rule.replace.lowercased()

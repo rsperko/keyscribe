@@ -44,10 +44,6 @@ struct RewriteRequestBuilder {
         let dictionary = plan.mergedDictionary(for: mode)
         let lowerContent = content.lowercased()
         let validTerms = dictionary.filter { lowerContent.contains($0.lowercased()) }
-        // Near-misses the STT left in the content (verbatim terms are validTerms above, not candidates) →
-        // surfaced for the LLM to adjudicate. Capped so a pathological transcript can't bloat the prompt.
-        let fuzzyCandidates = Array(
-            FuzzyCorrector.candidates(content, prepared: FuzzyCorrector.prepare(dictionary)).prefix(10))
 
         // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity is a context
         // channel; the browser URL is a local routing key only, never sent to the LLM (design.md §4.3/§4.4).
@@ -73,7 +69,7 @@ struct RewriteRequestBuilder {
 
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
-            tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: fuzzyCandidates,
+            tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: [],
             styleRules: styleRules, language: language,
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
@@ -94,7 +90,8 @@ struct RewriteRequestBuilder {
         let formatter = DateFormatter()
         formatter.locale = locale
         formatter.timeZone = timeZone
-        formatter.dateFormat = "EEEE, MMMM d, yyyy, h:mm a"
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
         return "\(formatter.string(from: date)) (\(timeZone.identifier))"
     }
 }

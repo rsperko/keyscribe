@@ -109,6 +109,19 @@ struct ProviderTransportTests {
         #expect(snippet?.count == 301)
     }
 
+    // A large provider error body (local vLLM/oMLX servers) must stay parseable: send wires errorBody (the
+    // full payload) into the HTTP error so OpenAIAPIError.parse still recovers error.code/param that the
+    // 400-remediation loop and model-not-found detection depend on. A >1000-char truncation would be invalid
+    // JSON and silently disable both.
+    @Test func errorBodyKeepsLargePayloadParseableBeyond1000Chars() {
+        let padding = String(repeating: "x", count: 1500)
+        let bodyJSON = "{\"error\":{\"message\":\"\(padding)\",\"code\":\"model_not_found\",\"param\":\"model\"}}"
+        #expect(bodyJSON.count > 1000)
+        let body = ProviderTransport.errorBody(from: Data(bodyJSON.utf8))
+        #expect(body?.count == bodyJSON.count)
+        #expect(OpenAIAPIError.parse(body: body)?.indicatesMissingModel == true)
+    }
+
     @Test func sendWiresANon2xxResponseBodyIntoTheHTTPError() async {
         ErrorStubProtocol.response = (404, Data(#"{"error":"model not found"}"#.utf8))
         defer { ErrorStubProtocol.response = nil }
