@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // System sleep suspends CoreAudio, so the resident capture engine's cached device binding is stale on
     // wake. Refresh it while idle (off the hot path) so the first post-wake dictation binds cleanly.
     private var wakeObserver: NSObjectProtocol?
+    private var lockMonitor: SessionLockMonitor?
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
     // launch. With neither set, lifecycle and bootstrap behave exactly as without them.
@@ -239,6 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.controller.refreshCaptureBinding() }
         }
+
+        lockMonitor = SessionLockMonitor { [weak self] in self?.controller.handleScreenLocked() }
     }
 
     // First-run only: before KeyScribe seeds or loads any config, let an injected importer populate the
@@ -333,6 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleHotkeyAction(_ id: String) {
+        guard !SessionLockMonitor.isSessionLocked() else { return }
         switch HotkeyAction(rawValue: id) {
         case .addVocabulary: correctionPanel.present()
         case .pasteLast: controller.pasteLast()

@@ -40,6 +40,7 @@ final class DictationController {
     private let frontmostBundleId: @MainActor () -> String?
     private let precedingTextProbe: @MainActor (String) async -> String?
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
+    private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
     // Durable sink for a model-load failure surviving both retries. Injected so tests assert it was
     // recorded without touching the real diagnostics file.
@@ -281,6 +282,7 @@ final class DictationController {
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
             InstalledEngineFilter.shouldRun(engineId: engine.id)
         },
+        isSessionLocked: @escaping @MainActor () -> Bool = { SessionLockMonitor.isSessionLocked() },
         llmClient: any LLMClient = HTTPLLMClient(),
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
@@ -307,6 +309,7 @@ final class DictationController {
         self.frontmostBundleId = frontmostBundleId
         self.precedingTextProbe = precedingTextProbe
         self.activeEngineUsable = activeEngineUsable
+        self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -529,6 +532,11 @@ final class DictationController {
     }
 
     func handleStart(triggerKey: String? = nil) {
+        // The trigger is a bare modifier event tap with no notion of session state; a key used to
+        // wake/unlock the machine can fire it while the login window still owns the console. Never
+        // arm the mic while the screen is locked — for a privacy-first app, no audio may be captured
+        // while locked. Silent return, same shape as the beginArming guard.
+        guard !isSessionLocked() else { return }
         guard machine.beginArming() else { return }
         hideTask?.cancel()
         idleEvictionTask?.cancel()
@@ -1682,6 +1690,13 @@ final class DictationController {
         // returns nil). Otherwise every press-then-cancel leaks a temp WAV until the OS reclaims it.
         if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
         finish(machine: .cancel, cue: .cancel, state: .hidden)
+    }
+
+    // The screen locked mid-dictation (lid close / hot corner). Cancel any in-flight capture so the
+    // mic stops immediately and its temp WAV is deleted — no locked-screen audio survives.
+    func handleScreenLocked() {
+        guard machine.isBusy else { return }
+        cancel()
     }
 
     func insertLocalTranscriptNow() {
