@@ -1231,14 +1231,14 @@ final class DictationController {
             clearRewriteEscapeHatch()
             finishError(message, action: action)   // applies eviction internally
 
-        case .insert(let transcript, let bare):
-            await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare)
+        case .insert(let transcript, let bare, let submit):
+            await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare, submitOverride: submit)
         }
     }
 
     private func finishInsertion(
         transcript: String, heard: String, transformed: String? = nil, rewrite: RewriteDetails?,
-        bare: Bool = false
+        bare: Bool = false, submitOverride: Mode.Submit? = nil
     ) async {
         clearRewriteEscapeHatch()
         // Guarded transition: another terminal path may already have won the race.
@@ -1265,8 +1265,11 @@ final class DictationController {
             // OUTSIDE that atom and only on a verified insert — never .copied, where a synthesized Return
             // would hit whatever app is now focused instead of the target the text reached.
             let trailing = bare ? .none : (activeMode?.trailing ?? .none)
+            // A `<CR>` on a whole-utterance replacement overrides the mode's standing submit for this
+            // insert only; absent an override the mode's submit behaves exactly as before.
+            let submit = submitOverride ?? activeMode?.submit ?? .none
             // Await the paste's clipboard settle inline only when a submit Return must land after ⌘V.
-            let submitFollows = initialOutcome == .inserted && (activeMode?.submit ?? .none) != .none
+            let submitFollows = initialOutcome == .inserted && submit != .none
             let insertStart = DispatchTime.now()
             let actuated = await insert(decision, activeMode?.insertion ?? .paste, activeMode?.clipboardModifier ?? .command, transcript + trailing.suffix(after: transcript), submitFollows)
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
@@ -1274,7 +1277,7 @@ final class DictationController {
                 // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"
                 // (lastResult is set). Never fire submit against a paste that did not happen.
                 outcome = .failed
-            } else if initialOutcome == .inserted, let submit = activeMode?.submit, submit != .none,
+            } else if initialOutcome == .inserted, submit != .none,
                       await submitTargetStillFocused() {
                 await submitKey(submit)
             }
@@ -1399,8 +1402,9 @@ final class DictationController {
     }
 
     private enum FinalText {
-        // `bare` ⇒ a whole-utterance replacement: insert verbatim, suppress trim + trailing.
-        case insert(String, bare: Bool)
+        // `bare` ⇒ a whole-utterance replacement: insert verbatim, suppress trim + trailing. `submit`
+        // is a `<CR>`-requested Return that overrides the mode's submit for this insert only.
+        case insert(String, bare: Bool, submit: Mode.Submit?)
         // leave the target untouched; surface this message, optionally with a repair action
         case abort(String, HUDErrorAction?)
     }
@@ -1415,7 +1419,7 @@ final class DictationController {
             log.error("insert aborted: unrestored sentinel token survived the restore pass")
             return .abort("Dictation could not be completed — please try again", nil)
         }
-        return .insert(text, bare: false)
+        return .insert(text, bare: false, submit: nil)
     }
 
     static func shouldAbortInsertion(text: String, issuedTokens: [String]) -> Bool {
@@ -1464,8 +1468,8 @@ final class DictationController {
         // trailing/trim shaping. Detected at the replacements stage and surfaced on the payload.
         if let bare = payload.bareReplacement {
             building.stageMillis[.localProcess] = elapsedMs(since: localStart)
-            building.fingerprints[.localProcessed] = .of(bare)
-            return (.insert(bare, bare: true), nil, bare)
+            building.fingerprints[.localProcessed] = .of(bare.text)
+            return (.insert(bare.text, bare: true, submit: bare.submit), nil, bare.text)
         }
 
         // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
@@ -1690,8 +1694,8 @@ final class DictationController {
         switch guardedInsert(transcript, issuedTokens: issuedTokens) {
         case .abort(let message, let action):
             finishError(message, action: action)
-        case .insert(let final, let bare):
-            Task { await self.finishInsertion(transcript: final, heard: heard, transformed: transcript, rewrite: rewrite, bare: bare) }
+        case .insert(let final, let bare, let submit):
+            Task { await self.finishInsertion(transcript: final, heard: heard, transformed: transcript, rewrite: rewrite, bare: bare, submitOverride: submit) }
         }
     }
 

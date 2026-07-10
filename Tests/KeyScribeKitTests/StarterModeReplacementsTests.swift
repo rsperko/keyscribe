@@ -79,7 +79,7 @@ struct StarterModeReplacementsTests {
     @Test func messageShrugEmojiAloneClampsToTheBareEmoticon() {
         var ctx = PipelineContext(text: "Shrug emoji.")
         ReplacementsStage(rules: rules("message")).apply(&ctx)
-        #expect(ctx.bareReplacement == #"¯\_(ツ)_/¯"#)
+        #expect(ctx.bareReplacement?.text == #"¯\_(ツ)_/¯"#)
     }
 
     // The stub is deliberately a placeholder — saying the phrase once shows the user exactly what to

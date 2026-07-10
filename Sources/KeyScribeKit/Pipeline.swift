@@ -21,9 +21,21 @@ public enum StageOrder {
     public static let fuzzy = 30
 }
 
+// A whole-utterance replacement: one rule owned the entire utterance, so its generated value is inserted
+// verbatim (bypassing the LLM and trim/trailing). `submit` is set iff that rule's regex template ended in
+// a `<CR>` marker, requesting a physical Return after the insert (agent_notes/replace_with_return).
+public struct BareReplacement: Sendable, Equatable {
+    public let text: String
+    public let submit: Mode.Submit?
+    public init(text: String, submit: Mode.Submit? = nil) {
+        self.text = text
+        self.submit = submit
+    }
+}
+
 public struct PipelineContext: Sendable {
     public var text: String
-    public var bareReplacement: String?
+    public var bareReplacement: BareReplacement?
     public init(text: String) { self.text = text }
 }
 
@@ -48,9 +60,9 @@ public extension PipelineStage {
 public struct TokenizedPayload: Sendable {
     public let text: String
     public let issuedTokens: [String]
-    public let bareReplacement: String?
+    public let bareReplacement: BareReplacement?
 
-    init(text: String, issuedTokens: [String], bareReplacement: String? = nil) {
+    init(text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil) {
         self.text = text
         self.issuedTokens = issuedTokens
         self.bareReplacement = bareReplacement

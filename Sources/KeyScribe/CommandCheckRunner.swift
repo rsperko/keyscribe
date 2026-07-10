@@ -95,7 +95,7 @@ enum CommandCheckRunner {
         stages.append(TokenizingStage.clipboard(read: { clipboard }))
         let pipeline = Pipeline(stages)
         let payload = pipeline.forward(transcript)
-        if let bare = payload.bareReplacement { return bare }
+        if let bare = payload.bareReplacement { return bare.text }
         return pipeline.restore(payload.text)
     }
 

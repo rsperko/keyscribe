@@ -40,7 +40,7 @@ struct VocabularyConfigTests {
         var ctx = PipelineContext(text: "insert code fence")
         ReplacementsStage(rules: rules).apply(&ctx)
         #expect(ctx.text == "```\n")
-        #expect(ctx.bareReplacement == "```\n")
+        #expect(ctx.bareReplacement?.text == "```\n")
     }
 
     @Test func literalRuleThroughTomlLeavesEscapeUninterpreted() throws {
@@ -71,7 +71,7 @@ struct VocabularyConfigTests {
         #expect(reloaded.rules[0].replace == #"```\n"#)
         var ctx = PipelineContext(text: "insert code fence")
         ReplacementsStage(rules: reloaded.toRules()).apply(&ctx)
-        #expect(ctx.bareReplacement == "```\n")
+        #expect(ctx.bareReplacement?.text == "```\n")
     }
 
     @Test func missingSchemaVersionThrows() {

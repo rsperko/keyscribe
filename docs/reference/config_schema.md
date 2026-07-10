@@ -400,6 +400,29 @@ How a rule behaves once it matches:
   correction or a chain of rules whose outputs combine — only an explicit replacement that consumed
   the entire utterance.
 
+- **A regex replacement can press Return with a terminal `<CR>`.** Appending `<CR>` to the *end* of a
+  **regex** replacement template requests a physical **Return** key press after the whole-utterance
+  insert — for a command like `slash resume` → `/resume` that then runs, sends, or activates a default
+  control:
+
+  ```toml
+  [[rules]]
+  heard = 'slash resume'
+  replace = '/resume<CR>'   # inserts /resume, then presses Return
+  regex = true
+  ```
+
+  - `<CR>` is stripped from the inserted text (with any whitespace right before it) — it never appears
+    as literal text, and never reaches the AI rewrite. Capture expansion still works: `'/$1<CR>'`.
+  - It is honored **only** when the rule owns the whole utterance (the bare path above). In the middle
+    of a longer sentence the rule does its ordinary text replacement and presses nothing.
+  - It is recognized **only** in a regex rule and **only** at the very end. `<CR>` in a *literal* rule
+    is inserted verbatim; a `<CR>` anywhere but the end of a regex template is invalid and the rule is
+    ignored. Write `\<CR>` to emit the literal text `<CR>` in a regex replacement.
+  - The Return is a real key press, **not** a guaranteed "send" — its effect depends on the focused
+    target. It fires only after the text verifiably lands (never on a clipboard fallback, a password
+    field, or if focus moved), and `replace = '<CR>'` alone presses nothing (empty output → no-speech).
+
 ### `settings.toml` — general
 ```toml
 schema_version = 1

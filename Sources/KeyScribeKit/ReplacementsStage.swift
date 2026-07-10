@@ -24,7 +24,7 @@ public struct ReplacementsStage: PipelineStage {
 
     // Regex + template resolved once at construction, so the per-dictation path is just matching. Invalid or
     // unsafe rules are dropped here.
-    private let prepared: [(regex: NSRegularExpression, template: String)]
+    private let prepared: [(regex: NSRegularExpression, template: String, submit: Mode.Submit?)]
 
     // When the transform leaves text unchanged, the only possible whole-utterance owner is an *identity*
     // replacement (output == matched span); absent any such rule we skip the whole-utterance scan. A literal
@@ -40,7 +40,10 @@ public struct ReplacementsStage: PipelineStage {
                 // a case-sensitive pattern would silently miss. Opt back in with an inline `(?-i)`.
                 guard ReplacementSafety.isSafe(rule.heard),
                       let re = RegexCache.regex(rule.heard, options: [.caseInsensitive]) else { return nil }
-                return (re, ReplacementEscapes.expandTemplate(rule.replace))
+                // Recognize a terminal `<CR>` submit marker after escape expansion; an unescaped
+                // non-terminal marker is invalid config and drops the rule (agent_notes/replace_with_return).
+                guard let parsed = ReturnSuffix.parse(ReplacementEscapes.expandTemplate(rule.replace)) else { return nil }
+                return (re, parsed.template, parsed.submit)
             }
             guard let first = rule.heard.first, let last = rule.heard.last else { return nil }
             // `\b` only exists between a word and a non-word char, so wrapping a term whose edge is already
@@ -52,7 +55,8 @@ public struct ReplacementsStage: PipelineStage {
             let trail = Self.isWordCharacter(last) ? #"\b"# : ""
             let pattern = "\(lead)\(NSRegularExpression.escapedPattern(for: rule.heard))\(trail)"
             guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
-            return (re, NSRegularExpression.escapedTemplate(for: rule.replace))
+            // Literal rules are never interpreted: `<CR>` in a literal replacement is inserted verbatim.
+            return (re, NSRegularExpression.escapedTemplate(for: rule.replace), nil)
         }
         self.mayHaveIdentityReplacement = rules.contains { rule in
             guard !rule.heard.isEmpty else { return false }
@@ -91,7 +95,7 @@ public struct ReplacementsStage: PipelineStage {
     // punctuation/space (so a stray STT "slash dog." still clamps). The clamped value is the rule's generated
     // output; we clamp only when running every rule over the core reproduces exactly that value, so a second
     // rule mutating the owner's output falls through to the normal path.
-    public func bareReplacement(for input: String, transformedInput: String? = nil) -> String? {
+    public func bareReplacement(for input: String, transformedInput: String? = nil) -> BareReplacement? {
         let (core, leading, trailing) = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
         // A protected token (verbatim/clipboard) means no single rule cleanly owns the utterance — fall
@@ -99,27 +103,28 @@ public struct ReplacementsStage: PipelineStage {
         guard !SentinelText.containsSentinel(core) else { return nil }
         // core == input ⇒ reuse the transform we already ran.
         let reusable = (transformedInput != nil && core == input) ? transformedInput : nil
-        if let generated = wholeUtteranceOutput(of: core, transformedInput: reusable) {
-            return leading + generated + trailing
+        if let owned = wholeUtteranceOutput(of: core, transformedInput: reusable) {
+            return BareReplacement(text: leading + owned.text + trailing, submit: owned.submit)
         }
         // A mid-utterance pause is sentence punctuation the contiguous match can't cross; retry across a
         // de-paused core (whole-utterance only — still requires an end-to-end match).
         let dePaused = Self.dePause(core)
-        if dePaused != core, let generated = wholeUtteranceOutput(of: dePaused, transformedInput: nil) {
-            return leading + generated + trailing
+        if dePaused != core, let owned = wholeUtteranceOutput(of: dePaused, transformedInput: nil) {
+            return BareReplacement(text: leading + owned.text + trailing, submit: owned.submit)
         }
         return nil
     }
 
-    // One rule matches `core` end-to-end AND every rule over `core` reproduces that output, else nil.
-    private func wholeUtteranceOutput(of core: String, transformedInput: String?) -> String? {
+    // One rule matches `core` end-to-end AND every rule over `core` reproduces that output, else nil. The
+    // owning rule's `<CR>` submit (if any) rides along so a whole-utterance command can press Return.
+    private func wholeUtteranceOutput(of core: String, transformedInput: String?) -> (text: String, submit: Mode.Submit?)? {
         let coreRange = NSRange(core.startIndex..., in: core)
         for rule in prepared {
             guard let match = rule.regex.firstMatch(in: core, range: coreRange), match.range == coreRange else { continue }
             let generated = SentinelText.neutralizeOpen(
                 rule.regex.replacementString(for: match, in: core, offset: 0, template: rule.template))
             let coreTransformed = transformedInput ?? transform(core)
-            return coreTransformed == generated ? generated : nil
+            return coreTransformed == generated ? (generated, rule.submit) : nil
         }
         return nil
     }
