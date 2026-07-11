@@ -229,6 +229,7 @@ enum AccessibilityID {
 
     enum History {
         static let list = "history.list"
+        static let row = "history.list.row"
         static let search = "history.search"
         static let export = "history.action.export"
         static let stagePicker = "history.detail.stagePicker"

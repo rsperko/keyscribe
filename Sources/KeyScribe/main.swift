@@ -82,6 +82,8 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
       --setup-permissions     Present the permissions-only setup flow.
       --resume-onboarding     Resume the full onboarding wizard after the permission relaunch
                               (set automatically by that relaunch; not meant to be run by hand).
+      --open-settings         Open the Settings window on launch (used by the UI test suite to land
+                              in a known state instead of driving the status-bar menu).
     """)
     exit(0)
 }

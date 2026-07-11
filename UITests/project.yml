@@ -1,0 +1,32 @@
+name: KeyScribeUITests
+options:
+  bundleIdPrefix: com.keyscribe
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "KeyScribe Local"
+    SWIFT_VERSION: "6.0"
+
+targets:
+  KeyScribeUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: KeyScribeUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.keyscribe.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "KeyScribe Local"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+    scheme:
+      testTargets:
+        - KeyScribeUITests
+      gatherCoverageData: false

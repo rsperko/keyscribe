@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
     private let forceResumeOnboarding = CommandLine.arguments.contains("--resume-onboarding")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
+    private let openSettingsOnLaunch = CommandLine.arguments.contains("--open-settings")
     private let hudPreview = HUDPreview.state(from: CommandLine.arguments)
 
     func applicationWillTerminate(_: Notification) {
@@ -222,6 +223,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: firstRunKey)
         } else {
             presentFirstRun()
+        }
+
+        if openSettingsOnLaunch {
+            // Test/dev flag: open the Settings window on launch so a UI test lands in a known state
+            // instead of driving the LSUIElement status menu. Promote to a regular (Dock) app first so
+            // XCUITest reliably sees the process reach the foreground -- an LSUIElement (.accessory) app
+            // can stay "Running Background" through a cold-launch activate, timing out launch().
+            NSApp.setActivationPolicy(.regular)
+            settingsController.present()
+            // A cold-launched agent app can settle back into the background before its first window takes
+            // focus (the launching test harness is not frontmost), so re-assert activation once AppKit has
+            // finished bringing the process up -- otherwise XCUITest's launch() times out on foreground.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                self?.settingsController.present()
+            }
         }
 
         // Warm the HUD window, audio unit, and resolved config so the FIRST dictation doesn't pay their

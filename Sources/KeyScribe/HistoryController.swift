@@ -356,6 +356,7 @@ struct HistoryPaneView: View {
                     Section(group.day) {
                         ForEach(group.rows) { row in
                             HistoryRowView(entry: row.entry).tag(row.id)
+                                .accessibilityIdentifier(AccessibilityID.History.row)
                         }
                     }
                 }
