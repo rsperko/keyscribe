@@ -10,7 +10,6 @@ struct GeneralSettingsView: View {
     var plainDictationTrigger: KeyDescriptor?
     var onOpenPlainDictation: () -> Void = {}
     @State private var shortcutsExpanded = false
-    @State private var advancedModelExpanded = false
 
     var body: some View {
         Form {
@@ -94,20 +93,6 @@ struct GeneralSettingsView: View {
                 }
             } header: {
                 Text("Shortcuts")
-            }
-
-            Section("Performance") {
-                DisclosureSection(isExpanded: $advancedModelExpanded) {
-                    DisclosureSummaryLabel(title: "Keep speech recognition ready", summary: model.evictionSummary)
-                } content: {
-                    Picker("When idle", selection: $model.eviction) {
-                        ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
-                    }
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.eviction)
-                    Text(model.evictionFooter)
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier(AccessibilityID.Settings.General.advancedModelBehavior)
             }
 
         }

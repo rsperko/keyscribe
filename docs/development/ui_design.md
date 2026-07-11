@@ -406,20 +406,28 @@ disclosures:
   that collides with a higher-precedence hotkey, such as a Mode trigger, shows an inline **shadowed**
   breadcrumb and will not fire — mode triggers win.
 
-The warm-up tier lives behind a `Keep speech recognition ready` disclosure within the Performance section
-(collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
+The warm-up tier lives behind a `Keep speech recognition ready` disclosure in Speech Models'
+Performance section (collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff (it governs both the STT model's memory
 residency and idle microphone warm-up), not as cache terminology. The footer copy **never shows a raw
 byte count** — it describes behavior, not size.
 
 ### Speech Models
 
-Each engine is represented by an `Engine card` with status, language coverage, on-device badge,
-space requirement, lifecycle action, and a clear active selection.
+The first level is intentionally quiet: the active model, its language coverage and a short
+plain-language reason it is a good choice, plus a **Change…** action. Performance belongs here
+too: **Keep speech recognition ready** controls the selected engine's idle memory and microphone
+warm-up behavior.
 
-Exactly one active engine is visually enforced. Downloaded-but-inactive engines are available
-but never look simultaneously selected. Model deletion requires confirmation only when it is
-the active engine or leaves no usable engine.
+**Change…** enters an in-pane master/detail chooser. The left list leads with the recommended
+model and shows only model names plus ready/download status; it has no radio controls or per-row
+actions. Selecting a model fills the right detail pane with its best-use description, language
+coverage, disk requirement, and light/moderate/high memory use. The detail pane contains the one
+primary lifecycle action: **Current model**, **Use This Model**, **Download**, or its live
+install/test state. Downloaded models do not become active until **Use This Model** is pressed.
+The detail pane's named **Model actions…** menu holds testing, deletion, reinstall, and
+dictionary-recognition tuning. Exactly one active engine is visually enforced, and deleting it
+still requires confirmation.
 
 ### Dictionary and Replacements
 

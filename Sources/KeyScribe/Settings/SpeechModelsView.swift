@@ -3,22 +3,20 @@ import KeyScribeKit
 
 struct SpeechModelsView: View {
     @ObservedObject var model: SpeechModelsModel
+    @ObservedObject var settings: SettingsModel
+    @State private var choosingModel = false
+    @State private var selectedModelID: String?
+    @State private var modelBehaviorExpanded = false
+    @State private var modelActionsExpanded = false
 
     var body: some View {
-        Form {
-            Section { activeBanner }
-            Section {
-                Text("\(Branding.appName) runs one speech model at a time, entirely on this Mac, before any AI step. Pick it here.")
-                    .font(.caption).foregroundStyle(.secondary)
-                ForEach(model.rows) { row in
-                    EngineRow(row: row, model: model)
-                }
+        Group {
+            if choosingModel {
+                chooser
+            } else {
+                overview
             }
-            .accessibilityIdentifier(AccessibilityID.Settings.Speech.list)
         }
-        .formStyle(.grouped)
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .confirmationDialog(
             "Delete this speech model?",
             isPresented: Binding(
@@ -37,18 +35,285 @@ struct SpeechModelsView: View {
         }
     }
 
-    private var activeBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "checkmark.seal.fill").foregroundStyle(.tint).font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(Branding.appName) uses \(model.activeName)").font(.headline)
-                Text("Used for every dictation, before any AI step.")
-                    .font(.caption).foregroundStyle(.secondary)
+    private var overview: some View {
+        Form {
+            Section("Speech recognition") {
+                activeModel
+            }
+            Section("Performance") {
+                DisclosureSection(isExpanded: $modelBehaviorExpanded) {
+                    DisclosureSummaryLabel(title: "Keep speech recognition ready", summary: settings.evictionSummary)
+                } content: {
+                    Picker("When idle", selection: $settings.eviction) {
+                        ForEach(settings.evictions, id: \.id) { Text($0.label).tag($0.id) }
+                    }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.eviction)
+                    Text(settings.evictionFooter)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.advancedModelBehavior)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var activeModel: some View {
+        let row = activeRow
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(.tint)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row?.info.displayName ?? model.activeName).font(.headline)
+                Text("\(languageScope(row?.info)) · Ready")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let row {
+                    Text(SpeechModelChoiceCopy.bestFor(row.info))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
+            Button("Change…") {
+                selectedModelID = activeRow?.id
+                choosingModel = true
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier(AccessibilityID.Settings.Speech.change)
         }
         .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var chooser: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button("Back") { choosingModel = false }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.back)
+                Text("Choose a speech model")
+                    .font(.title3.bold())
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            HStack(spacing: 0) {
+                List(selection: $selectedModelID) {
+                    Section("Recommended") {
+                        choiceListRow(recommendedRow)
+                    }
+                    Section("Other models") {
+                        ForEach(otherRows) { choiceListRow($0) }
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.list)
+                .frame(width: 240)
+
+                Divider()
+
+                Group {
+                    if let selectedRow {
+                        choiceDetail(selectedRow)
+                            .id(selectedRow.id)
+                    } else {
+                        ContentUnavailableView("Choose a model", systemImage: "waveform")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .onAppear {
+            if selectedModelID == nil { selectedModelID = activeRow?.id }
+        }
+    }
+
+    private func choiceListRow(_ row: SpeechModelsModel.Row) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.info.displayName)
+                Text(listStatus(row))
+                    .font(.caption)
+                    .foregroundStyle(row.isActive
+                        ? AnyShapeStyle(.tint)
+                        : AnyShapeStyle(.secondary))
+            }
+            Spacer(minLength: 0)
+            if row.isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.tint)
+                    .accessibilityLabel("Current model")
+            }
+        }
+        .tag(row.id)
+        .accessibilityIdentifier(AccessibilityID.Settings.Speech.row(row.id))
+    }
+
+    private func choiceDetail(_ row: SpeechModelsModel.Row) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: row.isActive ? "checkmark.seal.fill" : "waveform")
+                    .font(.title2)
+                    .foregroundStyle(row.isActive
+                        ? AnyShapeStyle(.tint)
+                        : AnyShapeStyle(.secondary))
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(row.info.displayName).font(.title2.bold())
+                        if row.info.isDefaultEnglish { SpeechBadge(text: "Recommended", prominent: true) }
+                    }
+                    Text(SpeechModelChoiceCopy.bestFor(row.info))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow {
+                    Text("Languages").foregroundStyle(.secondary)
+                    Text(languageScope(row.info))
+                }
+                GridRow {
+                    Text("Storage").foregroundStyle(.secondary)
+                    Text(storageLabel(row))
+                }
+                GridRow {
+                    Text("Memory").foregroundStyle(.secondary)
+                    Text(memoryLabel(row.info))
+                }
+            }
+            .font(.callout)
+
+            if let error = row.errorText {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+
+            Divider()
+
+            primaryAction(for: row)
+
+            if hasModelActions(row) {
+                DisclosureGroup("Advanced", isExpanded: $modelActionsExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        modelActions(for: row)
+                    }
+                    .padding(.top, 8)
+                }
+                .font(.callout)
+            }
+        }
+        .padding(28)
+    }
+
+    @ViewBuilder private func primaryAction(for row: SpeechModelsModel.Row) -> some View {
+        switch SpeechModelChoiceCopy.primaryAction(
+            isActive: row.isActive,
+            isUsable: row.isUsable,
+            isDownloading: row.downloadFraction != nil,
+            isVerifying: row.verifying,
+            verificationFailed: row.verificationFailed
+        ) {
+        case .current:
+            Label("Current model", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.tint)
+        case .use:
+            Button("Use This Model") {
+                model.select(row.id)
+                choosingModel = false
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
+        case .download:
+            Button("Download") { model.startDownload(row.id) }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
+        case .downloading:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(row.downloadPhase ?? "Downloading…")
+            }
+        case .testing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Testing model…")
+            }
+        case .testAgain:
+            Button("Test Again") { model.test(row.id) }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.testAgain(row.id))
+        }
+    }
+
+    @ViewBuilder private func modelActions(for row: SpeechModelsModel.Row) -> some View {
+        if row.info.supportsRecognitionBias {
+            Toggle("Use dictionary during recognition", isOn: recognitionBiasBinding(for: row))
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.recognitionBias(row.id))
+        }
+        if row.isUsable {
+            Button("Test model") { model.test(row.id) }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.test(row.id))
+        }
+        if row.verificationFailed && !row.info.systemManaged {
+            Button("Reinstall model") { model.reinstall(row.id) }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.reinstall(row.id))
+        }
+        if !row.info.systemManaged && (row.isUsable || row.verificationFailed) {
+            Button("Delete model", role: .destructive) { model.requestDelete(row.id) }
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.delete(row.id))
+        }
+    }
+
+    private var activeRow: SpeechModelsModel.Row? {
+        model.rows.first(where: { $0.isActive })
+    }
+
+    private var selectedRow: SpeechModelsModel.Row? {
+        model.rows.first { $0.id == selectedModelID }
+    }
+
+    private var recommendedRow: SpeechModelsModel.Row {
+        model.rows.first(where: { $0.info.isDefaultEnglish }) ?? model.rows[0]
+    }
+
+    private var otherRows: [SpeechModelsModel.Row] {
+        model.rows.filter { $0.id != recommendedRow.id }
+    }
+
+    private func recognitionBiasBinding(for row: SpeechModelsModel.Row) -> Binding<Bool> {
+        Binding(
+            get: { row.recognitionBiasOn },
+            set: { model.setRecognitionBias($0, for: row.id) })
+    }
+
+    private func hasModelActions(_ row: SpeechModelsModel.Row) -> Bool {
+        row.info.supportsRecognitionBias || row.isUsable || (!row.info.systemManaged && row.verificationFailed)
+    }
+
+    private func listStatus(_ row: SpeechModelsModel.Row) -> String {
+        if row.isActive { return "Current" }
+        if row.downloadFraction != nil { return "Downloading" }
+        if row.verifying { return "Testing" }
+        if row.verificationFailed { return "Needs attention" }
+        return row.isUsable ? "Ready" : "Download available"
+    }
+
+    private func languageScope(_ info: SpeechModelInfo?) -> String {
+        guard let info else { return "Speech recognition" }
+        return info.languageCount <= 1 ? "English" : "\(info.languageCount) languages"
+    }
+
+    private func storageLabel(_ row: SpeechModelsModel.Row) -> String {
+        if row.info.systemManaged { return "Built into macOS" }
+        let bytes = row.installedBytes ?? row.info.approxDownloadBytes
+        let label = row.isUsable ? "on disk" : "download"
+        return "\(ByteCountFormatter.fileStyle.string(fromByteCount: bytes)) \(label)"
+    }
+
+    private func memoryLabel(_ info: SpeechModelInfo) -> String {
+        SpeechModelChoiceCopy.memoryUse(for: info)
     }
 }
 
@@ -59,247 +324,9 @@ private struct SpeechBadge: View {
     var body: some View {
         Text(text)
             .font(.caption2)
-            .padding(.horizontal, 6).padding(.vertical, 2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
             .background(prominent ? AnyShapeStyle(.tint.opacity(0.2)) : AnyShapeStyle(.quaternary), in: Capsule())
             .foregroundStyle(prominent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-    }
-}
-
-private struct EngineRow: View {
-    let row: SpeechModelsModel.Row
-    @ObservedObject var model: SpeechModelsModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: icon)
-                    .font(.title2).foregroundStyle(.secondary).frame(width: 26)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(row.info.displayName).font(.headline)
-                        if row.info.isDefaultEnglish { SpeechBadge(text: "Recommended", prominent: true) }
-                        SpeechBadge(text: row.info.languageCount <= 1 ? "English" : "Multilingual")
-                        Spacer(minLength: 0)
-                        if row.isActive {
-                            Label("In use", systemImage: "checkmark.circle.fill")
-                                .font(.caption).foregroundStyle(.tint).labelStyle(.titleAndIcon)
-                        }
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(row.info.summary).font(.callout).foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                        Text(languageScope).font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            if row.info.supportsRecognitionBias {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle(isOn: recognitionBiasBinding) {
-                        Text("Use dictionary during recognition").font(.caption)
-                    }
-                    .toggleStyle(.checkbox)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.recognitionBias(row.id))
-                    Text("Guides this model toward your dictionary terms as it listens. Rarely, it may "
-                         + "prefer a term over a similar-sounding phrase — turn this off if that happens "
-                         + "with your voice.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.leading, 36)
-            }
-
-            if let frac = row.downloadFraction {
-                VStack(alignment: .leading, spacing: 2) {
-                    ProgressView(value: frac).controlSize(.small)
-                    HStack {
-                        Text(row.downloadPhase ?? "Downloading…")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(Int((frac * 100).rounded()))%")
-                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if row.verifying {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Testing model…").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            if row.verificationFailed {
-                Label("Failed its self-test", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.red)
-            }
-            if row.testPassed {
-                Label("Passed its self-test", systemImage: "checkmark.circle.fill")
-                    .font(.caption).foregroundStyle(.green)
-            }
-            if let err = row.errorText {
-                Text(err).font(.caption).foregroundStyle(.red).lineLimit(2)
-            }
-
-            HStack {
-                statusFooter
-                Spacer()
-                actions
-            }
-        }
-        .padding(.vertical, 4)
-        .overlay(alignment: .leading) {
-            if row.isActive {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.accentColor)
-                    .frame(width: 3)
-                    .padding(.vertical, 2)
-                    .offset(x: -8)
-            }
-        }
-        .accessibilityIdentifier(AccessibilityID.Settings.Speech.row(row.id))
-    }
-
-    private var recognitionBiasBinding: Binding<Bool> {
-        Binding(
-            get: { row.recognitionBiasOn },
-            set: { model.setRecognitionBias($0, for: row.id) })
-    }
-
-    private var icon: String {
-        switch row.info.kind {
-        case .apple: "apple.logo"
-        default: "waveform"
-        }
-    }
-
-    private var languageScope: String {
-        row.info.languageCount <= 1 ? "English" : "\(row.info.languageCount) languages"
-    }
-
-    @ViewBuilder private var statusFooter: some View {
-        if row.verificationFailed {
-            if let bytes = row.installedBytes {
-                Text("On disk · \(fmt(bytes))")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        } else if row.downloadFraction != nil || row.verifying {
-            EmptyView()
-        } else if row.info.systemManaged {
-            if row.isUsable {
-                Text("Built into macOS · No download, needs almost no memory")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.sizeStatus(row.id))
-            }
-        } else {
-            sizeAndFit
-        }
-    }
-
-    // One quiet line: the familiar disk figure, then a plain verdict answering "will this run on my Mac?"
-    // computed against this Mac's installed RAM. The exact memory number lives in the hover/VoiceOver detail,
-    // so the surface never shows two competing gigabyte counts.
-    private var sizeAndFit: some View {
-        HStack(spacing: 6) {
-            Text(diskLabel).foregroundStyle(.secondary)
-            if fitVerdict != nil {
-                Text("·").foregroundStyle(.tertiary)
-                fitClause
-            }
-        }
-        .font(.caption2)
-        .help(memoryDetailText)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityStatus)
-        .accessibilityIdentifier(AccessibilityID.Settings.Speech.sizeStatus(row.id))
-    }
-
-    @ViewBuilder private var fitClause: some View {
-        switch fitVerdict {
-        case .comfortable:
-            HStack(spacing: 5) {
-                Circle().fill(.green).frame(width: 6, height: 6)
-                Text("Runs comfortably on your Mac").foregroundStyle(.secondary)
-            }
-        case .heavy:
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                Text("Uses ~\(fmt(peakMemoryBytes)) memory — heavy on this Mac")
-            }
-            .foregroundStyle(.orange)
-        case .none:
-            EmptyView()
-        }
-    }
-
-    private var diskLabel: String {
-        if row.isUsable {
-            return "\(fmt(row.installedBytes ?? row.info.approxDownloadBytes)) on disk"
-        }
-        return "~\(fmt(row.info.approxDownloadBytes)) download"
-    }
-
-    private var peakMemoryBytes: Int64 { row.info.approxMemoryBytes }
-
-    // Nil when the model's resident footprint is unmeasured (0) — better to show no verdict than a green
-    // "runs comfortably" claim we can't stand behind.
-    private var fitVerdict: ModelFitVerdict? {
-        guard peakMemoryBytes > 0 else { return nil }
-        return ModelMemory.verdict(peakBytes: peakMemoryBytes, physicalBytes: ProcessInfo.processInfo.physicalMemory)
-    }
-
-    private var memoryDetailText: String {
-        guard row.info.approxMemoryBytes > 0 else { return "" }
-        return "Uses about \(fmt(peakMemoryBytes)) of memory while the model is loaded."
-    }
-
-    // VoiceOver can't hover the tooltip, so fold the disk size, the verdict, and the memory detail into one
-    // spoken label.
-    private var accessibilityStatus: String {
-        var parts = ["\(diskLabel)."]
-        switch fitVerdict {
-        case .comfortable: parts.append("Runs comfortably on your Mac.")
-        case .heavy: parts.append("Uses about \(fmt(peakMemoryBytes)) of memory. Heavy on this Mac.")
-        case .none: break
-        }
-        if !memoryDetailText.isEmpty { parts.append(memoryDetailText) }
-        return parts.joined(separator: " ")
-    }
-
-    private func fmt(_ bytes: Int64) -> String {
-        ByteCountFormatter.fileStyle.string(fromByteCount: bytes)
-    }
-
-    @ViewBuilder private var actions: some View {
-        if row.downloadFraction != nil {
-            Text("Installing…").font(.caption).foregroundStyle(.secondary)
-        } else if row.verifying {
-            Text("Testing…").font(.caption).foregroundStyle(.secondary)
-        } else if row.verificationFailed {
-            Button("Test Again") { model.test(row.id) }
-                .help("Re-runs the on-device self-test without re-downloading.")
-                .accessibilityIdentifier(AccessibilityID.Settings.Speech.testAgain(row.id))
-            if !row.info.systemManaged {
-                Button("Reinstall") { model.reinstall(row.id) }
-                    .help("Deletes the files and downloads the model again.")
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.reinstall(row.id))
-                Button("Delete", role: .destructive) { model.requestDelete(row.id) }
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.delete(row.id))
-            }
-        } else if row.isUsable {
-            if !row.isActive {
-                Button("Use This Model") { model.select(row.id) }
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
-            }
-            Button("Test") { model.test(row.id) }
-                .help("Runs a quick on-device self-test to confirm this model can transcribe.")
-                .accessibilityIdentifier(AccessibilityID.Settings.Speech.test(row.id))
-            if !row.info.systemManaged {
-                Button("Delete", role: .destructive) { model.requestDelete(row.id) }
-                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.delete(row.id))
-            }
-        } else {
-            Button("Download") { model.startDownload(row.id) }
-                .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
-        }
     }
 }

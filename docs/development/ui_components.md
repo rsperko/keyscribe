@@ -136,15 +136,18 @@ mode was chosen for a past dictation — no phase names. `Chosen from the menu f
 `Started by its shortcut`, `Chosen for the app you were in`, `Routed by the spoken phrase "as an
 email"`, or `Plain Dictation — nothing else matched`.
 
-### Engine card
+### Speech model choice
 
-**Use for:** Speech Models.
+**Use for:** the Speech Models chooser.
 
-**Contents:** engine name, active state, on-device badge, language capability, installed/download
-state, size, and a single primary action.
+**Contents:** the left list has engine name plus lifecycle status; the detail pane has the
+best-use description, language capability, disk requirement, light/moderate/high memory-use
+label, and primary action.
 
-**Behavior:** exactly one card can be active. Progress is attached to the affected card. A
-downloaded engine is not implicitly selected after install.
+**Behavior:** a list selection only inspects a model; it does not switch it. The detail pane has
+the one direct lifecycle action: Current model, Use This Model, Download, or a live install/test
+state. The recommended choice is shown first. Testing, file management, and dictionary-recognition
+tuning live in the detail pane's named Model actions menu.
 
 ### Processing status
 

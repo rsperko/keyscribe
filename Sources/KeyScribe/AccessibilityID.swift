@@ -44,6 +44,10 @@ enum AccessibilityID {
 
         enum Speech {
             static let list = "settings.speech.list"
+            static let change = "settings.speech.change"
+            static let back = "settings.speech.back"
+            static let eviction = "settings.speech.eviction"
+            static let advancedModelBehavior = "settings.speech.advancedModelBehavior"
             static let deleteConfirmConfirm = "settings.speech.deleteConfirm.confirm"
             static let deleteConfirmCancel = "settings.speech.deleteConfirm.cancel"
             static func row(_ engineID: String) -> String { "settings.speech.row.\(engineID)" }
@@ -278,9 +282,10 @@ enum AccessibilityID {
         Settings.General.sounds, Settings.General.keepDisplayAwake, Settings.General.muteSystemAudio,
         Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.addVocabularyShortcut,
         Settings.General.pasteLastShortcut, Settings.General.historyEnabled, Settings.General.retentionDays,
-        Settings.General.eviction, Settings.General.advancedModelBehavior,
         Settings.General.dictationTrigger, Settings.General.changeDictationTrigger,
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
+        Settings.Speech.change, Settings.Speech.back,
+        Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.replacementsList,

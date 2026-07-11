@@ -177,4 +177,38 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertTrue(try row("parakeet", in: model).isUsable)
         XCTAssertFalse(try row("parakeet", in: model).verificationFailed)
     }
+
+    func testChoiceCopyExplainsTheRecommendedAndBuiltInOptions() {
+        let recommended = SpeechModelCatalog.entry(for: "parakeet")!
+        let builtIn = SpeechModelCatalog.entry(for: "apple")!
+
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.bestFor(recommended),
+            "Fast, accurate dictation for most people.")
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.bestFor(builtIn),
+            "No download and the fastest setup.")
+        XCTAssertEqual(SpeechModelChoiceCopy.memoryUse(for: recommended), "light memory use")
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.memoryUse(for: SpeechModelCatalog.entry(for: "whisper")!),
+            "high memory use")
+    }
+
+    func testChoiceActionUsesOneDirectActionPerModel() {
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.primaryAction(
+                isActive: true, isUsable: true, isDownloading: false,
+                isVerifying: false, verificationFailed: false),
+            .current)
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.primaryAction(
+                isActive: false, isUsable: true, isDownloading: false,
+                isVerifying: false, verificationFailed: false),
+            .use)
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.primaryAction(
+                isActive: false, isUsable: false, isDownloading: false,
+                isVerifying: false, verificationFailed: false),
+            .download)
+    }
 }

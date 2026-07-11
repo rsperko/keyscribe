@@ -365,7 +365,7 @@ struct SettingsRootView: View {
                         PlainDictationPointer.open(modes: modes, navigation: navigation)
                     })
             case .speechModels:
-                SpeechModelsView(model: speechModels)
+                SpeechModelsView(model: speechModels, settings: general)
             case .vocabulary:
                 VocabularySettingsView(dictionary: dictionary, replacements: replacements)
             case .aiServices:
