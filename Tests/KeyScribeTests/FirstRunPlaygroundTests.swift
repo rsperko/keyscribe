@@ -9,7 +9,7 @@ struct FirstRunPlaygroundTests {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-playground-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         let model = FirstRunModel(
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
@@ -27,21 +27,20 @@ struct FirstRunPlaygroundTests {
         return (model, supportDir)
     }
 
-    @Test func enteringPlaygroundBuildsDictationThenConnectedRewriteLessons() async {
+    @Test func enteringPlaygroundBuildsOnlyTheConnectedRewriteLessons() async {
         let (model, supportDir) = await connectedModel()
         defer { try? FileManager.default.removeItem(at: supportDir) }
 
         model.enterPlayground()
 
         #expect(model.step == .playground)
-        #expect(model.playgroundLessons.map(\.modeId) == [Mode.directId, "polish", "edit-selection"])
-        let dictation = model.playgroundLessons.first { $0.modeId == Mode.directId }
-        #expect(dictation?.title == "Dictation")
-        #expect(dictation?.hint.contains("insert new line") == true)
+        #expect(model.playgroundLessons.map(\.modeId) == ["polish", "edit-selection"])
         let polish = model.playgroundLessons.first { $0.modeId == "polish" }
         #expect(polish?.invocation.contains("⌥") == true)
+        #expect(polish?.hint.contains("Right-⌥") == true)
         let selection = model.playgroundLessons.first { $0.modeId == "edit-selection" }
         #expect(selection?.invocation.contains("⌘") == true)
+        #expect(selection?.hint.contains("Right-⌘") == true)
     }
 
     @Test func aLessonMarksCompleteWithItsBeforeAndAfterOnAnInsertedDictation() async {
@@ -59,7 +58,7 @@ struct FirstRunPlaygroundTests {
         #expect(model.completedLessons[Mode.directId] == nil)
     }
 
-    @Test func directDictationCompletesTheDictationLesson() async {
+    @Test func directDictationInThePlaygroundRecordsNoLesson() async {
         let (model, supportDir) = await connectedModel()
         defer { try? FileManager.default.removeItem(at: supportDir) }
         model.enterPlayground()
@@ -67,10 +66,8 @@ struct FirstRunPlaygroundTests {
         model.noteDictation(DictationCompletion(
             outcome: .inserted, modeId: Mode.directId, heard: "plain words", finalText: "Plain words"))
 
-        let done = model.completedLessons[Mode.directId]
-        #expect(done?.before == "plain words")
-        #expect(done?.after == "Plain words")
-        #expect(model.finishedPlaygroundLessonIds.contains(Mode.directId))
+        #expect(model.completedLessons[Mode.directId] == nil)
+        #expect(!model.finishedPlaygroundLessonIds.contains(Mode.directId))
     }
 
     @Test func advancingALessonMarksItFinished() async {
@@ -135,7 +132,7 @@ struct FirstRunPlaygroundTests {
             .appendingPathComponent("keyscribe-first-run-playground-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var completed = 0
         let model = FirstRunModel(
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
@@ -150,7 +147,7 @@ struct FirstRunPlaygroundTests {
         #expect(completed == 1)
     }
 
-    @Test func skippingAISetupShowsTheBasicDictationTrial() {
+    @Test func finishWithoutAICompletesOnboarding() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-playground-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
@@ -162,9 +159,8 @@ struct FirstRunPlaygroundTests {
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             onComplete: { completed += 1 })
 
-        model.skipAISetup()
+        model.finishWithoutAI()
 
-        #expect(model.step == .tryIt)
-        #expect(completed == 0)
+        #expect(completed == 1)
     }
 }

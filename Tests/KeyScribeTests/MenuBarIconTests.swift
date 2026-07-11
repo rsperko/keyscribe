@@ -39,6 +39,21 @@ struct MenuBarIconTests {
         #expect(title == "Direct")
     }
 
+    @Test func modeItemTitleShowsAPhraseOnlyModesSpokenPhrase() {
+        let title = MenuBarController.modeItemTitle(
+            name: "Email", trigger: nil, phrase: "as an email", inertReason: nil)
+
+        #expect(title == "Email — say \"as an email\"")
+    }
+
+    @Test func modeItemTitleJoinsAKeyAndAPhrase() {
+        let title = MenuBarController.modeItemTitle(
+            name: "Pig Latin", trigger: try? KeyDescriptor(parsing: "right_option"),
+            phrase: "as pig latin", inertReason: nil)
+
+        #expect(title == "Pig Latin — Right-⌥ · say \"as pig latin\"")
+    }
+
     @Test func modeItemTitleKeepsShortcutAndInertReasonTogether() {
         let title = MenuBarController.modeItemTitle(
             name: "Email", trigger: try? KeyDescriptor(parsing: "fn"),

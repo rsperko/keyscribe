@@ -10,6 +10,25 @@ struct KeyDescriptorTests {
         #expect(try KeyDescriptor(parsing: "right_command") == .named(.rightCommand))
     }
 
+    @Test func keycapTokensForNamedKeys() {
+        #expect(KeyDescriptor.named(.fn).keycapTokens == ["fn"])
+        #expect(KeyDescriptor.named(.hyper).keycapTokens == ["⌃", "⌥", "⇧", "⌘"])
+        #expect(KeyDescriptor.named(.rightOption).keycapTokens == ["right ⌥"])
+        #expect(KeyDescriptor.named(.rightCommand).keycapTokens == ["right ⌘"])
+    }
+
+    @Test func keycapTokensForChordsAreModifiersThenKeyInCanonicalOrder() {
+        #expect(KeyDescriptor.chord(modifiers: [.command], key: .letter("k")).keycapTokens == ["⌘", "K"])
+        // canonical ⌃⌥⇧⌘ order regardless of set iteration order
+        #expect(KeyDescriptor.chord(modifiers: [.command, .shift, .control, .option], key: .letter("e")).keycapTokens
+            == ["⌃", "⌥", "⇧", "⌘", "E"])
+        #expect(KeyDescriptor.chord(modifiers: [], key: .function(5)).keycapTokens == ["F5"])
+    }
+
+    @Test func keycapTokensForMouseButtonAreEmpty() {
+        #expect(KeyDescriptor.mouseButton(4).keycapTokens.isEmpty)
+    }
+
     @Test func parsesChords() throws {
         let d = try KeyDescriptor(parsing: "control+option+a")
         #expect(d == .chord(modifiers: [.control, .option], key: .letter("a")))

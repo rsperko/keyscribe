@@ -17,6 +17,7 @@ final class ModesSettingsModel: ObservableObject {
     private let repository: ConfigRepository
     private var modesDir: URL { repository.modesDir }
     private var supportDir: URL { repository.supportDir }
+    private var ledgerDir: URL { supportDir.appendingPathComponent("lkg", isDirectory: true) }
     private var loadedSignature: String?
 
     // True while THIS model is writing, so the change observer skips the reentrant reload the write's own
@@ -55,7 +56,9 @@ final class ModesSettingsModel: ObservableObject {
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         fragmentIds = loadFragmentIds()
         if selectedID == nil || !modes.contains(where: { $0.id == selectedID }) {
-            selectedID = modes.first?.id
+            // With no user modes (a fresh, templates-only install), leave the detail empty so the template
+            // gallery is the landing state; otherwise keep selecting the first mode.
+            selectedID = modes.contains { !$0.isSystem } ? modes.first?.id : nil
         }
         loadedSignature = configSignature()
         error = nil
@@ -78,6 +81,41 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     func consumeCreated() { lastCreatedId = nil }
+
+    // Create a blank mode pre-wired to a connection ("Create a mode with this service", UX2 phase 5b). Like
+    // create() it autofocuses the name; it does NOT enable the mode — it stays a disabled, ordinary mode the
+    // user configures in the editor, consistent with the pendingConnectOffer consent pattern.
+    func createWithConnection(connectionId: String) {
+        let name = "New Mode"
+        var mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
+        mode.trailing = .space
+        mode.commands.liveEdits = true
+        mode.enabled = false
+        mode.aiRewrite = Mode.AIRewrite(connection: connectionId, prompt: "")
+        save(mode)
+        selectedID = mode.id
+        lastCreatedId = mode.id
+        awaitingInitialName = mode.id
+    }
+
+    // Materialize a starter template into a real mode (Add Mode menu + gallery). At its free catalog id it is
+    // a `.seed` — kept migratable via the ledger; if the id is taken it is a `.copy` (plain user mode). No
+    // name autofocus: a template name is already meaningful.
+    func materializeTemplate(_ seedId: String) {
+        guard let template = ModeStore.templates().first(where: { $0.id == seedId }) else { return }
+        let materialization = ModeTemplateInstantiation.materialize(
+            template: template, existing: modes, connections: connections)
+        save(materialization.mode)
+        if case .seed(let mode) = materialization {
+            applyingLocalMutation { ModeStore.recordMaterializedSeed(mode, ledgerDir: ledgerDir) }
+        }
+        selectedID = materialization.mode.id
+    }
+
+    // A template already materialized at its catalog id (so the gallery shows "Added" instead of an Add button).
+    func isTemplateMaterialized(_ seedId: String) -> Bool {
+        modes.contains { $0.id == seedId }
+    }
 
     // Duplicate into a new user-created mode (the system Direct floor is not duplicable). The copy drops the
     // seed identity and trigger keys, so it never clashes with the original's shortcut.

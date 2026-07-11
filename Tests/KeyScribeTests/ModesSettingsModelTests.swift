@@ -129,6 +129,48 @@ struct ModesSettingsModelTests {
         #expect(model.selectedID == "email-copy")
     }
 
+    @Test func materializingATemplateWritesAnEnabledSeedAndSelectsIt() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        model.materializeTemplate("polish")
+
+        #expect(tomls(in: modesDir) == ["polish"])
+        let polish = try #require(model.modes.first { $0.id == "polish" })
+        #expect(polish.seedId == "polish")
+        #expect(polish.enabled)
+        #expect(model.selectedID == "polish")
+        // The materialized seed's ledger entry carries a real fingerprint (participates in seed updates).
+        let ledger = ModeStore.loadLedger(in: support.appendingPathComponent("lkg", isDirectory: true))
+        #expect(ledger?.entry("polish")?.fingerprint != nil)
+    }
+
+    @Test func createWithConnectionWritesAModeCarryingTheConnectionAndSelectsIt() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        model.createWithConnection(connectionId: "fast")
+
+        #expect(tomls(in: modesDir) == ["new-mode"])
+        let created = try #require(model.modes.first { $0.id == "new-mode" })
+        #expect(created.aiRewrite?.connection == "fast")
+        #expect(created.enabled == false)   // disabled until configured — no silent cloud rewrite
+        #expect(model.selectedID == "new-mode")
+    }
+
+    @Test func materializingATemplateTwiceYieldsASeedlessCopy() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        model.materializeTemplate("polish")
+        model.materializeTemplate("polish")
+
+        #expect(tomls(in: modesDir) == ["polish", "polish-2"])
+        let copy = try #require(model.modes.first { $0.id == "polish-2" })
+        #expect(copy.seedId == nil)
+        #expect(model.selectedID == "polish-2")
+    }
+
     @Test func duplicateRefusesTheSystemDirectFloor() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

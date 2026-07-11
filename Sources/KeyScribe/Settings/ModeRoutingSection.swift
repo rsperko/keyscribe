@@ -11,17 +11,26 @@ struct ModeRoutingSection: View {
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
     @State private var newWindowTitlePattern = ""
+    @State private var newDomain = ""
     @State private var manualBundleId = ""
     @State private var enteringBundleId = false
+    @State private var enteringDomain = false
     @State private var runningApps: [InstalledApps.Info] = []
 
     private var trigger: ModeTrigger {
         ModeTrigger(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
     }
 
+    // First level (UX2 phase 7a): Shortcut, Spoken phrase, Use in — plain language. Advanced routing keeps
+    // press style, window-title, and the raw URL regex.
     var body: some View {
         Section("When this mode is used") {
             ModeTriggerRow(mode: mode, onUpdate: onUpdate)
+
+            spokenPhraseLevel
+            Divider().padding(.vertical, 2)
+            useInLevel
+
             DisclosureSection(isExpanded: $routingExpanded) {
                 DisclosureSummaryLabel(title: "Advanced routing", summary: routingSummary)
             } content: {
@@ -32,56 +41,8 @@ struct ModeRoutingSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("Limit by app, URL, or window title")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.top, 4)
-                if !mode.constraints.isEmpty && mode.triggerKeys.isEmpty {
-                    Text("An app rule alone doesn’t run a mode automatically — give it the same shortcut as Plain Dictation (Fn) to take over in matching apps, or pick it from the menu.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(mode.constraints.indices, id: \.self) { index in
-                    HStack {
-                        constraintLabel(mode.constraints[index])
-                        Spacer()
-                        Button("Remove", role: .destructive) { removeConstraint(at: index) }
-                    }
-                }
-                HStack {
-                    Menu("Add app rule") {
-                        ForEach(runningApps) { app in
-                            Button(app.name) { addAppConstraint(app.bundleId) }
-                        }
-                        Divider()
-                        Button("Choose from Applications…") {
-                            if let app = InstalledApps.chooseFromApplications() { addAppConstraint(app.bundleId) }
-                        }
-                        Button("Enter Bundle ID…") { enteringBundleId = true }
-                    }
-                    .fixedSize()
-                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addAppRule)
-                    .onAppear { if runningApps.isEmpty { runningApps = InstalledApps.running() } }
-                    Spacer()
-                }
-                if enteringBundleId {
-                    HStack {
-                        TextField("Bundle ID, e.g. com.apple.Safari", text: $manualBundleId)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit(commitManualBundleId)
-                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleID)
-                        Button("Add", action: commitManualBundleId)
-                            .disabled(manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleIDAdd)
-                    }
-                }
-                HStack {
-                    TextField("URL regex, e.g. github\\.com", text: $newURLPattern)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(commitURLConstraint)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPattern)
-                    Button("Add", action: commitURLConstraint)
-                        .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
-                }
+                Text("Window title (regular expression)")
+                    .font(.subheadline.weight(.semibold)).padding(.top, 4)
                 HStack {
                     TextField("Window title regex, e.g. (?i)pull request", text: $newWindowTitlePattern)
                         .textFieldStyle(.roundedBorder)
@@ -91,28 +52,19 @@ struct ModeRoutingSection: View {
                         .disabled(newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitleAdd)
                 }
-
-                Divider().padding(.vertical, 4)
-                Text("Choose by spoken phrase")
-                    .font(.subheadline.weight(.semibold))
+                Text("URL (regular expression)")
+                    .font(.subheadline.weight(.semibold)).padding(.top, 4)
                 HStack {
-                    TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
+                    TextField("URL regex, e.g. github\\.com", text: $newURLPattern)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit(commitPhrase)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
-                    Button("Add", action: commitPhrase)
-                        .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
-                }
-                ForEach(mode.triggerPhrases, id: \.self) { phrase in
-                    HStack {
-                        Text(phrase).font(.callout)
-                        Spacer()
-                        Button("Remove", role: .destructive) { removePhrase(phrase) }
-                    }
+                        .onSubmit(commitURLConstraint)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPattern)
+                    Button("Add", action: commitURLConstraint)
+                        .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
                 }
 
-                Text("Routing rules choose a mode before recording. App rules match bundle IDs, URL and window title rules are regular expressions, and each is checked only when a mode uses it. URLs are local routing keys and are never sent to a rewrite provider. A spoken phrase said at the end can reroute the result after transcription.")
+                Text("Routing rules choose a mode before recording. Each is checked only when a mode uses it. URLs are local routing keys and are never sent to a rewrite provider. A spoken phrase said at the end can reroute the result after transcription.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -120,15 +72,94 @@ struct ModeRoutingSection: View {
         }
     }
 
+    private var spokenPhraseLevel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Spoken phrase").font(.subheadline.weight(.semibold))
+            Text("End a dictation with a phrase to hand the result to this mode — e.g. \u{201C}…and that's the plan, as an email.\u{201D}")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(mode.triggerPhrases, id: \.self) { phrase in
+                HStack {
+                    Text(ModeSummary.spokenPhrase(phrase, capitalized: false)).font(.callout)
+                    Spacer()
+                    Button("Remove", role: .destructive) { removePhrase(phrase) }
+                }
+            }
+            HStack {
+                TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(commitPhrase)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
+                Button("Add", action: commitPhrase)
+                    .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
+            }
+        }
+    }
+
+    private var useInLevel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Use in").font(.subheadline.weight(.semibold))
+            if !mode.constraints.isEmpty && mode.triggerKeys.isEmpty {
+                Text("An app or website rule alone doesn’t run a mode automatically — give it the same shortcut as Plain Dictation (Fn) to take over in matching apps, or pick it from the menu.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(mode.constraints.indices, id: \.self) { index in
+                HStack {
+                    constraintLabel(mode.constraints[index])
+                    Spacer()
+                    Button("Remove", role: .destructive) { removeConstraint(at: index) }
+                }
+            }
+            HStack {
+                Menu("Add…") {
+                    ForEach(runningApps) { app in
+                        Button(app.name) { addAppConstraint(app.bundleId) }
+                    }
+                    Divider()
+                    Button("Choose from Applications…") {
+                        if let app = InstalledApps.chooseFromApplications() { addAppConstraint(app.bundleId) }
+                    }
+                    Button("Enter Bundle ID…") { enteringBundleId = true }
+                    Divider()
+                    Button("Website…") { enteringDomain = true }
+                }
+                .fixedSize()
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addAppRule)
+                .onAppear { if runningApps.isEmpty { runningApps = InstalledApps.running() } }
+                Spacer()
+            }
+            if enteringBundleId {
+                HStack {
+                    TextField("Bundle ID, e.g. com.apple.Safari", text: $manualBundleId)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitManualBundleId)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleID)
+                    Button("Add", action: commitManualBundleId)
+                        .disabled(manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleIDAdd)
+                }
+            }
+            if enteringDomain {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        TextField("Website domain, e.g. github.com", text: $newDomain)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(commitDomainConstraint)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.websitePattern)
+                        Button("Add", action: commitDomainConstraint)
+                            .disabled(HostPattern.regex(forDomain: newDomain) == nil)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.websitePatternAdd)
+                    }
+                    Text("Matches that domain and its subdomains. Needs Automation access to read the browser URL.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var routingSummary: String {
         if trigger.conflict != nil { return "Shortcut conflict" }
-        let ruleCount = mode.constraints.count
-        let phraseCount = mode.triggerPhrases.count
-        if ruleCount == 0 && phraseCount == 0 { return "No app rules or spoken phrases" }
-        var parts: [String] = []
-        if ruleCount > 0 { parts.append("\(ruleCount) rule\(ruleCount == 1 ? "" : "s")") }
-        if phraseCount > 0 { parts.append("\(phraseCount) spoken phrase\(phraseCount == 1 ? "" : "s")") }
-        return parts.joined(separator: ", ")
+        return "Press style, window title, URL regex"
     }
 
     @ViewBuilder private func constraintLabel(_ constraint: Mode.Constraint) -> some View {
@@ -140,6 +171,16 @@ struct ModeRoutingSection: View {
                 }
                 Text(InstalledApps.name(forBundleId: bundle) ?? bundle).font(.callout)
                 Text(bundle).font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let url = constraint.urlPattern, parts.count == 1 {
+            HStack(spacing: 6) {
+                Image(systemName: "globe").foregroundStyle(.secondary)
+                if let domain = HostPattern.domain(fromRegex: url) {
+                    Text(domain).font(.callout)
+                    Text("and subdomains").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(url).font(.callout)
+                }
             }
         } else {
             Text(parts.joined(separator: " + ")).font(.callout)
@@ -153,7 +194,13 @@ struct ModeRoutingSection: View {
             parts.append("App: \(name)")
         }
         if let prefix = constraint.bundlePrefix { parts.append("App prefix: \(prefix)") }
-        if let url = constraint.urlPattern { parts.append("URL regex: \(url)") }
+        if let url = constraint.urlPattern {
+            if let domain = HostPattern.domain(fromRegex: url) {
+                parts.append("Website: \(domain)")
+            } else {
+                parts.append("URL regex: \(url)")
+            }
+        }
         if let title = constraint.windowTitle { parts.append("Window title regex: \(title)") }
         return parts.isEmpty ? ["Empty routing rule"] : parts
     }
@@ -197,6 +244,17 @@ struct ModeRoutingSection: View {
         updated.constraints.append(.init(bundleId: nil, urlPattern: value))
         onUpdate(updated)
         newURLPattern = ""
+    }
+
+    // The friendly domain-first entry: stores a host-anchored regex (host = domain or subdomain), never the
+    // raw domain string, so `github.com` never substring-matches `notgithub.com` (UX2 phase 7a).
+    private func commitDomainConstraint() {
+        guard let pattern = HostPattern.regex(forDomain: newDomain) else { return }
+        var updated = mode
+        updated.constraints.append(.init(bundleId: nil, urlPattern: pattern))
+        onUpdate(updated)
+        newDomain = ""
+        enteringDomain = false
     }
 
     private func commitWindowTitleConstraint() {

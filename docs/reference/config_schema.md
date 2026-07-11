@@ -38,6 +38,11 @@
   of edits. Direct owns Fn by default and records to history per the global setting unless turned off.
 - Config files are human-editable text. **Model weights** are downloaded at runtime (never
   committed) into `models/`, consolidated under the KeyScribe support dir.
+- **History records** (`history/<day>.jsonl`, one JSON object per line) are additive: each dictation
+  writes `mode`, `heard`, `result`, `outcome`, boundary metadata, and (UX2 phase 7c) two **optional**
+  fields, `mode_choice` (`one_shot` / `trigger_key` / `context_rule` / `spoken_phrase` / `fallback`)
+  and `routed_phrase` (present only for `spoken_phrase`). Old rows lacking them decode as absent —
+  History renders without the "how chosen" line. Audio and the redaction map are never stored.
 
 ### Model storage
 
@@ -108,6 +113,10 @@ bundle_id = "com.apple.mail"
 # bundle_prefix = "com.jetbrains."        # optional; matches all bundle ids under the prefix
 # url_pattern = 'mail\.google\.com/.*'    # optional; best-effort
 # window_title = '(?i)pull request'       # optional; regex against the focused window title
+# The editor's friendly "Website…" field (UX2 phase 7a) stores a generated host-anchored url_pattern
+# (host = the entered domain OR a subdomain of it), e.g. github.com →
+# (?i)^[a-z][a-z0-9+.-]*://([^/?#]*\.)?github\.com([/:?#]|$). The on-disk shape is unchanged (still a
+# url_pattern regex); a hand-written pattern keeps today's unanchored substring semantics.
 
 # ── Pipeline commands (spoken-command / pipeline features, opt-in per mode) ──
 [commands]
@@ -205,11 +214,18 @@ or make global behavior hard to reason about.
 
 ## Seeded starter modes
 
-A fresh install ships eight starter modes — all disabled, AI-backed examples. They are ordinary mode
-files — nothing about them is special-cased in source — and the user can edit or delete any of them.
-Plain local dictation on Fn is provided by the **Direct** system mode (`_direct`, see "System modes"),
-not a starter. This set is the canonical one the menu and onboarding refer to (`ui_design.md` §6 menu
-bar).
+A fresh install writes **only `_direct.toml`** (the Direct floor). The eight starter modes below are
+**templates**, not files: at first launch each catalog id is recorded in the seed ledger as an
+**offer** (a `seed-ledger.toml` entry with a nil fingerprint), and the modes materialize on demand
+from the Modes pane (Add Mode menu + template gallery) or when the first AI service connects
+(Polish + Edit Selection). A materialized template written at its catalog id IS a seed — it keeps
+`seed_id`/`seed_version` and gets a real ledger fingerprint, so unedited materialized seeds still
+participate in seed updates; a second copy of the same template is a plain user mode (suffixed id, no
+seed identity). They are ordinary mode files — nothing about them is special-cased in source — and the
+user can edit or delete any of them. **Existing installs keep their previously-seeded starter files**
+unchanged. Plain local dictation on Fn is provided by the **Direct** system mode (`_direct`, see
+"System modes"). This set is the canonical one the menu and onboarding refer to (`ui_design.md` §6
+menu bar).
 
 | id | name | Shape | Rewrite |
 |---|---|---|---|
@@ -222,18 +238,17 @@ bar).
 | `markdown` | Markdown | `source = dictation`, `output = cursor` | **disabled by default.** Reformats dictation into raw Markdown (headings, bullet/numbered lists, bold, blockquotes, inline/fenced code) without wrapping the output in a code fence. |
 | `shell` | Shell | `source = dictation`, `output = cursor` | **disabled by default.** Turns a spoken command or description into a single terminal-ready shell command, mapping spoken symbols ("dash dash", "pipe", "tilde slash") to shell syntax; emits only the command, never runs or explains it. |
 
-`message`, `email`, `ai-prompt`, `code`, `markdown`, and `shell` ship **disabled** (`enabled = false`)
-as discoverable examples — the resolver ignores disabled modes, so the user enables one only after
-editing it to taste and attaching a connection. `polish` and `edit-selection` ship disabled too but
-already carry a default reach (Right-⌥ and Right-⌘ respectively), so the first AI connection makes
-them usable without any further setup. `email` keeps a default reach as well (the "as an email"
-phrase) but is not auto-connected — enable it in Settings when you want it.
+The template catalog defaults (`enabled = false` in the catalog, `polish`/`edit-selection` carrying
+Right-⌥/Right-⌘ and `email` carrying the "as an email" phrase) describe the mode a template
+materializes into: materializing sets `enabled = true`, drops any trigger already held by an enabled
+mode, and prefills the connection when exactly one exists. `message`, `ai-prompt`, `code`, `markdown`,
+and `shell` are added from the gallery/menu when the user wants them.
 
 The **Direct** system mode (`_direct`, shown to users as **"Plain Dictation"**) works with zero
-configuration (it's the Fn default; all starters ship disabled). When the first AI service is added, onboarding connects and enables `polish`
-and `edit-selection`; the remaining modes stay as disabled examples for deliberate setup. The
-default English engine plus **Direct** is the minimum first-run target (`ui_design.md` §2 first run).
-Mode prompts instruct, never answer, keep redaction tokens intact, and avoid bracketed signature
+configuration (it's the Fn default). When the first AI service is added, onboarding materializes and
+connects `polish` and `edit-selection`; the remaining starters stay as templates for deliberate setup.
+The default English engine plus **Direct** is the minimum first-run target (`ui_design.md` §2 first
+run). Mode prompts instruct, never answer, keep redaction tokens intact, and avoid bracketed signature
 placeholders.
 
 ### Seeded example replacements

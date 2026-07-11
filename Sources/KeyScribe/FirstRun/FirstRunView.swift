@@ -7,8 +7,34 @@ struct FirstRunView: View {
     @FocusState private var trialFieldFocused: Bool
     @FocusState private var playgroundFieldFocused: Bool
     @State private var modelChoiceExpanded = false
+    @State private var changeTriggerRevealed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            stepContent
+                .id(model.step)
+                .transition(reduceMotion ? .identity : .opacity)
+        }
+        .frame(width: 480, height: 500, alignment: .topLeading)
+        .overlay(alignment: .bottom) {
+            if !model.permissionsOnly { stepDots }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.step)
+        .onChange(of: model.step) { _, step in
+            if step == .permissions { model.startPolling() } else { model.stopPolling() }
+        }
+        .onChange(of: model.activePlaygroundLessonId) { _, _ in
+            guard model.step == .playground else { return }
+            focusPlaygroundText(selectAll: false)
+        }
+        .onChange(of: model.playgroundReseedToken) { _, _ in
+            guard model.step == .playground else { return }
+            focusPlaygroundText(selectAll: true)
+        }
+    }
+
+    @ViewBuilder private var stepContent: some View {
         VStack(alignment: .leading, spacing: 20) {
             switch model.step {
             case .intro: intro
@@ -21,26 +47,27 @@ struct FirstRunView: View {
         }
         .padding(28)
         .frame(width: 480, height: 500, alignment: .topLeading)
-        .onChange(of: model.step) { _, step in
-            if step == .permissions { model.startPolling() } else { model.stopPolling() }
-            if step == .tryIt { trialFieldFocused = true }
-            if step == .playground { playgroundFieldFocused = true }
+    }
+
+    private var stepDots: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<FirstRunModel.stepCount, id: \.self) { index in
+                Circle()
+                    .fill(index <= model.stepIndex ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                    .frame(width: 6, height: 6)
+            }
         }
-        .onChange(of: model.activePlaygroundLessonId) { _, _ in
-            guard model.step == .playground else { return }
-            focusPlaygroundText(selectAll: false)
-        }
-        .onChange(of: model.playgroundReseedToken) { _, _ in
-            guard model.step == .playground else { return }
-            focusPlaygroundText(selectAll: true)
-        }
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(model.stepIndex + 1) of \(FirstRunModel.stepCount)")
     }
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "waveform").font(.system(size: 44)).foregroundStyle(.tint)
+                .symbolEffect(.variableColor.iterative.reversing, options: .repeat(.continuous), isActive: !reduceMotion)
             Text("Welcome to \(Branding.appName)").font(.largeTitle.bold())
-            Text("\(Branding.appName) turns your voice into text, entirely on this Mac. Speech recognition never leaves it.")
+            Text("Your voice becomes text — entirely on this Mac.")
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Get Started") { model.step = .model }
@@ -52,11 +79,13 @@ struct FirstRunView: View {
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Download speech recognition").font(.title.bold())
-            Text("\(Branding.appName) needs one on-device recognizer before it can turn speech into text. Start with the recommended option; it is a good balance of accuracy, speed, and size.")
+            Text("One on-device model powers all dictation. The recommended pick balances accuracy, speed, and size.")
                 .foregroundStyle(.secondary)
             modelCard
             DisclosureSection("Advanced: choose a different recognizer", isExpanded: $modelChoiceExpanded) {
                 Text("Different recognizers trade accuracy, language support, download size, and startup time. You can change this later in Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Apple Speech is built into macOS and needs no download. It works as a fallback, but the recommended recognizer is usually more accurate.")
                     .font(.caption).foregroundStyle(.secondary)
                 Picker("Model", selection: $model.selectedEngineId) {
                     ForEach(downloadableModels) { info in
@@ -92,8 +121,6 @@ struct FirstRunView: View {
                 .disabled(model.downloading)
                 .accessibilityIdentifier(AccessibilityID.FirstRun.Model.download)
             }
-            Text("Apple Speech is built into macOS and needs no download. It works as a fallback, but the recommended recognizer is usually more accurate.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -147,7 +174,7 @@ struct FirstRunView: View {
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Set up dictation").font(.title.bold())
-            Text("\(Branding.appName) asks for one permission at a time, only when the next part of dictation needs it.")
+            Text("One permission at a time, each asked when dictation needs it.")
                 .foregroundStyle(.secondary)
 
             permissionStep
@@ -237,16 +264,40 @@ struct FirstRunView: View {
             .font(.title3)
     }
 
+    private var triggerWellVisible: Bool { changeTriggerRevealed || model.directTrigger == nil }
+
     private var tryIt: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Try it now").font(.title.bold())
-            Text("Hold the **Fn (Globe)** key, say a sentence, and release. Your words appear wherever the cursor is.")
-                .foregroundStyle(.secondary)
+            if let descriptor = model.directTrigger {
+                HStack(spacing: 6) {
+                    Text("Hold").foregroundStyle(.secondary)
+                    KeycapView(descriptor: descriptor)
+                    Text("to speak, then release.").foregroundStyle(.secondary)
+                }
+                Text("Your words land wherever the cursor is.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text("Choose a key to hold while you speak.")
+                    .foregroundStyle(.secondary)
+            }
+            if triggerWellVisible {
+                ShortcutWell(
+                    key: model.directTriggerBinding, profile: .modeTrigger,
+                    accessibilityID: AccessibilityID.FirstRun.TryIt.shortcutWell)
+                if let error = model.triggerSaveError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+            } else {
+                Button("Use a different key…") { changeTriggerRevealed = true }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.changeTrigger)
+            }
             Text("Dictate into this box to finish setup:").font(.callout)
             TextEditor(text: $model.trialText)
                 .font(.body)
                 .ghostText("Your dictated words will appear here\u{2026}", visible: model.trialText.isEmpty)
-                .frame(height: 110)
+                .frame(height: 96)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($trialFieldFocused)
                 .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.field)
@@ -259,58 +310,67 @@ struct FirstRunView: View {
             }
             Spacer()
             HStack {
-                Button("Skip for now") { model.finish() }
+                Button("Skip for now") { model.continueFromTrial() }
                     .buttonStyle(.link)
                     .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.skip)
                 Spacer()
-                Button("Done") { model.finish() }
+                Button("Continue") { model.continueFromTrial() }
                     .keyboardShortcut(.defaultAction).controlSize(.large)
                     .disabled(!model.trialSucceeded)
                     .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.done)
             }
         }
+        // Focus here, not in the parent's `.onChange(of: model.step)`: `.id(model.step)` recreates this
+        // subtree on the cross-fade, so the fresh TextEditor exists only once this content appears.
+        .onAppear(perform: focusTrialField)
     }
 
     private var aiService: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Optional text cleanup").font(.title.bold())
-            Text("Connect an AI service for rewrite modes. Speech stays local.")
+            Text("Want AI cleanup?").font(.title.bold())
+            Text("Optional — connect your own AI service to rewrite dictations. Speech recognition stays on this Mac.")
                 .font(.callout).foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Label("Hosted providers use API keys. Local OpenAI-compatible endpoints can use no auth or a token command.", systemImage: "key")
-                Label("\(Branding.appName) will connect the starter rewrite modes to this service.", systemImage: "wand.and.stars")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            if model.aiOfferExpanded {
+                AIConnectionDraftEditor(
+                    presentation: .onboarding,
+                    draft: $model.aiDraft,
+                    hasStoredKey: false,
+                    testState: model.aiTesting ? .testing : nil,
+                    onCommit: { _, _ in },
+                    onFetchModels: { _ in Task { await model.fetchAIModels() } })
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connectionEditor)
 
-            AIConnectionDraftEditor(
-                presentation: .onboarding,
-                draft: $model.aiDraft,
-                hasStoredKey: false,
-                testState: model.aiTesting ? .testing : nil,
-                onCommit: { _, _ in },
-                onFetchModels: { _ in Task { await model.fetchAIModels() } })
-                .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connectionEditor)
-
-            if let error = model.aiSetupError {
-                Text(error).font(.callout).foregroundStyle(.red)
-            }
-
-            Spacer()
-            HStack {
-                Button("Set Up Later") { model.skipAISetup() }
-                    .buttonStyle(.link)
-                    .disabled(model.aiTesting)
-                    .accessibilityIdentifier(AccessibilityID.FirstRun.AI.skip)
-                Spacer()
-                if model.aiTesting { ProgressView().controlSize(.small) }
-                Button(model.aiTesting ? "Testing…" : "Connect AI Service") {
-                    model.connect()
+                if let error = model.aiSetupError {
+                    Text(error).font(.callout).foregroundStyle(.red)
                 }
-                    .keyboardShortcut(.defaultAction).controlSize(.large)
-                    .disabled(!model.aiCanConnect || model.aiTesting)
-                    .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connect)
+
+                Spacer()
+                HStack {
+                    Button("Finish Without AI") { model.finishWithoutAI() }
+                        .buttonStyle(.link)
+                        .disabled(model.aiTesting)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.AI.skip)
+                    Spacer()
+                    if model.aiTesting { ProgressView().controlSize(.small) }
+                    Button(model.aiTesting ? "Testing…" : "Connect AI Service") {
+                        model.connect()
+                    }
+                        .keyboardShortcut(.defaultAction).controlSize(.large)
+                        .disabled(!model.aiCanConnect || model.aiTesting)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connect)
+                }
+            } else {
+                Spacer()
+                HStack {
+                    Button("Finish") { model.finish() }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.AI.skip)
+                    Spacer()
+                    Button("Connect an AI Service…") { model.aiOfferExpanded = true }
+                        .keyboardShortcut(.defaultAction).controlSize(.large)
+                        .accessibilityIdentifier(AccessibilityID.FirstRun.AI.offerConnect)
+                }
             }
         }
     }
@@ -318,7 +378,7 @@ struct FirstRunView: View {
     private var playground: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Try it now").font(.title.bold())
-            Text("Start with normal dictation. Then try the rewrite modes you just enabled. You can leave anytime.")
+            Text("Connected. See what it does:")
                 .foregroundStyle(.secondary)
             TextEditor(text: $model.playgroundText)
                 .font(.body)
@@ -340,16 +400,26 @@ struct FirstRunView: View {
                     .accessibilityIdentifier(AccessibilityID.FirstRun.Playground.done)
             }
         }
+        .onAppear { focusPlaygroundText(selectAll: false) }
     }
 
     private var playgroundPlaceholder: String {
-        switch model.activePlaygroundLessonId {
-        case Mode.directId:
-            return "Hold Fn (Globe), say one sentence, and release\u{2026}"
-        case .some(let id) where id.contains("edit-selection"):
+        if let id = model.activePlaygroundLessonId, id.contains("edit-selection") {
             return "Select this text with Command-A, then say \"make this shorter\"\u{2026}"
-        default:
-            return "Dictate or paste a rough sentence to polish\u{2026}"
+        }
+        return "Dictate or paste a rough sentence to polish\u{2026}"
+    }
+
+    @ViewBuilder private func lessonInvocation(_ lesson: FirstRunModel.PlaygroundLesson) -> some View {
+        if let key = lesson.triggerKey, let descriptor = try? KeyDescriptor(parsing: key),
+           !descriptor.keycapTokens.isEmpty {
+            HStack(spacing: 4) {
+                Text("Hold").font(.caption).foregroundStyle(.secondary)
+                KeycapView(descriptor: descriptor)
+                Text("and speak").font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            Text(lesson.invocation).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -368,7 +438,7 @@ struct FirstRunView: View {
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(lesson.title).font(.headline)
-                        Text(lesson.invocation).font(.caption).foregroundStyle(.secondary)
+                        lessonInvocation(lesson)
                     }
                     Spacer()
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
@@ -415,6 +485,13 @@ struct FirstRunView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: expanded ? .controlBackgroundColor : .textBackgroundColor).opacity(expanded ? 0.9 : 0.45)))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+    }
+
+    private func focusTrialField() {
+        trialFieldFocused = true
+        // Re-assert after the subtree settles: the incoming `.onAppear` can fire a hair before the recreated
+        // TextEditor is ready to accept focus (same timing the playground field guards against).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { trialFieldFocused = true }
     }
 
     private func focusPlaygroundText(selectAll: Bool) {

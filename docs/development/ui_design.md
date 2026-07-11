@@ -53,19 +53,32 @@ The sequence is short, and each step states its purpose in plain language:
    asked just before it is first needed:** Microphone to hear you, Accessibility to detect a
    modifier-key trigger and place text. State what still works if one is declined. (A key+modifier
    trigger registers as a system hotkey and needs no permission; Input Monitoring is never requested.)
-4. **Optional: connect an AI service (BYOK).** Speech stays local; only a rewrite leaves the
-   machine. Connecting the first service auto-enables and links the everyday rewrite modes. The
-   form uses visible labels plus placeholder examples so editable fields are easy to find. A
-   low-prominence **Set Up Later** route stays available and continues to the basic dictation trial.
-5. **Try it now.** Land the user on a focused text field with the hotkey shown and let them
-   produce one real dictation; completion unlocks only after one succeeds. A low-prominence
-   **Skip for now** stays available so a hardware or permission snag never traps the user —
-   taking it records setup as complete, so an incomplete setup is a supported, not a blocked, state.
-   If an AI service was connected, this becomes an optional, always-skippable tutorial playground:
-   a focused sandbox inside the onboarding window with a vertical accordion for Dictation, Polish,
-   and Edit Selection. Only one lesson is expanded at a time; each names its trigger and shows the
-   user's own before → after the moment they try it. Email-style spoken routing is not taught in
-   first run because the suffix is hard to observe when it succeeds.
+4. **Try it now.** Land the user on a focused text field and let them produce one real dictation;
+   completion unlocks only after one succeeds. The instruction names the user's **resolved**
+   trigger (never a hardcoded key), and the trial owns that shortcut: an inline **Use a different
+   key…** affordance changes the Plain Dictation trigger in place (it edits the Direct mode itself,
+   the same data Modes edits — not a duplicate setting), and a Direct mode the migration left with
+   no trigger leads with a choose-a-key picker instead of dead-ending. A low-prominence **Skip for
+   now** stays available so a hardware or permission snag never traps the user; both it and
+   **Continue** lead to the AI opt-in (the AI step's own Finish is one click, so no one is ever
+   more than two clicks from done). Taking Skip still records setup as complete, so an incomplete
+   setup is a supported, not a blocked, state.
+5. **Optional: want AI cleanup? (BYOK).** A slim opt-in card — one line, a **Connect an AI
+   Service…** action, and a one-click **Finish**. Choosing to connect reveals the compact
+   connection form in place. Speech stays local; only a rewrite leaves the machine. Connecting the
+   first service auto-enables and links the everyday rewrite modes, then lands on a short
+   **playground** that shows exactly what the service does: the two headline rewrite demos —
+   clean-up (Polish) and Edit Selection — each naming its real trigger and showing the user's own
+   before → after the moment they try it. Dictation itself is not re-taught here (the trial already
+   proved it), and Email-style spoken routing is not taught in first run because the suffix is hard
+   to observe when it succeeds.
+
+Each step states its purpose in roughly one line — the tone is fewer words, not more. The
+permissions relaunch resumes onboarding at the **trial** (the step whose modifier tap the relaunch
+exists to revive). A small **step indicator** (dots; the playground shares the AI step's dot) tracks
+progress, steps **cross-fade**, and the intro waveform animates a gentle variable-color sweep — all
+gated on Reduce Motion (static and identical to a still frame when it is on). Trigger keys render as
+**keycap glyphs** in the trial and playground rows.
 
 After first run, every other capability — dictionary, history, additional modes — is introduced
 just in time, never as a wall. First run is the only exception, because the everyday loop (and the
@@ -157,6 +170,10 @@ the only signal.
 - Recording feedback starts on the same run-loop turn as capture.
 - The input-level indicator is the only continuous HUD animation. It respects Reduce Motion by
   becoming a changing level value without bouncing or pulsing.
+- Sanctioned onboarding motion (all Reduce-Motion gated, no artwork or sound): the intro waveform's
+  gentle variable-color sweep and the step cross-fade between wizard steps.
+- The HUD recording indicator's red level-history bars are level-driven motion; Reduce Motion falls
+  back to the fixed-geometry intensity-only dot.
 - Completion, fallback, and errors settle quickly; no celebratory animation.
 - Start/end sounds are optional and must have equivalent visual feedback.
 - When "mute system audio" is on, other audio is silenced by *ducking* the output (the same call FaceTime
@@ -178,13 +195,20 @@ becomes a second destination for configuration.
 | State | Primary content | Secondary content | Available action |
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
-| Recording | Mode name + live input level | “Listening” | Stop if tap-to-toggle |
+| Recording | Mode name + a red level-history wave (halo + bars; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
+| No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
+| Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, or dismiss as applicable |
+
+Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
+grows vertically (its per-state height is a minimum, not a cap). The two no-speech outcomes both
+record `.noSpeech` in history; they differ only in the render — the microphone repair action appears
+only when the take's audio peak never cleared the digital-silence floor.
 
 The local-only states — Recording, Transcribing, Complete, Target changed, and Error — are the
 whole HUD for a local dictation. The Ready state is the brief acknowledgment shown only when a
@@ -285,8 +309,9 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 
 The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
-setup connects and enables the starter rewrite modes defined in `config_schema.md`; disabled examples
-stay hidden until the user enables them in Modes settings.
+setup materializes and connects the two headline rewrite modes (Polish and Edit Selection); the other
+starters stay available as templates in the Modes pane (Add Mode menu + gallery) until the user adds
+one.
 
 ### One-shot manual-mode override
 
@@ -342,14 +367,16 @@ them subtle — they hint, they don't alarm.
 Settings follows the user’s configuration path, from basic behavior to increasingly technical
 capabilities. The sidebar order is fixed:
 
-1. **General** — startup, feedback, model memory behavior, and history retention.
+1. **General** — startup, feedback, and model memory behavior.
 2. **Speech Models** — active local engine, language capability, download/prepare/select/delete
    (any per-engine preparation step, such as a model conversion, is named for what it does).
 3. **Vocabulary** — global recognition terms and automatic corrections.
 4. **AI Services** — named BYOK connections; hosted-provider keys live in Keychain.
 5. **Modes** — automatic rules and per-mode behavior.
-6. **Permissions** — review and repair macOS access.
-7. **Advanced** — configuration folder, diagnostics, migration/config errors, and notices.
+6. **History** — audit/correction/diagnostics of past dictations, with the history enable and
+   retention controls inline (see §8).
+7. **Permissions** — review and repair macOS access.
+8. **Advanced** — configuration folder, diagnostics, migration/config errors, and notices.
 
 General, Speech Models, Vocabulary, and Advanced stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
@@ -362,16 +389,23 @@ Show only commonly changed behavior initially:
 - Start and end sounds
 - Keep display awake while dictating
 - Mute system audio while dictating
-- History enabled and retention
+- (History enable and retention live in the **History** pane, not here.)
 - **Shortcuts** — global chords for **Add to Vocabulary** and **Paste Last Dictation** (both also
   always in the menu), each set with a chord-only **shortcut well** (`None` in its menu clears it; a
   mouse button is rejected at capture with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste
   Last Dictation defaults off. A chord that collides with a higher-precedence hotkey, such as a Mode
   trigger, shows an inline **shadowed** breadcrumb and will not fire — mode triggers win.
 
-The warm-up tier moves behind `Advanced model behavior` within General. Explain Fastest,
+A **Dictation** section at the top of General shows a read-only **pointer** to the Plain Dictation
+(Direct mode) trigger — the trigger rendered as keycaps (or "None set"), a one-line hint, and a
+**Change in Modes…** link that routes to the Direct mode's editor. It is a pointer, never a duplicate
+setting: the trigger is owned by the Direct mode and edited only in Modes.
+
+The warm-up tier lives behind an `Advanced model behavior` disclosure within the Performance section
+(collapsed by default; the collapsed row shows the current tier's short name). Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff (it governs both the STT model's memory
-residency and idle microphone warm-up), not as cache terminology.
+residency and idle microphone warm-up), not as cache terminology. The footer copy **never shows a raw
+byte count** — it describes behavior, not size.
 
 ### Speech Models
 
@@ -389,10 +423,12 @@ Both screens prioritize fast correction over configuration theory.
 - Add to Vocabulary: one compact composer with stacked fields, **Word or heard phrase** and
   **Use instead (optional)**, so labels stay readable in global settings, mode settings, and the
   standalone panel. Leaving **Use instead** empty adds a dictionary word; filling it in creates a
-  replacement. The first field keeps focus after adding so repeated entries are fast. A **Match heard
-  phrase as a regular expression** checkbox stays in this composer; when checked, the first label
-  becomes **Heard pattern**, **Use instead** is required, and the composer can create only a
-  replacement.
+  replacement. The first field keeps focus after adding so repeated entries are fast. The composer's
+  first level is just the two fields and the Add button; **Match heard phrase as a regular expression**
+  lives behind the composer's **Advanced** disclosure (regex stays fully available, one disclosure
+  away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, and
+  the composer can create only a replacement — and the disclosure stays open so an ON regex toggle is
+  never hidden.
 - Dictionary: edit/remove saved words, import/export later only if needed.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
@@ -409,7 +445,20 @@ Both screens prioritize fast correction over configuration theory.
 
 An AI service is a named connection, not a global provider choice. The main list shows name,
 provider/model, availability, and the active credential state: no auth, key stored/no key, token
-command, or failed test. Connection editing is a focused detail page.
+command, or failed test.
+
+**Creating a service is the same flow everywhere** (onboarding and Settings): **Add AI Service** opens
+a draft form with a primary **Connect** button that tests the endpoint and only then saves, rolling
+the Keychain key back on failure or cancel — nothing is ever half-saved, and Settings can no longer
+hold a never-tested service. The same status vocabulary and error strings are shared across both
+surfaces via one helper.
+
+Selecting a **working** service defaults to a **summary** (name, provider·model, status, "Used by",
+and — only when nothing uses it yet — **Create a mode with this service**), not endpoint/credential
+mechanics. **Edit Connection** reveals the focused detail editor; a service whose config is broken or
+whose last test failed opens straight into that editor and stays there until it tests clean (the
+in-memory test state clears on restart). The editor's **Done** button returns to the summary and is
+disabled while the config is incomplete.
 
 The editor uses progressive sections:
 
@@ -429,9 +478,18 @@ compatible endpoint configuration under `Advanced connection settings`.
 
 ### Modes
 
+A fresh install lists only **Plain Dictation** (the Direct floor). The starter rewrite modes are
+**templates**, discoverable in two visible places: the **Add Mode** menu (Blank Mode, then each
+template by name) and the Modes pane's empty-detail **template gallery** (each template's name, a
+one-line summary, and an Add button; an already-added template reads "Added"). Materializing a
+template creates an enabled, fully editable mode; at its catalog id it keeps its seed identity, so it
+continues to receive starter updates until the user edits it (a second copy of the same template is a
+plain user mode with no seed identity). Existing installs keep their previously-seeded starter files
+unchanged.
+
 The Modes list shows the user-visible summary of each mode:
 
-- name and enabled state;
+- name and enabled state (a disabled mode reads "Disabled");
 - when it can be selected (automatic everywhere, app rule, hotkey, or spoken phrase);
 - local-only or rewrite boundary status;
 - history exclusion status when enabled.
@@ -442,11 +500,15 @@ sections:
 1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
-2. **When this mode is used** — the direct shortcut uses a **shortcut well** (one control: its menu
-   offers `None` and the modifier-only keys Fn (Globe), Right-⌥, Right-⌘, and ⌃⌥⇧⌘, and clicking it
-   or choosing `Record…` captures a custom chord or extra mouse button in place — no separate picker/
-   recorder swap); app/URL/window-title rules, press style, and spoken routing live under `Advanced
-   routing`.
+2. **When this mode is used** — three plain first-level rows (UX2 phase 7a): **Shortcut** (the
+   **shortcut well** — one control whose menu offers `None` and the modifier-only keys Fn (Globe),
+   Right-⌥, Right-⌘, and ⌃⌥⇧⌘, and clicking it or `Record…` captures a custom chord or extra mouse
+   button in place), **Spoken phrase** (the chips + add field, with the actual phrases shown), and
+   **Use in** (one unified apps-and-websites rule list; the Add… menu offers running apps, Choose from
+   Applications…, Enter Bundle ID…, and **Website…** — a domain-first field that stores a host-anchored
+   pattern matching that domain or a subdomain, never a substring). Press style, the window-title regex,
+   and the raw URL regex live under `Advanced routing`. History detail explains **how the mode was
+   chosen** (menu / shortcut / app / spoken phrase / fallback).
 3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
    (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
    under `Recognition and replacements`. (Dictionary recovery is no longer a mode setting — it is a
@@ -492,8 +554,16 @@ here.)
 
 ## 8. History
 
-History is a dedicated, searchable window. It is the audit and correction surface, not a log
-viewer.
+History is a **Settings pane**, not a separate window (UX2 phase 8) — it is the audit,
+correction, and diagnostics surface, reached via the menu "History…" / ⌘Y (which opens Settings
+on the History pane) and the sidebar. It uses the same list/detail pane layout as Modes: a
+left column with the history enable/retention controls (moved out of General), a search field,
+the day-grouped list, and the storage-truth statement pinned at the bottom; the right column is
+the entry detail. The enable toggle and retention stepper live only here now — General has no
+History section. **"Navigated away" equals "closed"**: leaving the pane (or closing Settings)
+releases all parsed transcripts and the search cache, and re-entering reloads (signature-gated,
+so it is free when nothing changed). "Paste Result" hides Settings, pastes into the previously
+focused app, and closes Settings on success (re-presents + copies on failure).
 
 ### List view
 
@@ -523,12 +593,19 @@ Correction actions are directly beside the relevant text:
 - **Add to Dictionary** for a term that should be recognized as written.
 - **Create Replacement** for a repeated heard-to-intended correction.
 
+### Empty state
+
+One centered state when there are no entries: `No dictations yet` with `Future dictations appear
+here.` — and, because the enable toggle is inline in the same pane, **no navigation action**; when
+history is off the description appends `History is currently off.` and the inline toggle is the
+affordance. The storage-truth statement stays pinned regardless.
+
 ### Storage truth
 
-History settings and the empty state must state: `History stays on this Mac. Audio and
+The History pane and its empty state must state: `History stays on this Mac. Audio and
 password-field dictations are never saved. Stored transcripts and final text can still contain
-sensitive information.` Link the user directly to retention and per-mode exclusion from this
-explanation.
+sensitive information.` Retention and per-mode exclusion are reachable from the pane's inline
+controls and each mode's Result handling.
 
 ---
 

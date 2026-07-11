@@ -20,7 +20,7 @@ enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
     case arming(mode: String?)
-    case recording(mode: String?, level: Float)
+    case recording(mode: String?, level: Float, latchedTrigger: String?)
     case loadingModel(mode: String)
     case transcribing(mode: String)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
@@ -72,7 +72,7 @@ extension HUDState {
             return mode
         case .arming(let mode):
             return mode
-        case .recording(let mode, _):
+        case .recording(let mode, _, _):
             return mode
         case .loadingModel(let mode):
             return mode
@@ -101,8 +101,8 @@ extension HUDState {
             return "Next dictation"
         case .arming:
             return "Preparing dictation"
-        case .recording:
-            return "Listening"
+        case .recording(_, _, let latchedTrigger):
+            return latchedTrigger.map { "Listening — tap \($0) again to stop" } ?? "Listening"
         case .loadingModel:
             return "Loading speech model…"
         case .transcribing:

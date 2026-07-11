@@ -33,6 +33,12 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var connection: String?
     public var model: String?
     public var prompt: String?
+    // How this mode was chosen (UX2 phase 7c) — additive optional fields, nil on older rows.
+    public var modeChoice: ModeChoiceReason?
+    public var routedPhrase: String?
+    // Display string of the shortcut that started this dictation, when the mode was chosen by its trigger
+    // key (modeChoice == .triggerKey). Lets History show "Started by its shortcut (Right-⌥)". nil otherwise.
+    public var triggerKey: String?
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -49,6 +55,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case connection
         case model
         case prompt
+        case modeChoice = "mode_choice"
+        case routedPhrase = "routed_phrase"
+        case triggerKey = "trigger_key"
     }
 
     public init(
@@ -56,7 +65,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         heard: String, transformed: String? = nil,
         result: String, outcome: Outcome,
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
-        connection: String? = nil, model: String? = nil, prompt: String? = nil
+        connection: String? = nil, model: String? = nil, prompt: String? = nil,
+        modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
+        triggerKey: String? = nil
     ) {
         self.timestamp = timestamp
         self.modeName = modeName
@@ -72,6 +83,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.connection = connection
         self.model = model
         self.prompt = prompt
+        self.modeChoice = modeChoice
+        self.routedPhrase = routedPhrase
+        self.triggerKey = triggerKey
     }
 
     private static let encoder: JSONEncoder = {

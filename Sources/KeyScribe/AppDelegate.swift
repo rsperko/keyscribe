@@ -20,7 +20,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsController: SettingsController!
     private var notices = NoticesController()
     private var history: HistoryStore!
-    private var historyController: HistoryController!
     private var correctionPanel: CorrectionPanelController!
     private var configRepository: ConfigRepository!
     // Legacy crash recovery for audio state markers written by earlier builds.
@@ -63,13 +62,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
         }
         provider = resolveProvider(engines: engines)
-        ModeStore.seedStartersIfEmpty(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
+        ModeStore.recordStarterOffersIfFresh(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
         let reconciled = ModeStore.reconcileSeeds(
             modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
             settingsDir: KeyScribePaths.supportDir)
         if !reconciled.isEmpty {
-            Log.models.info("seed reconcile: renamed=\(reconciled.renamed, privacy: .public) added=\(reconciled.added, privacy: .public) updated=\(reconciled.updated, privacy: .public)")
+            Log.models.info("seed reconcile: renamed=\(reconciled.renamed, privacy: .public) offered=\(reconciled.added, privacy: .public) updated=\(reconciled.updated, privacy: .public)")
             loadSettings()
         }
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
@@ -105,11 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refreshStatus()
         }
 
-        historyController = HistoryController(
-            store: history,
-            addDictionaryWord: { [weak self] word in self?.configRepository.addDictionaryWord(word) ?? false },
-            addReplacement: { [weak self] heard, replace in self?.configRepository.addReplacement(heard: heard, replace: replace) ?? false },
-            openSettings: { [weak self] destination in self?.settingsController.present(destination) })
         correctionPanel = CorrectionPanelController(
             destinations: { [weak self] in self?.correctionDestinations() ?? [.global] },
             addDictionaryWord: { [weak self] word, destination in
@@ -132,7 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.showsUpdateCheck = updater != nil
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
-        menu.onOpenHistory = { [weak self] in self?.historyController.present() }
+        menu.onOpenHistory = { [weak self] in self?.settingsController.present(.history) }
         menu.onOpenSettings = { [weak self] in self?.settingsController.present() }
         menu.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         menu.onOpenModes = { [weak self] in self?.settingsController.present(.modes) }
@@ -192,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels, repository: configRepository,
+            historyStore: history,
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
@@ -310,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotkey == nil {
             hotkey = HotkeyMonitor(
                 bindings: bindings, actionBindings: actionBindings,
-                onStart: { [weak self] key in self?.controller.handleStart(triggerKey: key) },
+                onStart: { [weak self] key, style in self?.controller.handleStart(triggerKey: key, pressStyle: style) },
                 onCommit: { [weak self] _ in
                     self?.controller.handleCommit()
                     self?.refreshStatus()
@@ -524,6 +519,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onDictationCompleted = { [weak self] completion in
             self?.firstRun?.noteDictation(completion)
+        }
+        // Suspend the global hotkey monitor while the trial's ShortcutWell captures, mirroring the Settings
+        // wiring — otherwise holding a modifier to record it starts a dictation mid-capture.
+        firstRun?.recordingState.onChange = { [weak self] recording in
+            self?.hotkey?.isSuspended = recording
         }
         firstRun?.present()
     }

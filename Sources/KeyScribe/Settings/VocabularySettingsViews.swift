@@ -41,9 +41,16 @@ struct VocabularyComposer: View {
     @State private var heard = ""
     @State private var replace = ""
     @State private var regex = false
+    @State private var advancedExpanded = false
     @FocusState private var focus: Field?
 
     private enum Field { case heard, replace }
+
+    // The disclosure is open whenever the user opened it OR regex is on — a collapsed section hiding an ON
+    // regex toggle would silently change what Add does (5a).
+    private var advancedBinding: Binding<Bool> {
+        Binding(get: { advancedExpanded || regex }, set: { advancedExpanded = $0 })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -69,13 +76,24 @@ struct VocabularyComposer: View {
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerUseInstead)
             }
-            Toggle("Match heard phrase as a regular expression", isOn: $regex)
-                .toggleStyle(.checkbox)
-                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerRegexToggle)
-            Text(helpText)
+            Text(generalHelpText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            DisclosureSection("Advanced", isExpanded: advancedBinding) {
+                Toggle("Match heard phrase as a regular expression", isOn: $regex)
+                    .toggleStyle(.checkbox)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerRegexToggle)
+                if regex {
+                    Text(regexHelpText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdvanced)
+            // Kept OUTSIDE the disclosure: it gates canAdd, so it must stay visible while regex is on even if
+            // the section is somehow collapsed.
             if regexInvalid {
                 Label("That is not a valid regular expression.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -102,11 +120,12 @@ struct VocabularyComposer: View {
     }
     private var canAdd: Bool { !heardTrimmed.isEmpty && (!regex || !replaceTrimmed.isEmpty) && !regexInvalid }
 
-    private var helpText: String {
-        if regex {
-            return "Regex always creates a replacement, so Use instead is required. Use captures like $1."
-        }
-        return "Leave Use instead empty to add a word. Fill it in to create an automatic replacement."
+    private var generalHelpText: String {
+        "Leave Use instead empty to add a word. Fill it in to create an automatic replacement."
+    }
+
+    private var regexHelpText: String {
+        "Regex always creates a replacement, so Use instead is required. Use captures like $1."
     }
 
     private func commit() {
@@ -123,6 +142,7 @@ struct VocabularyComposer: View {
         heard = ""
         replace = ""
         regex = false
+        advancedExpanded = false
         focus = .heard
     }
 }

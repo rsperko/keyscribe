@@ -87,11 +87,17 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let replacements: ReplacementsSettingsModel
     private let modes: ModesSettingsModel
     private let aiServices: AIServiceSettingsModel
+    private let history: HistoryPaneModel
     private let problems = SettingsProblemModel()
     private let navigation = SettingsNavigationModel()
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
+    // The app to hand focus back to for History's "Paste Result" — the Settings window is key while the
+    // pane is up. Tracked only while the History pane is selected and the window is visible.
+    private var historyPreviousApp: NSRunningApplication?
+    private var historyActivationObserver: NSObjectProtocol?
+    private var loadedHistorySignature: String?
     // Permissions are granted out-of-process; poll while the window is open so a flag clears as soon as the
     // user fixes it. Owned here (not a view `.task`) because the window is retained (`isReleasedWhenClosed
     // = false`) — a view-owned task would never cancel and would run for the process lifetime.
@@ -102,6 +108,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     init(
         settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository,
+        historyStore: HistoryStore,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
         detectProblems: @escaping () -> [SettingsProblem],
@@ -120,7 +127,21 @@ final class SettingsController: NSObject, NSWindowDelegate {
         replacements = ReplacementsSettingsModel(repository: repository)
         modes = ModesSettingsModel(repository: repository)
         aiServices = AIServiceSettingsModel(repository: repository)
+        history = HistoryPaneModel(
+            store: historyStore,
+            addDictionaryWord: { repository.addDictionaryWord($0) },
+            addReplacement: { repository.addReplacement(heard: $0, replace: $1) },
+            openSettings: { _ in })
         super.init()
+        history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
+        history.copyText = { TextInserter.copyToClipboard($0) }
+        history.pasteText = { [weak self] in self?.pasteHistoryResult($0) }
+        // "Create a mode with this service": make a disabled mode wired to the connection and route to Modes.
+        aiServices.onCreateModeWithConnection = { [weak self] connectionId in
+            guard let self else { return }
+            self.modes.createWithConnection(connectionId: connectionId)
+            self.navigation.destination = .modes
+        }
     }
 
     func update(settings: Settings) {
@@ -149,9 +170,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
         let root = SettingsRootView(
             general: model, speechModels: speechModels, dictionary: dictionary,
-            replacements: replacements, aiServices: aiServices, modes: modes,
+            replacements: replacements, aiServices: aiServices, modes: modes, history: history,
             problems: problems, navigation: navigation, recordingState: recordingState,
-            accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
+            accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch,
+            onHistoryPaneChange: { [weak self] active in self?.handleHistoryPaneChange(active: active) })
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "\(Branding.appName) Settings"
@@ -171,7 +193,83 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         problemPollTask?.cancel()
         problemPollTask = nil
+        // "Navigated away" equals "closed" for retained transcript state (phase 8e memory/privacy invariant).
+        handleHistoryPaneChange(active: false)
         AppActivationPolicy.popRegular()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        // Dictations may have landed (or retention changed) while Settings was open in the background — the
+        // signature-gated reload is cheap, so re-check when the window regains focus while History is showing.
+        if navigation.destination == .history { reloadHistoryIfNeeded() }
+    }
+
+    // Reload on entering the History pane; release on leaving (both the memory/privacy invariant: no parsed
+    // transcripts retained while History is not on screen). Also drives the previousApp tracking observer.
+    private func handleHistoryPaneChange(active: Bool) {
+        if active {
+            historyPreviousApp = NSWorkspace.shared.frontmostApplication
+            registerHistoryActivationObserver()
+            reloadHistoryIfNeeded()
+        } else {
+            removeHistoryActivationObserver()
+            history.releaseForClose()
+            loadedHistorySignature = nil
+        }
+    }
+
+    private func reloadHistoryIfNeeded() {
+        let signature = history.storeSignature()
+        guard signature != loadedHistorySignature else { return }
+        history.reload()
+        loadedHistorySignature = signature
+    }
+
+    private func registerHistoryActivationObserver() {
+        guard historyActivationObserver == nil else { return }
+        let selfBundleId = Bundle.main.bundleIdentifier
+        historyActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // Track only while the History pane is selected and the window is visible, so switching panes
+                // does not keep re-seeding previousApp.
+                guard let self, self.navigation.destination == .history, self.window?.isVisible == true,
+                      let app = NSWorkspace.shared.frontmostApplication,
+                      app.bundleIdentifier != selfBundleId else { return }
+                self.historyPreviousApp = app
+            }
+        }
+    }
+
+    private func removeHistoryActivationObserver() {
+        if let historyActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(historyActivationObserver)
+        }
+        historyActivationObserver = nil
+    }
+
+    // History's "Paste Result": the Settings window is key while the pane reads, so hand focus back to the
+    // last real app and paste there. Order the Settings window out (through the activation policy), paste,
+    // then close on success or re-present + flash on failure — mirroring the old History-window dance.
+    private func pasteHistoryResult(_ text: String) {
+        guard let target = historyPreviousApp,
+              target.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            TextInserter.copyToClipboard(text)
+            history.flash("No target app to paste into — copied to clipboard instead.")
+            return
+        }
+        window?.orderOut(nil)
+        Task { @MainActor in
+            guard await TextInserter.pasteReturning(to: target, text: text) else {
+                TextInserter.copyToClipboard(text)
+                NSApp.activate(ignoringOtherApps: true)
+                window?.makeKeyAndOrderFront(nil)
+                history.flash("Could not return to the app — copied to clipboard instead.")
+                return
+            }
+            window?.close()
+        }
     }
 
     private func startProblemPoll() {
@@ -193,11 +291,13 @@ struct SettingsRootView: View {
     @ObservedObject var replacements: ReplacementsSettingsModel
     @ObservedObject var aiServices: AIServiceSettingsModel
     @ObservedObject var modes: ModesSettingsModel
+    @ObservedObject var history: HistoryPaneModel
     @ObservedObject var problems: SettingsProblemModel
     @ObservedObject var navigation: SettingsNavigationModel
     @ObservedObject var recordingState: HotkeyRecordingState
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
+    var onHistoryPaneChange: (Bool) -> Void = { _ in }
 
     // Global action shortcuts as double-fire rivals for the mode-trigger overlap warning (a chord like
     // ⌃⌥⇧V subsumes a right-Option trigger). Read from the live `general` model so editing refreshes the
@@ -210,6 +310,15 @@ struct SettingsRootView: View {
             .init(id: GlobalHotkey.pasteLastId, key: general.pasteLastShortcut,
                   label: "the Paste Last Dictation shortcut"),
         ], shadowed: shadowedHotkeys())
+    }
+
+    // The Direct mode's trigger, read live from the observed modes model so the General pointer row updates
+    // when it is rebound in Modes (UX2 phase 3c).
+    private var plainDictationTrigger: KeyDescriptor? {
+        guard let key = modes.modes.first(where: { $0.id == Mode.directId })?.triggerKeys.first?.key else {
+            return nil
+        }
+        return try? KeyDescriptor(parsing: key)
     }
 
     private func shadowedHotkeys() -> Set<String> {
@@ -250,7 +359,11 @@ struct SettingsRootView: View {
                 GeneralSettingsView(
                     model: general,
                     vocabularyShadowed: shadowed.contains(GlobalHotkey.vocabularyId),
-                    pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId))
+                    pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId),
+                    plainDictationTrigger: plainDictationTrigger,
+                    onOpenPlainDictation: {
+                        PlainDictationPointer.open(modes: modes, navigation: navigation)
+                    })
             case .speechModels:
                 SpeechModelsView(model: speechModels)
             case .vocabulary:
@@ -260,6 +373,8 @@ struct SettingsRootView: View {
             case .modes:
                 ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds,
                                   actionShortcuts: actionShortcutRivals)
+            case .history:
+                HistoryPaneView(model: history, settings: general)
             case .permissions:
                 PermissionsSettingsView(
                     accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
@@ -269,6 +384,20 @@ struct SettingsRootView: View {
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
         .environmentObject(recordingState)
+        .onAppear { if navigation.destination == .history { onHistoryPaneChange(true) } }
+        .onChange(of: navigation.destination) { old, new in
+            if new == .history { onHistoryPaneChange(true) }
+            else if old == .history { onHistoryPaneChange(false) }
+        }
+    }
+}
+
+// The General pane's "Change in Modes…" pointer: select the Direct (Plain Dictation) mode and route to the
+// Modes pane. Extracted so the effect is unit-testable without driving the SwiftUI view (UX2 phase 3).
+enum PlainDictationPointer {
+    @MainActor static func open(modes: ModesSettingsModel, navigation: SettingsNavigationModel) {
+        modes.selectedID = Mode.directId
+        navigation.destination = .modes
     }
 }
 
@@ -278,6 +407,7 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
     case vocabulary
     case aiServices
     case modes
+    case history
     case permissions
     case advanced
 
@@ -290,6 +420,7 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
         case .vocabulary: "Vocabulary"
         case .aiServices: "AI Services"
         case .modes: "Modes"
+        case .history: "History"
         case .permissions: "Permissions"
         case .advanced: "Advanced"
         }
@@ -302,6 +433,7 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
         case .vocabulary: "text.book.closed"
         case .aiServices: "wand.and.stars"
         case .modes: "square.stack.3d.up"
+        case .history: "clock"
         case .permissions: "lock"
         case .advanced: "slider.horizontal.3"
         }
@@ -445,6 +577,13 @@ final class SettingsModel: ObservableObject {
             ("balanced", "Balanced — release after \(Self.idleLabel(settings.stt.evictionIdleSeconds)) idle"),
             ("frugal", "Frugal — load only when dictating"),
         ]
+    }
+
+    // The selected tier's short name (the part before the em dash) — the collapsed "Advanced model behavior"
+    // summary so the disclosure still shows state (UX2 phase 3a).
+    var evictionShortLabel: String {
+        let label = evictions.first { $0.id == eviction }?.label ?? "Fastest"
+        return label.components(separatedBy: " — ").first ?? label
     }
 
     var evictionFooter: String {

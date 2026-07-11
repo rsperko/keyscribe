@@ -25,9 +25,10 @@ struct SpeechPresenceGateWiringTests {
 
     private struct StubPresence: SpeechPresenceDetecting {
         let presence: SpeechPresence
+        var peak: Float = 0.5
         func read(samples: [Float]?, url: URL, sampleRate: Int) async -> SpeechPresenceReading {
             SpeechPresenceReading(
-                presence: presence, maxProbability: presence == .speech ? 0.9 : 0,
+                presence: presence, maxProbability: presence == .speech ? 0.9 : 0, peak: peak,
                 latencyMs: 1, modelUsed: true)
         }
     }
@@ -41,7 +42,66 @@ struct SpeechPresenceGateWiringTests {
         func read(samples: [Float]?, url: URL, sampleRate: Int) async -> SpeechPresenceReading {
             await MainActor.run { cancel.run?() }
             return SpeechPresenceReading(
-                presence: .noSpeech, maxProbability: 0, latencyMs: 1, modelUsed: true)
+                presence: .noSpeech, maxProbability: 0, peak: 0.5, latencyMs: 1, modelUsed: true)
+        }
+    }
+
+    private final class HUDSpy: HUDPresenting {
+        private(set) var states: [HUDState] = []
+        func render(_ state: HUDState) { states.append(state) }
+    }
+
+    // Run and also capture the HUD render trail so the two no-speech renders (error vs complete) are visible.
+    private func runWithHUD(detector: SpeechPresenceDetecting) async -> (DictationRecord?, [HUDState]) {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-vad-hud-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        var m = Mode(id: "plain", name: "plain")
+        m.commands = .init(liveEdits: false, privacy: false)
+        try? ModeStore.write(m, to: modesDir)
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        let hud = HUDSpy()
+        let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: nil, hud: hud,
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            presenceDetector: detector,
+            insert: { _, _, _, _, _ in true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+        controller.setNextModeOverride(id: "plain")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+        return (controller.lastRecord, hud.states)
+    }
+
+    @Test func nothingHeardRendersTheMicrophoneErrorButRecordsNoSpeech() async {
+        let (record, states) = await runWithHUD(detector: StubPresence(presence: .noSpeech, peak: 0))
+        #expect(record?.outcome == .noSpeech)
+        let terminal = states.last
+        if case .error(let message, let action) = terminal {
+            #expect(message == "Nothing heard — check your microphone")
+            #expect(action == .openMicrophoneSettings)
+        } else {
+            Issue.record("expected an error render, got \(String(describing: terminal))")
+        }
+    }
+
+    @Test func realAudioNoSpeechRendersTheNeutralCompleteAndRecordsNoSpeech() async {
+        let (record, states) = await runWithHUD(detector: StubPresence(presence: .noSpeech, peak: 0.5))
+        #expect(record?.outcome == .noSpeech)
+        let terminal = states.last
+        if case .complete(let outcome, _) = terminal {
+            #expect(outcome == .noSpeech)
+        } else {
+            Issue.record("expected a complete render, got \(String(describing: terminal))")
         }
     }
 

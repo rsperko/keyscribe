@@ -7,6 +7,7 @@ import KeyScribeKit
 struct SpeechPresenceReading: Sendable {
     let presence: SpeechPresence
     let maxProbability: Float
+    let peak: Float
     let latencyMs: Double
     let modelUsed: Bool
 }
@@ -102,7 +103,7 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
         if let peak, peak < SpeechPresenceGate.silenceFloor {
             return SpeechPresenceReading(
-                presence: .noSpeech, maxProbability: 0,
+                presence: .noSpeech, maxProbability: 0, peak: peak,
                 latencyMs: Self.elapsedMs(since: start), modelUsed: false)
         }
 
@@ -124,14 +125,14 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
         guard let probabilities else {
             return SpeechPresenceReading(
-                presence: .speech, maxProbability: 0,
+                presence: .speech, maxProbability: 0, peak: peak ?? 1,
                 latencyMs: Self.elapsedMs(since: start), modelUsed: false)
         }
 
         let verdict = SpeechPresenceGate.evaluate(
             chunkProbabilities: probabilities, peak: peak ?? 1)
         return SpeechPresenceReading(
-            presence: verdict, maxProbability: probabilities.max() ?? 0,
+            presence: verdict, maxProbability: probabilities.max() ?? 0, peak: peak ?? 1,
             latencyMs: Self.elapsedMs(since: start), modelUsed: true)
     }
 

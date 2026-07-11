@@ -64,31 +64,37 @@ struct EvictionPolicyTests {
 }
 
 struct EvictionCopyTests {
-    @Test func fastestStatesResidentFootprint() {
+    // No footer string may ever contain a byte count (UX2 phase 3b) — the copy describes behavior, not size.
+    private func hasNoByteCount(_ s: String) -> Bool {
+        !s.contains("KB") && !s.contains("MB") && !s.contains("GB")
+    }
+
+    @Test func fastestStatesResidentBehaviorWithoutBytes() {
         let s = EvictionCopy.footer(
             policy: .fastest, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("Keeps Qwen3-ASR 1.7B loaded"))
-        #expect(s.contains("on disk, similar in memory"))
-        #expect(s.contains("1.8 GB"))
         #expect(s.contains("microphone"))
+        #expect(hasNoByteCount(s))
     }
 
-    @Test func balancedUsesIdleLabel() {
+    @Test func balancedUsesIdleLabelWithoutBytes() {
         let s = EvictionCopy.footer(
             policy: .balanced, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("releases the microphone after 30 min idle"))
-        #expect(s.contains("1.8 GB"))
+        #expect(s.contains("Qwen3-ASR 1.7B"))
+        #expect(hasNoByteCount(s))
     }
 
-    @Test func frugalLeadsWithFreeing() {
+    @Test func frugalLeadsWithFreeingWithoutBytes() {
         let s = EvictionCopy.footer(
             policy: .frugal, modelName: "Whisper Large v3 Turbo", bytes: 1_500_000_000,
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("Frees Whisper Large v3 Turbo"))
         #expect(s.contains("after each dictation"))
         #expect(s.contains("microphone"))
+        #expect(hasNoByteCount(s))
     }
 
     // A model under the small threshold collapses to the "costs you little" line regardless of policy.
@@ -99,6 +105,8 @@ struct EvictionCopyTests {
                 systemManaged: false, idleLabel: "30 min")
             #expect(s.contains("is small"))
             #expect(s.contains("cost you little"))
+            #expect(s.contains("Moonshine Base (English)"))
+            #expect(hasNoByteCount(s))
         }
     }
 
@@ -107,6 +115,7 @@ struct EvictionCopyTests {
             policy: .fastest, modelName: "Big", bytes: EvictionCopy.smallModelBytes,
             systemManaged: false, idleLabel: "30 min")
         #expect(!s.contains("is small"))
+        #expect(hasNoByteCount(s))
     }
 
     @Test func systemManagedHasNoFootprintCopy() {
@@ -114,6 +123,7 @@ struct EvictionCopyTests {
             policy: .fastest, modelName: "Apple Speech", bytes: 0,
             systemManaged: true, idleLabel: "30 min")
         #expect(s.contains("managed by macOS"))
-        #expect(!s.contains("loaded ("))
+        #expect(s.contains("Apple Speech"))
+        #expect(hasNoByteCount(s))
     }
 }

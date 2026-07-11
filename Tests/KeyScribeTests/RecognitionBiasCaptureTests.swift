@@ -34,7 +34,7 @@ struct RecognitionBiasCaptureTests {
     private func makeController(
         supportDir: URL, capture: BiasCapture, settings: Settings
     ) -> (DictationController, SpeechEngineProvider) {
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
         try! DictionaryStore.write(DictionarySet(words: ["Kubernetes", "Postgres"]), to: supportDir)
         let engine = RecordingBiasEngine(id: "instant", capture: capture)
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")

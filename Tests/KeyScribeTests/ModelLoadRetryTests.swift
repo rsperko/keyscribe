@@ -112,7 +112,7 @@ struct ModelLoadRetryTests {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = FlakyLoadEngine(failTimes: failTimes)
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "flaky")
@@ -186,7 +186,7 @@ struct ModelLoadRetryTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = SlowLoadEngine()
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "slow")
@@ -227,7 +227,7 @@ struct ModelLoadRetryTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = TimeoutLoadEngine()
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "timeout")

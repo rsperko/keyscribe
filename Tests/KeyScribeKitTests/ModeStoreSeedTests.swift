@@ -47,27 +47,64 @@ struct ModeStoreSeedTests {
         }
     }
 
-    @Test func seedThenLoadRoundTrips() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-test")
-        try? FileManager.default.removeItem(at: dir)
+    @Test func recordStarterOffersOnAFreshDirWritesNoFilesButOffersEveryStarter() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-\(UUID().uuidString)")
+        let ledgerDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-ledger-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: ledgerDir) }
 
-        ModeStore.seedStartersIfEmpty(in: dir)
-        let loaded = ModeStore.loadAll(in: dir)
-        #expect(Set(loaded.map(\.id)) == [
-            "polish", "message", "email", "edit-selection", "ai-prompt", "code",
-            "markdown", "shell",
-        ])
-        #expect(loaded.first { $0.id == "edit-selection" }?.source == .selection)
-        #expect(loaded.first { $0.id == "email" }?.aiRewrite?.prompt.contains("professional email") == true)
-        #expect(loaded.first { $0.id == "ai-prompt" }?.enabled == false)
-        #expect(loaded.first { $0.id == "code" }?.enabled == false)
-        #expect(loaded.first { $0.id == "shell" }?.enabled == false)
-        #expect(loaded.first { $0.id == "markdown" }?.enabled == false)
+        ModeStore.recordStarterOffersIfFresh(in: dir, ledgerDir: ledgerDir)
 
-        ModeStore.seedStartersIfEmpty(in: dir)
-        #expect(ModeStore.loadAll(in: dir).count == 8)
+        #expect(ModeStore.loadAll(in: dir).isEmpty)
+        let ledger = try #require(ModeStore.loadLedger(in: ledgerDir))
+        #expect(Set(ledger.entries.map(\.seedId)) == Set(ModeStore.starterModes().map(\.id)))
+        #expect(ledger.entries.allSatisfy { $0.fingerprint == nil })
+    }
 
-        try? FileManager.default.removeItem(at: dir)
+    @Test func recordStarterOffersLeavesANonEmptyDirAndItsLedgerUntouched() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-\(UUID().uuidString)")
+        let ledgerDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-ledger-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: ledgerDir) }
+        try ModeStore.write(Mode(id: "notes", name: "Notes"), to: dir)
+
+        ModeStore.recordStarterOffersIfFresh(in: dir, ledgerDir: ledgerDir)
+
+        #expect(ModeStore.loadAll(in: dir).map(\.id) == ["notes"])
+        #expect(ModeStore.loadLedger(in: ledgerDir) == nil)
+    }
+
+    @Test func fullFreshSequenceEverOnlyHasTheDirectMode() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-\(UUID().uuidString)")
+        let ledgerDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-ledger-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: ledgerDir) }
+
+        func launch() {
+            ModeStore.recordStarterOffersIfFresh(in: dir, ledgerDir: ledgerDir)
+            ModeStore.ensureSystemModes(in: dir)
+            ModeStore.reconcileSeeds(modesDir: dir, ledgerDir: ledgerDir, settingsDir: nil)
+        }
+        launch()
+        #expect(ModeStore.loadAll(in: dir).map(\.id) == [Mode.directId])
+        launch()
+        #expect(ModeStore.loadAll(in: dir).map(\.id) == [Mode.directId])
+    }
+
+    @Test func deletedLedgerOnAFreshStyleInstallRebuildsOffersWithNoModeFiles() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-\(UUID().uuidString)")
+        let ledgerDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-ledger-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: ledgerDir) }
+        // Fresh install already ran (only _direct.toml), then the ledger dir was deleted by hand.
+        ModeStore.ensureSystemModes(in: dir)
+        try? FileManager.default.removeItem(at: ledgerDir)
+
+        ModeStore.recordStarterOffersIfFresh(in: dir, ledgerDir: ledgerDir)   // dir non-empty → no-op
+        ModeStore.reconcileSeeds(modesDir: dir, ledgerDir: ledgerDir, settingsDir: nil)
+
+        // The additive step offers (never writes) any catalog id it has not seen; no starter file is
+        // resurrected. `code` is the one catalog id with no legacy predecessor, so it is freshly offered.
+        #expect(ModeStore.loadAll(in: dir).map(\.id) == [Mode.directId])
+        let ledger = ModeStore.loadLedger(in: ledgerDir)
+        #expect(ledger?.contains("code") == true)
+        #expect(ledger?.entry("code")?.fingerprint == nil)
     }
 
     @Test func loadAllOnMissingDirIsEmpty() {

@@ -11,12 +11,35 @@ public struct RoutingContext: Equatable, Sendable {
     }
 }
 
+// Why a mode was chosen for a dictation, recorded for the History "how this was chosen" line (UX2 phase 7c).
+// User-facing copy lives in the app; this is the durable, Codable key.
+public enum ModeChoiceReason: String, Codable, Sendable, Equatable {
+    case oneShot = "one_shot"           // menu "Dictate with" pick
+    case triggerKey = "trigger_key"     // the pressed key selected the mode
+    case contextRule = "context_rule"   // constraints won Phase-A resolution
+    case spokenPhrase = "spoken_phrase" // Phase-B suffix route
+    case fallback = "fallback"          // Direct floor caught it
+}
+
+// Phase-A result carries the resolved mode AND why it was chosen (key / context / fallback — the cases the
+// resolver itself can distinguish; oneShot is applied by DictationController before resolution).
+public struct PhaseAResult: Equatable, Sendable {
+    public var mode: Mode
+    public var reason: ModeChoiceReason
+    public init(mode: Mode, reason: ModeChoiceReason) {
+        self.mode = mode
+        self.reason = reason
+    }
+}
+
 public struct PhaseBResult: Equatable, Sendable {
     public var routedModeId: String?
     public var transcript: String
-    public init(routedModeId: String?, transcript: String) {
+    public var matchedPhrase: String?
+    public init(routedModeId: String?, transcript: String, matchedPhrase: String? = nil) {
         self.routedModeId = routedModeId
         self.transcript = transcript
+        self.matchedPhrase = matchedPhrase
     }
 }
 
@@ -31,6 +54,17 @@ public enum ModeResolver {
         modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?,
         eligible eligibleOverride: [Mode]? = nil
     ) -> Mode {
+        resolvePhaseAWithReason(
+            modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey,
+            eligible: eligibleOverride).mode
+    }
+
+    // Same resolution as resolvePhaseA, plus WHY the mode was chosen (UX2 phase 7c). Semantics are unchanged
+    // — the reason just names which branch won.
+    public static func resolvePhaseAWithReason(
+        modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?,
+        eligible eligibleOverride: [Mode]? = nil
+    ) -> PhaseAResult {
         let enabled = modes.filter(\.enabled)
         // Reuse the caller's eligible set (also needed for Phase B) so the enabled∧isEligible constraint-
         // regex scan isn't repeated.
@@ -43,15 +77,21 @@ public enum ModeResolver {
             let wanted = normalizeKey(key)
             let bound = enabled.filter { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
             if !bound.isEmpty {
-                if let m = mostSpecific(bound.filter { isEligible($0, context) }, context) { return m }
-                return directFallback
+                if let m = mostSpecific(bound.filter { isEligible($0, context) }, context) {
+                    // A bound mode that also carries a matching context rule is still "started by its shortcut"
+                    // from the user's view — the key is what fired it.
+                    return PhaseAResult(mode: m, reason: .triggerKey)
+                }
+                return PhaseAResult(mode: directFallback, reason: .fallback)
             }
         }
         // 2. Context auto-start: the most specific eligible *constrained* mode (ties → declaration
         //    order). Only constrained modes auto-start; unconstrained modes need a key or voice phrase.
-        if let m = mostSpecific(eligible.filter { !$0.constraints.isEmpty }, context) { return m }
+        if let m = mostSpecific(eligible.filter { !$0.constraints.isEmpty }, context) {
+            return PhaseAResult(mode: m, reason: .contextRule)
+        }
         // 3. Nothing else applies → the Direct floor (no separate "default mode"; design.md §4.3).
-        return directFallback
+        return PhaseAResult(mode: directFallback, reason: .fallback)
     }
 
     public static func resolvePhaseB(
@@ -59,7 +99,7 @@ public enum ModeResolver {
     ) -> PhaseBResult {
         // Among eligible modes whose phrase matches the suffix, pick by specificity → declaration order
         // (strict `>` in declaration order keeps the earliest-declared on a tie).
-        var best: (mode: Mode, stripped: String)?
+        var best: (mode: Mode, stripped: String, phrase: String)?
         var bestScore = Int.min
         for mode in eligibleModes {
             for phrase in mode.triggerPhrases {
@@ -67,12 +107,14 @@ public enum ModeResolver {
                 let score = specificity(mode, context)
                 if score > bestScore {
                     bestScore = score
-                    best = (mode, stripped)
+                    best = (mode, stripped, phrase)
                 }
                 break
             }
         }
-        if let best { return PhaseBResult(routedModeId: best.mode.id, transcript: best.stripped) }
+        if let best {
+            return PhaseBResult(routedModeId: best.mode.id, transcript: best.stripped, matchedPhrase: best.phrase)
+        }
         return PhaseBResult(routedModeId: nil, transcript: transcript)
     }
 

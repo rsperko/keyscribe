@@ -6,9 +6,9 @@ import Testing
 struct HUDStateTests {
     @Test func previewFixturesCoverEveryVisibleHUDState() {
         #expect(HUDPreview.names == [
-            "ready", "arming", "recording", "loading-model", "transcribing",
-            "rewriting", "redacted-rewrite", "rewriting-with-local-transcript",
-            "inserted", "copied", "no-speech", "failed", "rewrite-fallback",
+            "ready", "arming", "recording", "recording-latched", "loading-model", "transcribing",
+            "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
+            "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
             "microphone-error", "accessibility-error",
         ])
         for name in HUDPreview.names {
@@ -62,7 +62,7 @@ struct HUDStateTests {
         #expect(state.secondaryText == "Preparing dictation")
         #expect(state.holdsKeyFocus)
         #expect(state.indicator == .preparing)
-        #expect(HUDState.recording(mode: "Plain Dictation", level: 0).indicator == .recording)
+        #expect(HUDState.recording(mode: "Plain Dictation", level: 0, latchedTrigger: nil).indicator == .recording)
     }
 
     @Test func transcribingLeadsWithTheResolvedModeName() {
@@ -142,7 +142,7 @@ struct HUDStateTests {
     }
 
     @Test func stateChangesCarryAStableVoiceOverAnnouncement() {
-        #expect(HUDState.recording(mode: "Polish", level: 0.4).voiceOverAnnouncement == "Recording")
+        #expect(HUDState.recording(mode: "Polish", level: 0.4, latchedTrigger: nil).voiceOverAnnouncement == "Recording")
         #expect(HUDState.transcribing(mode: "Email").voiceOverAnnouncement == "Transcribing")
         #expect(HUDState.loadingModel(mode: "Email").voiceOverAnnouncement == "Loading speech model")
         #expect(HUDState.rewriting(
@@ -160,5 +160,16 @@ struct HUDStateTests {
         #expect(HUDState.hidden.voiceOverAnnouncement == nil)
         #expect(HUDState.ready(mode: "Edit Selection").voiceOverAnnouncement == nil)
         #expect(HUDState.arming(mode: "Plain Dictation").voiceOverAnnouncement == nil)
+    }
+
+    @Test func recordingSecondaryTextShowsTheStopCueOnlyWhenLatched() {
+        #expect(HUDState.recording(mode: "Plain Dictation", level: 0.4, latchedTrigger: nil).secondaryText == "Listening")
+        #expect(HUDState.recording(mode: "Plain Dictation", level: 0.4, latchedTrigger: "Right-⌥").secondaryText
+            == "Listening — tap Right-⌥ again to stop")
+    }
+
+    @Test func recordingVoiceOverIsConstantAcrossLevelAndLatchState() {
+        #expect(HUDState.recording(mode: "Polish", level: 0.1, latchedTrigger: nil).voiceOverAnnouncement == "Recording")
+        #expect(HUDState.recording(mode: "Polish", level: 0.9, latchedTrigger: "Right-⌥").voiceOverAnnouncement == "Recording")
     }
 }

@@ -46,29 +46,24 @@ public enum EvictionCopy {
     // (~141 MB) lands here.
     public static let smallModelBytes: Int64 = 200_000_000
 
+    // Humanized footer (UX2 phase 3b): NEVER interpolate a byte count. `bytes` is kept only to classify a
+    // small model (which reloads fast enough that the tier barely matters); the strings describe behavior.
     public static func footer(
         policy: Eviction, modelName: String, bytes: Int64, systemManaged: Bool, idleLabel: String
     ) -> String {
         if systemManaged {
             return "\(modelName) is managed by macOS, so this setting does not change its memory use."
         }
-        let size = formatBytes(bytes)
         if bytes > 0 && bytes < smallModelBytes {
-            return "\(modelName) is small (~\(size)) and reloads almost instantly — Balanced and Frugal cost you little here."
+            return "\(modelName) is small and reloads almost instantly — Balanced and Frugal cost you little here."
         }
         switch policy {
         case .fastest:
-            return "Keeps \(modelName) loaded (~\(size) on disk, similar in memory) and the microphone connection ready. Every dictation starts instantly; some apps may see the mic as in use."
+            return "Keeps \(modelName) loaded and the microphone connection ready. Every dictation starts instantly; some apps may see the mic as in use."
         case .balanced:
-            return "Keeps \(modelName) loaded (~\(size)), then frees it and releases the microphone after \(idleLabel) idle. The next dictation reloads with a brief delay."
+            return "Keeps \(modelName) loaded, then frees its memory and releases the microphone after \(idleLabel) idle. The next dictation reloads with a brief delay."
         case .frugal:
-            return "Frees \(modelName)’s ~\(size) after each dictation and opens the microphone only while dictating — lowest memory use, with a brief delay before each."
+            return "Frees \(modelName)’s memory after each dictation and opens the microphone only while dictating — lowest memory use, with a brief delay before each."
         }
-    }
-
-    static func formatBytes(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
     }
 }

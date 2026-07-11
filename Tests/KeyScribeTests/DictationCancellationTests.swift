@@ -239,7 +239,7 @@ struct DictationCancellationTests {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal()
         let release = Signal()
@@ -279,7 +279,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = LoadCountingEngine()
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "missing")
@@ -309,7 +309,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let engine = GatedEngine(started: started, release: release, text: "hello world")
@@ -343,7 +343,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let drainStarted = Signal(), drainRelease = Signal()
         let engine = InstantEngine(id: "instant", text: "unreached")
@@ -383,7 +383,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = InstantEngine(id: "instant", text: "unreached")
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
@@ -423,7 +423,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = InstantEngine(id: "instant", text: "unreached")
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
@@ -461,7 +461,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let engine = GatedEngine(started: started, release: release, text: "hello world")
@@ -516,7 +516,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let engine = ThrowAfterReleaseEngine(started: started, release: release)
@@ -557,7 +557,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let engine = EvictRecordingEngine(started: started, release: release)
@@ -595,7 +595,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let engine = EvictRecordingEngine(started: started, release: release)
@@ -638,7 +638,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let engineA = GatedEngine(started: started, release: release, text: "from engine A")
@@ -691,7 +691,7 @@ struct DictationCancellationTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal(), release = Signal()
         let insertSpy = InsertSpy()
@@ -742,7 +742,7 @@ struct DictationCancellationTests {
         h.controller.handleStart()
         await h.controller.captureBringUpTask?.value   // the .recording HUD lands once the mic is live
 
-        #expect(h.hud.states.last == .recording(mode: "Edit Selection", level: 0))
+        #expect(h.hud.states.last == .recording(mode: "Edit Selection", level: 0, latchedTrigger: nil))
         #expect(h.controller.nextModeOverrideName == nil)
     }
 
@@ -758,7 +758,7 @@ struct DictationCancellationTests {
 
         h.controller.handleStart(triggerKey: "right_option")
         await h.controller.captureBringUpTask?.value
-        #expect(h.hud.states.last == .recording(mode: "Plain Dictation", level: 0))
+        #expect(h.hud.states.last == .recording(mode: "Plain Dictation", level: 0, latchedTrigger: nil))
 
         h.controller.handleCommit()
         await h.started.wait()
@@ -922,7 +922,7 @@ struct DictationCaptureStartTests {
         configureSettings: (inout Settings) -> Void = { _ in }
     ) -> DictationController {
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
         let provider = try! SpeechEngineProvider(
             engines: [InstantEngine(id: "instant", text: "hello world")], activeId: "instant")
         var settings = Settings.defaults

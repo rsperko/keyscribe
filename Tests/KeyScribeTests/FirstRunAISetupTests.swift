@@ -46,8 +46,8 @@ struct FirstRunAISetupTests {
     }
 
     // P2-21: the permission relaunch used to drop the user into the permissions-only flow, whose Done
-    // ended onboarding — skipping the AI-service and try-it steps. Resuming lands on the AI-service step.
-    @Test func resumeOnboardingStartsAtTheAIServiceStep() {
+    // ended onboarding early. Resuming lands on the trial, whose modifier tap the relaunch revives.
+    @Test func resumeOnboardingStartsAtTheTrialStep() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-resume-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
@@ -56,7 +56,7 @@ struct FirstRunAISetupTests {
             download: { _, _ in }, selectEngine: { _ in }, resumeOnboarding: true,
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             onComplete: {})
-        #expect(model.step == .aiService)
+        #expect(model.step == .tryIt)
     }
 
     @Test func permissionsOnlyStillStartsAtThePermissionsStep() {
@@ -77,7 +77,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var custom = Mode(id: "custom", name: "Custom")
         custom.aiRewrite = .init(connection: "", prompt: "Custom prompt")
         try ModeStore.write(custom, to: modesDir)
@@ -122,6 +122,37 @@ struct FirstRunAISetupTests {
         #expect(try #require(modes.first { $0.id == "custom" }).aiRewrite?.connection == "")
     }
 
+    // Fresh install (templates-only: no starter files, just _direct.toml): connecting the first service
+    // materializes the two headline modes as enabled seeds wired to the new connection, and touches no other
+    // starter. Their seed identity survives so the playground and future seed updates keep finding them.
+    @Test func connectingOnAFreshProfileMaterializesHeadlineModesAsSeeds() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.ensureSystemModes(in: modesDir)
+        let model = makeModel(supportDir: supportDir, modesDir: modesDir)
+
+        model.aiServiceName = "Local"
+        model.aiProvider = .gemini
+        model.aiModel = "gemini-2.5-flash"
+        model.aiAPIKey = "secret"
+        await model.createAIService()
+
+        let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
+        let modes = ModeStore.loadAll(in: modesDir)
+        let headline = modes.filter { ["polish", "edit-selection"].contains($0.id) }
+        #expect(headline.count == 2)
+        #expect(headline.allSatisfy { $0.enabled })
+        #expect(headline.allSatisfy { $0.seedId == $0.id })
+        #expect(headline.allSatisfy { $0.aiRewrite?.connection == connection.id })
+        #expect(modes.filter { ["message", "email", "code", "markdown", "shell", "ai-prompt"].contains($0.id) }.isEmpty)
+        #expect(model.step == .playground)
+        let ledger = ModeStore.loadLedger(in: supportDir.appendingPathComponent("lkg", isDirectory: true))
+        #expect(ledger?.entry("polish")?.fingerprint != nil)
+        #expect(ledger?.entry("edit-selection")?.fingerprint != nil)
+    }
+
     @Test func skippingModelDownloadSelectsAppleSpeechAndContinuesSetup() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
@@ -147,7 +178,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var completed = 0
         let model = makeModel(
             supportDir: supportDir,
@@ -170,7 +201,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var saveCalled = false
         var testCalled = false
         let model = makeModel(
@@ -213,7 +244,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
 
         let started = Signal(), release = Signal()
         var completed = 0
@@ -250,7 +281,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var completed = 0
         var deletedKeyRef: String?
         let model = makeModel(
@@ -332,7 +363,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var saveCalled = false
         let model = makeModel(
             supportDir: supportDir,
@@ -364,7 +395,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var saveCalled = false
         let model = makeModel(
             supportDir: supportDir,
@@ -396,7 +427,7 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: modesDir)
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
         var saveCalled = false
         let model = makeModel(
             supportDir: supportDir,

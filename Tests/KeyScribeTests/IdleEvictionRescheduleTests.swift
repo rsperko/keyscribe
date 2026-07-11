@@ -57,7 +57,7 @@ struct IdleEvictionRescheduleTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = EvictSpyEngine(text: "hello world")
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "balanced-engine")
@@ -97,7 +97,7 @@ struct IdleEvictionRescheduleTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let engine = EvictSpyEngine(text: "hello world")
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "balanced-engine")

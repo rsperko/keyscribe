@@ -24,6 +24,40 @@ struct HistoryEntryCodecTests {
         #expect(decoded == entry)
     }
 
+    @Test func modeChoiceAndRoutedPhraseRoundTrip() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Email", heard: "send this as an email", result: "…", outcome: .inserted,
+            cloudInvolved: true, redaction: false, contextCategories: [],
+            modeChoice: .spokenPhrase, routedPhrase: "as an email")
+        let decoded = try HistoryEntry(jsonLine: try entry.jsonLine())
+        #expect(decoded.modeChoice == .spokenPhrase)
+        #expect(decoded.routedPhrase == "as an email")
+        #expect(decoded == entry)
+    }
+
+    @Test func olderLinesWithoutModeChoiceDecodeToNil() throws {
+        let line = """
+        {"cloud_involved":false,"context_categories":[],"heard":"hello","mode":"Plain","outcome":"inserted","redaction":false,"result":"hello","timestamp":"2023-11-14T22:13:20Z"}
+        """
+        let decoded = try HistoryEntry(jsonLine: line)
+        #expect(decoded.modeChoice == nil)
+        #expect(decoded.routedPhrase == nil)
+        #expect(decoded.triggerKey == nil)
+    }
+
+    @Test func triggerKeyRoundTrips() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Email", heard: "…", result: "…", outcome: .inserted,
+            cloudInvolved: false, redaction: false, contextCategories: [],
+            modeChoice: .triggerKey, triggerKey: "Right-⌥")
+        let decoded = try HistoryEntry(jsonLine: try entry.jsonLine())
+        #expect(decoded.modeChoice == .triggerKey)
+        #expect(decoded.triggerKey == "Right-⌥")
+        #expect(decoded == entry)
+    }
+
     @Test func transformedStageRoundTrips() throws {
         let entry = HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),

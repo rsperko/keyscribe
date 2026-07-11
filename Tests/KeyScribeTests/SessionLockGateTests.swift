@@ -38,7 +38,7 @@ struct SessionLockGateTests {
         locked: @escaping @MainActor () -> Bool, audio: AudioCapturing, hud: HUDPresenting, supportDir: URL
     ) -> DictationController {
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
         let provider = try! SpeechEngineProvider(engines: [InstantEngine()], activeId: "instant")
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)

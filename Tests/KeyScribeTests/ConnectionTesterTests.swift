@@ -211,13 +211,27 @@ struct AIServiceTestStateTests {
         return dir
     }
 
+    // Seeds and selects one connection (creation is now a draft flow, so these test-state tests seed a
+    // connection directly instead of the old bare-insert create()).
+    @discardableResult
+    private func seedConnection(_ model: AIServiceSettingsModel, in dir: URL, id: String = "new-ai-service") -> Connection {
+        let conn = Connection(
+            id: id, name: "New AI Service", provider: .openai,
+            model: Connection.Provider.openai.defaultModel, keyRef: "keyscribe.llm.\(id)")
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        try! repo.upsertConnection(conn)
+        model.reload()
+        model.selectedID = id
+        return conn
+    }
+
     @Test func recordsPassThenClearsItOnEdit() async {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
             repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
-        model.create()
+        seedConnection(model, in: dir)
         let connection = model.selected!
 
         model.test(connection)
@@ -236,7 +250,7 @@ struct AIServiceTestStateTests {
             repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: BlockingClient(
                 result: .failure(ProviderTransportError.http(500, body: nil)), gate: gate)))
-        model.create()
+        seedConnection(model, in: dir)
         let connection = model.selected!
 
         model.test(connection)
@@ -259,13 +273,13 @@ struct AIServiceTestStateTests {
             repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: BlockingClient(
                 result: .failure(ProviderTransportError.http(500, body: nil)), gate: gate)))
-        model.create()
+        seedConnection(model, in: dir)
         let deleted = model.selected!
 
         model.test(deleted)
         model.delete(deleted)
         // A fresh connection re-mints the freed id.
-        model.create()
+        seedConnection(model, in: dir)
         let recreated = model.selected!
         #expect(recreated.id == deleted.id)
 
@@ -283,7 +297,7 @@ struct AIServiceTestStateTests {
         let model = AIServiceSettingsModel(
             repository: repository,
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
-        model.create()
+        seedConnection(model, in: dir)
         let connection = model.selected!
 
         var email = Mode(id: "email", name: "Email")
@@ -311,7 +325,7 @@ struct AIServiceTestStateTests {
                 #expect(apiKey == "secret")
                 return ["qwen3", "llama"]
             })
-        model.create()
+        seedConnection(model, in: dir)
         var connection = model.selected!
         connection.provider = .openaiCompatible
         connection.model = ""
@@ -333,7 +347,7 @@ struct AIServiceTestStateTests {
             repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))),
             listModels: { _, _ in ["qwen3"] })
-        model.create()
+        seedConnection(model, in: dir)
         var connection = model.selected!
         connection.provider = .openaiCompatible
         connection.model = ""

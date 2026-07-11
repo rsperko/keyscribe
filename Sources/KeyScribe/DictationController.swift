@@ -92,6 +92,12 @@ final class DictationController {
         var activeMode: Mode?
         var eligibleModes: [Mode] = []
         var routingContext = RoutingContext()
+        // How the mode was chosen, for the History "how this was chosen" line (UX2 phase 7c). Set at Phase-A
+        // resolution (key/context/fallback), overridden to .oneShot for a menu pick, and to .spokenPhrase
+        // with the matched phrase when Phase B re-routes.
+        var modeChoice: ModeChoiceReason = .fallback
+        var routedPhrase: String?
+        var triggerDisplay: String?
         var pendingLocalTranscript: String?
         var pendingLocalIssuedTokens: [String] = []
         var pendingHeardTranscript: String?
@@ -200,6 +206,11 @@ final class DictationController {
     // HUD from re-rendering its whole tree at buffer rate. Reset per recording.
     private var lastRenderedLevel: Float = -1
 
+    // Set at handleStart for a tap-to-toggle trigger so the recording HUD can show "tap X again to stop"
+    // (UX2 phase 6b) — a latched recording is otherwise indistinguishable from hold-to-talk. nil for
+    // hold gestures and the context-resolved default (no single key fired it).
+    private var latchedTriggerName: String?
+
     // Mic meter is PULLED, not pushed: the capture adapter publishes the level into an atomic from the RT
     // thread (no per-buffer main-actor hop), and a ~30 Hz poll reads it only while recording. Renders
     // deduped by `renderLevel`.
@@ -222,10 +233,13 @@ final class DictationController {
 
     private func renderLevel(_ level: Float) {
         guard case .recording = machine.state else { return }
+        // Push every poll tick (keeping the 1/20 quantization for visual stability but dropping the equality
+        // skip) so the red-wave bars keep moving even when the level is momentarily stable; HUDLevel.push
+        // elides only true digital silence (level + whole ring unchanged). A 30 Hz publish rebuilds only
+        // LevelIndicator (HUDView holds HUDLevel un-observed), so this stays cheap.
         let quantized = (level * 20).rounded() / 20
-        guard quantized != lastRenderedLevel else { return }
         lastRenderedLevel = quantized
-        hud?.render(.recording(mode: activeMode?.name, level: quantized))
+        hud?.render(.recording(mode: activeMode?.name, level: quantized, latchedTrigger: latchedTriggerName))
     }
 
     // Fired after every terminal insertion outcome. First run uses it to require one successful dictation
@@ -566,13 +580,15 @@ final class DictationController {
         scheduleHide()
     }
 
-    func handleStart(triggerKey: String? = nil) {
+    func handleStart(triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap) {
         // The trigger is a bare modifier event tap with no notion of session state; a key used to
         // wake/unlock the machine can fire it while the login window still owns the console. Never
         // arm the mic while the screen is locked — for a privacy-first app, no audio may be captured
         // while locked. Silent return, same shape as the beginArming guard.
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else { return }
+        latchedTriggerName = (pressStyle == .tapToToggle)
+            ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
         idleEvictionTask?.cancel()
         captureRefreshTask?.cancel()
@@ -609,7 +625,7 @@ final class DictationController {
                 await self.resolveModeProbing(triggerKey: triggerKey)
                 guard !Task.isCancelled else { return }
                 if self.machine.state == .recording {
-                    self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel)))
+                    self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel), latchedTrigger: self.latchedTriggerName))
                 } else if self.machine.state == .arming {
                     self.hud?.render(.arming(mode: self.activeMode?.name ?? self.currentModeName))
                 }
@@ -767,7 +783,7 @@ final class DictationController {
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
             self.pollLevelWhileRecording()
-            self.hud?.render(.recording(mode: self.activeMode?.name, level: 0))
+            self.hud?.render(.recording(mode: self.activeMode?.name, level: 0, latchedTrigger: self.latchedTriggerName))
         }
     }
 
@@ -872,10 +888,17 @@ final class DictationController {
             } else {
                 self.log.error("wav unreadable at \(url.path, privacy: .public)")
             }
-            if await self.gateSuppressesNoSpeech(samples: samples, url: url) {
+            if let reading = await self.noSpeechReading(samples: samples, url: url) {
                 try? FileManager.default.removeItem(at: url)
                 if Task.isCancelled { return }
-                self.finishNoSpeech()
+                // Two-state no-speech (UX2 phase 6d): nothing-heard (peak never cleared the silence floor — a
+                // muted/dead mic) gets the error+repair render; real audio with no speech keeps the neutral
+                // "No speech detected". Both record the .noSpeech outcome identically.
+                if SpeechPresenceGate.isNothingHeard(peak: reading.peak) {
+                    self.finishNothingHeard()
+                } else {
+                    self.finishNoSpeech()
+                }
                 return
             }
             // If a streaming session opened, its finalize (post-release inference) produces the transcript;
@@ -907,11 +930,13 @@ final class DictationController {
         }
     }
 
-    private func gateSuppressesNoSpeech(samples: [Float]?, url: URL) async -> Bool {
+    // The VAD reading when the take is no-speech (so the caller can split nothing-heard vs no-speech on the
+    // peak), or nil when speech is present and transcription should proceed.
+    private func noSpeechReading(samples: [Float]?, url: URL) async -> SpeechPresenceReading? {
         let reading = await presenceDetector.read(
             samples: samples, url: url, sampleRate: activeEngine.captureSampleRate)
-        Log.audio.debug("vad \(reading.presence == .noSpeech ? "noSpeech" : "speech", privacy: .public) maxP=\(reading.maxProbability, privacy: .public) model=\(reading.modelUsed, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
-        return reading.presence == .noSpeech
+        Log.audio.debug("vad \(reading.presence == .noSpeech ? "noSpeech" : "speech", privacy: .public) maxP=\(reading.maxProbability, privacy: .public) peak=\(reading.peak, privacy: .public) model=\(reading.modelUsed, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
+        return reading.presence == .noSpeech ? reading : nil
     }
 
     private func finishNoSpeech() {
@@ -922,6 +947,18 @@ final class DictationController {
         finish(machine: .finish(.noSpeech), cue: .cancel,
                state: .complete(outcome: .noSpeech, mode: currentModeName),
                hideAfter: 2, record: (.noSpeech, nil), evict: true, completion: completion)
+    }
+
+    // Nothing was heard — a hardware/mute problem. Renders like an error with the microphone-settings repair
+    // (longer hide, action button) but records the same .noSpeech outcome as finishNoSpeech.
+    private func finishNothingHeard() {
+        guard machine.beginInserting() else { return }
+        hud?.relinquishKeyFocus()
+        let completion = DictationCompletion(
+            outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
+        finish(machine: .finish(.noSpeech), cue: .error,
+               state: .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings),
+               hideAfter: 8, record: (.noSpeech, nil), evict: true, completion: completion)
     }
 
     private enum StreamingFinalizeOutcome {
@@ -1026,14 +1063,18 @@ final class DictationController {
         // both when its key is pressed and when a trigger falls through to it. Fall back to the canonical
         // profile only if it is somehow missing on disk.
         let directFallback = modes.first { $0.id == Mode.directId } ?? .direct
-        let resolved = ModeResolver.resolvePhaseA(
+        let resolved = ModeResolver.resolvePhaseAWithReason(
             modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey,
             eligible: eligible)
         // A menu-picked one-shot mode is an explicit choice that bypasses the context gate — it is the
         // deliberate way to run a constrained mode outside its apps (design.md §4.3).
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
-        activeMode = securePolicyApplied(override ?? resolved)
+        let choice: ModeChoiceReason = override != nil ? .oneShot : resolved.reason
+        session?.modeChoice = choice
+        session?.triggerDisplay = choice == .triggerKey
+            ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
+        activeMode = securePolicyApplied(override ?? resolved.mode)
         session?.modeReady = true
         onModeAndSnapshotReady()
     }
@@ -1255,6 +1296,10 @@ final class DictationController {
         // and is stripped from the transcript; otherwise the Phase-A mode stands.
         let eligible = session?.eligibleModes ?? []
         let routed = ModeResolver.resolvePhaseB(eligibleModes: eligible, transcript: raw, context: session?.routingContext ?? RoutingContext())
+        if let phraseModeId = routed.routedModeId, eligible.contains(where: { $0.id == phraseModeId }) {
+            session?.modeChoice = .spokenPhrase
+            session?.routedPhrase = routed.matchedPhrase
+        }
         // Neuter the routed mode BEFORE it drives the rewrite: produceFinalText resolves the connection off
         // this mode, so a Phase-B re-route to a cloud mode from a secure field must be local-only here, not
         // only on the stored activeMode.
@@ -1425,7 +1470,9 @@ final class DictationController {
             result: result, outcome: outcome,
             cloudInvolved: rewrite != nil, redaction: rewrite?.redaction ?? false,
             contextCategories: rewrite?.contextCategories ?? [],
-            connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt)
+            connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt,
+            modeChoice: session?.modeChoice, routedPhrase: session?.routedPhrase,
+            triggerKey: session?.triggerDisplay)
         guard let history else { return }
         let retentionDays = settings.history.retentionDays
         let today = HistoryStore.todayString()

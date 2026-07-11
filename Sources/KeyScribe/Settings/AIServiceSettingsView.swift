@@ -37,6 +37,18 @@ struct ConnectModesOffer {
     let modeNames: [String]
 }
 
+// The one rule deciding whether a selected service shows the summary or the full editor (UX2 phase 5b).
+// A working, complete service defaults to the summary; a broken config or a service whose LAST test
+// failed stays in the form until it tests clean or the app restarts (in-memory testState clears).
+enum AIServiceDetailForm {
+    static func showsForm(configIssue: Connection.ConfigIssue?, testState: ConnectionTestState?, isEditing: Bool) -> Bool {
+        if isEditing { return true }
+        if configIssue != nil { return true }
+        if case .failed = testState { return true }
+        return false
+    }
+}
+
 @MainActor
 final class AIServiceSettingsModel: ObservableObject {
     @Published private(set) var connections: [Connection] = []
@@ -47,8 +59,19 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published private(set) var modelDiscoveryStates: [String: ModelDiscoveryState] = [:]
     @Published private(set) var keyedRefs: Set<String> = []
     @Published var pendingConnectOffer: ConnectModesOffer?
-    @Published var lastCreatedId: String?
     @Published private(set) var dependentNamesByConnection: [String: [String]] = [:]
+
+    // Draft-creation flow (UX2 phase 5b): "Add AI Service" no longer inserts an empty connection; it opens a
+    // draft form whose Connect button runs the shared test-then-save-with-rollback. Nothing persists until a
+    // passing test, so Settings can no longer hold a half-configured, never-tested service.
+    @Published var isCreatingDraft = false
+    @Published var createDraft = AIConnectionDraft()
+    @Published private(set) var createTesting = false
+    @Published private(set) var createError: String?
+    private var createPendingId: String?
+    // Injected: create a disabled mode wired to a connection and route to Modes ("Create a mode with this
+    // service"). Set by SettingsRootView.
+    var onCreateModeWithConnection: ((String) -> Void)?
 
     private let repository: ConfigRepository
     private var supportDir: URL { repository.supportDir }
@@ -56,7 +79,10 @@ final class AIServiceSettingsModel: ObservableObject {
     private var loadedSignature: String?
     private let tester: ConnectionTester
     private let listModels: (Connection, String?) async throws -> [String]
+    private let saveAPIKey: (String, String) -> Bool
+    private let deleteAPIKey: (String) -> Void
     private(set) var testTask: Task<Void, Never>?
+    private(set) var createTask: Task<Void, Never>?
     // Monotonic per-connection token. A post-test edit bumps it so a slow verdict landing after the reset
     // can't resurrect a stale error badge (drives the menu error dot + Modes-pane flags).
     private var testGeneration: [String: Int] = [:]
@@ -66,11 +92,15 @@ final class AIServiceSettingsModel: ObservableObject {
         tester: ConnectionTester = ConnectionTester(),
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
-        }
+        },
+        saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
+        deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) }
     ) {
         self.repository = repository
         self.tester = tester
         self.listModels = listModels
+        self.saveAPIKey = saveAPIKey
+        self.deleteAPIKey = deleteAPIKey
         reload()
     }
 
@@ -159,27 +189,83 @@ final class AIServiceSettingsModel: ObservableObject {
         keyedRefs = Set(connections.map(\.keyRef).filter(KeychainStore.has))
     }
 
-    func create() {
-        let wasEmpty = connections.isEmpty
-        let name = "New AI Service"
-        let id = ConnectionStore.newID(for: name, existing: connections.map(\.id))
-        let connection = Connection(
-            id: id, name: name, provider: .openai, model: Connection.Provider.openai.defaultModel,
-            keyRef: "keyscribe.llm.\(id)")
-        save(connection)
-        selectedID = id
-        lastCreatedId = id
-        if wasEmpty {
-            let pending = modesNeedingConnection()
-            if !pending.isEmpty {
-                pendingConnectOffer = ConnectModesOffer(
-                    connectionId: id, connectionName: name,
-                    modeIds: pending.map(\.id), modeNames: pending.map(\.name))
+    // Open the draft-creation form. Nothing is written until connectDraft() sees a passing test.
+    func beginCreate() {
+        createTask?.cancel()
+        createDraft = AIConnectionDraft()
+        createDraft.model = Connection.Provider.openai.defaultModel
+        createError = nil
+        createPendingId = nil
+        createTesting = false
+        isCreatingDraft = true
+    }
+
+    // Discard the draft (nothing persisted; the connector rolls back a mid-flight abandon exactly as the
+    // wizard-close path does). The in-flight connect task is cancelled so a late verdict cannot mutate config.
+    func cancelCreate() {
+        createTask?.cancel()
+        createTesting = false
+        isCreatingDraft = false
+        createError = nil
+    }
+
+    var createCanConnect: Bool { createDraft.canConnectForSetup }
+
+    func connectDraft() {
+        createTask?.cancel()
+        createTask = Task { [weak self] in await self?.runConnectDraft() }
+    }
+
+    private func runConnectDraft() async {
+        createError = nil
+        let connector = AIServiceConnector(
+            repository: repository, saveAPIKey: saveAPIKey, deleteAPIKey: deleteAPIKey,
+            testConnection: { await self.tester.test($0) })
+        createTesting = true
+        let result = await connector.connect(draft: createDraft, reusingId: createPendingId)
+        createTesting = false
+        createPendingId = result.allocatedId
+        switch result.outcome {
+        case .cancelled:
+            return
+        case .failed(let message):
+            createError = message
+        case .connected(let connection):
+            let wasEmpty = connections.isEmpty
+            isCreatingDraft = false
+            reload()
+            selectedID = connection.id
+            testStates[connection.id] = .passed
+            // The connect-modes offer fires after a successful create exactly as it did for the old bare
+            // insert — but now only once a real, tested service exists.
+            if wasEmpty {
+                let pending = modesNeedingConnection()
+                if !pending.isEmpty {
+                    pendingConnectOffer = ConnectModesOffer(
+                        connectionId: connection.id, connectionName: connection.name,
+                        modeIds: pending.map(\.id), modeNames: pending.map(\.name))
+                }
             }
         }
     }
 
-    func consumeCreated() { lastCreatedId = nil }
+    func fetchModelsForDraft() async {
+        let id = createPendingId ?? "new-ai-service"
+        let connection = createDraft.connection(id: id, keyRef: "keyscribe.llm.\(id)")
+        createDraft.modelDiscoveryState = .loading
+        do {
+            let models = try await listModels(connection, createDraft.requestAPIKey)
+            createDraft.applyFetchedModels(models)
+        } catch {
+            let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
+            createDraft.modelDiscoveryState = .failed("Could not fetch models: \(message)")
+        }
+    }
+
+    func createModeWithConnection(_ connectionId: String) {
+        onCreateModeWithConnection?(connectionId)
+    }
+
 
     func dependentModeNames(of connection: Connection) -> [String] {
         dependentNamesByConnection[connection.id] ?? []
@@ -254,6 +340,9 @@ final class AIServiceSettingsModel: ObservableObject {
 struct AIServiceSettingsView: View {
     @ObservedObject var model: AIServiceSettingsModel
     @State private var pendingDelete: Connection?
+    // Per-selection edit toggle: keyed by connection id (reset by `.id(connection.id)` on the detail) so
+    // switching services returns to the summary. Summary vs editor is decided by AIServiceDetailForm.showsForm.
+    @State private var isEditing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -294,7 +383,7 @@ struct AIServiceSettingsView: View {
             }
             .accessibilityIdentifier(AccessibilityID.Settings.AI.list)
             .safeAreaInset(edge: .bottom) {
-                Button("Add AI Service", systemImage: "plus", action: model.create)
+                Button("Add AI Service", systemImage: "plus", action: model.beginCreate)
                     .buttonStyle(.borderless)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
@@ -304,32 +393,11 @@ struct AIServiceSettingsView: View {
 
             Divider()
 
-            Group {
-                if let connection = model.selected {
-                    AIServiceEditor(
-                        connection: connection, hasKey: model.hasKey(connection),
-                        dependentModeNames: model.dependentModeNames(of: connection),
-                        testState: model.testState(for: connection.id),
-                        modelSuggestions: model.modelSuggestions(for: connection.id),
-                        modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
-                        autofocusName: model.lastCreatedId == connection.id,
-                        onUpdate: model.update,
-                        onFetchModels: { connection, apiKey in
-                            Task { await model.fetchModels(for: connection, apiKey: apiKey) }
-                        },
-                        onTest: { if let connection = model.selected { model.test(connection) } },
-                        onConsumeFocus: model.consumeCreated,
-                        onDelete: { pendingDelete = connection })
-                        .id(connection.id)
-                } else {
-                    ContentUnavailableView(
-                        "No AI services", systemImage: "wand.and.stars",
-                        description: Text("Add a connection to your own AI provider to use cloud rewrite in a mode."))
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { model.reload() }
+        .onChange(of: model.selectedID) { _, _ in isEditing = false }
         .confirmationDialog("Delete this AI service?", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
             Button("Delete", role: .destructive) {
@@ -363,6 +431,49 @@ struct AIServiceSettingsView: View {
         }
     }
 
+    @ViewBuilder private var detail: some View {
+        if model.isCreatingDraft {
+            AIServiceDraftForm(model: model)
+        } else if let connection = model.selected {
+            let showsForm = AIServiceDetailForm.showsForm(
+                configIssue: connection.configIssue,
+                testState: model.testState(for: connection.id),
+                isEditing: isEditing)
+            Group {
+                if showsForm {
+                    AIServiceEditor(
+                        connection: connection, hasKey: model.hasKey(connection),
+                        dependentModeNames: model.dependentModeNames(of: connection),
+                        testState: model.testState(for: connection.id),
+                        modelSuggestions: model.modelSuggestions(for: connection.id),
+                        modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
+                        showsDone: isEditing,
+                        onUpdate: model.update,
+                        onFetchModels: { connection, apiKey in
+                            Task { await model.fetchModels(for: connection, apiKey: apiKey) }
+                        },
+                        onTest: { if let connection = model.selected { model.test(connection) } },
+                        onDone: { isEditing = false },
+                        onDelete: { pendingDelete = connection })
+                } else {
+                    AIServiceSummaryView(
+                        connection: connection,
+                        status: rowStatus(connection),
+                        dependentModeNames: model.dependentModeNames(of: connection),
+                        testState: model.testState(for: connection.id),
+                        onTest: { model.test(connection) },
+                        onEdit: { isEditing = true },
+                        onCreateMode: { model.createModeWithConnection(connection.id) })
+                }
+            }
+            .id(connection.id)
+        } else {
+            ContentUnavailableView(
+                "No AI services", systemImage: "wand.and.stars",
+                description: Text("Add a connection to your own AI provider to use cloud rewrite in a mode."))
+        }
+    }
+
     private func deleteMessage(for connection: Connection) -> String {
         let base = "Its connection settings and API key will be removed. This cannot be undone."
         let dependents = model.dependentModeNames(of: connection)
@@ -374,35 +485,50 @@ struct AIServiceSettingsView: View {
         return "\(lead) \(base)"
     }
 
-    private func rowStatus(_ connection: Connection) -> (text: String, icon: String, style: AnyShapeStyle) {
-        if case .failed = model.testState(for: connection.id) {
-            return ("Connection test failed", "exclamationmark.triangle.fill", AnyShapeStyle(.red))
+    private func rowStatus(_ connection: Connection) -> AIServiceStatus {
+        AIServiceStatus.derive(
+            connection: connection, testState: model.testState(for: connection.id),
+            hasKey: model.hasKey(connection))
+    }
+}
+
+// The shared status vocabulary for a connection — the list row, the summary, and the coordinator's error
+// surface all derive works/testing/failed/no-key/token-command/no-auth from this one place (UX2 phase 5b),
+// so no two surfaces phrase the same state differently.
+struct AIServiceStatus {
+    let text: String
+    let icon: String
+    let style: AnyShapeStyle
+
+    static func derive(connection: Connection, testState: ConnectionTestState?, hasKey: Bool) -> AIServiceStatus {
+        if case .failed = testState {
+            return .init(text: "Connection test failed", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.red))
         }
         switch connection.configIssue {
         case .missingModel:
-            return ("No model set", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
+            return .init(text: "No model set", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .missingBaseURL:
-            return ("Needs a base URL", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
+            return .init(text: "Needs a base URL", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .missingTokenCommand:
-            return ("Needs token command", "exclamationmark.triangle.fill", AnyShapeStyle(.orange))
+            return .init(text: "Needs token command", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case nil:
             break
         }
-        switch model.testState(for: connection.id) {
+        switch testState {
         case .passed:
-            return ("Connection works", "checkmark.circle.fill", AnyShapeStyle(.green))
+            return .init(text: "Connection works", icon: "checkmark.circle.fill", style: AnyShapeStyle(.green))
         case .testing:
-            return ("Testing…", "ellipsis.circle", AnyShapeStyle(.secondary))
+            return .init(text: "Testing…", icon: "ellipsis.circle", style: AnyShapeStyle(.secondary))
         default:
             if connection.provider == .openaiCompatible, connection.authMethod == .none {
-                return ("No auth", "globe", AnyShapeStyle(.secondary))
+                return .init(text: "No auth", icon: "globe", style: AnyShapeStyle(.secondary))
             }
             if connection.authMethod == .tokenCommand {
-                return ("Token command", "terminal", AnyShapeStyle(.secondary))
+                return .init(text: "Token command", icon: "terminal", style: AnyShapeStyle(.secondary))
             }
-            return model.hasKey(connection)
-                ? ("Key stored", "key.fill", AnyShapeStyle(.secondary))
-                : ("No key set", "key", AnyShapeStyle(.secondary))
+            return hasKey
+                ? .init(text: "Key stored", icon: "key.fill", style: AnyShapeStyle(.secondary))
+                : .init(text: "No key set", icon: "key", style: AnyShapeStyle(.secondary))
         }
     }
 }
@@ -415,9 +541,11 @@ private struct AIServiceEditor: View {
     let modelSuggestions: [String]
     let modelDiscoveryState: ModelDiscoveryState?
     var autofocusName = false
+    var showsDone = false
     let onUpdate: (Connection, String?) -> Void
     let onFetchModels: (Connection, String?) -> Void
     let onTest: () -> Void
+    var onDone: () -> Void = {}
     var onConsumeFocus: () -> Void = {}
     let onDelete: () -> Void
     @State private var draft: AIConnectionDraft
@@ -430,9 +558,11 @@ private struct AIServiceEditor: View {
         modelSuggestions: [String],
         modelDiscoveryState: ModelDiscoveryState?,
         autofocusName: Bool = false,
+        showsDone: Bool = false,
         onUpdate: @escaping (Connection, String?) -> Void,
         onFetchModels: @escaping (Connection, String?) -> Void,
         onTest: @escaping () -> Void,
+        onDone: @escaping () -> Void = {},
         onConsumeFocus: @escaping () -> Void = {},
         onDelete: @escaping () -> Void
     ) {
@@ -443,9 +573,11 @@ private struct AIServiceEditor: View {
         self.modelSuggestions = modelSuggestions
         self.modelDiscoveryState = modelDiscoveryState
         self.autofocusName = autofocusName
+        self.showsDone = showsDone
         self.onUpdate = onUpdate
         self.onFetchModels = onFetchModels
         self.onTest = onTest
+        self.onDone = onDone
         self.onConsumeFocus = onConsumeFocus
         self.onDelete = onDelete
         _draft = State(initialValue: Self.draft(
@@ -456,24 +588,36 @@ private struct AIServiceEditor: View {
     }
 
     var body: some View {
-        AIConnectionDraftEditor(
-            presentation: .settings,
-            draft: $draft,
-            hasStoredKey: hasKey,
-            dependentModeNames: dependentModeNames,
-            testState: testState,
-            autofocusName: autofocusName,
-            onCommit: commit,
-            onFetchModels: { fetchModels(apiKey: $0) },
-            onTest: onTest,
-            onConsumeFocus: onConsumeFocus,
-            onDelete: onDelete)
-            .onChange(of: connection) { _, connection in refreshDraft(from: connection) }
-            .onChange(of: modelSuggestions) { _, suggestions in
-                guard !suggestions.isEmpty else { return }
-                draft.applyFetchedModels(suggestions)
+        VStack(alignment: .leading, spacing: 0) {
+            if showsDone {
+                HStack {
+                    Spacer()
+                    Button("Done", action: onDone)
+                        // An incomplete config cannot be dismissed into a summary that would misrepresent it.
+                        .disabled(connection.configIssue != nil)
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.done)
+                }
+                .padding(.horizontal, 20).padding(.top, 12)
             }
-            .onChange(of: modelDiscoveryState) { _, _ in refreshDraft(from: connection) }
+            AIConnectionDraftEditor(
+                presentation: .settings,
+                draft: $draft,
+                hasStoredKey: hasKey,
+                dependentModeNames: dependentModeNames,
+                testState: testState,
+                autofocusName: autofocusName,
+                onCommit: commit,
+                onFetchModels: { fetchModels(apiKey: $0) },
+                onTest: onTest,
+                onConsumeFocus: onConsumeFocus,
+                onDelete: onDelete)
+        }
+        .onChange(of: connection) { _, connection in refreshDraft(from: connection) }
+        .onChange(of: modelSuggestions) { _, suggestions in
+            guard !suggestions.isEmpty else { return }
+            draft.applyFetchedModels(suggestions)
+        }
+        .onChange(of: modelDiscoveryState) { _, _ in refreshDraft(from: connection) }
     }
 
     private static func draft(
@@ -507,5 +651,96 @@ private struct AIServiceEditor: View {
         var updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
         updated.params = connection.params
         onFetchModels(updated, apiKey)
+    }
+}
+
+// The default detail for a selected, working service (UX2 phase 5b): is it ready, and what uses it? — instead
+// of endpoint/credential mechanics. Edit Connection reveals the full editor; Create a mode appears only when
+// nothing uses the service yet.
+private struct AIServiceSummaryView: View {
+    let connection: Connection
+    let status: AIServiceStatus
+    let dependentModeNames: [String]
+    let testState: ConnectionTestState?
+    let onTest: () -> Void
+    let onEdit: () -> Void
+    let onCreateMode: () -> Void
+
+    var body: some View {
+        Form {
+            Section {
+                Text(connection.name).font(.title3.bold())
+                Text("\(providerLabel(connection.provider)) · \(connection.model)")
+                    .foregroundStyle(.secondary)
+                Label(status.text, systemImage: status.icon)
+                    .foregroundStyle(status.style)
+                if case .testing = testState {
+                    Label("Testing…", systemImage: "ellipsis.circle").foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                LabeledContent("Used by") {
+                    Text(dependentModeNames.isEmpty ? "No modes yet" : dependentModeNames.joined(separator: ", "))
+                        .foregroundStyle(dependentModeNames.isEmpty ? .secondary : .primary)
+                }
+            }
+            Section {
+                Button("Test Connection", action: onTest)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Summary.test)
+                Button("Edit Connection", action: onEdit)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Summary.edit)
+                if dependentModeNames.isEmpty {
+                    Button("Create a mode with this service", action: onCreateMode)
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Summary.createMode)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// The draft-creation form (UX2 phase 5b): same fields as onboarding (AIConnectionDraftEditor.settings), a
+// primary Connect button that tests then saves via the shared connector, and the same error line. Cancel
+// discards the draft — nothing is persisted until a passing test.
+private struct AIServiceDraftForm: View {
+    @ObservedObject var model: AIServiceSettingsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("New AI Service").font(.headline)
+                Spacer()
+                Button("Cancel", action: model.cancelCreate)
+                    .disabled(model.createTesting)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Draft.cancel)
+            }
+            .padding(.horizontal, 20).padding(.top, 12)
+
+            AIConnectionDraftEditor(
+                presentation: .onboarding,
+                draft: $model.createDraft,
+                hasStoredKey: false,
+                testState: model.createTesting ? .testing : nil,
+                onCommit: { _, _ in },
+                onFetchModels: { _ in Task { await model.fetchModelsForDraft() } })
+
+            if let error = model.createError {
+                Text(error).font(.callout).foregroundStyle(.red)
+                    .padding(.horizontal, 20)
+            }
+
+            HStack {
+                Spacer()
+                if model.createTesting { ProgressView().controlSize(.small) }
+                Button(model.createTesting ? "Testing…" : "Connect") {
+                    model.connectDraft()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!model.createCanConnect || model.createTesting)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Draft.connect)
+            }
+            .padding(20)
+        }
     }
 }

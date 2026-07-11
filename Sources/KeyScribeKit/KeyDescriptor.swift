@@ -179,6 +179,20 @@ extension KeyDescriptor {
         }
     }
 
+    // Per-cap tokens for the wizard's keycap glyphs (phase 2). The view renders one rounded cap per token;
+    // an empty array means "no keycap" — the caller falls back to `displayString` plain text.
+    public var keycapTokens: [String] {
+        switch self {
+        case .named(.fn): return ["fn"]
+        case .named(.hyper): return Modifier.allCases.map(\.glyph)
+        case .named(.rightOption): return ["right ⌥"]
+        case .named(.rightCommand): return ["right ⌘"]
+        case .chord(let mods, let key):
+            return Modifier.allCases.filter { mods.contains($0) }.map(\.glyph) + [key.displayString]
+        case .mouseButton: return []
+        }
+    }
+
     public var displayString: String {
         switch self {
         case .named(.fn): return "Fn (Globe)"

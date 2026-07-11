@@ -9,10 +9,29 @@ final class HUDModel: ObservableObject {
 }
 
 // The recording level updates every audio buffer; kept on its own object so only `LevelIndicator`
-// (which observes it) rebuilds per tick, not the whole HUD card. See render().
+// (which observes it) rebuilds per tick, not the whole HUD card. See render(). `history` is a fixed-length
+// ring of recent raw levels driving the red-wave bars (UX2 phase 6a); `level` still drives the halo.
 @MainActor
 final class HUDLevel: ObservableObject {
-    @Published var level: Float = 0
+    static let historyLength = 10
+    @Published private(set) var level: Float = 0
+    @Published private(set) var history: [Float] = Array(repeating: 0, count: historyLength)
+
+    // Append a level to the ring (drop oldest) and publish — but skip publishing when both the level and the
+    // entire ring are unchanged (true digital silence), so a steady quiet state does not churn at 30 Hz.
+    func push(_ newLevel: Float) {
+        var ring = history
+        ring.removeFirst()
+        ring.append(newLevel)
+        if newLevel == level && ring == history { return }
+        level = newLevel
+        history = ring
+    }
+
+    func reset() {
+        level = 0
+        history = Array(repeating: 0, count: Self.historyLength)
+    }
 }
 
 @MainActor
@@ -40,16 +59,22 @@ final class HUDController: HUDPresenting {
     private var isRepositioning = false
 
     func render(_ state: HUDState) {
-        // Pure per-buffer level update while already recording the same mode: push only the level so the
-        // card chrome (material, badges, text, action buttons) is not rebuilt on every audio tick.
-        if case .recording(let mode, let level) = state,
-           case .recording(let currentMode, _) = model.state, mode == currentMode {
-            levelModel.level = level
+        // Pure per-buffer level update while already recording the same mode + latched trigger: push only the
+        // level/history so the card chrome (material, badges, text, action buttons) is not rebuilt on every
+        // audio tick. The latched trigger is constant within one recording, so the fast-path still always hits.
+        if case .recording(let mode, let level, let latched) = state,
+           case .recording(let currentMode, _, let currentLatched) = model.state,
+           mode == currentMode, latched == currentLatched {
+            levelModel.push(level)
             return
         }
         guard model.state != state else { return }
         let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
-        if case .recording(_, let level) = state { levelModel.level = level }
+        // Entering recording from any other state: clear the ring so a new take never shows the prior one's tail.
+        if case .recording(_, let level, _) = state {
+            if case .recording = model.state {} else { levelModel.reset() }
+            levelModel.push(level)
+        }
         model.state = state
         announce(state)
         if case .hidden = state {
@@ -100,6 +125,9 @@ final class HUDController: HUDPresenting {
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
                 }
             }))
+        // Let the panel grow to the content's intrinsic height (badges wrap, long reasons ellipsize never —
+        // UX2 phase 6c); the fixed 280 width is unchanged. `resize` reads fittingSize and grows upward.
+        hosting.sizingOptions = [.intrinsicContentSize]
         let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: HUDState.hidden.contentHeight),
             styleMask: [.nonactivatingPanel, .borderless],
@@ -120,7 +148,15 @@ final class HUDController: HUDPresenting {
     }
 
     private func resize(_ panel: NSPanel, to state: HUDState) {
-        let size = CGSize(width: Self.panelWidth, height: state.contentHeight)
+        // contentHeight is a MINIMUM; the actual height is whatever the wrapped/growing content needs. Measure
+        // the hosting view's fitting height at the fixed width and take the max, so truth never clips. Force a
+        // layout pass first: `model.state` was just mutated, and SwiftUI may not have reconciled the hosting
+        // view yet — reading `fittingSize` cold can return the PREVIOUS (smaller) state's height and clip a
+        // wrap-grown state on a state→state transition.
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let fittingHeight = panel.contentView?.fittingSize.height ?? 0
+        let height = max(state.contentHeight, fittingHeight)
+        let size = CGSize(width: Self.panelWidth, height: height)
         guard panel.frame.size != size else { return }
         isRepositioning = true
         let screen = panel.screen ?? NSScreen.main
@@ -274,6 +310,46 @@ private final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+// A minimal flow layout: lays subviews left-to-right, wrapping to a new row when the next subview would
+// exceed the proposed width. Used for the HUD's data-boundary badges so three badges wrap instead of
+// clipping the fixed-width panel (UX2 phase 6c).
+private struct WrapLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0, rowHeight: CGFloat = 0, totalHeight: CGFloat = 0, maxRow: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth > 0, rowWidth + spacing + size.width > maxWidth {
+                totalHeight += rowHeight + spacing
+                maxRow = max(maxRow, rowWidth)
+                rowWidth = 0; rowHeight = 0
+            }
+            rowWidth += (rowWidth > 0 ? spacing : 0) + size.width
+            rowHeight = max(rowHeight, size.height)
+        }
+        maxRow = max(maxRow, rowWidth)
+        totalHeight += rowHeight
+        return CGSize(width: min(maxRow, maxWidth), height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
 private struct HUDView: View {
     @ObservedObject var model: HUDModel
     // Held, not observed: only the nested RecordingIcon observes it, so a level tick rebuilds that
@@ -289,12 +365,18 @@ private struct HUDView: View {
                 icon
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primary).font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                     if let secondary {
                         Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if !model.state.dataBoundaryBadges.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(model.state.dataBoundaryBadges, id: \.self) { DataBoundaryBadge(label: $0) }
+                        // Wrap to as many rows as needed — three badges must never clip (UX2 phase 6c). Each
+                        // badge is `.fixedSize()` so a label never ellipsizes.
+                        WrapLayout(spacing: 4) {
+                            ForEach(model.state.dataBoundaryBadges, id: \.self) {
+                                DataBoundaryBadge(label: $0).fixedSize()
+                            }
                         }
                     }
                 }
@@ -307,7 +389,8 @@ private struct HUDView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .frame(width: 280, height: model.state.contentHeight, alignment: .leading)
+        .frame(width: 280, alignment: .leading)
+        .frame(minHeight: model.state.contentHeight, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
         .accessibilityElement(children: .contain)
@@ -481,11 +564,12 @@ private struct ProcessingIcon: View {
 
 private struct RecordingIcon: View {
     @ObservedObject var level: HUDLevel
-    var body: some View { LevelIndicator(level: level.level) }
+    var body: some View { LevelIndicator(level: level.level, history: level.history) }
 }
 
 private struct LevelIndicator: View {
     let level: Float
+    let history: [Float]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -498,14 +582,20 @@ private struct LevelIndicator: View {
                 Circle().fill(.red.opacity(0.16 + l * 0.34)).frame(width: 30, height: 30)
                 Circle().fill(.red).frame(width: 16, height: 16)
             } else {
+                // The halo still tracks the current level; the inner solid dot is replaced by a short history
+                // of red bars (level history, the "wave" every competitor actually draws), newest in the center.
                 Circle().fill(.red.opacity(0.14 + l * 0.34))
                     .frame(width: 16 + l * 14, height: 16 + l * 14)
-                Circle().fill(.red)
-                    .frame(width: 7 + l * 17, height: 7 + l * 17)
+                HStack(spacing: 2) {
+                    ForEach(Array(LevelWave.bars(history: history).enumerated()), id: \.offset) { _, value in
+                        Capsule().fill(.red)
+                            .frame(width: 3, height: 4 + CGFloat(value) * 18)
+                    }
+                }
             }
         }
         .frame(width: 30, height: 30)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: history)
         .accessibilityLabel("Recording")
     }
 }

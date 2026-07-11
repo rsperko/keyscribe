@@ -40,13 +40,13 @@ final class HotkeyMonitor {
     private let mouseTap: MouseTapping
     private let isProcessTrusted: () -> Bool
 
-    let onStart: (String?) -> Void
+    let onStart: (String?, PressStyle) -> Void
     let onCommit: (String?) -> Void
     let onAction: (String) -> Void
 
     init(
         bindings: [Binding], actionBindings: [ActionBinding] = [],
-        onStart: @escaping (String?) -> Void, onCommit: @escaping (String?) -> Void,
+        onStart: @escaping (String?, PressStyle) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
         carbon: ChordRegistering = CarbonHotKeys(),
         mouseTap: MouseTapping = MouseEventTap(),
@@ -233,8 +233,9 @@ final class HotkeyMonitor {
 
     private func fire(index: Int, edge: TriggerEdge, now: TimeInterval) {
         let key = bindings[index].triggerKey
+        let style = bindings[index].gesture.style
         switch bindings[index].gesture.handle(edge, at: now) {
-        case .start: dispatchSideEffect { self.onStart(key) }
+        case .start: dispatchSideEffect { self.onStart(key, style) }
         case .commit: dispatchSideEffect { self.onCommit(key) }
         case .none: break
         }

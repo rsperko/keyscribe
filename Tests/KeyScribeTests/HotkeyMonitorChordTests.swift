@@ -43,7 +43,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
         #expect(fake.lastRegistrations.count == 1)
 
@@ -60,7 +60,7 @@ struct HotkeyMonitorChordTests {
     @Test func mouseBindingRegistersConsumedButton() {
         let mouse = FakeMouseTap()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse3")])
         #expect(mouse.consumedButtons == [3])
@@ -70,7 +70,7 @@ struct HotkeyMonitorChordTests {
         let mouse = FakeMouseTap()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse4")])
 
@@ -88,7 +88,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .tapToToggle)])
 
         fake.lastRegistrations[0].onPressed()
@@ -105,7 +105,7 @@ struct HotkeyMonitorChordTests {
     @Test func heldGestureIsReportedWhilePhysicalKeyIsDown() async {
         let fake = FakeChordRegistrar()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in }, onCommit: { _ in }, carbon: fake)
+            bindings: [], onStart: { _, _ in }, onCommit: { _ in }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .holdOnly)])
 
         fake.lastRegistrations[0].onPressed()
@@ -122,7 +122,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
 
         fake.lastRegistrations[0].onPressed()
@@ -141,7 +141,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _ in }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .tapToToggle)])
 
         fake.lastRegistrations[0].onPressed()   // tap-to-toggle start; gesture now "recording"
@@ -160,7 +160,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionReleaseFiresEvenWhenLeftOptionStillHeld() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar())
         m.update(bindings: [namedBinding(.rightOption)])
 
@@ -177,7 +177,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightCommandReleaseFiresEvenWhenLeftCommandStillHeld() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar())
         m.update(bindings: [namedBinding(.rightCommand)])
 
@@ -195,7 +195,7 @@ struct HotkeyMonitorChordTests {
         let mouse = FakeMouseTap()
         var starts = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse4")])
 
@@ -207,7 +207,7 @@ struct HotkeyMonitorChordTests {
     @Test func suspendEmptiesMouseButtonsAndResumeRestoresThem() {
         let mouse = FakeMouseTap()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse3")])
         #expect(mouse.consumedButtons == [3])
@@ -221,7 +221,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func suspendUnregistersChordsAndResumeRestoresThem() {
         let fake = FakeChordRegistrar()
-        let m = HotkeyMonitor(bindings: [], onStart: { _ in }, onCommit: { _ in }, carbon: fake)
+        let m = HotkeyMonitor(bindings: [], onStart: { _, _ in }, onCommit: { _ in }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
         #expect(fake.lastRegistrations.count == 1)
 
@@ -235,7 +235,7 @@ struct HotkeyMonitorChordTests {
     @Test func untrustedDefersTapButStillRegistersChords() {
         let fake = FakeChordRegistrar()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
             carbon: fake, mouseTap: FakeMouseTap(), isProcessTrusted: { false })
         m.update(bindings: [chordBinding("control+option+e")])
 
@@ -245,7 +245,7 @@ struct HotkeyMonitorChordTests {
     }
 
     @Test func hudHoldsKeyFocusOnlyAcrossCancellableStates() {
-        #expect(HUDState.recording(mode: nil, level: 0).holdsKeyFocus)
+        #expect(HUDState.recording(mode: nil, level: 0, latchedTrigger: nil).holdsKeyFocus)
         #expect(HUDState.transcribing(mode: "m").holdsKeyFocus)
         #expect(HUDState.rewriting(
             connection: "c", mode: "m", redacted: false, contextCategories: [], offerLocalTranscript: false).holdsKeyFocus)

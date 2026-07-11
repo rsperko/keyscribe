@@ -37,11 +37,19 @@ struct ModesSettingsView: View {
             }
             .accessibilityIdentifier(AccessibilityID.Mode.List.list)
             .safeAreaInset(edge: .bottom) {
-                Button("Add Mode", systemImage: "plus", action: model.create)
-                    .buttonStyle(.borderless)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .accessibilityIdentifier(AccessibilityID.Mode.List.add)
+                Menu("Add Mode", systemImage: "plus") {
+                    Button("Blank Mode", action: model.create)
+                        .accessibilityIdentifier(AccessibilityID.Mode.List.addBlank)
+                    Divider()
+                    ForEach(ModeStore.templates()) { template in
+                        Button(template.name) { model.materializeTemplate(template.id) }
+                            .accessibilityIdentifier(AccessibilityID.Mode.List.addTemplate(template.id))
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .accessibilityIdentifier(AccessibilityID.Mode.List.add)
             }
             .disabled(recordingState.isRecording)
             .frame(width: 240)
@@ -66,9 +74,7 @@ struct ModesSettingsView: View {
                         onDelete: { modePendingDelete = mode })
                         .id(mode.id)
                 } else {
-                    ContentUnavailableView(
-                        "No modes", systemImage: "square.stack.3d.up",
-                        description: Text("Create a mode to choose how \(Branding.appName) handles a dictation."))
+                    TemplateGallery(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -102,6 +108,53 @@ struct ModesSettingsView: View {
             return .failedService
         }
         return nil
+    }
+}
+
+// The empty-detail discovery surface: a fresh install lists only Plain Dictation, and this shows the full
+// menu of starter templates (name + one-liner + Add) so what can be added is visible without clicking.
+private struct TemplateGallery: View {
+    @ObservedObject var model: ModesSettingsModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Add a mode")
+                    .font(.title3.bold())
+                Text("Start from a template, or use Add Mode ▸ Blank Mode for an empty one.")
+                    .font(.callout).foregroundStyle(.secondary)
+                VStack(spacing: 8) {
+                    ForEach(ModeStore.templates()) { template in
+                        row(for: template)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+    }
+
+    private func row(for template: Mode) -> some View {
+        let added = model.isTemplateMaterialized(template.id)
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(template.name).font(.headline)
+                Text(ModeStore.templateSummary(for: template.id))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if added {
+                Label("Added", systemImage: "checkmark")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Button("Add") { model.materializeTemplate(template.id) }
+                    .accessibilityIdentifier(AccessibilityID.Mode.Gallery.add(template.id))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
     }
 }
 
@@ -143,7 +196,7 @@ private struct ModeSummaryRow: View {
                         .background(.secondary.opacity(0.18), in: Capsule()).foregroundStyle(.secondary)
                 }
                 if !mode.enabled {
-                    Text(mode.seedId == nil ? "Disabled" : "Disabled starter")
+                    Text("Disabled")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 if let issue {
@@ -189,6 +242,12 @@ private enum ModeSummaryIssue {
 // Shared user-facing summary phrasing (ui_components.md "Mode summary"): when a mode runs and where its text
 // goes, in plain words — never bundle IDs or raw regex.
 enum ModeSummary {
+    // The one place the spoken-phrase format lives, so menu, mode list, and template gallery can never phrase
+    // it differently. Sentence-leading form is capitalized ("Say …"), the inline/annotation form is not.
+    static func spokenPhrase(_ phrase: String, capitalized: Bool) -> String {
+        "\(capitalized ? "Say" : "say") \"\(phrase)\""
+    }
+
     static func whenRuns(_ mode: Mode) -> String {
         let constrained = !mode.constraints.isEmpty
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
@@ -204,8 +263,9 @@ enum ModeSummary {
             return constrained ? "Triggered by \(descriptor.displayString) in matching apps"
                                : "Triggered by \(descriptor.displayString)"
         }
-        if !mode.triggerPhrases.isEmpty {
-            return constrained ? "Spoken phrase in matching apps" : "Spoken phrase"
+        if let phrase = mode.triggerPhrases.first {
+            let said = spokenPhrase(phrase, capitalized: true)
+            return constrained ? "\(said) in matching apps" : said
         }
         if constrained { return "App rule — add a shortcut to use it" }
         return "Pick from the menu"

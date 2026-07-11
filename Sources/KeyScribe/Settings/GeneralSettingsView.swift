@@ -1,12 +1,34 @@
 import SwiftUI
+import KeyScribeKit
 
 struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var vocabularyShadowed = false
     var pasteLastShadowed = false
+    // The Plain Dictation (Direct mode) trigger — a read-only pointer, not a duplicate setting (the trigger
+    // is owned by the Direct mode, edited only in Modes). Passed in by SettingsRootView (UX2 phase 3c).
+    var plainDictationTrigger: KeyDescriptor?
+    var onOpenPlainDictation: () -> Void = {}
+    @State private var advancedModelExpanded = false
 
     var body: some View {
         Form {
+            Section("Dictation") {
+                LabeledContent("Dictation trigger") {
+                    if let descriptor = plainDictationTrigger {
+                        KeycapView(descriptor: descriptor)
+                    } else {
+                        Text("None set").foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.General.dictationTrigger)
+                Text("Hold to dictate anywhere.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Change in Modes…", action: onOpenPlainDictation)
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.changeDictationTrigger)
+            }
+
             Section("While dictating") {
                 Toggle("Start and end sounds", isOn: $model.sounds)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
@@ -66,31 +88,18 @@ struct GeneralSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("History") {
-                SettingRow(
-                    title: "Keep dictation history on this Mac",
-                    result: "Audio is never saved; stored text can be sensitive.",
-                    help: "Stores transcripts and final text locally so you can search and correct them. Nothing leaves this Mac. Password-field dictations are never saved; for other sensitive work, lower retention below or exclude a mode in its Result handling.")
-                {
-                    Toggle("", isOn: $model.historyEnabled).labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
+            Section("Performance") {
+                DisclosureSection(isExpanded: $advancedModelExpanded) {
+                    DisclosureSummaryLabel(title: "Advanced model behavior", summary: model.evictionShortLabel)
+                } content: {
+                    Picker("Warm-up", selection: $model.eviction) {
+                        ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
+                    }
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.eviction)
+                    Text(model.evictionFooter)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                if model.historyEnabled {
-                    Stepper("Keep for \(model.retentionDays) days", value: $model.retentionDays, in: 1...365)
-                        .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
-                }
-            }
-
-            Section {
-                Picker("Warm-up", selection: $model.eviction) {
-                    ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
-                }
-                .accessibilityIdentifier(AccessibilityID.Settings.General.eviction)
-            } header: {
-                Text("Performance")
-            } footer: {
-                Text(model.evictionFooter)
-                    .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(AccessibilityID.Settings.General.advancedModelBehavior)
             }
 
         }

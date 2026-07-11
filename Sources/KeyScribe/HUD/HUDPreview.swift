@@ -2,9 +2,9 @@ import KeyScribeKit
 
 enum HUDPreview {
     static let names = [
-        "ready", "arming", "recording", "loading-model", "transcribing",
-        "rewriting", "redacted-rewrite", "rewriting-with-local-transcript",
-        "inserted", "copied", "no-speech", "failed", "rewrite-fallback",
+        "ready", "arming", "recording", "recording-latched", "loading-model", "transcribing",
+        "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
+        "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
         "microphone-error", "accessibility-error",
     ]
 
@@ -23,7 +23,9 @@ enum HUDPreview {
         case "arming":
             .arming(mode: "Plain Dictation")
         case "recording":
-            .recording(mode: "Plain Dictation", level: 0.7)
+            .recording(mode: "Plain Dictation", level: 0.7, latchedTrigger: nil)
+        case "recording-latched":
+            .recording(mode: "Plain Dictation", level: 0.7, latchedTrigger: "Right-⌥")
         case "loading-model":
             .loadingModel(mode: "Email")
         case "transcribing":
@@ -31,6 +33,10 @@ enum HUDPreview {
         case "rewriting":
             .rewriting(
                 connection: "Example Service", mode: "Polish", redacted: false,
+                contextCategories: ["app", "preceding text"], offerLocalTranscript: false)
+        case "rewriting-three-badges":
+            .rewriting(
+                connection: "Example Service", mode: "Polish", redacted: true,
                 contextCategories: ["app", "preceding text"], offerLocalTranscript: false)
         case "redacted-rewrite":
             .rewriting(
@@ -44,14 +50,18 @@ enum HUDPreview {
             .complete(outcome: .inserted, mode: "Plain Dictation")
         case "copied":
             .complete(outcome: .copied(.focusChanged), mode: "Edit Selection")
+        case "copied-long-reason":
+            .complete(outcome: .copied(.secureField), mode: "Plain Dictation")
         case "no-speech":
             .complete(outcome: .noSpeech, mode: "Plain Dictation")
+        case "nothing-heard":
+            .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
         case "failed":
             .complete(outcome: .failed, mode: "Plain Dictation")
         case "rewrite-fallback":
             .localFallback(outcome: .inserted, mode: "Polish")
         case "microphone-error":
-            .error(message: "Nothing heard - check your microphone", action: .openMicrophoneSettings)
+            .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
         case "accessibility-error":
             .error(message: "Accessibility is off", action: .openAccessibilitySettings)
         default:

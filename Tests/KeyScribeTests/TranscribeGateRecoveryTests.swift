@@ -75,7 +75,7 @@ struct TranscribeGateRecoveryTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let started = Signal()
         let release = Signal()
@@ -126,7 +126,7 @@ struct TranscribeGateRecoveryTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let selfTestStarted = Signal()
         let selfTestRelease = Signal()
@@ -171,7 +171,7 @@ struct TranscribeGateRecoveryTests {
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStartersIfEmpty(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
         let startedA = Signal()
         let releaseA = Signal()

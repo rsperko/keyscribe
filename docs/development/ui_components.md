@@ -100,7 +100,21 @@ and technical prompt behavior.
 | `Selected text shared` | Selection is sent with the rewrite. | State this exact category. |
 
 **Behavior:** labels are never shortened to an unexplained shield or lock. Multiple context
-categories remain separate badges; do not collapse them into a vague `Context shared` label.
+categories remain separate badges; do not collapse them into a vague `Context shared` label. In the
+HUD the badge row **wraps** to as many rows as needed (each badge fixed-size, never ellipsized) and the
+panel grows vertically — three badges must never clip.
+
+### Recording level indicator
+
+**Use for:** the HUD recording state's icon.
+
+**Anatomy:** a red halo whose size/opacity tracks the current input level, with an inner short history
+of the level drawn as symmetric red bars (newest in the center — the ▂▅▇▅▂ "wave" every recorder
+actually draws is level history, not a live waveform).
+
+**Behavior:** driven by the ~30 Hz pulled level (never the realtime audio callback). Under Reduce
+Motion it collapses to a fixed-geometry dot whose fill intensity alone carries the level (no growing,
+bouncing, or bars). Labeled "Recording" to VoiceOver; per-tick level changes are never announced.
 
 ### Mode summary
 
@@ -111,7 +125,16 @@ automatic-resolution label.
 and result behavior where it differs from normal insertion.
 
 **Rules:** use user-facing phrases such as `Used in Safari` or `Triggered by Fn`; hide internal
-terms such as bundle ID and raw regex behind Advanced.
+terms such as bundle ID and raw regex behind Advanced. A spoken-phrase mode shows its **actual first
+phrase** wherever it is listed (mode list, menu annotation, template gallery), formatted through one
+shared helper — `Say "as an email"` sentence-leading, `say "as an email"` inline/annotation — so a
+headline routing capability that is otherwise invisible teaches itself by being on screen. The phrase
+is the user's own words, so showing it verbatim honors the no-raw-regex rule.
+
+**Mode-choice line** (History detail, UX2 phase 7c): a one-line, user-language explanation of how the
+mode was chosen for a past dictation — no phase names. `Chosen from the menu for this dictation`,
+`Started by its shortcut`, `Chosen for the app you were in`, `Routed by the spoken phrase "as an
+email"`, or `Plain Dictation — nothing else matched`.
 
 ### Engine card
 
@@ -172,6 +195,30 @@ between a picker and a recorder — predefined vs custom is just a value, not a 
 - Any parseable value renders with its glyphs; an unrecognized stored value renders the raw string
   with a `Not a recognized shortcut` caption — never a blank control.
 
+### Keycap glyph
+
+**Use for:** displaying (never editing) a trigger as small physical-looking keys — the onboarding
+trial and playground rows, and the General dictation-trigger pointer row. For *editing* a binding use
+the Shortcut well, not this.
+
+**Anatomy:** one rounded cap per token from `KeyDescriptor.keycapTokens` (`fn` → a globe + "fn";
+`⌃⌥⇧⌘` for Hyper; `right ⌥`/`right ⌘`; a chord's modifier glyphs then the key). A mouse button has no
+keycap form and falls back to `displayString` plain text.
+
+**Behavior:** static (no motion of its own); exposed to VoiceOver as one element labeled with the
+descriptor's `displayString`.
+
+### Step indicator
+
+**Use for:** the onboarding wizard's progress dots.
+
+**Anatomy:** a row of small dots, one per step; filled up to and including the current step, quaternary
+beyond it. The playground shares the AI step's dot (it is that step's reward, not a separate step); the
+indicator is hidden entirely in the permissions-only repair flow.
+
+**Behavior:** dot fills change with the step cross-fade (no independent animation, nothing animates
+under Reduce Motion); the whole row is one VoiceOver element labeled `Step N of M`.
+
 ### Permission row
 
 **Use for:** microphone, and Accessibility-dependent features (modifier-key trigger detection +
@@ -202,7 +249,9 @@ mode" to reassign).
 An empty state explains what the surface is for and offers its primary creation action:
 
 - no modes: create a mode or restore the generic starter modes;
-- no history: explain that only future dictations appear and link to history settings;
+- no history: explain that only future dictations appear; the enable toggle is inline in the same
+  pane, so there is no navigation action — when history is off, the description says so and the
+  inline toggle is the affordance;
 - no AI services: explain BYOK and add a connection;
 - no downloaded engine: choose and download an on-device speech model.
 

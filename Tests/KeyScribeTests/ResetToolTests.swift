@@ -130,7 +130,7 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == true)
     }
 
-    @Test func modesWipesAndReseedsStarters() throws {
+    @Test func modesWipesToOnlyDirectAndRecordsStarterOffers() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let modesDir = dir.appendingPathComponent("modes")
@@ -140,8 +140,10 @@ struct ResetToolTests {
         let tomls = (try? FileManager.default.contentsOfDirectory(at: modesDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "toml" }) ?? []
         let stems = Set(tomls.map { $0.deletingPathExtension().lastPathComponent })
-        // Reset reseeds the starters AND the system Direct floor.
-        #expect(stems == Set(ModeStore.starterModes().map { $0.id }).union([Mode.directId]))
+        // Reset now writes only the system Direct floor; the starters become ledger offers (templates).
+        #expect(stems == [Mode.directId])
         #expect(!stems.contains("custom-junk"))
+        let ledger = ModeStore.loadLedger(in: dir.appendingPathComponent("lkg", isDirectory: true))
+        #expect(Set(ledger?.entries.map(\.seedId) ?? []) == Set(ModeStore.starterModes().map(\.id)))
     }
 }

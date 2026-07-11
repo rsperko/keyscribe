@@ -32,7 +32,7 @@ struct FrugalCaptureReleaseTests {
         let support = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-frugal-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-        ModeStore.seedStartersIfEmpty(in: support.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.seedStarterFilesForTesting(in: support.appendingPathComponent("modes", isDirectory: true))
         let provider = try! SpeechEngineProvider(engines: [TextEngine()], activeId: "text")
         var settings = Settings.defaults
         settings.stt = .init(engine: "text", eviction: eviction, evictionIdleSeconds: nil)

@@ -1,14 +1,14 @@
 import Foundation
 import TOMLKit
 
-// Seed reconcile (design.md §5.1): a fresh install seeds the starter catalog once
-// (`seedStartersIfEmpty`); after that the catalog drifts (renames, new starters) and existing installs
+// Seed reconcile (design.md §5.1): a fresh install records the starter catalog as ledger offers once
+// (`recordStarterOffersIfFresh`); after that the catalog drifts (renames, new starters) and existing installs
 // must carry forward without clobbering user edits or resurrecting a deleted mode. That distinction
 // needs the **seed ledger**: per seed id ever offered, the catalog version written and a fingerprint of
 // the bytes. It lives OUTSIDE the watched `modes/` dir (a stray .toml there decodes as a phantom mode)
 // and is cleared by a reset along with the LKG store, so a reset re-seeds clean.
 extension ModeStore {
-    // Starter ids a pre-ledger install was seeded with (known history — `seedStartersIfEmpty` wrote
+    // Starter ids a pre-ledger install was seeded with (known history — the old seed path wrote
     // exactly these). Bootstraps the ledger for a pre-ledger install so a mode deleted under the old
     // build is not resurrected by the additive step.
     static let legacySeedIds: Set<String> = [
@@ -242,13 +242,16 @@ extension ModeStore {
         let present = seedIdsOnDisk(in: modesDir)
 
         // 2. Additive: a catalog mode the install has never been offered (not on disk under its id or a
-        //    predecessor, not in the ledger) appears. A deleted mode lives in the ledger → skipped.
+        //    predecessor, not in the ledger) becomes a ledger OFFER — a template in the gallery/menu — not a
+        //    written mode file. Writing it would make a fresh install sprout an unrequested mode. A deleted
+        //    mode lives in the ledger → skipped. `outcome.added` means "newly offered."
         for mode in catalog {
             let predecessors = previousSeedIds(forNew: mode.id)
             let satisfiedOnDisk = present.contains(mode.id) || predecessors.contains { present.contains($0) }
             let knownToLedger = ledger.contains(mode.id) || predecessors.contains { ledger.contains($0) }
             if !satisfiedOnDisk && !knownToLedger {
-                if writeAndRecord(mode, to: modesDir, ledger: &ledger) { outcome.added.append(mode.id) }
+                ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: nil)
+                outcome.added.append(mode.id)
             } else if present.contains(mode.id) && !ledger.contains(mode.id) {
                 ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: nil)
             }
@@ -263,6 +266,7 @@ extension ModeStore {
             guard ledger.contains(mode.id),
                   let onDisk = try? String(contentsOf: url, encoding: .utf8),
                   let current = try? decode(from: onDisk, id: mode.id),
+                  current.seedId == mode.id,
                   isSeedShaped(current, like: mode) else { continue }
             let version = mode.seedVersion ?? 1
             let fingerprint = seedTemplateFingerprint(current)
@@ -280,6 +284,7 @@ extension ModeStore {
                   (mode.seedVersion ?? 1) > entry.version,
                   let onDisk = try? String(contentsOf: url, encoding: .utf8),
                   let current = try? decode(from: onDisk, id: mode.id),
+                  current.seedId == mode.id,
                   seedTemplateFingerprint(current) == fingerprint else { continue }
             let updated = carryForward(mode, from: current)
             if writeAndRecord(updated, to: modesDir, ledger: &ledger) { outcome.updated.append(mode.id) }

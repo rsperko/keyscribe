@@ -8,6 +8,9 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     private let model: FirstRunModel
     private let onComplete: () -> Void
     private var finished = false
+    // Suspends the global hotkey monitor while the trial's ShortcutWell captures, so holding a modifier to
+    // record it never starts a dictation mid-capture. AppDelegate wires `onChange` to `hotkey.isSuspended`.
+    let recordingState = HotkeyRecordingState()
 
     init(
         initialEngineId: String,
@@ -41,7 +44,8 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     func noteDictation(_ completion: DictationCompletion) { model.noteDictation(completion) }
 
     func present() {
-        let hosting = NSHostingController(rootView: FirstRunView(model: model))
+        let hosting = NSHostingController(
+            rootView: FirstRunView(model: model).environmentObject(recordingState))
         let window = NSWindow(contentViewController: hosting)
         window.title = model.permissionsOnly ? "Set Up Permissions" : "Welcome to \(Branding.appName)"
         window.styleMask = [.titled, .closable]
@@ -89,11 +93,25 @@ final class FirstRunController: NSObject, NSWindowDelegate {
 final class FirstRunModel: ObservableObject {
     enum Step { case intro, model, permissions, tryIt, aiService, playground }
 
+    // Step-dot progress mapping (phase 2). Playground shares the last dot with the AI step — it is that
+    // step's reward, not a sixth obligation. The indicator is hidden entirely in the permissions-only flow.
+    static let stepCount = 5
+    var stepIndex: Int {
+        switch step {
+        case .intro: return 0
+        case .model: return 1
+        case .permissions: return 2
+        case .tryIt: return 3
+        case .aiService, .playground: return 4
+        }
+    }
+
     struct PlaygroundLesson: Identifiable, Equatable {
         let modeId: String
         let title: String
         let invocation: String
         let hint: String
+        var triggerKey: String?
         var id: String { modeId }
     }
 
@@ -102,7 +120,11 @@ final class FirstRunModel: ObservableObject {
         let after: String
     }
 
-    @Published var step: Step = .intro
+    @Published var step: Step = .intro {
+        didSet {
+            if step == .tryIt || step == .playground { refreshDirectTrigger() }
+        }
+    }
     @Published var downloading = false
     @Published var downloadProgress: Double = 0
     @Published var downloadError: String?
@@ -118,8 +140,13 @@ final class FirstRunModel: ObservableObject {
     @Published private(set) var playgroundReseedToken = 0
     @Published var selectedEngineId: String
     @Published var aiDraft = AIConnectionDraft()
+    @Published var aiOfferExpanded = false
     @Published private(set) var aiSetupError: String?
     @Published private(set) var aiTesting = false
+    @Published private(set) var directTrigger: KeyDescriptor?
+    @Published private(set) var triggerSaveError: String?
+    private var rememberedTriggerStyle: String?
+    private var rememberedTriggerThreshold: Int?
 
     let catalog = EngineRegistry.availableCatalog
     var appleSpeechAvailable: Bool { catalog.contains { $0.id == "apple" } }
@@ -134,7 +161,7 @@ final class FirstRunModel: ObservableObject {
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
     private var pendingConnectionId: String?
-    private let starterModeIdsEnabledOnFirstAIConnection: Set<String> = ["polish", "edit-selection"]
+    private static let headlineSeedIds = ["polish", "edit-selection"]
     var onComplete: () -> Void
     var onReadyToDictate: () -> Void = {}
     var onRelaunch: () -> Void = {}
@@ -207,15 +234,16 @@ final class FirstRunModel: ObservableObject {
         self.listModels = listModels
         self.onComplete = onComplete
         refreshStatuses()
+        refreshDirectTrigger()
         if permissionsOnly {
             step = .permissions
             startPolling()
         } else if resumeOnboarding {
             // Relaunched from the permissions funnel: `continueFromPermissions` saw a dead modifier tap (a
             // fresh Accessibility grant is cached as denied until relaunch). Grants are proven (Continue is
-            // gated on them); this fresh process reads them and starts the tap. Resume at the AI-service step
-            // (ui_design §2 steps 4–5), not the permissions-only Done, which ended onboarding early (P2-21).
-            step = .aiService
+            // gated on them); this fresh process reads them and starts the tap. Resume at the trial, whose
+            // modifier tap the relaunch was meant to revive (P2-21) — the AI offer follows it.
+            step = .tryIt
         }
     }
 
@@ -268,8 +296,7 @@ final class FirstRunModel: ObservableObject {
         guard case .inserted = completion.outcome else { return }
         trialSucceeded = true
         guard step == .playground else { return }
-        let completedModeId = completion.modeId ?? (activePlaygroundLessonId == Mode.directId ? Mode.directId : nil)
-        guard let modeId = completedModeId,
+        guard let modeId = completion.modeId,
               playgroundLessons.contains(where: { $0.modeId == modeId }) else { return }
         completedLessons[modeId] = LessonOutcome(before: completion.heard, after: completion.finalText)
         finishedPlaygroundLessonIds.insert(modeId)
@@ -288,23 +315,15 @@ final class FirstRunModel: ObservableObject {
     private func buildPlaygroundLessons() -> [PlaygroundLesson] {
         let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         let modes = ModeStore.loadAll(in: modesDir)
-        let rewriteLessons: [PlaygroundLesson] = Self.playgroundLessonOrder.compactMap { seedId in
+        return Self.playgroundLessonOrder.compactMap { seedId in
             guard let mode = modes.first(where: { $0.seedId == seedId }), mode.enabled,
                   let connection = mode.aiRewrite?.connection, !connection.isEmpty,
                   connections.contains(where: { $0.id == connection }),
                   let invocation = Self.invocation(for: mode) else { return nil }
             return PlaygroundLesson(
                 modeId: mode.id, title: mode.name, invocation: invocation,
-                hint: Self.playgroundHints[seedId] ?? "")
+                hint: Self.playgroundHint(for: mode), triggerKey: mode.triggerKeys.first?.key)
         }
-        guard !rewriteLessons.isEmpty else { return [] }
-        return [
-            PlaygroundLesson(
-                modeId: Mode.directId,
-                title: "Dictation",
-                invocation: "Hold Fn (Globe) and speak",
-                hint: "Say one sentence. Try saying \"insert new line\" in the middle to add a line break."),
-        ] + rewriteLessons
     }
 
     func advancePlayground() {
@@ -333,8 +352,14 @@ final class FirstRunModel: ObservableObject {
         playgroundLessons.last?.modeId == id
     }
 
-    func skipAISetup() {
-        step = .tryIt
+    func finishWithoutAI() {
+        finish()
+    }
+
+    // Trial "Continue" and its "Skip for now" both land on the AI offer — the offer's own Finish is one
+    // click, so nobody is ever more than two clicks from done and the AI step is never skipped invisibly.
+    func continueFromTrial() {
+        step = .aiService
     }
 
     func changeAIProvider(from _: Connection.Provider, to provider: Connection.Provider) {
@@ -347,10 +372,25 @@ final class FirstRunModel: ObservableObject {
 
     private static let playgroundLessonOrder = ["polish", "edit-selection"]
 
-    private static let playgroundHints: [String: String] = [
-        "polish": "Try: \"Um I think we should maybe send the notes tomorrow because the meeting moved.\" Then hold Right-⌥ and speak.",
-        "edit-selection": "The sentence above is selected for you. Hold Right-⌘ and say \"make this shorter.\"",
-    ]
+    private static func playgroundHint(for mode: Mode) -> String {
+        let start: String
+        if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
+            start = "hold \(descriptor.displayString)"
+        } else if let phrase = mode.triggerPhrases.first {
+            start = "end your sentence with \"\(phrase)\""
+        } else {
+            start = "use this mode"
+        }
+        switch mode.seedId {
+        case "polish":
+            return "Try: \"Um I think we should maybe send the notes tomorrow because the meeting moved.\" Then \(start) and speak."
+        case "edit-selection":
+            let startCapitalized = start.prefix(1).uppercased() + start.dropFirst()
+            return "The sentence above is selected for you. \(startCapitalized) and say \"make this shorter.\""
+        default:
+            return ""
+        }
+    }
 
     private func preparePlaygroundTextIfNeeded(for lessonId: String) {
         guard lessonId == "edit-selection" else { return }
@@ -432,9 +472,52 @@ final class FirstRunModel: ObservableObject {
     func continueFromPermissions() {
         onReadyToDictate()
         if tapActive() {
-            step = .aiService
+            step = .tryIt
         } else {
             needsRelaunch = true
+        }
+    }
+
+    var directTriggerDisplay: String { directTrigger?.displayString ?? "Fn (Globe)" }
+
+    // Cached so the trial's instruction sentence and keycap read the resolved trigger without a disk read
+    // per render. `loadAll` touches disk, so this is called on entry to the trial/playground (via `step`'s
+    // didSet) and after a rebind, not from view code.
+    func refreshDirectTrigger() {
+        let key = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }?.triggerKeys.first?.key
+        directTrigger = key.flatMap { try? KeyDescriptor(parsing: $0) }
+    }
+
+    var directTriggerBinding: Binding<String> {
+        Binding(
+            get: { [weak self] in self?.directTrigger?.canonical ?? "" },
+            set: { [weak self] in self?.setDirectTrigger($0) })
+    }
+
+    // The trial owns the Plain Dictation shortcut: this rewrites `_direct.toml` through the same repository
+    // owner Modes uses, so the rebind goes live immediately (configRepository.onChange rebuilds the hotkey
+    // monitor). Preserves an existing entry's press style / tap threshold, mirroring ModeTriggerRow.
+    func setDirectTrigger(_ key: String) {
+        triggerSaveError = nil
+        guard var mode = ModeStore.loadAll(in: modesDir).first(where: { $0.id == Mode.directId }) else { return }
+        if key.isEmpty {
+            if let existing = mode.triggerKeys.first {
+                rememberedTriggerStyle = existing.pressStyle
+                rememberedTriggerThreshold = existing.tapThresholdMs
+            }
+            mode.triggerKeys = []
+        } else {
+            let existing = mode.triggerKeys.first
+            mode.triggerKeys = [.init(
+                key: key,
+                pressStyle: existing?.pressStyle ?? rememberedTriggerStyle ?? "hold-or-tap",
+                tapThresholdMs: existing?.tapThresholdMs ?? rememberedTriggerThreshold ?? 250)]
+        }
+        do {
+            try repository.writeMode(mode)
+            refreshDirectTrigger()
+        } catch {
+            triggerSaveError = "Could not save the shortcut."
         }
     }
 
@@ -465,46 +548,29 @@ final class FirstRunModel: ObservableObject {
 
     func createAIService() async {
         aiSetupError = nil
-        let existing = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
-        let name = aiDraft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let id = pendingConnectionId ?? ConnectionStore.newID(for: name, existing: existing.map(\.id))
-        pendingConnectionId = id
-        let keyRef = "keyscribe.llm.\(id)"
-        let connection = aiDraft.connection(id: id, keyRef: keyRef)
-        let key = aiDraft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if connection.authMethod == .apiKey, key.isEmpty {
-            aiSetupError = "API key is required."
-            return
-        }
-        if connection.authMethod == .apiKey, !saveAPIKey(keyRef, key) {
-            aiSetupError = "Could not save the API key."
-            return
-        }
+        // Delegate the test-then-save-with-rollback to the shared connector so onboarding and Settings can
+        // never diverge (UX2 phase 5b). The FirstRun-specific work (linking the headline rewrite modes,
+        // entering the playground) stays here.
+        let connector = AIServiceConnector(
+            repository: repository, saveAPIKey: saveAPIKey, deleteAPIKey: deleteAPIKey,
+            testConnection: testConnection)
         aiTesting = true
-        let result = await testConnection(connection)
+        let result = await connector.connect(draft: aiDraft, reusingId: pendingConnectionId)
         aiTesting = false
-        // Wizard may have closed while the test was in flight (connect()'s task cancelled in stopPolling).
-        // Don't write the connection or enable modes after a user-perceived cancel, and drop the key saved
-        // before the test so it doesn't strand under an unreferenced id.
-        if Task.isCancelled {
-            if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
+        pendingConnectionId = result.allocatedId
+        let connection: Connection
+        switch result.outcome {
+        case .cancelled:
             return
-        }
-        if case .failed(let message) = result {
-            if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
-            aiSetupError = "Connection test failed: \(message)"
+        case .failed(let message):
+            aiSetupError = message
             return
+        case .connected(let c):
+            connection = c
         }
-        do {
-            try repository.upsertConnection(connection)
-        } catch {
-            if connection.authMethod == .apiKey { deleteAPIKey(keyRef) }
-            aiSetupError = "Could not save the AI service: \(error.localizedDescription)"
-            return
-        }
-        let unlinked = connectStarterModes(to: id)
+        let unlinked = connectStarterModes(to: connection.id)
         if !unlinked.isEmpty {
-            aiSetupError = "Connected \(name), but could not link \(unlinked.joined(separator: ", ")). You can link them in Settings."
+            aiSetupError = "Connected \(connection.name), but could not link \(unlinked.joined(separator: ", ")). You can link them in Settings."
             return
         }
         enterPlayground()
@@ -515,24 +581,36 @@ final class FirstRunModel: ObservableObject {
         return aiDraft.connection(id: id, keyRef: "keyscribe.llm.\(id)")
     }
 
-    private func modesToConnect() -> [Mode] {
-        let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
-        return ModeStore.loadAll(in: modesDir).filter { mode in
-            guard let seedId = mode.seedId, starterModeIdsEnabledOnFirstAIConnection.contains(seedId),
-                  let rewrite = mode.aiRewrite else { return false }
-            return rewrite.connection.isEmpty || !connections.contains { $0.id == rewrite.connection }
-        }
-    }
+    private var ledgerDir: URL { supportDir.appendingPathComponent("lkg", isDirectory: true) }
 
+    // On the first AI connection, wire up the two headline rewrite modes so the playground can demo them. On a
+    // legacy install their files exist (seeded starters) → link + enable in place. On a fresh install they do
+    // not exist yet (templates-only) → materialize the template as a `.seed` (keeps seedId, so the playground's
+    // seedId lookup and future seed updates both keep working) wired to the new connection.
     private func connectStarterModes(to connectionId: String) -> [String] {
         var failed: [String] = []
-        for var mode in modesToConnect() {
-            guard var rewrite = mode.aiRewrite else { continue }
-            rewrite.connection = connectionId
-            mode.aiRewrite = rewrite
-            mode.enabled = true
-            do { try repository.writeMode(mode) }
-            catch { failed.append(mode.name) }
+        for seedId in Self.headlineSeedIds {
+            let onDisk = ModeStore.loadAll(in: modesDir)
+            let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+            if var mode = onDisk.first(where: { $0.seedId == seedId }) {
+                guard var rewrite = mode.aiRewrite else { continue }
+                let linked = !rewrite.connection.isEmpty && connections.contains { $0.id == rewrite.connection }
+                guard !linked || !mode.enabled else { continue }
+                rewrite.connection = connectionId
+                mode.aiRewrite = rewrite
+                mode.enabled = true
+                do { try repository.writeMode(mode) }
+                catch { failed.append(mode.name) }
+            } else if let template = ModeStore.templates().first(where: { $0.id == seedId }),
+                      case .seed(var mode) = ModeTemplateInstantiation.materialize(
+                        template: template, existing: onDisk, connections: connections) {
+                mode.aiRewrite?.connection = connectionId
+                mode.enabled = true
+                do {
+                    try repository.writeMode(mode)
+                    ModeStore.recordMaterializedSeed(mode, ledgerDir: ledgerDir)
+                } catch { failed.append(mode.name) }
+            }
         }
         return failed
     }

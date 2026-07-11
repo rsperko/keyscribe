@@ -48,7 +48,7 @@ struct ModeSeedReconcileTests {
     @Test func freshSeedWritesLedgerThenReconcileIsANoOp() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
 
         let ledger = try #require(ModeStore.loadLedger(in: d.ledger))
         #expect(Set(ledger.entries.map(\.seedId)) == Set(ModeStore.starterModes().map(\.id)))
@@ -57,21 +57,6 @@ struct ModeSeedReconcileTests {
         let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
         #expect(outcome.isEmpty)
         #expect(ModeStore.loadAll(in: d.modes).count == 8)
-    }
-
-    // A write that fails (disk full, unwritable path) must NOT record the seed in the ledger — otherwise
-    // the mode is marked "already offered" and a later healthy run never re-seeds it, so the user
-    // permanently loses a starter that was never written.
-    @Test func failedSeedWriteDoesNotRecordTheLedger() throws {
-        let d = tempDirs()
-        defer { try? FileManager.default.removeItem(at: d.support) }
-        try FileManager.default.createDirectory(at: d.support, withIntermediateDirectories: true)
-        try Data().write(to: d.modes)
-
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
-
-        let entries = ModeStore.loadLedger(in: d.ledger)?.entries ?? []
-        #expect(entries.isEmpty)
     }
 
     // A rename whose new-file write fails must NOT delete the user's old mode file or record the new id.
@@ -94,19 +79,6 @@ struct ModeSeedReconcileTests {
             atPath: d.modes.appendingPathComponent("polished-dictation.toml").path))
         let ledgerIds = (ModeStore.loadLedger(in: d.ledger)?.entries ?? []).map(\.seedId)
         #expect(!ledgerIds.contains("polish"))
-    }
-
-    @Test func failedAdditiveReconcileWriteLeavesTheSeedEligible() throws {
-        let d = tempDirs()
-        defer { try? FileManager.default.removeItem(at: d.support) }
-        try FileManager.default.createDirectory(at: d.support, withIntermediateDirectories: true)
-        try Data().write(to: d.modes)
-
-        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
-
-        let entries = ModeStore.loadLedger(in: d.ledger)?.entries ?? []
-        #expect(outcome.added.isEmpty)
-        #expect(entries.isEmpty)
     }
 
     @Test func renamesUneditedSeedPreservingConnectionAndEnabled() throws {
@@ -178,15 +150,100 @@ struct ModeSeedReconcileTests {
         #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("polish.toml").path))
     }
 
-    @Test func additiveAddsGenuinelyNewCatalogMode() throws {
+    // The one intentionally-flipped expectation (UX2 phase 4c): a genuinely new catalog id is now OFFERED
+    // (a template in the gallery/menu), never auto-written as a mode file — so a legacy install does not
+    // sprout an unrequested disabled row.
+    @Test func additiveOffersAGenuinelyNewCatalogModeWithoutWritingAFile() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
         // A minimal existing install: only email survives. No ledger (pre-ledger install).
         let survivor = try #require(ModeStore.starterModes().first { $0.id == "email" })
         try ModeStore.write(survivor, to: d.modes)
 
-        ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
-        #expect(FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("code.toml").path))
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("code.toml").path))
+        #expect(outcome.added.contains("code"))
+        let ledger = ModeStore.loadLedger(in: d.ledger)
+        #expect(ledger?.contains("code") == true)
+        #expect(ledger?.entry("code")?.fingerprint == nil)
+    }
+
+    // An offer record (nil fingerprint) for a catalog id suppresses the additive step: it is "known to the
+    // ledger", so reconcile never writes a file for it.
+    @Test func anOfferRecordSuppressesTheAdditiveStep() {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        ModeStore.recordStarterOffersIfFresh(in: d.modes, ledgerDir: d.ledger)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(outcome.added.isEmpty)
+        #expect(ModeStore.loadAll(in: d.modes).isEmpty)
+    }
+
+    // seedId guard (UX2 phase 4c): a seedId-nil file hand-placed at a catalog id is never re-baselined or
+    // updated — reconcile only touches files whose seedId equals the catalog id.
+    @Test func aSeedlessFileAtACatalogIdSurvivesAVersionBumpUntouched() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        var handcrafted = try #require(ModeStore.starterModes().first { $0.id == "message" })
+        handcrafted.seedId = nil
+        handcrafted.seedVersion = nil
+        handcrafted.aiRewrite?.prompt = "a user's own message mode at this id"
+        try ModeStore.write(handcrafted, to: d.modes)
+
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: nextVersion("message"))
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
+
+        #expect(!outcome.updated.contains("message"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
+        #expect(after.aiRewrite?.prompt == "a user's own message mode at this id")
+    }
+
+    // A materialized-and-unedited seed (seedId intact, ledger fingerprint recorded at materialization) IS
+    // updated by a version bump, carrying forward connection/enabled/triggerKeys.
+    @Test func aMaterializedUneditedSeedIsUpdatedByAVersionBump() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        let template = try #require(ModeStore.templates().first { $0.id == "message" })
+        guard case .seed(var mode) = ModeTemplateInstantiation.materialize(template: template, existing: [], connections: []) else {
+            Issue.record("expected .seed"); return
+        }
+        mode.aiRewrite?.connection = "conn-1"
+        try ModeStore.write(mode, to: d.modes)
+        ModeStore.recordMaterializedSeed(mode, ledgerDir: d.ledger)
+
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: nextVersion("message"))
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
+
+        #expect(outcome.updated.contains("message"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
+        #expect(after.aiRewrite?.prompt == "revised message prompt")
+        #expect(after.aiRewrite?.connection == "conn-1")
+        #expect(after.enabled)
+    }
+
+    // A materialized-then-edited seed (fingerprint broken) is left alone by a version bump.
+    @Test func aMaterializedThenEditedSeedIsLeftAloneByAVersionBump() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        let template = try #require(ModeStore.templates().first { $0.id == "message" })
+        guard case .seed(var mode) = ModeTemplateInstantiation.materialize(template: template, existing: [], connections: []) else {
+            Issue.record("expected .seed"); return
+        }
+        try ModeStore.write(mode, to: d.modes)
+        ModeStore.recordMaterializedSeed(mode, ledgerDir: d.ledger)
+        // The user edits the prompt after materializing — fingerprint no longer matches.
+        mode.aiRewrite?.prompt = "my own edited message prompt"
+        try ModeStore.write(mode, to: d.modes)
+
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: nextVersion("message"))
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
+
+        #expect(!outcome.updated.contains("message"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
+        #expect(after.aiRewrite?.prompt == "my own edited message prompt")
     }
 
     @Test func preLedgerDeletedModesAreNotResurrected() throws {
@@ -235,7 +292,7 @@ struct ModeSeedReconcileTests {
     @Test func versionBumpRefreshesAnUneditedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
 
         let future = nextVersion("message")
         let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: future)
@@ -254,7 +311,7 @@ struct ModeSeedReconcileTests {
     @Test func versionBumpRefreshesAConnectedSeedPreservingConnectionAndEnabled() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
         // Simulate FirstRunController.connectStarterModes: attach a connection + enable.
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         message.aiRewrite?.connection = "conn-1"
@@ -279,7 +336,7 @@ struct ModeSeedReconcileTests {
     @Test func versionBumpDoesNotPushANewTriggerKeyOntoAnUneditedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
         // The user enabled message but never edited it; message ships with no trigger key.
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         #expect(message.triggerKeys.isEmpty)
@@ -309,7 +366,7 @@ struct ModeSeedReconcileTests {
     @Test func versionBumpSkipsAnEditedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
         // The user edited message.toml — its template no longer matches, so the update must skip it.
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         message.aiRewrite?.prompt = "my own message prompt"
@@ -384,7 +441,7 @@ struct ModeSeedReconcileTests {
     @Test func reconcileReBaselinesALegacyFingerprintForAConnectedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        ModeStore.seedStartersIfEmpty(in: d.modes, ledgerDir: d.ledger)
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         message.aiRewrite?.connection = "conn-1"
         message.enabled = true

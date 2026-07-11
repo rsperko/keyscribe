@@ -3,123 +3,30 @@ import KeyScribeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-@MainActor
-final class HistoryController {
-    private var window: NSWindow?
-    private let model: HistoryViewModel
-    private var loadedSignature: String?
-    // The app to hand focus back to for "Paste Result" (History itself is key while reading). Seeded at
-    // open and kept fresh while the window is up, so it tracks the last real app the user was in.
-    private var previousApp: NSRunningApplication?
-    private var activationObserver: NSObjectProtocol?
-    private var closeObserver: NSObjectProtocol?
-
-    init(
-        store: HistoryStore,
-        addDictionaryWord: @escaping (String) -> Bool,
-        addReplacement: @escaping (String, String) -> Bool,
-        openSettings: @escaping (SettingsDestination) -> Void
-    ) {
-        model = HistoryViewModel(
-            store: store, addDictionaryWord: addDictionaryWord,
-            addReplacement: addReplacement, openSettings: openSettings)
-        model.copyText = { TextInserter.copyToClipboard($0) }
-        model.pasteText = { [weak self] in self?.pasteToPreviousApp($0) }
-    }
-
-    func present() {
-        previousApp = NSWorkspace.shared.frontmostApplication
-        // Re-parsing the JSONL on every open is wasteful when nothing has changed since the last load;
-        // the store's cheap signature gates the reload so re-fronting the window is free.
-        let signature = model.storeSignature()
-        if window == nil || signature != loadedSignature {
-            model.reload()
-            loadedSignature = signature
-        }
-        if let window {
-            registerObservers(for: window)
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-        let hosting = NSHostingController(rootView: HistoryView(model: model))
-        let window = NSWindow(contentViewController: hosting)
-        window.title = "History"
-        window.styleMask = [.titled, .closable, .resizable]
-        window.minSize = NSSize(width: 820, height: 520)
-        let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1040, height: 720)
-        window.setContentSize(NSSize(width: min(1040, max(820, visible.width - 80)),
-                                     height: min(720, max(520, visible.height - 80))))
-        window.center()
-        window.isReleasedWhenClosed = false
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
-        registerObservers(for: window)
-    }
-
-    // Observers live only while the window is open: seeded here (idempotent — a second present() while
-    // already open is a no-op) and torn down in the close handler, so no workspace observer runs for the
-    // app's lifetime after the user closes History.
-    private func registerObservers(for window: NSWindow) {
-        guard activationObserver == nil else { return }
-        let selfBundleId = Bundle.main.bundleIdentifier
-        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.window?.isVisible == true,
-                      let app = NSWorkspace.shared.frontmostApplication,
-                      app.bundleIdentifier != selfBundleId else { return }
-                self.previousApp = app
-            }
-        }
-        // The window is not released on close, so its parsed rows + full-store cache would otherwise
-        // survive until the next open; drop them and force a fresh read next present().
-        closeObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification, object: window, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.model.releaseForClose()
-                self.loadedSignature = nil
-                self.removeObservers()
-            }
-        }
-    }
-
-    private func removeObservers() {
-        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
-        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
-        activationObserver = nil
-        closeObserver = nil
-    }
-
-    // History is key while open, so hand focus back to the last real app and paste there via the shared
-    // safe path. No reliable target (only History, or nothing frontmost) → copy instead rather than
-    // synthesize a ⌘V into ourselves.
-    private func pasteToPreviousApp(_ text: String) {
-        guard let target = previousApp,
-              target.bundleIdentifier != Bundle.main.bundleIdentifier else {
-            TextInserter.copyToClipboard(text)
-            model.flash("No target app to paste into — copied to clipboard instead.")
-            return
-        }
-        window?.orderOut(nil)
-        Task { @MainActor in
-            guard await TextInserter.pasteReturning(to: target, text: text) else {
-                TextInserter.copyToClipboard(text)
-                NSApp.activate(ignoringOtherApps: true)
-                window?.makeKeyAndOrderFront(nil)
-                model.flash("Could not return to the app — copied to clipboard instead.")
-                return
-            }
-            window?.close()
+// The user-language "how this mode was chosen" line for History detail (UX2 phase 7c) — no phase names.
+// Pure function of the reason (+ the matched phrase / trigger key) so it is directly unit-testable.
+enum ModeChoiceLine {
+    static func text(reason: ModeChoiceReason?, routedPhrase: String?, triggerDisplay: String?) -> String? {
+        switch reason {
+        case .oneShot:
+            return "Chosen from the menu for this dictation"
+        case .triggerKey:
+            if let key = triggerDisplay { return "Started by its shortcut (\(key))" }
+            return "Started by its shortcut"
+        case .contextRule:
+            return "Chosen for the app you were in"
+        case .spokenPhrase:
+            if let phrase = routedPhrase { return "Routed by the spoken phrase \u{201C}\(phrase)\u{201D}" }
+            return "Routed by a spoken phrase"
+        case .fallback:
+            return "Plain Dictation — nothing else matched"
+        case nil:
+            return nil
         }
     }
 }
 
-private struct HistoryRow: Identifiable, Sendable {
+struct HistoryRow: Identifiable, Sendable {
     let id: String
     let entry: HistoryEntry
     let day: String
@@ -141,7 +48,7 @@ private struct HistoryRow: Identifiable, Sendable {
 }
 
 @MainActor
-private final class HistoryViewModel: ObservableObject {
+final class HistoryPaneModel: ObservableObject {
     @Published var query = "" { didSet { scheduleRecompute() } }
     @Published var selection: HistoryRow.ID?
     @Published private(set) var groups: [(day: String, rows: [HistoryRow])] = []
@@ -169,7 +76,7 @@ private final class HistoryViewModel: ObservableObject {
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Bool
     let addReplacement: (String, String) -> Bool
-    let openSettings: (SettingsDestination) -> Void
+    var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
 
@@ -383,53 +290,105 @@ private final class HistoryViewModel: ObservableObject {
     }
 }
 
-private struct HistoryView: View {
-    @ObservedObject var model: HistoryViewModel
+// History is a Settings pane (UX2 phase 8), not a window: the Modes-style HStack list/detail, with the
+// enable/retention controls (moved out of General) inline above the list and the storage-truth statement
+// pinned at the bottom. Reload/release lifecycle is driven by SettingsRootView on pane selection.
+struct HistoryPaneView: View {
+    @ObservedObject var model: HistoryPaneModel
+    @ObservedObject var settings: SettingsModel
 
     var body: some View {
-        NavigationSplitView {
-            Group {
-                if model.isLoading {
-                    ProgressView("Loading history…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if !model.hasEntries {
-                    ContentUnavailableView {
-                        Label("No dictations yet", systemImage: "clock")
-                    } description: {
-                        Text("Future dictations appear here when history is enabled.")
-                    } actions: {
-                        Button("Open History Settings") { model.openSettings(.general) }
-                            .accessibilityIdentifier(AccessibilityID.History.emptyOpenSettings)
-                    }
-                } else if model.groups.isEmpty {
-                    ContentUnavailableView(
-                        "No matching dictations", systemImage: "magnifyingglass",
-                        description: Text("Try a different search."))
-                } else {
-                    List(selection: $model.selection) {
-                        ForEach(model.groups, id: \.day) { group in
-                            Section(group.day) {
-                                ForEach(group.rows) { row in
-                                    HistoryRowView(entry: row.entry).tag(row.id)
-                                }
-                            }
+        HStack(spacing: 0) {
+            leftColumn
+                .frame(width: 260)
+            Divider()
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var leftColumn: some View {
+        VStack(spacing: 0) {
+            controls
+            Divider()
+            searchField
+            list
+            footer
+        }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SettingRow(
+                title: "Keep dictation history on this Mac",
+                result: "Audio is never saved; stored text can be sensitive.",
+                help: "Stores transcripts and final text locally so you can search and correct them. Nothing leaves this Mac. Password-field dictations are never saved; for other sensitive work, lower retention below or exclude a mode in its Result handling.")
+            {
+                Toggle("", isOn: $settings.historyEnabled).labelsHidden()
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
+            }
+            if settings.historyEnabled {
+                Stepper("Keep for \(settings.retentionDays) days", value: $settings.retentionDays, in: 1...365)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
+            }
+        }
+        .padding(10)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search history", text: $model.query)
+                .textFieldStyle(.plain)
+                .accessibilityIdentifier(AccessibilityID.History.search)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    @ViewBuilder private var list: some View {
+        if model.isLoading {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !model.hasEntries || model.groups.isEmpty {
+            Spacer()
+        } else {
+            List(selection: $model.selection) {
+                ForEach(model.groups, id: \.day) { group in
+                    Section(group.day) {
+                        ForEach(group.rows) { row in
+                            HistoryRowView(entry: row.entry).tag(row.id)
                         }
                     }
-                    .accessibilityIdentifier(AccessibilityID.History.list)
                 }
             }
-            .searchable(text: $model.query, placement: .sidebar, prompt: "Search history")
-            .accessibilityIdentifier(AccessibilityID.History.search)
-            .frame(minWidth: 280)
-            .safeAreaInset(edge: .bottom) { footer }
-        } detail: {
-            if let entry = model.selected {
-                HistoryDetailView(entry: entry, model: model)
-            } else {
-                ContentUnavailableView(
-                    "No dictation selected", systemImage: "clock",
-                    description: Text("Select an entry to review what was heard, what changed, and what came out."))
-            }
+            .accessibilityIdentifier(AccessibilityID.History.list)
+        }
+    }
+
+    @ViewBuilder private var detail: some View {
+        if !model.hasEntries {
+            emptyState
+        } else if let entry = model.selected {
+            HistoryDetailView(entry: entry, model: model)
+        } else if model.groups.isEmpty {
+            ContentUnavailableView(
+                "No matching dictations", systemImage: "magnifyingglass",
+                description: Text("Try a different search."))
+        } else {
+            ContentUnavailableView(
+                "No dictation selected", systemImage: "clock",
+                description: Text("Select an entry to review what was heard, what changed, and what came out."))
+        }
+    }
+
+    // The single empty state (supersedes phase 5c): the enable toggle above is the affordance, so there is
+    // no navigation action here — just a note, and a line naming that history is off when it is.
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No dictations yet", systemImage: "clock")
+        } description: {
+            Text(settings.historyEnabled
+                ? "Future dictations appear here."
+                : "Future dictations appear here. History is currently off.")
         }
     }
 
@@ -503,7 +462,7 @@ private typealias ComparisonStage = HistoryComparison.Stage
 
 private struct HistoryDetailView: View {
     let entry: HistoryEntry
-    @ObservedObject var model: HistoryViewModel
+    @ObservedObject var model: HistoryPaneModel
     @State private var stage: DetailStage = .whatHappened
     @State private var comparisonStage: ComparisonStage = .heardInserted
     @State private var selectedText = ""
@@ -556,7 +515,7 @@ private struct HistoryDetailView: View {
                 if model.addReplacement(heard, replace) {
                     model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : replace)\u{201D}.")
                 } else {
-                    model.flash(HistoryViewModel.saveFailedMessage)
+                    model.flash(HistoryPaneModel.saveFailedMessage)
                 }
             }
         }
@@ -565,7 +524,7 @@ private struct HistoryDetailView: View {
                 if model.addDictionaryWord(term) {
                     model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
                 } else {
-                    model.flash(HistoryViewModel.saveFailedMessage)
+                    model.flash(HistoryPaneModel.saveFailedMessage)
                 }
             }
         }
@@ -731,6 +690,10 @@ private struct HistoryDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Privacy & processing").font(.headline)
+                if let howChosen = ModeChoiceLine.text(
+                    reason: entry.modeChoice, routedPhrase: entry.routedPhrase, triggerDisplay: entry.triggerKey) {
+                    detailRow("How chosen", howChosen)
+                }
                 detailRow("AI rewrite", rewriteSummary)
                 detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
                 detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")

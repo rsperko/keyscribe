@@ -39,6 +39,24 @@ struct ModeSummaryTests {
         #expect(ModeSummary.whenRuns(mode) == "Triggered by Fn (Globe) in matching apps")
     }
 
+    @Test func spokenPhraseModeShowsTheActualQuotedPhrase() {
+        var mode = Mode(id: "email", name: "Email")
+        mode.triggerPhrases = ["as an email"]
+        #expect(ModeSummary.whenRuns(mode) == "Say \"as an email\"")
+    }
+
+    @Test func spokenPhraseInMatchingAppsKeepsTheQuotedPhrase() {
+        var mode = Mode(id: "email", name: "Email")
+        mode.triggerPhrases = ["as an email"]
+        mode.constraints = [Mode.Constraint(bundleId: "com.tinyspeck.slackmacgap")]
+        #expect(ModeSummary.whenRuns(mode) == "Say \"as an email\" in matching apps")
+    }
+
+    @Test func spokenPhraseFormatterMatchesAcrossCasings() {
+        #expect(ModeSummary.spokenPhrase("as an email", capitalized: true) == "Say \"as an email\"")
+        #expect(ModeSummary.spokenPhrase("as an email", capitalized: false) == "say \"as an email\"")
+    }
+
     @Test func directFloorLeadsWithShortcutThenFallbackRole() {
         var floor = Mode.direct
         floor.triggerKeys = [.init(key: "fn")]

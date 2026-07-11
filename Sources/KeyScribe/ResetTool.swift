@@ -60,9 +60,9 @@ struct ResetTool {
         // Drop the last-known-good and seed ledger too, so a re-seed can't resurrect a pre-reset mode.
         let lkgDir = supportDir.appendingPathComponent("lkg", isDirectory: true)
         try? fileManager.removeItem(at: lkgDir)
-        ModeStore.seedStartersIfEmpty(in: modesDir, ledgerDir: lkgDir)
+        ModeStore.recordStarterOffersIfFresh(in: modesDir, ledgerDir: lkgDir)
         ModeStore.ensureSystemModes(in: modesDir)
-        return ["Re-seeded \(ModeStore.starterModes().count) starter modes in \(modesDir.path)."]
+        return ["Reset modes: recorded \(ModeStore.starterModes().count) starter templates as offers in \(modesDir.path)."]
     }
 
     private func wipeConfig() -> [String] {

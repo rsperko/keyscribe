@@ -475,6 +475,30 @@ public enum ModeStore {
         }
     }
 
+    // The starter catalog reordered for presentation (Add Mode menu + template gallery). One catalog, two
+    // orderings — reconcile keeps using `starterModes()` order, which is irrelevant to its logic.
+    public static func templates() -> [Mode] {
+        let order = ["polish", "message", "email", "markdown", "code", "shell", "ai-prompt", "edit-selection"]
+        let byId = Dictionary(starterModes().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return order.compactMap { byId[$0] }
+    }
+
+    // One-line user summary for a template row (gallery/menu). Kept as pure data here rather than a persisted
+    // Mode field; phrase-carrying templates name their spoken phrase (phase 7 owns the shared phrase format).
+    public static func templateSummary(for seedId: String) -> String {
+        switch seedId {
+        case "polish": return "Clean up filler and grammar as you dictate"
+        case "message": return "Rewrite as a casual chat message"
+        case "email": return "Professional email — end with \"as an email\""
+        case "markdown": return "Reformat dictation as Markdown"
+        case "code": return "Developer-friendly text for code and commits"
+        case "shell": return "Turn a spoken request into a shell command"
+        case "ai-prompt": return "Clean prompt for an AI — end with \"as prompt\""
+        case "edit-selection": return "Rewrite selected text by voice"
+        default: return ""
+        }
+    }
+
     public struct LoadFailure: Equatable, Sendable {
         public let id: String
         public let message: String
@@ -565,7 +589,7 @@ public enum ModeStore {
     // editable fields; a missing one is seeded fresh. Writes ONLY when the normalized content differs
     // from disk, so a steady-state install never rewrites the file (no needless FSEvents churn → no
     // spurious config reload / hotkey rebuild on every launch or Settings open). Call after
-    // seedStartersIfEmpty.
+    // recordStarterOffersIfFresh.
     //
     // The FIRST time it runs (no `_direct.toml` yet) it also performs the one-time Plain-Dictation→Direct
     // migration: if a stock, enabled `plain-dictation.toml` exists, it is removed and its trigger is
@@ -643,22 +667,31 @@ public enum ModeStore {
         dir.appendingPathComponent("\(mode.id).toml")
     }
 
-    public static func seedStartersIfEmpty(in dir: URL, ledgerDir: URL? = nil) {
+    // Fresh install (no mode files yet): record every starter as a ledger OFFER (nil fingerprint) instead of
+    // writing a mode file. Starters become templates the user materializes on demand; the offer records are
+    // mandatory — without them reconcile's additive step would re-seed all 8 starters on the next launch. A
+    // nil fingerprint keeps the offer dormant until materialization replaces it with a real entry (4a). No
+    // files written, so the dir may not exist yet — ensureSystemModes creates it and writes _direct.toml next.
+    public static func recordStarterOffersIfFresh(in dir: URL, ledgerDir: URL? = nil) {
         let fm = FileManager.default
         let existing = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "toml" }) ?? []
-        guard existing.isEmpty else { return }
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        var ledger = SeedLedger()
+        guard existing.isEmpty, let ledgerDir else { return }
+        var ledger = loadLedger(in: ledgerDir) ?? SeedLedger()
         for mode in starterModes() {
-            guard let toml = try? encode(mode) else { continue }
-            do {
-                try toml.write(to: dir.appendingPathComponent("\(mode.id).toml"), atomically: true, encoding: .utf8)
-            } catch {
-                continue
-            }
-            ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: seedTemplateFingerprint(mode))
+            ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: nil)
         }
-        if let ledgerDir { saveLedger(ledger, in: ledgerDir) }
+        saveLedger(ledger, in: ledgerDir)
+    }
+
+    // Write a materialized `.seed` template's ledger entry: current version + the template fingerprint of the
+    // mode as written (mirrors reconcile's writeAndRecord). This makes "materialized and unedited ⇒ still
+    // receives seed updates" true (reconcile step 3 fires on a version bump + matching fingerprint), and
+    // overwrites the fresh-install offer record for that id. The mode file itself is written by the caller.
+    public static func recordMaterializedSeed(_ mode: Mode, ledgerDir: URL) {
+        guard mode.seedId == mode.id else { return }
+        var ledger = loadLedger(in: ledgerDir) ?? SeedLedger()
+        ledger.upsert(mode.id, version: mode.seedVersion ?? 1, fingerprint: seedTemplateFingerprint(mode))
+        saveLedger(ledger, in: ledgerDir)
     }
 }

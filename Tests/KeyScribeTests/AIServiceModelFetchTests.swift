@@ -5,6 +5,8 @@ import Testing
 
 @MainActor
 struct AIServiceModelFetchTests {
+    // Seeds one existing connection (these tests exercise the unchanged edit-existing path via update/
+    // fetchModels; creation is now a draft flow, so seed the connection directly instead of model.create()).
     private func makeModel(
         listModels: @escaping (Connection, String?) async throws -> [String]
     ) -> (AIServiceSettingsModel, URL) {
@@ -12,7 +14,12 @@ struct AIServiceModelFetchTests {
         let support = fm.temporaryDirectory.appendingPathComponent("keyscribe-ai-\(UUID().uuidString)")
         try! fm.createDirectory(at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
-        return (AIServiceSettingsModel(repository: repository, listModels: listModels), support)
+        let seed = Connection(
+            id: "new-ai-service", name: "New AI Service", provider: .openai,
+            model: Connection.Provider.openai.defaultModel, keyRef: "keyscribe.llm.new-ai-service")
+        try! repository.upsertConnection(seed)
+        let model = AIServiceSettingsModel(repository: repository, listModels: listModels)
+        return (model, support)
     }
 
     private func openAICompatConnection(from model: AIServiceSettingsModel, baseUrl: String, modelId: String) -> Connection {
@@ -29,8 +36,6 @@ struct AIServiceModelFetchTests {
     @Test func staleFetchDoesNotOverwriteAModelAfterTheBaseURLChanged() async {
         let (model, support) = makeModel { _, _ in ["only-on-old-server"] }
         defer { try? FileManager.default.removeItem(at: support) }
-
-        model.create()
         let stale = openAICompatConnection(from: model, baseUrl: "http://old/v1", modelId: "keep-me")
         model.update(stale, apiKey: nil)
         let id = stale.id
@@ -54,8 +59,6 @@ struct AIServiceModelFetchTests {
     @Test func modelEditPublishesSuggestionsButKeepsTheUsersModel() async {
         let (model, support) = makeModel { _, _ in ["server-a", "server-b"] }
         defer { try? FileManager.default.removeItem(at: support) }
-
-        model.create()
         let stale = openAICompatConnection(from: model, baseUrl: "http://host/v1", modelId: "old-model")
         model.update(stale, apiKey: nil)
         let id = stale.id
@@ -76,8 +79,6 @@ struct AIServiceModelFetchTests {
     @Test func modelEditedDuringFetchIsNotClobbered() async {
         let (model, support) = makeModel { _, _ in ["server-a", "server-b"] }
         defer { try? FileManager.default.removeItem(at: support) }
-
-        model.create()
         let stale = openAICompatConnection(from: model, baseUrl: "http://host/v1", modelId: "old-model")
         model.update(stale, apiKey: nil)
         let id = stale.id
@@ -96,8 +97,6 @@ struct AIServiceModelFetchTests {
     @Test func fetchAutoSelectsWhenTheEndpointIsUnchanged() async {
         let (model, support) = makeModel { _, _ in ["server-model"] }
         defer { try? FileManager.default.removeItem(at: support) }
-
-        model.create()
         let conn = openAICompatConnection(from: model, baseUrl: "http://host/v1", modelId: "not-in-list")
         model.update(conn, apiKey: nil)
         let id = conn.id

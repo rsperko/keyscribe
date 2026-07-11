@@ -347,4 +347,45 @@ struct ModeResolverTests {
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this as prompt").routedModeId == "cs")
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this As Prompt").routedModeId == nil)
     }
+
+    // MARK: mode-choice reasons (UX2 phase 7c) — additions, not behavioral changes.
+
+    @Test func phaseAReasonIsTriggerKeyForAKeySelectedMode() {
+        let polish = mode("polish", keys: ["right_option"])
+        let r = ModeResolver.resolvePhaseAWithReason(
+            modes: [polish], directFallback: .direct, context: .init(), triggerKey: "right_option")
+        #expect(r.mode.id == "polish")
+        #expect(r.reason == .triggerKey)
+    }
+
+    @Test func phaseAReasonIsContextRuleForAConstraintWonMode() {
+        let mail = mode("mail", bundles: ["com.apple.mail"])
+        let r = ModeResolver.resolvePhaseAWithReason(
+            modes: [mail], directFallback: .direct, context: .init(bundleId: "com.apple.mail"), triggerKey: nil)
+        #expect(r.mode.id == "mail")
+        #expect(r.reason == .contextRule)
+    }
+
+    @Test func phaseAReasonIsFallbackWhenNothingMatches() {
+        let mail = mode("mail", bundles: ["com.apple.mail"])
+        let r = ModeResolver.resolvePhaseAWithReason(
+            modes: [mail], directFallback: .direct, context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
+        #expect(r.mode.id == Mode.directId)
+        #expect(r.reason == .fallback)
+    }
+
+    @Test func phaseAReasonIsFallbackWhenBoundKeyIsIneligibleHere() {
+        let mail = mode("mail", keys: ["fn"], bundles: ["com.apple.mail"])
+        let r = ModeResolver.resolvePhaseAWithReason(
+            modes: [mail], directFallback: .direct, context: .init(bundleId: "com.apple.notes"), triggerKey: "fn")
+        #expect(r.mode.id == Mode.directId)
+        #expect(r.reason == .fallback)
+    }
+
+    @Test func phaseBReportsTheMatchedPhrase() {
+        let email = mode("email", phrases: ["as an email"])
+        let r = ModeResolver.resolvePhaseB(eligibleModes: [email], transcript: "send this to bob as an email")
+        #expect(r.routedModeId == "email")
+        #expect(r.matchedPhrase == "as an email")
+    }
 }

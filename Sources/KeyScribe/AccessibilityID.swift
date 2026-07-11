@@ -8,6 +8,7 @@ enum AccessibilityID {
             static let vocabulary = "settings.sidebar.vocabulary"
             static let aiServices = "settings.sidebar.aiServices"
             static let modes = "settings.sidebar.modes"
+            static let history = "settings.sidebar.history"
             static let permissions = "settings.sidebar.permissions"
             static let advanced = "settings.sidebar.advanced"
 
@@ -18,6 +19,7 @@ enum AccessibilityID {
                 case .vocabulary: return vocabulary
                 case .aiServices: return aiServices
                 case .modes: return modes
+                case .history: return history
                 case .permissions: return permissions
                 case .advanced: return advanced
                 }
@@ -35,6 +37,9 @@ enum AccessibilityID {
             static let historyEnabled = "settings.general.historyEnabled"
             static let retentionDays = "settings.general.retentionDays"
             static let eviction = "settings.general.eviction"
+            static let advancedModelBehavior = "settings.general.advancedModelBehavior"
+            static let dictationTrigger = "settings.general.dictationTrigger"
+            static let changeDictationTrigger = "settings.general.changeDictationTrigger"
         }
 
         enum Speech {
@@ -55,6 +60,7 @@ enum AccessibilityID {
             static let composerTerm = "settings.vocabulary.composer.term"
             static let composerUseInstead = "settings.vocabulary.composer.useInstead"
             static let composerRegexToggle = "settings.vocabulary.composer.regexToggle"
+            static let composerAdvanced = "settings.vocabulary.composer.advanced"
             static let composerAdd = "settings.vocabulary.composer.add"
             static let dictionaryList = "settings.vocabulary.dictionary.list"
             static let replacementsList = "settings.vocabulary.replacements.list"
@@ -78,6 +84,18 @@ enum AccessibilityID {
                 static let foundModel = "settings.ai.editor.foundModel"
                 static let testConnection = "settings.ai.editor.testConnection"
                 static let delete = "settings.ai.editor.delete"
+                static let done = "settings.ai.editor.done"
+            }
+
+            enum Summary {
+                static let edit = "settings.ai.summary.edit"
+                static let test = "settings.ai.summary.test"
+                static let createMode = "settings.ai.summary.createMode"
+            }
+
+            enum Draft {
+                static let connect = "settings.ai.draft.connect"
+                static let cancel = "settings.ai.draft.cancel"
             }
         }
 
@@ -104,7 +122,13 @@ enum AccessibilityID {
         enum List {
             static let list = "mode.list"
             static let add = "mode.list.add"
+            static let addBlank = "mode.list.add.blank"
+            static func addTemplate(_ seedID: String) -> String { "mode.list.add.template.\(seedID)" }
             static func row(_ modeID: String) -> String { "mode.list.row.\(modeID)" }
+        }
+
+        enum Gallery {
+            static func add(_ seedID: String) -> String { "mode.gallery.add.\(seedID)" }
         }
 
         enum Editor {
@@ -140,6 +164,8 @@ enum AccessibilityID {
                 static let windowTitleAdd = "mode.editor.routing.windowTitle.add"
                 static let phrase = "mode.editor.routing.phrase"
                 static let phraseAdd = "mode.editor.routing.phrase.add"
+                static let websitePattern = "mode.editor.routing.websitePattern"
+                static let websitePatternAdd = "mode.editor.routing.websitePattern.add"
             }
 
             enum Recognition {
@@ -175,12 +201,15 @@ enum AccessibilityID {
             static let field = "firstrun.tryit.field"
             static let skip = "firstrun.tryit.skip"
             static let done = "firstrun.tryit.done"
+            static let changeTrigger = "firstrun.tryit.changeTrigger"
+            static let shortcutWell = "firstrun.tryit.shortcutWell"
         }
 
         enum AI {
             static let connectionEditor = "firstrun.ai.connectionEditor"
             static let connect = "firstrun.ai.connect"
             static let skip = "firstrun.ai.skip"
+            static let offerConnect = "firstrun.ai.offerConnect"
         }
 
         enum Playground {
@@ -212,7 +241,6 @@ enum AccessibilityID {
         static let manageVocabulary = "history.action.manageVocabulary"
         static let createReplacement = "history.action.createReplacement"
         static let addToDictionary = "history.action.addToDictionary"
-        static let emptyOpenSettings = "history.empty.openSettings"
 
         enum ReplacementSheet {
             static let source = "history.replacementSheet.source"
@@ -244,25 +272,29 @@ enum AccessibilityID {
 
     static let all: [String] = [
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
-        Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.permissions,
+        Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.history, Settings.Sidebar.permissions,
         Settings.Sidebar.advanced,
         Settings.General.sounds, Settings.General.keepDisplayAwake, Settings.General.muteSystemAudio,
         Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.addVocabularyShortcut,
         Settings.General.pasteLastShortcut, Settings.General.historyEnabled, Settings.General.retentionDays,
-        Settings.General.eviction,
+        Settings.General.eviction, Settings.General.advancedModelBehavior,
+        Settings.General.dictationTrigger, Settings.General.changeDictationTrigger,
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
-        Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdd,
+        Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.replacementsList,
         Settings.AI.list, Settings.AI.add,
         Settings.AI.Editor.name, Settings.AI.Editor.provider, Settings.AI.Editor.baseURL,
         Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey,
         Settings.AI.Editor.tokenCommand, Settings.AI.Editor.model, Settings.AI.Editor.fetchModels,
         Settings.AI.Editor.foundModel, Settings.AI.Editor.testConnection, Settings.AI.Editor.delete,
+        Settings.AI.Editor.done,
+        Settings.AI.Summary.edit, Settings.AI.Summary.test, Settings.AI.Summary.createMode,
+        Settings.AI.Draft.connect, Settings.AI.Draft.cancel,
         Settings.Permissions.list,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
-        Mode.List.list, Mode.List.add,
+        Mode.List.list, Mode.List.add, Mode.List.addBlank,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle,
         Mode.Editor.rewriteSelection, Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,
         Mode.Editor.addInstruction, Mode.Editor.privacy, Mode.Editor.excludeFromHistory,
@@ -271,19 +303,21 @@ enum AccessibilityID {
         Mode.Editor.Routing.disclosure, Mode.Editor.Routing.addAppRule, Mode.Editor.Routing.bundleID,
         Mode.Editor.Routing.bundleIDAdd, Mode.Editor.Routing.urlPattern, Mode.Editor.Routing.urlPatternAdd,
         Mode.Editor.Routing.windowTitle, Mode.Editor.Routing.windowTitleAdd, Mode.Editor.Routing.phrase,
-        Mode.Editor.Routing.phraseAdd, Mode.Editor.Recognition.disclosure,
+        Mode.Editor.Routing.phraseAdd, Mode.Editor.Routing.websitePattern, Mode.Editor.Routing.websitePatternAdd,
+        Mode.Editor.Recognition.disclosure,
         FirstRun.Intro.getStarted,
         FirstRun.Model.advancedDisclosure, FirstRun.Model.enginePicker, FirstRun.Model.progress,
         FirstRun.Model.useAppleSpeech, FirstRun.Model.download,
         FirstRun.Permissions.skip, FirstRun.Permissions.done, FirstRun.Permissions.relaunch,
         FirstRun.Permissions.continue,
         FirstRun.TryIt.field, FirstRun.TryIt.skip, FirstRun.TryIt.done,
-        FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip,
+        FirstRun.TryIt.changeTrigger, FirstRun.TryIt.shortcutWell,
+        FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip, FirstRun.AI.offerConnect,
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
         HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction,
         History.list, History.search, History.export, History.stagePicker, History.comparisonPicker,
         History.promptDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
-        History.manageVocabulary, History.createReplacement, History.addToDictionary, History.emptyOpenSettings,
+        History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
         History.DictionarySheet.term, History.DictionarySheet.save,
         Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination,
