@@ -312,18 +312,27 @@ out.
 schema_version = 1
 
 [[connection]]
-id = "gemini-flash"             # referenced by modes
-name = "Gemini 2.5 Flash"
+id = "gemini-flash-lite"        # referenced by modes
+name = "Gemini Flash Lite"
 provider = "gemini"             # "openai" | "anthropic" | "gemini" | "openai_compatible"
-model = "gemini-2.5-flash"
-key_ref = "keyscribe.llm.gemini-flash"   # Keychain item id — the key itself never lives in TOML
+model = "gemini-flash-lite-latest"
+key_ref = "keyscribe.llm.gemini-flash-lite"   # Keychain item id — the key itself never lives in TOML
 # auth_method = "api_key"       # "api_key" | "token_command" | "none"; defaults to "api_key"
 # base_url = "https://..."      # required for openai_compatible endpoints
 # token_command = "..."         # required when auth_method = "token_command"
 [connection.params]
 temperature = 0.2
 max_tokens = 2048   # floor; raised per request for long edit-in-place selections (prompt_design.md budget policy)
+reasoning_effort = "none"      # OpenAI defaults only
+gemini_thinking_level = "minimal" # Gemini defaults only
 ```
+
+The editor's hosted quick-setup presets (OpenRouter, Groq, Mistral) are **not** distinct providers on
+disk — each persists as a `provider = "openai_compatible"` connection with the preset's `base_url` and a
+lightweight default `model` (e.g. OpenRouter → `https://openrouter.ai/api/v1` /
+`google/gemini-3.1-flash-lite`, Groq → `https://api.groq.com/openai/v1` / `openai/gpt-oss-20b`,
+Mistral → `https://api.mistral.ai/v1` / `mistral-small-latest`). The preset only seeds the draft so the
+user just adds a key; reopening the connection recovers the preset from its base URL.
 
 `auth_method` controls how requests are authenticated:
 

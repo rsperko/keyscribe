@@ -53,7 +53,7 @@ The sequence is short, and each step states its purpose in plain language:
    asked just before it is first needed:** Microphone to hear you, Accessibility to detect a
    modifier-key trigger and place text. State what still works if one is declined. (A key+modifier
    trigger registers as a system hotkey and needs no permission; Input Monitoring is never requested.)
-4. **Try it now.** Land the user on a focused text field and let them produce one real dictation;
+4. **Try your voice.** Land the user on a focused text field and let them produce one real dictation;
    completion unlocks only after one succeeds. The instruction names the user's **resolved**
    trigger (never a hardcoded key), and the trial owns that shortcut: an inline **Use a different
    key…** affordance changes the Plain Dictation trigger in place (it edits the Direct mode itself,
@@ -63,8 +63,8 @@ The sequence is short, and each step states its purpose in plain language:
    **Continue** lead to the AI opt-in (the AI step's own Finish is one click, so no one is ever
    more than two clicks from done). Taking Skip still records setup as complete, so an incomplete
    setup is a supported, not a blocked, state.
-5. **Optional: want AI cleanup? (BYOK).** A slim opt-in card — one line, a **Connect an AI
-   Service…** action, and a one-click **Finish**. Choosing to connect reveals the compact
+5. **Optional: make rough dictation clear (BYOK).** A slim opt-in card shows a tiny rough-to-polished
+   example, an **Add AI cleanup…** action, and a one-click **Finish**. Choosing to connect reveals the compact
    connection form in place. Speech stays local; only a rewrite leaves the machine. Connecting the
    first service auto-enables and links the everyday rewrite modes, then lands on a short
    **playground** that shows exactly what the service does: the two headline rewrite demos —
@@ -258,13 +258,7 @@ that?
 KeyScribe
 Plain Dictation · Parakeet TDT-CTC 110M
 
-Speech Model ▸
-  Parakeet TDT-CTC 110M ✓
-  Apple Speech
-  ─────────────
-  Manage Speech Models…
-
-Dictate with ▸
+Next Dictation ▸
   Automatic — Plain Dictation ✓
   ─────────────
   Plain Dictation
@@ -275,10 +269,17 @@ Dictate with ▸
   Manage Modes…
 
 Paste Last Dictation
-History…
 
 ────────────────
 Add to Vocabulary…
+
+────────────────
+Speech Model ▸
+  Parakeet TDT-CTC 110M ✓
+  Apple Speech
+  ─────────────
+  Manage Speech Models…
+History…
 
 ────────────────
 Settings…
@@ -291,12 +292,16 @@ When ready it reads **`<next mode> · <model>`** — the mode being the pending 
 is set, otherwise the mode that Automatic resolves to (never the literal word "Automatic"); the model
 is the active STT engine. When something needs attention it is **replaced** by the problem text
 (config error, a missing permission, or `Relaunch to finish setup`), in that precedence. There is no
-separate "Next dictation" row — selecting a one-shot mode is reflected here, in the `Dictate with`
+separate "Next dictation" row — selecting a one-shot mode is reflected here, in the `Next Dictation`
 checkmark, and in the HUD acknowledgement.
 
 `Speech Model ▸` lists the **usable** (installed or system-managed) engines with the active one
 checkmarked; selecting one switches the active STT engine (and starts loading + warming it). `Manage
 Speech Models…` opens the full Speech Models settings pane for installs, deletes, and self-tests.
+
+The menu leads with actions around the next or most recent dictation. Vocabulary follows as an
+in-the-moment correction tool. Speech model selection and History are occasional management tasks,
+so they sit together above Settings instead of competing with the primary loop.
 
 > **`Add to Vocabulary…`** opens the standalone vocabulary panel; it is
 > always present here and is also bound to a global chord shortcut (default ⌃⌥⇧V, rebindable
@@ -307,7 +312,7 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
 
-The modes listed under `Dictate with` are the user's enabled modes; a fresh install shows only
+The modes listed under `Next Dictation` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
 setup materializes and connects the two headline rewrite modes (Polish and Edit Selection); the other
 starters stay available as templates in the Modes pane (Add Mode menu + gallery) until the user adds
@@ -315,7 +320,7 @@ one.
 
 ### One-shot manual-mode override
 
-Selecting a mode from `Dictate with` applies **to the next dictation only**. The submenu states
+Selecting a mode from `Next Dictation` applies **to the next dictation only**. The submenu states
 this in place (`Applies to the next dictation only`), and the HUD briefly acknowledges the choice
 in its Ready state (mode name, secondary `Next dictation`) before recording. When that dictation
 ends or is cancelled, KeyScribe returns to Automatic mode resolution.
@@ -383,26 +388,26 @@ the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
 ### General
 
-Show only commonly changed behavior initially:
+Show the few choices a new user is most likely to need, and keep optional or technical controls behind
+disclosures:
 
-- Start at login
-- Start and end sounds
-- Keep display awake while dictating
-- Mute system audio while dictating
+- The dictation key, with a clearly exposed **Change key…** button. The key remains owned by Plain
+  Dictation (Direct mode), so the button routes to that editor instead of creating a second setting.
+- Play start and stop sounds
+- Keep your Mac awake while dictating
+- Mute all other audio while dictating
+- Microphone choice, with a plain-language explanation of following the Mac’s current input
+- Open at login
 - (History enable and retention live in the **History** pane, not here.)
-- **Shortcuts** — global chords for **Add to Vocabulary** and **Paste Last Dictation** (both also
-  always in the menu), each set with a chord-only **shortcut well** (`None` in its menu clears it; a
-  mouse button is rejected at capture with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste
-  Last Dictation defaults off. A chord that collides with a higher-precedence hotkey, such as a Mode
-  trigger, shows an inline **shadowed** breadcrumb and will not fire — mode triggers win.
+- **Optional shortcuts** is collapsed by default. It contains global chords for **Add to Vocabulary**
+  and **Paste Last Dictation**, both of which are always available from the menu. Each uses a
+  chord-only **shortcut well** (`None` in its menu clears it; a mouse button is rejected at capture
+  with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste Last Dictation defaults off. A chord
+  that collides with a higher-precedence hotkey, such as a Mode trigger, shows an inline **shadowed**
+  breadcrumb and will not fire — mode triggers win.
 
-A **Dictation** section at the top of General shows a read-only **pointer** to the Plain Dictation
-(Direct mode) trigger — the trigger rendered as keycaps (or "None set"), a one-line hint, and a
-**Change in Modes…** link that routes to the Direct mode's editor. It is a pointer, never a duplicate
-setting: the trigger is owned by the Direct mode and edited only in Modes.
-
-The warm-up tier lives behind an `Advanced model behavior` disclosure within the Performance section
-(collapsed by default; the collapsed row shows the current tier's short name). Explain Fastest,
+The warm-up tier lives behind a `Keep speech recognition ready` disclosure within the Performance section
+(collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff (it governs both the STT model's memory
 residency and idle microphone warm-up), not as cache terminology. The footer copy **never shows a raw
 byte count** — it describes behavior, not size.
@@ -462,13 +467,19 @@ disabled while the config is incomplete.
 
 The editor uses progressive sections:
 
-- **Service** — name and provider.
-- **Endpoint** — visible for OpenAI-compatible connections; base URL is required before model fetch
-  or test.
-- **Authentication** — segmented credential choice for OpenAI-compatible endpoints: **No Auth**,
-  **API Key**, or **Command**. API Key shows explicit saved/unsaved/no-key states and a **Save to
-  Keychain** action. Command shows the command field, placeholder, and an inline required-state
-  message when empty. Generated tokens stay in memory only.
+- **Service** — name and a service picker. The picker lists the first-party providers (OpenAI,
+  Anthropic, Gemini), the **hosted OpenAI-compatible presets** (OpenRouter, Groq, Mistral), and
+  **Custom (OpenAI-compatible)** for any other endpoint. Picking a hosted preset pins its base URL
+  and seeds a lightweight, fast default model, so the only remaining step is pasting a key — "add a
+  key and go." A preset is UI seed data only: a seeded connection still persists as a plain
+  `openai_compatible` connection with a `base_url`, and reopening it recovers which preset it is.
+- **Endpoint** — visible only for the **Custom** OpenAI-compatible option (hosted presets pin their
+  own URL); base URL is required before model fetch or test.
+- **Authentication** — hidden for hosted presets, which are always API-key. For the Custom option it
+  is a segmented credential choice: **No Auth**, **API Key**, or **Command**. API Key shows explicit
+  saved/unsaved/no-key states, a **Save to Keychain** action, and — when the service publishes one —
+  a **Get an API key** link to where the provider issues keys. Command shows the command field,
+  placeholder, and an inline required-state message when empty. Generated tokens stay in memory only.
 - **Model** — model id is always visible. Fetching models is a helper; when fetched models exist, a
   visible picker selects one while the chosen id remains visible in the model field.
 - **Connection test** — user-initiated only, disabled until the visible prerequisites are met.

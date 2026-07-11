@@ -530,7 +530,7 @@ final class SettingsModel: ObservableObject {
     // points at a disconnected device, append a trailing disabled row (last-seen name) so the picker renders
     // the current selection instead of silently snapping.
     var inputDeviceOptions: [InputDeviceOption] {
-        var options = [InputDeviceOption(id: "", label: "Follow macOS Input", connected: true)]
+        var options = [InputDeviceOption(id: "", label: "Use Mac’s current input", connected: true)]
         let live = currentAudioSnapshot().devices
         options += live.map { InputDeviceOption(id: $0.uid, label: $0.name, connected: true) }
         if !inputDeviceUID.isEmpty, !live.contains(where: { $0.uid == inputDeviceUID }) {
@@ -555,20 +555,20 @@ final class SettingsModel: ObservableObject {
         liveDevices: [AudioInputDevices.Device],
         systemDefault: AudioInputDevices.Device?
     ) -> String {
-        let systemName = systemDefault?.name ?? "No macOS input"
+        let systemName = systemDefault?.name ?? "No Mac input"
         guard !inputDeviceUID.isEmpty else {
-            return systemDefault == nil ? "No macOS input available." : "Using macOS input: \(systemName)."
+            return systemDefault == nil ? "No Mac input available." : "Using your Mac’s input: \(systemName)."
         }
         if let selected = liveDevices.first(where: { $0.uid == inputDeviceUID }) {
             guard let systemDefault, systemDefault.uid != selected.uid else {
-                return "Preferred: \(selected.name)."
+                return "Using \(selected.name)."
             }
-            return "Preferred: \(selected.name). macOS input is \(systemDefault.name)."
+            return "Using \(selected.name). Your Mac’s input is \(systemDefault.name)."
         }
-        let preferredName = storedInputDeviceName ?? "Preferred microphone"
+        let preferredName = storedInputDeviceName ?? "Selected microphone"
         return systemDefault == nil
-            ? "\(preferredName) unavailable. No macOS input available."
-            : "\(preferredName) unavailable. Using macOS input: \(systemName)."
+            ? "\(preferredName) is unavailable. No Mac input available."
+            : "\(preferredName) is unavailable. Using your Mac’s input: \(systemName)."
     }
 
     var evictions: [(id: String, label: String)] {
@@ -579,11 +579,10 @@ final class SettingsModel: ObservableObject {
         ]
     }
 
-    // The selected tier's short name (the part before the em dash) — the collapsed "Advanced model behavior"
-    // summary so the disclosure still shows state (UX2 phase 3a).
-    var evictionShortLabel: String {
+    var evictionSummary: String {
         let label = evictions.first { $0.id == eviction }?.label ?? "Fastest"
-        return label.components(separatedBy: " — ").first ?? label
+        let shortLabel = label.components(separatedBy: " — ").first ?? label
+        return shortLabel == "Fastest" ? "Fastest start-up" : shortLabel
     }
 
     var evictionFooter: String {

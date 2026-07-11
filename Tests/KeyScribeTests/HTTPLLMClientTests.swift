@@ -85,6 +85,40 @@ struct HTTPLLMClientTests {
         #expect(body?["max_tokens"] == nil)
     }
 
+    @Test func hostedOpenAISendsItsDefaultReasoningEffort() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        let connection = Connection(
+            id: "o", name: "O", provider: .openai,
+            model: Connection.Provider.openai.defaultModel, keyRef: "k")
+
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        #expect(body?["reasoning_effort"] as? String == "none")
+    }
+
+    @Test func geminiSendsItsDefaultMinimumThinkingLevel() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return (resp(request.url!, 200), try! JSONSerialization.data(withJSONObject: [
+                "candidates": [["content": ["parts": [["text": "OK"]]]]],
+            ]))
+        }
+        let connection = Connection(
+            id: "g", name: "G", provider: .gemini,
+            model: Connection.Provider.gemini.defaultModel, keyRef: "k")
+
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        let generation = body?["generationConfig"] as? [String: Any]
+        let thinking = generation?["thinkingConfig"] as? [String: Any]
+        #expect(thinking?["thinkingLevel"] as? String == "minimal")
+    }
+
     @Test func openAICompatibleKeepsMaxTokens() async throws {
         nonisolated(unsafe) var body: [String: Any]?
         LLMStubProtocol.handler = { request in

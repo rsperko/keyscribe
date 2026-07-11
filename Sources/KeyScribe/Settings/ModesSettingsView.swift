@@ -154,7 +154,7 @@ private struct TemplateGallery: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

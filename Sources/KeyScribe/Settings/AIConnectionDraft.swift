@@ -209,6 +209,34 @@ struct AIConnectionDraft: Equatable {
         return nil
     }
 
+    // The service the draft currently represents, recovered from provider + base URL (a hosted OpenAI-
+    // compatible endpoint resolves to its preset; anything else OpenAI-compatible is Custom).
+    var selectedPreset: ConnectionPreset {
+        ConnectionPreset.matching(provider: provider, baseURL: baseURL)
+    }
+
+    // Seed the draft from a picked service. Hosted presets pin the base URL, a lightweight default model, and
+    // API-key auth so the user only pastes a key. The name follows only while it still reads as a preset
+    // default (i.e. the user has not typed their own).
+    mutating func applyPreset(_ preset: ConnectionPreset, hasStoredKey: Bool, updateDefaultName: Bool) {
+        if updateDefaultName, ConnectionPreset.all.contains(where: { $0.name == name }) {
+            name = preset.name
+        }
+        provider = preset.provider
+        model = preset.defaultModel
+        baseURL = preset.baseURL ?? ""
+        if preset.isManaged {
+            authMethod = .apiKey
+        } else if authMethod == .none {
+            authMethod = .apiKey
+        }
+        if preset.provider != .openaiCompatible, authMethod != .tokenCommand {
+            tokenCommand = ""
+        }
+        if preset.isManaged { tokenCommand = "" }
+        resetModelDiscovery()
+    }
+
     mutating func changeProvider(
         to newProvider: Connection.Provider,
         defaultOpenAICompatibleAuth: Connection.AuthMethod,
@@ -277,4 +305,12 @@ func providerLabel(_ provider: Connection.Provider) -> String {
     case .gemini: "Gemini"
     case .openaiCompatible: "OpenAI-compatible"
     }
+}
+
+// The service label for a stored connection: a hosted preset (OpenRouter/Groq/Mistral) reads as its own
+// name rather than the generic "OpenAI-compatible", so the quick-setup services feel first-class in the
+// list and summary. A custom endpoint still reads "OpenAI-compatible".
+func serviceLabel(_ connection: Connection) -> String {
+    let preset = ConnectionPreset.matching(provider: connection.provider, baseURL: connection.baseUrl)
+    return preset.isManaged ? preset.name : providerLabel(connection.provider)
 }

@@ -455,7 +455,7 @@ rewrite and privacy are therefore mutually exclusive per mode by design.
   alongside the mode's prompt and shared fragments. Prompt + system-prompt structure is designed in
   `prompt_design.md`. (User-defined prompt templating that places chunks at arbitrary points is a
   confusing footgun — out of scope, YAGNI.)
-- **LLM floor: Gemini 2.5 Flash.** The lowest-common-denominator target. Prompt structure is tuned
+- **LLM floor: Gemini Flash Lite.** The lowest-common-denominator target. Prompt structure is tuned
   to be reliable on a fast/cheap model — explicit, well-delimited, concise — not dependent on
   top-tier instruction-following.
 

@@ -78,14 +78,12 @@ struct FirstRunView: View {
 
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Download speech recognition").font(.title.bold())
-            Text("One on-device model powers all dictation. The recommended pick balances accuracy, speed, and size.")
+            Text("Choose speech recognition").font(.title.bold())
+            Text("Download one model for fast, accurate dictation. It stays on your Mac.")
                 .foregroundStyle(.secondary)
             modelCard
-            DisclosureSection("Advanced: choose a different recognizer", isExpanded: $modelChoiceExpanded) {
-                Text("Different recognizers trade accuracy, language support, download size, and startup time. You can change this later in Settings.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("Apple Speech is built into macOS and needs no download. It works as a fallback, but the recommended recognizer is usually more accurate.")
+            DisclosureSection("Choose another model", isExpanded: $modelChoiceExpanded) {
+                Text("Compare accuracy, language support, download size, and startup time. You can change this later in Settings.")
                     .font(.caption).foregroundStyle(.secondary)
                 Picker("Model", selection: $model.selectedEngineId) {
                     ForEach(downloadableModels) { info in
@@ -108,7 +106,7 @@ struct FirstRunView: View {
             Spacer()
             HStack {
                 if model.appleSpeechAvailable {
-                    Button("Use Apple Speech") { model.skipModelDownload() }
+                    Button("Use built-in speech") { model.skipModelDownload() }
                         .buttonStyle(.link)
                         .disabled(model.downloading)
                         .accessibilityIdentifier(AccessibilityID.FirstRun.Model.useAppleSpeech)
@@ -139,13 +137,11 @@ struct FirstRunView: View {
                     }
                 }
                 Text(modelMeta(info)).font(.caption).foregroundStyle(.secondary)
-                Text("Downloaded once and used locally for every dictation.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var modelDownloadButtonTitle: String {
@@ -268,20 +264,21 @@ struct FirstRunView: View {
 
     private var tryIt: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Try it now").font(.title.bold())
+            Text("Try your voice").font(.title.bold())
             if let descriptor = model.directTrigger {
                 HStack(spacing: 6) {
                     Text("Hold").foregroundStyle(.secondary)
                     KeycapView(descriptor: descriptor)
                     Text("to speak, then release.").foregroundStyle(.secondary)
                 }
-                Text("Your words land wherever the cursor is.")
+                Text("Your words appear in any app.")
                     .font(.callout).foregroundStyle(.secondary)
             } else {
                 Text("Choose a key to hold while you speak.")
                     .foregroundStyle(.secondary)
             }
             if triggerWellVisible {
+                Text("Dictation key").font(.callout)
                 ShortcutWell(
                     key: model.directTriggerBinding, profile: .modeTrigger,
                     accessibilityID: AccessibilityID.FirstRun.TryIt.shortcutWell)
@@ -293,19 +290,19 @@ struct FirstRunView: View {
                     .buttonStyle(.link)
                     .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.changeTrigger)
             }
-            Text("Dictate into this box to finish setup:").font(.callout)
+            Text("Say anything:").font(.callout)
             TextEditor(text: $model.trialText)
                 .font(.body)
-                .ghostText("Your dictated words will appear here\u{2026}", visible: model.trialText.isEmpty)
+                .ghostText("Your words will appear here\u{2026}", visible: model.trialText.isEmpty)
                 .frame(height: 96)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($trialFieldFocused)
                 .accessibilityIdentifier(AccessibilityID.FirstRun.TryIt.field)
             if model.trialSucceeded {
-                Label("Dictation worked — you're set up.", systemImage: "checkmark.circle.fill")
+                Label("That worked. You're ready to dictate anywhere.", systemImage: "checkmark.circle.fill")
                     .font(.callout).foregroundStyle(.green)
             } else {
-                Label("Continue unlocks after one successful dictation lands here.", systemImage: "mic")
+                Label("Say anything to continue, or skip for now.", systemImage: "mic")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -327,8 +324,8 @@ struct FirstRunView: View {
 
     private var aiService: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Want AI cleanup?").font(.title.bold())
-            Text("Optional — connect your own AI service to rewrite dictations. Speech recognition stays on this Mac.")
+            Text("Make rough dictation clear").font(.title.bold())
+            Text("Optional — add your AI service to turn rough words into polished text. Dictation stays on your Mac.")
                 .font(.callout).foregroundStyle(.secondary)
 
             if model.aiOfferExpanded {
@@ -347,13 +344,13 @@ struct FirstRunView: View {
 
                 Spacer()
                 HStack {
-                    Button("Finish Without AI") { model.finishWithoutAI() }
+                    Button("Finish without AI") { model.finishWithoutAI() }
                         .buttonStyle(.link)
                         .disabled(model.aiTesting)
                         .accessibilityIdentifier(AccessibilityID.FirstRun.AI.skip)
                     Spacer()
                     if model.aiTesting { ProgressView().controlSize(.small) }
-                    Button(model.aiTesting ? "Testing…" : "Connect AI Service") {
+                    Button(model.aiTesting ? "Testing…" : "Connect and try cleanup") {
                         model.connect()
                     }
                         .keyboardShortcut(.defaultAction).controlSize(.large)
@@ -361,13 +358,14 @@ struct FirstRunView: View {
                         .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connect)
                 }
             } else {
+                aiPreview
                 Spacer()
                 HStack {
                     Button("Finish") { model.finish() }
                         .buttonStyle(.link)
                         .accessibilityIdentifier(AccessibilityID.FirstRun.AI.skip)
                     Spacer()
-                    Button("Connect an AI Service…") { model.aiOfferExpanded = true }
+                    Button("Add AI cleanup…") { model.aiOfferExpanded = true }
                         .keyboardShortcut(.defaultAction).controlSize(.large)
                         .accessibilityIdentifier(AccessibilityID.FirstRun.AI.offerConnect)
                 }
@@ -377,8 +375,8 @@ struct FirstRunView: View {
 
     private var playground: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Try it now").font(.title.bold())
-            Text("Connected. See what it does:")
+            Text("Make your words sharper").font(.title.bold())
+            Text("Your service is connected. Try these two everyday edits:")
                 .foregroundStyle(.secondary)
             TextEditor(text: $model.playgroundText)
                 .font(.body)
@@ -407,7 +405,23 @@ struct FirstRunView: View {
         if let id = model.activePlaygroundLessonId, id.contains("edit-selection") {
             return "Select this text with Command-A, then say \"make this shorter\"\u{2026}"
         }
-        return "Dictate or paste a rough sentence to polish\u{2026}"
+        return "Say or paste something rough to polish\u{2026}"
+    }
+
+    private var aiPreview: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("ROUGH")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+            Text("um I think we should maybe send the notes tomorrow")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("POLISHED")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.tint)
+            Text("Let's send the notes tomorrow.")
+                .font(.callout)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder private func lessonInvocation(_ lesson: FirstRunModel.PlaygroundLesson) -> some View {
@@ -452,8 +466,8 @@ struct FirstRunView: View {
                 Divider().padding(.leading, 32)
                 if let outcome {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("You said: \(outcome.before)").font(.caption).foregroundStyle(.secondary)
-                        Text(outcome.after).font(.callout)
+                        Text("Before: \(outcome.before)").font(.caption).foregroundStyle(.secondary)
+                        Text("After: \(outcome.after)").font(.callout)
                     }
                     .padding(.leading, 32)
                 } else {
@@ -473,7 +487,7 @@ struct FirstRunView: View {
                 if !model.isLastPlaygroundLesson(lesson.modeId) {
                     HStack {
                         Spacer()
-                        Button("Next") { model.advancePlayground() }
+                        Button("Next demo") { model.advancePlayground() }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .accessibilityIdentifier(AccessibilityID.FirstRun.Playground.next)
@@ -483,7 +497,7 @@ struct FirstRunView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: expanded ? .controlBackgroundColor : .textBackgroundColor).opacity(expanded ? 0.9 : 0.45)))
+        .background(expanded ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.quinary), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
     }
 

@@ -5,6 +5,18 @@ import Testing
 
 @MainActor
 struct MenuBarIconTests {
+    @Test func menuPutsEverydayDictationActionsBeforeManagement() {
+        let controller = MenuBarController()
+        controller.install()
+
+        let titles = controller.mainMenu?.items.map(\.title) ?? []
+        #expect(titles == [
+            "starting…", "Next Dictation", "Paste Last Dictation", "",
+            "Add to Vocabulary…", "", "Speech Model", "History…", "",
+            "Settings…", "About & Notices…", "", "Quit \(Branding.appName)",
+        ])
+    }
+
     @Test func modeItemTitleShowsAModifierOnlyShortcut() {
         let title = MenuBarController.modeItemTitle(
             name: "Polish", trigger: try? KeyDescriptor(parsing: "right_option"), inertReason: nil)

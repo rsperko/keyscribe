@@ -157,28 +157,28 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusLine.isEnabled = false
         menu.addItem(statusLine)
 
-        let speechModel = NSMenuItem(title: "Speech Model", action: nil, keyEquivalent: "")
-        speechModel.submenu = speechModelsMenu
-        menu.addItem(speechModel)
+        let nextDictation = NSMenuItem(title: "Next Dictation", action: nil, keyEquivalent: "")
+        nextDictation.submenu = modesMenu
+        menu.addItem(nextDictation)
 
-        let dictateWith = NSMenuItem(title: "Dictate with", action: nil, keyEquivalent: "")
-        dictateWith.submenu = modesMenu
-        menu.addItem(dictateWith)
-
-        menu.addItem(.separator())
         pasteLastItem.target = self
         pasteLastItem.action = #selector(pasteLast)
         pasteLastItem.isEnabled = false
         menu.addItem(pasteLastItem)
 
-        let history = NSMenuItem(title: "History…", action: #selector(openHistory), keyEquivalent: "y")
-        history.target = self
-        menu.addItem(history)
-
         menu.addItem(.separator())
         addVocabularyItem.target = self
         addVocabularyItem.action = #selector(addVocabulary)
         menu.addItem(addVocabularyItem)
+
+        menu.addItem(.separator())
+        let speechModel = NSMenuItem(title: "Speech Model", action: nil, keyEquivalent: "")
+        speechModel.submenu = speechModelsMenu
+        menu.addItem(speechModel)
+
+        let history = NSMenuItem(title: "History…", action: #selector(openHistory), keyEquivalent: "y")
+        history.target = self
+        menu.addItem(history)
 
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")

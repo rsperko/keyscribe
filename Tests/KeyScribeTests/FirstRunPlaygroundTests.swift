@@ -43,6 +43,16 @@ struct FirstRunPlaygroundTests {
         #expect(selection?.hint.contains("Right-⌘") == true)
     }
 
+    @Test func enteringPlaygroundSeedsAnImmediatelyPolishableExample() async {
+        let (model, supportDir) = await connectedModel()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+
+        model.enterPlayground()
+
+        #expect(model.activePlaygroundLessonId == "polish")
+        #expect(model.playgroundText == "um I think we should maybe send the notes tomorrow because the meeting moved")
+    }
+
     @Test func aLessonMarksCompleteWithItsBeforeAndAfterOnAnInsertedDictation() async {
         let (model, supportDir) = await connectedModel()
         defer { try? FileManager.default.removeItem(at: supportDir) }

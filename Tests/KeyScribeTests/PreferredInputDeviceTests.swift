@@ -66,7 +66,7 @@ struct PreferredInputDeviceTests {
             storedInputDeviceName: nil,
             liveDevices: [AudioInputDevices.Device(id: 5, uid: "BuiltInMic", name: "MacBook Pro Microphone")],
             systemDefault: AudioInputDevices.Device(id: 5, uid: "BuiltInMic", name: "MacBook Pro Microphone"))
-        #expect(text == "Using macOS input: MacBook Pro Microphone.")
+        #expect(text == "Using your Mac’s input: MacBook Pro Microphone.")
     }
 
     @Test func microphoneStatusNamesPreferredInputWhenAvailable() {
@@ -78,7 +78,7 @@ struct PreferredInputDeviceTests {
                 AudioInputDevices.Device(id: 7, uid: "Bose", name: "Bose QC Ultra 2 HP"),
             ],
             systemDefault: AudioInputDevices.Device(id: 7, uid: "Bose", name: "Bose QC Ultra 2 HP"))
-        #expect(text == "Preferred: MacBook Pro Microphone. macOS input is Bose QC Ultra 2 HP.")
+        #expect(text == "Using MacBook Pro Microphone. Your Mac’s input is Bose QC Ultra 2 HP.")
     }
 
     @Test func microphoneStatusNamesFallbackWhenPreferredInputIsUnavailable() {
@@ -87,6 +87,6 @@ struct PreferredInputDeviceTests {
             storedInputDeviceName: "Desk Mic",
             liveDevices: [AudioInputDevices.Device(id: 5, uid: "BuiltInMic", name: "MacBook Pro Microphone")],
             systemDefault: AudioInputDevices.Device(id: 5, uid: "BuiltInMic", name: "MacBook Pro Microphone"))
-        #expect(text == "Desk Mic unavailable. Using macOS input: MacBook Pro Microphone.")
+        #expect(text == "Desk Mic is unavailable. Using your Mac’s input: MacBook Pro Microphone.")
     }
 }

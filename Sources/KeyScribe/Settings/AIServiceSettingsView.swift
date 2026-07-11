@@ -366,7 +366,7 @@ struct AIServiceSettingsView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(connection.name)
-                            Text("\(providerLabel(connection.provider)) · \(connection.model)")
+                            Text("\(serviceLabel(connection)) · \(connection.model)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Label(status.text, systemImage: status.icon)
                                 .font(.caption2)
@@ -670,7 +670,7 @@ private struct AIServiceSummaryView: View {
         Form {
             Section {
                 Text(connection.name).font(.title3.bold())
-                Text("\(providerLabel(connection.provider)) · \(connection.model)")
+                Text("\(serviceLabel(connection)) · \(connection.model)")
                     .foregroundStyle(.secondary)
                 Label(status.text, systemImage: status.icon)
                     .foregroundStyle(status.style)

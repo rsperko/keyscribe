@@ -31,7 +31,7 @@ struct AIConnectionDraftEditor: View {
     private var onboardingBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             serviceRows
-            if draft.provider == .openaiCompatible {
+            if draft.selectedPreset.isCustom {
                 thinDivider
                 endpointRows
             }
@@ -42,7 +42,7 @@ struct AIConnectionDraftEditor: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var settingsBody: some View {
@@ -51,7 +51,7 @@ struct AIConnectionDraftEditor: View {
                 serviceRows
                 usedByRow
             }
-            if draft.provider == .openaiCompatible {
+            if draft.selectedPreset.isCustom {
                 Section("Endpoint") {
                     endpointRows
                 }
@@ -99,17 +99,16 @@ struct AIConnectionDraftEditor: View {
     }
 
     @ViewBuilder private var serviceRows: some View {
-        textRow("Name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
+        textRow("Service name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
         if presentation == .onboarding { thinDivider }
         HStack {
-            Text("Provider")
+            Text("Service")
             Spacer()
-            Picker("Provider", selection: providerBinding) {
-                Text("OpenAI").tag(Connection.Provider.openai)
-                Text("Anthropic").tag(Connection.Provider.anthropic)
-                Text("Gemini").tag(Connection.Provider.gemini)
-                Text("OpenAI-compatible").tag(Connection.Provider.openaiCompatible)
+            Picker("Service", selection: presetBinding) {
+                ForEach(ConnectionPreset.all) { preset in
+                    Text(preset.pickerLabel).tag(preset.id)
+                }
             }
             .labelsHidden()
             .frame(maxWidth: 230, alignment: .trailing)
@@ -141,22 +140,24 @@ struct AIConnectionDraftEditor: View {
 
     @ViewBuilder private var authenticationRows: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Credential")
-                Spacer()
-                Picker("Credential", selection: authMethodBinding) {
-                    if draft.provider == .openaiCompatible {
-                        Text("No Auth").tag(Connection.AuthMethod.none)
+            if !draft.selectedPreset.isManaged {
+                HStack {
+                    Text("Sign in with")
+                    Spacer()
+                    Picker("Credential", selection: authMethodBinding) {
+                        if draft.provider == .openaiCompatible {
+                            Text("No Auth").tag(Connection.AuthMethod.none)
+                        }
+                        Text("API Key").tag(Connection.AuthMethod.apiKey)
+                        if draft.provider == .openaiCompatible || draft.authMethod == .tokenCommand {
+                            Text("Command").tag(Connection.AuthMethod.tokenCommand)
+                        }
                     }
-                    Text("API Key").tag(Connection.AuthMethod.apiKey)
-                    if draft.provider == .openaiCompatible || draft.authMethod == .tokenCommand {
-                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
-                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: draft.provider == .openaiCompatible ? 310 : 220)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.auth)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: draft.provider == .openaiCompatible ? 310 : 220)
-                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.auth)
             }
             credentialFields
         }
@@ -187,10 +188,14 @@ struct AIConnectionDraftEditor: View {
                         .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.apiKey)
                 }
                 if !hasStoredKey, !draft.hasUnsavedAPIKey {
-                    requiredLabel("Enter an API key before connecting.")
+                    requiredLabel("Add an API key to connect.")
                 }
-                Label("Saved when you connect", systemImage: "key")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Label("Stored when you connect", systemImage: "key")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    keysLink
+                }
             } else {
                 HStack {
                     Text("API key")
@@ -211,11 +216,22 @@ struct AIConnectionDraftEditor: View {
                         .disabled(!draft.hasUnsavedAPIKey)
                         .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.saveKey)
                 }
-                Text(draft.provider == .openaiCompatible
-                     ? "Use No Auth if this endpoint accepts unauthenticated requests."
-                     : "Hosted providers require a saved key.")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text(draft.selectedPreset.isCustom
+                         ? "Use No Auth if this endpoint accepts unauthenticated requests."
+                         : "Hosted providers require a saved key.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    keysLink
+                }
             }
+        }
+    }
+
+    @ViewBuilder private var keysLink: some View {
+        if let url = draft.selectedPreset.keysURL {
+            Link("Get an API key", destination: url)
+                .font(.caption)
         }
     }
 
@@ -250,7 +266,7 @@ struct AIConnectionDraftEditor: View {
                 requiredLabel("Model ID is required.")
             }
             HStack {
-                Button(draft.isFetchingModels ? "Fetching Models" : "Fetch Models") {
+                Button(draft.isFetchingModels ? "Finding models" : "Find models") {
                     onFetchModels(draft.requestAPIKey)
                 }
                 .disabled(fetchModelsDisabled)
@@ -312,7 +328,7 @@ struct AIConnectionDraftEditor: View {
                         .frame(maxWidth: 260)
                 }
             case .settings:
-                CommittedTextField(title, text: value, prompt: prompt, autofocus: title == "Name" && autofocusName) { next in
+                CommittedTextField(title, text: value, prompt: prompt, autofocus: title == "Service name" && autofocusName) { next in
                     update(next)
                     commit(nil)
                 }
@@ -324,13 +340,13 @@ struct AIConnectionDraftEditor: View {
         Divider().padding(.vertical, 6)
     }
 
-    private var providerBinding: Binding<Connection.Provider> {
+    private var presetBinding: Binding<String> {
         Binding(
-            get: { draft.provider },
-            set: { value in
-                draft.changeProvider(
-                    to: value,
-                    defaultOpenAICompatibleAuth: .apiKey,
+            get: { draft.selectedPreset.id },
+            set: { id in
+                guard let preset = ConnectionPreset.preset(id: id) else { return }
+                draft.applyPreset(
+                    preset,
                     hasStoredKey: hasStoredKey,
                     updateDefaultName: presentation == .onboarding)
                 commit(nil)

@@ -9,37 +9,36 @@ struct GeneralSettingsView: View {
     // is owned by the Direct mode, edited only in Modes). Passed in by SettingsRootView (UX2 phase 3c).
     var plainDictationTrigger: KeyDescriptor?
     var onOpenPlainDictation: () -> Void = {}
+    @State private var shortcutsExpanded = false
     @State private var advancedModelExpanded = false
 
     var body: some View {
         Form {
             Section("Dictation") {
-                LabeledContent("Dictation trigger") {
-                    if let descriptor = plainDictationTrigger {
-                        KeycapView(descriptor: descriptor)
-                    } else {
-                        Text("None set").foregroundStyle(.secondary)
+                LabeledContent {
+                    HStack(spacing: 10) {
+                        if let descriptor = plainDictationTrigger {
+                            KeycapView(descriptor: descriptor)
+                        } else {
+                            Text("Not set").foregroundStyle(.secondary)
+                        }
+                        Button("Change key…", action: onOpenPlainDictation)
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier(AccessibilityID.Settings.General.changeDictationTrigger)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dictation key")
+                        Text("Hold it to dictate in any app.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.General.dictationTrigger)
-                Text("Hold to dictate anywhere.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Change in Modes…", action: onOpenPlainDictation)
-                    .buttonStyle(.link)
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.changeDictationTrigger)
-            }
-
-            Section("While dictating") {
-                Toggle("Start and end sounds", isOn: $model.sounds)
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
-                Toggle("Keep display awake", isOn: $model.keepDisplayAwake)
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.keepDisplayAwake)
-                Toggle("Mute system audio", isOn: $model.muteSystemAudio)
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.muteSystemAudio)
             }
 
             Section {
-                Picker("Preferred input device", selection: $model.inputDeviceUID) {
+                Picker("Use this microphone", selection: $model.inputDeviceUID) {
                     ForEach(model.inputDeviceOptions) { option in
                         Text(option.label).tag(option.id)
                     }
@@ -51,48 +50,57 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Microphone")
             } footer: {
-                Text("If the preferred microphone is unavailable, \(Branding.appName) uses the macOS input until it reconnects.")
+                Text("Choose a microphone to use it every time, or let \(Branding.appName) follow your Mac’s current input.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("During dictation") {
+                Toggle("Play start and stop sounds", isOn: $model.sounds)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
+                Toggle("Keep your Mac awake", isOn: $model.keepDisplayAwake)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.keepDisplayAwake)
+                Toggle("Mute all other audio", isOn: $model.muteSystemAudio)
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.muteSystemAudio)
+            }
+
             Section("Startup") {
-                Toggle("Start \(Branding.appName) at login", isOn: $model.loadOnLogin)
+                Toggle("Open \(Branding.appName) when you log in", isOn: $model.loadOnLogin)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.loadOnLogin)
             }
 
             Section {
-                SettingRow(
-                    title: "Add to Vocabulary",
-                    result: "Opens a panel to add a word or replacement.",
-                    help: "Optional global shortcut. With text selected when you press it, the word or heard phrase is pre-filled. Leave unset to use the menu instead.")
-                {
-                    VStack(alignment: .trailing, spacing: 4) {
+                DisclosureSection(isExpanded: $shortcutsExpanded) {
+                    DisclosureSummaryLabel(
+                        title: "Optional shortcuts",
+                        summary: "Add words or paste your last result")
+                } content: {
+                    LabeledContent("Add to Vocabulary") {
                         ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.addVocabularyShortcut)
-                        if vocabularyShadowed { ShadowedHotkeyNote() }
                     }
-                }
-                SettingRow(
-                    title: "Paste Last Dictation",
-                    result: "Re-inserts your most recent dictation result.",
-                    help: "Optional global shortcut. Leave unset to use the menu instead.")
-                {
-                    VStack(alignment: .trailing, spacing: 4) {
+                    Text("Opens a panel to add a word or correction. Selected text is filled in for you.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if vocabularyShadowed { ShadowedHotkeyNote() }
+                    LabeledContent("Paste last dictation") {
                         ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.pasteLastShortcut)
-                        if pasteLastShadowed { ShadowedHotkeyNote() }
                     }
+                    Text("Pastes your most recent dictation result.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if pasteLastShadowed { ShadowedHotkeyNote() }
+                    Text("Both are also available from the \(Branding.appName) menu.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Shortcuts")
-            } footer: {
-                Text("These are also in the menu bar menu. Use a modifier combo (e.g. ⌃⌥⇧V) to avoid clashing with apps.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Performance") {
                 DisclosureSection(isExpanded: $advancedModelExpanded) {
-                    DisclosureSummaryLabel(title: "Advanced model behavior", summary: model.evictionShortLabel)
+                    DisclosureSummaryLabel(title: "Keep speech recognition ready", summary: model.evictionSummary)
                 } content: {
-                    Picker("Warm-up", selection: $model.eviction) {
+                    Picker("When idle", selection: $model.eviction) {
                         ForEach(model.evictions, id: \.id) { Text($0.label).tag($0.id) }
                     }
                     .accessibilityIdentifier(AccessibilityID.Settings.General.eviction)

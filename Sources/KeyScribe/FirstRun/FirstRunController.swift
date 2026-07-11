@@ -307,7 +307,7 @@ final class FirstRunModel: ObservableObject {
         guard !playgroundLessons.isEmpty else { finish(); return }
         completedLessons = [:]
         finishedPlaygroundLessonIds = []
-        playgroundText = ""
+        playgroundText = Self.polishExample
         activePlaygroundLessonId = playgroundLessons.first?.modeId
         step = .playground
     }
@@ -371,6 +371,7 @@ final class FirstRunModel: ObservableObject {
     }
 
     private static let playgroundLessonOrder = ["polish", "edit-selection"]
+    private static let polishExample = "um I think we should maybe send the notes tomorrow because the meeting moved"
 
     private static func playgroundHint(for mode: Mode) -> String {
         let start: String

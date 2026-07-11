@@ -18,10 +18,18 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
 
         public var defaultModel: String {
             switch self {
-            case .openai: "gpt-5.4-mini"
+            case .openai: "gpt-5.6-luna"
             case .anthropic: "claude-haiku-4-5"
-            case .gemini: "gemini-2.5-flash"
+            case .gemini: "gemini-flash-lite-latest"
             case .openaiCompatible: ""
+            }
+        }
+
+        public var defaultParams: Params {
+            switch self {
+            case .openai: Params(reasoningEffort: "none")
+            case .gemini: Params(geminiThinkingLevel: "minimal")
+            case .anthropic, .openaiCompatible: Params()
             }
         }
 
@@ -44,15 +52,27 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     public struct Params: Codable, Equatable, Sendable {
         public var temperature: Double
         public var maxTokens: Int
-        enum CodingKeys: String, CodingKey { case temperature; case maxTokens = "max_tokens" }
-        public init(temperature: Double = 0.2, maxTokens: Int = 2048) {
+        public var reasoningEffort: String?
+        public var geminiThinkingLevel: String?
+        enum CodingKeys: String, CodingKey {
+            case temperature, reasoningEffort = "reasoning_effort", geminiThinkingLevel = "gemini_thinking_level"
+            case maxTokens = "max_tokens"
+        }
+        public init(
+            temperature: Double = 0.2, maxTokens: Int = 2048,
+            reasoningEffort: String? = nil, geminiThinkingLevel: String? = nil
+        ) {
             self.temperature = temperature
             self.maxTokens = maxTokens
+            self.reasoningEffort = reasoningEffort
+            self.geminiThinkingLevel = geminiThinkingLevel
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             temperature = try c.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.2
             maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens) ?? 2048
+            reasoningEffort = try c.decodeIfPresent(String.self, forKey: .reasoningEffort)
+            geminiThinkingLevel = try c.decodeIfPresent(String.self, forKey: .geminiThinkingLevel)
         }
     }
 
@@ -68,7 +88,7 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     public init(
         id: String, name: String, provider: Provider, model: String,
         keyRef: String, baseUrl: String? = nil, authMethod: AuthMethod? = nil,
-        tokenCommand: String? = nil, params: Params = .init()
+        tokenCommand: String? = nil, params: Params? = nil
     ) {
         self.id = id
         self.name = name
@@ -78,7 +98,7 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         self.baseUrl = baseUrl
         self.authMethod = authMethod ?? (tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .tokenCommand : .apiKey)
         self.tokenCommand = tokenCommand
-        self.params = params
+        self.params = params ?? provider.defaultParams
     }
 
     public init(from decoder: Decoder) throws {

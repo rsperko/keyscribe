@@ -112,6 +112,9 @@ struct HTTPLLMClient: LLMClient {
                 "messages": chatMessages(system: system, user: user, fold: adaptations.foldSystemIntoUser),
             ]
             if adaptations.includeTemperature { payload["temperature"] = temp }
+            if let reasoningEffort = connection.params.reasoningEffort {
+                payload["reasoning_effort"] = reasoningEffort
+            }
             req.httpBody = try body(payload)
             return req
 
@@ -135,10 +138,17 @@ struct HTTPLLMClient: LLMClient {
             }
             var req = jsonRequest(url)
             transport.applyAuth(key, for: connection.provider, to: &req)
+            var generationConfig: [String: Any] = [
+                "temperature": temp,
+                "maxOutputTokens": maxTokens,
+            ]
+            if let thinkingLevel = connection.params.geminiThinkingLevel {
+                generationConfig["thinkingConfig"] = ["thinkingLevel": thinkingLevel]
+            }
             req.httpBody = try body([
                 "systemInstruction": ["parts": [["text": system]]],
                 "contents": [["role": "user", "parts": [["text": user]]]],
-                "generationConfig": ["temperature": temp, "maxOutputTokens": maxTokens],
+                "generationConfig": generationConfig,
             ])
             return req
         }
