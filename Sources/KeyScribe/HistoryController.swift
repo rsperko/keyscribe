@@ -239,6 +239,7 @@ final class HistoryPaneModel: ObservableObject {
 
     private func applyFilteredRows(_ filtered: [HistoryRow], generation: Int) {
         guard generation == loadGeneration else { return }
+        entryIndex = Dictionary(uniqueKeysWithValues: filtered.map { ($0.id, $0.entry) })
         groups = Dictionary(grouping: filtered, by: \.day)
             .map { (day: $0.key, rows: $0.value) }
             .sorted { ($0.rows.first?.entry.timestamp ?? .distantPast) > ($1.rows.first?.entry.timestamp ?? .distantPast) }
@@ -263,6 +264,12 @@ final class HistoryPaneModel: ObservableObject {
 
     var selected: HistoryEntry? { selection.flatMap { entryIndex[$0] } }
     var hasEntries: Bool { !rows.isEmpty }
+
+    func wouldRemoveHistory(retainingDays: Int) -> Bool {
+        !HistoryRetention.expired(
+            dayFiles: store.dayFiles(), today: HistoryStore.todayString(), retentionDays: retainingDays
+        ).isEmpty
+    }
 
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
@@ -296,14 +303,32 @@ final class HistoryPaneModel: ObservableObject {
 struct HistoryPaneView: View {
     @ObservedObject var model: HistoryPaneModel
     @ObservedObject var settings: SettingsModel
+    @State private var retentionDays: Int?
+    @State private var pendingRetentionDays: Int?
 
     var body: some View {
         HStack(spacing: 0) {
             leftColumn
-                .frame(width: 260)
+                .frame(width: PaneMetrics.listWidth)
             Divider()
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .confirmationDialog(
+            "Remove older dictation history?",
+            isPresented: Binding(
+                get: { pendingRetentionDays != nil },
+                set: { if !$0 { pendingRetentionDays = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove Entries", role: .destructive) {
+                if let pendingRetentionDays { settings.retentionDays = pendingRetentionDays }
+                pendingRetentionDays = nil
+                retentionDays = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRetentionDays = nil }
+        } message: {
+            Text("Entries older than the new retention period will be removed. This cannot be undone.")
         }
     }
 
@@ -328,11 +353,32 @@ struct HistoryPaneView: View {
                     .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
             }
             if settings.historyEnabled {
-                Stepper("Keep for \(settings.retentionDays) days", value: $settings.retentionDays, in: 1...365)
+                Stepper("Keep for \(retentionDays ?? settings.retentionDays) days", value: retentionDraft, in: 1...365)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
+                if retentionDays != nil {
+                    Button("Apply Retention", action: applyRetention)
+                }
+                Text("Entries older than this are removed automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(10)
+    }
+
+    private var retentionDraft: Binding<Int> {
+        Binding(
+            get: { retentionDays ?? settings.retentionDays },
+            set: { retentionDays = $0 })
+    }
+
+    private func applyRetention() {
+        guard let retentionDays else { return }
+        if retentionDays < settings.retentionDays, model.wouldRemoveHistory(retainingDays: retentionDays) {
+            pendingRetentionDays = retentionDays
+        } else {
+            settings.retentionDays = retentionDays
+            self.retentionDays = nil
+        }
     }
 
     private var searchField: some View {
@@ -418,7 +464,7 @@ struct HistoryPaneView: View {
             }
             storageTruth
         }
-        .background(.thinMaterial)
+        .background(.bar)
     }
 
     private var storageTruth: some View {
@@ -471,6 +517,7 @@ private struct HistoryDetailView: View {
     @State private var showReplacementSheet = false
     @State private var showDictionarySheet = false
     @State private var promptExpanded = false
+    @State private var confirmingDelete = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -492,8 +539,17 @@ private struct HistoryDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            deleteFooter
         }
         .padding(24)
+        .confirmationDialog(
+            "Delete this dictation?", isPresented: $confirmingDelete, titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { model.deleteSelected() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This dictation will be removed from local history. This cannot be undone.")
+        }
         .onChange(of: entry.timestamp) {
             selectedText = ""
             selectedRole = nil
@@ -618,13 +674,17 @@ private struct HistoryDetailView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(entry.modeName).font(.headline)
-            badge(outcomeLabel(entry.outcome))
-            ForEach(entry.dataBoundaryLabels, id: \.self) { DataBoundaryBadge(label: $0) }
-            Spacer()
-            Text(entry.timestamp, style: .time).foregroundStyle(.secondary).font(.caption)
-        }
+        PaneDetailHeader(
+            systemImage: "clock",
+            symbolStyle: AnyShapeStyle(.secondary),
+            title: entry.modeName,
+            badges: {
+                PaneBadge(outcomeLabel(entry.outcome))
+                ForEach(entry.dataBoundaryLabels, id: \.self) { DataBoundaryBadge(label: $0) }
+            },
+            trailing: {
+                Text(entry.timestamp, style: .time).foregroundStyle(.secondary).font(.caption)
+            })
     }
 
     private var canReuseResult: Bool { !entry.result.isEmpty }
@@ -646,10 +706,14 @@ private struct HistoryDetailView: View {
             if let message = model.statusMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
-            Button(role: .destructive) { model.deleteSelected() } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .accessibilityIdentifier(AccessibilityID.History.delete)
+        }
+    }
+
+    private var deleteFooter: some View {
+        HStack {
+            Spacer()
+            PaneDeleteButton(title: "Delete Dictation") { confirmingDelete = true }
+                .accessibilityIdentifier(AccessibilityID.History.delete)
         }
     }
 
@@ -730,13 +794,6 @@ private struct HistoryDetailView: View {
             Text(title).font(.caption).foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
             Text(value).font(.caption)
         }
-    }
-
-    private func badge(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
     }
 }
 

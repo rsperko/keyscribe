@@ -191,6 +191,81 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 1)
     }
 
+    // "Chord wins": right-side modifier triggers must not drive dictation when a chord that includes
+    // them is being formed — the case that made the old overlap warning fire (right-⌥ + a Hyper chord).
+    private let rightAlt = 0x40, rightCtrl = 0x2000
+
+    @Test func rightOptionSuppressedWhenAChordModifierIsAlreadyHeld() async {
+        var starts = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in }, carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightOption)])
+
+        // ⌃ held, then the right Option engages (e.g. building ⌃⌥⇧⌘D with the right Option) → not a bare hold.
+        let flags = CGEventFlags.maskControl.rawValue | CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)
+        m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: flags))
+        await drainMain()
+        #expect(starts == 0)
+    }
+
+    @Test func rightOptionAbortsWhenAChordModifierJoinsAfterABareDown() async {
+        var starts = 0, commits = 0, cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            onCancel: { cancels += 1 }, carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightOption)])
+
+        // Bare right Option first → dictation starts.
+        m.handle(type: .flagsChanged, keyCode: 61,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        await drainMain()
+        #expect(starts == 1)
+
+        // ⌃ joins while the right Option is still held → it was a chord, not a hold → abort, no commit.
+        let joined = CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt) | CGEventFlags.maskControl.rawValue
+        m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: joined))
+        await drainMain()
+        #expect(cancels == 1)
+        #expect(commits == 0)
+    }
+
+    @Test func rightOptionAbortsWhenAChordKeyFollows() async {
+        var starts = 0, commits = 0, cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            onCancel: { cancels += 1 }, carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightOption)])
+
+        m.handle(type: .flagsChanged, keyCode: 61,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        await drainMain()
+        m.handle(type: .keyDown, keyCode: 2,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        await drainMain()
+
+        #expect(starts == 1)
+        #expect(cancels == 1)
+        #expect(commits == 0)
+    }
+
+    @Test func rightControlStartsAndCommitsAsABareModifier() async {
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightControl)])
+
+        m.handle(type: .flagsChanged, keyCode: 62,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskControl.rawValue | UInt64(rightCtrl)))
+        await drainMain()
+        #expect(starts == 1)
+        #expect(commits == 0)
+
+        m.handle(type: .flagsChanged, keyCode: 62, flags: CGEventFlags(rawValue: 0))
+        await drainMain()
+        #expect(commits == 1)
+    }
+
     @Test func unboundMouseButtonEdgeIsIgnored() async {
         let mouse = FakeMouseTap()
         var starts = 0

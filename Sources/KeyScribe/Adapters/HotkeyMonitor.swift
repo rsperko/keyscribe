@@ -43,11 +43,15 @@ final class HotkeyMonitor {
     let onStart: (String?, PressStyle) -> Void
     let onCommit: (String?) -> Void
     let onAction: (String) -> Void
+    // Fired when a bare modifier-only start turns out to be part of a chord (a foreign modifier joined
+    // the held trigger key) — the "chord wins" rule discards the just-started dictation.
+    let onCancel: () -> Void
 
     init(
         bindings: [Binding], actionBindings: [ActionBinding] = [],
         onStart: @escaping (String?, PressStyle) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
+        onCancel: @escaping () -> Void = {},
         carbon: ChordRegistering = CarbonHotKeys(),
         mouseTap: MouseTapping = MouseEventTap(),
         isProcessTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }
@@ -57,6 +61,7 @@ final class HotkeyMonitor {
         self.onStart = onStart
         self.onCommit = onCommit
         self.onAction = onAction
+        self.onCancel = onCancel
         self.carbon = carbon
         self.mouseTap = mouseTap
         self.isProcessTrusted = isProcessTrusted
@@ -95,7 +100,7 @@ final class HotkeyMonitor {
         bindings.contains { $0.gesture.isPhysicallyDown }
     }
 
-    // The tap watches modifier-only triggers (Fn/right-Option/right-Command/Hyper) via `.flagsChanged`; once
+    // The tap watches modifier-only triggers (Fn/right-Option/right-Command/right-Control/Hyper) via `.flagsChanged`; once
     // Accessibility is granted a `.listenOnly` modifier-only tap runs on Accessibility alone — KeyScribe never
     // requests Input Monitoring. Footgun: `tapCreate` *before* the grant fails AND makes tccd write a *denied*
     // ListenEvent record that then suppresses the tap permanently, even after Accessibility is later granted,
@@ -120,6 +125,7 @@ final class HotkeyMonitor {
             return false
         }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+            | CGEventMask(1 << CGEventType.keyDown.rawValue)
         guard let tap = makeTap(mask: mask, options: .listenOnly) else {
             hotkeyLog.error("modifier-key event tap not created despite Accessibility granted; a denied ListenEvent record may be suppressing it — relaunch to repair")
             return false
@@ -171,16 +177,34 @@ final class HotkeyMonitor {
     }
 
     // Modifier-only triggers only. Chord triggers and action chords are handled by `CarbonHotKeys`.
-    // Never consumes — a bare modifier types nothing, so there is nothing to swallow.
+    // Never consumes — a bare modifier types nothing, so there is nothing to swallow. The right-side
+    // modifier keys route through `resolveSoleModifier` (the "chord wins" rule); Fn/Hyper stay on `edge`.
     func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags) {
         guard !isSuspended else { return }
-        var now: TimeInterval = 0
-        var haveNow = false
+        let now = ProcessInfo.processInfo.systemUptime
+        if type == .keyDown {
+            for i in bindings.indices {
+                switch bindings[i].descriptor {
+                case .named(.rightOption), .named(.rightCommand), .named(.rightControl):
+                    if bindings[i].gesture.isPhysicallyDown { abort(index: i) }
+                case .named(.fn), .named(.hyper), .chord, .mouseButton:
+                    break
+                }
+            }
+            return
+        }
+        guard type == .flagsChanged else { return }
         for i in bindings.indices {
-            guard case .named = bindings[i].descriptor else { continue }
-            guard let edge = edge(binding: i, type: type, keyCode: keyCode, flags: flags) else { continue }
-            if !haveNow { now = ProcessInfo.processInfo.systemUptime; haveNow = true }
-            fire(index: i, edge: edge, now: now)
+            switch bindings[i].descriptor {
+            case .named(.rightOption), .named(.rightCommand), .named(.rightControl):
+                resolveSoleModifier(binding: i, flags: flags, now: now)
+            case .named(.fn), .named(.hyper):
+                if let edge = edge(binding: i, type: type, keyCode: keyCode, flags: flags) {
+                    fire(index: i, edge: edge, now: now)
+                }
+            case .chord, .mouseButton:
+                break
+            }
         }
     }
 
@@ -241,6 +265,43 @@ final class HotkeyMonitor {
         }
     }
 
+    // "Chord wins": a right-side modifier-only trigger (right ⌥ / ⌘ / ⌃) drives dictation only while it is
+    // the SOLE modifier engaged. Suppress it the instant a foreign chord modifier is also held, and abort a
+    // bare start if one joins afterward (the option-pressed-first ordering) — so forming a chord that merely
+    // includes this key (e.g. ⌃⌥⇧⌘D with the right Option) fires the chord's action, not dictation. Runs on
+    // every flagsChanged so a foreign modifier's arrival is seen even though it isn't this key's own keyCode.
+    private func resolveSoleModifier(binding i: Int, flags: CGEventFlags, now: TimeInterval) {
+        let deviceBit: UInt64
+        let own: CGEventFlags
+        switch bindings[i].descriptor {
+        case .named(.rightOption):  deviceBit = UInt64(NX_DEVICERALTKEYMASK); own = .maskAlternate
+        case .named(.rightCommand): deviceBit = UInt64(NX_DEVICERCMDKEYMASK); own = .maskCommand
+        case .named(.rightControl): deviceBit = UInt64(NX_DEVICERCTLKEYMASK); own = .maskControl
+        default: return
+        }
+        var foreign: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+        foreign.subtract(own)
+        let keyHeld = flags.rawValue & deviceBit != 0
+        let sole = keyHeld && flags.intersection(foreign).isEmpty
+
+        if sole {
+            if !bindings[i].gesture.isPhysicallyDown { fire(index: i, edge: .down, now: now) }
+            return
+        }
+        guard bindings[i].gesture.isPhysicallyDown else { return }
+        if keyHeld {
+            abort(index: i)                     // key still down, a foreign modifier joined → it's a chord
+        } else {
+            fire(index: i, edge: .up, now: now) // key physically released → normal commit/latch path
+        }
+    }
+
+    private func abort(index i: Int) {
+        bindings[i].gesture.cancel()
+        bindings[i].hyperEngaged = false
+        dispatchSideEffect { self.onCancel() }
+    }
+
     // Run a gesture/action callback off the event-tap delivery context: `onStart`/`onCommit`/`onAction` do
     // real work (engine resolve, audio start, HUD) that inline would risk a `tapDisabledByTimeout`. Gesture
     // state already advanced synchronously; only the side-effect is deferred, FIFO so a start precedes its commit.
@@ -260,19 +321,12 @@ final class HotkeyMonitor {
             if !engaged, bindings[i].hyperEngaged { bindings[i].hyperEngaged = false; return .up }
             return nil
 
-        case .named(let named):
+        case .named(.fn):
             guard type == .flagsChanged, keyCode == Int64(descriptor.triggerKeyCode) else { return nil }
-            switch named {
-            case .fn:
-                return flags.contains(.maskSecondaryFn) ? .down : .up
-            case .rightOption:
-                return flags.rawValue & UInt64(NX_DEVICERALTKEYMASK) != 0 ? .down : .up
-            case .rightCommand:
-                return flags.rawValue & UInt64(NX_DEVICERCMDKEYMASK) != 0 ? .down : .up
-            case .hyper: return nil
-            }
+            return flags.contains(.maskSecondaryFn) ? .down : .up
 
-        case .chord, .mouseButton:
+        // The right-side modifier keys are resolved by `resolveSoleModifier`, not here.
+        case .named(.rightOption), .named(.rightCommand), .named(.rightControl), .chord, .mouseButton:
             return nil
         }
     }

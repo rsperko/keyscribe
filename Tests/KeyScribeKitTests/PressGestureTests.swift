@@ -2,6 +2,11 @@ import Testing
 @testable import KeyScribeKit
 
 struct PressGestureTests {
+    @Test func instructionExplainsEveryPressStyle() {
+        #expect(PressStyle.holdOnly.instruction == "Hold the trigger while speaking, then release it to stop.")
+        #expect(PressStyle.tapToToggle.instruction == "Tap once to start, then tap again to stop.")
+        #expect(PressStyle.holdOrTap.instruction == "Hold and release, or tap to start and tap again to stop.")
+    }
     @Test func holdOnlyStartsOnDownCommitsOnUp() {
         var g = PressGesture(style: .holdOnly, tapThreshold: 0.3)
         #expect(g.handle(.down, at: 0.0) == .start)

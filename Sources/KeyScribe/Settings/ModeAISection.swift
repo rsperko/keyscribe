@@ -22,15 +22,13 @@ struct ModeAISection: View {
         Section("Improve with AI") {
             if connections.isEmpty {
                 if let aiServiceIssueText {
-                    Label(aiServiceIssueText, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.red)
+                    IssueText(aiServiceIssueText)
                 }
                 Text("Add an AI service in Settings before a mode can rewrite the transcript.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 if let aiServiceIssueText {
-                    Label(aiServiceIssueText, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.red)
+                    IssueText(aiServiceIssueText)
                 }
                 SettingRow(
                     title: "AI service",
@@ -50,7 +48,9 @@ struct ModeAISection: View {
                     PromptEditor(
                         title: "Writing instruction",
                         placeholder: "Describe how the AI should rewrite your dictation\u{2026}",
-                        text: mode.aiRewrite?.prompt ?? ""
+                        text: mode.aiRewrite?.prompt ?? "",
+                        expandID: AccessibilityID.Mode.Editor.instructionExpand,
+                        expandDoneID: AccessibilityID.Mode.Editor.instructionExpandDone
                     ) { value in
                         updateRewrite { $0.prompt = value }
                     }
@@ -77,6 +77,7 @@ struct ModeAISection: View {
                     Spacer()
                     Button("Edit") { editingFragment = id }
                         .buttonStyle(.borderless)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.fragmentEdit(id))
                         .popover(isPresented: Binding(
                             get: { editingFragment == id },
                             set: { if !$0 { closeFragmentEditor(id) } })) {
@@ -84,6 +85,7 @@ struct ModeAISection: View {
                         }
                     Button("Remove", role: .destructive) { removeFragment(id) }
                         .buttonStyle(.borderless)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.fragmentRemove(id))
                 }
             }
             .onMove(perform: moveFragment)
@@ -98,12 +100,14 @@ struct ModeAISection: View {
             if !unusedFragmentIds.isEmpty {
                 ForEach(unusedFragmentIds, id: \.self) { id in
                     Button(fragmentName(id)) { addFragment(id) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.addFragment(id))
                 }
                 Divider()
             }
             Button { creatingFragment = true } label: {
                 Label("New instruction…", systemImage: "plus")
             }
+            .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstruction)
         } label: {
             Label("Add instruction", systemImage: "plus.circle")
         }
@@ -112,8 +116,11 @@ struct ModeAISection: View {
         .accessibilityIdentifier(AccessibilityID.Mode.Editor.addInstruction)
         .alert("New reusable instruction", isPresented: $creatingFragment) {
             TextField("Name, e.g. Email style", text: $newFragmentName)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionName)
             Button("Create", action: commitNewFragment)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionCreate)
             Button("Cancel", role: .cancel) { newFragmentName = "" }
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionCancel)
         } message: {
             Text("Creates a reusable instruction you can edit here and attach to any mode.")
         }
@@ -130,17 +137,22 @@ struct ModeAISection: View {
                 placeholder: "Describe the reusable instruction\u{2026}",
                 text: onLoadFragmentBody(id),
                 commitsOnChange: true,
-                flush: fragmentFlush
+                flush: fragmentFlush,
+                expandID: AccessibilityID.Mode.Editor.fragmentExpand,
+                expandDoneID: AccessibilityID.Mode.Editor.fragmentExpandDone
             ) { body in
                 onSaveFragmentBody(id, body)
             }
+            .accessibilityIdentifier(AccessibilityID.Mode.Editor.fragmentBody)
             HStack {
                 Button { onRevealFragment(id) } label: {
                     Label("Reveal in Finder", systemImage: "folder")
                 }
                 .buttonStyle(.link).font(.caption)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.fragmentReveal)
                 Spacer()
                 Button("Done") { closeFragmentEditor(id) }.keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.fragmentDone)
             }
         }
         .padding(16)

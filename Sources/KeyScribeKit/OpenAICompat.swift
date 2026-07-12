@@ -11,15 +11,21 @@ public struct RequestAdaptations: Equatable, Sendable {
     public var tokenLimitField: TokenLimitField
     public var includeTemperature: Bool
     public var foldSystemIntoUser: Bool
+    public var includeReasoningEffort: Bool
+    public var includeThinkingConfig: Bool
 
     public init(
         tokenLimitField: TokenLimitField,
         includeTemperature: Bool = true,
-        foldSystemIntoUser: Bool = false
+        foldSystemIntoUser: Bool = false,
+        includeReasoningEffort: Bool = true,
+        includeThinkingConfig: Bool = true
     ) {
         self.tokenLimitField = tokenLimitField
         self.includeTemperature = includeTemperature
         self.foldSystemIntoUser = foldSystemIntoUser
+        self.includeReasoningEffort = includeReasoningEffort
+        self.includeThinkingConfig = includeThinkingConfig
     }
 
     public static func `default`(for provider: Connection.Provider) -> RequestAdaptations {
@@ -75,6 +81,9 @@ public func remediatedAdaptations(
     case "temperature":
         guard current.includeTemperature else { return nil }
         next.includeTemperature = false
+    case "reasoning_effort":
+        guard current.includeReasoningEffort else { return nil }
+        next.includeReasoningEffort = false
     default:
         guard param.range(of: #"^messages\[\d+\]\.role$"#, options: .regularExpression) != nil,
               !current.foldSystemIntoUser else { return nil }

@@ -14,6 +14,16 @@ enum ModelDiscoveryState: Equatable {
 }
 
 struct AIConnectionDraft: Equatable {
+    // The endpoint/credential values a service switch would otherwise overwrite, kept per preset so an
+    // accidental Service flip is restorable within the editing session (ui_components.md: never silently
+    // reset a dependent user value — preserve it for restoration).
+    struct ServiceValues: Equatable {
+        var model: String
+        var baseURL: String
+        var authMethod: Connection.AuthMethod
+        var tokenCommand: String
+    }
+
     var name: String
     var provider: Connection.Provider
     var model: String
@@ -23,6 +33,10 @@ struct AIConnectionDraft: Equatable {
     var tokenCommand: String
     var availableModels: [String]
     var modelDiscoveryState: ModelDiscoveryState?
+    // The picked service is user intent, stored — deriving it from the base URL made a typed custom URL
+    // that happens to match a hosted preset hide the very fields being edited.
+    var presetId: String
+    var stashedServiceValues: [String: ServiceValues] = [:]
 
     init(
         name: String = Connection.Provider.openai.defaultName,
@@ -44,6 +58,18 @@ struct AIConnectionDraft: Equatable {
         self.tokenCommand = tokenCommand
         self.availableModels = availableModels
         self.modelDiscoveryState = modelDiscoveryState
+        self.presetId = Self.derivePresetId(provider: provider, baseURL: baseURL, authMethod: authMethod)
+    }
+
+    // A stored connection at a hosted preset's URL but with No Auth or a token command (creatable in the
+    // old UI) opens as Custom: presenting it as managed would hide the endpoint and auth fields and leave
+    // it uneditable.
+    static func derivePresetId(
+        provider: Connection.Provider, baseURL: String, authMethod: Connection.AuthMethod
+    ) -> String {
+        let match = ConnectionPreset.matching(provider: provider, baseURL: baseURL)
+        if match.isManaged, authMethod != .apiKey { return ConnectionPreset.custom.id }
+        return match.id
     }
 
     init(
@@ -209,55 +235,46 @@ struct AIConnectionDraft: Equatable {
         return nil
     }
 
-    // The service the draft currently represents, recovered from provider + base URL (a hosted OpenAI-
-    // compatible endpoint resolves to its preset; anything else OpenAI-compatible is Custom).
     var selectedPreset: ConnectionPreset {
-        ConnectionPreset.matching(provider: provider, baseURL: baseURL)
+        ConnectionPreset.preset(id: presetId) ?? .custom
     }
 
-    // Seed the draft from a picked service. Hosted presets pin the base URL, a lightweight default model, and
-    // API-key auth so the user only pastes a key. The name follows only while it still reads as a preset
-    // default (i.e. the user has not typed their own).
-    mutating func applyPreset(_ preset: ConnectionPreset, hasStoredKey: Bool, updateDefaultName: Bool) {
+    // Switch the draft to a picked service. Hosted presets pin the base URL, a lightweight default model,
+    // and API-key auth so the user only pastes a key. The outgoing service's values are stashed and restored
+    // on switch-back, so an accidental flip destroys nothing. The name follows only while it still reads as
+    // a preset default (i.e. the user has not typed their own).
+    mutating func applyPreset(_ preset: ConnectionPreset, updateDefaultName: Bool) {
+        guard preset.id != presetId else { return }
+        stashedServiceValues[presetId] = ServiceValues(
+            model: model, baseURL: baseURL, authMethod: authMethod, tokenCommand: tokenCommand)
         if updateDefaultName, ConnectionPreset.all.contains(where: { $0.name == name }) {
             name = preset.name
         }
+        presetId = preset.id
         provider = preset.provider
-        model = preset.defaultModel
-        baseURL = preset.baseURL ?? ""
-        if preset.isManaged {
-            authMethod = .apiKey
-        } else if authMethod == .none {
+        if let restored = stashedServiceValues[preset.id] {
+            model = restored.model
+            baseURL = restored.baseURL
+            authMethod = restored.authMethod
+            tokenCommand = restored.tokenCommand
+        } else {
+            model = preset.defaultModel
+            baseURL = preset.baseURL ?? ""
+        }
+        if preset.isManaged || (preset.provider != .openaiCompatible && authMethod == .none) {
             authMethod = .apiKey
         }
-        if preset.provider != .openaiCompatible, authMethod != .tokenCommand {
+        if preset.isManaged || (preset.provider != .openaiCompatible && authMethod != .tokenCommand) {
             tokenCommand = ""
         }
-        if preset.isManaged { tokenCommand = "" }
         resetModelDiscovery()
     }
 
-    mutating func changeProvider(
-        to newProvider: Connection.Provider,
-        defaultOpenAICompatibleAuth: Connection.AuthMethod,
-        hasStoredKey: Bool,
-        updateDefaultName: Bool
-    ) {
-        let oldProvider = provider
-        provider = newProvider
-        if updateDefaultName, name == oldProvider.defaultName {
-            name = newProvider.defaultName
-        }
-        model = newProvider.defaultModel
-        if newProvider == .openaiCompatible {
-            authMethod = hasStoredKey ? .apiKey : defaultOpenAICompatibleAuth
-        } else if authMethod == .none {
-            authMethod = .apiKey
-        }
-        if newProvider != .openaiCompatible, authMethod != .tokenCommand {
-            tokenCommand = ""
-        }
-        resetModelDiscovery()
+    // Params are not editable in the connection form, so an edit preserves whatever the stored connection
+    // carries (including hand-edited TOML) — unless the provider changed, where carrying them over would
+    // send one provider's reasoning knob to another (reasoning_effort to Gemini, or none at all to OpenAI).
+    func resolvedParams(for existing: Connection) -> Connection.Params {
+        provider == existing.provider ? existing.params : provider.defaultParams
     }
 
     mutating func changeAuthMethod(to newMethod: Connection.AuthMethod) {
@@ -309,8 +326,11 @@ func providerLabel(_ provider: Connection.Provider) -> String {
 
 // The service label for a stored connection: a hosted preset (OpenRouter/Groq/Mistral) reads as its own
 // name rather than the generic "OpenAI-compatible", so the quick-setup services feel first-class in the
-// list and summary. A custom endpoint still reads "OpenAI-compatible".
+// list and summary. A custom endpoint still reads "OpenAI-compatible". Uses the same rule as the editor
+// (including the non-API-key demotion), so the list and the editor never name the same connection differently.
 func serviceLabel(_ connection: Connection) -> String {
-    let preset = ConnectionPreset.matching(provider: connection.provider, baseURL: connection.baseUrl)
+    let presetId = AIConnectionDraft.derivePresetId(
+        provider: connection.provider, baseURL: connection.baseUrl ?? "", authMethod: connection.authMethod)
+    let preset = ConnectionPreset.preset(id: presetId) ?? .custom
     return preset.isManaged ? preset.name : providerLabel(connection.provider)
 }

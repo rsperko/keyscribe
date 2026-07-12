@@ -78,27 +78,33 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
 
     public func toRules() -> [ReplacementRule] { rules.toReplacementRules() }
 
-    // Correction surface (design.md §4.7): add a literal heard→replace rule, ignoring blanks and
-    // case-insensitive duplicates of an existing literal rule's `heard`.
+    // Correction surface (design.md §4.7): add a literal heard→replace rule, ignoring blanks. Re-adding
+    // an existing literal `heard` (case-insensitive) updates that rule in place — dropping the new
+    // correction would silently discard the user's intent, and appending would accumulate duplicates.
     public func addingLiteral(heard: String, replace: String) -> ReplacementsSet {
         let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !h.isEmpty,
-              !rules.contains(where: { !$0.regex && $0.heard.caseInsensitiveCompare(h) == .orderedSame })
-        else { return self }
+        guard !h.isEmpty else { return self }
         var copy = self
-        copy.rules.append(Rule(heard: h, replace: replace, regex: false))
+        let rule = Rule(heard: h, replace: replace, regex: false)
+        if let i = copy.rules.firstIndex(where: { !$0.regex && $0.heard.caseInsensitiveCompare(h) == .orderedSame }) {
+            copy.rules[i] = rule
+        } else {
+            copy.rules.append(rule)
+        }
         return copy
     }
 
-    // Regex counterpart: dedup by `heard` (case-sensitive — regex patterns are) so a repeated
-    // correction-panel add can't accumulate identical rules. First-write-wins, like addingLiteral.
+    // Regex counterpart: same update-in-place, matched by `heard` case-sensitively (regex patterns are).
     public func addingRegex(heard: String, replace: String) -> ReplacementsSet {
         let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !h.isEmpty,
-              !rules.contains(where: { $0.regex && $0.heard == h })
-        else { return self }
+        guard !h.isEmpty else { return self }
         var copy = self
-        copy.rules.append(Rule(heard: h, replace: replace, regex: true))
+        let rule = Rule(heard: h, replace: replace, regex: true)
+        if let i = copy.rules.firstIndex(where: { $0.regex && $0.heard == h }) {
+            copy.rules[i] = rule
+        } else {
+            copy.rules.append(rule)
+        }
         return copy
     }
 

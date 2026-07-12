@@ -116,4 +116,26 @@ struct VocabularyLostWriteTests {
         #expect(global.rules.isEmpty)
         #expect(updated.replacements.rules == [.init(heard: "cube cuddle", replace: "kubectl", regex: false)])
     }
+
+    // The Vocabulary pane is open while the config files are edited OUTSIDE the app. The FSEvents reload
+    // path (AppDelegate.reloadConfig) calls notifyExternalChange; the pane models must re-read from disk.
+    @Test func externalEditNotificationRefreshesPaneModels() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try DictionaryStore.write(DictionarySet(words: ["Postgres"]), to: dir)
+        try ReplacementsStore.write(
+            ReplacementsSet(rules: [.init(heard: "teh", replace: "the", regex: false)]), to: dir)
+
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let dictionary = DictionarySettingsModel(repository: repo)
+        let replacements = ReplacementsSettingsModel(repository: repo)
+
+        try DictionaryStore.write(DictionarySet(words: ["Postgres", "Redis"]), to: dir)
+        try ReplacementsStore.write(
+            ReplacementsSet(rules: [.init(heard: "wont", replace: "won't", regex: false)]), to: dir)
+        repo.notifyExternalChange()
+
+        #expect(dictionary.words == ["Postgres", "Redis"])
+        #expect(replacements.rules == [.init(heard: "wont", replace: "won't", regex: false)])
+    }
 }

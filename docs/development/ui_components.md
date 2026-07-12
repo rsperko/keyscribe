@@ -1,14 +1,22 @@
 # KeyScribe — UI Component Contract
 
-> A small behavioral widget library for the SwiftUI/AppKit implementation. It prevents
-> inconsistent controls while preserving native macOS behavior. Pair with `ui_design.md`.
+> The committed contract for the SwiftUI/AppKit UI: the semantic roles, the component inventory, the
+> shared-behavior invariants, and the user-facing copy vocabulary. It prevents inconsistent controls
+> and divergent wording while preserving native macOS behavior. Pair with `ui_design.md`.
+>
+> **Construction how-to** — each component's anatomy, behavior rules, and the exact shared Swift type
+> to reuse, plus the accessibility-identifier mechanics and the build/ship checklists — lives in the
+> `keyscribe-ui` build guide (agent-facing). This document stays the source of truth for *what the
+> components are and what words to use*; that guide is *how to build them*.
 
 ---
 
 ## 1. Foundations
 
-Use native macOS controls and SF Symbols first. This library defines semantic roles and behavior,
-not a custom control kit.
+Use native macOS controls and SF Symbols first. This defines semantic roles and behavior, not a custom
+control kit. Use system semantic colors for the roles below — never hardcode a color as the meaning of a
+state. 8-point rhythm within a group, 16–24 between sections; cards only for engines, mode summaries, and
+data-boundary summaries, not every row.
 
 ### Tokens
 
@@ -28,282 +36,64 @@ not a custom control kit.
 | `boundary.redaction` | Cloud rewrite with best-effort redaction |
 | `boundary.context` | A named context category is shared |
 
-Use system semantic colors for these roles. Do not hardcode colors as the meaning of a state.
+---
 
-### Spacing and hierarchy
+## 2. Component inventory
 
-- Use standard macOS control heights and target sizes.
-- Use an 8-point rhythm for related elements and 16–24 points between sections.
-- Keep a settings row’s label, current value, and first-line explanation visible without
-  expansion whenever practical.
-- Do not make all rows cards. Cards are reserved for engines, mode summaries, and data-boundary
-  summaries where a short block of related state needs scanning.
+The blessed set. Reuse the named component; if none fits, add a one-line entry here **before** building
+it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and the Swift type: see the
+`keyscribe-ui` build guide.)
+
+| Component | Use for |
+|---|---|
+| Setting row with help | Every non-obvious, consequential, advanced, permission-gated, or privacy-relevant setting — label, one-line result, control, inline `Learn more`. No hover-only tooltip for anything affecting data/privacy/output. |
+| Advanced disclosure | Advanced/rare config, collapsed by default. Full header row is the toggle target, chevron trailing; the label names the capability, not the mechanism. |
+| Data boundary badge | HUD (cloud rewrite only), mode list, History, connection summaries. Categories stay separate badges, never a vague `Context shared`. |
+| Recording level indicator | The HUD recording icon — a level-driven red halo + history bars (not a live waveform). |
+| Mode summary | Mode editor header, list rows, one-shot HUD ack, menu resolution label — name, state, when it runs, boundary summary. Spoken-phrase modes show their actual first phrase. |
+| Settings list pane | The master/detail scaffold shared by Speech Models, AI Services, Modes, and History (`PaneLayout.swift`): a fixed-width (`PaneMetrics.listWidth`) list column of `PaneListRow`s with `PaneBadge` status pills, then a divider and a detail column led by `PaneDetailHeader` and closed by a trailing-red `PaneDeleteButton`. The three acquisition panes split the list into two persistent sections — a Library section (On This Mac / Your Services / Your Modes) and a Catalog section (Available to Download / Connect a Service / Start from a Template); selecting a Catalog row shows a read-only descriptive preview with one CTA (Download / Add Service / Add Mode) that promotes the object into the Library and keeps it selected. The bottom `ListActionBar` is creation-only (New Blank Mode / Custom AI service / Export) — never a name-menu duplicate of catalog acquisition. History keeps its own transcript row plus its search/stats chrome; the rest share the row. |
+| Speech model choice | The Speech Models pane: inspect-only list + a detail pane with one primary lifecycle action; testing/reinstall/delete/dictionary-tuning behind its Advanced disclosure. |
+| Processing status | HUD/status states: listening, transcribing, rewriting, inserted, copied instead, fallback, no-speech, error. Never show a raw transcript while a rewrite is pending. |
+| Correction action | History + global correction panel: `Add to Dictionary`, `Create Replacement` — pre-filled, showing the resulting rule and its scope. |
+| Shortcut well | Every keyboard/mouse shortcut binding; one control that always shows the current binding with an attached menu (never picker⇄recorder mode-swapping). |
+| Keycap glyph | *Displaying* (never editing) a trigger as small physical keys — onboarding trial/playground, the General trigger pointer. |
+| Step indicator | The onboarding wizard's progress dots. |
+| Permission row | Microphone and Accessibility-dependent features — state, why, what still works without it, `Open System Settings`. |
+| Retention/destructive confirmation | Clearing History, retention cuts that delete entries, deleting a model or a mode. Name what is removed and whether it recovers. |
 
 ---
 
-## 2. Core components
+## 3. Shared behavior invariants
 
-### Setting row with help
-
-**Use for:** every non-obvious, consequential, advanced, permission-gated, or privacy-relevant
-setting.
-
-**Anatomy:** label, one-line result, control/current value, `Learn more` disclosure, optional
-dependency reason, optional example.
-
-**Behavior:**
-
-- `Learn more` expands inline and remains expanded until the user closes it or leaves the page.
-- The expanded content includes the benefit, limit, and prerequisite. It can link to a nearby
-  related setting but never requires an external help site.
-- If disabled, leave the row visible and show the dependency reason in place.
-- Provide an accessible label that includes the one-line result; disclosure state is announced.
-
-**Do not use:** a bare circled-info icon, hover-only tooltip, or long explanatory paragraph
-above a screen.
-
-### Advanced disclosure
-
-**Use for:** regex, connection parameters, model eviction, config file access,
-and technical prompt behavior.
-
-**Behavior:**
-
-- Collapsed by default.
-- Its label names the capability, not its implementation: `Advanced model behavior`, not
-  `Eviction configuration` unless eviction is the only capability.
-- Show a one-line consequence before expansion when the setting affects output or data flow.
-- Expansion does not alter values or enable functionality by itself.
-- **The entire header row is the toggle target** — clicking anywhere on the label, not only the
-  chevron, expands and collapses it. The hit area spans the full row width (`contentShape`), and
-  the chevron sits at the trailing edge. Never ship a disclosure whose label text is inert while
-  only the triangle responds. Every disclosure uses the shared `DisclosureSection` (it owns this
-  behavior); the platform's bare `DisclosureGroup(_:)` does not satisfy this rule and must not be
-  used.
-
-### Data boundary badge
-
-**Use for:** the HUD, mode list, History, and connection summaries.
-
-> **Where each surface renders these as a badge vs plain text:** **History** renders the full set,
-> including `On this Mac`, as badges (`HistoryEntry.dataBoundaryLabels`). The **HUD** shows boundary
-> badges **only during a cloud rewrite** — a fully-local dictation shows no boundary badge (it has no
-> Rewriting state). The **mode list / mode summary** states the local-vs-cloud boundary as plain
-> summary text (“Stays on this Mac” / “On this Mac”), not as a capsule badge.
-
-| Badge | Meaning | Required companion text when expanded |
-|---|---|---|
-| `On this Mac` | No cloud rewrite is used for this operation. | “Speech recognition and text processing stay on this Mac.” |
-| `Cloud rewrite` | The named connection processes text. | Name the connection and model. |
-| `Best-effort redaction` | Recognizable sensitive spans are tokenized before cloud rewrite. | “Pattern matching can miss content. Context is off.” |
-| `App shared` | App identity is sent with the rewrite. (URL is never sent — it is a local routing key only.) | State this exact category. |
-| `Selected text shared` | Selection is sent with the rewrite. | State this exact category. |
-
-**Behavior:** labels are never shortened to an unexplained shield or lock. Multiple context
-categories remain separate badges; do not collapse them into a vague `Context shared` label. In the
-HUD the badge row **wraps** to as many rows as needed (each badge fixed-size, never ellipsized) and the
-panel grows vertically — three badges must never clip.
-
-### Recording level indicator
-
-**Use for:** the HUD recording state's icon.
-
-**Anatomy:** a red halo whose size/opacity tracks the current input level, with an inner short history
-of the level drawn as symmetric red bars (newest in the center — the ▂▅▇▅▂ "wave" every recorder
-actually draws is level history, not a live waveform).
-
-**Behavior:** driven by the ~30 Hz pulled level (never the realtime audio callback). Under Reduce
-Motion it collapses to a fixed-geometry dot whose fill intensity alone carries the level (no growing,
-bouncing, or bars). Labeled "Recording" to VoiceOver; per-tick level changes are never announced.
-
-### Mode summary
-
-**Use for:** the top of a mode editor, mode list rows, one-shot HUD acknowledgement, and menu
-automatic-resolution label.
-
-**Contents:** name, enabled/disabled state, when it runs, processing/data-boundary summary,
-and result behavior where it differs from normal insertion.
-
-**Rules:** use user-facing phrases such as `Used in Safari` or `Triggered by Fn`; hide internal
-terms such as bundle ID and raw regex behind Advanced. A spoken-phrase mode shows its **actual first
-phrase** wherever it is listed (mode list, menu annotation, template gallery), formatted through one
-shared helper — `Say "as an email"` sentence-leading, `say "as an email"` inline/annotation — so a
-headline routing capability that is otherwise invisible teaches itself by being on screen. The phrase
-is the user's own words, so showing it verbatim honors the no-raw-regex rule.
-
-**Mode-choice line** (History detail, UX2 phase 7c): a one-line, user-language explanation of how the
-mode was chosen for a past dictation — no phase names. `Chosen from the menu for this dictation`,
-`Started by its shortcut`, `Chosen for the app you were in`, `Routed by the spoken phrase "as an
-email"`, or `Plain Dictation — nothing else matched`.
-
-### Speech model choice
-
-**Use for:** the Speech Models chooser.
-
-**Contents:** the left list has engine name plus lifecycle status; the detail pane has the
-best-use description, language capability, disk requirement, light/moderate/high memory-use
-label, and primary action.
-
-**Behavior:** a list selection only inspects a model; it does not switch it. The detail pane has
-the one direct lifecycle action: Current model, Use This Model, Download, or a live install/test
-state. The recommended choice is shown first. Testing, file management, and dictionary-recognition
-tuning live in the detail pane's named Model actions menu.
-
-### Processing status
-
-**Use for:** HUD and status rows.
-
-**States:** listening, transcribing, rewriting, inserted, copied instead, fallback (inserted or
-copied without rewriting), error.
-
-**Rules:**
-
-- Listening shows a live input-level indicator and concise text.
-- Processing uses neutral movement; success appears only after actual insertion.
-- Cloud processing identifies the named connection and adjacent boundary badges.
-- It does not show a raw transcript while a rewrite that may materially alter it is pending.
-
-### Correction action
-
-**Use for:** History and the global correction panel.
-
-**Actions:** `Add to Dictionary` and `Create Replacement`.
-
-**Behavior:** pre-fill source text, show the resulting rule before save, and state global versus
-mode-local scope. Do not make the user reconstruct a dictation from scratch.
-
-### Shortcut well
-
-**Use for:** every keyboard/mouse shortcut binding — the mode trigger (`Start this mode with`) and
-the global action shortcuts (`Add to Vocabulary`, `Paste Last Dictation`).
-
-**Anatomy:** one control that always shows the current binding, with an attached menu. It never swaps
-between a picker and a recorder — predefined vs custom is just a value, not a mode.
-
-**Behavior:**
-
-- Clicking the well body, or choosing `Record…` from the menu, starts capture in place immediately,
-  regardless of the current value.
-- While recording it shows a prompt (`Press keys or a mouse button…  Esc cancels`, or `Press a key
-  combo…  Esc cancels` where mouse is not allowed). A valid capture is the only thing that changes
-  the value from recording; `Esc`, clicking away, and the view disappearing all revert to the exact
-  prior binding.
-- The menu lists `None` (the single clear affordance) and — for the mode trigger only — the
-  modifier-only named keys `Fn (Globe)`, `Right-⌥`, `Right-⌘`, `⌃⌥⇧⌘`, with a
-  checkmark on the current one. Action shortcuts offer `None` and `Record…` only.
-- **Profiles** gate what a capture accepts, with an inline hint on rejection rather than a silently
-  dead binding: the mode trigger accepts named keys, chords, and extra mouse buttons; an action
-  shortcut accepts chords only (a mouse button is rejected with `Mouse buttons can't be used for this
-  shortcut`). A bare key hints `Hold a modifier (⌃⌥⇧⌘) with the key`.
-- Any parseable value renders with its glyphs; an unrecognized stored value renders the raw string
-  with a `Not a recognized shortcut` caption — never a blank control.
-
-### Keycap glyph
-
-**Use for:** displaying (never editing) a trigger as small physical-looking keys — the onboarding
-trial and playground rows, and the General dictation-trigger pointer row. For *editing* a binding use
-the Shortcut well, not this.
-
-**Anatomy:** one rounded cap per token from `KeyDescriptor.keycapTokens` (`fn` → a globe + "fn";
-`⌃⌥⇧⌘` for Hyper; `right ⌥`/`right ⌘`; a chord's modifier glyphs then the key). A mouse button has no
-keycap form and falls back to `displayString` plain text.
-
-**Behavior:** static (no motion of its own); exposed to VoiceOver as one element labeled with the
-descriptor's `displayString`.
-
-### Step indicator
-
-**Use for:** the onboarding wizard's progress dots.
-
-**Anatomy:** a row of small dots, one per step; filled up to and including the current step, quaternary
-beyond it. The playground shares the AI step's dot (it is that step's reward, not a separate step); the
-indicator is hidden entirely in the permissions-only repair flow.
-
-**Behavior:** dot fills change with the step cross-fade (no independent animation, nothing animates
-under Reduce Motion); the whole row is one VoiceOver element labeled `Step N of M`.
-
-### Permission row
-
-**Use for:** microphone, and Accessibility-dependent features (modifier-key trigger detection +
-paste/post-event).
-
-**Contents:** capability name, current authorization state, why KeyScribe needs it, what still
-works without it, and `Open System Settings`.
-
-**Behavior:** it is explanatory before the OS prompt and actionable after denial. Never label a
-permission merely `Required` without the affected feature.
-
-### Retention/destructive confirmation
-
-**Use for:** clearing History, lowering retention when it deletes entries, deleting a model,
-and deleting a mode.
-
-**Behavior:** name what is removed and whether it can be recovered. Do not require confirmation
-for ordinary reversible setting changes. The **Direct** system mode (the floor) cannot be deleted or
-duplicated — its row offers neither; every ordinary mode can be deleted freely (there is no "default
-mode" to reassign).
+- **Empty states** explain what the surface is for and offer its primary creation action — never a
+  marketing surface (no modes → create/restore starters; no history → inline enable toggle; no AI service
+  → explain BYOK + add; no engine → download one).
+- **Error vs fallback are distinct.** An error is one sentence + one next action (detail in a copyable
+  disclosure). A fallback (`Copied instead of inserted`, `Inserted without rewriting`) is a valid outcome
+  that explains *why* and offers the next action — not a failure.
+- **Control dependencies preserve visibility and never silently reset a dependent value.** Privacy mode
+  locks context off; rewrite-selected-text without a connection says what it will do rather than blocking;
+  regex fields appear only when regex is on. Preserve a dependent value for restoration unless retaining it
+  could send data unexpectedly — then require an explicit choice.
 
 ---
 
-## 3. Shared behavior patterns
+## 4. Copy
 
-### Empty states
+### Philosophy
 
-An empty state explains what the surface is for and offers its primary creation action:
-
-- no modes: create a mode or restore the generic starter modes;
-- no history: explain that only future dictations appear; the enable toggle is inline in the same
-  pane, so there is no navigation action — when history is off, the description says so and the
-  inline toggle is the affordance;
-- no AI services: explain BYOK and add a connection;
-- no downloaded engine: choose and download an on-device speech model.
-
-Do not make empty states marketing surfaces.
-
-### Errors and fallback
-
-Errors use one sentence that states the failed operation, followed by one next action. Technical
-details are available in a disclosure and can be copied for diagnostics.
-
-Fallback is distinct from error. `Copied instead of inserted` and `Inserted without rewriting`
-are valid outcomes that must explain why they occurred and offer the relevant next action.
-
-### Control dependencies
-
-When one option changes another, preserve visibility and explain the dependency. Examples:
-
-- privacy mode locks context off;
-- rewrite selected text recommends an AI connection — without one it replaces the selection with
-  the literal dictation, so the editor says what it will do rather than blocking the mode;
-- TOML-only insertion escapes remain visible as read-only notes when active, rather than becoming
-  normal Settings controls;
-- regular-expression substitution fields appear only when regex mode is enabled.
-
-Never silently reset a dependent user value. Preserve it for restoration when the dependency is
-removed unless retaining it could send data unexpectedly; in that case require explicit choice.
-
-### Copy philosophy
-
-Five rules govern user-facing copy:
-
-1. **Disclose the boundary where there is a real choice; stay silent where there is not.**
-   Recording and transcribing are always on-device with no alternative destination, so they carry
-   no location words — say `Listening` and `Transcribing`, not "Listening locally". Spend the
-   data-boundary signal where data genuinely could leave: the rewrite step, mode summaries, History.
-2. **One concrete phrase per concept.** `On this Mac` is the canonical data-location phrase. Do not
-   mix in "locally", "on your Mac", or "on this device". *Exceptions:* `on-device` in speech-model
-   metadata (a compact capability descriptor) and `local-first` in product positioning.
-3. **Name things by result, in plain words.** The rewrite escape hatch inserts locally-processed
-   text *minus the AI pass* (not the raw recognizer output), so it is `Insert without rewriting`,
-   never "local transcript". Avoid implementation jargon (BYOK, engine, nonce) in user copy.
-4. **One word per concept across surfaces.** Rewrite is "rewrite" everywhere (the HUD says
-   `Rewriting with {name}`, the badge says `Cloud rewrite`, the hatch says `without rewriting` —
-   never "Polishing"). Speech is a "model" everywhere in user copy, never "engine".
+1. **Disclose the boundary where there is a real choice; stay silent where there is not.** Recording and
+   transcribing are always on-device with no alternative destination — say `Listening` and `Transcribing`,
+   not "Listening locally". Spend the data-boundary signal where data genuinely could leave: the rewrite
+   step, mode summaries, History.
+2. **One concrete phrase per concept.** `On this Mac` is the canonical data-location phrase. *Exceptions:*
+   `on-device` in speech-model metadata, `local-first` in product positioning.
+3. **Name things by result, in plain words.** Avoid implementation jargon (BYOK, engine, nonce) in user copy.
+4. **One word per concept across surfaces.** Rewrite is "rewrite" everywhere (HUD `Rewriting with {name}`,
+   badge `Cloud rewrite`, hatch `without rewriting` — never "Polishing"). Speech is a "model", never "engine".
 5. **Never overstate privacy.** Best-effort redaction stays "best-effort"; no "secure/safe/private".
 
-### Copy vocabulary
-
-Use these terms consistently:
+### Vocabulary
 
 | Prefer | Avoid |
 |---|---|
@@ -322,40 +112,11 @@ Use these terms consistently:
 
 ---
 
-## 3.1 Accessibility identifiers
+## 5. Accessibility identifiers
 
-Every load-bearing control carries a stable **accessibility identifier** so UI automation (Peekaboo,
-XCUITest, Accessibility Inspector, System Events) can address it exactly instead of fuzzy-matching a
-label. These are frozen API once shipped — pick a name you would keep forever; a rename breaks the
-harness.
-
-- **Single source of truth:** all identifiers are `static let` (or `static func` for dynamic rows)
-  constants in `Sources/KeyScribe/AccessibilityID.swift`, nested by surface. **Never** write an id
-  string literal at a call site — reference the constant.
-- **Naming:** hierarchical, dot-separated, lowercase-leading camelCase segments, never user-visible
-  (`settings.sidebar.speechModels`, `mode.editor.routing.disclosure`). `AccessibilityID.all` is the
-  registry; `AccessibilityIDTests` asserts uniqueness + the naming pattern.
-- **Dynamic rows** interpolate the **stable domain id** — engine id, mode id, connection id, feature
-  id, permission id — never the display name (`AccessibilityID.Settings.Speech.row(engine.id)`). The
-  domain segment may contain `-`/`_`; the pattern check applies to the fixed prefix.
-- **SwiftUI:** `.accessibilityIdentifier(_:)` on the control (or the element you want addressable).
-  A shared control that appears more than once (e.g. `ShortcutWell`) takes the id as a parameter so
-  each instance is distinct.
-- **AppKit:** `setAccessibilityIdentifier(_:)` on the `NSView`/`NSControl`. **`NSMenuItem` is an
-  exception** — macOS ignores a custom identifier on menu items (AppKit derives `AXIdentifier` from
-  the action selector), so status-menu items are addressed by title / action-derived id /
-  `representedObject`, not by a catalog id. State that is otherwise color/glyph-only (the menu-bar
-  badges) is exposed to VoiceOver via `setAccessibilityLabel` instead.
-
-## 4. Implementation checklist
-
-For each new screen or control, establish:
-
-1. Its component type from this document.
-2. Its default and advanced visibility.
-3. Its empty, loading, disabled, error, and success states.
-4. Its keyboard and VoiceOver behavior.
-5. Its privacy/data-boundary wording, if it reads, stores, or transmits user content.
-
-If no existing component fits, add the smallest new component to this document before creating
-a one-off UI pattern.
+Every load-bearing control carries a stable accessibility identifier so UI automation can address it
+exactly. These are **frozen API once shipped** — a rename breaks the harness. All identifiers are
+constants in `Sources/KeyScribe/AccessibilityID.swift` (nested by surface, registered in
+`AccessibilityID.all`); never a string literal at a call site; dynamic rows interpolate the stable domain
+id, never the display name. Wiring mechanics (SwiftUI vs AppKit, the `NSMenuItem` exception) are in the
+`keyscribe-ui` build guide.

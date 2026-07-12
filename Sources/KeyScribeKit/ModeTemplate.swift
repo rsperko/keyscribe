@@ -18,7 +18,11 @@ public enum ModeTemplateInstantiation {
 
     public static func materialize(template: Mode, existing: [Mode], connections: [Connection]) -> Materialization {
         var mode = template
-        mode.enabled = true
+        // Added modes land Disabled (option-1-rollout.md): the user reviews/wires the seeded editor and flips
+        // Enabled when ready, so nothing goes live and starts failing (e.g. an AI-rewrite mode with no wired
+        // service) the instant it is added. Callers that add AND finish setup in one step (first-run) re-enable
+        // explicitly.
+        mode.enabled = false
         // Drop any trigger already held by an ENABLED existing mode so materializing never silently steals a
         // live shortcut (generalizes `fnIsFree`); stored keys are canonical, compared case-insensitively.
         let taken = Set(existing.filter(\.enabled).flatMap { $0.triggerKeys.map { $0.key.lowercased() } })

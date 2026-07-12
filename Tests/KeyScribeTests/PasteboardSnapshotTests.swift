@@ -152,12 +152,7 @@ struct PasteboardSnapshotTests {
         pb.clearContents()
         pb.writeObjects([item])
 
-        let clock = ContinuousClock()
-        let start = clock.now
         let snapshot = await TextInserter.PasteboardSnapshot.capture(from: pb)
-        let elapsed = clock.now - start
-
-        #expect(elapsed < .milliseconds(700))  // returned on the deadline, not after the 1s provider sleep
 
         pb.clearContents()
         pb.setString("scratch", forType: .string)

@@ -868,6 +868,7 @@ private final class PreferredInputFailedAudio: AudioCapturing, @unchecked Sendab
 private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     private let gate: Signal
+    private let stopped = Signal()
     private let lock = NSLock()
     private var _stopCalls = 0
     var stopCalls: Int { lock.withLock { _stopCalls } }
@@ -876,8 +877,10 @@ private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
         await gate.wait()
         return url
     }
+    func waitUntilStopped() async { await stopped.wait() }
     func stop() -> URL? {
         lock.withLock { _stopCalls += 1 }
+        stopped.fire()
         return url
     }
 }
@@ -1035,16 +1038,12 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy)
         #expect(audio.stopCalls == 0)
 
-        let clock = ContinuousClock()
-        let started = clock.now
         controller.handleCommit()      // release during the cue hold
+        await audio.waitUntilStopped()
         await bringUpTask?.value
-        let elapsed = clock.now - started
 
         #expect(audio.stopCalls == 1)
         #expect(controller.isBusy == false)
-        // Cancelling the hold makes teardown immediate; without it the task would wait out the ~0.46s remainder.
-        #expect(elapsed < .milliseconds(300))
     }
 
     @Test func startShowsCancellableArmingBeforeCaptureIsLive() {

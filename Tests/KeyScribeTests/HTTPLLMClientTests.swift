@@ -119,6 +119,93 @@ struct HTTPLLMClientTests {
         #expect(thinking?["thinkingLevel"] as? String == "minimal")
     }
 
+    @Test func unsupportedReasoningEffortRetriesWithoutIt() async throws {
+        nonisolated(unsafe) var bodies: [[String: Any]?] = []
+        let steps: [(Int, Data)] = [(400, errBody("unsupported_parameter", "reasoning_effort")), (200, okBody("OK"))]
+        LLMStubProtocol.handler = { request in
+            let idx = bodies.count
+            bodies.append(request.decodedBody())
+            let step = steps[min(idx, steps.count - 1)]
+            return (resp(request.url!, step.0), step.1)
+        }
+        let connection = Connection(
+            id: "o", name: "O", provider: .openai,
+            model: "gpt-4o-mini", keyRef: "k")
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        #expect(out == "OK")
+        #expect(bodies.count == 2)
+        #expect(bodies[0]?["reasoning_effort"] as? String == "none")
+        #expect(bodies[1]?["reasoning_effort"] == nil)
+    }
+
+    @Test func geminiRejectingThinkingConfigRetriesWithoutItAndCaches() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let connection = Connection(
+            id: "g", name: "G", provider: .gemini,
+            model: "gemini-2.5-flash", keyRef: "k")
+        let ok = try! JSONSerialization.data(withJSONObject: [
+            "candidates": [["content": ["parts": [["text": "OK"]]]]],
+        ])
+        let bad = try! JSONSerialization.data(withJSONObject: [
+            "error": ["code": 400, "message": "Unknown name \"thinkingLevel\"", "status": "INVALID_ARGUMENT"],
+        ])
+
+        nonisolated(unsafe) var firstRun: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody()
+            firstRun.append(body)
+            let hasThinking = (body?["generationConfig"] as? [String: Any])?["thinkingConfig"] != nil
+            return (resp(request.url!, hasThinking ? 400 : 200), hasThinking ? bad : ok)
+        }
+        let out = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(out == "OK")
+        #expect(firstRun.count == 2)
+        #expect((firstRun[0]?["generationConfig"] as? [String: Any])?["thinkingConfig"] != nil)
+        #expect((firstRun[1]?["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil)
+
+        nonisolated(unsafe) var secondRun: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            secondRun.append(request.decodedBody())
+            return (resp(request.url!, 200), ok)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(secondRun.count == 1)
+        #expect((secondRun[0]?["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil)
+    }
+
+    @Test func geminiUnrelated400StillFailsAndCachesNothing() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let connection = Connection(
+            id: "g", name: "G", provider: .gemini,
+            model: "bogus-model", keyRef: "k")
+        let bad = try! JSONSerialization.data(withJSONObject: [
+            "error": ["code": 400, "message": "model not found", "status": "INVALID_ARGUMENT"],
+        ])
+
+        nonisolated(unsafe) var calls = 0
+        LLMStubProtocol.handler = { request in
+            calls += 1
+            return (resp(request.url!, 400), bad)
+        }
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(calls == 2)
+
+        nonisolated(unsafe) var nextBody: [String: Any]?
+        let ok = try! JSONSerialization.data(withJSONObject: [
+            "candidates": [["content": ["parts": [["text": "OK"]]]]],
+        ])
+        LLMStubProtocol.handler = { request in
+            nextBody = request.decodedBody()
+            return (resp(request.url!, 200), ok)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect((nextBody?["generationConfig"] as? [String: Any])?["thinkingConfig"] != nil)
+    }
+
     @Test func openAICompatibleKeepsMaxTokens() async throws {
         nonisolated(unsafe) var body: [String: Any]?
         LLMStubProtocol.handler = { request in

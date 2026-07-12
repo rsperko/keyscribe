@@ -199,22 +199,43 @@ struct CorrectionSurfaceTests {
         #expect(set.words == ["KeyScribe", "Parakeet"])
     }
 
-    @Test func addingLiteralRuleIgnoresBlankAndDupHeard() {
+    @Test func addingLiteralRuleIgnoresBlankHeard() {
         var set = ReplacementsSet().addingLiteral(heard: "github", replace: "GitHub")
         set = set.addingLiteral(heard: "  ", replace: "x")
-        set = set.addingLiteral(heard: "GITHUB", replace: "GitHub")   // dup heard
         #expect(set.rules.count == 1)
         #expect(set.rules.first?.heard == "github")
         #expect(set.rules.first?.regex == false)
     }
 
-    @Test func addingRegexRuleIgnoresBlankAndDupHeard() {
+    @Test func addingLiteralRuleUpdatesExistingHeardInPlace() {
+        var set = ReplacementsSet().addingLiteral(heard: "github", replace: "GitHub")
+        set = set.addingLiteral(heard: "wont", replace: "won't")
+        set = set.addingLiteral(heard: "GITHUB", replace: "GitHub.com")
+        #expect(set.rules.map(\.heard) == ["GITHUB", "wont"])
+        #expect(set.rules.first?.replace == "GitHub.com")
+        #expect(set.rules.first?.regex == false)
+    }
+
+    @Test func addingRegexRuleIgnoresBlankHeard() {
         var set = ReplacementsSet().addingRegex(heard: #"\bfoo\b"#, replace: "bar")
         set = set.addingRegex(heard: "   ", replace: "x")
-        set = set.addingRegex(heard: #"\bfoo\b"#, replace: "baz")   // dup heard → first wins, no accumulation
         #expect(set.rules.count == 1)
         #expect(set.rules.first?.regex == true)
-        #expect(set.rules.first?.replace == "bar")
+    }
+
+    @Test func addingRegexRuleUpdatesExistingHeardInPlace() {
+        var set = ReplacementsSet().addingRegex(heard: #"\bfoo\b"#, replace: "bar")
+        set = set.addingRegex(heard: "tail", replace: "t")
+        set = set.addingRegex(heard: #"\bfoo\b"#, replace: "baz")
+        #expect(set.rules.map(\.heard) == [#"\bfoo\b"#, "tail"])
+        #expect(set.rules.first?.replace == "baz")
+        #expect(set.rules.first?.regex == true)
+    }
+
+    @Test func addingRegexRuleMatchesExistingHeardCaseSensitively() {
+        var set = ReplacementsSet().addingRegex(heard: "Foo", replace: "bar")
+        set = set.addingRegex(heard: "foo", replace: "baz")
+        #expect(set.rules.count == 2)
     }
 
     @Test func regexAndLiteralDedupAreIndependentKeyspaces() {

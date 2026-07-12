@@ -55,6 +55,8 @@ final class SpeechModelsModelTests: XCTestCase {
             deferWhileBusy: { recorder.deferred.append($0) })
 
         model.requestDelete("parakeet")
+        XCTAssertEqual(model.pendingDeleteId, "parakeet")
+        model.confirmDelete()
         await settleTasks()
 
         XCTAssertEqual(recorder.evicted, ["parakeet"])
@@ -66,6 +68,17 @@ final class SpeechModelsModelTests: XCTestCase {
         recorder.deferred[0]()
 
         XCTAssertEqual(recorder.removed, ["parakeet"])
+    }
+
+    func testCancellingInactiveDeletionPreservesTheModel() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder)
+        model.requestDelete("parakeet")
+        model.cancelDelete()
+        await settleTasks()
+        XCTAssertTrue(try row("parakeet", in: model).isUsable)
+        XCTAssertTrue(recorder.removed.isEmpty)
+        XCTAssertTrue(recorder.evicted.isEmpty)
     }
 
     func testPassingSelfTestEvictsAnInactiveEngine() async throws {
@@ -176,6 +189,33 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.clearedFailed, ["parakeet"])
         XCTAssertTrue(try row("parakeet", in: model).isUsable)
         XCTAssertFalse(try row("parakeet", in: model).verificationFailed)
+    }
+
+    // The two list sections partition by residency (option-1-rollout.md): every usable model — including
+    // the always-usable system-managed Apple engine — is On This Mac; everything else is Available to
+    // Download. The partition is exhaustive and disjoint.
+    func testRowsPartitionByResidency() {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder)
+
+        let onMac = Set(model.onThisMacRows.map(\.id))
+        XCTAssertTrue(onMac.contains("parakeet-tdt-ctc-110m"))
+        XCTAssertTrue(onMac.contains("parakeet"))
+        XCTAssertTrue(onMac.contains("apple"), "system-managed Apple engine is always On This Mac")
+        XCTAssertTrue(model.onThisMacRows.allSatisfy(\.isUsable))
+        XCTAssertTrue(model.availableRows.allSatisfy { !$0.isUsable })
+        XCTAssertEqual(model.onThisMacRows.count + model.availableRows.count, model.rows.count)
+        XCTAssertTrue(model.availableRows.contains { $0.id == "whisper" })
+    }
+
+    // A quarantined (self-test failed) model stays under Available — it is not usable — but keeps its
+    // maintenance recovery, so it is not treated as a pristine catalog preview.
+    func testFailedModelStaysAvailableWithRecovery() {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, initialFailedIds: ["parakeet"])
+
+        XCTAssertTrue(model.availableRows.contains { $0.id == "parakeet" })
+        XCTAssertFalse(model.onThisMacRows.contains { $0.id == "parakeet" })
     }
 
     func testChoiceCopyExplainsTheRecommendedAndBuiltInOptions() {

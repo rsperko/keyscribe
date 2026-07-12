@@ -112,7 +112,25 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         tokenCommand = try c.decodeIfPresent(String.self, forKey: .tokenCommand)
         authMethod = try c.decodeIfPresent(AuthMethod.self, forKey: .authMethod)
             ?? (tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .tokenCommand : .apiKey)
-        params = try c.decodeIfPresent(Params.self, forKey: .params) ?? .init()
+        params = try c.decodeIfPresent(Params.self, forKey: .params) ?? provider.defaultParams
+    }
+}
+
+public extension Connection {
+    func crossesCredentialBoundary(to updated: Connection) -> Bool {
+        guard provider == updated.provider else { return true }
+        guard provider == .openaiCompatible else { return false }
+        return normalizedOrigin(baseUrl) != normalizedOrigin(updated.baseUrl)
+    }
+
+    private func normalizedOrigin(_ value: String?) -> String? {
+        guard let value, let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else { return nil }
+        let port = switch (scheme, url.port) {
+        case ("https", 443), ("http", 80), (_, nil): ""
+        case (_, let port?): ":\(port)"
+        }
+        return "\(scheme)://\(host)\(port)"
     }
 }
 

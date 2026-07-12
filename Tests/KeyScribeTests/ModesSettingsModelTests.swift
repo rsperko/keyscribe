@@ -129,7 +129,33 @@ struct ModesSettingsModelTests {
         #expect(model.selectedID == "email-copy")
     }
 
-    @Test func materializingATemplateWritesAnEnabledSeedAndSelectsIt() throws {
+    // The Start-from-a-Template section holds every catalog template until it is materialized at its catalog
+    // id, then that template drops out (its identity now lives in Your Modes).
+    @Test func starterTemplatesExcludeAMaterializedCatalogIdentity() throws {
+        let (model, support, _) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        #expect(model.starterTemplates.map(\.id) == ModeStore.templates().map(\.id))
+
+        model.materializeTemplate("polish")
+
+        #expect(!model.starterTemplates.contains { $0.id == "polish" })
+        // Selecting the materialized identity now resolves to a real mode, not a starter preview.
+        #expect(model.selected?.id == "polish")
+        #expect(model.selectedStarter == nil)
+    }
+
+    @Test func selectingAnUnmaterializedTemplateResolvesToAStarterPreview() throws {
+        let (model, support, _) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+
+        model.selectedID = "email"
+
+        #expect(model.selected == nil)
+        #expect(model.selectedStarter?.id == "email")
+    }
+
+    @Test func materializingATemplateWritesADisabledSeedAndSelectsIt() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
 
@@ -138,7 +164,7 @@ struct ModesSettingsModelTests {
         #expect(tomls(in: modesDir) == ["polish"])
         let polish = try #require(model.modes.first { $0.id == "polish" })
         #expect(polish.seedId == "polish")
-        #expect(polish.enabled)
+        #expect(polish.enabled == false)   // added Disabled; user enables after reviewing the seeded editor
         #expect(model.selectedID == "polish")
         // The materialized seed's ledger entry carries a real fingerprint (participates in seed updates).
         let ledger = ModeStore.loadLedger(in: support.appendingPathComponent("lkg", isDirectory: true))

@@ -79,7 +79,7 @@ struct FirstRunView: View {
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Choose speech recognition").font(.title.bold())
-            Text("Download one model for fast, accurate dictation. It stays on your Mac.")
+            Text("Download one model for fast, accurate dictation. It stays on this Mac.")
                 .foregroundStyle(.secondary)
             modelCard
             DisclosureSection("Choose another model", isExpanded: $modelChoiceExpanded) {
@@ -101,7 +101,7 @@ struct FirstRunView: View {
                 .accessibilityIdentifier(AccessibilityID.FirstRun.Model.progress)
             }
             if let error = model.downloadError {
-                Text(error).foregroundStyle(.red).font(.callout)
+                IssueText(error, font: .callout)
             }
             Spacer()
             HStack {
@@ -267,9 +267,9 @@ struct FirstRunView: View {
             Text("Try your voice").font(.title.bold())
             if let descriptor = model.directTrigger {
                 HStack(spacing: 6) {
-                    Text("Hold").foregroundStyle(.secondary)
                     KeycapView(descriptor: descriptor)
-                    Text("to speak, then release.").foregroundStyle(.secondary)
+                    Text((PressStyle(rawValue: model.directTriggerStyle ?? "hold-or-tap") ?? .holdOrTap).instruction)
+                        .foregroundStyle(.secondary)
                 }
                 Text("Your words appear in any app.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -283,7 +283,7 @@ struct FirstRunView: View {
                     key: model.directTriggerBinding, profile: .modeTrigger,
                     accessibilityID: AccessibilityID.FirstRun.TryIt.shortcutWell)
                 if let error = model.triggerSaveError {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    IssueText(error)
                 }
             } else {
                 Button("Use a different key…") { changeTriggerRevealed = true }
@@ -322,10 +322,11 @@ struct FirstRunView: View {
         .onAppear(perform: focusTrialField)
     }
 
+
     private var aiService: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Make rough dictation clear").font(.title.bold())
-            Text("Optional — add your AI service to turn rough words into polished text. Dictation stays on your Mac.")
+            Text("Optional — add your AI service to turn rough words into polished text. Speech recognition stays on this Mac.")
                 .font(.callout).foregroundStyle(.secondary)
 
             if model.aiOfferExpanded {
@@ -339,7 +340,7 @@ struct FirstRunView: View {
                     .accessibilityIdentifier(AccessibilityID.FirstRun.AI.connectionEditor)
 
                 if let error = model.aiSetupError {
-                    Text(error).font(.callout).foregroundStyle(.red)
+                    IssueText(error, font: .callout)
                 }
 
                 Spacer()
@@ -412,11 +413,11 @@ struct FirstRunView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("ROUGH")
                 .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
-            Text("um I think we should maybe send the notes tomorrow")
+            Text(FirstRunModel.polishExample)
                 .font(.caption).foregroundStyle(.secondary)
             Text("POLISHED")
                 .font(.caption2.weight(.semibold)).foregroundStyle(.tint)
-            Text("Let's send the notes tomorrow.")
+            Text(FirstRunModel.polishExamplePolished)
                 .font(.callout)
         }
         .padding(12)

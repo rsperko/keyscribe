@@ -20,14 +20,14 @@ struct ModeTemplateTests {
         #expect(!ModeStore.templateSummary(for: "polish").isEmpty)
     }
 
-    @Test func materializeAtAFreeCatalogIdIsAnEnabledSeed() {
+    @Test func materializeAtAFreeCatalogIdIsADisabledSeed() {
         let template = ModeStore.templates().first { $0.id == "polish" }!
         let result = ModeTemplateInstantiation.materialize(template: template, existing: [], connections: [])
         guard case .seed(let mode) = result else { Issue.record("expected .seed"); return }
         #expect(mode.id == "polish")
         #expect(mode.seedId == "polish")
         #expect(mode.seedVersion == template.seedVersion)
-        #expect(mode.enabled)
+        #expect(!mode.enabled)   // added Disabled; the user enables it after reviewing the seeded editor
     }
 
     @Test func materializeAtATakenCatalogIdIsASuffixedSeedlessCopy() {
@@ -38,7 +38,7 @@ struct ModeTemplateTests {
         #expect(mode.id == "polish-2")
         #expect(mode.seedId == nil)
         #expect(mode.seedVersion == nil)
-        #expect(mode.enabled)
+        #expect(!mode.enabled)
     }
 
     @Test func aTriggerHeldByAnEnabledModeIsDroppedOnMaterialize() {

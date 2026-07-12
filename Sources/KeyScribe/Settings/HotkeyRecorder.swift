@@ -220,7 +220,12 @@ final class RecorderButtonView: NSButton {
 
     private func handleFlags(_ event: NSEvent) {
         guard recording else { return }
-        let count = RecorderButtonView.modifierSet(event.modifierFlags).count
+        let modifiers = RecorderButtonView.modifierSet(event.modifierFlags)
+        if let descriptor = model.modifierEvent(keyCode: Int(event.keyCode), modifiers: modifiers) {
+            commit(descriptor)
+            return
+        }
+        let count = modifiers.count
         if count == 0 {
             if peakModifierCount >= 2, !didCommit {
                 model.noKeyOnModifierRelease()

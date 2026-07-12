@@ -62,30 +62,32 @@ struct AIConnectionDraftEditor: View {
             Section("Model") {
                 modelRows
             }
-            if let onTest {
-                Section("Connection test") {
-                    HStack {
-                        Button("Test Connection", action: onTest)
-                            .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
-                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
-                        if testState == .testing { ProgressView().controlSize(.small) }
+            Section {
+                Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if onTest != nil || onDelete != nil {
+                    HStack(spacing: 10) {
+                        if let onTest {
+                            Button("Test Connection", action: onTest)
+                                .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
+                                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
+                            if testState == .testing { ProgressView().controlSize(.small) }
+                            testStatus
+                        }
                         Spacer()
-                        testStatus
+                        if let onDelete {
+                            PaneDeleteButton(title: "Delete AI Service") { onDelete() }
+                                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
+                        }
                     }
+                }
+                if onTest != nil {
                     if case .failed(let message) = testState {
-                        Text(message).font(.caption).foregroundStyle(.red)
+                        IssueText(message)
                     }
                     if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey) {
                         Text(reason).font(.caption).foregroundStyle(.secondary)
                     }
-                }
-            }
-            Section {
-                Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let onDelete {
-                    Button("Delete AI Service", role: .destructive, action: onDelete)
-                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
                 }
             }
         }
@@ -232,6 +234,7 @@ struct AIConnectionDraftEditor: View {
         if let url = draft.selectedPreset.keysURL {
             Link("Get an API key", destination: url)
                 .font(.caption)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.getKeyLink)
         }
     }
 
@@ -304,8 +307,9 @@ struct AIConnectionDraftEditor: View {
         switch draft.modelDiscoveryState {
         case .loaded where !draft.availableModels.isEmpty:
             Text("\(draft.availableModels.count) found").font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.foundModel)
         case .failed(let message):
-            Text(message).font(.caption).foregroundStyle(.orange)
+            IssueText(message, severity: .advisory)
                 .lineLimit(1)
         default:
             EmptyView()
@@ -345,10 +349,7 @@ struct AIConnectionDraftEditor: View {
             get: { draft.selectedPreset.id },
             set: { id in
                 guard let preset = ConnectionPreset.preset(id: id) else { return }
-                draft.applyPreset(
-                    preset,
-                    hasStoredKey: hasStoredKey,
-                    updateDefaultName: presentation == .onboarding)
+                draft.applyPreset(preset, updateDefaultName: presentation == .onboarding)
                 commit(nil)
             })
     }
@@ -409,8 +410,7 @@ struct AIConnectionDraftEditor: View {
     }
 
     private func requiredLabel(_ text: String) -> some View {
-        Label(text, systemImage: "exclamationmark.circle.fill")
-            .font(.caption).foregroundStyle(.orange)
+        IssueText(text, severity: .advisory)
     }
 
     private func saveKey() {

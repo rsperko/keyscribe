@@ -95,8 +95,6 @@ extension ConnectionPreset {
     }
 
     static func normalize(_ baseURL: String?) -> String {
-        var s = Substring(baseURL?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "")
-        while s.hasSuffix("/") { s = s.dropLast() }
-        return String(s)
+        (baseURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased().removingTrailingSlash
     }
 }

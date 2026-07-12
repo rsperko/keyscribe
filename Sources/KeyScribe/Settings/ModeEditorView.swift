@@ -129,10 +129,17 @@ struct ModeEditorView: View {
             }
 
             Section {
-                Button("Duplicate Mode", systemImage: "plus.square.on.square", action: onDuplicate)
+                HStack(spacing: 10) {
+                    Button {
+                        onDuplicate()
+                    } label: {
+                        Label("Duplicate Mode", systemImage: "plus.square.on.square")
+                    }
                     .accessibilityIdentifier(AccessibilityID.Mode.Editor.duplicate)
-                Button("Delete Mode", role: .destructive, action: onDelete)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.delete)
+                    Spacer()
+                    PaneDeleteButton(title: "Delete Mode") { onDelete() }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.delete)
+                }
             }
         }
         .formStyle(.grouped)
@@ -148,12 +155,21 @@ struct ModeEditorView: View {
     }
 
     @ViewBuilder private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            summaryLine("When", ModeSummary.whenRuns(mode))
-            summaryLine("Does", mode.source == .selection
-                ? "Replaces the selected text using your spoken instruction"
-                : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))
-            summaryLine("Text goes", boundarySummary)
+        VStack(alignment: .leading, spacing: 10) {
+            PaneDetailHeader(
+                systemImage: "square.stack.3d.up",
+                title: mode.name,
+                subtitle: ModeSummary.whenRuns(mode),
+                badges: {
+                    if mode.isSystem { PaneBadge("Built in") }
+                    if !mode.enabled { PaneBadge("Disabled") }
+                })
+            VStack(alignment: .leading, spacing: 6) {
+                summaryLine("Does", mode.source == .selection
+                    ? "Replaces the selected text using your spoken instruction"
+                    : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))
+                summaryLine("Text goes", boundarySummary)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -194,7 +210,9 @@ struct ModeEditorView: View {
                 .font(.caption).foregroundStyle(.secondary)
             DictionaryRows(
                 words: mode.dictionary.words,
+                removeID: AccessibilityID.Mode.Editor.Recognition.dictionaryRemove,
                 onRemove: removeWord)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.dictionaryList)
             if mode.dictionary.words.isEmpty {
                 Text("None yet").font(.caption).foregroundStyle(.tertiary)
             }
@@ -206,7 +224,9 @@ struct ModeEditorView: View {
                 .font(.caption).foregroundStyle(.secondary)
             ReplacementRows(
                 rules: mode.replacements.rules,
+                removeID: AccessibilityID.Mode.Editor.Recognition.replacementRemove,
                 onRemove: removeReplacement(at:))
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.replacementsList)
             if mode.replacements.rules.isEmpty {
                 Text("None yet").font(.caption).foregroundStyle(.tertiary)
             }
@@ -214,6 +234,7 @@ struct ModeEditorView: View {
             if mode.source != .selection {
                 Divider().padding(.vertical, 4)
                 Toggle("Write numbers as digits", isOn: bind.commandsBinding(\.numbers))
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.numbersAsDigits)
                 Text("Numbers are tidied on this Mac, before any AI rewrite.")
                     .font(.caption).foregroundStyle(.secondary)
             }

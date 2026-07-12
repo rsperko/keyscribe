@@ -8,6 +8,7 @@ struct KeyDescriptorTests {
         #expect(try KeyDescriptor(parsing: "hyper") == .named(.hyper))
         #expect(try KeyDescriptor(parsing: "right_option") == .named(.rightOption))
         #expect(try KeyDescriptor(parsing: "right_command") == .named(.rightCommand))
+        #expect(try KeyDescriptor(parsing: "right_control") == .named(.rightControl))
     }
 
     @Test func keycapTokensForNamedKeys() {
@@ -15,6 +16,15 @@ struct KeyDescriptorTests {
         #expect(KeyDescriptor.named(.hyper).keycapTokens == ["⌃", "⌥", "⇧", "⌘"])
         #expect(KeyDescriptor.named(.rightOption).keycapTokens == ["right ⌥"])
         #expect(KeyDescriptor.named(.rightCommand).keycapTokens == ["right ⌘"])
+        #expect(KeyDescriptor.named(.rightControl).keycapTokens == ["right ⌃"])
+    }
+
+    @Test func rightControlDescriptorProperties() {
+        #expect(KeyDescriptor.named(.rightControl).displayString == "Right-⌃")
+        #expect(KeyDescriptor.named(.rightControl).triggerKeyCode == 62)
+        #expect(KeyDescriptor.named(.rightControl).requiredModifiers == [.control])
+        #expect(KeyDescriptor.named(.rightControl).isModifierOnly)
+        #expect(KeyDescriptor.named(.rightControl).canonical == "right_control")
     }
 
     @Test func keycapTokensForChordsAreModifiersThenKeyInCanonicalOrder() {

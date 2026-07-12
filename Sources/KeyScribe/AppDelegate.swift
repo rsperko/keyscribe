@@ -328,7 +328,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.controller.handleCommit()
                     self?.refreshStatus()
                 },
-                onAction: { [weak self] id in self?.handleHotkeyAction(id) })
+                onAction: { [weak self] id in self?.handleHotkeyAction(id) },
+                onCancel: { [weak self] in self?.controller.cancel() })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
         }
@@ -389,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildHotkeyMonitor()
         }
         refreshStatus()
+        configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
         // modes/dictionary/fragments realization invalidate() just discarded (mirrors the launch warm).
         Task { @MainActor [weak self] in _ = self?.config.resolved }

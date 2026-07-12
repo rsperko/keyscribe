@@ -312,15 +312,6 @@ struct SettingsRootView: View {
         ], shadowed: shadowedHotkeys())
     }
 
-    // The Direct mode's trigger, read live from the observed modes model so the General pointer row updates
-    // when it is rebound in Modes (UX2 phase 3c).
-    private var plainDictationTrigger: KeyDescriptor? {
-        guard let key = modes.modes.first(where: { $0.id == Mode.directId })?.triggerKeys.first?.key else {
-            return nil
-        }
-        return try? KeyDescriptor(parsing: key)
-    }
-
     private func shadowedHotkeys() -> Set<String> {
         var ordered = modes.modes.map {
             HotkeyConflicts.Registrant(
@@ -360,10 +351,10 @@ struct SettingsRootView: View {
                     model: general,
                     vocabularyShadowed: shadowed.contains(GlobalHotkey.vocabularyId),
                     pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId),
-                    plainDictationTrigger: plainDictationTrigger,
-                    onOpenPlainDictation: {
-                        PlainDictationPointer.open(modes: modes, navigation: navigation)
-                    })
+                    directMode: modes.modes.first(where: { $0.id == Mode.directId }),
+                    allModes: modes.modes,
+                    actionShortcuts: actionShortcutRivals,
+                    onUpdatePlainDictation: { modes.update($0) })
             case .speechModels:
                 SpeechModelsView(model: speechModels, settings: general)
             case .vocabulary:
@@ -389,15 +380,6 @@ struct SettingsRootView: View {
             if new == .history { onHistoryPaneChange(true) }
             else if old == .history { onHistoryPaneChange(false) }
         }
-    }
-}
-
-// The General pane's "Change in Modes…" pointer: select the Direct (Plain Dictation) mode and route to the
-// Modes pane. Extracted so the effect is unit-testable without driving the SwiftUI view (UX2 phase 3).
-enum PlainDictationPointer {
-    @MainActor static func open(modes: ModesSettingsModel, navigation: SettingsNavigationModel) {
-        modes.selectedID = Mode.directId
-        navigation.destination = .modes
     }
 }
 

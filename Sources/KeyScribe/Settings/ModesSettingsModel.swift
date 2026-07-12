@@ -55,9 +55,11 @@ final class ModesSettingsModel: ObservableObject {
         loadFailures = result.failures
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         fragmentIds = loadFragmentIds()
-        if selectedID == nil || !modes.contains(where: { $0.id == selectedID }) {
-            // With no user modes (a fresh, templates-only install), leave the detail empty so the template
-            // gallery is the landing state; otherwise keep selecting the first mode.
+        let selectionStillValid = selectedID != nil
+            && (modes.contains { $0.id == selectedID } || ModeStore.templates().contains { $0.id == selectedID })
+        if !selectionStillValid {
+            // A fresh, templates-only install lands on the first user mode if one exists; otherwise leave the
+            // detail empty (the Start-from-a-Template section is visible in the list either way).
             selectedID = modes.contains { !$0.isSystem } ? modes.first?.id : nil
         }
         loadedSignature = configSignature()
@@ -112,9 +114,23 @@ final class ModesSettingsModel: ObservableObject {
         selectedID = materialization.mode.id
     }
 
-    // A template already materialized at its catalog id (so the gallery shows "Added" instead of an Add button).
+    // A template already materialized at its catalog id (so it drops out of the Start-from-a-Template section).
     func isTemplateMaterialized(_ seedId: String) -> Bool {
         modes.contains { $0.id == seedId }
+    }
+
+    // The Catalog section for the Modes pane: starter templates not yet materialized at their catalog identity.
+    // A materialized starter leaves the catalog (its identity now lives in Your Modes); deleting that mode
+    // brings the starter back (option-1-rollout.md).
+    var starterTemplates: [Mode] {
+        ModeStore.templates().filter { !isTemplateMaterialized($0.id) }
+    }
+
+    // The template backing the current selection when it is a not-yet-materialized starter (selectedID is the
+    // template's catalog id). nil once a real mode owns the selection.
+    var selectedStarter: Mode? {
+        guard selected == nil, let id = selectedID else { return nil }
+        return starterTemplates.first { $0.id == id }
     }
 
     // Duplicate into a new user-created mode (the system Direct floor is not duplicable). The copy drops the

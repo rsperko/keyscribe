@@ -67,6 +67,15 @@ struct OpenAICompatTests {
         #expect(afterTemp?.indicatesReasoningModel == true)
     }
 
+    @Test func remediatesUnsupportedReasoningEffortByDroppingIt() {
+        let start = RequestAdaptations.default(for: .openai)
+        let after = remediatedAdaptations(start, for: OpenAIAPIError(code: "unsupported_parameter", param: "reasoning_effort"))
+        #expect(after?.includeReasoningEffort == false)
+        #expect(after?.includeTemperature == true)
+
+        #expect(remediatedAdaptations(after!, for: OpenAIAPIError(code: "unsupported_parameter", param: "reasoning_effort")) == nil)
+    }
+
     @Test func remediatesRoleByFolding() {
         let start = RequestAdaptations.default(for: .openaiCompatible)
         let folded = remediatedAdaptations(start, for: OpenAIAPIError(code: "unsupported_value", param: "messages[0].role"))

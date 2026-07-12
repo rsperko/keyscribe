@@ -11,7 +11,7 @@ public struct ShortcutProfile: Equatable, Sendable {
     public static let actionChord = ShortcutProfile(allowsNamedKeys: false, allowsMouseButtons: false)
 
     public var namedKeyOptions: [NamedKey] {
-        allowsNamedKeys ? [.fn, .rightOption, .rightCommand, .hyper] : []
+        allowsNamedKeys ? [.fn, .rightOption, .rightCommand, .rightControl, .hyper] : []
     }
 }
 
@@ -24,6 +24,7 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
     public private(set) var phase: Phase = .idle
     public private(set) var hint: String?
     private var priorValue: KeyDescriptor?
+    private var pendingModifierOnly: KeyDescriptor?
 
     public init(profile: ShortcutProfile, stored: String) {
         self.profile = profile
@@ -38,12 +39,14 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
 
     public mutating func beginRecording() {
         priorValue = value
+        pendingModifierOnly = nil
         phase = .recording
         hint = nil
     }
 
     public mutating func keyEvent(keyCode: Int, modifiers: Set<Modifier>) -> KeyDescriptor? {
         guard phase == .recording else { return nil }
+        pendingModifierOnly = nil
         if let descriptor = KeyDescriptor(eventKeyCode: keyCode, modifiers: modifiers) {
             commit(descriptor)
             return descriptor
@@ -52,8 +55,29 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
         return nil
     }
 
+    public mutating func modifierEvent(keyCode: Int, modifiers: Set<Modifier>) -> KeyDescriptor? {
+        guard phase == .recording else { return nil }
+        guard profile.allowsNamedKeys else { return nil }
+
+        if let descriptor = modifierOnlyDescriptor(keyCode: keyCode, modifiers: modifiers) {
+            pendingModifierOnly = descriptor
+            return nil
+        }
+
+        if modifiers.isEmpty, let pendingModifierOnly {
+            commit(pendingModifierOnly)
+            return pendingModifierOnly
+        }
+
+        if pendingModifierOnly != .named(.hyper) {
+            pendingModifierOnly = nil
+        }
+        return nil
+    }
+
     public mutating func mouseEvent(buttonNumber: Int) -> KeyDescriptor? {
         guard phase == .recording else { return nil }
+        pendingModifierOnly = nil
         guard profile.allowsMouseButtons else {
             hint = "Mouse buttons can't be used for this shortcut"
             return nil
@@ -66,6 +90,7 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
     public mutating func cancel() {
         guard phase == .recording else { return }
         value = priorValue
+        pendingModifierOnly = nil
         phase = .idle
         hint = nil
     }
@@ -85,7 +110,18 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
     private mutating func commit(_ descriptor: KeyDescriptor) {
         value = descriptor
         rawFallback = nil
+        pendingModifierOnly = nil
         phase = .idle
         hint = nil
+    }
+
+    private func modifierOnlyDescriptor(keyCode: Int, modifiers: Set<Modifier>) -> KeyDescriptor? {
+        if modifiers == Set(Modifier.allCases) { return .named(.hyper) }
+        switch (keyCode, modifiers) {
+        case (61, [.option]): return .named(.rightOption)
+        case (54, [.command]): return .named(.rightCommand)
+        case (62, [.control]): return .named(.rightControl)
+        default: return nil
+        }
     }
 }

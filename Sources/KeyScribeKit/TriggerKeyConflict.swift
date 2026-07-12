@@ -72,15 +72,19 @@ public enum TriggerKeyConflicts {
         }
     }
 
-    // A modifier-only trigger (Hyper / right-Option / right-Command) fires the instant its modifiers are held,
-    // so any chord or action shortcut whose modifier set is a superset ALSO fires it — that rival runs its own
-    // action AND starts this mode's dictation from one press. `collides` can't express this (key codes
-    // differ), so the exact-duplicate check misses it. Returns the first rival that would double-fire
-    // `triggerKey`; exact duplicates are left to `conflict`/`shadowed`.
+    // Only the Hyper trigger can genuinely double-fire with a chord that subsumes it. The right-side
+    // modifier triggers (right-Option / right-Command / right-Control) are disambiguated at runtime by
+    // the "chord wins" rule (HotkeyMonitor: a bare modifier-only trigger is suppressed while any foreign
+    // chord modifier is also held, and a bare start is aborted if one joins), so an overlapping chord
+    // no longer double-fires them — warning there would be noise on a common, legitimate setup
+    // (e.g. right-Option dictation next to a Hyper action shortcut). Hyper is the maximal modifier set,
+    // so nothing outranks it: pressing ⌃⌥⇧⌘X fires a Hyper-triggered mode alongside the chord with no
+    // "bare vs chord" distinction to exploit — that lone case still warrants the warning.
+    // Returns the first rival whose modifier set is a superset of Hyper's; exact duplicates and the
+    // right-side keys are left to `conflict`/`shadowed`/the runtime.
     public static func modifierOverlap(triggerKey: String, with rivals: [RivalBinding]) -> TriggerOverlap? {
-        guard let trigger = try? KeyDescriptor(parsing: triggerKey), trigger.isModifierOnly else { return nil }
+        guard let trigger = try? KeyDescriptor(parsing: triggerKey), case .named(.hyper) = trigger else { return nil }
         let mods = trigger.requiredModifierMask
-        guard !mods.isEmpty else { return nil }
         for rival in rivals {
             guard let descriptor = try? KeyDescriptor(parsing: rival.key),
                   !descriptor.collides(with: trigger),

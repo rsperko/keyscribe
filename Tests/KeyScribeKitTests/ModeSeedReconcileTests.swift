@@ -211,6 +211,7 @@ struct ModeSeedReconcileTests {
             Issue.record("expected .seed"); return
         }
         mode.aiRewrite?.connection = "conn-1"
+        mode.enabled = true   // the user enabled the added-Disabled starter; the bump must carry that forward
         try ModeStore.write(mode, to: d.modes)
         ModeStore.recordMaterializedSeed(mode, ledgerDir: d.ledger)
 

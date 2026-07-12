@@ -258,9 +258,7 @@ private struct CorrectionPanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if regexInvalid {
-                Label("That is not a valid regular expression.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                IssueText("That is not a valid regular expression.")
             }
 
             Text(saveDestinationText)

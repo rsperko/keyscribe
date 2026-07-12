@@ -5,12 +5,14 @@ import KeyScribeKit
 struct ModeTriggerRow: View {
     let mode: Mode
     let onUpdate: (Mode) -> Void
+    var label: String = "Start this mode with"
+    var accessibilityID: String = AccessibilityID.Mode.Editor.shortcutWell
     @State private var rememberedStyle: String?
     @State private var rememberedThreshold: Int?
 
     var body: some View {
-        LabeledContent("Start this mode with") {
-            ShortcutWell(key: triggerKey, profile: .modeTrigger, accessibilityID: AccessibilityID.Mode.Editor.shortcutWell)
+        LabeledContent(label) {
+            ShortcutWell(key: triggerKey, profile: .modeTrigger, accessibilityID: accessibilityID)
         }
     }
 
@@ -52,6 +54,8 @@ struct PressStyleRow: View {
         }
         .disabled(disabled)
         .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
+        Text((PressStyle(rawValue: selection.wrappedValue) ?? .holdOrTap).instruction)
+            .font(.caption).foregroundStyle(.secondary)
     }
 }
 
@@ -60,23 +64,22 @@ struct TriggerConflictLabel: View {
 
     @ViewBuilder var body: some View {
         if let conflict {
-            Label("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
-                  systemImage: "exclamationmark.triangle.fill")
-                .font(.caption).foregroundStyle(.orange)
+            IssueText("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
+                      severity: .advisory)
         }
     }
 }
 
-// A modifier-only trigger (Hyper / right ⌥ / right ⌘) fires the instant its modifiers are held, so a
-// chord or action shortcut whose modifiers include them starts this mode too, from a single press.
+// A Hyper trigger fires the instant all four modifiers are held, so a ⌃⌥⇧⌘ chord or action shortcut
+// starts this mode too, from a single press. The right-side modifier triggers are disambiguated at
+// runtime ("chord wins"), so only Hyper still surfaces this warning (see TriggerKeyConflicts.modifierOverlap).
 struct TriggerOverlapLabel: View {
     let overlap: TriggerOverlap?
 
     @ViewBuilder var body: some View {
         if let overlap {
-            Label("Pressing \(overlap.rivalLabel) also starts this mode — its keys include this shortcut’s modifiers. Give one of them different keys so a single press doesn’t fire both.",
-                  systemImage: "exclamationmark.triangle.fill")
-                .font(.caption).foregroundStyle(.orange)
+            IssueText("Pressing \(overlap.rivalLabel) also starts this mode — its keys include this shortcut’s modifiers. Give one of them different keys so a single press doesn’t fire both.",
+                      severity: .advisory)
         }
     }
 }

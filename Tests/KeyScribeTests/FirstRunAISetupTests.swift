@@ -233,7 +233,7 @@ struct FirstRunAISetupTests {
         model.aiProvider = .openai
         model.aiAuthMethod = .apiKey
         model.aiAPIKey = ""
-        model.changeAIProvider(from: .openai, to: .openaiCompatible)
+        model.aiDraft.applyPreset(.custom, updateDefaultName: true)
 
         #expect(model.aiProvider == .openaiCompatible)
         #expect(model.aiAuthMethod == .apiKey)

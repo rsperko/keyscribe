@@ -32,7 +32,7 @@ extension Modifier {
 }
 
 public enum NamedKey: String, Sendable {
-    case fn, hyper, rightOption, rightCommand
+    case fn, hyper, rightOption, rightCommand, rightControl
 }
 
 public enum BaseKey: Equatable, Sendable {
@@ -116,6 +116,7 @@ extension KeyDescriptor {
         case .named(.hyper): return [.control, .option, .shift, .command]
         case .named(.rightOption): return [.option]
         case .named(.rightCommand): return [.command]
+        case .named(.rightControl): return [.control]
         case .named(.fn): return []
         case .chord(let mods, _): return mods
         case .mouseButton: return []
@@ -127,6 +128,7 @@ extension KeyDescriptor {
         case .named(.hyper): return [.control, .option, .shift, .command]
         case .named(.rightOption): return [.option]
         case .named(.rightCommand): return [.command]
+        case .named(.rightControl): return [.control]
         case .named(.fn): return []
         case .chord(let mods, _): return ModifierSet(mods)
         case .mouseButton: return []
@@ -138,6 +140,7 @@ extension KeyDescriptor {
         case .named(.fn): return 63
         case .named(.rightOption): return 61
         case .named(.rightCommand): return 54
+        case .named(.rightControl): return 62
         case .named(.hyper): return 55
         case .chord(_, let key): return key.keyCode
         case .mouseButton(let n): return n
@@ -174,7 +177,7 @@ extension KeyDescriptor {
     /// flag, which no chord carries — as are chords and mouse buttons.
     public var isModifierOnly: Bool {
         switch self {
-        case .named(.hyper), .named(.rightOption), .named(.rightCommand): return true
+        case .named(.hyper), .named(.rightOption), .named(.rightCommand), .named(.rightControl): return true
         case .named(.fn), .chord, .mouseButton: return false
         }
     }
@@ -187,6 +190,7 @@ extension KeyDescriptor {
         case .named(.hyper): return Modifier.allCases.map(\.glyph)
         case .named(.rightOption): return ["right ⌥"]
         case .named(.rightCommand): return ["right ⌘"]
+        case .named(.rightControl): return ["right ⌃"]
         case .chord(let mods, let key):
             return Modifier.allCases.filter { mods.contains($0) }.map(\.glyph) + [key.displayString]
         case .mouseButton: return []
@@ -199,6 +203,7 @@ extension KeyDescriptor {
         case .named(.hyper): return "⌃⌥⇧⌘"
         case .named(.rightOption): return "Right-⌥"
         case .named(.rightCommand): return "Right-⌘"
+        case .named(.rightControl): return "Right-⌃"
         case .chord(let mods, let key):
             let glyphs = Modifier.allCases.filter { mods.contains($0) }.map(\.glyph).joined()
             return glyphs + key.displayString
@@ -214,6 +219,7 @@ extension NamedKey {
         case "hyper": self = .hyper
         case "right_option": self = .rightOption
         case "right_command": self = .rightCommand
+        case "right_control": self = .rightControl
         default: return nil
         }
     }
@@ -224,6 +230,7 @@ extension NamedKey {
         case .hyper: return "hyper"
         case .rightOption: return "right_option"
         case .rightCommand: return "right_command"
+        case .rightControl: return "right_control"
         }
     }
 }

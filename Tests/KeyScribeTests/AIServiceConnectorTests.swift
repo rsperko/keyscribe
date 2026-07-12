@@ -99,61 +99,96 @@ struct AIServiceConnectorTests {
         #expect(second.allocatedId == "gemini")   // did not become gemini-2 despite the first failure
     }
 
-    // MARK: showsForm predicate
+    // MARK: Settings add-a-service flow (persist-immediately)
 
-    @Test func showsFormRulesAreDirectlyTestable() {
-        #expect(AIServiceDetailForm.showsForm(configIssue: nil, testState: .passed, isEditing: false) == false)
-        #expect(AIServiceDetailForm.showsForm(configIssue: nil, testState: nil, isEditing: false) == false)
-        #expect(AIServiceDetailForm.showsForm(configIssue: nil, testState: .passed, isEditing: true) == true)
-        #expect(AIServiceDetailForm.showsForm(configIssue: .missingModel, testState: .passed, isEditing: false) == true)
-        #expect(AIServiceDetailForm.showsForm(configIssue: nil, testState: .failed("x"), isEditing: false) == true)
-    }
-
-    // MARK: Settings draft flow (delegates to the connector)
-
-    private func settingsModel(
-        testConnection: @escaping @Sendable (Connection) async -> ConnectionTestState,
-        support: URL
-    ) -> AIServiceSettingsModel {
+    private func settingsModel(support: URL) -> AIServiceSettingsModel {
         try? FileManager.default.createDirectory(
             at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
         return AIServiceSettingsModel(
             repository: repository,
-            tester: ConnectionTester(client: StubLLMClient(testConnection: testConnection)),
+            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in })
     }
 
-    @Test func abandoningTheDraftPersistsNothing() {
+    // Add Service persists a seeded connection immediately and selects it — no test, no key. It lands in an
+    // honest "no key" config state (not usable until the user finishes it in the editor and Tests it).
+    @Test func addServicePersistsASeededConnectionAndSelectsIt() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
-        let model = settingsModel(testConnection: { _ in .passed }, support: support)
+        let model = settingsModel(support: support)
 
-        model.beginCreate()
-        model.createDraft.name = "Half"
-        model.cancelCreate()
+        model.addService(preset: .gemini)
 
-        #expect(model.isCreatingDraft == false)
-        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+        let saved = ConnectionStore.loadOrDefault(supportDir: support).connections
+        #expect(saved.count == 1)
+        let connection = try! #require(saved.first)
+        #expect(connection.provider == .gemini)
+        #expect(connection.model == ConnectionPreset.gemini.defaultModel)
+        #expect(model.selectedID == connection.id)
+        #expect(model.testState(for: connection.id) == nil)   // never claimed as working on add
     }
 
-    @Test func aPassingDraftConnectSelectsTheServiceAndLeavesTheForm() async {
+    @Test func firstServiceOfferSurvivesSavingItsKeyUntilTheTestPasses() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
-        let model = settingsModel(testConnection: { _ in .passed }, support: support)
+        let modes = support.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modes, withIntermediateDirectories: true)
+        var pendingMode = Mode(id: "rewrite", name: "Rewrite")
+        pendingMode.aiRewrite = .init(connection: "", prompt: "Rewrite")
+        try? ModeStore.write(pendingMode, to: modes)
+        let model = settingsModel(support: support)
+        model.addService(preset: .gemini)
+        let connection = try! #require(model.selected)
 
-        model.beginCreate()
-        model.createDraft.name = "Gemini"
-        model.createDraft.provider = .gemini
-        model.createDraft.model = "gemini-2.5-flash"
-        model.createDraft.apiKey = "secret"
-        model.connectDraft()
-        await model.createTask?.value
+        model.update(connection, apiKey: "key")
+        model.test(connection)
+        await model.testTask?.value
 
-        #expect(model.isCreatingDraft == false)
-        #expect(model.selectedID == "gemini")
-        #expect(model.testState(for: "gemini") == .passed)
-        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.map(\.id) == ["gemini"])
+        #expect(model.pendingConnectOffer?.connectionId == connection.id)
+    }
+
+    @Test func credentialBoundaryMintsAKeyReference() {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = settingsModel(support: support)
+        model.addService(preset: .gemini)
+        let connection = try! #require(model.selected)
+        var updated = connection
+        updated.provider = .openai
+
+        model.updateAcrossCredentialBoundary(updated)
+
+        #expect(model.selected?.keyRef != connection.keyRef)
+    }
+
+    // A provider starter is reusable: adding a second connection for the same provider disambiguates the name
+    // rather than overwriting the first.
+    @Test func addingASecondServiceForAProviderKeepsBothWithDistinctNames() {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = settingsModel(support: support)
+
+        model.addService(preset: .gemini)
+        model.addService(preset: .gemini)
+
+        let saved = ConnectionStore.loadOrDefault(supportDir: support).connections
+        #expect(saved.count == 2)
+        #expect(Set(saved.map(\.name)).count == 2)   // uniqued, not two identical "Gemini" rows
+    }
+
+    // The Catalog row label switches from "Connect to X" to "Connect another X service" once a connection for
+    // that provider exists — so a saved service named after its provider cannot be confused with the starter.
+    @Test func presetRowLabelBecomesConnectAnotherOnceProviderExists() {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = settingsModel(support: support)
+
+        #expect(model.presetRows.first { $0.preset.id == "gemini" }?.label == "Connect to Gemini")
+
+        model.addService(preset: .gemini)
+
+        #expect(model.presetRows.first { $0.preset.id == "gemini" }?.label == "Connect another Gemini service")
     }
 
     // MARK: shared status vocabulary

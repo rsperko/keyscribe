@@ -50,12 +50,40 @@ struct HTTPLLMClient: LLMClient {
         switch connection.provider {
         case .openai, .openaiCompatible:
             return try await completeOpenAI(system: system, user: user, connection: connection, key: key)
-        case .anthropic, .gemini:
+        case .anthropic:
             let request = try buildRequest(
                 system: system, user: user, connection: connection, key: key,
-                adaptations: .default(for: connection.provider))
+                adaptations: .default(for: .anthropic))
             let data = try await transport.send(request)
-            return try parse(data, provider: connection.provider)
+            return try parse(data, provider: .anthropic)
+        case .gemini:
+            return try await completeGemini(system: system, user: user, connection: connection, key: key)
+        }
+    }
+
+    // Gemini has no structured unsupported-parameter error to key a remediation loop on, but a model that
+    // rejects thinkingConfig (e.g. one that takes thinkingBudget instead of thinkingLevel) must not break
+    // every rewrite permanently. On a 400 with thinkingConfig in the payload, retry once without it and
+    // remember only if the retry succeeds — a 400 with an unrelated cause fails again identically and
+    // caches nothing.
+    private func completeGemini(system: String, user: String, connection: Connection, key: String?) async throws -> String {
+        let cacheKey = adaptationCacheKey(for: connection)
+        let adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: .gemini)
+        let request = try buildRequest(
+            system: system, user: user, connection: connection, key: key, adaptations: adaptations)
+        do {
+            return try parse(try await transport.send(request), provider: .gemini)
+        } catch let ProviderTransportError.http(status, body) where status == 400 {
+            guard adaptations.includeThinkingConfig, connection.params.geminiThinkingLevel != nil else {
+                throw ProviderTransportError.http(status, body: body)
+            }
+            var next = adaptations
+            next.includeThinkingConfig = false
+            let retry = try buildRequest(
+                system: system, user: user, connection: connection, key: key, adaptations: next)
+            let output = try parse(try await transport.send(retry), provider: .gemini)
+            await adaptationCache.remember(next, for: cacheKey)
+            return output
         }
     }
 
@@ -112,7 +140,7 @@ struct HTTPLLMClient: LLMClient {
                 "messages": chatMessages(system: system, user: user, fold: adaptations.foldSystemIntoUser),
             ]
             if adaptations.includeTemperature { payload["temperature"] = temp }
-            if let reasoningEffort = connection.params.reasoningEffort {
+            if adaptations.includeReasoningEffort, let reasoningEffort = connection.params.reasoningEffort {
                 payload["reasoning_effort"] = reasoningEffort
             }
             req.httpBody = try body(payload)
@@ -142,7 +170,7 @@ struct HTTPLLMClient: LLMClient {
                 "temperature": temp,
                 "maxOutputTokens": maxTokens,
             ]
-            if let thinkingLevel = connection.params.geminiThinkingLevel {
+            if adaptations.includeThinkingConfig, let thinkingLevel = connection.params.geminiThinkingLevel {
                 generationConfig["thinkingConfig"] = ["thinkingLevel": thinkingLevel]
             }
             req.httpBody = try body([

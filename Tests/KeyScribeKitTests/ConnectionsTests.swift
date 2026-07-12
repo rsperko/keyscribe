@@ -3,6 +3,23 @@ import Testing
 @testable import KeyScribeKit
 
 struct ConnectionsTests {
+    @Test func credentialBoundaryDetectsProviderAndOriginChangesOnly() {
+        let original = connection(provider: .openaiCompatible, model: "m", baseUrl: "https://example.com/v1")
+        var equivalent = original
+        equivalent.baseUrl = "https://example.com/v1/"
+        #expect(!original.crossesCredentialBoundary(to: equivalent))
+
+        equivalent.baseUrl = "https://example.com:443/v1"
+        #expect(!original.crossesCredentialBoundary(to: equivalent))
+
+        var differentOrigin = original
+        differentOrigin.baseUrl = "https://other.example.com/v1"
+        #expect(original.crossesCredentialBoundary(to: differentOrigin))
+
+        var differentProvider = original
+        differentProvider.provider = .gemini
+        #expect(original.crossesCredentialBoundary(to: differentProvider))
+    }
     private let toml = """
     schema_version = 1
 
@@ -126,6 +143,26 @@ struct ConnectionsTests {
         """
         let c = try #require(try ConnectionStore.decode(from: t).connection(id: "x"))
         #expect(c.params.maxTokens == 2048)   // floor default
+        #expect(c.params.geminiThinkingLevel == "minimal")
+    }
+
+    @Test func absentParamsDecodeToProviderDefaults() throws {
+        func decode(_ provider: String) throws -> Connection? {
+            let t = """
+            schema_version = 1
+            [[connection]]
+            id = "x"
+            name = "X"
+            provider = "\(provider)"
+            model = "m"
+            key_ref = "k"
+            """
+            return try ConnectionStore.decode(from: t).connection(id: "x")
+        }
+        #expect(try decode("openai")?.params.reasoningEffort == "none")
+        #expect(try decode("anthropic")?.params.reasoningEffort == nil)
+        #expect(try decode("openai_compatible")?.params.reasoningEffort == nil)
+        #expect(try decode("openai_compatible")?.params.geminiThinkingLevel == nil)
     }
 
     @Test func missingSchemaVersionThrows() {

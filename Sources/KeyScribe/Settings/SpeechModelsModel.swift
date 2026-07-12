@@ -29,6 +29,13 @@ final class SpeechModelsModel: ObservableObject {
     var activeEngineUsable: Bool { self.set.isUsable(self.set.activeId) }
     var hasFailedModel: Bool { rows.contains { $0.verificationFailed } }
 
+    // The Library/Catalog partition for the two list sections (option-1-rollout.md). On This Mac holds every
+    // usable model — the system-managed Apple engine is always usable, so it lives here too. Available to
+    // Download holds the rest: pristine catalog entries, a row mid-download/verify, and a quarantined failure
+    // (still recoverable), until it verifies usable and promotes.
+    var onThisMacRows: [Row] { rows.filter(\.isUsable) }
+    var availableRows: [Row] { rows.filter { !$0.isUsable } }
+
     private var set: SpeechModelSet
     private var downloading: [String: ModelLoadProgress] = [:]
     private var verifying: Set<String> = []
@@ -267,7 +274,8 @@ final class SpeechModelsModel: ObservableObject {
         case .notDeletable, .notInstalled:
             return
         case .routine:
-            performDelete(id)
+            pendingDeleteLeavesNoEngine = false
+            pendingDeleteId = id
         case .confirmActive:
             pendingDeleteLeavesNoEngine = false
             pendingDeleteId = id
@@ -283,7 +291,10 @@ final class SpeechModelsModel: ObservableObject {
         performDelete(id)
     }
 
-    func cancelDelete() { pendingDeleteId = nil }
+    func cancelDelete() {
+        pendingDeleteId = nil
+        pendingDeleteLeavesNoEngine = false
+    }
 
     private func performDelete(_ id: String) {
         let wasActive = set.activeId == id

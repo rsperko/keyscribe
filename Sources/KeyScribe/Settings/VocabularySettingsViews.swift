@@ -3,6 +3,7 @@ import KeyScribeKit
 
 struct DictionaryRows: View {
     let words: [String]
+    let removeID: (String) -> String
     let onRemove: (String) -> Void
 
     var body: some View {
@@ -11,6 +12,7 @@ struct DictionaryRows: View {
                 Text(word)
                 Spacer()
                 RemoveButton { onRemove(word) }
+                    .accessibilityIdentifier(removeID(word))
             }
         }
     }
@@ -18,6 +20,7 @@ struct DictionaryRows: View {
 
 struct ReplacementRows: View {
     let rules: [ReplacementsSet.Rule]
+    let removeID: (Int) -> String
     let onRemove: (Int) -> Void
 
     var body: some View {
@@ -30,6 +33,7 @@ struct ReplacementRows: View {
                 if rule.regex { Text("Regex").font(.caption2).foregroundStyle(.secondary) }
                 Spacer()
                 RemoveButton { onRemove(index) }
+                    .accessibilityIdentifier(removeID(index))
             }
         }
     }
@@ -54,32 +58,30 @@ struct VocabularyComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(regex ? "Heard pattern" : "Word or heard phrase")
+            TextField(
+                regex ? "Heard pattern" : "Word or heard phrase",
+                text: $heard,
+                prompt: Text(regex ? "Regular expression" : "e.g. Kubernetes"))
+                .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .heard)
+                .onSubmit(commit)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerTerm)
+            TextField(
+                regex ? "Use instead" : "Use instead (optional)",
+                text: $replace,
+                prompt: regex ? Text("Replacement text") : nil)
+                .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .replace)
+                .onSubmit(commit)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerUseInstead)
+            if !regex {
+                Text(generalHelpText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField(regex ? "Regular expression" : "Add a word or heard phrase", text: $heard)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focus, equals: .heard)
-                    .onSubmit(commit)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerTerm)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(regex ? "Use instead" : "Use instead (optional)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField(regex ? "Replacement text" : "Optional correction", text: $replace)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focus, equals: .replace)
-                    .onSubmit(commit)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerUseInstead)
-            }
-            Text(generalHelpText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             DisclosureSection("Advanced", isExpanded: advancedBinding) {
                 Toggle("Match heard phrase as a regular expression", isOn: $regex)
                     .toggleStyle(.checkbox)
@@ -95,9 +97,7 @@ struct VocabularyComposer: View {
             // Kept OUTSIDE the disclosure: it gates canAdd, so it must stay visible while regex is on even if
             // the section is somehow collapsed.
             if regexInvalid {
-                Label("That is not a valid regular expression.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                IssueText("That is not a valid regular expression.")
             }
             HStack {
                 Spacer()
@@ -177,15 +177,17 @@ struct VocabularySettingsView: View {
             Section("Words to Recognize") {
                 Text("Names, product terms, and jargon. When you say one, \(Branding.appName) prefers your spelling — as it transcribes and when it cleans up afterward. Entries are shared with your AI service, marked as intended spellings rather than typos, whenever a rewrite runs — including in privacy modes.")
                     .font(.caption).foregroundStyle(.secondary)
-                DictionaryRows(words: dictionary.words, onRemove: dictionary.remove)
+                DictionaryRows(
+                    words: dictionary.words,
+                    removeID: AccessibilityID.Settings.Vocabulary.dictionaryRemove,
+                    onRemove: dictionary.remove)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
                     Label("You have \(dictionary.words.count) entries. That is fine — but a phrase \(Branding.appName) always mishears the same way works better as a Replacement, which changes it exactly.", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let error = dictionary.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.red)
+                    IssueText(error)
                 }
             }
             Section("Automatic Replacements") {
@@ -193,11 +195,11 @@ struct VocabularySettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 ReplacementRows(
                     rules: replacements.rules,
+                    removeID: AccessibilityID.Settings.Vocabulary.replacementRemove,
                     onRemove: replacements.remove(at:))
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementsList)
                 if let error = replacements.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.red)
+                    IssueText(error)
                 }
             }
         }

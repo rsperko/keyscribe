@@ -16,8 +16,7 @@ struct ModesSettingsView: View {
                 Divider()
             }
             if let error = model.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.red)
+                IssueText(error)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                 Divider()
@@ -29,30 +28,35 @@ struct ModesSettingsView: View {
     private var paneBody: some View {
         HStack(spacing: 0) {
             List(selection: $model.selectedID) {
-                ForEach(model.modes) { mode in
-                    ModeSummaryRow(mode: mode, issue: issue(for: mode))
-                        .tag(mode.id)
-                        .accessibilityIdentifier(AccessibilityID.Mode.List.row(mode.id))
+                Section {
+                    ForEach(model.modes) { mode in
+                        ModeSummaryRow(mode: mode, issue: issue(for: mode))
+                            .tag(mode.id)
+                            .accessibilityIdentifier(AccessibilityID.Mode.List.row(mode.id))
+                    }
+                } header: {
+                    PaneListSectionHeader("Your Modes")
+                }
+                if !model.starterTemplates.isEmpty {
+                    Section {
+                        ForEach(model.starterTemplates) { template in
+                            ModeStarterRow(template: template)
+                                .tag(template.id)
+                                .accessibilityIdentifier(AccessibilityID.Mode.List.starterRow(template.id))
+                        }
+                    } header: {
+                        PaneListSectionHeader("Start from a Template")
+                    }
                 }
             }
             .accessibilityIdentifier(AccessibilityID.Mode.List.list)
-            .safeAreaInset(edge: .bottom) {
-                Menu("Add Mode", systemImage: "plus") {
-                    Button("Blank Mode", action: model.create)
-                        .accessibilityIdentifier(AccessibilityID.Mode.List.addBlank)
-                    Divider()
-                    ForEach(ModeStore.templates()) { template in
-                        Button(template.name) { model.materializeTemplate(template.id) }
-                            .accessibilityIdentifier(AccessibilityID.Mode.List.addTemplate(template.id))
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .accessibilityIdentifier(AccessibilityID.Mode.List.add)
+            .paneListActionBar {
+                Button("New Blank Mode", systemImage: "plus", action: model.create)
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier(AccessibilityID.Mode.List.addBlank)
             }
             .disabled(recordingState.isRecording)
-            .frame(width: 240)
+            .frame(width: PaneMetrics.listWidth)
 
             Divider()
 
@@ -73,8 +77,13 @@ struct ModesSettingsView: View {
                         onDuplicate: { model.duplicate(mode) },
                         onDelete: { modePendingDelete = mode })
                         .id(mode.id)
+                } else if let starter = model.selectedStarter {
+                    ModeStarterPreview(template: starter) { model.materializeTemplate(starter.id) }
+                        .id(starter.id)
                 } else {
-                    TemplateGallery(model: model)
+                    ContentUnavailableView(
+                        "Choose a mode", systemImage: "square.stack.3d.up",
+                        description: Text("Select one of your modes to edit it, or a template to add it."))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -90,7 +99,9 @@ struct ModesSettingsView: View {
                 if let mode = modePendingDelete { model.delete(mode) }
                 modePendingDelete = nil
             }
+            .accessibilityIdentifier(AccessibilityID.Mode.List.deleteConfirmConfirm)
             Button("Cancel", role: .cancel) { modePendingDelete = nil }
+                .accessibilityIdentifier(AccessibilityID.Mode.List.deleteConfirmCancel)
         } message: {
             Text("\(modePendingDelete?.name ?? "This mode") and its configuration will be removed. This cannot be undone.")
         }
@@ -111,50 +122,80 @@ struct ModesSettingsView: View {
     }
 }
 
-// The empty-detail discovery surface: a fresh install lists only Plain Dictation, and this shows the full
-// menu of starter templates (name + one-liner + Add) so what can be added is visible without clicking.
-private struct TemplateGallery: View {
-    @ObservedObject var model: ModesSettingsModel
+// A Catalog row in the Start-from-a-Template section: the template name + its one-line capability. No
+// per-row action — selecting it opens the read-only preview on the right (option-1-rollout.md).
+private struct ModeStarterRow: View {
+    let template: Mode
+
+    var body: some View {
+        PaneListRow(title: template.name, subtitle: ModeStore.templateSummary(for: template.id))
+    }
+}
+
+// The Catalog detail for a starter Mode: a reduced, read-only capability preview with one CTA, `Add Mode`.
+// It never edits configuration — pressing Add Mode materializes an editable (Disabled) mode and the pane
+// swaps this preview for the live editor (installed-catalog-behavior.md). No edit fields, no destructive or
+// Advanced controls live here.
+private struct ModeStarterPreview: View {
+    let template: Mode
+    let onAdd: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Add a mode")
-                    .font(.title3.bold())
-                Text("Start from a template, or use Add Mode ▸ Blank Mode for an empty one.")
-                    .font(.callout).foregroundStyle(.secondary)
-                VStack(spacing: 8) {
-                    ForEach(ModeStore.templates()) { template in
-                        row(for: template)
+            VStack(alignment: .leading, spacing: 18) {
+                Text("STARTER MODE")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                PaneDetailHeader(
+                    systemImage: "square.stack.3d.up",
+                    title: template.name,
+                    subtitle: ModeStore.templateSummary(for: template.id))
+
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 10) {
+                    GridRow {
+                        Text("How to use").foregroundStyle(.secondary)
+                        Text(ModeSummary.whenRuns(template))
+                    }
+                    GridRow {
+                        Text("Runs").foregroundStyle(.secondary)
+                        Text(template.aiRewrite == nil ? "On this Mac" : "Needs an AI service")
                     }
                 }
+                .font(.callout)
+
+                if let example = ModeStore.templateExample(for: template.id) {
+                    exampleCard(example)
+                }
+
+                Divider()
+
+                Button("Add Mode", action: onAdd)
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Preview.add(template.id))
+                Text("Added modes start Disabled — review the settings, then turn it on.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(28)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
-    private func row(for template: Mode) -> some View {
-        let added = model.isTemplateMaterialized(template.id)
-        return HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(template.name).font(.headline)
-                Text(ModeStore.templateSummary(for: template.id))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if added {
-                Label("Added", systemImage: "checkmark")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Button("Add") { model.materializeTemplate(template.id) }
-                    .accessibilityIdentifier(AccessibilityID.Mode.Gallery.add(template.id))
-            }
+    private func exampleCard(_ example: (heard: String, result: String)) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            exampleRow(label: "You say", text: example.heard, style: AnyShapeStyle(.secondary))
+            exampleRow(label: "You get", text: example.result, style: AnyShapeStyle(.primary))
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func exampleRow(label: String, text: String, style: AnyShapeStyle) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Text(text).font(.callout).foregroundStyle(style)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -166,14 +207,10 @@ private struct ModeLoadFailureBanner: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(failures, id: \.id) { failure in
-                Label {
-                    Text(failure.usedLastKnownGood
-                        ? "“\(failure.id)” has an error in its file — still running its last working version. Fix the file to apply changes."
-                        : "“\(failure.id)” couldn’t be loaded and was skipped. Check its file under Application Support.")
-                        .font(.callout)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                }
+                IssueText(failure.usedLastKnownGood
+                    ? "“\(failure.id)” has an error in its file — still running its last working version. Fix the file to apply changes."
+                    : "“\(failure.id)” couldn’t be loaded and was skipped. Check its file under Application Support.",
+                    severity: .advisory, font: .callout)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -187,26 +224,15 @@ private struct ModeSummaryRow: View {
     var issue: ModeSummaryIssue?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(mode.name)
-                if mode.isSystem {
-                    Text("Built in").font(.caption2)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.secondary.opacity(0.18), in: Capsule()).foregroundStyle(.secondary)
-                }
-                if !mode.enabled {
-                    Text("Disabled")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                if let issue {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2).foregroundStyle(.red)
-                        .help(issue.help)
-                }
+        PaneListRow(title: mode.name, subtitle: summary, badges: {
+            if mode.isSystem { PaneBadge("Built in") }
+            if !mode.enabled { PaneBadge("Disabled") }
+            if let issue {
+                Circle().fill(.red).frame(width: 7, height: 7)
+                    .help(issue.help)
+                    .accessibilityLabel("Needs attention")
             }
-            Text(summary).font(.caption).foregroundStyle(.secondary)
-        }
+        })
     }
 
     private var summary: String {

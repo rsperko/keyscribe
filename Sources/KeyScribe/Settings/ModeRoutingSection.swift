@@ -31,7 +31,10 @@ struct ModeRoutingSection: View {
             Divider().padding(.vertical, 2)
             useInLevel
 
-            DisclosureSection(isExpanded: $routingExpanded) {
+            DisclosureSection(
+                isExpanded: $routingExpanded,
+                hasError: trigger.conflict != nil || trigger.overlap != nil
+            ) {
                 DisclosureSummaryLabel(title: "Advanced routing", summary: routingSummary)
             } content: {
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
@@ -77,11 +80,12 @@ struct ModeRoutingSection: View {
             Text("Spoken phrase").font(.subheadline.weight(.semibold))
             Text("End a dictation with a phrase to hand the result to this mode — e.g. \u{201C}…and that's the plan, as an email.\u{201D}")
                 .font(.caption).foregroundStyle(.secondary)
-            ForEach(mode.triggerPhrases, id: \.self) { phrase in
+            ForEach(Array(mode.triggerPhrases.enumerated()), id: \.element) { index, phrase in
                 HStack {
                     Text(ModeSummary.spokenPhrase(phrase, capitalized: false)).font(.callout)
                     Spacer()
                     Button("Remove", role: .destructive) { removePhrase(phrase) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseRemove(index))
                 }
             }
             HStack {
@@ -108,20 +112,25 @@ struct ModeRoutingSection: View {
                     constraintLabel(mode.constraints[index])
                     Spacer()
                     Button("Remove", role: .destructive) { removeConstraint(at: index) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.constraintRemove(index))
                 }
             }
             HStack {
                 Menu("Add…") {
                     ForEach(runningApps) { app in
                         Button(app.name) { addAppConstraint(app.bundleId) }
+                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addApp(app.bundleId))
                     }
                     Divider()
                     Button("Choose from Applications…") {
                         if let app = InstalledApps.chooseFromApplications() { addAppConstraint(app.bundleId) }
                     }
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.chooseFromApplications)
                     Button("Enter Bundle ID…") { enteringBundleId = true }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.enterBundleID)
                     Divider()
                     Button("Website…") { enteringDomain = true }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addWebsite)
                 }
                 .fixedSize()
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addAppRule)

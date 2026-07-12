@@ -499,6 +499,33 @@ public enum ModeStore {
         }
     }
 
+    // A short dictated-input → resulting-output example for a starter preview (option-1-rollout.md). It is an
+    // illustration of the transformation the template performs, not a record that any service ran — kept as
+    // pure data here alongside templateSummary. `result` may contain newlines for multi-line shapes.
+    public static func templateExample(for seedId: String) -> (heard: String, result: String)? {
+        switch seedId {
+        case "polish":
+            return ("um so i think we should uh ship it monday", "I think we should ship it Monday.")
+        case "message":
+            return ("tell them the build is green and i'll deploy after lunch", "Build's green — I'll deploy after lunch.")
+        case "email":
+            return ("thanks for the update i'll review it by friday as an email",
+                    "Hi,\n\nThanks for the update. I'll review it by Friday.\n\nBest,")
+        case "markdown":
+            return ("heading project setup then bullets clone install run", "## Project Setup\n\n- Clone\n- Install\n- Run")
+        case "code":
+            return ("todo handle the empty input case", "// TODO: handle the empty input case")
+        case "shell":
+            return ("find every swift file changed today", "find . -name '*.swift' -mtime -1")
+        case "ai-prompt":
+            return ("draft release notes for the audio fixes as prompt", "Draft release notes for the following audio fixes:")
+        case "edit-selection":
+            return ("“make this more formal” with text selected", "Your selected text, rewritten in a more formal tone.")
+        default:
+            return nil
+        }
+    }
+
     public struct LoadFailure: Equatable, Sendable {
         public let id: String
         public let message: String

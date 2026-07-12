@@ -144,6 +144,7 @@ final class FirstRunModel: ObservableObject {
     @Published private(set) var aiSetupError: String?
     @Published private(set) var aiTesting = false
     @Published private(set) var directTrigger: KeyDescriptor?
+    @Published private(set) var directTriggerStyle: String?
     @Published private(set) var triggerSaveError: String?
     private var rememberedTriggerStyle: String?
     private var rememberedTriggerThreshold: Int?
@@ -362,16 +363,12 @@ final class FirstRunModel: ObservableObject {
         step = .aiService
     }
 
-    func changeAIProvider(from _: Connection.Provider, to provider: Connection.Provider) {
-        aiDraft.changeProvider(
-            to: provider,
-            defaultOpenAICompatibleAuth: .apiKey,
-            hasStoredKey: false,
-            updateDefaultName: true)
-    }
-
     private static let playgroundLessonOrder = ["polish", "edit-selection"]
-    private static let polishExample = "um I think we should maybe send the notes tomorrow because the meeting moved"
+    static let polishExample = "um I think we should maybe send the notes tomorrow because the meeting moved"
+    static let polishExamplePolished = "The meeting moved, so let's send the notes tomorrow."
+    private static var polishExampleSpoken: String {
+        polishExample.prefix(1).uppercased() + polishExample.dropFirst() + "."
+    }
 
     private static func playgroundHint(for mode: Mode) -> String {
         let start: String
@@ -384,7 +381,7 @@ final class FirstRunModel: ObservableObject {
         }
         switch mode.seedId {
         case "polish":
-            return "Try: \"Um I think we should maybe send the notes tomorrow because the meeting moved.\" Then \(start) and speak."
+            return "Try: \"\(polishExampleSpoken)\" Then \(start) and speak."
         case "edit-selection":
             let startCapitalized = start.prefix(1).uppercased() + start.dropFirst()
             return "The sentence above is selected for you. \(startCapitalized) and say \"make this shorter.\""
@@ -485,8 +482,13 @@ final class FirstRunModel: ObservableObject {
     // per render. `loadAll` touches disk, so this is called on entry to the trial/playground (via `step`'s
     // didSet) and after a rebind, not from view code.
     func refreshDirectTrigger() {
-        let key = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }?.triggerKeys.first?.key
-        directTrigger = key.flatMap { try? KeyDescriptor(parsing: $0) }
+        let trigger = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }?.triggerKeys.first
+        if let key = trigger?.key {
+            directTrigger = try? KeyDescriptor(parsing: key)
+        } else {
+            directTrigger = nil
+        }
+        directTriggerStyle = trigger?.pressStyle
     }
 
     var directTriggerBinding: Binding<String> {

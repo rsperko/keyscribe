@@ -5,35 +5,31 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var vocabularyShadowed = false
     var pasteLastShadowed = false
-    // The Plain Dictation (Direct mode) trigger — a read-only pointer, not a duplicate setting (the trigger
-    // is owned by the Direct mode, edited only in Modes). Passed in by SettingsRootView (UX2 phase 3c).
-    var plainDictationTrigger: KeyDescriptor?
-    var onOpenPlainDictation: () -> Void = {}
+    // The Plain Dictation (Direct mode) shortcut, edited inline here. The Direct mode owns the trigger; edits
+    // route back through onUpdatePlainDictation so the same _direct.toml and live HotkeyMonitor refresh as when
+    // it is changed in Modes. allModes/actionShortcuts feed the conflict and overlap warnings.
+    var directMode: Mode?
+    var allModes: [Mode] = []
+    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
+    var onUpdatePlainDictation: (Mode) -> Void = { _ in }
     @State private var shortcutsExpanded = false
 
     var body: some View {
         Form {
             Section("Dictation") {
-                LabeledContent {
-                    HStack(spacing: 10) {
-                        if let descriptor = plainDictationTrigger {
-                            KeycapView(descriptor: descriptor)
-                        } else {
-                            Text("Not set").foregroundStyle(.secondary)
-                        }
-                        Button("Change key…", action: onOpenPlainDictation)
-                            .buttonStyle(.bordered)
-                            .accessibilityIdentifier(AccessibilityID.Settings.General.changeDictationTrigger)
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Dictation key")
-                        Text("Hold it to dictate in any app.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if let directMode {
+                    let trigger = ModeTrigger(
+                        mode: directMode, allModes: allModes,
+                        actionShortcuts: actionShortcuts, onUpdate: onUpdatePlainDictation)
+                    ModeTriggerRow(
+                        mode: directMode, onUpdate: onUpdatePlainDictation, label: "Dictation key",
+                        accessibilityID: AccessibilityID.Settings.General.dictationTrigger)
+                    Text("Hold it to dictate in any app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TriggerConflictLabel(conflict: trigger.conflict)
+                    TriggerOverlapLabel(overlap: trigger.overlap)
                 }
-                .accessibilityIdentifier(AccessibilityID.Settings.General.dictationTrigger)
             }
 
             Section {
@@ -68,29 +64,34 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                DisclosureSection(isExpanded: $shortcutsExpanded) {
+                DisclosureSection(isExpanded: $shortcutsExpanded, hasError: vocabularyShadowed || pasteLastShadowed) {
                     DisclosureSummaryLabel(
                         title: "Optional shortcuts",
                         summary: "Add words or paste your last result")
                 } content: {
-                    LabeledContent("Add to Vocabulary") {
+                    LabeledContent {
                         ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.addVocabularyShortcut)
+                    } label: {
+                        ShortcutFieldLabel("Add to Vocabulary", shadowed: vocabularyShadowed)
                     }
+                    if vocabularyShadowed { ShadowedHotkeyNote() }
                     Text("Opens a panel to add a word or correction. Selected text is filled in for you.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if vocabularyShadowed { ShadowedHotkeyNote() }
-                    LabeledContent("Paste last dictation") {
+                    LabeledContent {
                         ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.pasteLastShortcut)
+                    } label: {
+                        ShortcutFieldLabel("Paste last dictation", shadowed: pasteLastShadowed)
                     }
+                    if pasteLastShadowed { ShadowedHotkeyNote() }
                     Text("Pastes your most recent dictation result.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if pasteLastShadowed { ShadowedHotkeyNote() }
                     Text("Both are also available from the \(Branding.appName) menu.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityIdentifier(AccessibilityID.Settings.General.optionalShortcuts)
             } header: {
                 Text("Shortcuts")
             }
@@ -102,13 +103,26 @@ struct GeneralSettingsView: View {
     }
 }
 
-struct ShadowedHotkeyNote: View {
+struct ShortcutFieldLabel: View {
+    let title: String
+    let shadowed: Bool
+
+    init(_ title: String, shadowed: Bool) {
+        self.title = title
+        self.shadowed = shadowed
+    }
+
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(.red).frame(width: 7, height: 7)
-            Text("A mode (or another shortcut) already uses this — it won’t fire. Pick a unique combo.")
-                .font(.caption).foregroundStyle(.secondary)
+            if shadowed { Circle().fill(.red).frame(width: 7, height: 7) }
+            Text(title)
         }
-        .accessibilityLabel("Shortcut conflict: this shortcut is shadowed and will not fire")
+        .accessibilityLabel(shadowed ? "\(title), needs attention" : title)
+    }
+}
+
+struct ShadowedHotkeyNote: View {
+    var body: some View {
+        IssueText("A mode (or another shortcut) already uses this — it won’t fire. Pick a unique combo.")
     }
 }

@@ -5,6 +5,27 @@ import Testing
 
 @MainActor
 struct HistoryPaneModelTests {
+    @Test func searchResultOutsideInitialLoadIsSelectable() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for number in 0...1_000 {
+            var value = entry("recent-\(number)")
+            value.timestamp = Date(timeIntervalSince1970: Double(number))
+            try store.append(value, today: "2026-07-10")
+        }
+        var older = entry("older-search-result")
+        older.timestamp = Date(timeIntervalSince1970: -1)
+        try store.append(older, today: "2026-07-01")
+        let model = model(store)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.query = "older-search-result"
+        for _ in 0..<80 where !model.groups.flatMap(\.rows).contains(where: { $0.entry.result == "older-search-result" }) {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        model.selection = model.groups.first?.rows.first?.id
+        #expect(model.selected?.result == "older-search-result")
+    }
     private func tempStore() -> (HistoryStore, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-history-pane-\(UUID().uuidString)", isDirectory: true)
@@ -70,5 +91,16 @@ struct HistoryPaneModelTests {
         for _ in 0..<40 where model.selected == nil { try await Task.sleep(for: .milliseconds(50)) }
 
         #expect(model.selected?.result == "only entry")
+    }
+
+    @Test func retentionConfirmationIsNeededOnlyWhenFilesWouldBeRemoved() throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = model(store)
+
+        #expect(!model.wouldRemoveHistory(retainingDays: 7))
+
+        try store.append(entry("old"), today: "2000-01-01")
+        #expect(model.wouldRemoveHistory(retainingDays: 7))
     }
 }

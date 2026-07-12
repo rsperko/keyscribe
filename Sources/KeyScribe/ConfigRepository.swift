@@ -33,6 +33,13 @@ final class ConfigRepository {
         changeObservers.append(observer)
     }
 
+    // For the FSEvents external-edit reload path (AppDelegate.reloadConfig), which performs the host's
+    // `onChange` effects itself: refresh only the in-app observers so an open Settings pane re-reads a
+    // file edited outside the app.
+    func notifyExternalChange() {
+        for observer in changeObservers { observer() }
+    }
+
     private func notifyChange() {
         onChange?()
         for observer in changeObservers { observer() }

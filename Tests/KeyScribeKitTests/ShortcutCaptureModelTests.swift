@@ -42,6 +42,33 @@ import Testing
         #expect(model.hint == nil)
     }
 
+    @Test func tappingRightCommandRecordsModifierOnlyTrigger() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "hyper")
+        model.beginRecording()
+        #expect(model.modifierEvent(keyCode: 54, modifiers: [.command]) == nil)
+        #expect(model.modifierEvent(keyCode: 54, modifiers: []) == .named(.rightCommand))
+        #expect(model.value == .named(.rightCommand))
+        #expect(model.phase == .idle)
+    }
+
+    @Test func tappingRightOptionReplacesHyperTrigger() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "hyper")
+        model.beginRecording()
+        #expect(model.modifierEvent(keyCode: 61, modifiers: [.option]) == nil)
+        #expect(model.modifierEvent(keyCode: 61, modifiers: []) == .named(.rightOption))
+        #expect(model.value == .named(.rightOption))
+        #expect(model.phase == .idle)
+    }
+
+    @Test func commandXRecordsChordInsteadOfPendingRightCommand() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
+        model.beginRecording()
+        #expect(model.modifierEvent(keyCode: 54, modifiers: [.command]) == nil)
+        #expect(model.keyEvent(keyCode: 7, modifiers: [.command]) == chord([.command], .letter("x")))
+        #expect(model.value == chord([.command], .letter("x")))
+        #expect(model.phase == .idle)
+    }
+
     @Test func bareLetterStaysRecordingWithHint() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
@@ -202,6 +229,6 @@ import Testing
 
     @Test func actionChordProfileOffersNoNamedKeys() {
         #expect(ShortcutProfile.actionChord.namedKeyOptions.isEmpty)
-        #expect(ShortcutProfile.modeTrigger.namedKeyOptions == [.fn, .rightOption, .rightCommand, .hyper])
+        #expect(ShortcutProfile.modeTrigger.namedKeyOptions == [.fn, .rightOption, .rightCommand, .rightControl, .hyper])
     }
 }

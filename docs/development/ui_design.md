@@ -151,7 +151,11 @@ the only signal.
 - Use a single comfortable settings column with section cards only where grouping materially
   improves scanning. Avoid a dashboard.
 - Settings use a sidebar for top-level destinations and a content column with grouped rows.
-- A mode editor is a detail page, not a modal with a long unstructured form.
+- A mode editor is a detail page, not a modal with a long unstructured form. Its footer is an
+  action row: **Duplicate Mode** leads, **Delete Mode** sits alone at the trailing edge in red with
+  a trash icon and a confirmation dialog — the same destructive-action convention the Speech Models
+  and AI Services editors follow (routine actions lead, the destructive one is trailing, red, and
+  confirmed; never stacked with routine actions).
 - The HUD is intentionally compact and uses sentence-case labels.
 - Monospaced text is reserved for hotkeys, model IDs, regular expressions, and code-like
   examples. It is not body-copy styling.
@@ -315,8 +319,8 @@ so they sit together above Settings instead of competing with the primary loop.
 The modes listed under `Next Dictation` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
 setup materializes and connects the two headline rewrite modes (Polish and Edit Selection); the other
-starters stay available as templates in the Modes pane (Add Mode menu + gallery) until the user adds
-one.
+starters stay available as templates in the Modes pane's **Start from a Template** section until the
+user adds one.
 
 ### One-shot manual-mode override
 
@@ -406,42 +410,52 @@ disclosures:
   that collides with a higher-precedence hotkey, such as a Mode trigger, shows an inline **shadowed**
   breadcrumb and will not fire — mode triggers win.
 
-The warm-up tier lives behind a `Keep speech recognition ready` disclosure in Speech Models'
-Performance section (collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
+The warm-up tier lives behind a `Keep speech recognition ready` disclosure pinned above the model
+list in Speech Models (collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff (it governs both the STT model's memory
 residency and idle microphone warm-up), not as cache terminology. The footer copy **never shows a raw
 byte count** — it describes behavior, not size.
 
 ### Speech Models
 
-The first level is intentionally quiet: the active model, its language coverage and a short
-plain-language reason it is a good choice, plus a **Change…** action. Performance belongs here
-too: **Keep speech recognition ready** controls the selected engine's idle memory and microphone
-warm-up behavior.
+Speech Models is a standing master/detail pane on the shared Settings list layout (ui_components.md
+"Settings list pane") — the same three-column shape as AI Services, Modes, and History. The pane's
+global **Performance** control, **Keep speech recognition ready** (the selected engine's idle memory
+and microphone warm-up behavior), is pinned above the list — the same "global controls above the
+list" placement History uses for its enable/retention controls.
 
-**Change…** enters an in-pane master/detail chooser. The left list leads with the recommended
-model and shows only model names plus ready/download status; it has no radio controls or per-row
-actions. Selecting a model fills the right detail pane with its best-use description, language
-coverage, disk requirement, and light/moderate/high memory use. The detail pane contains the one
-primary lifecycle action: **Current model**, **Use This Model**, **Download**, or its live
-install/test state. Downloaded models do not become active until **Use This Model** is pressed.
-The detail pane's named **Model actions…** menu holds testing, deletion, reinstall, and
-dictionary-recognition tuning. Exactly one active engine is visually enforced, and deleting it
-still requires confirmation.
+The left list has two persistent sections — **On This Mac** (usable/downloaded models, including the
+always-usable system engine) and **Available to Download** (catalog models not yet on disk; a model
+mid-download or verifying stays here until it verifies `Ready`, then promotes). Rows show only names
+plus status; there are no radio controls, per-row actions, or bottom download menu — acquisition is
+the selected model's own **Download** button. Selecting a model fills the right detail pane, under the
+shared detail header (icon + name + **Recommended** badge), with its best-use description, language
+coverage, disk requirement, and light/moderate/high memory use, and the one primary lifecycle action:
+**Current model**, **Use This Model**, **Download**, or its live install/test state. A model in
+**Available to Download** shows an `AVAILABLE TO DOWNLOAD` label and a reduced read-only preview — the
+facts and the `Download` button only, no Advanced or maintenance controls. Downloaded models do not
+become active until **Use This Model** is pressed. Once a model is on this Mac, the detail's
+**Advanced** disclosure (the shared full-row `DisclosureSection`) holds dictionary-recognition tuning
+plus a single maintenance row: **Test model** and **Reinstall model** lead the row, and **Delete
+model** sits alone at the trailing edge in red — the destructive action is spatially separated from
+routine maintenance, never stacked with it. Exactly one active engine is visually enforced, and
+deleting it still requires confirmation.
 
 ### Dictionary and Replacements
 
 Both screens prioritize fast correction over configuration theory.
 
-- Add to Vocabulary: one compact composer with stacked fields, **Word or heard phrase** and
-  **Use instead (optional)**, so labels stay readable in global settings, mode settings, and the
-  standalone panel. Leaving **Use instead** empty adds a dictionary word; filling it in creates a
-  replacement. The first field keeps focus after adding so repeated entries are fast. The composer's
-  first level is just the two fields and the Add button; **Match heard phrase as a regular expression**
+- Add to Vocabulary: one compact composer with two labeled fields, **Word or heard phrase** (with an
+  in-field example prompt) and **Use instead (optional)** — each field carries exactly one label, in
+  global settings, mode settings, and the standalone panel. Leaving **Use instead** empty adds a
+  dictionary word; filling it in creates a replacement. Adding a heard phrase that already has a
+  replacement updates that rule in place — never a silent drop or a duplicate row. The first field
+  keeps focus after adding so repeated entries are fast. The composer's first level is just the two
+  fields, the leave-empty hint, and the Add button; **Match heard phrase as a regular expression**
   lives behind the composer's **Advanced** disclosure (regex stays fully available, one disclosure
-  away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, and
-  the composer can create only a replacement — and the disclosure stays open so an ON regex toggle is
-  never hidden.
+  away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, the
+  composer can create only a replacement — the leave-empty hint disappears and only the regex help
+  shows — and the disclosure stays open so an ON regex toggle is never hidden.
 - Dictionary: edit/remove saved words, import/export later only if needed.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
@@ -456,22 +470,27 @@ Both screens prioritize fast correction over configuration theory.
 
 ### AI Services
 
-An AI service is a named connection, not a global provider choice. The main list shows name,
-provider/model, availability, and the active credential state: no auth, key stored/no key, token
-command, or failed test.
+An AI service is a named connection, not a global provider choice. The pane uses the shared two-section
+list: **Your Services** (saved connections — name, provider/model, and the active credential/health
+state: no auth, key stored/no key, token command, connection works, or failed test) and **Connect a
+Service** (one action-oriented row per hosted provider starter — `Connect to OpenAI`, and once a
+connection for that provider exists, `Connect another OpenAI service`, so a saved service named after
+its provider can never be confused with the starter). The bottom action bar holds only **Custom
+(OpenAI-compatible)…**, the create path for an endpoint KeyScribe does not know in advance.
 
-**Creating a service is the same flow everywhere** (onboarding and Settings): **Add AI Service** opens
-a draft form with a primary **Connect** button that tests the endpoint and only then saves, rolling
-the Keychain key back on failure or cancel — nothing is ever half-saved, and Settings can no longer
-hold a never-tested service. The same status vocabulary and error strings are shared across both
-surfaces via one helper.
+Selecting a **saved** service opens its **live editor directly** — no summary, no *Edit Connection*
+step. The editor is immediate-apply and carries **Test Connection** and the trailing-red **Delete AI
+Service** in place. Selecting a **provider starter** shows a read-only preview (endpoint known?,
+sign-in, model default) with one CTA, **Add Service**: it persists a connection seeded from the preset
+immediately, in an honest `No key set` state, selects it, and drops into that editor where the key is
+pasted and the connection is Tested. The service is never presented as usable until it passes a Test,
+and a failed Test surfaces in the editor rather than removing the row.
 
-Selecting a **working** service defaults to a **summary** (name, provider·model, status, "Used by",
-and — only when nothing uses it yet — **Create a mode with this service**), not endpoint/credential
-mechanics. **Edit Connection** reveals the focused detail editor; a service whose config is broken or
-whose last test failed opens straight into that editor and stays there until it tests clean (the
-in-memory test state clears on restart). The editor's **Done** button returns to the summary and is
-disabled while the config is incomplete.
+Onboarding keeps the stricter **test-then-save** flow (`AIServiceConnector`): its **Connect** button
+tests the endpoint and only then saves, rolling the Keychain key back on failure or cancel — that
+surface has one shot to produce a working service. The Settings pane deliberately relaxes this so
+`Add Service` behaves like `Download`/`Add Mode`. The status vocabulary and error strings are shared
+across both surfaces via one helper.
 
 The editor uses progressive sections:
 
@@ -497,14 +516,18 @@ compatible endpoint configuration under `Advanced connection settings`.
 
 ### Modes
 
-A fresh install lists only **Plain Dictation** (the Direct floor). The starter rewrite modes are
-**templates**, discoverable in two visible places: the **Add Mode** menu (Blank Mode, then each
-template by name) and the Modes pane's empty-detail **template gallery** (each template's name, a
-one-line summary, and an Add button; an already-added template reads "Added"). Materializing a
-template creates an enabled, fully editable mode; at its catalog id it keeps its seed identity, so it
-continues to receive starter updates until the user edits it (a second copy of the same template is a
-plain user mode with no seed identity). Existing installs keep their previously-seeded starter files
-unchanged.
+The Modes pane uses the shared two-section list: **Your Modes** (Plain Dictation — the Direct floor —
+plus every materialized mode) and **Start from a Template** (the starter rewrite modes not yet
+materialized at their catalog identity; a materialized one drops out, and deleting it brings it back).
+Selecting a starter shows a read-only **preview** on the right — a `STARTER MODE` label, its capability,
+how it is invoked, whether it runs on this Mac or needs an AI service, a short dictated-input →
+resulting-output example, and one CTA, **Add Mode**. The bottom action bar holds only **New Blank
+Mode**. Pressing **Add Mode** materializes a fully editable mode, added **Disabled**, keeps it selected,
+and swaps the preview for the live editor — the user reviews/wires it and flips **Enabled** when ready,
+so a mode that needs an AI service never lands enabled-but-broken. At its catalog id the materialized
+mode keeps its seed identity, so it continues to receive starter updates until the user edits it (a
+second copy of the same template is a plain user mode with no seed identity). Existing installs keep
+their previously-seeded starter files unchanged.
 
 The Modes list shows the user-visible summary of each mode:
 
@@ -521,8 +544,9 @@ sections:
    reduced, mostly-locked form: shortcut + result handling only.)
 2. **When this mode is used** — three plain first-level rows (UX2 phase 7a): **Shortcut** (the
    **shortcut well** — one control whose menu offers `None` and the modifier-only keys Fn (Globe),
-   Right-⌥, Right-⌘, and ⌃⌥⇧⌘, and clicking it or `Record…` captures a custom chord or extra mouse
-   button in place), **Spoken phrase** (the chips + add field, with the actual phrases shown), and
+   Right-⌥, Right-⌘, and ⌃⌥⇧⌘; recording accepts a tap of a modifier-only key on release, while a
+   key pressed before release records a chord such as ⌘X; it also captures custom chords or extra mouse
+   buttons in place), **Spoken phrase** (the chips + add field, with the actual phrases shown), and
    **Use in** (one unified apps-and-websites rule list; the Add… menu offers running apps, Choose from
    Applications…, Enter Bundle ID…, and **Website…** — a domain-first field that stores a host-anchored
    pattern matching that domain or a subdomain, never a substring). Press style, the window-title regex,
@@ -584,6 +608,10 @@ releases all parsed transcripts and the search cache, and re-entering reloads (s
 so it is free when nothing changed). "Paste Result" hides Settings, pastes into the previously
 focused app, and closes Settings on success (re-presents + copies on failure).
 
+Retention changes are staged until **Apply Retention** is pressed. A lower value confirms once only
+when it would remove existing day files; an empty history or a value that removes nothing applies
+without confirmation.
+
 ### List view
 
 The list is grouped by day and supports search over locally stored text. Each row contains:
@@ -611,6 +639,12 @@ Correction actions are directly beside the relevant text:
 
 - **Add to Dictionary** for a term that should be recognized as written.
 - **Create Replacement** for a repeated heard-to-intended correction.
+
+Reuse actions (**Copy Result**, **Paste Result**, **Copy Heard**) lead an action row at the top of the
+detail. The destructive **Delete Dictation** follows the shared delete convention: it sits alone at the
+trailing edge of a footer at the bottom of the detail, in red with a trash icon, and opens a confirmation
+("Delete this dictation?" — "This dictation will be removed from local history. This cannot be undone.")
+— the same trailing-edge, red, confirmed pattern as the Modes, AI Services, and Speech Models editors.
 
 ### Empty state
 

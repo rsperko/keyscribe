@@ -2,9 +2,16 @@ import SwiftUI
 
 struct DisclosureSection<Label: View, Content: View>: View {
     @Binding var isExpanded: Bool
+    // A child of `content` is in an error state. An error must never sit hidden behind a collapsed
+    // header, so the section AUTO-EXPANDS when `hasError` becomes true (revealing the child's own
+    // indicator). The red dot is the fallback: if the user then manually collapses, the header
+    // surfaces it (mirroring the Settings sidebar) so the error is still reachable.
+    var hasError: Bool = false
     @ViewBuilder var label: () -> Label
     @ViewBuilder var content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showsErrorDot: Bool { hasError && !isExpanded }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -14,6 +21,10 @@ struct DisclosureSection<Label: View, Content: View>: View {
                 HStack {
                     label()
                     Spacer()
+                    if showsErrorDot {
+                        Circle().fill(.red).frame(width: 7, height: 7)
+                            .accessibilityHidden(true)
+                    }
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -22,16 +33,49 @@ struct DisclosureSection<Label: View, Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityHint(showsErrorDot ? "Needs attention" : "")
             if isExpanded { content() }
         }
+        // Reveal an error the moment it appears (and on open if one is already present). Only forces
+        // OPEN — never auto-collapses — so the user can still close it, falling back to the dot.
+        .onAppear { if hasError { isExpanded = true } }
+        .onChange(of: hasError) { _, nowError in if nowError { isExpanded = true } }
     }
 }
 
 extension DisclosureSection where Label == Text {
-    init(_ title: String, isExpanded: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) {
+    init(
+        _ title: String, isExpanded: Binding<Bool>, hasError: Bool = false,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self._isExpanded = isExpanded
+        self.hasError = hasError
         self.label = { Text(title) }
         self.content = content
+    }
+}
+
+// The one inline issue-message idiom: colored caption text, NO leading glyph — the color carries
+// severity (red = failure, orange = advisory) and reachability is the red dot on the owning field
+// label / container. Multi-state status indicators (badges, the connection-test tri-state, permission
+// rows) keep their icon set and are NOT this; they distinguish success/neutral states an icon conveys.
+struct IssueText: View {
+    enum Severity { case failure, advisory }
+    let message: String
+    var severity: Severity = .failure
+    var font: Font = .caption
+
+    init(_ message: String, severity: Severity = .failure, font: Font = .caption) {
+        self.message = message
+        self.severity = severity
+        self.font = font
+    }
+
+    var body: some View {
+        Text(message)
+            .font(font)
+            .foregroundStyle(severity == .failure ? Color.red : Color.orange)
+            .accessibilityLabel("\(severity == .failure ? "Error" : "Warning"): \(message)")
     }
 }
 
@@ -182,6 +226,8 @@ struct PromptEditor: View {
     let commitsOnChange: Bool
     let commit: (String) -> Void
     let flush: PromptEditorFlush?
+    let expandID: String?
+    let expandDoneID: String?
     @State private var draft: String
     @State private var expanded = false
     @State private var commitTask: Task<Void, Never>?
@@ -190,6 +236,7 @@ struct PromptEditor: View {
     init(
         title: String, placeholder: String = "", text: String,
         commitsOnChange: Bool = false, flush: PromptEditorFlush? = nil,
+        expandID: String? = nil, expandDoneID: String? = nil,
         commit: @escaping (String) -> Void
     ) {
         self.title = title
@@ -197,6 +244,8 @@ struct PromptEditor: View {
         self.text = text
         self.commitsOnChange = commitsOnChange
         self.flush = flush
+        self.expandID = expandID
+        self.expandDoneID = expandDoneID
         self.commit = commit
         _draft = State(initialValue: text)
     }
@@ -219,9 +268,10 @@ struct PromptEditor: View {
                 .onDisappear { commitNow() }
             Button("Open in a larger editor…") { expanded = true }
                 .font(.caption).buttonStyle(.link)
+                .accessibilityIdentifier(ifPresent: expandID)
         }
         .sheet(isPresented: $expanded) {
-            PromptEditorSheet(title: title, placeholder: placeholder, text: $draft) { commitNow() }
+            PromptEditorSheet(title: title, placeholder: placeholder, text: $draft, doneID: expandDoneID) { commitNow() }
         }
     }
 
@@ -246,6 +296,7 @@ private struct PromptEditorSheet: View {
     let title: String
     let placeholder: String
     @Binding var text: String
+    var doneID: String? = nil
     let onDone: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -261,10 +312,17 @@ private struct PromptEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Done") { onDone(); dismiss() }.keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(ifPresent: doneID)
             }
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 440)
+    }
+}
+
+extension View {
+    @ViewBuilder func accessibilityIdentifier(ifPresent id: String?) -> some View {
+        if let id { accessibilityIdentifier(id) } else { self }
     }
 }
 
