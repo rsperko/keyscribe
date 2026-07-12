@@ -82,7 +82,7 @@ struct VocabularyComposer: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            DisclosureSection("Advanced", isExpanded: advancedBinding) {
+            DisclosureSection("Pattern matching", isExpanded: advancedBinding) {
                 Toggle("Match heard phrase as a regular expression", isOn: $regex)
                     .toggleStyle(.checkbox)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerRegexToggle)

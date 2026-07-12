@@ -44,4 +44,18 @@ final class SidebarNavigationTests: XCTestCase {
                           "selecting \(pane.sidebar) should render detail probe \(probe)")
         }
     }
+
+    func testGeneralShowsAllShortcutsWithoutExpandingAnything() {
+        let (_, window) = launchIntoSettings()
+
+        for id in [
+            "settings.general.dictationTrigger",
+            "settings.general.addVocabularyShortcut",
+            "settings.general.pasteLastShortcut",
+        ] {
+            let shortcut = element(id, in: window)
+            XCTAssertTrue(shortcut.waitForExistence(timeout: 8), "\(id) should be visible in General")
+            XCTAssertTrue(shortcut.isHittable, "\(id) should be available without expanding a section")
+        }
+    }
 }

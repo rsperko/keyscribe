@@ -370,7 +370,7 @@ struct SettingsRootView: View {
                 PermissionsSettingsView(
                     accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
             case .advanced:
-                AdvancedSettingsView(model: general)
+                MaintenanceSettingsView(model: general)
             }
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
@@ -404,7 +404,7 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
         case .modes: "Modes"
         case .history: "History"
         case .permissions: "Permissions"
-        case .advanced: "Advanced"
+        case .advanced: "Maintenance"
         }
     }
 
@@ -417,12 +417,12 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
         case .modes: "square.stack.3d.up"
         case .history: "clock"
         case .permissions: "lock"
-        case .advanced: "slider.horizontal.3"
+        case .advanced: "wrench.and.screwdriver"
         }
     }
 }
 
-private struct AdvancedSettingsView: View {
+private struct MaintenanceSettingsView: View {
     @ObservedObject var model: SettingsModel
     @State private var confirmingErase = false
 
@@ -437,7 +437,7 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Dictation HUD") {
+            Section("Interface repair") {
                 Button("Reset HUD Position") { model.resetHUDPosition() }
                     .accessibilityIdentifier(AccessibilityID.Settings.Advanced.resetHUDPosition)
                 Text("Drag the HUD to flick it to any edge or corner; it stays there. Reset returns it to the bottom center.")
@@ -445,7 +445,7 @@ private struct AdvancedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             if !Feature.allCases.isEmpty {
-                Section("Experimental Features") {
+                Section("Experimental features") {
                     ForEach(Feature.allCases, id: \.self) { feature in
                         Toggle(isOn: model.binding(for: feature)) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -462,7 +462,7 @@ private struct AdvancedSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Section("Erase Data") {
+            Section("Reset \(Branding.appName)") {
                 Button("Erase All \(Branding.appName) Data…", role: .destructive) { confirmingErase = true }
                     .accessibilityIdentifier(AccessibilityID.Settings.Advanced.eraseAllData)
                 Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")

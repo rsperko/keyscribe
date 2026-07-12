@@ -151,7 +151,7 @@ struct SpeechModelsView: View {
             primaryAction(for: row)
 
             if hasModelActions(row) {
-                DisclosureSection("Advanced", isExpanded: $modelActionsExpanded) {
+                DisclosureSection("Recognition and maintenance", isExpanded: $modelActionsExpanded) {
                     modelActions(for: row)
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.Speech.advanced(row.id))

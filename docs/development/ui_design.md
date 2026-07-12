@@ -353,7 +353,7 @@ glance and can show simultaneously:
   (deleted out from under us), and the AI checks — a **dangling connection** (a mode names a deleted
   connection), a **structurally misconfigured connection** (no model, or OpenAI-compatible with no
   base URL, or token-command auth with no command), and a **failed Test Connection**. Opening
-  Settings **flags the offending sidebar pane with a matching red dot** — Advanced (config) ·
+  Settings **flags the offending sidebar pane with a matching red dot** — Maintenance (config) ·
   Permissions · Speech Models (model) · AI Services (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. The sidebar polls
   while open and clears the flag the moment it's fixed. **A missing key is not always an error** —
@@ -385,15 +385,14 @@ capabilities. The sidebar order is fixed:
 6. **History** — audit/correction/diagnostics of past dictations, with the history enable and
    retention controls inline (see §8).
 7. **Permissions** — review and repair macOS access.
-8. **Advanced** — configuration folder, diagnostics, migration/config errors, and notices.
+8. **Maintenance** — configuration, interface repair, experimental features, and reset.
 
-General, Speech Models, Vocabulary, and Advanced stand on the local-only product. AI Services, and
+General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
 ### General
 
-Show the few choices a new user is most likely to need, and keep optional or technical controls behind
-disclosures:
+Show the few choices a new user is most likely to need:
 
 - The dictation key, with a clearly exposed **Change key…** button. The key remains owned by Plain
   Dictation (Direct mode), so the button routes to that editor instead of creating a second setting.
@@ -403,7 +402,7 @@ disclosures:
 - Microphone choice, with a plain-language explanation of following the Mac’s current input
 - Open at login
 - (History enable and retention live in the **History** pane, not here.)
-- **Optional shortcuts** is collapsed by default. It contains global chords for **Add to Vocabulary**
+- **Shortcuts** immediately follows Dictation and shows global chords for **Add to Vocabulary**
   and **Paste Last Dictation**, both of which are always available from the menu. Each uses a
   chord-only **shortcut well** (`None` in its menu clears it; a mouse button is rejected at capture
   with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste Last Dictation defaults off. A chord
@@ -433,9 +432,9 @@ shared detail header (icon + name + **Recommended** badge), with its best-use de
 coverage, disk requirement, and light/moderate/high memory use, and the one primary lifecycle action:
 **Current model**, **Use This Model**, **Download**, or its live install/test state. A model in
 **Available to Download** shows an `AVAILABLE TO DOWNLOAD` label and a reduced read-only preview — the
-facts and the `Download` button only, no Advanced or maintenance controls. Downloaded models do not
+facts and the `Download` button only, with no recognition or maintenance controls. Downloaded models do not
 become active until **Use This Model** is pressed. Once a model is on this Mac, the detail's
-**Advanced** disclosure (the shared full-row `DisclosureSection`) holds dictionary-recognition tuning
+**Recognition and maintenance** disclosure (the shared full-row `DisclosureSection`) holds dictionary-recognition tuning
 plus a single maintenance row: **Test model** and **Reinstall model** lead the row, and **Delete
 model** sits alone at the trailing edge in red — the destructive action is spatially separated from
 routine maintenance, never stacked with it. Exactly one active engine is visually enforced, and
@@ -452,7 +451,7 @@ Both screens prioritize fast correction over configuration theory.
   replacement updates that rule in place — never a silent drop or a duplicate row. The first field
   keeps focus after adding so repeated entries are fast. The composer's first level is just the two
   fields, the leave-empty hint, and the Add button; **Match heard phrase as a regular expression**
-  lives behind the composer's **Advanced** disclosure (regex stays fully available, one disclosure
+  lives behind the composer's **Pattern matching** disclosure (regex stays fully available, one disclosure
   away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, the
   composer can create only a replacement — the leave-empty hint disappears and only the regex help
   shows — and the disclosure stays open so an ON regex toggle is never hidden.
@@ -512,7 +511,7 @@ The editor uses progressive sections:
 - **Connection test** — user-initiated only, disabled until the visible prerequisites are met.
 
 Do not present API parameters until the connection works. Put temperature, output limits, and
-compatible endpoint configuration under `Advanced connection settings`.
+compatible endpoint configuration under `Connection options`.
 
 ### Modes
 
@@ -550,7 +549,7 @@ sections:
    **Use in** (one unified apps-and-websites rule list; the Add… menu offers running apps, Choose from
    Applications…, Enter Bundle ID…, and **Website…** — a domain-first field that stores a host-anchored
    pattern matching that domain or a subdomain, never a substring). Press style, the window-title regex,
-   and the raw URL regex live under `Advanced routing`. History detail explains **how the mode was
+   and the raw URL regex live under `More ways to trigger`. History detail explains **how the mode was
    chosen** (menu / shortcut / app / spoken phrase / fallback).
 3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
    (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
@@ -577,10 +576,10 @@ near the bottom of the sidebar. Each permission row states why it is needed, wha
 action to open the macOS setting. KeyScribe requests permissions just in time, never in a blanket
 first-launch wall.
 
-### Advanced
+### Maintenance
 
-Holds configuration-folder access. (Notices live in the separate **About & Notices** window, not
-here.)
+Separates configuration, interface repair, experimental features, and the destructive reset. (Notices
+live in the separate **About & Notices** window, not here.)
 
 - **Reveal Config in Finder** opens the support folder (`~/Library/Application Support/KeyScribe/`,
   `config_schema.md`) so a user can read, edit, back up, or version the plain-TOML config

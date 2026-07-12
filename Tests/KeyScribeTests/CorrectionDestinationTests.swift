@@ -21,7 +21,7 @@ struct CorrectionDestinationTests {
     @MainActor
     @Test func saveFailedMessageNamesTheRightSurface() {
         let global = CorrectionPanelController.saveFailedMessage(for: .global)
-        #expect(global.contains("Advanced"))
+        #expect(global.contains("Maintenance"))
 
         let mode = CorrectionPanelController.saveFailedMessage(
             for: .mode(id: "email", name: "Email"))

@@ -35,7 +35,7 @@ struct ModeRoutingSection: View {
                 isExpanded: $routingExpanded,
                 hasError: trigger.conflict != nil || trigger.overlap != nil
             ) {
-                DisclosureSummaryLabel(title: "Advanced routing", summary: routingSummary)
+                DisclosureSummaryLabel(title: "More ways to trigger", summary: routingSummary)
             } content: {
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 TriggerConflictLabel(conflict: trigger.conflict)

@@ -32,7 +32,7 @@ struct SettingsProblemTests {
         #expect(problems == [.accessibilityPermission])
     }
 
-    @Test func malformedConfigFlagsTheAdvancedPane() {
+    @Test func malformedConfigFlagsTheMaintenancePane() {
         let problems = SettingsProblem.detect(
             hasConfigError: true, microphoneGranted: true,
             accessibilityGranted: true)

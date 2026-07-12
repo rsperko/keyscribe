@@ -12,7 +12,6 @@ struct GeneralSettingsView: View {
     var allModes: [Mode] = []
     var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     var onUpdatePlainDictation: (Mode) -> Void = { _ in }
-    @State private var shortcutsExpanded = false
 
     var body: some View {
         Form {
@@ -30,6 +29,30 @@ struct GeneralSettingsView: View {
                     TriggerConflictLabel(conflict: trigger.conflict)
                     TriggerOverlapLabel(overlap: trigger.overlap)
                 }
+            }
+
+            Section("Shortcuts") {
+                LabeledContent {
+                    ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.addVocabularyShortcut)
+                } label: {
+                    ShortcutFieldLabel("Add to Vocabulary", shadowed: vocabularyShadowed)
+                }
+                if vocabularyShadowed { ShadowedHotkeyNote() }
+                Text("Opens a panel to add a word or correction. Selected text is filled in for you.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LabeledContent {
+                    ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.pasteLastShortcut)
+                } label: {
+                    ShortcutFieldLabel("Paste last dictation", shadowed: pasteLastShadowed)
+                }
+                if pasteLastShadowed { ShadowedHotkeyNote() }
+                Text("Pastes your most recent dictation result.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Both are also available from the \(Branding.appName) menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -61,39 +84,6 @@ struct GeneralSettingsView: View {
             Section("Startup") {
                 Toggle("Open \(Branding.appName) when you log in", isOn: $model.loadOnLogin)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.loadOnLogin)
-            }
-
-            Section {
-                DisclosureSection(isExpanded: $shortcutsExpanded, hasError: vocabularyShadowed || pasteLastShadowed) {
-                    DisclosureSummaryLabel(
-                        title: "Optional shortcuts",
-                        summary: "Add words or paste your last result")
-                } content: {
-                    LabeledContent {
-                        ShortcutWell(key: $model.addVocabularyShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.addVocabularyShortcut)
-                    } label: {
-                        ShortcutFieldLabel("Add to Vocabulary", shadowed: vocabularyShadowed)
-                    }
-                    if vocabularyShadowed { ShadowedHotkeyNote() }
-                    Text("Opens a panel to add a word or correction. Selected text is filled in for you.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    LabeledContent {
-                        ShortcutWell(key: $model.pasteLastShortcut, profile: .actionChord, accessibilityID: AccessibilityID.Settings.General.pasteLastShortcut)
-                    } label: {
-                        ShortcutFieldLabel("Paste last dictation", shadowed: pasteLastShadowed)
-                    }
-                    if pasteLastShadowed { ShadowedHotkeyNote() }
-                    Text("Pastes your most recent dictation result.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Both are also available from the \(Branding.appName) menu.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier(AccessibilityID.Settings.General.optionalShortcuts)
-            } header: {
-                Text("Shortcuts")
             }
 
         }

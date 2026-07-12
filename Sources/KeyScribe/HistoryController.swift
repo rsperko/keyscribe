@@ -284,7 +284,7 @@ final class HistoryPaneModel: ObservableObject {
     }
 
     static let saveFailedMessage =
-        "Couldn't save — a configuration file may be malformed. Open Settings ▸ Advanced to fix it."
+        "Couldn't save — a configuration file may be malformed. Open Settings ▸ Maintenance to fix it."
 
     func flash(_ message: String) {
         statusMessage = message
