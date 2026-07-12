@@ -30,16 +30,8 @@ struct ModeEditorView: View {
         if mode.isSystem { systemBody } else { normalBody }
     }
 
-    // The Direct floor (`_direct`, shown as "Plain Dictation"): a reduced, mostly-locked editor. Only its
-    // shortcut and result handling are editable; the guarantees (no AI, no edit-in-place, global vocabulary
-    // only) are fixed.
     private var systemBody: some View {
         Form {
-            Section {
-                Label("Plain Dictation is the built-in fallback — it dictates on-device with no AI and always types plainly, and runs whenever no other mode applies. You can change its shortcut and result handling (including whether it saves to history); everything else is fixed.",
-                      systemImage: "lock.fill")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             Section("Shortcut") {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate)
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
@@ -48,9 +40,9 @@ struct ModeEditorView: View {
                 Text("Plain Dictation owns Fn by default. Change or clear its shortcut here — even with no shortcut it still runs automatically whenever no other mode applies.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("What it does") {
+            Section("Spoken editing") {
                 SettingRow(
-                    title: "Turn spoken commands into edits",
+                    title: "Turn spoken editing phrases into edits",
                     help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D}, \u{201C}scratch that\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
@@ -165,6 +157,8 @@ struct ModeEditorView: View {
                     if !mode.enabled { PaneBadge("Disabled") }
                 })
             VStack(alignment: .leading, spacing: 6) {
+                summaryLine("Status", mode.enabled ? "Enabled" : "Disabled")
+                summaryLine("Trigger", ModeSummary.whenRuns(mode))
                 summaryLine("Does", mode.source == .selection
                     ? "Replaces the selected text using your spoken instruction"
                     : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))

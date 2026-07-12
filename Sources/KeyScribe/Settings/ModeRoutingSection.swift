@@ -24,7 +24,7 @@ struct ModeRoutingSection: View {
     // First level (UX2 phase 7a): Shortcut, Spoken phrase, Use in — plain language. Advanced routing keeps
     // press style, window-title, and the raw URL regex.
     var body: some View {
-        Section("When this mode is used") {
+        Section("When to use it") {
             ModeTriggerRow(mode: mode, onUpdate: onUpdate)
 
             spokenPhraseLevel

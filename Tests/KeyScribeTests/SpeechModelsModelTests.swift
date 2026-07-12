@@ -228,10 +228,10 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(
             SpeechModelChoiceCopy.bestFor(builtIn),
             "No download and the fastest setup.")
-        XCTAssertEqual(SpeechModelChoiceCopy.memoryUse(for: recommended), "light memory use")
+        XCTAssertEqual(SpeechModelChoiceCopy.memoryUse(for: recommended), "Light memory use")
         XCTAssertEqual(
             SpeechModelChoiceCopy.memoryUse(for: SpeechModelCatalog.entry(for: "whisper")!),
-            "high memory use")
+            "High memory use")
     }
 
     func testChoiceActionUsesOneDirectActionPerModel() {

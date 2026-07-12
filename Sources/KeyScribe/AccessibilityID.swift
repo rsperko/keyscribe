@@ -62,6 +62,7 @@ enum AccessibilityID {
             static let composerRegexToggle = "settings.vocabulary.composer.regexToggle"
             static let composerAdvanced = "settings.vocabulary.composer.advanced"
             static let composerAdd = "settings.vocabulary.composer.add"
+            static let recognitionHelp = "settings.vocabulary.recognitionHelp"
             static let dictionaryList = "settings.vocabulary.dictionary.list"
             static func dictionaryRemove(_ word: String) -> String { "settings.vocabulary.dictionary.remove.\(word)" }
             static let replacementsList = "settings.vocabulary.replacements.list"
@@ -70,7 +71,9 @@ enum AccessibilityID {
 
         enum AI {
             static let list = "settings.ai.list"
+            static let add = "settings.ai.list.add"
             static let addCustom = "settings.ai.list.addCustom"
+            static let chooserCancel = "settings.ai.chooser.cancel"
             static func row(_ connectionID: String) -> String { "settings.ai.list.row.\(connectionID)" }
             static func starterRow(_ presetID: String) -> String { "settings.ai.list.starter.\(presetID)" }
             static let deleteConfirmConfirm = "settings.ai.deleteConfirm.confirm"
@@ -85,6 +88,7 @@ enum AccessibilityID {
                 static let auth = "settings.ai.editor.auth"
                 static let apiKey = "settings.ai.editor.apiKey"
                 static let saveKey = "settings.ai.editor.saveKey"
+                static let replaceKey = "settings.ai.editor.replaceKey"
                 static let tokenCommand = "settings.ai.editor.tokenCommand"
                 static let model = "settings.ai.editor.model"
                 static let fetchModels = "settings.ai.editor.fetchModels"
@@ -120,7 +124,9 @@ enum AccessibilityID {
     enum Mode {
         enum List {
             static let list = "mode.list"
+            static let add = "mode.list.add"
             static let addBlank = "mode.list.add.blank"
+            static let chooserCancel = "mode.chooser.cancel"
             static let deleteConfirmConfirm = "mode.list.deleteConfirm.confirm"
             static let deleteConfirmCancel = "mode.list.deleteConfirm.cancel"
             static func row(_ modeID: String) -> String { "mode.list.row.\(modeID)" }
@@ -308,17 +314,19 @@ enum AccessibilityID {
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
+        Settings.Vocabulary.recognitionHelp,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.replacementsList,
-        Settings.AI.list, Settings.AI.addCustom, Settings.AI.deleteConfirmConfirm,
+        Settings.AI.list, Settings.AI.add, Settings.AI.addCustom, Settings.AI.chooserCancel, Settings.AI.deleteConfirmConfirm,
         Settings.AI.deleteConfirmCancel, Settings.AI.connectOfferConnect, Settings.AI.connectOfferDismiss,
         Settings.AI.Editor.name, Settings.AI.Editor.provider, Settings.AI.Editor.baseURL,
-        Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey,
+        Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey, Settings.AI.Editor.replaceKey,
         Settings.AI.Editor.tokenCommand, Settings.AI.Editor.model, Settings.AI.Editor.fetchModels,
         Settings.AI.Editor.foundModel, Settings.AI.Editor.getKeyLink, Settings.AI.Editor.testConnection,
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
-        Mode.List.list, Mode.List.addBlank, Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
+        Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
+        Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle,
         Mode.Editor.rewriteSelection, Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,
         Mode.Editor.instructionExpand, Mode.Editor.instructionExpandDone,

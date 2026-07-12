@@ -331,6 +331,7 @@ final class AIServiceSettingsModel: ObservableObject {
 struct AIServiceSettingsView: View {
     @ObservedObject var model: AIServiceSettingsModel
     @State private var pendingDelete: Connection?
+    @State private var showingAddService = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -350,15 +351,14 @@ struct AIServiceSettingsView: View {
                 Section {
                     ForEach(model.connections) { connection in
                         let status = rowStatus(connection)
-                        let usage = model.dependentModeNames(of: connection).count
                         PaneListRow(
                             title: connection.name,
                             subtitle: "\(serviceLabel(connection)) · \(connection.model)",
                             status: PaneRowStatus(text: status.text, systemImage: status.icon, style: status.style),
                             trailing: {
-                                Text(usage == 0 ? "Unused" : "\(usage) mode\(usage == 1 ? "" : "s")")
-                                    .font(.caption2)
-                                    .foregroundStyle(usage == 0 ? .tertiary : .secondary)
+                                if model.connections.count > 1, model.dependentModeNames(of: connection).isEmpty {
+                                    Text("Unused").font(.caption2).foregroundStyle(.tertiary)
+                                }
                             })
                             .tag(connection.id)
                             .accessibilityIdentifier(AccessibilityID.Settings.AI.row(connection.id))
@@ -366,23 +366,12 @@ struct AIServiceSettingsView: View {
                 } header: {
                     PaneListSectionHeader("Your Services")
                 }
-                Section {
-                    ForEach(model.presetRows) { row in
-                        PaneListRow(title: row.label)
-                            .tag(row.id)
-                            .accessibilityIdentifier(AccessibilityID.Settings.AI.starterRow(row.preset.id))
-                    }
-                } header: {
-                    PaneListSectionHeader("Connect a Service")
-                }
             }
             .accessibilityIdentifier(AccessibilityID.Settings.AI.list)
             .paneListActionBar {
-                Button("Custom (OpenAI-compatible)…", systemImage: "plus") {
-                    model.addService(preset: .custom)
-                }
+                Button("Add AI Service…", systemImage: "plus") { showingAddService = true }
                 .buttonStyle(.borderless)
-                .accessibilityIdentifier(AccessibilityID.Settings.AI.addCustom)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.add)
             }
             .frame(width: PaneMetrics.listWidth)
 
@@ -392,6 +381,14 @@ struct AIServiceSettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { model.reload() }
+        .sheet(isPresented: $showingAddService) {
+            AddAIServiceChooser(
+                onAdd: { preset in
+                    model.addService(preset: preset)
+                    showingAddService = false
+                },
+                onCancel: { showingAddService = false })
+        }
         .confirmationDialog("Delete this AI service?", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
             titleVisibility: .visible) {
@@ -430,14 +427,8 @@ struct AIServiceSettingsView: View {
         }
     }
 
-    // A selected saved service opens its live editor directly — no summary, no Edit Connection step
-    // (option-1-rollout.md). A selected provider starter shows a read-only preview whose one CTA, Add Service,
-    // persists a seeded connection and swaps this preview for that connection's editor.
     @ViewBuilder private var detail: some View {
-        if let preset = model.selectedPreset {
-            AIServiceStarterPreview(preset: preset) { model.addService(preset: preset) }
-                .id(preset.id)
-        } else if let connection = model.selected {
+        if let connection = model.selected {
             AIServiceEditor(
                 connection: connection, hasKey: model.hasKey(connection),
                 dependentModeNames: model.dependentModeNames(of: connection),
@@ -474,6 +465,44 @@ struct AIServiceSettingsView: View {
         AIServiceStatus.derive(
             connection: connection, testState: model.testState(for: connection.id),
             hasKey: model.hasKey(connection))
+    }
+}
+
+private struct AddAIServiceChooser: View {
+    let onAdd: (ConnectionPreset) -> Void
+    let onCancel: () -> Void
+    @State private var selectedPresetID = ConnectionPreset.all.first?.id
+
+    private var selectedPreset: ConnectionPreset? {
+        selectedPresetID.flatMap(ConnectionPreset.preset(id:)) ?? ConnectionPreset.all.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add AI Service").font(.title2.bold())
+            Text("Choose a provider, then add its key and test the connection.")
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 16) {
+                List(selection: $selectedPresetID) {
+                    Section("Providers") {
+                        ForEach(ConnectionPreset.all) { preset in
+                            Text(preset.pickerLabel).tag(Optional(preset.id))
+                        }
+                    }
+                }
+                .frame(width: 250)
+                if let preset = selectedPreset {
+                    AIServiceStarterPreview(preset: preset) { onAdd(preset) }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.chooserCancel)
+            }
+        }
+        .padding(24)
+        .frame(width: 760, height: 500)
     }
 }
 

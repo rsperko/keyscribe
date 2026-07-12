@@ -20,10 +20,10 @@ enum SpeechModelChoiceCopy {
 
     static func memoryUse(for info: SpeechModelInfo) -> String {
         switch info.approxMemoryBytes {
-        case 0: "almost no memory"
-        case ...600_000_000: "light memory use"
-        case ...2_000_000_000: "moderate memory use"
-        default: "high memory use"
+        case 0: "Almost no memory"
+        case ...600_000_000: "Light memory use"
+        case ...2_000_000_000: "Moderate memory use"
+        default: "High memory use"
         }
     }
 

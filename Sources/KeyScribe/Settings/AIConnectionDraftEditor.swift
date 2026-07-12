@@ -18,6 +18,8 @@ struct AIConnectionDraftEditor: View {
     var onTest: (() -> Void)?
     var onConsumeFocus: () -> Void = {}
     var onDelete: (() -> Void)?
+    @State private var replacingAPIKey = false
+    @State private var connectionOptionsExpanded = false
 
     var body: some View {
         switch presentation {
@@ -47,46 +49,42 @@ struct AIConnectionDraftEditor: View {
 
     private var settingsBody: some View {
         Form {
-            Section("Service") {
-                serviceRows
-                usedByRow
+            Section {
+                PaneDetailHeader(
+                    systemImage: "wand.and.stars",
+                    title: draft.name,
+                    subtitle: serviceLabel(draft.connection(id: "draft", keyRef: "draft")),
+                    badges: { PaneBadge(connectionStatus.text, kind: connectionStatus.kind, systemImage: connectionStatus.icon) })
             }
-            if draft.selectedPreset.isCustom {
-                Section("Endpoint") {
-                    endpointRows
-                }
-            }
-            Section("Authentication") {
-                authenticationRows
+            Section("Connection") {
+                textRow("Service name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
+                credentialFields
+                testRows
             }
             Section("Model") {
                 modelRows
             }
+            Section("Used by") { usedByRow }
+            Section {
+                DisclosureSection(isExpanded: $connectionOptionsExpanded) {
+                    DisclosureSummaryLabel(title: "Connection options", summary: connectionOptionsSummary)
+                } content: {
+                    serviceTypeRow
+                    if draft.selectedPreset.isCustom {
+                        endpointRows
+                        authenticationMechanismRow
+                    }
+                }
+            }
             Section {
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
                     .font(.caption).foregroundStyle(.secondary)
-                if onTest != nil || onDelete != nil {
-                    HStack(spacing: 10) {
-                        if let onTest {
-                            Button("Test Connection", action: onTest)
-                                .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
-                                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
-                            if testState == .testing { ProgressView().controlSize(.small) }
-                            testStatus
-                        }
+                if let onDelete {
+                    HStack {
                         Spacer()
-                        if let onDelete {
-                            PaneDeleteButton(title: "Delete AI Service") { onDelete() }
-                                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
-                        }
-                    }
-                }
-                if onTest != nil {
-                    if case .failed(let message) = testState {
-                        IssueText(message)
-                    }
-                    if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey) {
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                        PaneDeleteButton(title: "Delete AI Service", action: onDelete)
+                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
                     }
                 }
             }
@@ -104,8 +102,12 @@ struct AIConnectionDraftEditor: View {
         textRow("Service name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
         if presentation == .onboarding { thinDivider }
+        serviceTypeRow
+    }
+
+    private var serviceTypeRow: some View {
         HStack {
-            Text("Service")
+            Text("Service type")
             Spacer()
             Picker("Service", selection: presetBinding) {
                 ForEach(ConnectionPreset.all) { preset in
@@ -142,26 +144,30 @@ struct AIConnectionDraftEditor: View {
 
     @ViewBuilder private var authenticationRows: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !draft.selectedPreset.isManaged {
-                HStack {
-                    Text("Sign in with")
-                    Spacer()
-                    Picker("Credential", selection: authMethodBinding) {
-                        if draft.provider == .openaiCompatible {
-                            Text("No Auth").tag(Connection.AuthMethod.none)
-                        }
-                        Text("API Key").tag(Connection.AuthMethod.apiKey)
-                        if draft.provider == .openaiCompatible || draft.authMethod == .tokenCommand {
-                            Text("Command").tag(Connection.AuthMethod.tokenCommand)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: draft.provider == .openaiCompatible ? 310 : 220)
-                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.auth)
-                }
-            }
+            authenticationMechanismRow
             credentialFields
+        }
+    }
+
+    @ViewBuilder private var authenticationMechanismRow: some View {
+        if !draft.selectedPreset.isManaged {
+            HStack {
+                Text("Sign in with")
+                Spacer()
+                Picker("Credential", selection: authMethodBinding) {
+                    if draft.provider == .openaiCompatible {
+                        Text("No Auth").tag(Connection.AuthMethod.none)
+                    }
+                    Text("API Key").tag(Connection.AuthMethod.apiKey)
+                    if draft.provider == .openaiCompatible || draft.authMethod == .tokenCommand {
+                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: draft.provider == .openaiCompatible ? 310 : 220)
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.auth)
+            }
         }
     }
 
@@ -199,24 +205,35 @@ struct AIConnectionDraftEditor: View {
                     keysLink
                 }
             } else {
-                HStack {
-                    Text("API key")
-                    Spacer()
-                    SecureField("", text: apiKeyBinding, prompt: Text("Paste API key"))
-                        .multilineTextAlignment(.trailing)
-                        .textFieldStyle(.plain)
-                        .frame(maxWidth: 360)
-                        .onSubmit(saveKey)
-                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.apiKey)
-                }
-                HStack {
-                    let status = apiKeyStatus
-                    Label(status.text, systemImage: status.icon)
-                        .font(.caption).foregroundStyle(status.style)
-                    Spacer()
-                    Button("Save key", action: saveKey)
-                        .disabled(!draft.hasUnsavedAPIKey)
-                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.saveKey)
+                if hasStoredKey && !draft.hasUnsavedAPIKey && !replacingAPIKey {
+                    HStack {
+                        Label("API key saved", systemImage: "key.fill")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Replace key…") { replacingAPIKey = true }
+                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.replaceKey)
+                    }
+                } else {
+                    HStack {
+                        Text("API key")
+                        Spacer()
+                        SecureField("", text: apiKeyBinding, prompt: Text("Paste API key"))
+                            .multilineTextAlignment(.trailing)
+                            .textFieldStyle(.plain)
+                            .frame(maxWidth: 360)
+                            .onSubmit(saveKey)
+                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.apiKey)
+                    }
+                    HStack {
+                        if draft.hasUnsavedAPIKey {
+                            Label("Unsaved API key", systemImage: "exclamationmark.circle.fill")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        Button("Save key", action: saveKey)
+                            .disabled(!draft.hasUnsavedAPIKey)
+                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.saveKey)
+                    }
                 }
                 HStack {
                     Text(draft.selectedPreset.isCustom
@@ -384,16 +401,6 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
-    private var apiKeyStatus: (text: String, icon: String, style: AnyShapeStyle) {
-        if draft.hasUnsavedAPIKey {
-            return ("Typed key not saved", "exclamationmark.circle.fill", AnyShapeStyle(.orange))
-        }
-        if hasStoredKey {
-            return ("Key saved", "key.fill", AnyShapeStyle(.secondary))
-        }
-        return ("No saved key", "key", AnyShapeStyle(.secondary))
-    }
-
     @ViewBuilder private var testStatus: some View {
         switch testState {
         case .testing:
@@ -409,6 +416,35 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
+    @ViewBuilder private var testRows: some View {
+        if let onTest {
+            HStack(spacing: 10) {
+                Button("Test Connection", action: onTest)
+                    .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
+                if testState == .testing { ProgressView().controlSize(.small) }
+                testStatus
+            }
+            if case .failed(let message) = testState { IssueText(message) }
+            if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey) {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var connectionOptionsSummary: String {
+        draft.selectedPreset.isCustom ? "Custom endpoint and sign-in" : "Change service type"
+    }
+
+    private var connectionStatus: (text: String, icon: String, kind: PaneBadge.Kind) {
+        switch testState {
+        case .passed: ("Ready", "checkmark.circle.fill", .prominent)
+        case .testing: ("Testing", "ellipsis.circle", .neutral)
+        case .failed: ("Needs attention", "exclamationmark.triangle.fill", .warning)
+        case nil: (hasStoredKey ? "Key saved" : "No key", hasStoredKey ? "key.fill" : "key", .neutral)
+        }
+    }
+
     private func requiredLabel(_ text: String) -> some View {
         IssueText(text, severity: .advisory)
     }
@@ -420,6 +456,7 @@ struct AIConnectionDraftEditor: View {
         let key = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         commit(key)
         draft.apiKey = ""
+        replacingAPIKey = false
     }
 
     private func normalizeAuthForProvider() {

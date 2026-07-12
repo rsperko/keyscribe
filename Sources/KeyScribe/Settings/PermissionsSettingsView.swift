@@ -104,12 +104,20 @@ private struct PermissionRow: View {
             if status != .granted {
                 Text(unavailable).font(.caption).foregroundStyle(.secondary)
                 HStack {
+                    Spacer()
                     if status == .notDetermined {
                         Button("Allow", action: request)
+                            .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier(AccessibilityID.Settings.Permissions.allow(permID))
                     }
-                    Button("Open System Settings", action: openSettings)
-                        .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings(permID))
+                    if status == .denied {
+                        Button("Open System Settings", action: openSettings)
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings(permID))
+                    } else {
+                        Button("Open System Settings", action: openSettings)
+                            .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings(permID))
+                    }
                 }
             }
         }

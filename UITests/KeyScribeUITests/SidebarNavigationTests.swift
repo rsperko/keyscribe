@@ -28,7 +28,7 @@ final class SidebarNavigationTests: XCTestCase {
             ("settings.sidebar.vocabulary", "settings.vocabulary.composer.term"),
             ("settings.sidebar.aiServices", "settings.ai.list"),
             ("settings.sidebar.modes", "mode.list"),
-            ("settings.sidebar.history", "settings.general.historyEnabled"),
+            ("settings.sidebar.history", "history.search"),
             ("settings.sidebar.permissions", "settings.permissions.row.microphone"),
             ("settings.sidebar.advanced", "settings.advanced.revealConfig"),
         ]
@@ -57,5 +57,43 @@ final class SidebarNavigationTests: XCTestCase {
             XCTAssertTrue(shortcut.waitForExistence(timeout: 8), "\(id) should be visible in General")
             XCTAssertTrue(shortcut.isHittable, "\(id) should be available without expanding a section")
         }
+    }
+
+    func testAddAIServiceChooserHasVisibleCancelAction() {
+        let (_, window) = launchIntoSettings()
+
+        let aiServices = element("settings.sidebar.aiServices", in: window)
+        XCTAssertTrue(aiServices.waitForExistence(timeout: 8))
+        aiServices.click()
+
+        let add = element("settings.ai.list.add", in: window)
+        XCTAssertTrue(add.waitForExistence(timeout: 8))
+        add.click()
+
+        let cancel = element("settings.ai.chooser.cancel", in: window)
+        XCTAssertTrue(cancel.waitForExistence(timeout: 8),
+                      "the Add AI Service chooser should offer a visible Cancel action")
+        XCTAssertTrue(cancel.isHittable, "Cancel should be directly available in the chooser")
+        cancel.click()
+        XCTAssertFalse(cancel.waitForExistence(timeout: 3), "Cancel should dismiss the chooser")
+    }
+
+    func testAddModeChooserHasVisibleCancelAction() {
+        let (_, window) = launchIntoSettings()
+
+        let modes = element("settings.sidebar.modes", in: window)
+        XCTAssertTrue(modes.waitForExistence(timeout: 8))
+        modes.click()
+
+        let add = element("mode.list.add", in: window)
+        XCTAssertTrue(add.waitForExistence(timeout: 8))
+        add.click()
+
+        let cancel = element("mode.chooser.cancel", in: window)
+        XCTAssertTrue(cancel.waitForExistence(timeout: 8),
+                      "the Add Mode chooser should offer a visible Cancel action")
+        XCTAssertTrue(cancel.isHittable, "Cancel should be directly available in the chooser")
+        cancel.click()
+        XCTAssertFalse(cancel.waitForExistence(timeout: 3), "Cancel should dismiss the chooser")
     }
 }

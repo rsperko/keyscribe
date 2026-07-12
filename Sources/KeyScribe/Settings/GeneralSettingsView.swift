@@ -68,11 +68,11 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Microphone")
             } footer: {
-                Text("Choose a microphone to use it every time, or let \(Branding.appName) follow your Mac’s current input.")
+                Text("Choose one to always use it, or follow your Mac’s current input.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("During dictation") {
+            Section("Audio and system behavior") {
                 Toggle("Play start and stop sounds", isOn: $model.sounds)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
                 Toggle("Keep your Mac awake", isOn: $model.keepDisplayAwake)

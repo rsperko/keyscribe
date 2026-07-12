@@ -343,23 +343,23 @@ struct HistoryPaneView: View {
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SettingRow(
-                title: "Keep dictation history on this Mac",
-                result: "Audio is never saved; stored text can be sensitive.",
-                help: "Stores transcripts and final text locally so you can search and correct them. Nothing leaves this Mac. Password-field dictations are never saved; for other sensitive work, lower retention below or exclude a mode in its Result handling.")
-            {
-                Toggle("", isOn: $settings.historyEnabled).labelsHidden()
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
-            }
-            if settings.historyEnabled {
-                Stepper("Keep for \(retentionDays ?? settings.retentionDays) days", value: retentionDraft, in: 1...365)
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
-                if retentionDays != nil {
-                    Button("Apply Retention", action: applyRetention)
+        SettingRow(
+            title: "History",
+            result: settings.historyEnabled
+                ? "On this Mac · keep for \(retentionDays ?? settings.retentionDays) days"
+                : "Off",
+            help: "Stores transcripts and final text locally so you can search and correct them. Audio and password-field dictations are never saved. For other sensitive work, lower retention or exclude a mode in its Result handling.")
+        {
+            HStack(spacing: 8) {
+                if settings.historyEnabled {
+                    Stepper("\(retentionDays ?? settings.retentionDays) days", value: retentionDraft, in: 1...365)
+                        .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
+                    if retentionDays != nil {
+                        Button("Apply", action: applyRetention)
+                    }
                 }
-                Text("Entries older than this are removed automatically.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Keep history", isOn: $settings.historyEnabled).labelsHidden()
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
             }
         }
         .padding(10)
@@ -500,7 +500,7 @@ private struct HistoryRowView: View {
 }
 
 private enum DetailStage: String, CaseIterable, Identifiable {
-    case whatHappened = "What Happened"
+    case result = "Result"
     case details = "Details"
     var id: String { rawValue }
 }
@@ -510,7 +510,7 @@ private typealias ComparisonStage = HistoryComparison.Stage
 private struct HistoryDetailView: View {
     let entry: HistoryEntry
     @ObservedObject var model: HistoryPaneModel
-    @State private var stage: DetailStage = .whatHappened
+    @State private var stage: DetailStage = .result
     @State private var comparisonStage: ComparisonStage = .heardInserted
     @State private var selectedText = ""
     @State private var selectedRole: ComparisonTextRole?
@@ -553,7 +553,7 @@ private struct HistoryDetailView: View {
         .onChange(of: entry.timestamp) {
             selectedText = ""
             selectedRole = nil
-            stage = .whatHappened
+            stage = .result
             comparisonStage = .heardInserted
         }
         .onChange(of: stage) {
@@ -589,7 +589,7 @@ private struct HistoryDetailView: View {
 
     @ViewBuilder private var stageContent: some View {
         switch stage {
-        case .whatHappened: whatHappened
+        case .result: whatHappened
         case .details: details
         }
     }

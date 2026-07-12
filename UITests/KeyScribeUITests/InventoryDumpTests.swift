@@ -25,7 +25,7 @@ final class InventoryDumpTests: XCTestCase {
         ("vocabulary", "settings.sidebar.vocabulary", "settings.vocabulary.composer.term"),
         ("aiServices", "settings.sidebar.aiServices", "settings.ai.list"),
         ("modes", "settings.sidebar.modes", "mode.list"),
-        ("history", "settings.sidebar.history", "settings.general.historyEnabled"),
+        ("history", "settings.sidebar.history", "history.search"),
         ("permissions", "settings.sidebar.permissions", "settings.permissions.row.microphone"),
         ("advanced", "settings.sidebar.advanced", "settings.advanced.revealConfig"),
     ]

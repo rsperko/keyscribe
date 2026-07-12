@@ -319,8 +319,7 @@ so they sit together above Settings instead of competing with the primary loop.
 The modes listed under `Next Dictation` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
 setup materializes and connects the two headline rewrite modes (Polish and Edit Selection); the other
-starters stay available as templates in the Modes pane's **Start from a Template** section until the
-user adds one.
+starters stay available in the Modes pane's **Add Mode…** template chooser until the user adds one.
 
 ### One-shot manual-mode override
 
@@ -396,10 +395,8 @@ Show the few choices a new user is most likely to need:
 
 - The dictation key, with a clearly exposed **Change key…** button. The key remains owned by Plain
   Dictation (Direct mode), so the button routes to that editor instead of creating a second setting.
-- Play start and stop sounds
-- Keep your Mac awake while dictating
-- Mute all other audio while dictating
-- Microphone choice, with a plain-language explanation of following the Mac’s current input
+- **Audio and system behavior** groups start/stop sounds, keeping the Mac awake, and muting other audio.
+- Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
 - (History enable and retention live in the **History** pane, not here.)
 - **Shortcuts** immediately follows Dictation and shows global chords for **Add to Vocabulary**
@@ -430,7 +427,7 @@ plus status; there are no radio controls, per-row actions, or bottom download me
 the selected model's own **Download** button. Selecting a model fills the right detail pane, under the
 shared detail header (icon + name + **Recommended** badge), with its best-use description, language
 coverage, disk requirement, and light/moderate/high memory use, and the one primary lifecycle action:
-**Current model**, **Use This Model**, **Download**, or its live install/test state. A model in
+**Current**, **Use This Model**, **Download**, or its live install/test state. A model in
 **Available to Download** shows an `AVAILABLE TO DOWNLOAD` label and a reduced read-only preview — the
 facts and the `Download` button only, with no recognition or maintenance controls. Downloaded models do not
 become active until **Use This Model** is pressed. Once a model is on this Mac, the detail's
@@ -455,7 +452,9 @@ Both screens prioritize fast correction over configuration theory.
   away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, the
   composer can create only a replacement — the leave-empty hint disappears and only the regex help
   shows — and the disclosure stays open so an ON regex toggle is never hidden.
-- Dictionary: edit/remove saved words, import/export later only if needed.
+- Dictionary: edit/remove saved words, import/export later only if needed. The first scan says only
+  that terms use the intended spelling; model-specific recognition behavior and rewrite sharing live
+  behind **How recognition works** inline help.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
   Apple; a soft nudge on Whisper/Parakeet), and dictionary terms always help the optional rewrite
@@ -465,17 +464,17 @@ Both screens prioritize fast correction over configuration theory.
   recognition pass over the audio — on the order of **a second on a long dictation, negligible on short
   ones** (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
   recognition or a noticeable wait for normal use.
-- Replacements: a clear `Heard` → `Use instead` pair. Regex rows keep a `Regex` badge.
+- Replacements: human-readable `When heard`/`Use instead` rows that wrap long values. Regex rows use
+  `Pattern` and retain a visible `Regex` badge.
 
 ### AI Services
 
-An AI service is a named connection, not a global provider choice. The pane uses the shared two-section
-list: **Your Services** (saved connections — name, provider/model, and the active credential/health
-state: no auth, key stored/no key, token command, connection works, or failed test) and **Connect a
-Service** (one action-oriented row per hosted provider starter — `Connect to OpenAI`, and once a
-connection for that provider exists, `Connect another OpenAI service`, so a saved service named after
-its provider can never be confused with the starter). The bottom action bar holds only **Custom
-(OpenAI-compatible)…**, the create path for an endpoint KeyScribe does not know in advance.
+An AI service is a named connection, not a global provider choice. The persistent list is **Your
+Services** only: each row shows its name, health, and provider · model. **Unused** appears only as a
+subdued advisory when multiple saved services make it useful. The bottom **Add AI Service…** action
+opens a compact provider chooser for hosted providers and **Custom (OpenAI-compatible)**; it previews
+the selected provider before adding a seeded service and opening that service’s editor. The chooser has
+a visible **Cancel** action as well as the Escape shortcut.
 
 Selecting a **saved** service opens its **live editor directly** — no summary, no *Edit Connection*
 step. The editor is immediate-apply and carries **Test Connection** and the trailing-red **Delete AI
@@ -491,21 +490,16 @@ surface has one shot to produce a working service. The Settings pane deliberatel
 `Add Service` behaves like `Download`/`Add Mode`. The status vocabulary and error strings are shared
 across both surfaces via one helper.
 
-The editor uses progressive sections:
+The editor answers the ready path first: its header shows the service name, provider, and latest status;
+**Connection** keeps the credential action and **Test Connection** together; **Model** and **Used by**
+follow. The latest test result remains in the header and beside the test action.
 
-- **Service** — name and a service picker. The picker lists the first-party providers (OpenAI,
-  Anthropic, Gemini), the **hosted OpenAI-compatible presets** (OpenRouter, Groq, Mistral), and
-  **Custom (OpenAI-compatible)** for any other endpoint. Picking a hosted preset pins its base URL
-  and seeds a lightweight, fast default model, so the only remaining step is pasting a key — "add a
-  key and go." A preset is UI seed data only: a seeded connection still persists as a plain
-  `openai_compatible` connection with a `base_url`, and reopening it recovers which preset it is.
-- **Endpoint** — visible only for the **Custom** OpenAI-compatible option (hosted presets pin their
-  own URL); base URL is required before model fetch or test.
-- **Authentication** — hidden for hosted presets, which are always API-key. For the Custom option it
-  is a segmented credential choice: **No Auth**, **API Key**, or **Command**. API Key shows explicit
-  saved/unsaved/no-key states, a **Save to Keychain** action, and — when the service publishes one —
-  a **Get an API key** link to where the provider issues keys. Command shows the command field,
-  placeholder, and an inline required-state message when empty. Generated tokens stay in memory only.
+- Known providers keep their type, endpoint, and authentication mechanism out of the first scan.
+  **Connection options** reveals changing the service type; Custom then exposes the endpoint and
+  **No Auth**, **API Key**, or **Command** mechanism. Hosted presets pin their own URL and use API keys.
+- API key state is singular: **API key saved** + **Replace key…**; no saved key + field + **Save key**;
+  or an unsaved key + enabled **Save key**. Command shows its field and an inline required-state message.
+  Generated tokens stay in memory only.
 - **Model** — model id is always visible. Fetching models is a helper; when fetched models exist, a
   visible picker selects one while the chosen id remains visible in the model field.
 - **Connection test** — user-initiated only, disabled until the visible prerequisites are met.
@@ -515,25 +509,20 @@ compatible endpoint configuration under `Connection options`.
 
 ### Modes
 
-The Modes pane uses the shared two-section list: **Your Modes** (Plain Dictation — the Direct floor —
-plus every materialized mode) and **Start from a Template** (the starter rewrite modes not yet
-materialized at their catalog identity; a materialized one drops out, and deleting it brings it back).
-Selecting a starter shows a read-only **preview** on the right — a `STARTER MODE` label, its capability,
-how it is invoked, whether it runs on this Mac or needs an AI service, a short dictated-input →
-resulting-output example, and one CTA, **Add Mode**. The bottom action bar holds only **New Blank
-Mode**. Pressing **Add Mode** materializes a fully editable mode, added **Disabled**, keeps it selected,
-and swaps the preview for the live editor — the user reviews/wires it and flips **Enabled** when ready,
-so a mode that needs an AI service never lands enabled-but-broken. At its catalog id the materialized
-mode keeps its seed identity, so it continues to receive starter updates until the user edits it (a
-second copy of the same template is a plain user mode with no seed identity). Existing installs keep
-their previously-seeded starter files unchanged.
+The Modes pane’s persistent list is **Your Modes**: Plain Dictation — the Direct floor — plus every
+materialized mode. **Add Mode…** opens a compact chooser with **Start from a template** and **New blank
+mode**; templates keep their read-only preview there before they are added. The chooser has a visible
+**Cancel** action as well as the Escape shortcut, and its preview scrolls only when a smaller window
+needs it. Pressing **Add Mode**
+materializes a fully editable mode, added **Disabled**, keeps it selected, and opens its editor. At its
+catalog id the materialized mode keeps its seed identity, so it continues to receive starter updates
+until the user edits it. Existing installs keep their previously-seeded starter files unchanged.
 
 The Modes list shows the user-visible summary of each mode:
 
 - name and enabled state (a disabled mode reads "Disabled");
-- when it can be selected (automatic everywhere, app rule, hotkey, or spoken phrase);
-- local-only or rewrite boundary status;
-- history exclusion status when enabled.
+- one routing fact and one processing fact, such as `Right-⌥ · On this Mac`, `Safari · Cloud rewrite`,
+  or `Say “as an email” · Cloud rewrite`.
 
 The editor presents a short **Mode summary** at the top. The editor is divided into progressive
 sections:
@@ -541,7 +530,7 @@ sections:
 1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
-2. **When this mode is used** — three plain first-level rows (UX2 phase 7a): **Shortcut** (the
+2. **When to use it** — three plain first-level rows: **Shortcut** (the
    **shortcut well** — one control whose menu offers `None` and the modifier-only keys Fn (Globe),
    Right-⌥, Right-⌘, and ⌃⌥⇧⌘; recording accepts a tap of a modifier-only key on release, while a
    key pressed before release records a chord such as ⌘X; it also captures custom chords or extra mouse
@@ -565,6 +554,10 @@ sections:
 6. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
    notes when TOML-only insertion or submit behavior is active.
 
+Plain Dictation stays deliberately small: **Shortcut**, **Spoken editing**, and **Result handling**.
+Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it
+does not imply an AI rewrite or a separate expert mode.
+
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to
 wonder why a selection/context option disappeared.
@@ -573,7 +566,7 @@ wonder why a selection/context option disappeared.
 
 Permissions appear where their capability is enabled and in their own unobtrusive Settings section
 near the bottom of the sidebar. Each permission row states why it is needed, what works without it, and a direct
-action to open the macOS setting. KeyScribe requests permissions just in time, never in a blanket
+repair action; a missing permission makes that action the prominent trailing control. KeyScribe requests permissions just in time, never in a blanket
 first-launch wall.
 
 ### Maintenance
@@ -599,7 +592,7 @@ live in the separate **About & Notices** window, not here.)
 History is a **Settings pane**, not a separate window (UX2 phase 8) — it is the audit,
 correction, and diagnostics surface, reached via the menu "History…" / ⌘Y (which opens Settings
 on the History pane) and the sidebar. It uses the same list/detail pane layout as Modes: a
-left column with the history enable/retention controls (moved out of General), a search field,
+left column with one compact History header for enablement and retention (moved out of General), a search field,
 the day-grouped list, and the storage-truth statement pinned at the bottom; the right column is
 the entry detail. The enable toggle and retention stepper live only here now — General has no
 History section. **"Navigated away" equals "closed"**: leaving the pane (or closing Settings)
@@ -607,7 +600,7 @@ releases all parsed transcripts and the search cache, and re-entering reloads (s
 so it is free when nothing changed). "Paste Result" hides Settings, pastes into the previously
 focused app, and closes Settings on success (re-presents + copies on failure).
 
-Retention changes are staged until **Apply Retention** is pressed. A lower value confirms once only
+Retention changes are staged until **Apply** is pressed in that header. A lower value confirms once only
 when it would remove existing day files; an empty history or a value that removes nothing applies
 without confirmation.
 
@@ -629,7 +622,8 @@ The detail follows the user’s mental model:
 Heard → Transformed → Result
 ```
 
-It shows the mode, insertion outcome, correction actions, and a collapsed `Processing details`
+It shows the mode, insertion outcome, correction actions, and a `Result` view with a separate
+`Details` view for processing details.
 section. Details reveal the exact connection/model when used, whether best-effort redaction was
 enabled, which context categories were sent, and the stored prompt. Redaction maps are never
 shown or persisted.

@@ -26,11 +26,29 @@ struct ReplacementRows: View {
     var body: some View {
         ForEach(rules.indices, id: \.self) { index in
             let rule = rules[index]
-            HStack(spacing: 6) {
-                Text(rule.heard)
-                Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
-                Text(rule.replace).foregroundStyle(.secondary)
-                if rule.regex { Text("Regex").font(.caption2).foregroundStyle(.secondary) }
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(rule.regex ? "Pattern" : "When heard")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if rule.regex {
+                            Text("Regex")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(rule.heard)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                    Text("Use instead")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(rule.replace.isEmpty ? "Nothing" : rule.replace)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 RemoveButton { onRemove(index) }
                     .accessibilityIdentifier(removeID(index))
@@ -166,6 +184,7 @@ struct VocabularySettingsView: View {
 
     @ObservedObject var dictionary: DictionarySettingsModel
     @ObservedObject var replacements: ReplacementsSettingsModel
+    @State private var recognitionHelpExpanded = false
 
     var body: some View {
         Form {
@@ -175,8 +194,14 @@ struct VocabularySettingsView: View {
                     onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) })
             }
             Section("Words to Recognize") {
-                Text("Names, product terms, and jargon. When you say one, \(Branding.appName) prefers your spelling — as it transcribes and when it cleans up afterward. Entries are shared with your AI service, marked as intended spellings rather than typos, whenever a rewrite runs — including in privacy modes.")
+                Text("Names, product terms, and jargon that should use your spelling.")
                     .font(.caption).foregroundStyle(.secondary)
+                DisclosureSection("How recognition works", isExpanded: $recognitionHelpExpanded) {
+                    Text("Recognition support varies by speech model. These terms also guide a rewrite when one runs, including in privacy modes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.recognitionHelp)
                 DictionaryRows(
                     words: dictionary.words,
                     removeID: AccessibilityID.Settings.Vocabulary.dictionaryRemove,

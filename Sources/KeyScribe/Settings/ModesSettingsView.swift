@@ -8,6 +8,7 @@ struct ModesSettingsView: View {
     var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var modePendingDelete: Mode?
+    @State private var showingAddMode = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,23 +38,12 @@ struct ModesSettingsView: View {
                 } header: {
                     PaneListSectionHeader("Your Modes")
                 }
-                if !model.starterTemplates.isEmpty {
-                    Section {
-                        ForEach(model.starterTemplates) { template in
-                            ModeStarterRow(template: template)
-                                .tag(template.id)
-                                .accessibilityIdentifier(AccessibilityID.Mode.List.starterRow(template.id))
-                        }
-                    } header: {
-                        PaneListSectionHeader("Start from a Template")
-                    }
-                }
             }
             .accessibilityIdentifier(AccessibilityID.Mode.List.list)
             .paneListActionBar {
-                Button("New Blank Mode", systemImage: "plus", action: model.create)
+                Button("Add Mode…", systemImage: "plus") { showingAddMode = true }
                     .buttonStyle(.borderless)
-                    .accessibilityIdentifier(AccessibilityID.Mode.List.addBlank)
+                    .accessibilityIdentifier(AccessibilityID.Mode.List.add)
             }
             .disabled(recordingState.isRecording)
             .frame(width: PaneMetrics.listWidth)
@@ -77,18 +67,28 @@ struct ModesSettingsView: View {
                         onDuplicate: { model.duplicate(mode) },
                         onDelete: { modePendingDelete = mode })
                         .id(mode.id)
-                } else if let starter = model.selectedStarter {
-                    ModeStarterPreview(template: starter) { model.materializeTemplate(starter.id) }
-                        .id(starter.id)
                 } else {
                     ContentUnavailableView(
                         "Choose a mode", systemImage: "square.stack.3d.up",
-                        description: Text("Select one of your modes to edit it, or a template to add it."))
+                        description: Text("Select one of your modes to edit it, or add a new one."))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { model.reload() }
+        .sheet(isPresented: $showingAddMode) {
+            AddModeChooser(
+                templates: model.starterTemplates,
+                onAddBlank: {
+                    model.create()
+                    showingAddMode = false
+                },
+                onAddTemplate: { template in
+                    model.materializeTemplate(template.id)
+                    showingAddMode = false
+                },
+                onCancel: { showingAddMode = false })
+        }
         .confirmationDialog(
             "Delete this mode?", isPresented: Binding(
                 get: { modePendingDelete != nil },
@@ -122,26 +122,59 @@ struct ModesSettingsView: View {
     }
 }
 
-// A Catalog row in the Start-from-a-Template section: the template name + its one-line capability. No
-// per-row action — selecting it opens the read-only preview on the right (option-1-rollout.md).
-private struct ModeStarterRow: View {
-    let template: Mode
+private struct AddModeChooser: View {
+    let templates: [Mode]
+    let onAddBlank: () -> Void
+    let onAddTemplate: (Mode) -> Void
+    let onCancel: () -> Void
+    @State private var selectedTemplateID: String?
+
+    private var selectedTemplate: Mode? {
+        templates.first { $0.id == selectedTemplateID } ?? templates.first
+    }
 
     var body: some View {
-        PaneListRow(title: template.name, subtitle: ModeStore.templateSummary(for: template.id))
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add Mode").font(.title2.bold())
+            Text("Start with a template or make a blank mode.")
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 16) {
+                List(selection: $selectedTemplateID) {
+                    Section("Start from a template") {
+                        ForEach(templates) { template in
+                            Text(template.name).tag(template.id)
+                        }
+                    }
+                }
+                .frame(width: 220)
+
+                if let template = selectedTemplate {
+                    ModeStarterPreview(template: template) { onAddTemplate(template) }
+                } else {
+                    ContentUnavailableView("No templates available", systemImage: "square.stack.3d.up")
+                }
+            }
+            Divider()
+            HStack {
+                Text("Or start with an empty mode.").foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .accessibilityIdentifier(AccessibilityID.Mode.List.chooserCancel)
+                Button("New Blank Mode", action: onAddBlank)
+            }
+        }
+        .padding(24)
+        .frame(width: 760, height: 560)
+        .onAppear { selectedTemplateID = templates.first?.id }
     }
 }
 
-// The Catalog detail for a starter Mode: a reduced, read-only capability preview with one CTA, `Add Mode`.
-// It never edits configuration — pressing Add Mode materializes an editable (Disabled) mode and the pane
-// swaps this preview for the live editor (installed-catalog-behavior.md). No edit fields, no destructive or
-// Advanced controls live here.
 private struct ModeStarterPreview: View {
     let template: Mode
     let onAdd: () -> Void
 
     var body: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("STARTER MODE")
                     .font(.caption2.weight(.semibold))
@@ -236,10 +269,9 @@ private struct ModeSummaryRow: View {
     }
 
     private var summary: String {
-        var values = [ModeSummary.whenRuns(mode)]
-        values.append(issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite"))
-        if mode.excludeFromHistory { values.append("No history") }
-        return values.joined(separator: " · ")
+        guard mode.enabled else { return "Disabled" }
+        return [ModeSummary.whenRuns(mode), issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite")]
+            .joined(separator: " · ")
     }
 }
 
@@ -279,15 +311,15 @@ enum ModeSummary {
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
         if mode.isSystem {
             if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-                return "Triggered by \(descriptor.displayString) · fallback"
+                return descriptor.displayString
             }
-            return "Fallback when no mode matches"
+            return "Fallback"
         }
         // A shortcut is what makes a mode run automatically. A constrained mode with NO shortcut/phrase never
         // auto-runs (Fn goes to Plain Dictation) — it's menu-reachable, so don't imply it's automatic.
         if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-            return constrained ? "Triggered by \(descriptor.displayString) in matching apps"
-                               : "Triggered by \(descriptor.displayString)"
+            return constrained ? "\(descriptor.displayString) in matching apps"
+                               : descriptor.displayString
         }
         if let phrase = mode.triggerPhrases.first {
             let said = spokenPhrase(phrase, capitalized: true)
