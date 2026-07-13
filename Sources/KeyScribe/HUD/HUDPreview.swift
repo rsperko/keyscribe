@@ -32,11 +32,11 @@ enum HUDPreview {
             .transcribing(mode: "Markdown")
         case "rewriting":
             .rewriting(
-                connection: "Example Service", mode: "Polish", redacted: false,
+                connection: "Example Service", mode: "Cleanup", redacted: false,
                 contextCategories: ["app", "preceding text"], offerLocalTranscript: false)
         case "rewriting-three-badges":
             .rewriting(
-                connection: "Example Service", mode: "Polish", redacted: true,
+                connection: "Example Service", mode: "Cleanup", redacted: true,
                 contextCategories: ["app", "preceding text"], offerLocalTranscript: false)
         case "redacted-rewrite":
             .rewriting(
@@ -44,7 +44,7 @@ enum HUDPreview {
                 contextCategories: [], offerLocalTranscript: false)
         case "rewriting-with-local-transcript":
             .rewriting(
-                connection: "Example Service", mode: "Polish", redacted: false,
+                connection: "Example Service", mode: "Cleanup", redacted: false,
                 contextCategories: ["app"], offerLocalTranscript: true)
         case "inserted":
             .complete(outcome: .inserted, mode: "Plain Dictation")
@@ -59,7 +59,7 @@ enum HUDPreview {
         case "failed":
             .complete(outcome: .failed, mode: "Plain Dictation")
         case "rewrite-fallback":
-            .localFallback(outcome: .inserted, mode: "Polish")
+            .localFallback(outcome: .inserted, mode: "Cleanup")
         case "microphone-error":
             .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
         case "accessibility-error":

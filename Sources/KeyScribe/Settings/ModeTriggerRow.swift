@@ -47,14 +47,16 @@ struct PressStyleRow: View {
     let disabled: Bool
 
     var body: some View {
-        Picker("How the shortcut works", selection: selection) {
+        Picker("Press behavior", selection: selection) {
             Text("Hold or tap").tag("hold-or-tap")
             Text("Hold only").tag("hold-only")
             Text("Tap to toggle").tag("tap-to-toggle")
         }
         .disabled(disabled)
         .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
-        Text((PressStyle(rawValue: selection.wrappedValue) ?? .holdOrTap).instruction)
+        Text(disabled
+            ? "Add a shortcut to choose how it starts."
+            : (PressStyle(rawValue: selection.wrappedValue) ?? .holdOrTap).instruction)
             .font(.caption).foregroundStyle(.secondary)
     }
 }

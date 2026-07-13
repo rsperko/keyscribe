@@ -32,12 +32,16 @@ struct ModeEditorView: View {
 
     private var systemBody: some View {
         Form {
-            Section("Shortcut") {
-                ModeTriggerRow(mode: mode, onUpdate: onUpdate)
+            Section("Ways to use this mode") {
+                ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 TriggerConflictLabel(conflict: trigger.conflict)
                 TriggerOverlapLabel(overlap: trigger.overlap)
-                Text("Plain Dictation owns Fn by default. Change or clear its shortcut here — even with no shortcut it still runs automatically whenever no other mode applies.")
+                if usesMouseShortcut {
+                    Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Plain Dictation is also used whenever no other mode matches.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Spoken editing") {
@@ -137,6 +141,14 @@ struct ModeEditorView: View {
         .formStyle(.grouped)
         .padding(16)
         .onAppear { if autofocusName { onConsumeFocus() } }
+    }
+
+    private var usesMouseShortcut: Bool {
+        guard let key = mode.triggerKeys.first?.key,
+              let descriptor = try? KeyDescriptor(parsing: key)
+        else { return false }
+        if case .mouseButton = descriptor { return true }
+        return false
     }
 
     @ViewBuilder private var nonPasteInsertionNotice: some View {

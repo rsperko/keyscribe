@@ -7,7 +7,8 @@ struct ModeRoutingSection: View {
     let allModes: [Mode]
     var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     let onUpdate: (Mode) -> Void
-    @State private var routingExpanded = false
+    @State private var advancedMatchingExpanded = false
+    @State private var enteringPhrase = false
     @State private var newPhrase = ""
     @State private var newURLPattern = ""
     @State private var newWindowTitlePattern = ""
@@ -21,31 +22,34 @@ struct ModeRoutingSection: View {
         ModeTrigger(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
     }
 
-    // First level (UX2 phase 7a): Shortcut, Spoken phrase, Use in — plain language. Advanced routing keeps
-    // press style, window-title, and the raw URL regex.
     var body: some View {
-        Section("When to use it") {
-            ModeTriggerRow(mode: mode, onUpdate: onUpdate)
-
-            spokenPhraseLevel
-            Divider().padding(.vertical, 2)
-            useInLevel
-
-            DisclosureSection(
-                isExpanded: $routingExpanded,
-                hasWarning: trigger.conflict != nil || trigger.overlap != nil
-            ) {
-                DisclosureSummaryLabel(title: "More ways to trigger", summary: routingSummary)
-            } content: {
-                PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
-                TriggerConflictLabel(conflict: trigger.conflict)
-                TriggerOverlapLabel(overlap: trigger.overlap)
-                Text("Use Fn, a keyboard shortcut, or an extra mouse button to start this mode directly. Bound mouse buttons are used by \(Branding.appName) while it runs, so they won’t also go Back or Forward in other apps.")
+        Section("Ways to use this mode") {
+            ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
+            PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
+            TriggerConflictLabel(conflict: trigger.conflict)
+            TriggerOverlapLabel(overlap: trigger.overlap)
+            if usesMouseShortcut {
+                Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            spokenPhraseLevel
+        }
 
+        Section("Where it works") {
+            Text(ModeSummary.availabilityDescription(mode))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            availabilityLevel
+            DisclosureSection(
+                isExpanded: $advancedMatchingExpanded
+            ) {
+                DisclosureSummaryLabel(
+                    title: "More precise matching",
+                    summary: "Window titles and URL patterns")
+            } content: {
                 Text("Window title (regular expression)")
-                    .font(.subheadline.weight(.semibold)).padding(.top, 4)
+                    .font(.subheadline.weight(.semibold))
                 HStack {
                     TextField("Window title regex, e.g. (?i)pull request", text: $newWindowTitlePattern)
                         .textFieldStyle(.roundedBorder)
@@ -67,7 +71,7 @@ struct ModeRoutingSection: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
                 }
 
-                Text("Routing rules choose a mode before recording. Each is checked only when a mode uses it. URLs are local routing keys and are never sent to a rewrite provider. A spoken phrase said at the end can reroute the result after transcription.")
+                Text("These patterns narrow where this mode is available. URLs are never sent to a rewrite provider.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -75,48 +79,50 @@ struct ModeRoutingSection: View {
         }
     }
 
+    private var usesMouseShortcut: Bool {
+        guard let key = mode.triggerKeys.first?.key,
+              let descriptor = try? KeyDescriptor(parsing: key)
+        else { return false }
+        if case .mouseButton = descriptor { return true }
+        return false
+    }
+
     private var spokenPhraseLevel: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Spoken phrase").font(.subheadline.weight(.semibold))
-            Text("End a dictation with a phrase to hand the result to this mode — e.g. \u{201C}…and that's the plan, as an email.\u{201D}")
+            Text("End a dictation with a phrase such as \u{201C}as \(mode.name.lowercased())\u{201D} to use this mode. The phrase is removed from the result.")
                 .font(.caption).foregroundStyle(.secondary)
+            if enteringPhrase {
+                HStack {
+                    TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitPhrase)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
+                    Button("Add", action: commitPhrase)
+                        .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
+                }
+            } else {
+                Button(mode.triggerPhrases.isEmpty ? "Add spoken phrase…" : "Add another spoken phrase…") {
+                    enteringPhrase = true
+                }
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseStart)
+            }
             ForEach(Array(mode.triggerPhrases.enumerated()), id: \.element) { index, phrase in
                 HStack {
-                    Text(ModeSummary.spokenPhrase(phrase, capitalized: false)).font(.callout)
+                    Text("\u{201C}\(phrase)\u{201D}").font(.callout)
                     Spacer()
                     Button("Remove", role: .destructive) { removePhrase(phrase) }
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseRemove(index))
                 }
             }
-            HStack {
-                TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(commitPhrase)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
-                Button("Add", action: commitPhrase)
-                    .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
-            }
         }
     }
 
-    private var useInLevel: some View {
+    private var availabilityLevel: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Use in").font(.subheadline.weight(.semibold))
-            if !mode.constraints.isEmpty && mode.triggerKeys.isEmpty {
-                Text("An app or website rule alone doesn’t run a mode automatically — give it the same shortcut as Plain Dictation (Fn) to take over in matching apps, or pick it from the menu.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(mode.constraints.indices, id: \.self) { index in
-                HStack {
-                    constraintLabel(mode.constraints[index])
-                    Spacer()
-                    Button("Remove", role: .destructive) { removeConstraint(at: index) }
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.constraintRemove(index))
-                }
-            }
             HStack {
-                Menu("Add…") {
+                Menu("Add app or website…") {
                     ForEach(runningApps) { app in
                         Button(app.name) { addAppConstraint(app.bundleId) }
                             .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.addApp(app.bundleId))
@@ -163,12 +169,15 @@ struct ModeRoutingSection: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            ForEach(mode.constraints.indices, id: \.self) { index in
+                HStack {
+                    constraintLabel(mode.constraints[index])
+                    Spacer()
+                    Button("Remove", role: .destructive) { removeConstraint(at: index) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.constraintRemove(index))
+                }
+            }
         }
-    }
-
-    private var routingSummary: String {
-        if trigger.conflict != nil { return "Shortcut conflict" }
-        return "Press style, window title, URL regex"
     }
 
     @ViewBuilder private func constraintLabel(_ constraint: Mode.Constraint) -> some View {
@@ -223,6 +232,7 @@ struct ModeRoutingSection: View {
             onUpdate(updated)
         }
         newPhrase = ""
+        enteringPhrase = false
     }
 
     private func removePhrase(_ phrase: String) {

@@ -208,12 +208,12 @@ Set it up:
    short-lived bearer token.
 5. Test the connection.
 
-During first run, connecting an AI service enables the starter rewrite modes: Polish and Edit
+During first run, connecting an AI service enables the starter rewrite modes: Cleanup and Edit
 Selection. Email, Message, Markdown, Shell, and AI Prompt stay available as examples you can enable
 when you want them. If you add a service later, open Settings > Modes and enable the modes you
 actually want.
 
-Checkpoint: try **Polish** first. It is the smallest rewrite: same meaning, cleaner text.
+Checkpoint: try **Cleanup** first. It is the smallest rewrite: same meaning, cleaner text.
 
 ## 7. Use starter modes as examples, not commandments
 
@@ -231,7 +231,7 @@ Good first modes:
 | Mode | Use it for | Needs AI service |
 |---|---|---|
 | Plain Dictation | Local transcript at the cursor. | No |
-| Polish | Clean up rough speech without changing the meaning. | Yes |
+| Cleanup | Clean up rough speech without changing the meaning. | Yes |
 | Message | Short chat-style messages. | Yes |
 | Email | A polished email shape from rough speech. | Yes |
 | Edit Selection | Select text, speak the change, replace the selection. | Yes |
@@ -420,7 +420,7 @@ Use these as templates for your own setup.
 - Plain Dictation owns `Fn`.
 - Message also owns `Fn`, but only in your chat app.
 - Email has the spoken suffix `as an email`.
-- Polish is menu-only for occasional cleanup.
+- Cleanup is menu-only for occasional cleanup.
 
 ### Editing mode for existing text
 

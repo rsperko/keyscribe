@@ -218,7 +218,7 @@ A fresh install writes **only `_direct.toml`** (the Direct floor). The eight sta
 **templates**, not files: at first launch each catalog id is recorded in the seed ledger as an
 **offer** (a `seed-ledger.toml` entry with a nil fingerprint), and the modes materialize on demand
 from the Modes pane (Add Mode menu + template gallery) or when the first AI service connects
-(Polish + Edit Selection). A materialized template written at its catalog id IS a seed — it keeps
+(Cleanup + Edit Selection). A materialized template written at its catalog id IS a seed — it keeps
 `seed_id`/`seed_version` and gets a real ledger fingerprint, so unedited materialized seeds still
 participate in seed updates; a second copy of the same template is a plain user mode (suffixed id, no
 seed identity). They are ordinary mode files — nothing about them is special-cased in source — and the
@@ -229,7 +229,7 @@ menu bar).
 
 | id | name | Shape | Rewrite |
 |---|---|---|---|
-| `polish` | Polish | `source = dictation`, `output = cursor`, trigger `right_option` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Auto-enabled and connected when the first AI service is added; reachable on **Right-⌥**. |
+| `polish` | Cleanup | `source = dictation`, `output = cursor`, trigger `right_option` | light cleanup (fillers, grammar, punctuation) that keeps wording and tone. Auto-enabled and connected when the first AI service is added; reachable on **Right-⌥**. |
 | `message` | Message | `source = dictation`, `output = cursor` | **disabled by default.** casual chat-style message; no greeting/sign-off. A discoverable example enabled in Settings. |
 | `email` | Email | `source = dictation`, `output = cursor`, phrase `as an email` | **disabled by default.** polished professional email with greeting + closing; never invents names/facts. A discoverable example enabled in Settings; once enabled, route to it by ending a dictation with **"as an email"**. |
 | `edit-selection` | Edit Selection | `source = selection`, `output = replace_selection`, trigger `right_command` | transforms the selection from a spoken instruction. Auto-enabled and connected when the first AI service is added; reachable on **Right-⌘**. |

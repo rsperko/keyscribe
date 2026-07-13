@@ -8,7 +8,7 @@ and the result lands in the app you're already using. Plain Dictation stays enti
 Optional rewrite modes can polish, format, or edit text through a provider and key you configure.
 
 <p align="center">
-  <img src="docs/assets/readme-routing.gif" alt="KeyScribe routing the same dictation through Plain Dictation, Polish, and Email modes" width="760">
+  <img src="docs/assets/readme-routing.gif" alt="KeyScribe routing the same dictation through Plain Dictation, Cleanup, and Email modes" width="760">
 </p>
 
 ## Install
@@ -91,7 +91,7 @@ Good starter modes:
 | Mode | Use it for | Requires rewrite |
 | --- | --- | --- |
 | Plain Dictation | Local transcript at the cursor. | No |
-| Polish | Same meaning, cleaner text. | Yes |
+| Cleanup | Same meaning, cleaner text. | Yes |
 | Email | A rough thought shaped into an email. | Yes |
 | Edit Selection | Select text, speak an instruction, replace the selection. | Yes |
 | Markdown | Notes with headings, bullets, and code fences. | Yes |

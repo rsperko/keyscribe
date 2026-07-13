@@ -92,7 +92,7 @@ struct ModeSeedReconcileTests {
 
         #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("polished-dictation.toml").path))
         let polish = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "polish" })
-        #expect(polish.name == "Polish")
+        #expect(polish.name == "Cleanup")
         #expect(polish.seedId == "polish")
         #expect(polish.aiRewrite?.connection == "conn-1")
         #expect(polish.enabled == true)
@@ -466,7 +466,7 @@ struct ModeSeedReconcileTests {
     // it. The connection/enabled user-knobs are excluded, so onboarding never trips this.
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
-            "polish": (4, "5f3ef1df08c7f3ed"),
+            "polish": (5, "f69ef368dd964eed"),
             "message": (4, "4ed26688a8e2db27"),
             "email": (3, "dcb65eb2acecbd9d"),
             "edit-selection": (4, "8a301c3a95672266"),
@@ -484,6 +484,52 @@ struct ModeSeedReconcileTests {
             #expect(ModeStore.seedTemplateFingerprint(mode) == snap.fingerprint,
                     "starter '\(mode.id)' template changed — bump its seed_version in starterModes() and update this snapshot")
         }
+    }
+
+    // The "Polish" → "Cleanup" title change (seed_version 4 → 5) reaches an unedited install: reconcile
+    // rewrites the on-disk seed's name while preserving the user's connection, enabled state, and trigger.
+    @Test func polishRenameMigratesAnUnmodifiedInstall() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        // A pre-rename install: the polish seed as v4 named "Polish", connected + enabled with a user trigger.
+        var old = try #require(ModeStore.starterModes().first { $0.id == "polish" })
+        old.name = "Polish"
+        old.seedVersion = 4
+        old.aiRewrite?.connection = "conn-1"
+        old.enabled = true
+        old.triggerKeys = [.init(key: "right_command")]
+        try ModeStore.write(old, to: d.modes)
+        ModeStore.recordMaterializedSeed(old, ledgerDir: d.ledger)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(outcome.updated.contains("polish"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "polish" })
+        #expect(after.name == "Cleanup")
+        #expect(after.aiRewrite?.connection == "conn-1")
+        #expect(after.enabled == true)
+        #expect(after.triggerKeys.map(\.key) == ["right_command"])
+    }
+
+    // An install that edited the polish seed keeps its own name and prompt — the rename never clobbers it.
+    @Test func polishRenameSkipsAnEditedInstall() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        var old = try #require(ModeStore.starterModes().first { $0.id == "polish" })
+        old.name = "Polish"
+        old.seedVersion = 4
+        try ModeStore.write(old, to: d.modes)
+        ModeStore.recordMaterializedSeed(old, ledgerDir: d.ledger)
+        // The user edits the prompt after seeding — fingerprint no longer matches.
+        old.aiRewrite?.prompt = "my own custom cleanup prompt"
+        try ModeStore.write(old, to: d.modes)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(!outcome.updated.contains("polish"))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "polish" })
+        #expect(after.name == "Polish")
+        #expect(after.aiRewrite?.prompt == "my own custom cleanup prompt")
     }
 
     @Test func reconcileIsIdempotent() throws {

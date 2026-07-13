@@ -16,7 +16,7 @@ struct ModeStoreSeedTests {
         #expect(starters.allSatisfy { !$0.enabled })
 
         let polish = starters.first { $0.id == "polish" }
-        #expect(polish?.name == "Polish")
+        #expect(polish?.name == "Cleanup")
         #expect(polish?.triggerKeys == [.init(key: "right_option")])
 
         let email = starters.first { $0.id == "email" }

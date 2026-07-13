@@ -187,6 +187,7 @@ enum AccessibilityID {
                 static let urlPatternAdd = "mode.editor.routing.urlPattern.add"
                 static let windowTitle = "mode.editor.routing.windowTitle"
                 static let windowTitleAdd = "mode.editor.routing.windowTitle.add"
+                static let phraseStart = "mode.editor.routing.phrase.start"
                 static let phrase = "mode.editor.routing.phrase"
                 static let phraseAdd = "mode.editor.routing.phrase.add"
                 static func phraseRemove(_ index: Int) -> String { "mode.editor.routing.phrase.remove.\(index)" }
@@ -344,7 +345,8 @@ enum AccessibilityID {
         Mode.Editor.Routing.chooseFromApplications, Mode.Editor.Routing.enterBundleID,
         Mode.Editor.Routing.addWebsite, Mode.Editor.Routing.bundleID,
         Mode.Editor.Routing.bundleIDAdd, Mode.Editor.Routing.urlPattern, Mode.Editor.Routing.urlPatternAdd,
-        Mode.Editor.Routing.windowTitle, Mode.Editor.Routing.windowTitleAdd, Mode.Editor.Routing.phrase,
+        Mode.Editor.Routing.windowTitle, Mode.Editor.Routing.windowTitleAdd, Mode.Editor.Routing.phraseStart,
+        Mode.Editor.Routing.phrase,
         Mode.Editor.Routing.phraseAdd, Mode.Editor.Routing.websitePattern, Mode.Editor.Routing.websitePatternAdd,
         Mode.Editor.Recognition.disclosure, Mode.Editor.Recognition.dictionaryList,
         Mode.Editor.Recognition.replacementsList,

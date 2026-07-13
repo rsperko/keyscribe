@@ -68,7 +68,7 @@ The sequence is short, and each step states its purpose in plain language:
    connection form in place. Speech stays local; only a rewrite leaves the machine. Connecting the
    first service auto-enables and links the everyday rewrite modes, then lands on a short
    **playground** that shows exactly what the service does: the two headline rewrite demos —
-   clean-up (Polish) and Edit Selection — each naming its real trigger and showing the user's own
+   Cleanup and Edit Selection — each naming its real trigger and showing the user's own
    before → after the moment they try it. Dictation itself is not re-taught here (the trial already
    proved it), and Email-style spoken routing is not taught in first run because the suffix is hard
    to observe when it succeeds.
@@ -266,7 +266,7 @@ Next Dictation ▸
   Automatic — Plain Dictation ✓
   ─────────────
   Plain Dictation
-  Polish
+  Cleanup
   Message
   Email
   Edit Selection
@@ -318,7 +318,7 @@ so they sit together above Settings instead of competing with the primary loop.
 
 The modes listed under `Next Dictation` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
-setup materializes and connects the two headline rewrite modes (Polish and Edit Selection); the other
+setup materializes and connects the two headline rewrite modes (Cleanup and Edit Selection); the other
 starters stay available in the Modes pane's **Add Mode…** template chooser. Templates are reusable, so
 adding one never removes it from the chooser.
 
@@ -534,31 +534,29 @@ sections:
 1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
-2. **When to use it** — three plain first-level rows: **Shortcut** (the
-   **shortcut well** — one control whose menu offers `None` and the modifier-only keys Fn (Globe),
-   Right-⌥, Right-⌘, and ⌃⌥⇧⌘; recording accepts a tap of a modifier-only key on release, while a
-   key pressed before release records a chord such as ⌘X; it also captures custom chords or extra mouse
-   buttons in place), **Spoken phrase** (the chips + add field, with the actual phrases shown), and
-   **Use in** (one unified apps-and-websites rule list; the Add… menu offers running apps, Choose from
-   Applications…, Enter Bundle ID…, and **Website…** — a domain-first field that stores a host-anchored
-   pattern matching that domain or a subdomain, never a substring). Press style, the window-title regex,
-   and the raw URL regex live under `More ways to trigger`. History detail explains **how the mode was
-   chosen** (menu / shortcut / app / spoken phrase / fallback).
-3. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
+2. **Ways to use this mode** — keeps the shortcut and **Press behavior** together, followed by an
+   optional **Spoken phrase**. The phrase explanation says what the feature does and that the phrase
+   is removed from the result. Add controls precede saved phrases. Plain Dictation uses the same
+   shortcut structure and adds one concise explanation of its special fallback role.
+3. **Where it works** — states whether the mode is available everywhere or only in listed places.
+   **Add app or website…** precedes saved places and offers running apps, Choose from Applications…,
+   Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
+   **More precise matching**. Availability is separate from the ways a user starts or selects a mode.
+4. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
    (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
    under `Recognition and replacements`. (Dictionary recovery is no longer a mode setting — it is a
    per-engine option on bias-less speech models; see the Speech Models settings.)
-4. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
+5. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
    mode's **reusable writing instructions** (fragments): listed by name directly under the
    instruction they extend, reorderable (they append in order), edited in place in a popover, and
    added from a single menu of existing instructions or a new one. They appear only once an AI
    service is selected, since a fragment is appended to the rewrite instruction.
-5. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
+6. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
    mutually exclusive by design; the UI makes the tradeoff explicit before allowing either.
-6. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
+7. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
    notes when TOML-only insertion or submit behavior is active.
 
-Plain Dictation stays deliberately small: **Shortcut**, **Spoken editing**, and **Result handling**.
+Plain Dictation stays deliberately small: **Ways to use this mode**, **Spoken editing**, and **Result handling**.
 Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it
 does not imply an AI rewrite or a separate expert mode.
 

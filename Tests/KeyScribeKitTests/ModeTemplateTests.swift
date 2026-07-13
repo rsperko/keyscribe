@@ -32,11 +32,11 @@ struct ModeTemplateTests {
 
     @Test func materializeAtATakenCatalogIdIsASuffixedSeedlessCopy() {
         let template = ModeStore.templates().first { $0.id == "polish" }!
-        let existing = [Mode(id: "polish", name: "Polish")]
+        let existing = [Mode(id: "polish", name: "Cleanup")]
         let result = ModeTemplateInstantiation.materialize(template: template, existing: existing, connections: [])
         guard case .copy(let mode) = result else { Issue.record("expected .copy"); return }
-        #expect(mode.id == "polish-2")
-        #expect(mode.name == "Polish 2")
+        #expect(mode.id == "cleanup")
+        #expect(mode.name == "Cleanup 2")
         #expect(mode.seedId == nil)
         #expect(mode.seedVersion == nil)
         #expect(!mode.enabled)

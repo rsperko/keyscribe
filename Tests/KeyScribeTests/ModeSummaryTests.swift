@@ -65,4 +65,18 @@ struct ModeSummaryTests {
         triggerless.triggerKeys = []
         #expect(ModeSummary.whenRuns(triggerless) == "Fallback")
     }
+
+    @Test func unconstrainedModeExplainsThatItWorksEverywhere() {
+        let mode = Mode(id: "blank", name: "Blank")
+
+        #expect(ModeSummary.availabilityDescription(mode) ==
+            "Available in every app and website. Add a place to limit this mode to it.")
+    }
+
+    @Test func constrainedModeExplainsThatItsPlacesAreLimits() {
+        var mode = Mode(id: "email", name: "Email")
+        mode.constraints = [Mode.Constraint(bundleId: "com.apple.mail")]
+
+        #expect(ModeSummary.availabilityDescription(mode) == "Available only in these places.")
+    }
 }

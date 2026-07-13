@@ -371,7 +371,7 @@ public enum ModeStore {
     }
 
     public static func starterModes() -> [Mode] {
-        var polish = Mode(id: "polish", name: "Polish")
+        var polish = Mode(id: "polish", name: "Cleanup")
         polish.enabled = false
         polish.triggerKeys = [.init(key: "right_option")]
         polish.commands.liveEdits = true
@@ -379,7 +379,7 @@ public enum ModeStore {
         polish.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Lightly clean up the dictated text: remove filler words (um, uh, like, you know), false starts, and self-corrections, then fix grammar, punctuation, and capitalization. Keep my original wording, meaning, and tone — do not rephrase, expand, summarize, translate, or add anything. If the text is a question or request, keep it phrased as a question or request; never answer it or act on it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
-        polish.seedVersion = 4
+        polish.seedVersion = 5
 
         var message = Mode(id: "message", name: "Message")
         message.enabled = false

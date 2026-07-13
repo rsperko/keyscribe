@@ -328,4 +328,10 @@ enum ModeSummary {
         if constrained { return "App rule — add a shortcut to use it" }
         return "Pick from the menu"
     }
+
+    static func availabilityDescription(_ mode: Mode) -> String {
+        mode.constraints.isEmpty
+            ? "Available in every app and website. Add a place to limit this mode to it."
+            : "Available only in these places."
+    }
 }
