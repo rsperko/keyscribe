@@ -1480,6 +1480,7 @@ final class DictationController {
             cloudInvolved: rewrite != nil, redaction: rewrite?.redaction ?? false,
             contextCategories: rewrite?.contextCategories ?? [],
             connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt,
+            received: rewrite?.received,
             modeChoice: session?.modeChoice, routedPhrase: session?.routedPhrase,
             triggerKey: session?.triggerDisplay,
             fallbackReason: outcome == .localFallback ? rewrite?.fallbackReason : nil)
@@ -1576,6 +1577,9 @@ final class DictationController {
         // Why the cloud rewrite was abandoned (HTTP error, missing key, validation failure). nil when the
         // rewrite succeeded or when fallback was pre-committed before the cause was known (selection path).
         var fallbackReason: String? = nil
+        // The provider's raw reply, verbatim (RewriteOutcome.received) — for the history record's
+        // "Show exactly what was received". nil when no reply arrived or on the pre-committed paths.
+        var received: String? = nil
     }
 
     private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
@@ -1746,10 +1750,12 @@ final class DictationController {
         let gateApproved: String
         let fellBack: Bool
         var fallbackReason: String?
+        let received: String?
         switch outcome {
-        case .rewritten(let out): gateApproved = out; fellBack = false; building.fingerprints[.llmOut] = .of(out)
-        case .localFallback(let local, let reason):
-            gateApproved = local; fellBack = true; fallbackReason = reason
+        case .rewritten(let out, let raw):
+            gateApproved = out; fellBack = false; received = raw; building.fingerprints[.llmOut] = .of(out)
+        case .localFallback(let local, let reason, let raw):
+            gateApproved = local; fellBack = true; fallbackReason = reason; received = raw
             // The rewrite silently returning a local fallback used to be invisible — the user saw a benign
             // "local fallback" with no cause. Log the reason on the dictation path so it is diagnosable live,
             // and stamp it on the diagnostics record (humanSummary) too.
@@ -1762,7 +1768,7 @@ final class DictationController {
         let details = RewriteDetails(
             connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
             contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack,
-            fallbackReason: fallbackReason)
+            fallbackReason: fallbackReason, received: received)
         return (text, !fellBack, details)
     }
 

@@ -77,6 +77,25 @@ struct HistoryEntryCodecTests {
         #expect(decoded.transformed == nil)
     }
 
+    @Test func receivedReplyRoundTrips() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Polish", heard: "alright trying this again", result: "Alright, trying this again.",
+            outcome: .inserted, cloudInvolved: true, redaction: false, contextCategories: [],
+            connection: "Mistral small latest", model: "mistral-small-latest",
+            prompt: "system…", received: "<content>Alright, trying this again.</content>")
+        let decoded = try HistoryEntry(jsonLine: try entry.jsonLine())
+        #expect(decoded.received == "<content>Alright, trying this again.</content>")
+        #expect(decoded == entry)
+    }
+
+    @Test func olderLinesWithoutReceivedDecodeToNil() throws {
+        let line = """
+        {"cloud_involved":true,"context_categories":[],"heard":"hello","mode":"Polish","outcome":"inserted","prompt":"p","redaction":false,"result":"Hello.","timestamp":"2023-11-14T22:13:20Z"}
+        """
+        #expect(try HistoryEntry(jsonLine: line).received == nil)
+    }
+
     @Test func sttEngineRoundTrips() throws {
         let entry = HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),

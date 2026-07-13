@@ -268,6 +268,7 @@ enum AccessibilityID {
         static let comparisonPicker = "history.detail.comparisonPicker"
         static func comparisonPane(_ role: String) -> String { "history.detail.comparison.\(role)" }
         static let promptDisclosure = "history.detail.promptDisclosure"
+        static let receivedDisclosure = "history.detail.receivedDisclosure"
         static let copyResult = "history.action.copyResult"
         static let pasteResult = "history.action.pasteResult"
         static let copyHeard = "history.action.copyHeard"
@@ -361,7 +362,7 @@ enum AccessibilityID {
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
         HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction,
         History.list, History.search, History.export, History.stagePicker, History.comparisonPicker,
-        History.promptDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
+        History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
         History.DictionarySheet.term, History.DictionarySheet.save,

@@ -26,11 +26,11 @@ private func inputs(_ content: String, tokens: [String]) -> PromptInputs {
 }
 
 private func rewrittenText(_ o: RewriteOutcome) -> String? {
-    if case .rewritten(let s) = o { return s }
+    if case .rewritten(let s, _) = o { return s }
     return nil
 }
 private func fallbackText(_ o: RewriteOutcome) -> String? {
-    if case .localFallback(let s, _) = o { return s }
+    if case .localFallback(let s, _, _) = o { return s }
     return nil
 }
 

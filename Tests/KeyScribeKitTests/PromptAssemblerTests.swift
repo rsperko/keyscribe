@@ -258,4 +258,54 @@ struct PromptAssemblerOptionsTests {
         #expect(!p.system.contains("no Markdown or markup syntax"))
     }
 
+    @Test func contentWrapperIsLoadBearingForEchoUnwrap() {
+        let p = PromptAssembler.assemble(inputs(content: "hello there"))
+        #expect(
+            p.user.contains("<content>\nhello there\n</content>"),
+            "unwrappingContentEcho strips a whole-output <content> wrap from LLM replies because the prompt wraps content in exactly these tags — if the prompt stops using <content>, remove unwrappingContentEcho, its RewriteService call, and this test together, instead of leaving an unwrap that could strip tags from legitimate output")
+    }
+
+}
+
+struct ContentEchoUnwrapTests {
+    @Test func stripsWholeOutputEcho() {
+        #expect(PromptAssembler.unwrappingContentEcho(
+            "<content>Alright, trying this again.</content>", sentContent: "alright trying this again"
+        ) == "Alright, trying this again.")
+    }
+
+    @Test func stripsEchoWithNewlinesAndMixedCase() {
+        #expect(PromptAssembler.unwrappingContentEcho(
+            "<Content>\nHi there.\n</Content>\n", sentContent: "hi there"
+        ) == "Hi there.")
+    }
+
+    @Test func leavesPlainOutputAlone() {
+        #expect(PromptAssembler.unwrappingContentEcho("Hi there.", sentContent: "hi there") == "Hi there.")
+    }
+
+    @Test func leavesUnmatchedOpeningTagAlone() {
+        #expect(PromptAssembler.unwrappingContentEcho(
+            "<content>Hi there.", sentContent: "hi there"
+        ) == "<content>Hi there.")
+    }
+
+    @Test func leavesInteriorTagsAlone() {
+        let ragged = "<content>a</content> and <content>b</content>"
+        #expect(PromptAssembler.unwrappingContentEcho(ragged, sentContent: "a and b") == ragged)
+    }
+
+    @Test func keepsWrapWhenSentContentContainedTheTags() {
+        let wrapped = "<content>Hello.</content>"
+        #expect(PromptAssembler.unwrappingContentEcho(
+            wrapped, sentContent: "put <content> tags around hello"
+        ) == wrapped)
+        #expect(PromptAssembler.unwrappingContentEcho(
+            wrapped, sentContent: "<content>hello</content>"
+        ) == wrapped)
+    }
+
+    @Test func emptyInnerUnwrapsToEmpty() {
+        #expect(PromptAssembler.unwrappingContentEcho("<content>\n</content>", sentContent: "hello") == "")
+    }
 }

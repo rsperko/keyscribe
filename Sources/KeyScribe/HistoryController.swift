@@ -529,6 +529,7 @@ private struct HistoryDetailView: View {
     @State private var showReplacementSheet = false
     @State private var showDictionarySheet = false
     @State private var promptExpanded = false
+    @State private var receivedExpanded = false
     @State private var confirmingDelete = false
 
     var body: some View {
@@ -784,14 +785,21 @@ private struct HistoryDetailView: View {
             }
             if let prompt = entry.prompt {
                 DisclosureSection("Show exactly what was sent", isExpanded: $promptExpanded) {
-                    Text(prompt)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    rawExchangeText(prompt)
                 }
                 .accessibilityIdentifier(AccessibilityID.History.promptDisclosure)
+            }
+            if let received = entry.received {
+                DisclosureSection("Show exactly what was received", isExpanded: $receivedExpanded) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if entry.outcome == .localFallback {
+                            Text("This reply was not used — your local text was kept.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        rawExchangeText(received)
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.History.receivedDisclosure)
             }
             Text("Redaction maps are never shown or stored.")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -802,6 +810,15 @@ private struct HistoryDetailView: View {
         guard let connection = entry.connection else { return "None — local only" }
         let where_ = entry.cloudInvolved ? "cloud" : "local"
         return connection + (entry.model.map { " · \($0)" } ?? "") + " · \(where_)"
+    }
+
+    private func rawExchangeText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.caption, design: .monospaced))
+            .textSelection(.enabled)
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func detailRow(_ title: String, _ value: String) -> some View {

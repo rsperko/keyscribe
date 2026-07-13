@@ -194,6 +194,40 @@ public enum PromptAssembler {
         return s
     }
 
+    // Some models (Mistral Small, observed 2026-07-13) echo the prompt's <content> wrapper onto their
+    // output despite the no-tags rule — the same delimiter-echo class as a code-fence wrap, and prompt
+    // rules alone provably don't stop it. Strip a clean whole-output echo deterministically; anything
+    // ragged (unmatched tag, interior tags) is left for the validation gate / caller unchanged, because
+    // partial stripping could corrupt real text. The guard on `sentContent` keeps faithful output intact:
+    // if the content sent to the model itself carried <content> tags (a replacement or captured selection
+    // can), the wrap is the model preserving user text, not scaffolding — never remove it. This unwrap
+    // exists ONLY because `user(_:)` above wraps content in these exact tags; if that wrapper ever
+    // changes, remove this along with it (PromptAssemblerTests.contentWrapperIsLoadBearingForEchoUnwrap
+    // is the tripwire).
+    public static func unwrappingContentEcho(_ output: String, sentContent: String) -> String {
+        let anyTagPattern = #"(?i)<(/?)\s*content\b"#
+        guard let anyTag = RegexCache.regex(anyTagPattern),
+              let open = RegexCache.regex(#"(?i)^<\s*content\s*>"#),
+              let close = RegexCache.regex(#"(?i)</\s*content\s*>$"#)
+        else { return output }
+        guard anyTag.firstMatch(in: sentContent, range: NSRange(sentContent.startIndex..., in: sentContent)) == nil
+        else { return output }
+
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        guard let openMatch = open.firstMatch(in: trimmed, range: range),
+              let closeMatch = close.firstMatch(in: trimmed, range: range),
+              openMatch.range.upperBound <= closeMatch.range.lowerBound,
+              let openEnd = Range(openMatch.range, in: trimmed)?.upperBound,
+              let closeStart = Range(closeMatch.range, in: trimmed)?.lowerBound
+        else { return output }
+
+        let inner = String(trimmed[openEnd..<closeStart]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard anyTag.firstMatch(in: inner, range: NSRange(inner.startIndex..., in: inner)) == nil
+        else { return output }
+        return inner
+    }
+
     // Breaks block-delimiter tags inside untrusted text by inserting a zero-width space after `<`.
     // Targeted to our own tag names, so ordinary `<` / `>` / "a < b" / "<3" pass through unchanged.
     static func neutralize(_ s: String) -> String {

@@ -41,8 +41,11 @@
 - **History records** (`history/<day>.jsonl`, one JSON object per line) are additive: each dictation
   writes `mode`, `heard`, `result`, `outcome`, boundary metadata, and (UX2 phase 7c) two **optional**
   fields, `mode_choice` (`one_shot` / `trigger_key` / `context_rule` / `spoken_phrase` / `fallback`)
-  and `routed_phrase` (present only for `spoken_phrase`). Old rows lacking them decode as absent —
-  History renders without the "how chosen" line. Audio and the redaction map are never stored.
+  and `routed_phrase` (present only for `spoken_phrase`). A cloud rewrite also stores the optional
+  `received` — the provider's raw reply, verbatim (pre-enforcement, carrying `⟦SN:…⟧` tokens like
+  `prompt`, never their originals) — behind History's "Show exactly what was received". Old rows
+  lacking optional fields decode as absent — History renders without the corresponding line. Audio
+  and the redaction map are never stored.
 
 ### Model storage
 

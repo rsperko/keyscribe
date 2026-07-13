@@ -31,16 +31,17 @@ struct RewriteServiceTests {
     @Test func returnsRewrittenOnCleanOutput() async {
         let svc = RewriteService(client: FakeClient([.success("Hello.")]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
-        #expect(out == .rewritten("Hello."))
+        #expect(out == .rewritten("Hello.", received: "Hello."))
     }
 
     @Test func fallsBackToLocalWhenClientThrows() async {
         let svc = RewriteService(client: FakeClient([.failure(FakeError())]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         // The fallback now carries the reason so it is diagnosable rather than silent.
-        guard case .localFallback(let text, let reason) = out else { Issue.record("expected fallback"); return }
+        guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "hello")
         #expect(reason != nil)
+        #expect(received == nil)
     }
 
     @Test func retriesOnceThenSucceeds() async {
@@ -51,7 +52,7 @@ struct RewriteServiceTests {
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "kept ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "kept ⟦SN:REDACT:1⟧"), connection: conn)
-        #expect(out == .rewritten("kept ⟦SN:REDACT:1⟧"))
+        #expect(out == .rewritten("kept ⟦SN:REDACT:1⟧", received: "kept ⟦SN:REDACT:1⟧"))
         #expect(await client.calls == 2)
     }
 
@@ -61,9 +62,10 @@ struct RewriteServiceTests {
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "orig ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "orig ⟦SN:REDACT:1⟧"), connection: conn)
-        guard case .localFallback(let text, let reason) = out else { Issue.record("expected fallback"); return }
+        guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "orig ⟦SN:REDACT:1⟧")
         #expect(reason != nil)   // gate-failure fallback is also labeled
+        #expect(received == "still no token")   // the last reply received, kept for the history record
         #expect(await client.calls == 2)   // initial + one stricter retry, no more
     }
 
@@ -77,7 +79,7 @@ struct RewriteServiceTests {
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "the ⟦SN:REDACT:1⟧ please", issuedTokens: ["⟦SN:VERB:1⟧", "⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "the ⟦SN:REDACT:1⟧ please"), connection: conn)
-        #expect(out == .rewritten("The ⟦SN:REDACT:1⟧ please."))
+        #expect(out == .rewritten("The ⟦SN:REDACT:1⟧ please.", received: "The ⟦SN:REDACT:1⟧ please."))
         #expect(await client.calls == 1)
     }
 
@@ -93,7 +95,7 @@ struct RewriteServiceTests {
                 appName: nil, bundleId: nil, fieldRole: nil,
                 selectedText: "context mentions \(contextToken) only"),
             connection: conn)
-        #expect(out == .rewritten("Clean content."))
+        #expect(out == .rewritten("Clean content.", received: "Clean content."))
         #expect(await client.calls == 1)
     }
 
@@ -106,15 +108,16 @@ struct RewriteServiceTests {
             payload: TokenizedPayload(text: "send to", issuedTokens: []),
             inputs: inputs(content: "send to"), connection: conn,
             allowedTokens: ["⟦SN:REDACT:2⟧"])
-        #expect(out == .rewritten("send to ⟦SN:REDACT:2⟧"))
+        #expect(out == .rewritten("send to ⟦SN:REDACT:2⟧", received: "send to ⟦SN:REDACT:2⟧"))
         #expect(await client.calls == 1)
     }
 
     @Test func emptyOutputFallsBack() async {
         let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
-        guard case .localFallback(let text, _) = out else { Issue.record("expected fallback"); return }
+        guard case .localFallback(let text, _, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "hello")
+        #expect(received == "   ")
     }
 
     @Test func restoresSourceBoundaryLayoutStrippedByTheLLM() async {
@@ -122,6 +125,28 @@ struct RewriteServiceTests {
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "\n\tHello\n", issuedTokens: []),
             inputs: inputs(content: "\n\tHello\n"), connection: conn)
-        #expect(out == .rewritten("\n\tHello.\n"))
+        #expect(out == .rewritten("\n\tHello.\n", received: "Hello."))
+    }
+
+    @Test func unwrapsContentEchoFromModelOutput() async {
+        let svc = RewriteService(client: FakeClient([.success("<content>Hello.</content>")]))
+        let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
+        #expect(out == .rewritten("Hello.", received: "<content>Hello.</content>"))
+    }
+
+    @Test func keepsEchoShapedOutputWhenSentContentCarriedTheTags() async {
+        let svc = RewriteService(client: FakeClient([.success("<content>Hello.</content>")]))
+        let out = await svc.rewrite(
+            payload: TokenizedPayload(text: "<content>hello</content>", issuedTokens: []),
+            inputs: inputs(content: "<content>hello</content>"), connection: conn)
+        #expect(out == .rewritten("<content>Hello.</content>", received: "<content>Hello.</content>"))
+    }
+
+    @Test func emptyContentEchoFailsGateThenRetries() async {
+        let client = FakeClient([.success("<content>\n</content>"), .success("Hello.")])
+        let svc = RewriteService(client: client)
+        let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
+        #expect(out == .rewritten("Hello.", received: "Hello."))
+        #expect(await client.calls == 2)
     }
 }

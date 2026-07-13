@@ -627,8 +627,11 @@ Heard → Transformed → Result
 It shows the mode, insertion outcome, correction actions, and a `Result` view with a separate
 `Details` view for processing details.
 section. Details reveal the exact connection/model when used, whether best-effort redaction was
-enabled, which context categories were sent, and the stored prompt. Redaction maps are never
-shown or persisted.
+enabled, which context categories were sent, and the raw cloud exchange as sibling disclosures:
+**Show exactly what was sent** (the stored prompt) and **Show exactly what was received** (the
+provider's reply, verbatim — before any output enforcement, so model misbehavior stays visible
+rather than silently corrected). On a local-fallback entry the received view notes the reply was
+not used. Redaction maps are never shown or persisted.
 
 Correction actions are directly beside the relevant text:
 

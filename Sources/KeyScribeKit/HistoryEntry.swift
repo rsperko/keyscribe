@@ -33,6 +33,10 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var connection: String?
     public var model: String?
     public var prompt: String?
+    // The provider's raw reply, verbatim (pre-enforcement, carrying tokens like `prompt` does) — the
+    // "Show exactly what was received" mirror of `prompt`. On a localFallback entry it is the rejected
+    // reply that explains `fallbackReason`. nil on local-only and older entries, and when the call failed.
+    public var received: String?
     // How this mode was chosen (UX2 phase 7c) — additive optional fields, nil on older rows.
     public var modeChoice: ModeChoiceReason?
     public var routedPhrase: String?
@@ -58,6 +62,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case connection
         case model
         case prompt
+        case received
         case modeChoice = "mode_choice"
         case routedPhrase = "routed_phrase"
         case triggerKey = "trigger_key"
@@ -69,7 +74,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         heard: String, transformed: String? = nil,
         result: String, outcome: Outcome,
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
-        connection: String? = nil, model: String? = nil, prompt: String? = nil,
+        connection: String? = nil, model: String? = nil, prompt: String? = nil, received: String? = nil,
         modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
         triggerKey: String? = nil, fallbackReason: String? = nil
     ) {
@@ -87,6 +92,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.connection = connection
         self.model = model
         self.prompt = prompt
+        self.received = received
         self.modeChoice = modeChoice
         self.routedPhrase = routedPhrase
         self.triggerKey = triggerKey
