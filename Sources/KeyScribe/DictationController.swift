@@ -127,6 +127,10 @@ final class DictationController {
     // observe them (dictationTask/captureBringUpTask). A nil session reads as "no captured state"; a write
     // outside a dictation no-ops via optional chaining.
     private var session: DictationSession?
+    // The triggerKey that started the in-flight dictation, recorded only once a start is actually admitted
+    // (past beginArming). Lets a right-modifier "chord wins" abort cancel ONLY the dictation its own key
+    // started, never one a different trigger committed. Cleared with the session at every terminal.
+    private var activeStartTrigger: String?
 
     private var building: DictationRecord {
         get { session?.building ?? DictationRecord(modeName: Self.fallbackModeName) }
@@ -586,6 +590,7 @@ final class DictationController {
         // while locked. Silent return, same shape as the beginArming guard.
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else { return }
+        activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
@@ -828,6 +833,7 @@ final class DictationController {
         }
         protectedEngineIds.removeAll()
         session = nil
+        activeStartTrigger = nil
         scheduleCaptureRefresh()
         onBecameIdle?()
         // The dictation is fully terminal (reload + transcribe + insert are done), so any deferred idle
@@ -1821,6 +1827,19 @@ final class DictationController {
         // returns nil). Otherwise every press-then-cancel leaks a temp WAV until the OS reclaims it.
         if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
         finish(machine: .cancel, cue: .cancel, state: .hidden)
+    }
+
+    // The "chord wins" abort from a right-side modifier trigger: the key turned out to be part of a chord, so
+    // discard the dictation IT started — never an unrelated one another trigger committed. Two guards, both
+    // required: (1) the active session was started by this same trigger key; (2) it is still pre-commit
+    // (arming/recording). A dictation that already reached transcribing was committed by a prior deliberate
+    // release, so its starting gesture is no longer held and a still-held aborting key cannot own it — cancelling
+    // it would be data loss (e.g. right-⌥ punctuation typed while an Fn dictation is transcribing, or the same
+    // key re-pressed in a chord after its own tap-to-toggle commit).
+    func cancelStartedByModifier(triggerKey: String?) {
+        guard activeStartTrigger == triggerKey,
+              machine.state == .arming || machine.state == .recording else { return }
+        cancel()
     }
 
     // The screen locked mid-dictation (lid close / hot corner). Cancel any in-flight capture so the

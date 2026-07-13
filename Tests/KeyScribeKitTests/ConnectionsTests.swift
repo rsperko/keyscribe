@@ -20,6 +20,23 @@ struct ConnectionsTests {
         differentProvider.provider = .gemini
         #expect(original.crossesCredentialBoundary(to: differentProvider))
     }
+
+    // Two base URLs that can't parse to an origin both normalize to nil; without a raw-text fallback they
+    // would read as the same origin and reuse the key across a real endpoint change.
+    @Test func credentialBoundaryFallsBackToRawTextWhenOriginsAreUnparseable() {
+        let original = connection(provider: .openaiCompatible, model: "m", baseUrl: "not a url")
+        var changed = original
+        changed.baseUrl = "also not a url"
+        #expect(original.crossesCredentialBoundary(to: changed))          // different garbage → crosses
+
+        var sameGarbage = original
+        sameGarbage.baseUrl = "not a url"
+        #expect(!original.crossesCredentialBoundary(to: sameGarbage))     // identical text → no cross
+
+        var oneParseable = original
+        oneParseable.baseUrl = "https://example.com/v1"
+        #expect(original.crossesCredentialBoundary(to: oneParseable))     // unparseable → parseable → crosses
+    }
     private let toml = """
     schema_version = 1
 

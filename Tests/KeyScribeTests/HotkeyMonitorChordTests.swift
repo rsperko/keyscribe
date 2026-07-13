@@ -212,7 +212,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            onCancel: { cancels += 1 }, carbon: FakeChordRegistrar())
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar())
         m.update(bindings: [namedBinding(.rightOption)])
 
         // Bare right Option first → dictation starts.
@@ -233,7 +233,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            onCancel: { cancels += 1 }, carbon: FakeChordRegistrar())
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar())
         m.update(bindings: [namedBinding(.rightOption)])
 
         m.handle(type: .flagsChanged, keyCode: 61,
@@ -246,6 +246,44 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
         #expect(cancels == 1)
         #expect(commits == 0)
+    }
+
+    // After a chord abort, releasing the chord drops its modifiers one at a time, so the trigger key is
+    // transiently SOLE again while still physically down. It must NOT re-arm a fresh dictation (which would
+    // tap-latch and strand the mic recording); suppression persists until the key is fully released.
+    @Test func rightOptionDoesNotReArmWhileHeldAfterAChordAbort() async {
+        var starts = 0, commits = 0, cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar())
+        m.update(bindings: [namedBinding(.rightOption)])
+
+        // Bare right Option → start.
+        m.handle(type: .flagsChanged, keyCode: 61,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        await drainMain()
+        #expect(starts == 1)
+
+        // ⌃ joins while right Option is held → chord → abort.
+        let joined = CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt) | CGEventFlags.maskControl.rawValue
+        m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: joined))
+        await drainMain()
+        #expect(cancels == 1)
+
+        // ⌃ lifts first → right Option is momentarily sole again but still down. No re-arm, no latch.
+        m.handle(type: .flagsChanged, keyCode: 59,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        await drainMain()
+        #expect(starts == 1)
+        #expect(commits == 0)
+
+        // Right Option fully released → suppression lifts; a subsequent genuine bare press arms again.
+        m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: 0))
+        await drainMain()
+        m.handle(type: .flagsChanged, keyCode: 61,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        await drainMain()
+        #expect(starts == 2)
     }
 
     @Test func rightControlStartsAndCommitsAsABareModifier() async {

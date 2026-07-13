@@ -39,6 +39,7 @@ struct AIServiceConnectorTests {
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
             saveAPIKey: { ref, _ in savedRef = ref; return true },
             deleteAPIKey: { _ in },
+            readAPIKey: { _ in nil },
             testConnection: { _ in .passed })
 
         let result = await connector.connect(draft: draft(), reusingId: nil)
@@ -57,6 +58,7 @@ struct AIServiceConnectorTests {
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
             saveAPIKey: { _, _ in true },
             deleteAPIKey: { deletedRef = $0 },
+            readAPIKey: { _ in nil },
             testConnection: { _ in .failed("401 Unauthorized") })
 
         let result = await connector.connect(draft: draft(), reusingId: nil)
@@ -64,6 +66,29 @@ struct AIServiceConnectorTests {
         #expect(result.outcome == .failed("Connection test failed: 401 Unauthorized"))
         #expect(deletedRef == "keyscribe.llm.gemini")
         #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+    }
+
+    // A retest of an already-persisted connection reuses its keyRef, so saving overwrites a possibly-good key.
+    // A failed retest must RESTORE the prior key, never delete it — otherwise a working service is left with no
+    // credential (finding P2).
+    @Test func failedRetestRestoresAPreExistingKeyInsteadOfDeletingIt() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var saves: [(ref: String, value: String)] = []
+        var deletedRef: String?
+        let connector = AIServiceConnector(
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            saveAPIKey: { ref, value in saves.append((ref, value)); return true },
+            deleteAPIKey: { deletedRef = $0 },
+            readAPIKey: { _ in "existing-good-key" },
+            testConnection: { _ in .failed("401 Unauthorized") })
+
+        let result = await connector.connect(draft: draft(), reusingId: "gemini")
+
+        #expect(result.outcome == .failed("Connection test failed: 401 Unauthorized"))
+        #expect(deletedRef == nil)                          // the pre-existing key is not destroyed
+        #expect(saves.last?.ref == "keyscribe.llm.gemini")
+        #expect(saves.last?.value == "existing-good-key")   // restored to its prior value
     }
 
     @Test func emptyAPIKeyFailsBeforeSavingOrTesting() async {
@@ -75,6 +100,7 @@ struct AIServiceConnectorTests {
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
             saveAPIKey: { _, _ in saved = true; return true },
             deleteAPIKey: { _ in },
+            readAPIKey: { _ in nil },
             testConnection: { _ in tested = true; return .passed })
 
         let result = await connector.connect(draft: d, reusingId: nil)
@@ -90,6 +116,7 @@ struct AIServiceConnectorTests {
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
             saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in },
+            readAPIKey: { _ in nil },
             testConnection: { _ in .failed("nope") })
 
         let first = await connector.connect(draft: draft(), reusingId: nil)
@@ -148,6 +175,51 @@ struct AIServiceConnectorTests {
         #expect(model.pendingConnectOffer?.connectionId == connection.id)
     }
 
+    // update() must persist the typed key through the injected saveAPIKey seam, never KeychainStore directly —
+    // otherwise every test run writes a real entry into the developer's login Keychain.
+    @Test func updateSavesTheKeyThroughTheInjectedSeam() {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try? FileManager.default.createDirectory(
+            at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
+        var saved: (ref: String, value: String)?
+        let model = AIServiceSettingsModel(
+            repository: repository,
+            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
+            saveAPIKey: { ref, value in saved = (ref, value); return true },
+            deleteAPIKey: { _ in })
+        model.addService(preset: .gemini)
+        let connection = try! #require(model.selected)
+
+        model.update(connection, apiKey: "topsecret")
+
+        #expect(saved?.ref == connection.keyRef)
+        #expect(saved?.value == "topsecret")
+        #expect(model.hasKey(connection))
+    }
+
+    // delete() must remove the key through the injected deleteAPIKey seam, not KeychainStore directly.
+    @Test func deleteRemovesTheKeyThroughTheInjectedSeam() {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try? FileManager.default.createDirectory(
+            at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
+        var deletedRef: String?
+        let model = AIServiceSettingsModel(
+            repository: repository,
+            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
+            saveAPIKey: { _, _ in true },
+            deleteAPIKey: { deletedRef = $0 })
+        model.addService(preset: .gemini)
+        let connection = try! #require(model.selected)
+
+        model.delete(connection)
+
+        #expect(deletedRef == connection.keyRef)
+    }
+
     @Test func credentialBoundaryMintsAKeyReference() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -160,6 +232,30 @@ struct AIServiceConnectorTests {
         model.updateAcrossCredentialBoundary(updated)
 
         #expect(model.selected?.keyRef != connection.keyRef)
+    }
+
+    // Repeated boundary crossings must not stack UUIDs onto the keyRef (base.uuid1.uuid2…) — each rotation
+    // strips the prior UUID and appends one fresh, so the ref stays base + exactly one UUID.
+    @Test func repeatedCredentialBoundaryRotationsStayBounded() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = settingsModel(support: support)
+        model.addService(preset: .gemini)
+        let base = try #require(model.selected).keyRef
+
+        var first = try #require(model.selected); first.provider = .openai
+        model.updateAcrossCredentialBoundary(first)
+        let afterFirst = try #require(model.selected).keyRef
+
+        var second = try #require(model.selected); second.provider = .openaiCompatible
+        model.updateAcrossCredentialBoundary(second)
+        let afterSecond = try #require(model.selected).keyRef
+
+        #expect(afterSecond.hasPrefix("\(base)."))
+        #expect(afterFirst != afterSecond)
+        let segments = afterSecond.split(separator: ".")
+        #expect(UUID(uuidString: String(segments.last!)) != nil)                // ends in a fresh UUID
+        #expect(UUID(uuidString: String(segments[segments.count - 2])) == nil)  // not two stacked UUIDs
     }
 
     // A provider starter is reusable: adding a second connection for the same provider disambiguates the name
@@ -175,20 +271,6 @@ struct AIServiceConnectorTests {
         let saved = ConnectionStore.loadOrDefault(supportDir: support).connections
         #expect(saved.count == 2)
         #expect(Set(saved.map(\.name)).count == 2)   // uniqued, not two identical "Gemini" rows
-    }
-
-    // The Catalog row label switches from "Connect to X" to "Connect another X service" once a connection for
-    // that provider exists — so a saved service named after its provider cannot be confused with the starter.
-    @Test func presetRowLabelBecomesConnectAnotherOnceProviderExists() {
-        let support = tempSupport()
-        defer { try? FileManager.default.removeItem(at: support) }
-        let model = settingsModel(support: support)
-
-        #expect(model.presetRows.first { $0.preset.id == "gemini" }?.label == "Connect to Gemini")
-
-        model.addService(preset: .gemini)
-
-        #expect(model.presetRows.first { $0.preset.id == "gemini" }?.label == "Connect another Gemini service")
     }
 
     // MARK: shared status vocabulary

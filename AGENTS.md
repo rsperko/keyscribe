@@ -277,9 +277,10 @@ keyscribe/
   Microphone is capture.
   - **The hotkey mechanism is split by trigger type, and no path needs Input Monitoring**
     (`HotkeyMonitor` + `CarbonHotKeys`):
-    - **Modifier-only triggers** (Fn / right-Option / right-Command / Hyper) → a `.listenOnly`
-      `CGEventTap` watching **only `.flagsChanged`**. Once Accessibility is granted, a session tap
-      observing *modifiers* runs on **Accessibility** (we never request Input Monitoring) and never
+    - **Modifier-only triggers** (Fn / right-Option / right-Command / right-Control / Hyper) → a
+      `.listenOnly` `CGEventTap` watching `.flagsChanged` **and `.keyDown`** (keyDown drives the
+      right-side "chord wins" abort — see `resolveSoleModifier`/`handle`). Once Accessibility is granted,
+      that session tap runs on **Accessibility alone** (we never request Input Monitoring) and never
       consumes a keystroke. `.listenOnly` (not `.defaultTap`) because we never modify/consume the event:
       a listen-only tap is delivered async, so the window server does NOT block the system input stream on
       our callback — a busy/wedged main thread can never hold global input hostage, it only delays our own
@@ -292,9 +293,16 @@ keyscribe/
       `relaunchForPermissionSetup()` runs `tccutil reset ListenEvent` (via `ResetTool.resetInputMonitoring`)
       before the permission relaunch to heal installs poisoned by a pre-gate build (harmless no-op on a
       clean machine). Never call `tapCreate` untrusted, and never "simplify" the gate away.
-      Footgun: that tap is **deaf to `keyDown`** without Input Monitoring — both `CGEventTap` and
-      `NSEvent.addGlobalMonitorForEvents` deliver zero key events on Accessibility alone. So chords
-      and ESC can NOT ride the tap.
+      Verified fact (macOS 26.5, 2026-07-12): **Accessibility subsumes listen-event access** — a
+      `.listenOnly` session tap DOES receive `.keyDown` with only Accessibility granted and **no**
+      Input Monitoring grant (`CGPreflightListenEventAccess()` reads `true` from the Accessibility grant
+      alone; 65 physical keyDowns delivered to the tap while KeyScribe was absent from the Input
+      Monitoring list). That is what makes the right-side "chord wins" abort real on every install — it
+      is NOT dead code. (An earlier note here claimed the tap was "deaf to keyDown without Input
+      Monitoring"; that was stale — it conflated the *untrusted*-`tapCreate` poisoning above, which is
+      still real and still gated, with steady-state delivery.) Chords still ride `CarbonHotKeys` and ESC
+      still rides the HUD local monitor — by design (no permission, guaranteed suppression from the
+      focused app), not because the tap can't see keyDown. Re-verify if the macOS TCC model changes.
     - **Chord triggers + the Add-Dictionary / Add-Replacement action shortcuts** (key + modifiers,
       e.g. ⌃⌥E) → **`RegisterEventHotKey`** (Carbon, `CarbonHotKeys`). No permission at all: the OS
       dispatches the chord and suppresses it from the focused app. Delivers

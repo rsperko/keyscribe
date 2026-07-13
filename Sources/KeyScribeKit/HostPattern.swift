@@ -15,9 +15,26 @@ public enum HostPattern {
     // so regex metacharacters in it are literal.
     public static func regex(forDomain domain: String) -> String? {
         let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty, !trimmed.contains("/"), trimmed.contains(".") else { return nil }
+        guard isValidDomain(trimmed) else { return nil }
         let escaped = NSRegularExpression.escapedPattern(for: trimmed)
         return prefix + escaped + suffix
+    }
+
+    // A domain that can actually appear as a URL host: two or more dot-separated labels, each of
+    // `[a-z0-9-]` with no leading/trailing hyphen. Rejects the shapes the old `contains(".")` guard let
+    // through — `*.github.com`, `.github.com`, `github.com.` — which escaped into regexes that can never
+    // match a real host yet still displayed as valid.
+    private static func isValidDomain(_ domain: String) -> Bool {
+        let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+        for label in labels {
+            guard !label.isEmpty, label.count <= 63,
+                  label.first != "-", label.last != "-",
+                  CharacterSet(charactersIn: String(label)).isSubset(of: allowed)
+            else { return false }
+        }
+        return true
     }
 
     // The inverse of `regex(forDomain:)`: recognizes exactly the shape that function emits and returns the

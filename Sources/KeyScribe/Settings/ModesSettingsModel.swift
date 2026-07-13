@@ -107,7 +107,7 @@ final class ModesSettingsModel: ObservableObject {
         guard let template = ModeStore.templates().first(where: { $0.id == seedId }) else { return }
         let materialization = ModeTemplateInstantiation.materialize(
             template: template, existing: modes, connections: connections)
-        save(materialization.mode)
+        guard save(materialization.mode) else { return }
         if case .seed(let mode) = materialization {
             applyingLocalMutation { ModeStore.recordMaterializedSeed(mode, ledgerDir: ledgerDir) }
         }
@@ -267,7 +267,8 @@ final class ModesSettingsModel: ObservableObject {
         }
     }
 
-    private func save(_ mode: Mode) {
+    @discardableResult
+    private func save(_ mode: Mode) -> Bool {
         let mode = mode.isSystem ? mode.systemNormalized() : mode
         do {
             try applyingLocalMutation { try repository.writeMode(mode) }
@@ -277,8 +278,10 @@ final class ModesSettingsModel: ObservableObject {
                 modes.append(mode)
             }
             error = nil
+            return true
         } catch {
             self.error = "Could not save \(mode.name): \(error.localizedDescription)"
+            return false
         }
     }
 }

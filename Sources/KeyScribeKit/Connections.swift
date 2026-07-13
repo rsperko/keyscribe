@@ -120,7 +120,19 @@ public extension Connection {
     func crossesCredentialBoundary(to updated: Connection) -> Bool {
         guard provider == updated.provider else { return true }
         guard provider == .openaiCompatible else { return false }
-        return normalizedOrigin(baseUrl) != normalizedOrigin(updated.baseUrl)
+        let currentOrigin = normalizedOrigin(baseUrl)
+        let updatedOrigin = normalizedOrigin(updated.baseUrl)
+        // A base URL that won't parse to an origin can't be compared structurally — two *different*
+        // unparseable endpoints both normalize to nil and would read as the same origin, reusing the key
+        // across a real endpoint change. Fall back to the raw trimmed text so any change still crosses.
+        if currentOrigin == nil || updatedOrigin == nil {
+            return trimmedBaseURL(baseUrl) != trimmedBaseURL(updated.baseUrl)
+        }
+        return currentOrigin != updatedOrigin
+    }
+
+    private func trimmedBaseURL(_ value: String?) -> String {
+        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func normalizedOrigin(_ value: String?) -> String? {

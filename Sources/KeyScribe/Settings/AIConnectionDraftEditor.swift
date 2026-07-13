@@ -67,7 +67,7 @@ struct AIConnectionDraftEditor: View {
             }
             Section("Used by") { usedByRow }
             Section {
-                DisclosureSection(isExpanded: $connectionOptionsExpanded) {
+                DisclosureSection(isExpanded: $connectionOptionsExpanded, hasError: connectionOptionsError) {
                     DisclosureSummaryLabel(title: "Connection options", summary: connectionOptionsSummary)
                 } content: {
                     serviceTypeRow
@@ -434,6 +434,14 @@ struct AIConnectionDraftEditor: View {
 
     private var connectionOptionsSummary: String {
         draft.selectedPreset.isCustom ? "Custom endpoint and sign-in" : "Change service type"
+    }
+
+    // The Base URL field lives inside the collapsed "Connection options" section for a custom service, so
+    // a cleared (required) endpoint must raise the section's dot and auto-expand it — otherwise the
+    // required-message hides behind the header with no indication.
+    private var connectionOptionsError: Bool {
+        draft.selectedPreset.isCustom
+            && draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var connectionStatus: (text: String, icon: String, kind: PaneBadge.Kind) {

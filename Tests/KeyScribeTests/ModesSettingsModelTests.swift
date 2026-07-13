@@ -23,6 +23,24 @@ struct ModesSettingsModelTests {
             .filter { !$0.hasPrefix(Mode.systemIdPrefix) })
     }
 
+    // A template whose save fails must NOT record a seed-ledger entry — a ghost entry marks a mode as
+    // materialized that isn't on disk, and the one-shot seed migration would then never re-run for it.
+    @Test func aTemplateThatFailsToSaveRecordsNoSeedLedgerEntry() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let template = try #require(ModeStore.templates().first)
+
+        // Force the write to fail deterministically: a directory sits where the mode's .toml must be written.
+        try FileManager.default.createDirectory(
+            at: modesDir.appendingPathComponent("\(template.id).toml"), withIntermediateDirectories: true)
+
+        model.materializeTemplate(template.id)
+
+        #expect(model.selectedID != template.id)   // never persisted, so never selected
+        let ledger = ModeStore.loadLedger(in: support.appendingPathComponent("lkg", isDirectory: true))
+        #expect(ledger?.contains(template.id) != true)
+    }
+
     @Test func namingAFreshModeReslugsTheFile() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

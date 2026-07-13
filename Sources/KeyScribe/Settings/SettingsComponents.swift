@@ -2,16 +2,19 @@ import SwiftUI
 
 struct DisclosureSection<Label: View, Content: View>: View {
     @Binding var isExpanded: Bool
-    // A child of `content` is in an error state. An error must never sit hidden behind a collapsed
-    // header, so the section AUTO-EXPANDS when `hasError` becomes true (revealing the child's own
-    // indicator). The red dot is the fallback: if the user then manually collapses, the header
-    // surfaces it (mirroring the Settings sidebar) so the error is still reachable.
+    // A child of `content` needs attention. It must never sit hidden behind a collapsed header, so the
+    // section AUTO-EXPANDS when either flag becomes true (revealing the child's own indicator). The dot is
+    // the fallback: if the user then manually collapses, the header surfaces it (mirroring the Settings
+    // sidebar) so it stays reachable. Its color matches the child's severity — RED for `hasError` (a
+    // failure), ORANGE for `hasWarning` (an advisory) — so the header can't contradict what it reveals.
     var hasError: Bool = false
+    var hasWarning: Bool = false
     @ViewBuilder var label: () -> Label
     @ViewBuilder var content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var showsErrorDot: Bool { hasError && !isExpanded }
+    private var needsAttention: Bool { hasError || hasWarning }
+    private var showsAttentionDot: Bool { needsAttention && !isExpanded }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -21,8 +24,8 @@ struct DisclosureSection<Label: View, Content: View>: View {
                 HStack {
                     label()
                     Spacer()
-                    if showsErrorDot {
-                        Circle().fill(.red).frame(width: 7, height: 7)
+                    if showsAttentionDot {
+                        Circle().fill(hasError ? Color.red : Color.orange).frame(width: 7, height: 7)
                             .accessibilityHidden(true)
                     }
                     Image(systemName: "chevron.right")
@@ -33,23 +36,24 @@ struct DisclosureSection<Label: View, Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(showsErrorDot ? "Needs attention" : "")
+            .accessibilityHint(showsAttentionDot ? "Needs attention" : "")
             if isExpanded { content() }
         }
-        // Reveal an error the moment it appears (and on open if one is already present). Only forces
+        // Reveal the issue the moment it appears (and on open if one is already present). Only forces
         // OPEN — never auto-collapses — so the user can still close it, falling back to the dot.
-        .onAppear { if hasError { isExpanded = true } }
-        .onChange(of: hasError) { _, nowError in if nowError { isExpanded = true } }
+        .onAppear { if needsAttention { isExpanded = true } }
+        .onChange(of: needsAttention) { _, now in if now { isExpanded = true } }
     }
 }
 
 extension DisclosureSection where Label == Text {
     init(
-        _ title: String, isExpanded: Binding<Bool>, hasError: Bool = false,
+        _ title: String, isExpanded: Binding<Bool>, hasError: Bool = false, hasWarning: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self._isExpanded = isExpanded
         self.hasError = hasError
+        self.hasWarning = hasWarning
         self.label = { Text(title) }
         self.content = content
     }

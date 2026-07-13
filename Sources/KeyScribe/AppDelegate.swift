@@ -329,7 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.refreshStatus()
                 },
                 onAction: { [weak self] id in self?.handleHotkeyAction(id) },
-                onCancel: { [weak self] in self?.controller.cancel() })
+                onCancel: { [weak self] key in self?.controller.cancelStartedByModifier(triggerKey: key) })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
         }

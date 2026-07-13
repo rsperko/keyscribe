@@ -33,7 +33,7 @@ struct ModeRoutingSection: View {
 
             DisclosureSection(
                 isExpanded: $routingExpanded,
-                hasError: trigger.conflict != nil || trigger.overlap != nil
+                hasWarning: trigger.conflict != nil || trigger.overlap != nil
             ) {
                 DisclosureSummaryLabel(title: "More ways to trigger", summary: routingSummary)
             } content: {

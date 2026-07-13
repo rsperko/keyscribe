@@ -22,6 +22,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
+        readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         onRelaunch: @escaping () -> Void = {},
         tapActive: @escaping () -> Bool = { true },
@@ -33,7 +34,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
             resumeOnboarding: resumeOnboarding,
             repository: repository, saveAPIKey: saveAPIKey,
-            deleteAPIKey: deleteAPIKey,
+            deleteAPIKey: deleteAPIKey, readAPIKey: readAPIKey,
             testConnection: testConnection, onComplete: onComplete)
         super.init()
         model.onReadyToDictate = onReadyToDictate
@@ -159,6 +160,7 @@ final class FirstRunModel: ObservableObject {
     private var modesDir: URL { repository.modesDir }
     private let saveAPIKey: (String, String) -> Bool
     private let deleteAPIKey: (String) -> Void
+    private let readAPIKey: (String) -> String?
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
     private var pendingConnectionId: String?
@@ -218,6 +220,7 @@ final class FirstRunModel: ObservableObject {
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
+        readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
@@ -231,6 +234,7 @@ final class FirstRunModel: ObservableObject {
         self.repository = repository
         self.saveAPIKey = saveAPIKey
         self.deleteAPIKey = deleteAPIKey
+        self.readAPIKey = readAPIKey
         self.testConnection = testConnection
         self.listModels = listModels
         self.onComplete = onComplete
@@ -556,7 +560,7 @@ final class FirstRunModel: ObservableObject {
         // entering the playground) stays here.
         let connector = AIServiceConnector(
             repository: repository, saveAPIKey: saveAPIKey, deleteAPIKey: deleteAPIKey,
-            testConnection: testConnection)
+            readAPIKey: readAPIKey, testConnection: testConnection)
         aiTesting = true
         let result = await connector.connect(draft: aiDraft, reusingId: pendingConnectionId)
         aiTesting = false
@@ -598,7 +602,10 @@ final class FirstRunModel: ObservableObject {
             if var mode = onDisk.first(where: { $0.seedId == seedId }) {
                 guard var rewrite = mode.aiRewrite else { continue }
                 let linked = !rewrite.connection.isEmpty && connections.contains { $0.id == rewrite.connection }
-                guard !linked || !mode.enabled else { continue }
+                // Already wired to a live connection: leave it exactly as the user has it — do not repoint
+                // it at the new service or re-enable a starter they deliberately turned off. Only wire up a
+                // starter that has no working connection yet.
+                guard !linked else { continue }
                 rewrite.connection = connectionId
                 mode.aiRewrite = rewrite
                 mode.enabled = true

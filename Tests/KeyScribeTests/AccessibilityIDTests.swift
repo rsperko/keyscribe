@@ -29,6 +29,7 @@ struct AccessibilityIDTests {
         #expect(AccessibilityID.Settings.AI.row("fast") == "settings.ai.list.row.fast")
         #expect(AccessibilityID.Mode.List.row("_direct") == "mode.list.row._direct")
         #expect(AccessibilityID.Settings.Permissions.row("microphone") == "settings.permissions.row.microphone")
+        #expect(AccessibilityID.History.row("2026-07-12T09-00-00") == "history.list.row.2026-07-12T09-00-00")
     }
 
     // Dynamic ids splice a stable domain id (engine/mode/connection/feature/permission id) into a fixed

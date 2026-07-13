@@ -16,6 +16,11 @@ final class HotkeyMonitor {
         let descriptor: KeyDescriptor
         var gesture: PressGesture
         var hyperEngaged = false
+        // Set when a right-side modifier's gesture aborts as part of a chord. While set, the key is barred
+        // from re-arming a fresh dictation even if it goes momentarily sole again on the way up — the
+        // suppression persists until the key is fully released (see resolveSoleModifier). Without it, releasing
+        // a chord like ⌃⌥⇧⌘D built with the right Option re-fires .down on the transiently-sole ⌥ and tap-latches.
+        var suppressedUntilRelease = false
 
         init(triggerKey: String?, descriptor: KeyDescriptor, style: PressStyle, tapThreshold: Double) {
             self.triggerKey = triggerKey
@@ -44,14 +49,16 @@ final class HotkeyMonitor {
     let onCommit: (String?) -> Void
     let onAction: (String) -> Void
     // Fired when a bare modifier-only start turns out to be part of a chord (a foreign modifier joined
-    // the held trigger key) — the "chord wins" rule discards the just-started dictation.
-    let onCancel: () -> Void
+    // the held trigger key) — the "chord wins" rule discards the just-started dictation. Carries the
+    // aborting binding's triggerKey so the controller cancels only a dictation THIS key started, never an
+    // unrelated in-flight one another trigger committed.
+    let onCancel: (String?) -> Void
 
     init(
         bindings: [Binding], actionBindings: [ActionBinding] = [],
         onStart: @escaping (String?, PressStyle) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
-        onCancel: @escaping () -> Void = {},
+        onCancel: @escaping (String?) -> Void = { _ in },
         carbon: ChordRegistering = CarbonHotKeys(),
         mouseTap: MouseTapping = MouseEventTap(),
         isProcessTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }
@@ -82,6 +89,7 @@ final class HotkeyMonitor {
             var carried = incoming
             carried.gesture = match.gesture
             carried.hyperEngaged = match.hyperEngaged
+            carried.suppressedUntilRelease = match.suppressedUntilRelease
             return carried
         }
         self.actionBindings = actionBindings
@@ -93,6 +101,7 @@ final class HotkeyMonitor {
         for i in bindings.indices {
             bindings[i].gesture.cancel()
             bindings[i].hyperEngaged = false
+            bindings[i].suppressedUntilRelease = false
         }
     }
 
@@ -284,7 +293,14 @@ final class HotkeyMonitor {
         let keyHeld = flags.rawValue & deviceBit != 0
         let sole = keyHeld && flags.intersection(foreign).isEmpty
 
+        // A full physical release lifts the post-abort suppression: the key is up, so the next genuine bare
+        // press may arm again.
+        if !keyHeld { bindings[i].suppressedUntilRelease = false }
+
         if sole {
+            // Don't re-arm off a momentarily-sole key that is still down after a chord abort — the chord's
+            // release drops its modifiers one at a time, and this key is transiently sole on the way up.
+            guard !bindings[i].suppressedUntilRelease else { return }
             if !bindings[i].gesture.isPhysicallyDown { fire(index: i, edge: .down, now: now) }
             return
         }
@@ -299,7 +315,9 @@ final class HotkeyMonitor {
     private func abort(index i: Int) {
         bindings[i].gesture.cancel()
         bindings[i].hyperEngaged = false
-        dispatchSideEffect { self.onCancel() }
+        bindings[i].suppressedUntilRelease = true
+        let key = bindings[i].triggerKey
+        dispatchSideEffect { self.onCancel(key) }
     }
 
     // Run a gesture/action callback off the event-tap delivery context: `onStart`/`onCommit`/`onAction` do

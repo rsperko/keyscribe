@@ -42,6 +42,18 @@ struct HostPatternTests {
         #expect(HostPattern.regex(forDomain: "github.com/foo") == nil) // contains a slash (a path, not a domain)
     }
 
+    // Shapes the old `contains(".")` guard let through — each escaped into a regex that can never match a
+    // real URL host, yet still displayed as a valid rule. They must be rejected outright.
+    @Test func rejectsDomainsThatCanNeverMatchAHost() {
+        #expect(HostPattern.regex(forDomain: "*.github.com") == nil) // wildcard label
+        #expect(HostPattern.regex(forDomain: ".github.com") == nil)  // leading dot / empty label
+        #expect(HostPattern.regex(forDomain: "github.com.") == nil)  // trailing dot / empty label
+        #expect(HostPattern.regex(forDomain: "git hub.com") == nil)  // space in a label
+        #expect(HostPattern.regex(forDomain: "-github.com") == nil)  // leading hyphen
+        #expect(HostPattern.regex(forDomain: "github-.com") == nil)  // trailing hyphen
+        #expect(HostPattern.regex(forDomain: "foo..bar.com") == nil) // empty middle label
+    }
+
     // Pin the generated pattern to the verified full-URL matching context (ModeResolver.regexFound matches
     // unanchored over the whole URL string, so the `^` anchor is load-bearing).
     @Test func generatedPatternIsHostAnchoredFromTheStart() throws {

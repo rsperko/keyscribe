@@ -180,34 +180,6 @@ final class AIServiceSettingsModel: ObservableObject {
         keyedRefs = Set(connections.map(\.keyRef).filter(KeychainStore.has))
     }
 
-    // The Catalog section for the AI pane: one action-oriented row per hosted provider starter (Custom is the
-    // create path in the bottom bar, not a starter). A provider stays in the Catalog after use because it is a
-    // reusable recipe — a user may keep several named connections for one provider — so its row switches from
-    // "Connect to X" to "Connect another X service" once one exists, and can never be confused with a saved
-    // connection named after its provider (installed-catalog-behavior.md).
-    struct PresetRow: Identifiable {
-        let preset: ConnectionPreset
-        let label: String
-        var id: String { "preset:\(preset.id)" }
-    }
-
-    var presetRows: [PresetRow] {
-        ConnectionPreset.all.filter { !$0.isCustom }.map { preset in
-            let hasExisting = connections.contains {
-                ConnectionPreset.matching(provider: $0.provider, baseURL: $0.baseUrl).id == preset.id
-            }
-            let label = hasExisting ? "Connect another \(preset.name) service" : "Connect to \(preset.name)"
-            return PresetRow(preset: preset, label: label)
-        }
-    }
-
-    // The provider starter backing the current selection when it is a Catalog row (its tag is "preset:<id>"),
-    // not a saved connection. nil once a saved connection owns the selection.
-    var selectedPreset: ConnectionPreset? {
-        guard selected == nil, let id = selectedID, id.hasPrefix("preset:") else { return nil }
-        return ConnectionPreset.preset(id: String(id.dropFirst("preset:".count)))
-    }
-
     // Acquire a Catalog starter: persist a new connection seeded from the preset immediately and select it, so
     // the detail becomes its live editor (option-1-rollout.md). Nothing is tested here — the connection lands
     // in an honest "No key set" / config-issue state and is not usable until the user finishes it in the editor
@@ -276,11 +248,22 @@ final class AIServiceSettingsModel: ObservableObject {
         testGeneration[connection.id, default: 0] += 1
         save(connection)
         guard let apiKey, !apiKey.isEmpty else { return }
-        if KeychainStore.set(apiKey, for: connection.keyRef), KeychainStore.has(connection.keyRef) {
+        if saveAPIKey(connection.keyRef, apiKey) {
             keyedRefs.insert(connection.keyRef)
         } else {
             error = "Could not save the API key for \(connection.name)."
         }
+    }
+
+    // Rotating a keyRef appends a fresh UUID so the old Keychain item is orphaned rather than reused. Strip
+    // any UUID a prior rotation already appended first, so repeated boundary crossings can't grow the ref
+    // unboundedly (base.uuid1.uuid2…) — it stays base + exactly one UUID.
+    private func rotationBase(_ keyRef: String) -> String {
+        let parts = keyRef.split(separator: ".", omittingEmptySubsequences: false)
+        if let last = parts.last, UUID(uuidString: String(last)) != nil {
+            return parts.dropLast().joined(separator: ".")
+        }
+        return keyRef
     }
 
     func updateAcrossCredentialBoundary(_ connection: Connection) {
@@ -289,14 +272,14 @@ final class AIServiceSettingsModel: ObservableObject {
         modelDiscoveryStates[connection.id] = nil
         modelSuggestionsByConnection[connection.id] = nil
         var connection = connection
-        connection.keyRef = "\(connection.keyRef).\(UUID().uuidString)"
+        connection.keyRef = "\(rotationBase(connection.keyRef)).\(UUID().uuidString)"
         update(connection, apiKey: nil)
     }
 
     func delete(_ connection: Connection) {
         do {
             let updated = try repository.deleteConnection(id: connection.id).connections
-            KeychainStore.delete(connection.keyRef)
+            deleteAPIKey(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
             // Bump so an in-flight test for the deleted connection can't land on a freshly created one
@@ -673,9 +656,17 @@ private struct AIServiceEditor: View {
         onBoundaryUpdate(pendingBoundaryConnection)
     }
 
+    // Cancel fully reverts the service flip: rebuild the draft from the unchanged connection so the picked
+    // service (presetId) and its stashed values are re-derived from what is actually stored — NOT preserved
+    // like the post-save refreshDraft path, which would keep the flipped presetId over reverted values and
+    // strand the editor showing a managed preset's hidden fields against a custom endpoint's data.
     private func cancelCredentialBoundary() {
         pendingBoundaryConnection = nil
-        refreshDraft(from: connection)
+        draft = Self.draft(
+            from: connection,
+            apiKey: draft.apiKey,
+            modelSuggestions: modelSuggestions,
+            modelDiscoveryState: modelDiscoveryState)
     }
 
     private func fetchModels(apiKey: String?) {

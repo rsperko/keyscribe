@@ -72,7 +72,6 @@ enum AccessibilityID {
         enum AI {
             static let list = "settings.ai.list"
             static let add = "settings.ai.list.add"
-            static let addCustom = "settings.ai.list.addCustom"
             static let chooserCancel = "settings.ai.chooser.cancel"
             static func row(_ connectionID: String) -> String { "settings.ai.list.row.\(connectionID)" }
             static func starterRow(_ presetID: String) -> String { "settings.ai.list.starter.\(presetID)" }
@@ -260,7 +259,7 @@ enum AccessibilityID {
 
     enum History {
         static let list = "history.list"
-        static let row = "history.list.row"
+        static func row(_ id: String) -> String { "history.list.row.\(id)" }
         static let search = "history.search"
         static let export = "history.action.export"
         static let stagePicker = "history.detail.stagePicker"
@@ -316,7 +315,7 @@ enum AccessibilityID {
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.recognitionHelp,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.replacementsList,
-        Settings.AI.list, Settings.AI.add, Settings.AI.addCustom, Settings.AI.chooserCancel, Settings.AI.deleteConfirmConfirm,
+        Settings.AI.list, Settings.AI.add, Settings.AI.chooserCancel, Settings.AI.deleteConfirmConfirm,
         Settings.AI.deleteConfirmCancel, Settings.AI.connectOfferConnect, Settings.AI.connectOfferDismiss,
         Settings.AI.Editor.name, Settings.AI.Editor.provider, Settings.AI.Editor.baseURL,
         Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey, Settings.AI.Editor.replaceKey,

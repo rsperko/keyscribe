@@ -29,6 +29,7 @@ struct FirstRunAISetupTests {
         modesDir: URL,
         saveAPIKey: @escaping (String, String) -> Bool = { _, _ in true },
         deleteAPIKey: @escaping (String) -> Void = { _ in },
+        readAPIKey: @escaping (String) -> String? = { _ in nil },
         testConnection: @escaping (Connection) async -> ConnectionTestState = { _ in .passed },
         listModels: @escaping (Connection, String?) async throws -> [String] = { _, _ in [] },
         onComplete: @escaping () -> Void = {}
@@ -40,6 +41,7 @@ struct FirstRunAISetupTests {
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             saveAPIKey: saveAPIKey,
             deleteAPIKey: deleteAPIKey,
+            readAPIKey: readAPIKey,
             testConnection: testConnection,
             listModels: listModels,
             onComplete: onComplete)
@@ -120,6 +122,42 @@ struct FirstRunAISetupTests {
         #expect(examples.allSatisfy { !$0.enabled })
         #expect(examples.allSatisfy { $0.aiRewrite?.connection == "" })
         #expect(try #require(modes.first { $0.id == "custom" }).aiRewrite?.connection == "")
+    }
+
+    // A headline starter already wired to a live connection and deliberately turned OFF must be left exactly
+    // as the user has it — connecting a new service must not re-enable it or repoint it. An unlinked headline
+    // is still wired up as usual.
+    @Test func connectingLeavesADeliberatelyDisabledLinkedHeadlineAlone() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
+
+        let repository = ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir))
+        try repository.upsertConnection(
+            Connection(id: "existing", name: "Existing", provider: .gemini, model: "m", keyRef: "keyscribe.llm.existing"))
+        var polish = try #require(ModeStore.loadAll(in: modesDir).first { $0.id == "polish" })
+        polish.aiRewrite?.connection = "existing"
+        polish.enabled = false
+        try ModeStore.write(polish, to: modesDir)
+
+        let model = makeModel(supportDir: supportDir, modesDir: modesDir)
+        model.aiServiceName = "Gemini Flash"
+        model.aiProvider = .gemini
+        model.aiModel = "gemini-2.5-flash"
+        model.aiAPIKey = "secret"
+        await model.createAIService()
+
+        let newConnection = try #require(
+            ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first { $0.id != "existing" })
+        let modes = ModeStore.loadAll(in: modesDir)
+        let polishAfter = try #require(modes.first { $0.id == "polish" })
+        #expect(!polishAfter.enabled)                                   // deliberate disable respected
+        #expect(polishAfter.aiRewrite?.connection == "existing")        // not repointed to the new service
+        let editSelection = try #require(modes.first { $0.id == "edit-selection" })
+        #expect(editSelection.enabled)                                  // the unlinked headline is still wired
+        #expect(editSelection.aiRewrite?.connection == newConnection.id)
     }
 
     // Fresh install (templates-only: no starter files, just _direct.toml): connecting the first service

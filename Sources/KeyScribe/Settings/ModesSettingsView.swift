@@ -243,7 +243,7 @@ private struct ModeLoadFailureBanner: View {
                 IssueText(failure.usedLastKnownGood
                     ? "“\(failure.id)” has an error in its file — still running its last working version. Fix the file to apply changes."
                     : "“\(failure.id)” couldn’t be loaded and was skipped. Check its file under Application Support.",
-                    severity: .advisory, font: .callout)
+                    severity: failure.usedLastKnownGood ? .advisory : .failure, font: .callout)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

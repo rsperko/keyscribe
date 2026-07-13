@@ -216,6 +216,10 @@ struct SpeechModelsView: View {
                             Label("Test model", systemImage: "waveform.and.magnifyingglass")
                         }
                         .accessibilityIdentifier(AccessibilityID.Settings.Speech.test(row.id))
+                        if row.testPassed {
+                            Label("Passed", systemImage: "checkmark.circle.fill")
+                                .font(.caption).foregroundStyle(.green)
+                        }
                     }
                     if canReinstall {
                         Button {
@@ -294,7 +298,9 @@ struct SpeechModelsView: View {
     private func storageLabel(_ row: SpeechModelsModel.Row) -> String {
         if row.info.systemManaged { return "Built into macOS" }
         let bytes = row.installedBytes ?? row.info.approxDownloadBytes
-        let label = row.isUsable ? "on disk" : "download"
+        // A quarantined model still has its files on disk (verificationFailed) even though it isn't usable —
+        // "download" would wrongly imply nothing is stored.
+        let label = (row.isUsable || row.verificationFailed) ? "on disk" : "download"
         return "\(ByteCountFormatter.fileStyle.string(fromByteCount: bytes)) \(label)"
     }
 

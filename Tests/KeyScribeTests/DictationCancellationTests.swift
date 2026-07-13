@@ -493,6 +493,61 @@ struct DictationCancellationTests {
         #expect(!hud.states.contains { if case .error = $0 { true } else { false } })
     }
 
+    // #3: a right-modifier "chord wins" abort must cancel ONLY the dictation its own key started. A different
+    // trigger's in-flight transcription must survive — right-⌥ punctuation typed while an Fn dictation is still
+    // transcribing must not discard it.
+    @Test func modifierAbortLeavesAnotherTriggersTranscriptionAlone() async {
+        let h = makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart(triggerKey: "fn")
+        await h.controller.captureBringUpTask?.value
+        h.controller.handleCommit()
+        await h.started.wait()                                          // fn dictation is transcribing
+
+        h.controller.cancelStartedByModifier(triggerKey: "right_option") // a different key aborts
+
+        #expect(h.controller.isBusy)                                    // untouched
+        h.release.fire()
+        await h.controller.dictationTask?.value
+        #expect(await h.insertSpy.calls == 1)                           // its transcript was inserted
+    }
+
+    // #3: even the SAME key must not cancel its own dictation once it has reached transcribing — commit happens
+    // on release, so the starting gesture is already up and a still-held aborting press is a new gesture (the
+    // key re-pressed in a chord right after its own tap-to-toggle commit).
+    @Test func modifierAbortLeavesItsOwnCommittedTranscriptionAlone() async {
+        let h = makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart(triggerKey: "right_option")
+        await h.controller.captureBringUpTask?.value
+        h.controller.handleCommit()
+        await h.started.wait()
+
+        h.controller.cancelStartedByModifier(triggerKey: "right_option")
+
+        #expect(h.controller.isBusy)
+        h.release.fire()
+        await h.controller.dictationTask?.value
+        #expect(await h.insertSpy.calls == 1)
+    }
+
+    // #3: the legitimate chord-wins case — the key's own still-recording (pre-commit) dictation IS cancelled.
+    @Test func modifierAbortCancelsItsOwnRecordingDictation() async {
+        let h = makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart(triggerKey: "right_option")
+        await h.controller.captureBringUpTask?.value                    // recording, pre-commit
+
+        h.controller.cancelStartedByModifier(triggerKey: "right_option")
+        await h.controller.dictationTask?.value
+
+        #expect(h.controller.isBusy == false)
+        #expect(await h.insertSpy.calls == 0)
+    }
+
     @Test func cancellingDuringTranscriptionInsertsNothingAndWritesNoHistory() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }

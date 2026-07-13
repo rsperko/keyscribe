@@ -138,7 +138,7 @@ final class HistoryPaneModel: ObservableObject {
     private func applyLoaded(_ loaded: [HistoryEntry], generation: Int) {
         guard generation == loadGeneration else { return }
         rows = loaded.map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
-        entryIndex = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry) })
+        entryIndex = Dictionary(rows.map { ($0.id, $0.entry) }, uniquingKeysWith: { first, _ in first })
         statsLine = Self.statsSummary(HistoryStats.compute(from: loaded))
         recomputeGroups()
         isLoading = false
@@ -239,7 +239,7 @@ final class HistoryPaneModel: ObservableObject {
 
     private func applyFilteredRows(_ filtered: [HistoryRow], generation: Int) {
         guard generation == loadGeneration else { return }
-        entryIndex = Dictionary(uniqueKeysWithValues: filtered.map { ($0.id, $0.entry) })
+        entryIndex = Dictionary(filtered.map { ($0.id, $0.entry) }, uniquingKeysWith: { first, _ in first })
         groups = Dictionary(grouping: filtered, by: \.day)
             .map { (day: $0.key, rows: $0.value) }
             .sorted { ($0.rows.first?.entry.timestamp ?? .distantPast) > ($1.rows.first?.entry.timestamp ?? .distantPast) }
@@ -269,6 +269,14 @@ final class HistoryPaneModel: ObservableObject {
         !HistoryRetention.expired(
             dayFiles: store.dayFiles(), today: HistoryStore.todayString(), retentionDays: retainingDays
         ).isEmpty
+    }
+
+    // Prune the store to the new retention now and re-read, so a lowered retention drops expired rows
+    // from the visible list immediately instead of leaving them until the next pane switch. Idempotent
+    // with the AppDelegate's settings-driven prune (deletes already-gone files → no-op).
+    func applyRetention(days: Int) {
+        _ = store.applyRetention(retentionDays: days)
+        reload()
     }
 
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
@@ -322,7 +330,10 @@ struct HistoryPaneView: View {
             titleVisibility: .visible
         ) {
             Button("Remove Entries", role: .destructive) {
-                if let pendingRetentionDays { settings.retentionDays = pendingRetentionDays }
+                if let pendingRetentionDays {
+                    settings.retentionDays = pendingRetentionDays
+                    model.applyRetention(days: pendingRetentionDays)
+                }
                 pendingRetentionDays = nil
                 retentionDays = nil
             }
@@ -346,7 +357,7 @@ struct HistoryPaneView: View {
         SettingRow(
             title: "History",
             result: settings.historyEnabled
-                ? "On this Mac · keep for \(retentionDays ?? settings.retentionDays) days"
+                ? "On this Mac · keep for \(settings.retentionDays) days"
                 : "Off",
             help: "Stores transcripts and final text locally so you can search and correct them. Audio and password-field dictations are never saved. For other sensitive work, lower retention or exclude a mode in its Result handling.")
         {
@@ -377,6 +388,7 @@ struct HistoryPaneView: View {
             pendingRetentionDays = retentionDays
         } else {
             settings.retentionDays = retentionDays
+            model.applyRetention(days: retentionDays)
             self.retentionDays = nil
         }
     }
@@ -402,7 +414,7 @@ struct HistoryPaneView: View {
                     Section(group.day) {
                         ForEach(group.rows) { row in
                             HistoryRowView(entry: row.entry).tag(row.id)
-                                .accessibilityIdentifier(AccessibilityID.History.row)
+                                .accessibilityIdentifier(AccessibilityID.History.row(row.id))
                         }
                     }
                 }

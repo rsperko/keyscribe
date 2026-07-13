@@ -94,7 +94,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
     // The app to hand focus back to for History's "Paste Result" — the Settings window is key while the
-    // pane is up. Tracked only while the History pane is selected and the window is visible.
+    // pane is up. Captured in `present()` BEFORE we activate our own window (once NSApp.activate runs the
+    // frontmost app is KeyScribe itself), refreshed by the activation observer while the History pane shows,
+    // and cleared when the window closes. Stable across in-window pane navigation.
     private var historyPreviousApp: NSRunningApplication?
     private var historyActivationObserver: NSObjectProtocol?
     private var loadedHistorySignature: String?
@@ -159,6 +161,14 @@ final class SettingsController: NSObject, NSWindowDelegate {
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
 
     func present(_ destination: SettingsDestination? = nil) {
+        // Capture the app to paste History results back into BEFORE activating our own window — after
+        // NSApp.activate the frontmost app is KeyScribe. Skip when we are already frontmost (a re-invoke while
+        // Settings is key) so a real prior app is not overwritten with self. Re-seeds on every open, so a
+        // reopen replaces any stale value from the previous session.
+        let priorApp = NSWorkspace.shared.frontmostApplication
+        if priorApp?.bundleIdentifier != Bundle.main.bundleIdentifier {
+            historyPreviousApp = priorApp
+        }
         refreshProblems()
         startProblemPoll()
         if let destination { navigation.destination = destination }
@@ -195,6 +205,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         problemPollTask = nil
         // "Navigated away" equals "closed" for retained transcript state (phase 8e memory/privacy invariant).
         handleHistoryPaneChange(active: false)
+        // Drop the paste-target only on real close (not on pane-switch, where it must persist) so a reopen
+        // re-seeds a fresh one in present() instead of pasting into a stale app from a prior session.
+        historyPreviousApp = nil
         AppActivationPolicy.popRegular()
     }
 
@@ -208,7 +221,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     // transcripts retained while History is not on screen). Also drives the previousApp tracking observer.
     private func handleHistoryPaneChange(active: Bool) {
         if active {
-            historyPreviousApp = NSWorkspace.shared.frontmostApplication
+            // previousApp is seeded in present() (before activation) and refreshed by the observer — not
+            // re-captured here, where the frontmost app is already KeyScribe. It must also survive an
+            // in-window pane switch away and back, so it is cleared only on window close, not here.
             registerHistoryActivationObserver()
             reloadHistoryIfNeeded()
         } else {
