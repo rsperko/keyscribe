@@ -11,10 +11,63 @@ public enum VerbatimTokenizer {
     private static let endTrigger = CommandPhrase.boundedTrigger("end verbatim")
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
+        let text = snapMarkerKeyword(text)
         guard text.range(of: "verbatim", options: .caseInsensitive) != nil else { return text }
         let afterPairs = replacePairs(text, tokenizer)
         let afterRescue = replaceRescue(afterPairs, tokenizer)
         return replaceUnterminated(afterRescue, tokenizer)
+    }
+
+    // "verbatim" is a rare, schwa-final word an on-device STT reliably mangles ("verbatum", "vebatim") —
+    // the acoustic model can't pin the reduced final vowel and there is no lexicon to snap it to a real
+    // word. A mistranscribed keyword defeats every marker match below, so a misheard token adjacent to a
+    // marker word ("begin", or an endLike close) is snapped back to the literal before matching. The bound
+    // is Levenshtein <= 1 with NO phonetic gate: "verbatim" has zero real English words within one edit
+    // (so only non-word mishearings snap), and dropping the phonetic gate is what catches the r-drop
+    // "vebatim" — its consonant skeleton differs, which a phonetic-key equality would reject. Only a
+    // marker-adjacent token is touched, so a verbatim-like word dictated as content is left alone. Runs on
+    // raw STT text (verbatim sorts before the text stages, design.md §4.2.1 — no control chars yet).
+    private static let keyword = "verbatim"
+    private static let keywordDistance = 1
+    private static let beginWord = "begin"
+    private static let keywordEdgePunct = CharacterSet(charactersIn: ".,!?;:'\"()[]")
+
+    private static func snapMarkerKeyword(_ text: String) -> String {
+        guard let tokenRe = RegexCache.regex("\\S+", options: []) else { return text }
+        let ns = text as NSString
+        let ranges = tokenRe.matches(in: text, range: NSRange(location: 0, length: ns.length)).map(\.range)
+        guard ranges.count >= 2 else { return text }
+        var edits: [(range: NSRange, replacement: String)] = []
+        for i in 1..<ranges.count {
+            let raw = ns.substring(with: ranges[i])
+            guard keywordLike(core(of: raw)) else { continue }
+            let prev = core(of: ns.substring(with: ranges[i - 1])).lowercased()
+            guard prev == beginWord || endLike(prev) else { continue }
+            edits.append((ranges[i], swapCore(raw, into: keyword)))
+        }
+        guard !edits.isEmpty else { return text }
+        let mutable = NSMutableString(string: text)
+        for edit in edits.reversed() { mutable.replaceCharacters(in: edit.range, with: edit.replacement) }
+        return mutable as String
+    }
+
+    private static func keywordLike(_ token: String) -> Bool {
+        let w = token.lowercased()
+        guard w != keyword, abs(w.count - keyword.count) <= keywordDistance else { return false }
+        return FuzzyCorrector.levenshtein(w, keyword) <= keywordDistance
+    }
+
+    private static func core(of token: String) -> String {
+        token.trimmingCharacters(in: keywordEdgePunct)
+    }
+
+    // Preserve the token's outer punctuation (a pause comma / marker-glued terminator the marker regexes
+    // still expect to handle); only the alphabetic core is replaced.
+    private static func swapCore(_ token: String, into replacement: String) -> String {
+        let isEdge = { (c: Character) in c.unicodeScalars.allSatisfy(keywordEdgePunct.contains) }
+        let lead = String(token.prefix(while: isEdge))
+        let trail = String(token.reversed().prefix(while: isEdge).reversed())
+        return lead + replacement + trail
     }
 
     // The `[\s,]*` around the content group trims pause whitespace/commas hugging the markers (so

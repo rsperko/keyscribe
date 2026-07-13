@@ -252,4 +252,50 @@ struct VerbatimTokenizerTests {
         #expect(out == "⟦SN:VERB:1⟧")
         #expect(t.restore(out) == "A begin verbatim B")
     }
+
+    // "verbatim" is a rare, schwa-final word an on-device STT reliably mangles ("verbatum"). Adjacent to
+    // the "begin" marker word it is snapped back to the literal so the span still closes. lev<=1 with no
+    // phonetic gate — "verbatim" has zero real English words within one edit, so only non-word mishearings
+    // snap.
+    @Test func beginMarkerKeywordMishearIsSnapped() {
+        let (out, t) = tokenize("say begin verbatum KeepThis end verbatim done")
+        #expect(out == "say ⟦SN:VERB:1⟧ done")
+        #expect(t.restore(out) == "say KeepThis done")
+    }
+
+    // The dropped-r mishear ("vebatim") changes the consonant skeleton, so a phonetic-key gate would
+    // reject it; the lev-only rule still catches it because the pure edit-distance neighbourhood is empty.
+    @Test func endMarkerDroppedConsonantMishearIsSnapped() {
+        let (out, t) = tokenize("say begin verbatim KeepThis end vebatim done")
+        #expect(out == "say ⟦SN:VERB:1⟧ done")
+        #expect(t.restore(out) == "say KeepThis done")
+    }
+
+    // The reported case: BOTH markers mistranscribed at once ("begin verbatum … end vebatim").
+    @Test func bothMarkerKeywordsMisheardStillCloses() {
+        let (out, t) = tokenize("blah blah begin verbatum text in between end vebatim blah blah")
+        #expect(out == "blah blah ⟦SN:VERB:1⟧ blah blah")
+        #expect(t.restore(out) == "blah blah text in between blah blah")
+    }
+
+    // A pause comma between the marker words survives the keyword snap.
+    @Test func misheardKeywordWithPauseCommaFires() {
+        let (out, t) = tokenize("say begin, verbatum KeepThis end, vebatim done")
+        #expect(out == "say ⟦SN:VERB:1⟧ done")
+        #expect(t.restore(out) == "say KeepThis done")
+    }
+
+    // Scope guard: a verbatim-like word NOT adjacent to a marker word is content, never touched — the snap
+    // must not "correct" dictated prose or corrupt the inside of a span.
+    @Test func misheardKeywordAwayFromMarkerIsNotSnapped() {
+        let (out, _) = tokenize("the verbatum note is here")
+        #expect(out == "the verbatum note is here")
+    }
+
+    // The snap only fires on a NON-exact keyword — an exact "and verbatim" without a begin stays inert
+    // (regression guard for loneEndLikePhraseWithoutBeginIsInert under the new pass).
+    @Test func exactVerbatimIsNeverReSnapped() {
+        let (out, _) = tokenize("quote it and verbatim please")
+        #expect(out == "quote it and verbatim please")
+    }
 }
