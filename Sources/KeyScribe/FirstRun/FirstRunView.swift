@@ -78,8 +78,8 @@ struct FirstRunView: View {
 
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Choose speech recognition").font(.title.bold())
-            Text("Download one model for fast, accurate dictation. It stays on this Mac.")
+            Text("Choose a speech model").font(.title.bold())
+            Text(modelStepSubtitle)
                 .foregroundStyle(.secondary)
             modelCard
             DisclosureSection("Choose another model", isExpanded: $modelChoiceExpanded) {
@@ -144,9 +144,15 @@ struct FirstRunView: View {
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 
+    private var modelStepSubtitle: String {
+        model.appleSpeechAvailable
+            ? "Download a model for the best accuracy, or use the speech recognition built into macOS. Either way, it stays on this Mac."
+            : "Download one model for fast, accurate dictation. It stays on this Mac."
+    }
+
     private var modelDownloadButtonTitle: String {
-        guard let info = model.selectedInfo else { return "Download Recognizer" }
-        return info.isDefaultEnglish ? "Download Recommended Recognizer" : "Download \(info.displayName)"
+        guard let info = model.selectedInfo else { return "Download Model" }
+        return info.isDefaultEnglish ? "Download Recommended Model" : "Download \(info.displayName)"
     }
 
     private var downloadableModels: [SpeechModelInfo] {

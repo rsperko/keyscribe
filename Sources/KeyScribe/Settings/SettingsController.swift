@@ -478,8 +478,10 @@ private struct MaintenanceSettingsView: View {
                 }
             }
             Section("Reset \(Branding.appName)") {
-                Button("Erase All \(Branding.appName) Data…", role: .destructive) { confirmingErase = true }
-                    .accessibilityIdentifier(AccessibilityID.Settings.Advanced.eraseAllData)
+                Button(role: .destructive) { confirmingErase = true } label: {
+                    Label("Erase All \(Branding.appName) Data…", systemImage: "trash").foregroundStyle(.red)
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.Advanced.eraseAllData)
                 Text("Permanently deletes your modes, settings, AI services, saved keys, and dictation history, then restarts \(Branding.appName). Downloaded speech models and system permissions are kept. This cannot be undone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

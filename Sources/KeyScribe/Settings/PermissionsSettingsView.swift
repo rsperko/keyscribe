@@ -105,17 +105,15 @@ private struct PermissionRow: View {
                 Text(unavailable).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
+                    // Present the in-app request first; System Settings is the recovery path that only
+                    // helps once the request has been denied, so it doesn't compete with Allow up front.
                     if status == .notDetermined {
                         Button("Allow", action: request)
                             .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier(AccessibilityID.Settings.Permissions.allow(permID))
-                    }
-                    if status == .denied {
-                        Button("Open System Settings", action: openSettings)
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings(permID))
                     } else {
                         Button("Open System Settings", action: openSettings)
+                            .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings(permID))
                     }
                 }

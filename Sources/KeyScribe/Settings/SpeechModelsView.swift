@@ -170,8 +170,8 @@ struct SpeechModelsView: View {
             verificationFailed: row.verificationFailed
         ) {
         case .current:
-            Text("Current")
-                .foregroundStyle(.tint)
+            Label("Current model", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(.secondary)
         case .use:
             Button("Use This Model") {
                 model.select(row.id)
