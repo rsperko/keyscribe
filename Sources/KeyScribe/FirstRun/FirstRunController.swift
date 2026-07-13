@@ -154,6 +154,10 @@ final class FirstRunModel: ObservableObject {
     var appleSpeechAvailable: Bool { catalog.contains { $0.id == "apple" } }
     let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
+    // Remove a partially-downloaded model's files when a download fails or is cancelled, so the next attempt
+    // starts clean instead of choking on (or silently trusting) half-written weights. Guarded on the model
+    // not already being installed so a completed prior install is never wiped.
+    private let cleanupFailedDownload: (String) -> Void
     private let selectEngine: (String) -> Void
     private let repository: ConfigRepository
     private var supportDir: URL { repository.supportDir }
@@ -215,6 +219,10 @@ final class FirstRunModel: ObservableObject {
         initialEngineId: String,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
+        cleanupFailedDownload: @escaping (String) -> Void = { id in
+            guard !ModelInstallStore.installedIds().contains(id) else { return }
+            ModelInstallStore.removeFiles(for: id)
+        },
         permissionsOnly: Bool = false,
         resumeOnboarding: Bool = false,
         repository: ConfigRepository,
@@ -229,6 +237,7 @@ final class FirstRunModel: ObservableObject {
     ) {
         self.selectedEngineId = initialEngineId
         self.download = download
+        self.cleanupFailedDownload = cleanupFailedDownload
         self.selectEngine = selectEngine
         self.permissionsOnly = permissionsOnly
         self.repository = repository
@@ -290,6 +299,11 @@ final class FirstRunModel: ObservableObject {
                 downloading = false
                 step = .permissions
             } catch {
+                // A failed or cancelled download leaves partial weights on disk. Left behind, they wedge the
+                // next attempt (the SDK may trust or trip over them) and there is no delete affordance for a
+                // model that was never marked installed — the "can't recover without switching models" trap.
+                // Wipe them so retry is clean.
+                cleanupFailedDownload(id)
                 downloadError = "Download failed. Check your connection and try again."
                 downloading = false
             }

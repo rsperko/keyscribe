@@ -772,6 +772,9 @@ private struct HistoryDetailView: View {
                     detailRow("How chosen", howChosen)
                 }
                 detailRow("AI rewrite", rewriteSummary)
+                if entry.outcome == .localFallback, let reason = entry.fallbackReason {
+                    detailRow("Why local was kept", reason)
+                }
                 detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
                 detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")
                 if let device = entry.device {

@@ -1344,7 +1344,11 @@ final class DictationController {
         // the clipboard so the text survives and the outcome reports "copied" truthfully.
         let decision = accessibilityGranted() ? targetDecision : .clipboardFallback(reason: .accessibilityDenied)
         building.targetBundleId = current.bundleId ?? capturedSnapshot?.bundleId
-        if case .clipboardFallback(let reason) = decision { building.fallbackReason = String(describing: reason) }
+        // Don't clobber a rewrite fallback reason already recorded above — that cause (an LLM 400) is the
+        // more surprising one; the insertion-clipboard reason only fills the slot when nothing else claimed it.
+        if case .clipboardFallback(let reason) = decision, building.fallbackReason == nil {
+            building.fallbackReason = String(describing: reason)
+        }
         building.fingerprints[.final] = .of(transcript)
         let initialOutcome = DictationMachine.outcomeForTranscript(finalText: transcript, heard: heard, decision: decision)
         // May downgrade to .failed if paste silently fails; insertion success is observed, not assumed.
@@ -1477,7 +1481,8 @@ final class DictationController {
             contextCategories: rewrite?.contextCategories ?? [],
             connection: rewrite?.connection, model: rewrite?.model, prompt: rewrite?.prompt,
             modeChoice: session?.modeChoice, routedPhrase: session?.routedPhrase,
-            triggerKey: session?.triggerDisplay)
+            triggerKey: session?.triggerDisplay,
+            fallbackReason: outcome == .localFallback ? rewrite?.fallbackReason : nil)
         guard let history else { return }
         let retentionDays = settings.history.retentionDays
         let today = HistoryStore.todayString()
@@ -1568,6 +1573,9 @@ final class DictationController {
         let contextCategories: [String]
         let prompt: String
         let fellBack: Bool
+        // Why the cloud rewrite was abandoned (HTTP error, missing key, validation failure). nil when the
+        // rewrite succeeded or when fallback was pre-committed before the cause was known (selection path).
+        var fallbackReason: String? = nil
     }
 
     private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
@@ -1737,16 +1745,24 @@ final class DictationController {
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
         let gateApproved: String
         let fellBack: Bool
+        var fallbackReason: String?
         switch outcome {
         case .rewritten(let out): gateApproved = out; fellBack = false; building.fingerprints[.llmOut] = .of(out)
-        case .localFallback(let local): gateApproved = local; fellBack = true
+        case .localFallback(let local, let reason):
+            gateApproved = local; fellBack = true; fallbackReason = reason
+            // The rewrite silently returning a local fallback used to be invisible — the user saw a benign
+            // "local fallback" with no cause. Log the reason on the dictation path so it is diagnosable live,
+            // and stamp it on the diagnostics record (humanSummary) too.
+            log.notice("rewrite fell back to local: \(reason ?? "unknown", privacy: .public)")
+            building.fallbackReason = reason
         }
         // Restore runs only on the gate-approved text (or the fallback), never before the gate — the
         // ordering is structural now that `rewrite` owns the gate and returns the vetted string.
         let text = pipeline.restore(trimmedIfNeeded(gateApproved, mode: mode))
         let details = RewriteDetails(
             connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
-            contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack)
+            contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack,
+            fallbackReason: fallbackReason)
         return (text, !fellBack, details)
     }
 

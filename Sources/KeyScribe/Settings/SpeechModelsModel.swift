@@ -186,6 +186,10 @@ final class SpeechModelsModel: ObservableObject {
                 }
             } catch {
                 Log.models.error("download failed: \(id, privacy: .public): \(error, privacy: .public)")
+                // Wipe partial weights so a retry starts clean and the model never lingers as an undeletable
+                // "on disk but not installed" phantom. Guarded on not-installed so a re-download that fails
+                // never removes a still-good prior install.
+                if !set.installed.contains(id) { removeFiles(id) }
                 errors[id] = "\(error)"
                 downloading[id] = nil
                 rebuild()

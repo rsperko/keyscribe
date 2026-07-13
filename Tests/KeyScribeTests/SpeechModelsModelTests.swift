@@ -20,12 +20,13 @@ final class SpeechModelsModelTests: XCTestCase {
         verifyResult: Bool? = nil,
         activeId: String = "parakeet-tdt-ctc-110m",
         initialFailedIds: Set<String>? = nil,
-        deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil
+        deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil,
+        download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void = { _, _ in }
     ) -> SpeechModelsModel {
         SpeechModelsModel(
             activeId: activeId,
             stt: Settings.defaults.stt,
-            download: { _, _ in },
+            download: download,
             verify: { _ in verifyResult },
             evictEngine: { id in recorder.evicted.append(id) },
             onActiveChange: { recorder.activeChanges.append($0) },
@@ -68,6 +69,33 @@ final class SpeechModelsModelTests: XCTestCase {
         recorder.deferred[0]()
 
         XCTAssertEqual(recorder.removed, ["parakeet"])
+    }
+
+    // An interrupted/failed download must wipe its partial weights so a retry starts clean and the model
+    // never becomes an "on disk but not installed" phantom with no delete affordance.
+    func testFailedDownloadWipesPartialFiles() async throws {
+        struct Boom: Error {}
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, download: { _, _ in throw Boom() })
+
+        model.startDownload("whisper")   // a real, not-yet-installed catalog id
+        await settleTasks()
+
+        XCTAssertEqual(recorder.removed, ["whisper"])
+        XCTAssertNotNil(try row("whisper", in: model).errorText)
+        XCTAssertEqual(recorder.markedInstalled, [])   // never marked installed
+    }
+
+    // A failed re-download of an already-installed model must NOT wipe the still-good prior install.
+    func testFailedDownloadKeepsAlreadyInstalledModel() async throws {
+        struct Boom: Error {}
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, download: { _, _ in throw Boom() })
+
+        model.startDownload("parakeet")   // already in initialInstalledIds
+        await settleTasks()
+
+        XCTAssertEqual(recorder.removed, [])   // guarded: installed models are preserved
     }
 
     func testCancellingInactiveDeletionPreservesTheModel() async throws {

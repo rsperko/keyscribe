@@ -39,6 +39,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // Display string of the shortcut that started this dictation, when the mode was chosen by its trigger
     // key (modeChoice == .triggerKey). Lets History show "Started by its shortcut (Right-⌥)". nil otherwise.
     public var triggerKey: String?
+    // Why a `localFallback` entry kept the local text (an HTTP error, missing key, or validation failure).
+    // Provider error text or a fixed local string, never user content. nil on non-fallback and older rows.
+    public var fallbackReason: String?
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -58,6 +61,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case modeChoice = "mode_choice"
         case routedPhrase = "routed_phrase"
         case triggerKey = "trigger_key"
+        case fallbackReason = "fallback_reason"
     }
 
     public init(
@@ -67,7 +71,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
         connection: String? = nil, model: String? = nil, prompt: String? = nil,
         modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
-        triggerKey: String? = nil
+        triggerKey: String? = nil, fallbackReason: String? = nil
     ) {
         self.timestamp = timestamp
         self.modeName = modeName
@@ -86,6 +90,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.modeChoice = modeChoice
         self.routedPhrase = routedPhrase
         self.triggerKey = triggerKey
+        self.fallbackReason = fallbackReason
     }
 
     private static let encoder: JSONEncoder = {

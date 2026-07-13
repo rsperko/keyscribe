@@ -30,7 +30,7 @@ private func rewrittenText(_ o: RewriteOutcome) -> String? {
     return nil
 }
 private func fallbackText(_ o: RewriteOutcome) -> String? {
-    if case .localFallback(let s) = o { return s }
+    if case .localFallback(let s, _) = o { return s }
     return nil
 }
 

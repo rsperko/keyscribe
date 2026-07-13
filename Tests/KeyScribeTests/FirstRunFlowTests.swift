@@ -107,6 +107,30 @@ struct FirstRunFlowTests {
         #expect(model.downloading == false)
     }
 
+    // An interrupted onboarding download wipes its partial weights so the next attempt starts clean —
+    // otherwise the half-downloaded model wedges retry and can't be deleted (it was never marked installed).
+    @Test func failedDownloadCleansUpPartialWeights() async {
+        let supportDir = tempSupportDir()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        struct Boom: Error {}
+        final class Box { var ids: [String] = [] }
+        let box = Box()
+        let model = FirstRunModel(
+            initialEngineId: "whisper",
+            download: { _, _ in throw Boom() },
+            selectEngine: { _ in },
+            cleanupFailedDownload: { box.ids.append($0) },
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            onComplete: {})
+
+        model.beginDownload()
+        await model.downloadTask?.value
+
+        #expect(box.ids == ["whisper"])
+        #expect(model.downloadError != nil)
+        #expect(model.downloading == false)
+    }
+
     // MARK: 2b — step-dot mapping
 
     @Test func stepIndexMapsEveryStepAndPlaygroundSharesTheLastDot() {

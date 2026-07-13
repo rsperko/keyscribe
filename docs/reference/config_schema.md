@@ -327,6 +327,14 @@ reasoning_effort = "none"      # OpenAI defaults only
 gemini_thinking_level = "minimal" # Gemini defaults only
 ```
 
+**`reasoning_effort` is provider-specific — do not copy it across providers.** Valid values differ by
+backend and even by model (native OpenAI accepts `none`; many OpenAI-*compatible* proxies require one of
+`minimal|low|medium|high` and reject `none` with a 400). KeyScribe does not validate the value on our
+side, because "valid" is defined by the server, not us. Instead, if the endpoint rejects the parameter,
+the client automatically drops `reasoning_effort` and retries (remembering the working shape for that
+connection), and any rewrite that still cannot run records the reason in History under *Why local was
+kept* instead of falling back silently. Use **Test** in the connection editor to confirm a value works.
+
 The editor's hosted quick-setup presets (OpenRouter, Groq, Mistral) are **not** distinct providers on
 disk — each persists as a `provider = "openai_compatible"` connection with the preset's `base_url` and a
 lightweight default `model` (e.g. OpenRouter → `https://openrouter.ai/api/v1` /

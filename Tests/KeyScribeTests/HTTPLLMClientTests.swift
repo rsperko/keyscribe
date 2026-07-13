@@ -303,6 +303,83 @@ struct HTTPLLMClientTests {
         #expect(folded?.contains("USR") == true)
     }
 
+    // Some compatible servers / proxies return `content` as an array of typed parts rather than a string.
+    // It must be read, not rejected as a bad response and silently dropped to local.
+    @Test func openAIContentAsPartsArrayIsAccepted() async throws {
+        LLMStubProtocol.handler = { request in
+            let data = try! JSONSerialization.data(withJSONObject: [
+                "choices": [["message": ["content": [["type": "text", "text": "Hello there."]]]]]])
+            return (resp(request.url!, 200), data)
+        }
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        #expect(out == "Hello there.")
+    }
+
+    // A proxy can wrap a SUCCESS body in a single-element top-level array too, the same shape it uses for
+    // errors — unwrap it rather than failing every rewrite.
+    @Test func arrayWrappedSuccessResponseIsUnwrapped() async throws {
+        LLMStubProtocol.handler = { request in
+            let data = try! JSONSerialization.data(withJSONObject: [
+                ["choices": [["message": ["content": "OK"]]]]])
+            return (resp(request.url!, 200), data)
+        }
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        #expect(out == "OK")
+    }
+
+    // Gemini can split its reply across multiple parts; read them all, not just the first.
+    @Test func geminiJoinsMultipleTextParts() async throws {
+        LLMStubProtocol.handler = { request in
+            let data = try! JSONSerialization.data(withJSONObject: [
+                "candidates": [["content": ["parts": [["text": "Hello "], ["text": "world."]]]]]])
+            return (resp(request.url!, 200), data)
+        }
+        let connection = Connection(
+            id: "g", name: "G", provider: .gemini, model: Connection.Provider.gemini.defaultModel, keyRef: "k")
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        #expect(out == "Hello world.")
+    }
+
+    // A proxy that wraps its error in a single-element top-level array (e.g. one fronting Gemini) must
+    // still drive remediation, not slip past the parser as an unrecognized body.
+    @Test func arrayWrappedProxyErrorStillRemediates() async throws {
+        nonisolated(unsafe) var bodies: [[String: Any]?] = []
+        let wrapped = try! JSONSerialization.data(withJSONObject: [
+            ["error": ["message": "temperature is not supported by this model"]]])
+        let steps: [(Int, Data)] = [(400, wrapped), (200, okBody("OK"))]
+        LLMStubProtocol.handler = { request in
+            let idx = bodies.count
+            bodies.append(request.decodedBody())
+            let step = steps[min(idx, steps.count - 1)]
+            return (resp(request.url!, step.0), step.1)
+        }
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        #expect(out == "OK")
+        #expect(bodies.count == 2)
+        #expect(bodies[0]?["temperature"] != nil)
+        #expect(bodies[1]?["temperature"] == nil)
+    }
+
+    @Test func messageOnlyRoleRejectionFoldsSystemIntoUser() async throws {
+        nonisolated(unsafe) var bodies: [[String: Any]?] = []
+        // A generic 400 with no structured `param` — only prose — the shape a non-OpenAI proxy returns.
+        let roleErr = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "This model does not support the 'system' role."]])
+        let steps: [(Int, Data)] = [(400, roleErr), (200, okBody("OK"))]
+        LLMStubProtocol.handler = { request in
+            let idx = bodies.count
+            bodies.append(request.decodedBody())
+            let step = steps[min(idx, steps.count - 1)]
+            return (resp(request.url!, step.0), step.1)
+        }
+        _ = try await stubbedClient().complete(system: "SYS", user: "USR", connection: compatConnection())
+        #expect(bodies.count == 2)
+        #expect((bodies[0]?["messages"] as? [[String: Any]])?.count == 2)
+        let retryMessages = bodies[1]?["messages"] as? [[String: Any]]
+        #expect(retryMessages?.count == 1)
+        #expect(retryMessages?.first?["role"] as? String == "user")
+    }
+
     @Test func unknownParamErrorDoesNotRetry() async {
         nonisolated(unsafe) var calls = 0
         LLMStubProtocol.handler = { request in
@@ -310,6 +387,61 @@ struct HTTPLLMClientTests {
             return (resp(request.url!, 400), errBody("unsupported_parameter", "top_p"))
         }
         await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        }
+        #expect(calls == 1)   // a 400 is deterministic: no transient retry
+    }
+
+    // A transient 5xx (proxy rebooting, model still warming) shouldn't cost the rewrite — one quick retry
+    // recovers it.
+    @Test func transientServerErrorRetriesOnceThenSucceeds() async throws {
+        nonisolated(unsafe) var calls = 0
+        let steps: [(Int, Data)] = [(503, Data("overloaded".utf8)), (200, okBody("OK"))]
+        LLMStubProtocol.handler = { request in
+            let idx = calls; calls += 1
+            let step = steps[min(idx, steps.count - 1)]
+            return (resp(request.url!, step.0), step.1)
+        }
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        #expect(out == "OK")
+        #expect(calls == 2)
+    }
+
+    // A dropped connection is transient too — retry once rather than falling back on a blip.
+    @Test func droppedConnectionRetriesOnceThenSucceeds() async throws {
+        nonisolated(unsafe) var calls = 0
+        LLMStubProtocol.handler = { request in
+            calls += 1
+            if calls == 1 { throw URLError(.networkConnectionLost) }
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        let out = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        #expect(out == "OK")
+        #expect(calls == 2)
+    }
+
+    // But it is a SINGLE quick retry, not a backoff ladder — a persistent 5xx fails fast so dictation
+    // falls back to the local transcript promptly.
+    @Test func persistentServerErrorFailsAfterExactlyOneRetry() async {
+        nonisolated(unsafe) var calls = 0
+        LLMStubProtocol.handler = { request in
+            calls += 1
+            return (resp(request.url!, 502), Data("bad gateway".utf8))
+        }
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        }
+        #expect(calls == 2)
+    }
+
+    // A timeout already waited the full request window; retrying would double the wait, so it must not.
+    @Test func timeoutDoesNotRetry() async {
+        nonisolated(unsafe) var calls = 0
+        LLMStubProtocol.handler = { _ in
+            calls += 1
+            throw URLError(.timedOut)
+        }
+        await #expect(throws: Error.self) {
             _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
         }
         #expect(calls == 1)

@@ -37,7 +37,10 @@ struct RewriteServiceTests {
     @Test func fallsBackToLocalWhenClientThrows() async {
         let svc = RewriteService(client: FakeClient([.failure(FakeError())]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
-        #expect(out == .localFallback(localText: "hello"))
+        // The fallback now carries the reason so it is diagnosable rather than silent.
+        guard case .localFallback(let text, let reason) = out else { Issue.record("expected fallback"); return }
+        #expect(text == "hello")
+        #expect(reason != nil)
     }
 
     @Test func retriesOnceThenSucceeds() async {
@@ -58,7 +61,9 @@ struct RewriteServiceTests {
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "orig ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "orig ⟦SN:REDACT:1⟧"), connection: conn)
-        #expect(out == .localFallback(localText: "orig ⟦SN:REDACT:1⟧"))
+        guard case .localFallback(let text, let reason) = out else { Issue.record("expected fallback"); return }
+        #expect(text == "orig ⟦SN:REDACT:1⟧")
+        #expect(reason != nil)   // gate-failure fallback is also labeled
         #expect(await client.calls == 2)   // initial + one stricter retry, no more
     }
 
@@ -108,7 +113,8 @@ struct RewriteServiceTests {
     @Test func emptyOutputFallsBack() async {
         let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
-        #expect(out == .localFallback(localText: "hello"))
+        guard case .localFallback(let text, _) = out else { Issue.record("expected fallback"); return }
+        #expect(text == "hello")
     }
 
     @Test func restoresSourceBoundaryLayoutStrippedByTheLLM() async {

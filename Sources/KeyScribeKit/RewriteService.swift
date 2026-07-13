@@ -14,7 +14,10 @@ public extension LLMClient {
 
 public enum RewriteOutcome: Equatable, Sendable {
     case rewritten(String)
-    case localFallback(localText: String)
+    // `reason` records WHY the rewrite was abandoned (an HTTP error, a missing key, a validation failure)
+    // so the fallback is diagnosable instead of silent. It is provider error text or a fixed local string,
+    // never user content, so it is safe to log and to store in history.
+    case localFallback(localText: String, reason: String?)
 }
 
 // Orchestrates one optional rewrite (design.md §4.2, prompt_design.md): assemble the prompt, call the
@@ -45,7 +48,7 @@ public actor RewriteService {
             do {
                 output = try await client.complete(system: system, user: base.user, connection: connection)
             } catch {
-                return .localFallback(localText: localText)
+                return .localFallback(localText: localText, reason: error.localizedDescription)
             }
             switch ValidationGate.check(
                 output: output, issuedTokens: required, allowedTokens: allowedTokens, allowDeletion: allowDeletion
@@ -54,7 +57,9 @@ public actor RewriteService {
                 return .rewritten(OutputCleanup.preserveBoundaryLayout(from: localText, in: output))
             case .fail:
                 guard ValidationGate.recovery(attempt: attempt) == .retryStricter else {
-                    return .localFallback(localText: localText)
+                    return .localFallback(
+                        localText: localText,
+                        reason: "The AI reply left out or changed protected text, so your local version was kept.")
                 }
                 attempt += 1
             }

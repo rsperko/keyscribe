@@ -1,13 +1,18 @@
 import Foundation
 import KeyScribeKit
 
-enum ProviderTransportError: Error, CustomStringConvertible {
+enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
     case missingKey(String)
     case keychainDenied(String, status: Int32)
     case missingBaseURL
     case http(Int, body: String?)
     case badResponse
     case truncated
+
+    // Route the rich `description` (which names the HTTP code and the provider's error-body snippet) through
+    // localizedDescription so a caught rewrite error carries the real cause into logs and history, instead of
+    // the generic "The operation couldn't be completed" a bare Error yields.
+    var errorDescription: String? { description }
 
     var description: String {
         switch self {
@@ -81,12 +86,43 @@ struct ProviderTransport: Sendable {
     }
 
     func send(_ request: URLRequest) async throws -> Data {
+        do {
+            return try await attempt(request)
+        } catch let error where Self.isTransient(error) {
+            // One quick retry, NOT exponential backoff. A dropped connection or a gateway 5xx (a BYOK proxy
+            // rebooting, a local server still warming, a home-wifi blip) shouldn't cost the rewrite. But
+            // dictation is commit-on-release: a persistent failure must fall back to the local transcript
+            // promptly (with the reason now recorded), not stall the insert on a retry ladder — so this is a
+            // single short retry, never a growing wait.
+            try? await Task.sleep(for: Self.quickRetryDelay)
+            return try await attempt(request)
+        }
+    }
+
+    static let quickRetryDelay: Duration = .milliseconds(250)
+
+    private func attempt(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ProviderTransportError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw ProviderTransportError.http(http.statusCode, body: Self.errorBody(from: data))
         }
         return data
+    }
+
+    // Retry only genuinely transient failures — a dropped/failed connection or a 5xx gateway hiccup. NOT
+    // 4xx (deterministic; a 400 goes through param remediation instead, and retrying it just repeats), NOT
+    // timeouts (already waited the full request window), NOT offline (won't recover in 250 ms) — those fall
+    // straight back to the local transcript.
+    static func isTransient(_ error: Error) -> Bool {
+        if case ProviderTransportError.http(let code, _) = error { return (500...599).contains(code) }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .networkConnectionLost, .cannotConnectToHost, .dnsLookupFailed: return true
+            default: return false
+            }
+        }
+        return false
     }
 
     // The provider's raw error payload, trimmed but NOT truncated: the error machinery (OpenAIAPIError.parse,

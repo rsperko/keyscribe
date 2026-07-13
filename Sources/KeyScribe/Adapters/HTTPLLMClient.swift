@@ -200,7 +200,10 @@ struct HTTPLLMClient: LLMClient {
     private static let openRouterReferer = "https://keyscribe.app"
 
     private func parse(_ data: Data, provider: Connection.Provider) throws -> String {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        // A proxy fronting another backend can wrap the whole payload in a single-element top-level array
+        // (`[{...}]`), the same shape it uses for errors. Unwrap it so a success body is read, not rejected.
+        guard let root = try? JSONSerialization.jsonObject(with: data),
+              let json = Self.responseObject(root) else {
             throw ProviderTransportError.badResponse
         }
         switch provider {
@@ -211,7 +214,7 @@ struct HTTPLLMClient: LLMClient {
             guard let choices = json["choices"] as? [[String: Any]],
                   let choice = choices.first,
                   let message = choice["message"] as? [String: Any],
-                  let content = message["content"] as? String else { throw ProviderTransportError.badResponse }
+                  let content = Self.messageText(message["content"]) else { throw ProviderTransportError.badResponse }
             // A response cut off at max_tokens passes the gate when no sentinels were issued (common
             // privacy-off case), pasting half a sentence. Treat truncation as an error → local fallback.
             if (choice["finish_reason"] as? String) == "length" { throw ProviderTransportError.truncated }
@@ -226,11 +229,34 @@ struct HTTPLLMClient: LLMClient {
             guard let candidates = json["candidates"] as? [[String: Any]],
                   let candidate = candidates.first,
                   let content = candidate["content"] as? [String: Any],
-                  let parts = content["parts"] as? [[String: Any]],
-                  let text = parts.first?["text"] as? String else { throw ProviderTransportError.badResponse }
+                  let parts = content["parts"] as? [[String: Any]] else { throw ProviderTransportError.badResponse }
+            // Join every text part, not just the first — Gemini can split the reply across parts (or lead
+            // with a non-text part), and reading `parts.first` alone would drop or miss the answer.
+            let text = parts.compactMap { $0["text"] as? String }.joined()
+            guard !text.isEmpty else { throw ProviderTransportError.badResponse }
             if (candidate["finishReason"] as? String) == "MAX_TOKENS" { throw ProviderTransportError.truncated }
             return text
         }
+    }
+
+    // The response object, whether the body is a plain `{...}` or wrapped in a single-element top-level
+    // array `[{...}]` (a proxy normalizing another backend). Mirrors OpenAIAPIError's error-object unwrap.
+    private static func responseObject(_ root: Any) -> [String: Any]? {
+        if let object = root as? [String: Any] { return object }
+        if let array = root as? [Any], let first = array.first { return responseObject(first) }
+        return nil
+    }
+
+    // OpenAI `content` is normally a string, but some compatible servers and proxies (normalizing from
+    // Anthropic/Gemini) return it as an array of typed parts — `[{"type":"text","text":"…"}]`. Accept both,
+    // so a parts-shaped reply isn't rejected as a bad response and silently dropped to local.
+    private static func messageText(_ content: Any?) -> String? {
+        if let string = content as? String { return string }
+        if let parts = content as? [[String: Any]] {
+            let joined = parts.compactMap { $0["text"] as? String }.joined()
+            return joined.isEmpty ? nil : joined
+        }
+        return nil
     }
 
     private func anthropicText(from blocks: [[String: Any]]) -> String? {
