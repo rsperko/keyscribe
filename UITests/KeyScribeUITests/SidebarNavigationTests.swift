@@ -57,6 +57,9 @@ final class SidebarNavigationTests: XCTestCase {
             XCTAssertTrue(shortcut.waitForExistence(timeout: 8), "\(id) should be visible in General")
             XCTAssertTrue(shortcut.isHittable, "\(id) should be available without expanding a section")
         }
+
+        XCTAssertFalse(window.staticTexts["Both are also available from the KeyScribeDev menu."].exists,
+                       "the Shortcuts section should not repeat menu availability")
     }
 
     func testAddAIServiceChooserHasVisibleCancelAction() {

@@ -234,9 +234,8 @@ final class DictationController {
     private func renderLevel(_ level: Float) {
         guard case .recording = machine.state else { return }
         // Push every poll tick (keeping the 1/20 quantization for visual stability but dropping the equality
-        // skip) so the red-wave bars keep moving even when the level is momentarily stable; HUDLevel.push
-        // elides only true digital silence (level + whole ring unchanged). A 30 Hz publish rebuilds only
-        // LevelIndicator (HUDView holds HUDLevel un-observed), so this stays cheap.
+        // skip) so the level indicator keeps moving even when the level is momentarily stable. A 30 Hz publish
+        // rebuilds only LevelIndicator (HUDView holds HUDLevel un-observed), so this stays cheap.
         let quantized = (level * 20).rounded() / 20
         lastRenderedLevel = quantized
         hud?.render(.recording(mode: activeMode?.name, level: quantized, latchedTrigger: latchedTriggerName))

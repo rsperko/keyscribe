@@ -176,8 +176,8 @@ the only signal.
   becoming a changing level value without bouncing or pulsing.
 - Sanctioned onboarding motion (all Reduce-Motion gated, no artwork or sound): the intro waveform's
   gentle variable-color sweep and the step cross-fade between wizard steps.
-- The HUD recording indicator's red level-history bars are level-driven motion; Reduce Motion falls
-  back to the fixed-geometry intensity-only dot.
+- The HUD recording indicator's red halo and dot are level-driven motion; Reduce Motion falls back to
+  the fixed-geometry intensity-only dot.
 - Completion, fallback, and errors settle quickly; no celebratory animation.
 - Start/end sounds are optional and must have equivalent visual feedback.
 - When "mute system audio" is on, other audio is silenced by *ducking* the output (the same call FaceTime
@@ -199,7 +199,7 @@ becomes a second destination for configuration.
 | State | Primary content | Secondary content | Available action |
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
-| Recording | Mode name + a red level-history wave (halo + bars; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
+| Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |

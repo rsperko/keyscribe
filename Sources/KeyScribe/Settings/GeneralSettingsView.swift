@@ -50,9 +50,6 @@ struct GeneralSettingsView: View {
                 Text("Pastes your most recent dictation result.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Both are also available from the \(Branding.appName) menu.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section {

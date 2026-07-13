@@ -9,29 +9,10 @@ final class HUDModel: ObservableObject {
 }
 
 // The recording level updates every audio buffer; kept on its own object so only `LevelIndicator`
-// (which observes it) rebuilds per tick, not the whole HUD card. See render(). `history` is a fixed-length
-// ring of recent raw levels driving the red-wave bars (UX2 phase 6a); `level` still drives the halo.
+// (which observes it) rebuilds per tick, not the whole HUD card. See render().
 @MainActor
 final class HUDLevel: ObservableObject {
-    static let historyLength = 10
-    @Published private(set) var level: Float = 0
-    @Published private(set) var history: [Float] = Array(repeating: 0, count: historyLength)
-
-    // Append a level to the ring (drop oldest) and publish — but skip publishing when both the level and the
-    // entire ring are unchanged (true digital silence), so a steady quiet state does not churn at 30 Hz.
-    func push(_ newLevel: Float) {
-        var ring = history
-        ring.removeFirst()
-        ring.append(newLevel)
-        if newLevel == level && ring == history { return }
-        level = newLevel
-        history = ring
-    }
-
-    func reset() {
-        level = 0
-        history = Array(repeating: 0, count: Self.historyLength)
-    }
+    @Published var level: Float = 0
 }
 
 @MainActor
@@ -60,20 +41,17 @@ final class HUDController: HUDPresenting {
 
     func render(_ state: HUDState) {
         // Pure per-buffer level update while already recording the same mode + latched trigger: push only the
-        // level/history so the card chrome (material, badges, text, action buttons) is not rebuilt on every
-        // audio tick. The latched trigger is constant within one recording, so the fast-path still always hits.
+        // level so the card chrome (material, badges, text, action buttons) is not rebuilt on every audio tick.
         if case .recording(let mode, let level, let latched) = state,
            case .recording(let currentMode, _, let currentLatched) = model.state,
            mode == currentMode, latched == currentLatched {
-            levelModel.push(level)
+            levelModel.level = level
             return
         }
         guard model.state != state else { return }
         let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
-        // Entering recording from any other state: clear the ring so a new take never shows the prior one's tail.
         if case .recording(_, let level, _) = state {
-            if case .recording = model.state {} else { levelModel.reset() }
-            levelModel.push(level)
+            levelModel.level = level
         }
         model.state = state
         announce(state)
@@ -564,12 +542,11 @@ private struct ProcessingIcon: View {
 
 private struct RecordingIcon: View {
     @ObservedObject var level: HUDLevel
-    var body: some View { LevelIndicator(level: level.level, history: level.history) }
+    var body: some View { LevelIndicator(level: level.level) }
 }
 
 private struct LevelIndicator: View {
     let level: Float
-    let history: [Float]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -582,20 +559,14 @@ private struct LevelIndicator: View {
                 Circle().fill(.red.opacity(0.16 + l * 0.34)).frame(width: 30, height: 30)
                 Circle().fill(.red).frame(width: 16, height: 16)
             } else {
-                // The halo still tracks the current level; the inner solid dot is replaced by a short history
-                // of red bars (level history, the "wave" every competitor actually draws), newest in the center.
                 Circle().fill(.red.opacity(0.14 + l * 0.34))
                     .frame(width: 16 + l * 14, height: 16 + l * 14)
-                HStack(spacing: 2) {
-                    ForEach(Array(LevelWave.bars(history: history).enumerated()), id: \.offset) { _, value in
-                        Capsule().fill(.red)
-                            .frame(width: 3, height: 4 + CGFloat(value) * 18)
-                    }
-                }
+                Circle().fill(.red)
+                    .frame(width: 7 + l * 17, height: 7 + l * 17)
             }
         }
         .frame(width: 30, height: 30)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: history)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)
         .accessibilityLabel("Recording")
     }
 }
