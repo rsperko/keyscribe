@@ -78,7 +78,7 @@ struct ModesSettingsView: View {
         .onAppear { model.reload() }
         .sheet(isPresented: $showingAddMode) {
             AddModeChooser(
-                templates: model.starterTemplates,
+                templates: model.allTemplates,
                 onAddBlank: {
                     model.create()
                     showingAddMode = false

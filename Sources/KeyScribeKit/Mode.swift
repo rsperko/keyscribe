@@ -690,6 +690,17 @@ public enum ModeStore {
         return candidate
     }
 
+    public static func uniqueName(for name: String, existing: [String]) -> String {
+        let used = Set(existing)
+        var candidate = name
+        var suffix = 2
+        while used.contains(candidate) {
+            candidate = "\(name) \(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
     private static func fileURL(for mode: Mode, in dir: URL) -> URL {
         dir.appendingPathComponent("\(mode.id).toml")
     }

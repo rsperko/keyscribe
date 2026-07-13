@@ -114,23 +114,11 @@ final class ModesSettingsModel: ObservableObject {
         selectedID = materialization.mode.id
     }
 
-    // A template already materialized at its catalog id (so it drops out of the Start-from-a-Template section).
-    func isTemplateMaterialized(_ seedId: String) -> Bool {
-        modes.contains { $0.id == seedId }
-    }
-
-    // The Catalog section for the Modes pane: starter templates not yet materialized at their catalog identity.
-    // A materialized starter leaves the catalog (its identity now lives in Your Modes); deleting that mode
-    // brings the starter back (option-1-rollout.md).
-    var starterTemplates: [Mode] {
-        ModeStore.templates().filter { !isTemplateMaterialized($0.id) }
-    }
-
-    // The template backing the current selection when it is a not-yet-materialized starter (selectedID is the
-    // template's catalog id). nil once a real mode owns the selection.
-    var selectedStarter: Mode? {
-        guard selected == nil, let id = selectedID else { return nil }
-        return starterTemplates.first { $0.id == id }
+    // The Start-from-a-Template chooser: templates are reusable starting points, always the full catalog. The
+    // first instance materialized at a free catalog id is the migratable seed; adding it again yields a plain
+    // suffixed copy (materialize handles the id/name collision), so a template never drops out of the chooser.
+    var allTemplates: [Mode] {
+        ModeStore.templates()
     }
 
     // Duplicate into a new user-created mode (the system Direct floor is not duplicable). The copy drops the

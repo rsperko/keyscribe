@@ -44,6 +44,15 @@
       }
     },
     {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "b6496a74a087257ef5e6da1c5b29a447a60f5bd7",
+        "version" : "2.9.4"
+      }
+    },
+    {
       "identity" : "speech-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/rsperko/speech-swift.git",

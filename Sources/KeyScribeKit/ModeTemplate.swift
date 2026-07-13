@@ -3,7 +3,8 @@ import Foundation
 // Materializing a starter template on demand (design.md §5.1, UX2 phase 4). A template written at its
 // free catalog id IS a seed — it keeps `seedId`/`seedVersion` so reconcile keeps applying future seed
 // updates until the user edits it. A second copy (catalog id already taken) is a plain user mode at a
-// suffixed id with no seed identity, so two files never fight for one ledger entry.
+// suffixed id and a suffixed visible name ("Email 2") with no seed identity, so two files never fight
+// for one ledger entry and repeated instances stay distinguishable in Your Modes.
 public enum ModeTemplateInstantiation {
     public enum Materialization: Equatable, Sendable {
         case seed(Mode)
@@ -33,6 +34,7 @@ public enum ModeTemplateInstantiation {
         }
         if existing.contains(where: { $0.id == template.id }) {
             mode.id = ModeStore.newID(for: template.name, existing: existing.map(\.id))
+            mode.name = ModeStore.uniqueName(for: template.name, existing: existing.map(\.name))
             mode.seedId = nil
             mode.seedVersion = nil
             return .copy(mode)

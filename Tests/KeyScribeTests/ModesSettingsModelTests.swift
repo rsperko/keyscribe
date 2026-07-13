@@ -147,30 +147,17 @@ struct ModesSettingsModelTests {
         #expect(model.selectedID == "email-copy")
     }
 
-    // The Start-from-a-Template section holds every catalog template until it is materialized at its catalog
-    // id, then that template drops out (its identity now lives in Your Modes).
-    @Test func starterTemplatesExcludeAMaterializedCatalogIdentity() throws {
+    // Templates are reusable starting points: the Start-from-a-Template chooser always shows the full catalog,
+    // even after every template has been materialized, so a user can add any template again.
+    @Test func templatesStayAvailableAfterMaterialization() throws {
         let (model, support, _) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
 
-        #expect(model.starterTemplates.map(\.id) == ModeStore.templates().map(\.id))
+        #expect(model.allTemplates.map(\.id) == ModeStore.templates().map(\.id))
 
-        model.materializeTemplate("polish")
+        for id in ModeStore.templates().map(\.id) { model.materializeTemplate(id) }
 
-        #expect(!model.starterTemplates.contains { $0.id == "polish" })
-        // Selecting the materialized identity now resolves to a real mode, not a starter preview.
-        #expect(model.selected?.id == "polish")
-        #expect(model.selectedStarter == nil)
-    }
-
-    @Test func selectingAnUnmaterializedTemplateResolvesToAStarterPreview() throws {
-        let (model, support, _) = try makeModel()
-        defer { try? FileManager.default.removeItem(at: support) }
-
-        model.selectedID = "email"
-
-        #expect(model.selected == nil)
-        #expect(model.selectedStarter?.id == "email")
+        #expect(model.allTemplates.map(\.id) == ModeStore.templates().map(\.id))
     }
 
     @Test func materializingATemplateWritesADisabledSeedAndSelectsIt() throws {
@@ -202,17 +189,32 @@ struct ModesSettingsModelTests {
         #expect(model.selectedID == "new-mode")
     }
 
-    @Test func materializingATemplateTwiceYieldsASeedlessCopy() throws {
+    @Test func materializingATemplateRepeatedlyYieldsDistinctSeedlessCopies() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
 
-        model.materializeTemplate("polish")
-        model.materializeTemplate("polish")
+        model.materializeTemplate("email")
+        model.materializeTemplate("email")
+        model.materializeTemplate("email")
 
-        #expect(tomls(in: modesDir) == ["polish", "polish-2"])
-        let copy = try #require(model.modes.first { $0.id == "polish-2" })
-        #expect(copy.seedId == nil)
-        #expect(model.selectedID == "polish-2")
+        #expect(tomls(in: modesDir) == ["email", "email-2", "email-3"])
+
+        let first = try #require(model.modes.first { $0.id == "email" })
+        #expect(first.name == "Email")
+        #expect(first.seedId == "email")
+        #expect(first.seedVersion != nil)
+
+        let second = try #require(model.modes.first { $0.id == "email-2" })
+        #expect(second.name == "Email 2")
+        #expect(second.seedId == nil)
+        #expect(second.seedVersion == nil)
+
+        let third = try #require(model.modes.first { $0.id == "email-3" })
+        #expect(third.name == "Email 3")
+        #expect(third.seedId == nil)
+        #expect(third.seedVersion == nil)
+
+        #expect(model.selectedID == "email-3")
     }
 
     @Test func duplicateRefusesTheSystemDirectFloor() throws {

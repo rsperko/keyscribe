@@ -319,7 +319,8 @@ so they sit together above Settings instead of competing with the primary loop.
 The modes listed under `Next Dictation` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
 setup materializes and connects the two headline rewrite modes (Polish and Edit Selection); the other
-starters stay available in the Modes pane's **Add Mode…** template chooser until the user adds one.
+starters stay available in the Modes pane's **Add Mode…** template chooser. Templates are reusable, so
+adding one never removes it from the chooser.
 
 ### One-shot manual-mode override
 
@@ -511,12 +512,15 @@ compatible endpoint configuration under `Connection options`.
 
 The Modes pane’s persistent list is **Your Modes**: Plain Dictation — the Direct floor — plus every
 materialized mode. **Add Mode…** opens a compact chooser with **Start from a template** and **New blank
-mode**; templates keep their read-only preview there before they are added. The chooser has a visible
-**Cancel** action as well as the Escape shortcut, and its preview scrolls only when a smaller window
-needs it. Pressing **Add Mode**
-materializes a fully editable mode, added **Disabled**, keeps it selected, and opens its editor. At its
-catalog id the materialized mode keeps its seed identity, so it continues to receive starter updates
-until the user edits it. Existing installs keep their previously-seeded starter files unchanged.
+mode**; templates are reusable starting points, so the chooser always shows the full starter catalog and
+each template keeps its read-only preview there. The chooser has a visible **Cancel** action as well as
+the Escape shortcut, and its preview scrolls only when a smaller window needs it. Pressing **Add Mode**
+materializes a fully editable mode, added **Disabled**, keeps it selected, and opens its editor. The
+first instance created at a template's free catalog id keeps its seed identity, so it continues to
+receive starter updates until the user edits it; adding the same template again creates a fresh,
+distinct instance (**Email 2**, **Email 3**, …) with no seed identity. This differs from **Duplicate
+Mode**, which copies the selected *customized* mode rather than the pristine catalog template. Existing
+installs keep their previously-seeded starter files unchanged.
 
 The Modes list shows the user-visible summary of each mode:
 
