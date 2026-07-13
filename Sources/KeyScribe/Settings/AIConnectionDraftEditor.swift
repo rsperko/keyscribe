@@ -76,6 +76,7 @@ struct AIConnectionDraftEditor: View {
                         authenticationMechanismRow
                     }
                 }
+                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.connectionOptions)
             }
             Section {
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")

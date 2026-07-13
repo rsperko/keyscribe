@@ -6,6 +6,14 @@ enum ComparisonTextRole {
     case heard
     case local
     case result
+
+    var idSegment: String {
+        switch self {
+        case .heard: return "heard"
+        case .local: return "local"
+        case .result: return "result"
+        }
+    }
 }
 
 struct ComparisonSection: Identifiable {
@@ -256,6 +264,7 @@ struct ComparisonPane: View {
                 Spacer()
             }
             SelectableComparisonText(spans: spans) { onSelect(role, $0) }
+                .accessibilityIdentifier(AccessibilityID.History.comparisonPane(role.idSegment))
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 .overlay {

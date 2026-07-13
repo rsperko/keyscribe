@@ -62,3 +62,4 @@ corpus/commands/baseline.json
 UITests/*.xcodeproj/
 UITests/DerivedData/
 UITests/map/
+UITests/actions/

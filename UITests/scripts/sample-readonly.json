@@ -1,0 +1,8 @@
+[
+  {"action":"selectPane","pane":"general"},
+  {"action":"exists","id":"settings.general.dictationTrigger","timeout":6},
+  {"action":"dump","name":"general"},
+  {"action":"selectPane","pane":"aiServices"},
+  {"action":"exists","id":"settings.ai.list","timeout":6},
+  {"action":"screenshot","name":"ai"}
+]

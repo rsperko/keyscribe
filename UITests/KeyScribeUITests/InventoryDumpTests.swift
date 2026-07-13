@@ -65,7 +65,13 @@ final class InventoryDumpTests: XCTestCase {
         }
 
         write(allGaps, to: "_gaps.json")
-        print("[InventoryDump] wrote map to \(mapDir.path) — \(allGaps.count) unaddressed interactive controls")
+        // The runner is sandboxed, so direct file writes to the repo are denied; print the gaps to
+        // stdout (fenced) so they are readable from the test log without extracting the result bundle.
+        if let data = try? JSONSerialization.data(withJSONObject: allGaps, options: [.prettyPrinted, .sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            print("[InventoryDump] GAPS_BEGIN\n\(json)\nGAPS_END")
+        }
+        print("[InventoryDump] \(allGaps.count) unaddressed interactive controls")
     }
 
     // MARK: - dump one surface
@@ -75,19 +81,23 @@ final class InventoryDumpTests: XCTestCase {
         var elements: [[String: Any]] = []
         var gaps: [[String: Any]] = []
         if let snapshot {
-            walk(snapshot, pane: pane, into: &elements, gaps: &gaps)
+            walk(snapshot, pane: pane, into: &elements, gaps: &gaps, insideIdentifiedComposite: false)
         }
         write(["pane": pane, "elements": elements], to: "\(pane).json")
 
         let shot = window.screenshot()
-        let png = mapDir.appendingPathComponent("\(pane).png")
-        try? shot.pngRepresentation.write(to: png)
+        try? shot.pngRepresentation.write(to: mapDir.appendingPathComponent("\(pane).png"))
+        let png = XCTAttachment(uniformTypeIdentifier: "public.png", name: "\(pane).png",
+                                payload: shot.pngRepresentation)
+        png.lifetime = .keepAlways
+        add(png)
         return gaps
     }
 
     private func walk(
         _ node: XCUIElementSnapshot, pane: String,
-        into elements: inout [[String: Any]], gaps: inout [[String: Any]]
+        into elements: inout [[String: Any]], gaps: inout [[String: Any]],
+        insideIdentifiedComposite: Bool
     ) {
         let id = node.identifier
         let role = roleName(node.elementType)
@@ -106,12 +116,29 @@ final class InventoryDumpTests: XCTestCase {
         if !id.isEmpty || interactive {
             elements.append(entry)
         }
-        if interactive && id.isEmpty {
+        if interactive && id.isEmpty && isRealGap(node) && !insideIdentifiedComposite {
             gaps.append(["pane": pane, "role": role, "label": node.label,
                          "frame": entry["frame"] as Any])
         }
+        // A bare sub-button of an identified composite control (a combo box's dropdown chevron, a
+        // stepper's +/-) is part of that already-addressable control, not an independent gap.
+        let childrenAreInternal = insideIdentifiedComposite || (!id.isEmpty && isCompositeControl(node.elementType))
         for child in node.children {
-            walk(child, pane: pane, into: &elements, gaps: &gaps)
+            walk(child, pane: pane, into: &elements, gaps: &gaps, insideIdentifiedComposite: childrenAreInternal)
+        }
+    }
+
+    private func isCompositeControl(_ type: XCUIElement.ElementType) -> Bool {
+        switch type {
+        case .comboBox, .popUpButton, .stepper, .segmentedControl, .datePicker, .slider, .menuButton:
+            return true
+        case .scrollView:
+            // An IDENTIFIED scrollView is an addressable text/scroll control (e.g. the history comparison
+            // panes wrap an NSTextView); its inner textView is that control's content, not a separate gap.
+            // Only fires when the scrollView itself carries an id, so unidentified Form scrollViews are unaffected.
+            return true
+        default:
+            return false
         }
     }
 
@@ -128,6 +155,18 @@ final class InventoryDumpTests: XCTestCase {
     }
 
     // MARK: - element type helpers
+
+    // Filters false positives the raw "interactive + empty id" test over-reports:
+    //  - AppKit chrome: scroller knobs (~11pt wide) and zero-size elements
+    //  - segmented-Picker segments: a radioButton addressable by label within the identified picker
+    //  - SwiftUI Menu wrappers: the Menu's id lands on an inner element, so the outer AXMenuButton reads bare
+    //    (verified: `mode.list.add` sits on the inner button while the wrapping menuButton has no id)
+    private func isRealGap(_ node: XCUIElementSnapshot) -> Bool {
+        let f = node.frame
+        if f.width <= 12 || f.height <= 4 { return false }
+        if node.elementType == .radioButton || node.elementType == .menuButton { return false }
+        return true
+    }
 
     private func isInteractive(_ type: XCUIElement.ElementType) -> Bool {
         switch type {
@@ -176,6 +215,10 @@ final class InventoryDumpTests: XCTestCase {
               let data = try? JSONSerialization.data(
                 withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else { return }
+        // Direct write works only if the runner is unsandboxed; the attachment is the reliable channel.
         try? data.write(to: mapDir.appendingPathComponent(name))
+        let att = XCTAttachment(uniformTypeIdentifier: "public.json", name: name, payload: data)
+        att.lifetime = .keepAlways
+        add(att)
     }
 }

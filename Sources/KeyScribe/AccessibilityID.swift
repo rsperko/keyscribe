@@ -93,6 +93,7 @@ enum AccessibilityID {
                 static let fetchModels = "settings.ai.editor.fetchModels"
                 static let foundModel = "settings.ai.editor.foundModel"
                 static let getKeyLink = "settings.ai.editor.getKeyLink"
+                static let connectionOptions = "settings.ai.editor.connectionOptions"
                 static let testConnection = "settings.ai.editor.testConnection"
                 static let delete = "settings.ai.editor.delete"
             }
@@ -264,6 +265,7 @@ enum AccessibilityID {
         static let export = "history.action.export"
         static let stagePicker = "history.detail.stagePicker"
         static let comparisonPicker = "history.detail.comparisonPicker"
+        static func comparisonPane(_ role: String) -> String { "history.detail.comparison.\(role)" }
         static let promptDisclosure = "history.detail.promptDisclosure"
         static let copyResult = "history.action.copyResult"
         static let pasteResult = "history.action.pasteResult"
@@ -320,7 +322,8 @@ enum AccessibilityID {
         Settings.AI.Editor.name, Settings.AI.Editor.provider, Settings.AI.Editor.baseURL,
         Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey, Settings.AI.Editor.replaceKey,
         Settings.AI.Editor.tokenCommand, Settings.AI.Editor.model, Settings.AI.Editor.fetchModels,
-        Settings.AI.Editor.foundModel, Settings.AI.Editor.getKeyLink, Settings.AI.Editor.testConnection,
+        Settings.AI.Editor.foundModel, Settings.AI.Editor.getKeyLink, Settings.AI.Editor.connectionOptions,
+        Settings.AI.Editor.testConnection,
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
