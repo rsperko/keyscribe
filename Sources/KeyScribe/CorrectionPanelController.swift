@@ -294,8 +294,8 @@ private struct CorrectionPanelView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if regexInvalid {
-                IssueText("That is not a valid regular expression.")
+            if let issue = draft.validationIssue {
+                IssueText(validationMessage(issue))
             }
 
             Text(saveDestinationText)
@@ -337,10 +337,6 @@ private struct CorrectionPanelView: View {
 
     private var correctedValue: String {
         trimmedReplace.isEmpty ? trimmedTerm : trimmedReplace
-    }
-
-    private var regexInvalid: Bool {
-        regex && !trimmedTerm.isEmpty && !RegexCache.isValidPattern(trimmedTerm)
     }
 
     private var canSave: Bool {
@@ -397,5 +393,13 @@ private struct CorrectionPanelView: View {
             return .dictionary(word: trimmedTerm, destination: destination)
         }
         return .replacement(heard: trimmedTerm, replace: trimmedReplace, regex: regex, destination: destination)
+    }
+
+    private func validationMessage(_ issue: VocabularyDraftValidationIssue) -> String {
+        switch issue {
+        case .invalidRegex: "That is not a valid regular expression."
+        case .replacementRequired: "Use instead is required for a regular expression."
+        case .invalidInput(let issue): issue.message
+        }
     }
 }

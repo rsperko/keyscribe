@@ -20,6 +20,7 @@ struct AIConnectionDraftEditor: View {
     var onDelete: (() -> Void)?
     @State private var replacingAPIKey = false
     @State private var connectionOptionsExpanded = false
+    @State private var modelInputIssue: UserInputValidation.Issue?
 
     var body: some View {
         switch presentation {
@@ -57,7 +58,7 @@ struct AIConnectionDraftEditor: View {
                     badges: { PaneBadge(connectionStatus.text, kind: connectionStatus.kind, systemImage: connectionStatus.icon) })
             }
             Section("Connection") {
-                textRow("Service name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
+                textRow("Service name", value: draft.name, prompt: "My AI service", validation: UserInputValidation.nameIssue) { draft.name = $0 }
                     .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
                 credentialFields
                 testRows
@@ -102,7 +103,7 @@ struct AIConnectionDraftEditor: View {
     }
 
     @ViewBuilder private var serviceRows: some View {
-        textRow("Service name", value: draft.name, prompt: "My AI service") { draft.name = $0 }
+        textRow("Service name", value: draft.name, prompt: "My AI service", validation: UserInputValidation.nameIssue) { draft.name = $0 }
             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
         if presentation == .onboarding { thinDivider }
         serviceTypeRow
@@ -135,12 +136,14 @@ struct AIConnectionDraftEditor: View {
 
     private var endpointRows: some View {
         VStack(alignment: .leading, spacing: 4) {
-            textRow("Base URL", value: draft.baseURL, prompt: "Required") { draft.baseURL = $0 }
+            textRow("Base URL", value: draft.baseURL, prompt: "Required", validation: UserInputValidation.endpointIssue) { draft.baseURL = $0 }
                 .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.baseURL)
             Text("Example: http://127.0.0.1:11234/v1")
                 .font(.caption).foregroundStyle(.secondary)
             if draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 requiredLabel("Base URL is required.")
+            } else if let issue = draft.baseURLIssue {
+                IssueText(issue.message)
             }
         }
     }
@@ -214,6 +217,8 @@ struct AIConnectionDraftEditor: View {
                 }
                 if !hasStoredKey, !draft.hasUnsavedAPIKey {
                     requiredLabel("Add an API key to connect.")
+                } else if let issue = draft.apiKeyIssue {
+                    IssueText(issue.message)
                 }
                 HStack {
                     Label("Stored when you connect", systemImage: "key")
@@ -246,9 +251,12 @@ struct AIConnectionDraftEditor: View {
                             Label("Unsaved API key", systemImage: "exclamationmark.circle.fill")
                                 .font(.caption).foregroundStyle(.orange)
                         }
+                        if let issue = draft.apiKeyIssue {
+                            IssueText(issue.message)
+                        }
                         Spacer()
                         Button("Save key", action: saveKey)
-                            .disabled(!draft.hasUnsavedAPIKey)
+                            .disabled(!draft.hasUnsavedAPIKey || draft.apiKeyIssue != nil)
                             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.saveKey)
                     }
                 }
@@ -277,7 +285,7 @@ struct AIConnectionDraftEditor: View {
             textRow(
                 "Command",
                 value: draft.tokenCommand,
-                prompt: "Command that prints a token"
+                prompt: "Command that prints a token", validation: { UserInputValidation.identifierIssue($0, required: true) }
             ) { value in
                 draft.authMethod = .tokenCommand
                 draft.tokenCommand = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -288,6 +296,8 @@ struct AIConnectionDraftEditor: View {
                     presentation == .onboarding
                     ? "Enter the command that prints a fresh token or key."
                     : "Enter the command that prints a fresh bearer token.")
+            } else if let issue = draft.tokenCommandIssue {
+                IssueText(issue.message)
             }
             Text(presentation == .onboarding
                  ? "stdout: raw token or JSON token fields."
@@ -299,8 +309,12 @@ struct AIConnectionDraftEditor: View {
     private var modelRows: some View {
         VStack(alignment: .leading, spacing: presentation == .onboarding ? 4 : 6) {
             modelComboRow
-            if draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let modelInputIssue {
+                IssueText(modelInputIssue.message)
+            } else if draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 requiredLabel("Model ID is required.")
+            } else if let issue = draft.modelIssue {
+                IssueText(issue.message)
             }
             HStack {
                 Button(draft.isFetchingModels ? "Finding models" : "Find models") {
@@ -321,7 +335,10 @@ struct AIConnectionDraftEditor: View {
     private var modelComboRow: some View {
         let combo = ModelComboBox(
             text: $draft.model, items: draft.availableModels,
-            prompt: "Choose or type a model ID", onCommit: { commit(nil) })
+            prompt: "Choose or type a model ID",
+            validation: { UserInputValidation.identifierIssue($0, required: true) },
+            onValidationIssue: { modelInputIssue = $0 },
+            onCommit: { commit(nil) })
             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.model)
         return Group {
             switch presentation {
@@ -350,7 +367,7 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
-    private func textRow(_ title: String, value: String, prompt: String? = nil, update: @escaping (String) -> Void) -> some View {
+    private func textRow(_ title: String, value: String, prompt: String? = nil, validation: ((String) -> UserInputValidation.Issue?)? = nil, update: @escaping (String) -> Void) -> some View {
         Group {
             switch presentation {
             case .onboarding:
@@ -366,7 +383,7 @@ struct AIConnectionDraftEditor: View {
                         .frame(maxWidth: 260)
                 }
             case .settings:
-                CommittedTextField(title, text: value, prompt: prompt, autofocus: title == "Service name" && autofocusName) { next in
+                CommittedTextField(title, text: value, prompt: prompt, autofocus: title == "Service name" && autofocusName, validation: validation) { next in
                     update(next)
                     commit(nil)
                 }
@@ -484,7 +501,7 @@ struct AIConnectionDraftEditor: View {
     }
 
     private func saveKey() {
-        guard draft.hasUnsavedAPIKey else { return }
+        guard draft.hasUnsavedAPIKey, draft.apiKeyIssue == nil else { return }
         draft.authMethod = .apiKey
         draft.tokenCommand = ""
         let key = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)

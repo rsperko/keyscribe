@@ -23,7 +23,9 @@ struct CreateReplacementSheet: View {
     private var isNoop: Bool {
         !sourceTrimmed.isEmpty && sourceTrimmed.caseInsensitiveCompare(replaceTrimmed) == .orderedSame
     }
-    private var canSave: Bool { !sourceTrimmed.isEmpty && !isNoop }
+    private var sourceIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(sourceTrimmed) }
+    private var replacementIssue: UserInputValidation.Issue? { UserInputValidation.promptIssue(replaceTrimmed) }
+    private var canSave: Bool { sourceIssue == nil && replacementIssue == nil && !isNoop }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -34,12 +36,14 @@ struct CreateReplacementSheet: View {
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .source).onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.source)
             }
+            if let sourceIssue { IssueText(sourceIssue.message) }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Replace with").font(.caption).foregroundStyle(.secondary)
                 TextField("What it should say", text: $replace)
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .replace).onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.replace)
             }
+            if let replacementIssue { IssueText(replacementIssue.message) }
             if isNoop {
                 Text("That is the same as what was heard, so it would do nothing.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -79,6 +83,7 @@ struct AddToDictionarySheet: View {
     }
 
     private var trimmed: String { term.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var validationIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(trimmed) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -90,13 +95,14 @@ struct AddToDictionarySheet: View {
                     .onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.term)
             }
+            if let validationIssue { IssueText(validationIssue.message) }
             Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Add to Dictionary") { save() }
-                    .keyboardShortcut(.defaultAction).disabled(trimmed.isEmpty)
+                    .keyboardShortcut(.defaultAction).disabled(validationIssue != nil)
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.save)
             }
         }
@@ -105,7 +111,7 @@ struct AddToDictionarySheet: View {
     }
 
     private func save() {
-        guard !trimmed.isEmpty else { return }
+        guard validationIssue == nil else { return }
         onSave(trimmed)
         dismiss()
     }

@@ -77,8 +77,8 @@ struct ModeEditorView: View {
             Section { summaryCard }
 
             Section("Basics") {
-                CommittedTextField("Name", text: mode.name, autofocus: autofocusName) { value in
-                    var updated = mode; updated.name = value; onUpdate(updated)
+                CommittedTextField("Name", text: mode.name, autofocus: autofocusName, validation: UserInputValidation.nameIssue) { value in
+                    var updated = mode; updated.name = value.trimmingCharacters(in: .whitespacesAndNewlines); onUpdate(updated)
                 }
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.name)
                 Toggle("Enabled", isOn: bind.binding(\.enabled))

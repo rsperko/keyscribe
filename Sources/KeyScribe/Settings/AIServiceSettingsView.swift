@@ -501,10 +501,16 @@ struct AIServiceStatus {
         switch connection.configIssue {
         case .missingModel:
             return .init(text: "No model set", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
+        case .invalidModel:
+            return .init(text: "Invalid model ID", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .missingBaseURL:
             return .init(text: "Needs a base URL", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
+        case .invalidBaseURL:
+            return .init(text: "Invalid base URL", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .missingTokenCommand:
             return .init(text: "Needs token command", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
+        case .invalidTokenCommand:
+            return .init(text: "Invalid token command", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case nil:
             break
         }

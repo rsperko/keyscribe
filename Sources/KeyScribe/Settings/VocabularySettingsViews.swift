@@ -492,6 +492,9 @@ private struct ReplacementEditor: View {
             } else if draft.validationIssue == .replacementRequired {
                 IssueText("Use instead is required for a regular expression.")
                     .accessibilityIdentifier(ids.status)
+            } else if case let .invalidInput(issue) = draft.validationIssue {
+                IssueText(issue.message)
+                    .accessibilityIdentifier(ids.status)
             } else if draft.hasReplacementIdentityConflict {
                 IssueText("Another replacement already uses this heard phrase or pattern.")
                     .accessibilityIdentifier(ids.status)
@@ -590,8 +593,8 @@ struct VocabularyComposer: View {
                 }
             }
             .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdvanced)
-            if regexInvalid {
-                IssueText("That is not a valid regular expression.")
+            if let issue = draft.validationIssue {
+                IssueText(validationMessage(issue))
             }
             HStack {
                 Spacer()
@@ -609,10 +612,6 @@ struct VocabularyComposer: View {
 
     private var heardTrimmed: String { heard.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var replaceTrimmed: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var regexInvalid: Bool {
-        regex && !heardTrimmed.isEmpty && !RegexCache.isValidPattern(heardTrimmed)
-    }
-
     private var draft: VocabularyDraftAnalysis {
         VocabularyDraftAnalysis(term: heardTrimmed, replacement: replaceTrimmed, regex: regex, analyze: analyze)
     }
@@ -642,6 +641,14 @@ struct VocabularyComposer: View {
         regex = false
         advancedExpanded = false
         focus = .heard
+    }
+
+    private func validationMessage(_ issue: VocabularyDraftValidationIssue) -> String {
+        switch issue {
+        case .invalidRegex: "That is not a valid regular expression."
+        case .replacementRequired: "Use instead is required for a regular expression."
+        case .invalidInput(let issue): issue.message
+        }
     }
 }
 

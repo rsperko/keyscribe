@@ -118,6 +118,7 @@ struct ModeAISection: View {
             TextField("Name, e.g. Email style", text: $newFragmentName)
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionName)
             Button("Create", action: commitNewFragment)
+                .disabled(UserInputValidation.nameIssue(newFragmentName) != nil)
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionCreate)
             Button("Cancel", role: .cancel) { newFragmentName = "" }
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionCancel)
@@ -191,7 +192,7 @@ struct ModeAISection: View {
     private func commitNewFragment() {
         let name = newFragmentName.trimmingCharacters(in: .whitespacesAndNewlines)
         newFragmentName = ""
-        guard !name.isEmpty, let id = onAddFragmentFile(name) else { return }
+        guard UserInputValidation.nameIssue(name) == nil, let id = onAddFragmentFile(name) else { return }
         addFragment(id)
         editingFragment = id
     }

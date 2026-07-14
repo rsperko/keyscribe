@@ -6,6 +6,8 @@ struct ModelComboBox: NSViewRepresentable {
     @Binding var text: String
     let items: [String]
     var prompt: String?
+    var validation: ((String) -> UserInputValidation.Issue?)? = nil
+    var onValidationIssue: ((UserInputValidation.Issue?) -> Void)? = nil
     let onCommit: () -> Void
 
     func makeNSView(context: Context) -> NSComboBox {
@@ -103,6 +105,11 @@ struct ModelComboBox: NSViewRepresentable {
         }
 
         @MainActor private func commit(_ value: String) {
+            if let issue = parent.validation?(value) {
+                parent.onValidationIssue?(issue)
+                return
+            }
+            parent.onValidationIssue?(nil)
             guard parent.text != value else { return }
             parent.text = value
             parent.onCommit()

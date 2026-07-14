@@ -119,10 +119,23 @@ struct AIConnectionDraft: Equatable {
     }
 
     var canConnectForSetup: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        nameIssue == nil
+            && modelIssue == nil
+            && baseURLIssue == nil
+            && tokenCommandIssue == nil
+            && apiKeyIssue == nil
             && setupCredentialReady
     }
+
+    var nameIssue: UserInputValidation.Issue? { UserInputValidation.nameIssue(name) }
+    var modelIssue: UserInputValidation.Issue? { UserInputValidation.identifierIssue(model, required: true) }
+    var baseURLIssue: UserInputValidation.Issue? {
+        provider == .openaiCompatible ? UserInputValidation.endpointIssue(baseURL) : nil
+    }
+    var tokenCommandIssue: UserInputValidation.Issue? {
+        effectiveAuthMethod == .tokenCommand ? UserInputValidation.identifierIssue(tokenCommand, required: true) : nil
+    }
+    var apiKeyIssue: UserInputValidation.Issue? { UserInputValidation.secretIssue(apiKey) }
 
     var canFetchModelsForSetup: Bool {
         setupCredentialReady
@@ -134,8 +147,7 @@ struct AIConnectionDraft: Equatable {
     }
 
     var setupCredentialReady: Bool {
-        let base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if provider == .openaiCompatible, base.isEmpty { return false }
+        if provider == .openaiCompatible, baseURLIssue != nil { return false }
         switch effectiveAuthMethod {
         case .none:
             return true
@@ -167,7 +179,7 @@ struct AIConnectionDraft: Equatable {
         if hasUnsavedAPIKey { return false }
         switch provider {
         case .openaiCompatible:
-            guard !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            guard baseURLIssue == nil else { return false }
             switch effectiveAuthMethod {
             case .none:
                 return true
@@ -182,7 +194,7 @@ struct AIConnectionDraft: Equatable {
     }
 
     func canTestInSettings(hasStoredKey: Bool) -> Bool {
-        if hasUnsavedAPIKey || connection(id: "draft", keyRef: "draft").configIssue != nil { return false }
+        if hasUnsavedAPIKey || nameIssue != nil || modelIssue != nil || baseURLIssue != nil || tokenCommandIssue != nil || apiKeyIssue != nil || connection(id: "draft", keyRef: "draft").configIssue != nil { return false }
         switch provider {
         case .openaiCompatible:
             switch effectiveAuthMethod {
@@ -204,11 +216,16 @@ struct AIConnectionDraft: Equatable {
         switch connection(id: "draft", keyRef: "draft").configIssue {
         case .missingBaseURL:
             return "Base URL is required before fetching models."
+        case .invalidBaseURL:
+            return UserInputValidation.endpointIssue(baseURL)?.message
         case .missingTokenCommand:
             return "Token command is required before fetching models."
-        case .missingModel, nil:
+        case .invalidTokenCommand:
+            return UserInputValidation.identifierIssue(tokenCommand, required: true)?.message
+        case .missingModel, .invalidModel, nil:
             break
         }
+        if let baseURLIssue { return baseURLIssue.message }
         if provider == .openaiCompatible {
             if effectiveAuthMethod == .apiKey && !hasStoredKey {
                 return "Save an API key or choose No Auth before fetching models."
@@ -226,11 +243,20 @@ struct AIConnectionDraft: Equatable {
             return "Model ID is required."
         case .missingBaseURL:
             return "Base URL is required."
+        case .invalidBaseURL:
+            return UserInputValidation.endpointIssue(baseURL)?.message
         case .missingTokenCommand:
             return "Token command is required."
+        case .invalidTokenCommand:
+            return UserInputValidation.identifierIssue(tokenCommand, required: true)?.message
+        case .invalidModel:
+            return UserInputValidation.identifierIssue(model, required: true)?.message
         case nil:
             break
         }
+        if let baseURLIssue { return baseURLIssue.message }
+        if let modelIssue { return modelIssue.message }
+        if let tokenCommandIssue { return tokenCommandIssue.message }
         if provider == .openaiCompatible {
             if effectiveAuthMethod == .apiKey && !hasStoredKey { return "Save an API key or choose No Auth." }
         } else if effectiveAuthMethod == .apiKey && !hasStoredKey {

@@ -10,6 +10,7 @@ enum VocabularyFeedback: Equatable {
 enum VocabularyDraftValidationIssue: Equatable {
     case invalidRegex
     case replacementRequired
+    case invalidInput(UserInputValidation.Issue)
 }
 
 struct VocabularyDraftAnalysis {
@@ -43,9 +44,19 @@ struct VocabularyDraftAnalysis {
         let term = term.trimmingCharacters(in: .whitespacesAndNewlines)
         let replacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
         let proposal: VocabularyProposal?
+        let termIssue = regex
+            ? UserInputValidation.regexIssue(term)
+            : UserInputValidation.phraseIssue(term)
+        let replacementIssue = UserInputValidation.promptIssue(replacement)
         if term.isEmpty {
             proposal = nil
             validationIssue = nil
+        } else if let termIssue {
+            proposal = nil
+            validationIssue = regex && termIssue == .invalidRegex ? .invalidRegex : .invalidInput(termIssue)
+        } else if let replacementIssue {
+            proposal = nil
+            validationIssue = .invalidInput(replacementIssue)
         } else if regex && !RegexCache.isValidPattern(term) {
             proposal = nil
             validationIssue = .invalidRegex

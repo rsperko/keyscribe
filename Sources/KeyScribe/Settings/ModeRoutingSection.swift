@@ -56,9 +56,10 @@ struct ModeRoutingSection: View {
                         .onSubmit(commitWindowTitleConstraint)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitle)
                     Button("Add", action: commitWindowTitleConstraint)
-                        .disabled(newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(windowTitleIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitleAdd)
                 }
+                if let windowTitleIssue { IssueText(windowTitleIssue.message) }
                 Text("URL (regular expression)")
                     .font(.subheadline.weight(.semibold)).padding(.top, 4)
                 HStack {
@@ -67,9 +68,10 @@ struct ModeRoutingSection: View {
                         .onSubmit(commitURLConstraint)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPattern)
                     Button("Add", action: commitURLConstraint)
-                        .disabled(newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(urlPatternIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
                 }
+                if let urlPatternIssue { IssueText(urlPatternIssue.message) }
 
                 Text("These patterns narrow where this mode is available. URLs are never sent to a rewrite provider.")
                     .font(.caption)
@@ -99,9 +101,10 @@ struct ModeRoutingSection: View {
                         .onSubmit(commitPhrase)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
                     Button("Add", action: commitPhrase)
-                        .disabled(newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(phraseIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
                 }
+                if let phraseIssue { IssueText(phraseIssue.message) }
             } else {
                 Button(mode.triggerPhrases.isEmpty ? "Add spoken phrase…" : "Add another spoken phrase…") {
                     enteringPhrase = true
@@ -150,9 +153,10 @@ struct ModeRoutingSection: View {
                         .onSubmit(commitManualBundleId)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleID)
                     Button("Add", action: commitManualBundleId)
-                        .disabled(manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(bundleIDIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleIDAdd)
                 }
+                if let bundleIDIssue { IssueText(bundleIDIssue.message) }
             }
             if enteringDomain {
                 VStack(alignment: .leading, spacing: 2) {
@@ -225,7 +229,7 @@ struct ModeRoutingSection: View {
 
     private func commitPhrase() {
         let phrase = newPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !phrase.isEmpty else { return }
+        guard UserInputValidation.phraseIssue(phrase) == nil else { return }
         if !mode.triggerPhrases.contains(phrase) {
             var updated = mode
             updated.triggerPhrases.append(phrase)
@@ -250,7 +254,7 @@ struct ModeRoutingSection: View {
 
     private func commitManualBundleId() {
         let value = manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
+        guard UserInputValidation.identifierIssue(value, required: true) == nil else { return }
         addAppConstraint(value)
         manualBundleId = ""
         enteringBundleId = false
@@ -258,7 +262,7 @@ struct ModeRoutingSection: View {
 
     private func commitURLConstraint() {
         let value = newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
+        guard UserInputValidation.regexIssue(value) == nil else { return }
         var updated = mode
         updated.constraints.append(.init(bundleId: nil, urlPattern: value))
         onUpdate(updated)
@@ -278,7 +282,7 @@ struct ModeRoutingSection: View {
 
     private func commitWindowTitleConstraint() {
         let value = newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
+        guard UserInputValidation.regexIssue(value) == nil else { return }
         var updated = mode
         updated.constraints.append(.init(windowTitle: value))
         onUpdate(updated)
@@ -291,4 +295,9 @@ struct ModeRoutingSection: View {
         updated.constraints.remove(at: index)
         onUpdate(updated)
     }
+
+    private var phraseIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(newPhrase) }
+    private var urlPatternIssue: UserInputValidation.Issue? { UserInputValidation.regexIssue(newURLPattern) }
+    private var windowTitleIssue: UserInputValidation.Issue? { UserInputValidation.regexIssue(newWindowTitlePattern) }
+    private var bundleIDIssue: UserInputValidation.Issue? { UserInputValidation.identifierIssue(manualBundleId, required: true) }
 }

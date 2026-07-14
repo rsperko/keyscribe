@@ -69,6 +69,15 @@ struct ConnectionsTests {
         #expect(connection(provider: .openaiCompatible, model: "local", baseUrl: " ").configIssue == .missingBaseURL)
     }
 
+    @Test func malformedConnectionInputsAreConfigurationIssues() {
+        #expect(connection(provider: .openai, model: String(repeating: "m", count: 513)).configIssue == .invalidModel)
+        #expect(connection(provider: .openaiCompatible, model: "local", baseUrl: "not a URL").configIssue == .invalidBaseURL)
+        var command = connection(provider: .openai, model: "local")
+        command.authMethod = .tokenCommand
+        command.tokenCommand = "run\nthis"
+        #expect(command.configIssue == .invalidTokenCommand)
+    }
+
     @Test func tokenCommandAuthWithoutCommandIsAnIssue() {
         let c = Connection(
             id: "c", name: "c", provider: .openaiCompatible, model: "local", keyRef: "k",

@@ -142,19 +142,26 @@ extension Connection {
     // Connection reveals). A missing key is NOT here — it's legitimate for a local/no-auth endpoint.
     public enum ConfigIssue: Equatable, Sendable {
         case missingModel
+        case invalidModel
         case missingBaseURL
+        case invalidBaseURL
         case missingTokenCommand
+        case invalidTokenCommand
     }
 
     public var configIssue: ConfigIssue? {
-        if model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
-        if provider == .openaiCompatible,
-           (baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .missingBaseURL
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if model.isEmpty { return .missingModel }
+        if UserInputValidation.identifierIssue(model, required: true) != nil { return .invalidModel }
+        if provider == .openaiCompatible {
+            let baseURL = (baseUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if baseURL.isEmpty { return .missingBaseURL }
+            if UserInputValidation.endpointIssue(baseURL) != nil { return .invalidBaseURL }
         }
-        if authMethod == .tokenCommand,
-           (tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .missingTokenCommand
+        if authMethod == .tokenCommand {
+            let command = (tokenCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if command.isEmpty { return .missingTokenCommand }
+            if UserInputValidation.identifierIssue(command, required: true) != nil { return .invalidTokenCommand }
         }
         return nil
     }

@@ -390,6 +390,10 @@ capabilities. The sidebar order is fixed:
 General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
+Editable fields preserve the typed draft while it is invalid and explain the correction inline. Names,
+phrases, identifiers, endpoints, and regular expressions reject empty, multi-line, malformed, or
+unreasonably large values; multiline writing instructions remain supported with a visible size limit.
+
 For OpenAI-shaped connections, KeyScribe automatically selects the compatible request format from the endpoint's
 own response. The setup flow never asks people to choose an API protocol, and detection never infers from a
 model name.

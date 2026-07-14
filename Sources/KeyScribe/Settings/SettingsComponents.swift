@@ -1,4 +1,5 @@
 import SwiftUI
+import KeyScribeKit
 
 struct DisclosureSection<Label: View, Content: View>: View {
     @Binding var isExpanded: Bool
@@ -180,35 +181,42 @@ struct CommittedTextField: View {
     let text: String
     let prompt: String?
     let autofocus: Bool
+    let validation: ((String) -> UserInputValidation.Issue?)?
     let commit: (String) -> Void
     @State private var draft: String
+    @State private var validationIssue: UserInputValidation.Issue?
     @FocusState private var focused: Bool
 
     init(
         _ title: String, text: String, prompt: String? = nil,
-        autofocus: Bool = false, commit: @escaping (String) -> Void
+        autofocus: Bool = false, validation: ((String) -> UserInputValidation.Issue?)? = nil,
+        commit: @escaping (String) -> Void
     ) {
         self.title = title
         self.text = text
         self.prompt = prompt
         self.autofocus = autofocus
+        self.validation = validation
         self.commit = commit
         _draft = State(initialValue: text)
     }
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 4) {
             if let prompt {
                 TextField(title, text: $draft, prompt: Text(prompt))
             } else {
                 TextField(title, text: $draft)
             }
+            if let validationIssue {
+                IssueText(validationIssue.message)
+            }
         }
             .focused($focused)
             .onSubmit { commitIfChanged() }
-            .onExitCommand { draft = text }
+            .onExitCommand { draft = text; validationIssue = nil }
             .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
-            .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
+            .onChange(of: text) { _, newValue in if !focused { draft = newValue; validationIssue = nil } }
             // A container teardown (`.id` swap, pane switch) can remove the field without a focus-loss commit.
             .onDisappear { commitIfChanged() }
             .onAppear {
@@ -220,7 +228,15 @@ struct CommittedTextField: View {
             }
     }
 
-    private func commitIfChanged() { if draft != text { commit(draft) } }
+    private func commitIfChanged() {
+        guard draft != text else { return }
+        if let issue = validation?(draft) {
+            validationIssue = issue
+            return
+        }
+        validationIssue = nil
+        commit(draft)
+    }
 }
 
 // A popover's own onDisappear commit does NOT fire reliably on teardown, so the debounce alone can lose
@@ -246,6 +262,7 @@ struct PromptEditor: View {
     @State private var draft: String
     @State private var expanded = false
     @State private var commitTask: Task<Void, Never>?
+    @State private var validationIssue: UserInputValidation.Issue?
     @FocusState private var focused: Bool
 
     init(
@@ -277,33 +294,45 @@ struct PromptEditor: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 .focused($focused)
                 .onChange(of: draft) { if commitsOnChange { scheduleCommit() } }
-                .onChange(of: focused) { _, nowFocused in if !nowFocused { commitNow() } }
+                .onChange(of: focused) { _, nowFocused in if !nowFocused { _ = commitNow() } }
                 .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
-                .onAppear { flush?.commit = { commitNow() } }
-                .onDisappear { commitNow() }
+                .onAppear { flush?.commit = { _ = commitNow() } }
+                .onDisappear { _ = commitNow() }
             Button("Open in a larger editor…") { expanded = true }
                 .font(.caption).buttonStyle(.link)
                 .accessibilityIdentifier(ifPresent: expandID)
+            if let validationIssue {
+                IssueText(validationIssue.message)
+            }
         }
         .sheet(isPresented: $expanded) {
             PromptEditorSheet(title: title, placeholder: placeholder, text: $draft, doneID: expandDoneID) { commitNow() }
         }
     }
 
-    private func commitIfChanged() { if draft != text { commit(draft) } }
+    private func commitIfChanged() -> Bool {
+        guard draft != text else { return true }
+        if let issue = UserInputValidation.promptIssue(draft) {
+            validationIssue = issue
+            return false
+        }
+        validationIssue = nil
+        commit(draft)
+        return true
+    }
 
     private func scheduleCommit() {
         commitTask?.cancel()
         commitTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            commitIfChanged()
+            _ = commitIfChanged()
         }
     }
 
-    private func commitNow() {
+    private func commitNow() -> Bool {
         commitTask?.cancel()
-        commitIfChanged()
+        return commitIfChanged()
     }
 }
 
@@ -312,7 +341,7 @@ private struct PromptEditorSheet: View {
     let placeholder: String
     @Binding var text: String
     var doneID: String? = nil
-    let onDone: () -> Void
+    let onDone: () -> Bool
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -326,7 +355,7 @@ private struct PromptEditorSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             HStack {
                 Spacer()
-                Button("Done") { onDone(); dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Done") { if onDone() { dismiss() } }.keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier(ifPresent: doneID)
             }
         }
