@@ -78,6 +78,24 @@ struct ModelDiscoveryTests {
         #expect(models == ["qwen"])
     }
 
+    @Test func openAICompatibleNoAuthSendsNoAuthorizationHeader() async throws {
+        StubURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "https://gateway.example.com/open/v1/models")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+            let body = #"{"object":"list","data":[{"id":"standard-model"}]}"#.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("stored-key") })
+        let connection = Connection(
+            id: "open", name: "Open Gateway", provider: .openaiCompatible,
+            model: "", keyRef: "k", baseUrl: "https://gateway.example.com/open/v1",
+            authMethod: Connection.AuthMethod.none)
+
+        let models = try await lister.listModels(for: connection, apiKey: nil)
+
+        #expect(models == ["standard-model"])
+    }
+
     @Test func geminiListsOnlyGenerateContentModelsByBaseModelId() async throws {
         StubURLProtocol.handler = { request in
             #expect(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000")

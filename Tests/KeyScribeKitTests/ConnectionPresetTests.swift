@@ -1,57 +1,90 @@
+import Foundation
 import Testing
 @testable import KeyScribeKit
 
+// Machinery-only: exercises ConnectionPreset semantics over local fixtures and the catalog contract
+// members (custom), never named public-lineup entries — so a swapped downstream AIServiceCatalog keeps
+// this file green. Public-lineup pinning lives in AIServiceCatalogTests.
 struct ConnectionPresetTests {
-    @Test func hostedPresetsAreOpenAICompatibleWithFixedEndpointAndLightweightModel() {
-        for preset in [ConnectionPreset.openRouter, .groq, .mistral] {
-            #expect(preset.provider == .openaiCompatible)
-            #expect(preset.isManaged)
-            #expect(!preset.isCustom)
-            #expect(preset.baseURL?.isEmpty == false)
-            #expect(!preset.defaultModel.isEmpty)
-            #expect(preset.keysURL != nil)
-        }
+    private let hosted = ConnectionPreset(
+        id: "gateway-keyed", name: "Gateway (Keyed)", provider: .openaiCompatible,
+        baseURL: "https://gateway.example.com/keyed/v1", defaultModel: "standard-model",
+        keysURL: URL(string: "https://gateway.example.com/keys"),
+        allowedAuthMethods: [.apiKey, .tokenCommand])
+
+    private let openGateway = ConnectionPreset(
+        id: "gateway-open", name: "Gateway (Open)", provider: .openaiCompatible,
+        baseURL: "https://gateway.example.com/open/v1", defaultModel: "standard-model",
+        allowedAuthMethods: [.none], defaultAuthMethod: Connection.AuthMethod.none)
+
+    private let firstParty = ConnectionPreset(
+        id: "first-party", name: "First Party", provider: .openai, defaultModel: "first-model")
+
+    private var lineup: [ConnectionPreset] { [firstParty, openGateway, hosted, ConnectionPreset.custom] }
+
+    @Test func managedPresetHasAFixedEndpointAndIsNotCustom() {
+        #expect(hosted.isManaged)
+        #expect(!hosted.isCustom)
+        #expect(openGateway.isManaged)
+        #expect(!firstParty.isManaged)
+        #expect(!firstParty.isCustom)
     }
 
-    @Test func hostedPresetDefaultModels() {
-        #expect(ConnectionPreset.openRouter.defaultModel == "google/gemini-3.1-flash-lite")
-        #expect(ConnectionPreset.groq.defaultModel == "openai/gpt-oss-20b")
-        #expect(ConnectionPreset.mistral.defaultModel == "mistral-small-latest")
-    }
-
-    @Test func hostedPresetBaseURLsHaveNoTrailingChatCompletions() {
-        #expect(ConnectionPreset.openRouter.baseURL == "https://openrouter.ai/api/v1")
-        #expect(ConnectionPreset.groq.baseURL == "https://api.groq.com/openai/v1")
-        #expect(ConnectionPreset.mistral.baseURL == "https://api.mistral.ai/v1")
-    }
-
-    @Test func customPresetHasNoBaseURLAndIsTheEscapeHatch() {
+    @Test func customPresetIsTheEscapeHatch() {
         #expect(ConnectionPreset.custom.isCustom)
         #expect(!ConnectionPreset.custom.isManaged)
         #expect(ConnectionPreset.custom.baseURL == nil)
-        #expect(ConnectionPreset.custom.pickerLabel == "Custom (OpenAI-compatible)")
     }
 
-    @Test func presetIdsAreUnique() {
-        let ids = ConnectionPreset.all.map(\.id)
-        #expect(Set(ids).count == ids.count)
+    @Test func authDefaultsAreAPIKeyOnlyUnlessOverridden() {
+        #expect(firstParty.allowedAuthMethods == [.apiKey])
+        #expect(firstParty.defaultAuthMethod == .apiKey)
+        #expect(!firstParty.offersAuthChoice)
+        #expect(hosted.offersAuthChoice)
+        #expect(openGateway.allowedAuthMethods == [.none])
+        #expect(openGateway.defaultAuthMethod == .none)
     }
 
-    @Test func matchingResolvesHostedPresetFromBaseURLIgnoringTrailingSlashAndCase() {
-        #expect(ConnectionPreset.matching(provider: .openaiCompatible, baseURL: "https://openrouter.ai/api/v1").id == "openrouter")
-        #expect(ConnectionPreset.matching(provider: .openaiCompatible, baseURL: "https://api.groq.com/openai/v1/").id == "groq")
-        #expect(ConnectionPreset.matching(provider: .openaiCompatible, baseURL: "HTTPS://API.MISTRAL.AI/V1").id == "mistral")
+    @Test func pickerLabelDefaultsToTheNameUnlessOverridden() {
+        #expect(hosted.pickerLabel == "Gateway (Keyed)")
+        let overridden = ConnectionPreset(
+            id: "labeled", name: "Labeled", provider: .openaiCompatible, defaultModel: "",
+            pickerLabelOverride: "Labeled (OpenAI-compatible)")
+        #expect(overridden.pickerLabel == "Labeled (OpenAI-compatible)")
+    }
+
+    @Test func matchingResolvesAFixedEndpointIgnoringTrailingSlashAndCase() {
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://gateway.example.com/keyed/v1", in: lineup).id == "gateway-keyed")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://gateway.example.com/keyed/v1/", in: lineup).id == "gateway-keyed")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "HTTPS://GATEWAY.EXAMPLE.COM/KEYED/V1", in: lineup).id == "gateway-keyed")
+    }
+
+    @Test func matchingDisambiguatesSameHostEntriesByFullBaseURL() {
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://gateway.example.com/open/v1", in: lineup).id == "gateway-open")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://gateway.example.com/keyed/v1", in: lineup).id == "gateway-keyed")
     }
 
     @Test func matchingFallsBackToCustomForUnknownOpenAICompatibleEndpoint() {
-        #expect(ConnectionPreset.matching(provider: .openaiCompatible, baseURL: "http://127.0.0.1:11234/v1").id == "custom")
-        #expect(ConnectionPreset.matching(provider: .openaiCompatible, baseURL: nil).id == "custom")
-        #expect(ConnectionPreset.matching(provider: .openaiCompatible, baseURL: "").id == "custom")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://elsewhere.example.com/v1", in: lineup).id == ConnectionPreset.custom.id)
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: nil, in: lineup).id == ConnectionPreset.custom.id)
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "", in: lineup).id == ConnectionPreset.custom.id)
     }
 
-    @Test func matchingResolvesFirstPartyProvidersByKind() {
-        #expect(ConnectionPreset.matching(provider: .openai, baseURL: nil).id == "openai")
-        #expect(ConnectionPreset.matching(provider: .anthropic, baseURL: nil).id == "anthropic")
-        #expect(ConnectionPreset.matching(provider: .gemini, baseURL: nil).id == "gemini")
+    @Test func matchingResolvesFirstPartyProvidersByKindWithCustomFallback() {
+        #expect(ConnectionPreset.matching(provider: .openai, baseURL: nil, in: lineup).id == "first-party")
+        #expect(ConnectionPreset.matching(provider: .anthropic, baseURL: nil, in: lineup).id == ConnectionPreset.custom.id)
+    }
+
+    @Test func presetLookupFindsOnlyLineupMembers() {
+        #expect(ConnectionPreset.preset(id: "gateway-open", in: lineup)?.name == "Gateway (Open)")
+        #expect(ConnectionPreset.preset(id: "absent", in: lineup) == nil)
     }
 }

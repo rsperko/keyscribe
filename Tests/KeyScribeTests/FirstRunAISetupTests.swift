@@ -224,6 +224,7 @@ struct FirstRunAISetupTests {
             saveAPIKey: { _, _ in false },
             onComplete: { completed += 1 })
 
+        model.aiAuthMethod = .apiKey
         model.aiAPIKey = "secret"
         await model.createAIService()
 
@@ -359,6 +360,7 @@ struct FirstRunAISetupTests {
             })
 
         model.aiProvider = .openaiCompatible
+        model.aiAuthMethod = .apiKey
         model.aiModel = ""
         model.aiBaseURL = "http://127.0.0.1:11234/v1"
         model.aiAPIKey = "secret"

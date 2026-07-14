@@ -257,30 +257,13 @@ struct ConnectionsTests {
         #expect(ConnectionStore.newID(for: "My Local AI", existing: ["my-local-ai"]) == "my-local-ai-2")
     }
 
-    @Test func keyedProvidersDefaultToCurrentModels() {
-        #expect(Connection.Provider.openai.defaultModel == "gpt-5.6-luna")
-        #expect(Connection.Provider.anthropic.defaultModel == "claude-haiku-4-5")
-        #expect(Connection.Provider.gemini.defaultModel == "gemini-flash-lite-latest")
-    }
-
     @Test func newConnectionsUseProviderSpecificReasoningDefaults() {
-        let openAI = Connection(id: "openai", name: "OpenAI", provider: .openai, model: Connection.Provider.openai.defaultModel, keyRef: "k")
-        let anthropic = Connection(id: "anthropic", name: "Anthropic", provider: .anthropic, model: Connection.Provider.anthropic.defaultModel, keyRef: "k")
-        let gemini = Connection(id: "gemini", name: "Gemini", provider: .gemini, model: Connection.Provider.gemini.defaultModel, keyRef: "k")
+        let openAI = Connection(id: "openai", name: "OpenAI", provider: .openai, model: "gpt-5.6-luna", keyRef: "k")
+        let anthropic = Connection(id: "anthropic", name: "Anthropic", provider: .anthropic, model: "claude-haiku-4-5", keyRef: "k")
+        let gemini = Connection(id: "gemini", name: "Gemini", provider: .gemini, model: "gemini-flash-lite-latest", keyRef: "k")
 
         #expect(openAI.params.reasoningEffort == "none")
         #expect(anthropic.params.reasoningEffort == nil)
         #expect(gemini.params.geminiThinkingLevel == "minimal")
-    }
-
-    @Test func openAICompatibleHasNoDefaultModel() {
-        #expect(Connection.Provider.openaiCompatible.defaultModel.isEmpty)
-    }
-
-    @Test func providersHaveDefaultNames() {
-        #expect(Connection.Provider.openai.defaultName == "OpenAI")
-        #expect(Connection.Provider.anthropic.defaultName == "Anthropic")
-        #expect(Connection.Provider.gemini.defaultName == "Gemini")
-        #expect(Connection.Provider.openaiCompatible.defaultName == "Custom AI")
     }
 }

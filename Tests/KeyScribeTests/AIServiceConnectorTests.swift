@@ -17,6 +17,9 @@ private struct StubLLMClient: LLMClient {
 
 @MainActor
 struct AIServiceConnectorTests {
+    private let starterPreset = ConnectionPreset(
+        id: "starter", name: "Starter AI", provider: .gemini, defaultModel: "starter-model")
+
     private func tempSupport() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-connector-\(UUID().uuidString)", isDirectory: true)
@@ -48,6 +51,53 @@ struct AIServiceConnectorTests {
         #expect(connection.id == "gemini")
         #expect(savedRef == "keyscribe.llm.gemini")
         #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.map(\.id) == ["gemini"])
+    }
+
+    private func noAuthDraft() -> AIConnectionDraft {
+        var d = AIConnectionDraft()
+        d.name = "Open Gateway"
+        d.provider = .openaiCompatible
+        d.baseURL = "https://gateway.example.com/open/v1"
+        d.model = "standard-model"
+        d.authMethod = .none
+        return d
+    }
+
+    @Test func noAuthConnectionConnectsWithoutTouchingTheKeychain() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var keychainTouched = false
+        let connector = AIServiceConnector(
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            saveAPIKey: { _, _ in keychainTouched = true; return true },
+            deleteAPIKey: { _ in keychainTouched = true },
+            readAPIKey: { _ in keychainTouched = true; return nil },
+            testConnection: { _ in .passed })
+
+        let result = await connector.connect(draft: noAuthDraft(), reusingId: nil)
+
+        guard case .connected(let connection) = result.outcome else { Issue.record("expected connected"); return }
+        #expect(connection.authMethod == .none)
+        #expect(!keychainTouched)
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.map(\.id) == ["open-gateway"])
+    }
+
+    @Test func failedNoAuthTestPersistsNothingAndLeavesTheKeychainAlone() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var keychainTouched = false
+        let connector = AIServiceConnector(
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            saveAPIKey: { _, _ in keychainTouched = true; return true },
+            deleteAPIKey: { _ in keychainTouched = true },
+            readAPIKey: { _ in keychainTouched = true; return nil },
+            testConnection: { _ in .failed("503 Service Unavailable") })
+
+        let result = await connector.connect(draft: noAuthDraft(), reusingId: nil)
+
+        #expect(result.outcome == .failed("Connection test failed: 503 Service Unavailable"))
+        #expect(!keychainTouched)
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
     }
 
     @Test func failedTestRollsBackTheKeyAndPersistsNothing() async {
@@ -145,13 +195,13 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         let model = settingsModel(support: support)
 
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
 
         let saved = ConnectionStore.loadOrDefault(supportDir: support).connections
         #expect(saved.count == 1)
         let connection = try! #require(saved.first)
         #expect(connection.provider == .gemini)
-        #expect(connection.model == ConnectionPreset.gemini.defaultModel)
+        #expect(connection.model == starterPreset.defaultModel)
         #expect(model.selectedID == connection.id)
         #expect(model.testState(for: connection.id) == nil)   // never claimed as working on add
     }
@@ -165,7 +215,7 @@ struct AIServiceConnectorTests {
         pendingMode.aiRewrite = .init(connection: "", prompt: "Rewrite")
         try? ModeStore.write(pendingMode, to: modes)
         let model = settingsModel(support: support)
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
         let connection = try! #require(model.selected)
 
         model.update(connection, apiKey: "key")
@@ -189,7 +239,7 @@ struct AIServiceConnectorTests {
             tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { ref, value in saved = (ref, value); return true },
             deleteAPIKey: { _ in })
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
         let connection = try! #require(model.selected)
 
         model.update(connection, apiKey: "topsecret")
@@ -212,7 +262,7 @@ struct AIServiceConnectorTests {
             tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { _, _ in true },
             deleteAPIKey: { deletedRef = $0 })
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
         let connection = try! #require(model.selected)
 
         model.delete(connection)
@@ -224,7 +274,7 @@ struct AIServiceConnectorTests {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
         let model = settingsModel(support: support)
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
         let connection = try! #require(model.selected)
         var updated = connection
         updated.provider = .openai
@@ -240,7 +290,7 @@ struct AIServiceConnectorTests {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
         let model = settingsModel(support: support)
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
         let base = try #require(model.selected).keyRef
 
         var first = try #require(model.selected); first.provider = .openai
@@ -258,6 +308,25 @@ struct AIServiceConnectorTests {
         #expect(UUID(uuidString: String(segments[segments.count - 2])) == nil)  // not two stacked UUIDs
     }
 
+    @Test func addServiceSeedsThePresetDefaultTokenCommand() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = settingsModel(support: support)
+        let commandPreset = ConnectionPreset(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            baseURL: "https://gateway.example.com/keyed/v1", defaultModel: "standard-model",
+            allowedAuthMethods: [.apiKey, .tokenCommand], defaultAuthMethod: .tokenCommand,
+            defaultTokenCommand: "gateway-cli token mint")
+
+        model.addService(preset: commandPreset)
+
+        let connection = try #require(ConnectionStore.loadOrDefault(supportDir: support).connections.first)
+        #expect(connection.authMethod == .tokenCommand)
+        #expect(connection.tokenCommand == "gateway-cli token mint")
+        #expect(connection.baseUrl == "https://gateway.example.com/keyed/v1")
+        #expect(connection.configIssue == nil)
+    }
+
     // A provider starter is reusable: adding a second connection for the same provider disambiguates the name
     // rather than overwriting the first.
     @Test func addingASecondServiceForAProviderKeepsBothWithDistinctNames() {
@@ -265,8 +334,8 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         let model = settingsModel(support: support)
 
-        model.addService(preset: .gemini)
-        model.addService(preset: .gemini)
+        model.addService(preset: starterPreset)
+        model.addService(preset: starterPreset)
 
         let saved = ConnectionStore.loadOrDefault(supportDir: support).connections
         #expect(saved.count == 2)

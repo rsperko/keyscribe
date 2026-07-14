@@ -39,13 +39,13 @@ struct AIConnectionDraft: Equatable {
     var stashedServiceValues: [String: ServiceValues] = [:]
 
     init(
-        name: String = Connection.Provider.openai.defaultName,
-        provider: Connection.Provider = .openai,
-        model: String = Connection.Provider.openai.defaultModel,
-        baseURL: String = "",
-        authMethod: Connection.AuthMethod = .apiKey,
+        name: String = AIServiceCatalog.defaultPreset.name,
+        provider: Connection.Provider = AIServiceCatalog.defaultPreset.provider,
+        model: String = AIServiceCatalog.defaultPreset.defaultModel,
+        baseURL: String = AIServiceCatalog.defaultPreset.baseURL ?? "",
+        authMethod: Connection.AuthMethod = AIServiceCatalog.defaultPreset.defaultAuthMethod,
         apiKey: String = "",
-        tokenCommand: String = "",
+        tokenCommand: String = AIServiceCatalog.defaultPreset.defaultTokenCommand ?? "",
         availableModels: [String] = [],
         modelDiscoveryState: ModelDiscoveryState? = nil
     ) {
@@ -61,14 +61,15 @@ struct AIConnectionDraft: Equatable {
         self.presetId = Self.derivePresetId(provider: provider, baseURL: baseURL, authMethod: authMethod)
     }
 
-    // A stored connection at a hosted preset's URL but with No Auth or a token command (creatable in the
-    // old UI) opens as Custom: presenting it as managed would hide the endpoint and auth fields and leave
-    // it uneditable.
+    // A stored connection at a hosted preset's URL but with an auth method that preset does not offer
+    // (creatable in the old UI or hand-edited TOML) opens as Custom: presenting it as managed would hide
+    // the endpoint and auth fields and leave it uneditable.
     static func derivePresetId(
-        provider: Connection.Provider, baseURL: String, authMethod: Connection.AuthMethod
+        provider: Connection.Provider, baseURL: String, authMethod: Connection.AuthMethod,
+        in presets: [ConnectionPreset] = AIServiceCatalog.all
     ) -> String {
-        let match = ConnectionPreset.matching(provider: provider, baseURL: baseURL)
-        if match.isManaged, authMethod != .apiKey { return ConnectionPreset.custom.id }
+        let match = ConnectionPreset.matching(provider: provider, baseURL: baseURL, in: presets)
+        if match.isManaged, !match.allowedAuthMethods.contains(authMethod) { return ConnectionPreset.custom.id }
         return match.id
     }
 
@@ -260,13 +261,19 @@ struct AIConnectionDraft: Equatable {
         } else {
             model = preset.defaultModel
             baseURL = preset.baseURL ?? ""
+            tokenCommand = preset.defaultTokenCommand ?? ""
         }
-        if preset.isManaged || (preset.provider != .openaiCompatible && authMethod == .none) {
-            authMethod = .apiKey
+        // A disallowed token command survives on a non-managed preset (a first-party connection configured
+        // via TOML keeps its command); any other disallowed method snaps to the preset's default.
+        if !preset.allowedAuthMethods.contains(authMethod), preset.isManaged || authMethod != .tokenCommand {
+            authMethod = preset.defaultAuthMethod
         }
-        if preset.isManaged || (preset.provider != .openaiCompatible && authMethod != .tokenCommand) {
+        if authMethod != .tokenCommand, !preset.allowedAuthMethods.contains(.tokenCommand) {
             tokenCommand = ""
         }
+        // A typed key belongs to the key-signed flow only — carrying it into a no-auth or token-command
+        // preset leaves hasUnsavedAPIKey blocking Test/fetch behind a hidden field.
+        if authMethod != .apiKey { apiKey = "" }
         resetModelDiscovery()
     }
 
@@ -277,8 +284,13 @@ struct AIConnectionDraft: Equatable {
         provider == existing.provider ? existing.params : provider.defaultParams
     }
 
-    mutating func changeAuthMethod(to newMethod: Connection.AuthMethod) {
+    mutating func changeAuthMethod(
+        to newMethod: Connection.AuthMethod, in presets: [ConnectionPreset] = AIServiceCatalog.all
+    ) {
         authMethod = provider != .openaiCompatible && newMethod == .none ? .apiKey : newMethod
+        if authMethod == .tokenCommand, tokenCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            tokenCommand = (ConnectionPreset.preset(id: presetId, in: presets) ?? .custom).defaultTokenCommand ?? ""
+        }
         if authMethod != .tokenCommand { tokenCommand = "" }
         if authMethod != .apiKey { apiKey = "" }
         resetModelDiscovery()

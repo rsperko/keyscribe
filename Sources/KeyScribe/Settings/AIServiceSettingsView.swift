@@ -193,7 +193,8 @@ final class AIServiceSettingsModel: ObservableObject {
             provider: preset.provider,
             model: preset.defaultModel,
             keyRef: "keyscribe.llm.\(id)",
-            authMethod: .apiKey)
+            authMethod: preset.defaultAuthMethod,
+            tokenCommand: preset.defaultTokenCommand)
         if preset.provider == .openaiCompatible {
             connection.baseUrl = preset.baseURL
         }
@@ -457,13 +458,13 @@ private struct AddAIServiceChooser: View {
     @State private var selectedPresetID = ConnectionPreset.all.first?.id
 
     private var selectedPreset: ConnectionPreset? {
-        selectedPresetID.flatMap(ConnectionPreset.preset(id:)) ?? ConnectionPreset.all.first
+        selectedPresetID.flatMap { ConnectionPreset.preset(id: $0) } ?? ConnectionPreset.all.first
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Add AI Service").font(.title2.bold())
-            Text("Choose a provider, then add its key and test the connection.")
+            Text("Choose a service, then finish setup and test the connection.")
                 .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 16) {
                 List(selection: $selectedPresetID) {
@@ -609,8 +610,21 @@ private struct AIServiceEditor: View {
                 Button("Change Service", role: .destructive) { confirmCredentialBoundary() }
                 Button("Cancel", role: .cancel) { cancelCredentialBoundary() }
             } message: {
-                Text("Continuing removes the saved API key. Enter a new key before this service can be used.")
+                Text(credentialBoundaryMessage)
             }
+    }
+
+    // The saved key is always removed here (this dialog only fires when one existed), but the destination
+    // decides whether a new one is even wanted — a token-command or no-auth endpoint needs none.
+    private var credentialBoundaryMessage: String {
+        switch pendingBoundaryConnection?.authMethod {
+        case .some(.tokenCommand):
+            "Continuing removes the saved API key. This service signs in with its token command instead."
+        case .some(.none):
+            "Continuing removes the saved API key. This service connects without a key."
+        case .some(.apiKey), nil:
+            "Continuing removes the saved API key. Enter a new key before this service can be used."
+        }
     }
 
     private static func draft(
@@ -701,7 +715,7 @@ private struct AIServiceStarterPreview: View {
                     }
                     GridRow {
                         Text("Sign-in").foregroundStyle(.secondary)
-                        Text("Your own API key")
+                        Text(signInDescription)
                     }
                     GridRow {
                         Text("Model").foregroundStyle(.secondary)
@@ -717,7 +731,7 @@ private struct AIServiceStarterPreview: View {
                 Button("Add Service", action: onAdd)
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier(AccessibilityID.Settings.AI.Preview.add(preset.id))
-                Text("Adds \(preset.name) to Your Services. Paste your key and Test it there — text is sent only when a mode uses it.")
+                Text(addFooter)
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -727,8 +741,33 @@ private struct AIServiceStarterPreview: View {
     }
 
     private var subtitle: String {
-        preset.isManaged
-            ? "A hosted OpenAI-compatible service — connect with your key."
-            : "Connect with your own \(preset.name) account."
+        if preset.isManaged {
+            return switch preset.defaultAuthMethod {
+            case .none: "A hosted OpenAI-compatible service — no key needed."
+            case .tokenCommand: "A hosted OpenAI-compatible service — signs in with a token command."
+            case .apiKey: "A hosted OpenAI-compatible service — connect with your key."
+            }
+        }
+        return "Connect with your own \(preset.name) account."
+    }
+
+    private var signInDescription: String {
+        switch preset.defaultAuthMethod {
+        case .none: "None needed"
+        case .tokenCommand: "A command that prints a token"
+        case .apiKey:
+            preset.isManaged && preset.allowedAuthMethods.contains(.tokenCommand)
+                ? "Your own API key or a token command"
+                : "Your own API key"
+        }
+    }
+
+    private var addFooter: String {
+        switch preset.defaultAuthMethod {
+        case .apiKey:
+            "Adds \(preset.name) to Your Services. Paste your key and Test it there — text is sent only when a mode uses it."
+        case .tokenCommand, .none:
+            "Adds \(preset.name) to Your Services. Test it there — text is sent only when a mode uses it."
+        }
     }
 }

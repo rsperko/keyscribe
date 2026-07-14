@@ -73,6 +73,8 @@ struct AIConnectionDraftEditor: View {
                     serviceTypeRow
                     if draft.selectedPreset.isCustom {
                         endpointRows
+                    }
+                    if draft.selectedPreset.isCustom || draft.selectedPreset.offersAuthChoice {
                         authenticationMechanismRow
                     }
                 }
@@ -151,24 +153,38 @@ struct AIConnectionDraftEditor: View {
     }
 
     @ViewBuilder private var authenticationMechanismRow: some View {
-        if !draft.selectedPreset.isManaged {
+        if !draft.selectedPreset.isManaged || draft.selectedPreset.offersAuthChoice {
+            let segments = authSegments
             HStack {
                 Text("Sign in with")
                 Spacer()
                 Picker("Credential", selection: authMethodBinding) {
-                    if draft.provider == .openaiCompatible {
-                        Text("No Auth").tag(Connection.AuthMethod.none)
-                    }
-                    Text("API Key").tag(Connection.AuthMethod.apiKey)
-                    if draft.provider == .openaiCompatible || draft.authMethod == .tokenCommand {
-                        Text("Command").tag(Connection.AuthMethod.tokenCommand)
+                    ForEach(segments, id: \.self) { method in
+                        Text(authMethodLabel(method)).tag(method)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: draft.provider == .openaiCompatible ? 310 : 220)
+                .frame(width: segments.count > 2 ? 310 : 220)
                 .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.auth)
             }
+        }
+    }
+
+    // The preset's allowed methods plus the draft's current one: a connection whose TOML carries a method
+    // the preset no longer offers (the first-party token-command grace) must stay selectable, not vanish.
+    private var authSegments: [Connection.AuthMethod] {
+        var methods = draft.selectedPreset.allowedAuthMethods
+        let current = draft.effectiveAuthMethod
+        if !methods.contains(current) { methods.append(current) }
+        return methods
+    }
+
+    private func authMethodLabel(_ method: Connection.AuthMethod) -> String {
+        switch method {
+        case .none: "No Auth"
+        case .apiKey: "API Key"
+        case .tokenCommand: "Command"
         }
     }
 
@@ -450,7 +466,17 @@ struct AIConnectionDraftEditor: View {
         case .passed: ("Ready", "checkmark.circle.fill", .prominent)
         case .testing: ("Testing", "ellipsis.circle", .neutral)
         case .failed: ("Needs attention", "exclamationmark.triangle.fill", .warning)
-        case nil: (hasStoredKey ? "Key saved" : "No key", hasStoredKey ? "key.fill" : "key", .neutral)
+        case nil: untestedStatus
+        }
+    }
+
+    // An untested connection reports its sign-in shape, not "No key" for methods that never take one:
+    // a no-auth or token-command service always showed "No key" here, contradicting its own auth row.
+    private var untestedStatus: (text: String, icon: String, kind: PaneBadge.Kind) {
+        switch draft.effectiveAuthMethod {
+        case .none: ("No auth", "globe", .neutral)
+        case .tokenCommand: ("Token command", "terminal", .neutral)
+        case .apiKey: hasStoredKey ? ("Key saved", "key.fill", .neutral) : ("No key", "key", .neutral)
         }
     }
 

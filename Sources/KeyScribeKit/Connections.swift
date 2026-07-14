@@ -16,29 +16,11 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         case openai, anthropic, gemini
         case openaiCompatible = "openai_compatible"
 
-        public var defaultModel: String {
-            switch self {
-            case .openai: "gpt-5.6-luna"
-            case .anthropic: "claude-haiku-4-5"
-            case .gemini: "gemini-flash-lite-latest"
-            case .openaiCompatible: ""
-            }
-        }
-
         public var defaultParams: Params {
             switch self {
             case .openai: Params(reasoningEffort: "none")
             case .gemini: Params(geminiThinkingLevel: "minimal")
             case .anthropic, .openaiCompatible: Params()
-            }
-        }
-
-        public var defaultName: String {
-            switch self {
-            case .openai: "OpenAI"
-            case .anthropic: "Anthropic"
-            case .gemini: "Gemini"
-            case .openaiCompatible: "Custom AI"
             }
         }
     }

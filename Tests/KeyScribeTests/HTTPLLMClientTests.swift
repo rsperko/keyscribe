@@ -93,7 +93,7 @@ struct HTTPLLMClientTests {
         }
         let connection = Connection(
             id: "o", name: "O", provider: .openai,
-            model: Connection.Provider.openai.defaultModel, keyRef: "k")
+            model: "gpt-5.6-luna", keyRef: "k")
 
         _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
 
@@ -110,7 +110,7 @@ struct HTTPLLMClientTests {
         }
         let connection = Connection(
             id: "g", name: "G", provider: .gemini,
-            model: Connection.Provider.gemini.defaultModel, keyRef: "k")
+            model: "gemini-flash-lite-latest", keyRef: "k")
 
         _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
 
@@ -335,7 +335,7 @@ struct HTTPLLMClientTests {
             return (resp(request.url!, 200), data)
         }
         let connection = Connection(
-            id: "g", name: "G", provider: .gemini, model: Connection.Provider.gemini.defaultModel, keyRef: "k")
+            id: "g", name: "G", provider: .gemini, model: "gemini-flash-lite-latest", keyRef: "k")
         let out = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
         #expect(out == "Hello world.")
     }

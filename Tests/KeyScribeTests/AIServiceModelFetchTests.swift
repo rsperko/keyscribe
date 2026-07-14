@@ -16,7 +16,7 @@ struct AIServiceModelFetchTests {
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
         let seed = Connection(
             id: "new-ai-service", name: "New AI Service", provider: .openai,
-            model: Connection.Provider.openai.defaultModel, keyRef: "keyscribe.llm.new-ai-service")
+            model: "gpt-5.6-luna", keyRef: "keyscribe.llm.new-ai-service")
         try! repository.upsertConnection(seed)
         let model = AIServiceSettingsModel(repository: repository, listModels: listModels)
         return (model, support)

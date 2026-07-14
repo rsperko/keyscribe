@@ -217,7 +217,7 @@ struct AIServiceTestStateTests {
     private func seedConnection(_ model: AIServiceSettingsModel, in dir: URL, id: String = "new-ai-service") -> Connection {
         let conn = Connection(
             id: id, name: "New AI Service", provider: .openai,
-            model: Connection.Provider.openai.defaultModel, keyRef: "keyscribe.llm.\(id)")
+            model: "gpt-5.6-luna", keyRef: "keyscribe.llm.\(id)")
         let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
         try! repo.upsertConnection(conn)
         model.reload()
