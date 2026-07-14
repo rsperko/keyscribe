@@ -2,13 +2,14 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --samples-parity <dir>`. Verifies the in-memory-samples transcription path matches
-// the WAV path for every installed sample-capable engine, over the *.wav files in <dir>. Runs TWO isolated
-// same-order passes — all `transcribe(wavURL:)`, then evict+reload, then all `transcribe(samples:)` fed the
-// SAME audio at the engine's captureSampleRate — and asserts each clip's two transcripts are identical.
-// Separated (not interleaved) because some engines (Moonshine's ONNX transcriber) carry state across calls,
-// so interleaving would report a mismatch that never happens live; same-order passes give each call the
-// identical preceding-state trajectory, so any divergence is a real bug. Headless; exit non-zero on mismatch.
+// Verifies the in-memory-samples transcription path matches the WAV path for every installed
+// sample-capable engine, over the *.wav files in <dir>. Runs TWO isolated same-order passes — all
+// `transcribe(wavURL:)`, then evict+reload, then all `transcribe(samples:)` fed the SAME audio at the
+// engine's captureSampleRate — asserting each clip's two transcripts are identical. Separated (not
+// interleaved) because some engines (Moonshine's ONNX transcriber) carry state across calls, so
+// interleaving would report a mismatch that never happens live; same-order passes give each call the
+// identical preceding-state trajectory, so any divergence is a real bug. Headless; exits non-zero on
+// mismatch.
 enum SamplesParityRunner {
     @discardableResult
     static func run(dir: URL, only: Set<String>? = nil) async -> Bool {
@@ -41,7 +42,7 @@ enum SamplesParityRunner {
             ranAny = true
             print("── \(engine.id) " + String(repeating: "─", count: max(0, 40 - engine.id.count)))
 
-            // Pass A: WAV path for every clip, in order.
+            // Pass A (WAV path).
             var fileTexts: [String?] = []
             for wav in wavs {
                 fileTexts.append(try? await engine.transcribe(wavURL: wav, biasTerms: []))
@@ -51,7 +52,7 @@ enum SamplesParityRunner {
             do { try await engine.loadIfNeeded() } catch {
                 print("  reload failed between passes — skipping\n"); continue
             }
-            // Pass B: samples path for every clip, in the same order.
+            // Pass B (samples path, same order).
             var sampleTexts: [String?] = []
             for wav in wavs {
                 if let samples = try? AudioDecoder.pcmMono(wav, sampleRate: engine.captureSampleRate) {

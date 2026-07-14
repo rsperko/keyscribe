@@ -16,11 +16,11 @@ struct DuringDictationEffectsTests {
             reapplyDelays: [], duckFollowInterval: 100)
 
         effects.begin(duckConfig)
-        #expect(writes.isEmpty)       // begin only arms — the route is not settled yet
+        #expect(writes.isEmpty)   // begin only arms — the route is not settled yet
         effects.activateDuck()
-        #expect(writes == [0])        // ducked to silence once capture is live
+        #expect(writes == [0])    // 0 = ducked to silence
         effects.end(duckConfig)
-        #expect(writes == [0, 1])     // restored to full volume
+        #expect(writes == [0, 1]) // 1 = restored to full volume
     }
 
     // If ducking is unavailable (the private API is absent on a future macOS), every duck fails — the
@@ -34,9 +34,9 @@ struct DuringDictationEffectsTests {
 
         effects.begin(duckConfig)
         effects.activateDuck()
-        #expect(writes == [0])        // attempted once
+        #expect(writes == [0])
         effects.end(duckConfig)
-        #expect(writes == [0])        // nothing was ducked, so restore writes nothing
+        #expect(writes == [0]) // a duck that never took (returned false) is untracked, so restore is a no-op
     }
 
     @Test func cancelBeforeCaptureGoesLiveNeverDucks() {
@@ -47,8 +47,8 @@ struct DuringDictationEffectsTests {
             reapplyDelays: [], duckFollowInterval: 100)
 
         effects.begin(duckConfig)
-        effects.end(duckConfig, cue: .cancel)   // cancelled while the mic was still coming up
-        effects.activateDuck()                   // a late capture-live signal must not duck
+        effects.end(duckConfig, cue: .cancel)  // cancelled while the mic was still coming up
+        effects.activateDuck()                 // a late capture-live signal must not duck
         #expect(writes.isEmpty)
     }
 
@@ -63,14 +63,14 @@ struct DuringDictationEffectsTests {
             reapplyDelays: [], duckFollowInterval: 0.02)
 
         effects.begin(duckConfig)
-        effects.activateDuck()                   // ducks device 1
+        effects.activateDuck()
         #expect(levels[1] == 0)
-        defaultDev = 2                           // route shifts the audible output to device 2
+        defaultDev = 2  // route shifts the audible output to device 2
         for _ in 0..<200 { if levels[2] == 0 { break }; try? await Task.sleep(for: .seconds(0.02)) }
-        #expect(levels[2] == 0)                  // follow loop ducked the new default
+        #expect(levels[2] == 0)
 
         effects.end(duckConfig)
-        #expect(levels[1] == 1)                  // every touched device restored to full volume
+        #expect(levels[1] == 1)
         #expect(levels[2] == 1)
     }
 
@@ -84,15 +84,15 @@ struct DuringDictationEffectsTests {
             reapplyDelays: [0.02], duckFollowInterval: 100)
 
         effects.begin(duckConfig)
-        effects.activateDuck()                   // level=0 (ducked)
-        effects.end(duckConfig)                  // immediate restore level=1, schedules re-apply
-        level = 0                                // route switch drops our unduck, leaving it quiet
+        effects.activateDuck()
+        effects.end(duckConfig)  // restores immediately AND schedules the re-apply backstop
+        level = 0                // simulates the route switch dropping our unduck write
 
-        for _ in 0..<200 {                       // poll so the assertion is not racing the scheduler
+        for _ in 0..<200 {
             if level == 1 { break }
             try? await Task.sleep(for: .seconds(0.02))
         }
-        #expect(level == 1)                      // re-apply corrected the dropped restore
+        #expect(level == 1)
     }
 
     @Test func reapplyDoesNotClobberAFreshDictationsDuck() async {
@@ -104,11 +104,11 @@ struct DuringDictationEffectsTests {
 
         effects.begin(duckConfig)
         effects.activateDuck()
-        effects.end(duckConfig)                  // schedules re-apply of full volume
-        effects.begin(duckConfig)                // a new dictation starts...
-        effects.activateDuck()                   // ...and ducks again (level=0, new epoch)
+        effects.end(duckConfig)    // schedules a re-apply
+        effects.begin(duckConfig)  // a new dictation starts and ducks again before the re-apply fires,
+        effects.activateDuck()     // bumping the epoch — the stale re-apply must not fire against it
         try? await Task.sleep(for: .seconds(0.12))
 
-        #expect(level == 0)                      // the stale re-apply must not have restored the new dictation
+        #expect(level == 0)
     }
 }

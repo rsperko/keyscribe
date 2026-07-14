@@ -2,9 +2,9 @@ import CoreAudio
 import Foundation
 import KeyScribeKit
 
-// Legacy crash-recovery reconcile only. Current builds do not write these markers, but an upgrade may find
-// one from an earlier build that changed global audio state and crashed before restoring it. Devices are
-// resolved by UID, never by transient AudioDeviceID.
+// Legacy crash-recovery reconcile only — current builds never change the system default input and so
+// never write these markers. This exists solely to undo a state a pre-fix build may have stranded on
+// an earlier crash. Devices are resolved by UID, never by transient AudioDeviceID.
 final class SystemAudioStateRestorer: Sendable {
     private let readMarker: @Sendable () -> Data?
     private let deleteMarker: @Sendable () -> Void
@@ -35,9 +35,7 @@ final class SystemAudioStateRestorer: Sendable {
             deleteMarker: { try? FileManager.default.removeItem(at: markerURL) })
     }
 
-    // MARK: - Reconcile
-
-    // Undo any recorded global audio state and clear the marker. Idempotent.
+    // Idempotent — safe to call on every launch.
     func reconcile() {
         guard let data = readMarker(),
               let pending = PendingSystemRestore.decode(from: data),

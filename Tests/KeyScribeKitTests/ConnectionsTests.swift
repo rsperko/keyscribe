@@ -27,15 +27,15 @@ struct ConnectionsTests {
         let original = connection(provider: .openaiCompatible, model: "m", baseUrl: "not a url")
         var changed = original
         changed.baseUrl = "also not a url"
-        #expect(original.crossesCredentialBoundary(to: changed))          // different garbage → crosses
+        #expect(original.crossesCredentialBoundary(to: changed))
 
         var sameGarbage = original
         sameGarbage.baseUrl = "not a url"
-        #expect(!original.crossesCredentialBoundary(to: sameGarbage))     // identical text → no cross
+        #expect(!original.crossesCredentialBoundary(to: sameGarbage))
 
         var oneParseable = original
         oneParseable.baseUrl = "https://example.com/v1"
-        #expect(original.crossesCredentialBoundary(to: oneParseable))     // unparseable → parseable → crosses
+        #expect(original.crossesCredentialBoundary(to: oneParseable))
     }
     private let toml = """
     schema_version = 1
@@ -219,7 +219,7 @@ struct ConnectionsTests {
         try ConnectionStore.write(set, to: dir)
         #expect(ConnectionStore.load(supportDir: dir) == .loaded(set))
 
-        // A present-but-malformed file must surface as .failed, not silently drop every connection.
+        // Malformed must surface as .failed, not silently drop every connection.
         try "schema_version = 1\n[[connection]\nid = \"x\"".write(
             to: dir.appendingPathComponent(ConnectionStore.fileName), atomically: true, encoding: .utf8)
         guard case .failed = ConnectionStore.load(supportDir: dir) else {
@@ -234,7 +234,7 @@ struct ConnectionsTests {
             .appendingPathComponent("keyscribe-connection-unreadable-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Present but not valid UTF-8 — must not be mistaken for an absent file and silently defaulted.
+        // Not valid UTF-8 — must not be mistaken for an absent file and silently defaulted.
         try Data([0xFF, 0xFE, 0x00, 0xFF]).write(to: dir.appendingPathComponent(ConnectionStore.fileName))
         guard case .failed = ConnectionStore.load(supportDir: dir) else {
             Issue.record("expected .failed for a present but unreadable connections.toml")

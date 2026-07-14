@@ -32,7 +32,7 @@ struct ConfigSelfWriteGateTests {
         #expect(gate.shouldReload(current: .init(stamps: ["settings.toml": "12:9"])) == false)
     }
 
-    // The safety property: a self-write to one file must not mask an external edit to another.
+    // A self-write to one file must not mask an external edit to another.
     @Test func externalEditToAnotherFileStillReloadsAfterASelfWrite() {
         let gate = ConfigSelfWriteGate(baseline: .init(stamps: ["settings.toml": "10:5", "modes/a.toml": "3:1"]))
         gate.recordSelfWrite(relativePath: "settings.toml", stamp: "12:9")
@@ -104,7 +104,7 @@ struct ConfigSelfWriteGateTests {
         gate.recordSelfWrite(url: settings, supportDir: dir)
         #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) == false)
 
-        write("v3-external-longer", to: settings)   // external edit, not recorded
+        write("v3-external-longer", to: settings)   // not recorded as a self-write
         #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) == true)
     }
 }

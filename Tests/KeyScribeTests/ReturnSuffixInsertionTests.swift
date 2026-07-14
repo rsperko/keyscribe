@@ -6,7 +6,7 @@ import Testing
 // A `<CR>` on a whole-utterance regex replacement presses a real Return after the verified insert,
 // overriding the mode's standing submit for that insert only, and inheriting every existing submit
 // safety gate (never on clipboard fallback, failed paste, secure field, or moved focus). Wired through
-// the REAL DictationController with only the OS edges mocked (mirrors TrailingAndSubmitTests).
+// the real DictationController with only the OS edges mocked.
 @MainActor
 struct ReturnSuffixInsertionTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -34,7 +34,6 @@ struct ReturnSuffixInsertionTests {
         var hudStates: [HUDState] = []
     }
 
-    // Captures every rendered HUD state so a refusal's error copy (or a happy-path completion) is assertable.
     private final class HUDSpy: HUDPresenting {
         var states: [HUDState] = []
         func render(_ state: HUDState) { states.append(state) }
@@ -88,8 +87,7 @@ struct ReturnSuffixInsertionTests {
         controller.setNextModeOverride(id: mode.id)
         controller.handleStart()
         await controller.captureBringUpTask?.value
-        // Capture already pinned the original target; flip focus now so the commit-time decision sees a
-        // moved target (exercises a bare <CR> whose target changed before its Return).
+        // Flips focus after capture pinned the original target, so the commit-time decision sees a move.
         if moveFocusBeforeCommit { captured.focusMoved = true }
         controller.handleCommit()
         await controller.dictationTask?.value
@@ -97,7 +95,6 @@ struct ReturnSuffixInsertionTests {
         return captured
     }
 
-    // The terminal (last) HUD state a run settled on — the completion/error, past transient recording frames.
     private func terminalState(_ captured: Captured) -> HUDState? {
         captured.hudStates.last { state in
             switch state {
@@ -107,14 +104,13 @@ struct ReturnSuffixInsertionTests {
         }
     }
 
-    // 11. Owned non-empty <CR> replacement → one Return after a verified insert.
     @Test func crReplacementFiresReturnOnce() async {
         let out = await run(transcript: "slash resume", rules: crResume)
         #expect(out.insertedText == "/resume")
         #expect(out.submits == [.return])
     }
 
-    // 12. The <CR> Return overrides the mode's standing submit (.cmdReturn → .return), still once.
+    // The <CR> Return overrides the mode's standing submit (.cmdReturn → .return), still once.
     @Test func crOverridesModeSubmit() async {
         let out = await run(transcript: "slash resume", rules: crResume, modeSubmit: .cmdReturn)
         #expect(out.insertedText == "/resume")
@@ -129,34 +125,31 @@ struct ReturnSuffixInsertionTests {
         #expect(out.submits == [.cmdReturn])
     }
 
-    // 13a. Clipboard fallback (Accessibility off): the text never reached the target → no Return.
+    // Clipboard fallback (Accessibility off): the text never reached the target, so no Return.
     @Test func crReturnSkippedOnClipboardFallback() async {
         let out = await run(transcript: "slash resume", rules: crResume, accessibilityGranted: false)
         #expect(out.insertedText == "/resume")
         #expect(out.submits.isEmpty)
     }
 
-    // 13b. A silently-failed paste → no Return against a paste that did not happen.
     @Test func crReturnSkippedOnFailedPaste() async {
         let out = await run(transcript: "slash resume", rules: crResume, insertSucceeds: false)
         #expect(out.submits.isEmpty)
     }
 
-    // 13c. Secure field diverts to concealed clipboard → no Return.
     @Test func crReturnSkippedOnSecureField() async {
         let out = await run(transcript: "slash resume", rules: crResume, secureField: true)
         #expect(out.submits.isEmpty)
     }
 
-    // 13d. Focus moved between the paste and the Return check → skip (existing focus-race gate).
     @Test func crReturnSkippedWhenFocusMoved() async {
         let out = await run(transcript: "slash resume", rules: crResume, focusMovesAfterInsert: true)
         #expect(out.insertedText == "/resume")
         #expect(out.submits.isEmpty)
     }
 
-    // 14. A <CR>-only replacement trims to empty text but still presses Return — pressing enter is the
-    // whole point of the rule. Nothing is inserted; only the submit fires, and the HUD reads success.
+    // A <CR>-only replacement trims to empty text but still presses Return — pressing enter is the whole
+    // point of the rule, so nothing is inserted but the submit fires and the HUD reads success.
     @Test func crOnlyOutputPressesReturnWithoutInserting() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules)
@@ -165,8 +158,8 @@ struct ReturnSuffixInsertionTests {
         #expect(terminalState(out) == .complete(outcome: .inserted, mode: "M"))
     }
 
-    // 14a. The bare <CR> submit inherits the insert-path guards: Accessibility off (clipboard divert) → no
-    // Return, AND the HUD names the real cause with the settings action — never a misleading "No speech".
+    // The bare <CR> submit inherits the insert-path guards: Accessibility off (clipboard divert) means no
+    // Return, and the HUD names the real cause with the settings action, never a misleading "No speech".
     @Test func crOnlyReturnSkippedWithoutAccessibility() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, accessibilityGranted: false)
@@ -179,8 +172,8 @@ struct ReturnSuffixInsertionTests {
         #expect(action == .openAccessibilitySettings)
     }
 
-    // 14b. Secure field diverts to concealed clipboard → the bare <CR> presses nothing into a password field,
-    // and the HUD says so truthfully rather than "No speech detected".
+    // Secure field diverts to concealed clipboard, so the bare <CR> presses nothing into a password
+    // field, and the HUD says so truthfully rather than "No speech detected".
     @Test func crOnlyReturnSkippedOnSecureField() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, secureField: true)
@@ -193,8 +186,7 @@ struct ReturnSuffixInsertionTests {
         #expect(action == nil)
     }
 
-    // 14c. The target changed out from under a bare <CR> before its Return → refused truthfully (target
-    // changed), not silence.
+    // The target changed out from under a bare <CR> before its Return — refused truthfully, not silence.
     @Test func crOnlyReturnRefusedWhenTargetChanged() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, moveFocusBeforeCommit: true)
@@ -205,8 +197,7 @@ struct ReturnSuffixInsertionTests {
         #expect(message.contains("target window changed"))
     }
 
-    // 14d. Genuine silence (empty transcript, no <CR> command in play) still reads "No speech detected" — the
-    // refusal path must not swallow the honest no-speech completion.
+    // The refusal path must not swallow the honest no-speech completion.
     @Test func genuineSilenceStillReadsNoSpeech() async {
         let out = await run(transcript: "", rules: crResume)
         #expect(out.insertedText == nil)

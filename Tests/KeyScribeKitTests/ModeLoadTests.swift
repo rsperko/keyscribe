@@ -56,12 +56,11 @@ struct ModeLoadTests {
         let good = makeMode(id: "alpha")
         try ModeStore.write(good, to: dir)
 
-        // A clean load with an lkgDir stashes the good copy to disk...
         let first = ModeStore.load(in: dir, previous: [], lkgDir: lkg)
         #expect(first.failures.isEmpty)
         #expect(FileManager.default.fileExists(atPath: lkg.appendingPathComponent("alpha.toml").path))
 
-        // ...so a malformed file with NO in-memory prior (the launch case) recovers from disk.
+        // The launch case: no in-memory prior, so recovery must come from the disk LKG stashed above.
         try "broken = [".write(
             to: dir.appendingPathComponent("alpha.toml"), atomically: true, encoding: .utf8)
         let second = ModeStore.load(in: dir, previous: [], lkgDir: lkg)
@@ -83,7 +82,7 @@ struct ModeLoadTests {
         try ModeStore.write(renamed, to: dir)
         _ = ModeStore.load(in: dir, previous: [], lkgDir: lkg)
 
-        // A malformed file must not overwrite the disk LKG, and recovery yields the latest good copy.
+        // A malformed file must not overwrite the disk LKG, so recovery yields the latest good copy.
         try "broken = [".write(
             to: dir.appendingPathComponent("alpha.toml"), atomically: true, encoding: .utf8)
         let recovered = ModeStore.load(in: dir, previous: [], lkgDir: lkg)

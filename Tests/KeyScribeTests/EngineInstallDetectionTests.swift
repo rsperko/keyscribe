@@ -3,9 +3,8 @@ import AudioCommon
 @testable import KeyScribe
 import KeyScribeKit
 
-// Guards the on-disk install detection that both reconcile (adopt a completed-but-unmarked model
-// instead of deleting it) and the offline cold-load gate (load with zero network when installed)
-// depend on. Whisper detects its CoreML bundles + tokenizer; Qwen detects its safetensors weights.
+// Guards the on-disk install detection that reconcile (adopt a completed-but-unmarked model instead
+// of deleting it) and the offline cold-load gate both depend on.
 final class EngineInstallDetectionTests: XCTestCase {
     private var dir: URL!
 
@@ -65,7 +64,6 @@ final class EngineInstallDetectionTests: XCTestCase {
     }
 
     func testWhisperVariantsAreIsolated() throws {
-        // Small.en install must not make the turbo model look installed (each owns its own subdir).
         try writeBundles(Self.whisperBundles, into: variantDir("whisper-small-en", "openai_whisper-small.en_217MB"))
         try writeTokenizer(installDir: "whisper-small-en", repo: "openai/whisper-small.en")
         XCTAssertEqual(WhisperEngine(profile: .smallEnglish, modelsDir: dir).verifyInstalled(in: dir), true)

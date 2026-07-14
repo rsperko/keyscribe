@@ -29,8 +29,8 @@ struct ConfigCacheErrorTests {
         #expect(cache.replacements == good)
         #expect(cache.configFileError == nil)
 
-        // A later malformed edit must surface an error AND fall back to the last good copy, not empty —
-        // otherwise every replacement silently stops running with no signal (P2-14).
+        // Must surface an error AND fall back to the last good copy, not empty — otherwise every
+        // replacement silently stops running with no signal.
         try "schema_version = 1\n[[rules]\nheard = \"x\"".write(
             to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
         cache.invalidate()
@@ -47,12 +47,11 @@ struct ConfigCacheErrorTests {
         let cache = ConfigCache(supportDir: dir)
         #expect(cache.replacements == good)
 
-        // Delete the file — the correct state is empty, and last-good must follow it.
         try FileManager.default.removeItem(at: dir.appendingPathComponent(ReplacementsStore.fileName))
         cache.invalidate()
         #expect(cache.replacements == ReplacementsSet())
 
-        // A malformed file appearing now must fall back to the post-delete empty state, not the stale rules.
+        // Fallback on a subsequent malformed write must be the post-delete empty state, not the stale rules.
         try "schema_version = 1\n[[rules]\nheard = \"x\"".write(
             to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
         cache.invalidate()

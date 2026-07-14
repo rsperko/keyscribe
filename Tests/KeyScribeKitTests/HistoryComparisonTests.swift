@@ -2,30 +2,30 @@ import Testing
 @testable import KeyScribeKit
 
 struct HistoryComparisonTests {
-    // The real-world regression: a cloud-rewritten entry whose local pipeline was a no-op is stored with
-    // transformed == nil. The breakdown must still appear, and the rewrite step must show heard -> result.
+    // A cloud-rewritten entry whose local pipeline was a no-op is stored with transformed == nil; the
+    // breakdown must still appear, with the rewrite step showing heard -> result.
     @Test func cloudEntryWithNoLocalChangeStillShowsRewriteBreakdown() {
         let stages = HistoryComparison.stages(cloudInvolved: true)
         #expect(stages == [.heardInserted, .onThisMac, .rewrite])
 
         let onMac = HistoryComparison.texts(
             for: .onThisMac, heard: "send it to pat", transformed: nil, result: "Send it to Matt.")
-        #expect(onMac == (from: "send it to pat", to: "send it to pat"))  // local did nothing
+        #expect(onMac == (from: "send it to pat", to: "send it to pat"))
 
         let rewrite = HistoryComparison.texts(
             for: .rewrite, heard: "send it to pat", transformed: nil, result: "Send it to Matt.")
-        #expect(rewrite == (from: "send it to pat", to: "Send it to Matt."))  // the AI's change is visible
+        #expect(rewrite == (from: "send it to pat", to: "Send it to Matt."))
     }
 
     @Test func cloudEntryWithLocalEditsSplitsLocalFromRewrite() {
         let heard = "teh report", transformed = "the report", result = "The report is ready."
         let onMac = HistoryComparison.texts(
             for: .onThisMac, heard: heard, transformed: transformed, result: result)
-        #expect(onMac == (from: heard, to: transformed))  // local fixed the typo
+        #expect(onMac == (from: heard, to: transformed))
 
         let rewrite = HistoryComparison.texts(
             for: .rewrite, heard: heard, transformed: transformed, result: result)
-        #expect(rewrite == (from: transformed, to: result))  // the AI rewrote the local text
+        #expect(rewrite == (from: transformed, to: result))
     }
 
     @Test func nonCloudEntryShowsOnlyHeardInserted() {

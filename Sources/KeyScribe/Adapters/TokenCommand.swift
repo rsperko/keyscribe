@@ -97,10 +97,9 @@ enum TokenCommandOutput {
     }
 }
 
-// In-memory token cache keyed by the command string, honoring the returned expiry (ExecCredential
-// expirationTimestamp, OAuth expires_in, or a top-level expiration). No-expiry tokens are cached for
-// `defaultTTL` so a brokered credential isn't re-minted on every rewrite (the command is in the hot path
-// between hotkey-release and inserted text). Never persisted (a credential never touches disk).
+// Keyed by the command string, honoring the returned expiry (ExecCredential expirationTimestamp, OAuth
+// expires_in, or a top-level expiration). No-expiry tokens are cached for `defaultTTL` so a brokered
+// credential isn't re-minted on every rewrite. Never persisted — a credential never touches disk.
 actor TokenCommandCache {
     static let shared = TokenCommandCache()
 
@@ -132,9 +131,9 @@ actor TokenCommandCache {
 }
 
 enum TokenCommandRunner {
-    // Runs on a dedicated queue so the blocking Process wait doesn't park a concurrency-pool thread. stdout
-    // and stderr are drained concurrently so a chatty command (>64KB on either pipe) can't deadlock against
-    // an unread buffer; stderr is surfaced on failure.
+    // Dedicated queue so the blocking Process wait doesn't park a concurrency-pool thread. stdout and
+    // stderr are drained concurrently so a chatty command (>64KB on either pipe) can't deadlock against
+    // an unread buffer.
     private static let queue = DispatchQueue(label: "com.keyscribe.token-command", attributes: .concurrent)
 
     static func run(_ command: String, timeout: TimeInterval = 10) async throws -> String {
@@ -187,9 +186,8 @@ enum TokenCommandRunner {
             stdout: stdoutData, stderr: stderrData.value)
     }
 
-    // A command that finished right as the deadline killer fired still produced a valid token, so exit 0 +
-    // valid stdout is success regardless of the timeout flag — only a non-zero exit is treated as a timeout
-    // (terminate()/SIGKILL forces a signal status on a genuinely overrunning command).
+    // A command that finished right as the deadline killer fired still produced a valid token, so exit 0
+    // is success regardless of the timeout flag — only a non-zero exit is treated as a timeout.
     static func outcome(terminationStatus: Int32, timedOut: Bool, stdout: Data, stderr: Data) throws -> String {
         guard terminationStatus == 0 else {
             if timedOut { throw TokenCommandError.timedOut }

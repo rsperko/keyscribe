@@ -1,7 +1,7 @@
 import Foundation
 
-// Builds a host-anchored URL regex from a plain domain the user typed in the friendly "Website…" field
-// (UX2 phase 7a). Entering `github.com` means "the URL's host is github.com or a subdomain of it" — never a
+// Builds a host-anchored URL regex from a plain domain the user typed in the friendly "Website…" field.
+// Entering `github.com` means "the URL's host is github.com or a subdomain of it" — never a
 // substring match. The stored constraint is still an ordinary `url_pattern` regex (schema unchanged); the
 // resolver matches it unanchored over the FULL URL string (ModeResolver.regexFound), so the `^…` anchor and
 // the host structure below do the work. Hand-written raw patterns keep today's unanchored substring

@@ -3,9 +3,8 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// Frugal opens the mic only while dictating, so the warm capture unit the commit path leaves realized must
-// be disposed at the terminal — including when the user switches to Frugal mid-dictation (where
-// reconcileCaptureWarmth defers to this path). Also covers the plain steady-state Frugal dictation.
+// Frugal opens the mic only while dictating, so the warm unit the commit path leaves realized must be
+// disposed at the terminal — including a mid-dictation switch to Frugal, not just steady-state Frugal.
 @MainActor
 struct FrugalCaptureReleaseTests {
     private final class TextEngine: SpeechEngine, @unchecked Sendable {

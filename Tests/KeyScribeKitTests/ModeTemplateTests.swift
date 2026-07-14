@@ -27,7 +27,7 @@ struct ModeTemplateTests {
         #expect(mode.id == "polish")
         #expect(mode.seedId == "polish")
         #expect(mode.seedVersion == template.seedVersion)
-        #expect(!mode.enabled)   // added Disabled; the user enables it after reviewing the seeded editor
+        #expect(!mode.enabled)   // seeded disabled; the user enables it after reviewing the editor
     }
 
     @Test func materializeAtATakenCatalogIdIsASuffixedSeedlessCopy() {

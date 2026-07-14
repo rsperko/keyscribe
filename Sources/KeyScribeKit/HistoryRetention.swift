@@ -17,9 +17,9 @@ public enum HistoryRetention {
         file.hasSuffix(".jsonl") ? String(file.dropLast(6)) : file
     }
 
-    // A fully-configured formatter, built once and shared. Retention runs serialized on the history
-    // store's utility queue, and a DateFormatter is thread-safe for parsing once configured, so the
-    // per-file-per-dictation allocation this used to do is pure waste.
+    // Built once and shared: retention runs serialized on the history store's utility queue, and a
+    // DateFormatter is thread-safe for parsing once configured, so a fresh instance per call would be
+    // pure waste.
     private static let ymdFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)

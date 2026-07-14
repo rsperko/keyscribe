@@ -57,7 +57,7 @@ struct SettingsTests {
         #expect(try SettingsStore.decode(from: encoded) == Settings.defaults)
     }
 
-    // Every field differs from defaults — catches a snake_case encode-key regression the
+    // Every field differs from defaults, catching a snake_case encode-key regression the
     // defaults-only round-trip would miss.
     @Test func nonDefaultSettingsRoundTrip() throws {
         let s = Settings(
@@ -93,9 +93,9 @@ struct SettingsTests {
         #expect(!decoded.stt.recognitionBiasEnabled(for: capable))
     }
 
-    // Rev2: the per-engine dictionary-recovery keys were removed (recovery now runs unconditionally in the
-    // pipeline). A settings file written by an older build still carries them; it must decode cleanly, drop
-    // them on re-encode, and leave the recognition-bias disable list untouched.
+    // The per-engine dictionary-recovery keys were removed (recovery now runs unconditionally). A
+    // settings file from an older build still carries them; it must decode cleanly, drop them on
+    // re-encode, and leave the recognition-bias disable list untouched.
     @Test func legacyRecoveryKeysAreIgnoredAndDroppedWhileBiasSurvives() throws {
         let toml = """
         schema_version = 1
@@ -196,8 +196,8 @@ struct SettingsTests {
         #expect(s.audio.inputDeviceName == "MacBook Pro Microphone")
     }
 
-    // A name may be absent even when the UID is set (an older config, or a device that was disconnected
-    // when first saved) — the picker just falls back to a generic label until the next startup refresh.
+    // A name may be absent even when the UID is set (older config, or the device was disconnected when
+    // first saved) — the picker falls back to a generic label until the next startup refresh.
     @Test func audioUIDWithoutNameDecodes() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1\n[audio]\ninput_device_uid = \"BuiltInMic\"")
         #expect(s.audio.inputDeviceUID == "BuiltInMic")

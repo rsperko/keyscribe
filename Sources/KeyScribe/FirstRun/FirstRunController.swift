@@ -9,7 +9,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     private let onComplete: () -> Void
     private var finished = false
     // Suspends the global hotkey monitor while the trial's ShortcutWell captures, so holding a modifier to
-    // record it never starts a dictation mid-capture. AppDelegate wires `onChange` to `hotkey.isSuspended`.
+    // record it never starts a dictation mid-capture (AppDelegate wires `onChange` to `hotkey.isSuspended`).
     let recordingState = HotkeyRecordingState()
 
     init(
@@ -61,8 +61,9 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         model.onComplete = { [weak self] in self?.complete() }
         // The permission relaunch spawns this in the background while System Settings is frontmost. A
         // background-launched .accessory app usually can't take focus from inside
-        // applicationDidFinishLaunching, so the activate above is a no-op and the wizard stays hidden. Re-
-        // assert once the launch settles, with orderFrontRegardless so it surfaces even if activation is denied.
+        // applicationDidFinishLaunching, so the activate above is a no-op and the wizard stays hidden —
+        // re-assert once the launch settles, with orderFrontRegardless so it surfaces even if activation
+        // is denied.
         Task { @MainActor [weak self] in
             guard let window = self?.window else { return }
             NSApp.activate(ignoringOtherApps: true)
@@ -71,9 +72,9 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         }
     }
 
-    // Single teardown for both finish and manual close: stop the permission poll (its task strongly retains
-    // the model, so without this a window closed on the permissions step keeps the onboarding graph alive
-    // doing 1 Hz work forever) and run onComplete once. Idempotent — finish closes the window, re-entering
+    // Single teardown for both finish and manual close. Stopping the permission poll matters: its task
+    // strongly retains the model, so without this a window closed on the permissions step keeps the
+    // onboarding graph alive doing 1 Hz work forever. Idempotent — finish closes the window, re-entering
     // here via windowWillClose.
     private func complete() {
         guard !finished else { return }
@@ -94,8 +95,8 @@ final class FirstRunController: NSObject, NSWindowDelegate {
 final class FirstRunModel: ObservableObject {
     enum Step { case intro, model, permissions, tryIt, aiService, playground }
 
-    // Step-dot progress mapping (phase 2). Playground shares the last dot with the AI step — it is that
-    // step's reward, not a sixth obligation. The indicator is hidden entirely in the permissions-only flow.
+    // Playground shares the last dot with the AI step — it is that step's reward, not a sixth obligation.
+    // The indicator is hidden entirely in the permissions-only flow.
     static let stepCount = 5
     var stepIndex: Int {
         switch step {
@@ -154,9 +155,9 @@ final class FirstRunModel: ObservableObject {
     var appleSpeechAvailable: Bool { catalog.contains { $0.id == "apple" } }
     let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
-    // Remove a partially-downloaded model's files when a download fails or is cancelled, so the next attempt
-    // starts clean instead of choking on (or silently trusting) half-written weights. Guarded on the model
-    // not already being installed so a completed prior install is never wiped.
+    // Removes a partially-downloaded model's files when a download fails or is cancelled, so the next
+    // attempt starts clean instead of choking on (or silently trusting) half-written weights. Guarded on
+    // the model not already being installed so a completed prior install is never wiped.
     private let cleanupFailedDownload: (String) -> Void
     private let selectEngine: (String) -> Void
     private let repository: ConfigRepository
@@ -256,13 +257,13 @@ final class FirstRunModel: ObservableObject {
             // Relaunched from the permissions funnel: `continueFromPermissions` saw a dead modifier tap (a
             // fresh Accessibility grant is cached as denied until relaunch). Grants are proven (Continue is
             // gated on them); this fresh process reads them and starts the tap. Resume at the trial, whose
-            // modifier tap the relaunch was meant to revive (P2-21) — the AI offer follows it.
+            // modifier tap the relaunch was meant to revive — the AI offer follows it.
             step = .tryIt
         }
     }
 
     // Accessibility verdicts are cached for the process lifetime, so a fresh grant takes effect only on
-    // relaunch. The nuclear setup flow ends by relaunching into itself.
+    // relaunch — this ends the setup flow by relaunching into itself.
     func relaunch() {
         stopPolling()
         onRelaunch()
@@ -292,17 +293,17 @@ final class FirstRunModel: ObservableObject {
                         self.downloadProgress = progress.fraction
                     }
                 }
-                // Wizard closed mid-download → don't switch the engine after a user-perceived cancel (P1-9
-                // class). The install finishes; only the switch + step advance are gated.
+                // Wizard closed mid-download → don't switch the engine after a user-perceived cancel. The
+                // install finishes; only the switch + step advance are gated.
                 guard !Task.isCancelled else { downloading = false; return }
                 selectEngine(id)
                 downloading = false
                 step = .permissions
             } catch {
-                // A failed or cancelled download leaves partial weights on disk. Left behind, they wedge the
-                // next attempt (the SDK may trust or trip over them) and there is no delete affordance for a
-                // model that was never marked installed — the "can't recover without switching models" trap.
-                // Wipe them so retry is clean.
+                // A failed or cancelled download leaves partial weights on disk. Left behind, they wedge
+                // the next attempt (the SDK may trust or trip over them), and there is no delete affordance
+                // for a model that was never marked installed — the "can't recover without switching
+                // models" trap. Wipe them so retry is clean.
                 cleanupFailedDownload(id)
                 downloadError = "Download failed. Check your connection and try again."
                 downloading = false
@@ -310,7 +311,7 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // ui_design.md §2: onboarding ends after one real successful dictation, not after typing.
+    // ui_design.md §2: onboarding ends after one real successful DICTATION, not after typing in the field.
     func noteDictation(_ completion: DictationCompletion) {
         guard case .inserted = completion.outcome else { return }
         trialSucceeded = true
@@ -375,8 +376,8 @@ final class FirstRunModel: ObservableObject {
         finish()
     }
 
-    // Trial "Continue" and its "Skip for now" both land on the AI offer — the offer's own Finish is one
-    // click, so nobody is ever more than two clicks from done and the AI step is never skipped invisibly.
+    // Trial "Continue" and "Skip for now" both land on the AI offer — its own Finish is one click, so
+    // nobody is ever more than two clicks from done and the AI step is never skipped invisibly.
     func continueFromTrial() {
         step = .aiService
     }
@@ -431,8 +432,8 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // Let the system consent dialog drive the grant action. Opening System Settings here can steal focus
-    // from the consent dialog; the row has a separate deep-link for manual repair.
+    // Opening System Settings here can steal focus from the system consent dialog, so let the dialog drive
+    // the grant; the row has a separate deep-link for manual repair.
     func requestAccessibility() {
         _ = Permissions.accessibilityStatus(prompt: true)
         refreshStatuses()
@@ -461,8 +462,8 @@ final class FirstRunModel: ObservableObject {
         }
     }
 
-    // These tasks strongly retain the model and mutate config on completion (connect writes the connection +
-    // enables modes; download switches the engine). Cancelling on teardown keeps a closed wizard from
+    // These tasks strongly retain the model and mutate config on completion (connect writes the connection
+    // + enables modes; download switches the engine). Cancelling on teardown keeps a closed wizard from
     // silently connecting an AI service or switching the STT engine after the user walked away.
     func stopPolling() {
         pollTask?.cancel(); pollTask = nil
@@ -471,8 +472,8 @@ final class FirstRunModel: ObservableObject {
     }
 
     // Held in setupTask so the in-flight test/write can be cancelled when the wizard closes (see
-    // createAIService's post-test guard); a bare detached Task would let a slow test mutate config after a
-    // user-perceived cancel.
+    // createAIService's post-test guard) — a bare detached Task would let a slow test mutate config after
+    // a user-perceived cancel.
     func connect() {
         setupTask?.cancel()
         setupTask = Task { @MainActor [weak self] in await self?.createAIService() }
@@ -482,9 +483,9 @@ final class FirstRunModel: ObservableObject {
         micStatus == .granted && axStatus == .granted
     }
 
-    // Leaving the permissions step. `onReadyToDictate` retries the modifier-key tap; if the just-granted
-    // Accessibility verdict was cached as denied at launch the tap stays dead and the trial step (only
-    // triggered by that tap) can't complete — funnel to a relaunch instead.
+    // `onReadyToDictate` retries the modifier-key tap; if the just-granted Accessibility verdict was
+    // cached as denied at launch, the tap stays dead and the trial step (only triggered by that tap) can't
+    // complete — funnel to a relaunch instead.
     func continueFromPermissions() {
         onReadyToDictate()
         if tapActive() {
@@ -497,8 +498,8 @@ final class FirstRunModel: ObservableObject {
     var directTriggerDisplay: String { directTrigger?.displayString ?? "Fn (Globe)" }
 
     // Cached so the trial's instruction sentence and keycap read the resolved trigger without a disk read
-    // per render. `loadAll` touches disk, so this is called on entry to the trial/playground (via `step`'s
-    // didSet) and after a rebind, not from view code.
+    // per render. `loadAll` touches disk, so this runs on entry to the trial/playground (via `step`'s
+    // didSet) and after a rebind — never from view code.
     func refreshDirectTrigger() {
         let trigger = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }?.triggerKeys.first
         if let key = trigger?.key {
@@ -515,9 +516,9 @@ final class FirstRunModel: ObservableObject {
             set: { [weak self] in self?.setDirectTrigger($0) })
     }
 
-    // The trial owns the Plain Dictation shortcut: this rewrites `_direct.toml` through the same repository
-    // owner Modes uses, so the rebind goes live immediately (configRepository.onChange rebuilds the hotkey
-    // monitor). Preserves an existing entry's press style / tap threshold, mirroring ModeTriggerRow.
+    // Rewrites `_direct.toml` through the same repository owner Modes uses, so the rebind goes live
+    // immediately (configRepository.onChange rebuilds the hotkey monitor). Preserves an existing entry's
+    // press style / tap threshold, mirroring ModeTriggerRow.
     func setDirectTrigger(_ key: String) {
         triggerSaveError = nil
         guard var mode = ModeStore.loadAll(in: modesDir).first(where: { $0.id == Mode.directId }) else { return }
@@ -570,8 +571,8 @@ final class FirstRunModel: ObservableObject {
     func createAIService() async {
         aiSetupError = nil
         // Delegate the test-then-save-with-rollback to the shared connector so onboarding and Settings can
-        // never diverge (UX2 phase 5b). The FirstRun-specific work (linking the headline rewrite modes,
-        // entering the playground) stays here.
+        // never diverge. The FirstRun-specific work (linking the headline rewrite modes, entering the
+        // playground) stays here.
         let connector = AIServiceConnector(
             repository: repository, saveAPIKey: saveAPIKey, deleteAPIKey: deleteAPIKey,
             readAPIKey: readAPIKey, testConnection: testConnection)
@@ -604,10 +605,10 @@ final class FirstRunModel: ObservableObject {
 
     private var ledgerDir: URL { supportDir.appendingPathComponent("lkg", isDirectory: true) }
 
-    // On the first AI connection, wire up the two headline rewrite modes so the playground can demo them. On a
-    // legacy install their files exist (seeded starters) → link + enable in place. On a fresh install they do
-    // not exist yet (templates-only) → materialize the template as a `.seed` (keeps seedId, so the playground's
-    // seedId lookup and future seed updates both keep working) wired to the new connection.
+    // On the first AI connection, wire up the two headline rewrite modes so the playground can demo them.
+    // On a legacy install their files exist (seeded starters) → link + enable in place. On a fresh install
+    // they don't exist yet (templates-only) → materialize the template as a `.seed` (keeps seedId, so the
+    // playground's seedId lookup and future seed updates both keep working) wired to the new connection.
     private func connectStarterModes(to connectionId: String) -> [String] {
         var failed: [String] = []
         for seedId in Self.headlineSeedIds {
@@ -616,9 +617,8 @@ final class FirstRunModel: ObservableObject {
             if var mode = onDisk.first(where: { $0.seedId == seedId }) {
                 guard var rewrite = mode.aiRewrite else { continue }
                 let linked = !rewrite.connection.isEmpty && connections.contains { $0.id == rewrite.connection }
-                // Already wired to a live connection: leave it exactly as the user has it — do not repoint
-                // it at the new service or re-enable a starter they deliberately turned off. Only wire up a
-                // starter that has no working connection yet.
+                // Already wired to a live connection: leave it exactly as the user has it — don't repoint
+                // it at the new service or re-enable a starter they deliberately turned off.
                 guard !linked else { continue }
                 rewrite.connection = connectionId
                 mode.aiRewrite = rewrite

@@ -13,12 +13,7 @@ private func mode(
     return m
 }
 
-// Phase-A resolution always lands on a concrete mode; tests pass the Direct floor as the fallback.
-// `defaultModeId` is accepted but ignored now that there is no separate default mode — it just keeps
-// the existing call sites readable.
-private func phaseA(
-    _ modes: [Mode], defaultModeId: String = "", context: RoutingContext, triggerKey: String?
-) -> Mode {
+private func phaseA(_ modes: [Mode], context: RoutingContext, triggerKey: String?) -> Mode {
     ModeResolver.resolvePhaseA(modes: modes, directFallback: .direct, context: context, triggerKey: triggerKey)
 }
 
@@ -78,7 +73,7 @@ struct ModeResolverTests {
         exact.constraints = [Mode.Constraint(bundleId: "com.jetbrains.intellij")]
         var prefix = mode("prefix", keys: ["right_option"])
         prefix.constraints = [Mode.Constraint(bundlePrefix: "com.jetbrains.")]
-        let m = phaseA([prefix, exact], defaultModeId: "prefix",
+        let m = phaseA([prefix, exact],
             context: .init(bundleId: "com.jetbrains.intellij"), triggerKey: "right_option")
         #expect(m.id == "exact")
     }
@@ -88,7 +83,7 @@ struct ModeResolverTests {
         titled.constraints = [Mode.Constraint(windowTitle: #"(?i)github"#)]
         var urled = mode("urled", keys: ["right_option"])
         urled.constraints = [Mode.Constraint(urlPattern: #"github\.com"#)]
-        let m = phaseA([titled, urled], defaultModeId: "titled",
+        let m = phaseA([titled, urled],
             context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x", windowTitle: "GitHub"),
             triggerKey: "right_option")
         #expect(m.id == "urled")
@@ -108,7 +103,7 @@ struct ModeResolverTests {
         both.constraints = [Mode.Constraint(bundleId: "com.google.Chrome", urlPattern: #"github\.com"#)]
         var urlOnly = mode("urlOnly", keys: ["right_option"])
         urlOnly.constraints = [Mode.Constraint(urlPattern: #"github\.com"#)]
-        let m = phaseA([urlOnly, both], defaultModeId: "urlOnly",
+        let m = phaseA([urlOnly, both],
             context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x"),
             triggerKey: "right_option")
         #expect(m.id == "both")
@@ -118,21 +113,19 @@ struct ModeResolverTests {
     @Test func triggerKeyBindingSelectsKeyedMode() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"])
-        let m = phaseA([plain, email], defaultModeId: "plain", context: .init(), triggerKey: "right_option")
+        let m = phaseA([plain, email], context: .init(), triggerKey: "right_option")
         #expect(m.id == "email")
     }
 
     @Test func contextDefaultPrefersAppSpecificMode() {
         let plain = mode("plain")
         let email = mode("email", bundles: ["com.apple.mail"])
-        let m = phaseA([plain, email], defaultModeId: "plain",
+        let m = phaseA([plain, email],
             context: .init(bundleId: "com.apple.mail"), triggerKey: nil)
         #expect(m.id == "email")
     }
 
     @Test func fallsBackToDirectWhenNoKeyAndNoContextMatch() {
-        // No key, and the only constrained mode doesn't match the app → the Direct floor (there is no
-        // separate "default mode" anymore).
         let plain = mode("plain")
         let email = mode("email", bundles: ["com.apple.mail"])
         let m = phaseA([plain, email], context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
@@ -140,12 +133,11 @@ struct ModeResolverTests {
     }
 
     @Test func keyPressFallsThroughToDirectWhenConstraintExcludesContext() {
-        // email is keyed to right_option but constrained to Mail; pressing the key in Notes neither runs
-        // email nor borrows the default — it falls through to the Direct floor (design.md §4.3: an app
-        // constraint gates every trigger, and a press is never a no-op).
+        // design.md §4.3: an app constraint gates every trigger, and a key press is never a no-op —
+        // pressing the key outside email's constrained app falls through to Direct.
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
-        let m = phaseA([plain, email], defaultModeId: "plain",
+        let m = phaseA([plain, email],
             context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option")
         #expect(m.id == Mode.direct.id)
         #expect(m.aiRewrite == nil)
@@ -154,14 +146,14 @@ struct ModeResolverTests {
     @Test func keyPressRunsConstrainedModeInsideItsContext() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
-        let m = phaseA([plain, email], defaultModeId: "plain",
+        let m = phaseA([plain, email],
             context: .init(bundleId: "com.apple.mail"), triggerKey: "right_option")
         #expect(m.id == "email")
     }
 
     @Test func userNamedDirectCannotCollideWithTheSystemFloor() {
-        // The floor lives in the reserved "_" namespace the slugger can never produce, so a user mode
-        // named "Direct" gets a distinct id and the two never clash.
+        // "_direct" lives in the reserved "_" namespace the slugger can never produce from user
+        // input, so a user mode named "Direct" gets a distinct id and the two never clash.
         let userId = ModeStore.newID(for: "Direct", existing: [Mode.directId])
         #expect(userId == "direct")
         #expect(userId != Mode.directId)
@@ -172,7 +164,7 @@ struct ModeResolverTests {
     @Test func keyPressFallsThroughToDirectWhenAllBoundModesAreIneligible() {
         let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
         let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
-        let m = phaseA([slack, obsidian], defaultModeId: "slack",
+        let m = phaseA([slack, obsidian],
             context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option")
         #expect(m.id == Mode.direct.id)
     }
@@ -181,9 +173,9 @@ struct ModeResolverTests {
         let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
         let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
         let modes = [slack, obsidian]
-        let inSlack = phaseA(modes, defaultModeId: "slack",
+        let inSlack = phaseA(modes,
             context: .init(bundleId: "com.tinyspeck.slackmacgap"), triggerKey: "right_option")
-        let inObsidian = phaseA(modes, defaultModeId: "slack",
+        let inObsidian = phaseA(modes,
             context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
         #expect(inSlack.id == "slack")
         #expect(inObsidian.id == "obsidian")
@@ -193,11 +185,11 @@ struct ModeResolverTests {
         let plain = mode("plain", keys: ["right_option"])
         let markdown = mode("markdown", keys: ["right_option"], bundles: ["md.obsidian"])
         let modes = [plain, markdown]
-        let inObsidian = phaseA(modes, defaultModeId: "plain",
+        let inObsidian = phaseA(modes,
             context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
-        // An unconstrained mode shares the key, so it stays eligible everywhere — the press runs it, not
-        // the Direct floor.
-        let elsewhere = phaseA(modes, defaultModeId: "plain",
+        // An unconstrained mode sharing the key stays eligible everywhere, so the press outside
+        // Obsidian runs it rather than falling through to Direct.
+        let elsewhere = phaseA(modes,
             context: .init(bundleId: "com.apple.Notes"), triggerKey: "right_option")
         #expect(inObsidian.id == "markdown")
         #expect(elsewhere.id == "plain")
@@ -207,8 +199,8 @@ struct ModeResolverTests {
         let app = mode("app", bundles: ["com.google.Chrome"])                                  // score 1
         let appUrl = mode("appurl", bundles: ["com.google.Chrome"], urlPattern: #"github\.com"#) // score 3
         let ctx = RoutingContext(bundleId: "com.google.Chrome", url: "https://github.com/x")
-        // app is declared first, but appUrl is more specific and must win.
-        let m = phaseA([app, appUrl], defaultModeId: "app", context: ctx, triggerKey: nil)
+        // app is declared first but must lose: specificity beats declaration order.
+        let m = phaseA([app, appUrl], context: ctx, triggerKey: nil)
         #expect(m.id == "appurl")
     }
 
@@ -234,7 +226,7 @@ struct ModeResolverTests {
     }
 
     @Test func suffixPhraseToleratesSTTPunctuationAndCase() {
-        // Parakeet emits "… as an email." (capitalized, trailing period) — must still route.
+        // Parakeet emits capitalized, period-terminated output — must still route.
         let email = mode("email", phrases: [#"(?i)\bas an email$"#])
         let r = ModeResolver.resolvePhaseB(eligibleModes: [email], transcript: "send this to bob as an email.")
         #expect(r.routedModeId == "email")
@@ -260,7 +252,7 @@ struct ModeResolverTests {
         #expect(ModeResolver.eligibleModes([gh], context: .init(bundleId: "anything", url: "https://gitlab.com")).isEmpty)
     }
 
-    // Phase B specificity — the Chrome / ModeB / ModeC / ModeD example from design.md §4.3.
+    // The Chrome / ModeB / ModeC / ModeD example from design.md §4.3.
     @Test func phaseBPrefersMoreSpecificEligibleModeOverDeclarationOrder() {
         let search = #"(?i)\bas search$"#
         let b = mode("b", phrases: [search], bundles: ["md.obsidian"])         // ineligible in Chrome
@@ -299,16 +291,16 @@ struct ModeResolverTests {
     // A bare spoken phrase (no (?i), \b, or $) must route on every common STT output ending: the
     // matcher supplies case-insensitivity, the end anchor, and trailing-cruft tolerance itself.
     @Test(arguments: [
-        "summarize this thread as prompt",        // no punctuation
-        "summarize this thread as prompt.",       // trailing period (Parakeet/Whisper default)
-        "summarize this thread as prompt!",        // exclamation
-        "summarize this thread as prompt?",        // question mark
-        "summarize this thread as prompt...",      // ellipsis
-        "summarize this thread as prompt. ",       // period + trailing space
-        "summarize this thread as prompt ",        // trailing space only
-        "summarize this thread as prompt,\n",      // comma + newline
-        "summarize this thread As Prompt.",        // capitalized (case-insensitive)
-        "summarize this thread AS PROMPT",         // upper-cased
+        "summarize this thread as prompt",
+        "summarize this thread as prompt.",       // Parakeet/Whisper default
+        "summarize this thread as prompt!",
+        "summarize this thread as prompt?",
+        "summarize this thread as prompt...",
+        "summarize this thread as prompt. ",
+        "summarize this thread as prompt ",
+        "summarize this thread as prompt,\n",
+        "summarize this thread As Prompt.",
+        "summarize this thread AS PROMPT",
     ])
     func bareLiteralPhraseToleratesCommonSTTEndings(_ transcript: String) {
         let ai = mode("ai-prompt", phrases: ["as prompt"])
@@ -318,7 +310,7 @@ struct ModeResolverTests {
     }
 
     @Test func bareLiteralPhraseHonorsLeadingWordBoundary() {
-        // "as prompt" must not fire inside "has prompt" / "gas prompt" — that would split a word.
+        // Must not fire inside "has prompt" / "gas prompt" — that would split a word.
         let ai = mode("ai-prompt", phrases: ["as prompt"])
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "this has prompt").routedModeId == nil)
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "increase the gas prompt").routedModeId == nil)
@@ -333,8 +325,6 @@ struct ModeResolverTests {
     }
 
     @Test func regexPhraseStillSupported() {
-        // A genuine regex (alternation + optional group) routes "as a note" and "as note" alike,
-        // and tolerates the same trailing STT period.
         let note = mode("note", phrases: [#"(?i)\bas (a |an )?note$"#])
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [note], transcript: "jot this as a note.").transcript == "jot this")
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [note], transcript: "jot this as note").transcript == "jot this")
@@ -342,7 +332,7 @@ struct ModeResolverTests {
     }
 
     @Test func caseSensitivityCanBeOptedBackIn() {
-        // Phrases are case-insensitive by default; (?-i) restores case sensitivity when needed.
+        // Phrases are case-insensitive by default; (?-i) opts back in.
         let m = mode("cs", phrases: [#"(?-i)as prompt"#])
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this as prompt").routedModeId == "cs")
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this As Prompt").routedModeId == nil)

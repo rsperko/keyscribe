@@ -37,9 +37,8 @@ struct RedactionTokenizerTests {
         #expect(out == "⟦SN:REDACT:1⟧ and ⟦SN:REDACT:2⟧")
     }
 
-    // Distinct tokens per site (not deduped): a repeated secret must survive as two occurrences
-    // through the post-LLM gate's exactly-once check (mirrors ClipboardTokenizer) — a single reused
-    // token can never satisfy "each issued token appears exactly once" when it appears twice.
+    // Distinct tokens per site (not deduped): a repeated secret needs two occurrences to satisfy the
+    // post-LLM gate's exactly-once check (mirrors ClipboardTokenizer).
     @Test func repeatedSecretGetsDistinctTokens() {
         let (out, t) = redact("a@b.com then a@b.com again")
         #expect(out == "⟦SN:REDACT:1⟧ then ⟦SN:REDACT:2⟧ again")
@@ -61,8 +60,7 @@ struct RedactionTokenizerTests {
         #expect(gh.contains("⟦SN:REDACT:1⟧"))
     }
 
-    // A 16-digit card can sub-match the phone pattern; overlap resolution must collapse to a single
-    // span and restore must reproduce the original exactly.
+    // A 16-digit card can sub-match the phone pattern; overlap resolution must collapse to one span.
     @Test func overlappingMatchesProduceOneSpanAndRestoreExactly() {
         let original = "pay 4111 1111 1111 1111 now"
         let (out, t) = redact(original)
@@ -74,7 +72,7 @@ struct RedactionTokenizerTests {
     @Test func bestEffortIsAdvertisedNotGuaranteed() {
         // an obfuscated secret may slip through — redaction is best-effort by design
         let (out, _) = redact("my key is ess kay dash abc")
-        #expect(out == "my key is ess kay dash abc")   // not caught; acceptable
+        #expect(out == "my key is ess kay dash abc")
     }
 
     @Test func redactsStripeAndSlackTokens() {
@@ -137,10 +135,9 @@ struct RedactionTokenizerTests {
         #expect(out == "this is an ordinary sentence about establishment matters")
     }
 
-    // A detector must never scan an already-minted ⟦SN:…⟧ token body. The KEY=value detector's value
-    // class (`[^\s"']{6,}`) would otherwise swallow a whole token that trails a "password:"-style run
-    // (and a future detector could match partway in, stranding a `⟦SN:` fragment and leaking the
-    // protected span). Scanning only the runs between sentinels leaves the token byte-for-byte intact.
+    // A detector must never scan an already-minted ⟦SN:…⟧ token body — the KEY=value detector's value
+    // class (`[^\s"']{6,}`) would otherwise swallow a trailing token whole, stranding a fragment and
+    // leaking the protected span. Scanning only between sentinels keeps tokens byte-for-byte intact.
     @Test func doesNotRedactAcrossASentinelBoundary() {
         let t = Tokenizer()
         let token = t.tokenize("s3cr3t-body-value", type: .verbatim)
@@ -151,14 +148,13 @@ struct RedactionTokenizerTests {
 
     @Test func unpairedSentinelLookalikeDoesNotHideSecretFromRedaction() {
         let t = Tokenizer()
-        let verb = t.tokenize("keep", type: .verbatim)   // ⟦SN:VERB:1⟧
+        let verb = t.tokenize("keep", type: .verbatim)
         let out = RedactionTokenizer.apply("⟦SN: x sk-abcdefghijklmnop1234 \(verb) tail", into: t)
         #expect(!out.contains("sk-abcdefghijklmnop1234"))
         #expect(out.contains("⟦SN:REDACT:1⟧"))
         #expect(out.contains(verb))
     }
 
-    // A real secret sitting between two sentinel tokens is still redacted normally.
     @Test func redactsSecretBetweenSentinelTokens() {
         let t = Tokenizer()
         let a = t.tokenize("alpha", type: .verbatim)

@@ -2,8 +2,8 @@ import AppKit
 import Testing
 @testable import KeyScribe
 
-// A promised/lazy pasteboard flavor whose data materializes slowly — stands in for a cross-process image the
-// source app re-renders on demand. The provider is invoked synchronously on whatever thread requests the data.
+// Stands in for a cross-process image the source app re-renders on demand: a promised/lazy pasteboard
+// flavor whose data materializes slowly. The provider is invoked synchronously on the requesting thread.
 private final class SlowDataProvider: NSObject, NSPasteboardItemDataProvider, @unchecked Sendable {
     func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
         Thread.sleep(forTimeInterval: 1.0)
@@ -11,15 +11,13 @@ private final class SlowDataProvider: NSObject, NSPasteboardItemDataProvider, @u
     }
 }
 
-// Regression tests for the TextInserter pasteboard guard. The bugs these lock in:
-//  1. Restore saved only `.string`, silently destroying images / RTF / file lists on every dictation.
-//  2. A failed round-trip write left the clipboard EMPTY, so a late ⌘V pasted nothing.
-//  3. The heavyweight divert then over-corrected, dropping even a SMALL image/rich clipboard on every
-//     dictation. `capture` now renders every flavor off the main actor under a byte cap, so small
-//     images / webarchive survive while a 50–100 MB TIFF never stalls the main thread.
-// They run against an isolated pasteboard (withUniqueName) so they need no GUI and don't touch the
-// user's real clipboard. The 250ms restore delay is a timing constant tuned to a real app's paste
-// latency — not unit-testable here — so it is verified by hand, not asserted.
+// Regression tests for three bugs in the TextInserter pasteboard guard: restore once saved only
+// `.string` (destroying images/RTF/file lists), a failed round-trip write once left the clipboard
+// EMPTY (a late ⌘V pasted nothing), and the fix for that then over-corrected by dropping even a SMALL
+// image/rich clipboard (now `capture` renders every flavor off the main actor under a byte cap, so
+// small images survive while a 50–100 MB TIFF never stalls the main thread). Runs against an isolated
+// pasteboard (withUniqueName), so no GUI and no touching the user's real clipboard. The 250ms restore
+// delay is a timing constant tuned to real paste latency — not unit-testable, verified by hand.
 @MainActor
 struct PasteboardSnapshotTests {
     @Test func restoresAllTypesNotJustString() async {
@@ -33,13 +31,11 @@ struct PasteboardSnapshotTests {
 
         let snapshot = await TextInserter.PasteboardSnapshot.capture(from: pb)
 
-        // A dictation overwrites the clipboard with its scratch text…
         pb.clearContents()
         pb.setString("scratch dictation text", forType: .string)
 
         snapshot.restore(to: pb)
 
-        // …and restore brings back BOTH the text and the non-string representation.
         #expect(pb.string(forType: .string) == "the user's note")
         #expect(pb.data(forType: binaryType) == Data([0xDE, 0xAD, 0xBE, 0xEF]))
     }
@@ -87,8 +83,7 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: binaryType) == nil)
     }
 
-    // A small image clipboard is preserved (renders off-main, fits under the cap) — the reversal of the old
-    // heavyweight divert that wiped even a tiny screenshot on every dictation.
+    // Reversal of the old heavyweight divert that wiped even a tiny screenshot on every dictation.
     @Test func smallImageClipboardIsPreservedNotDropped() async {
         let pb = NSPasteboard.withUniqueName()
         let image = NSImage(size: NSSize(width: 4, height: 4))
@@ -115,8 +110,8 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: .tiff) == tiff)
     }
 
-    // An image-only clipboard (no `.string`) is preserved, and the full restore replaces the scratch — so the
-    // image returns AND the dictated text (which can include restored redacted spans) is never left behind.
+    // The full restore replaces the scratch entirely, so the dictated text (which can include restored
+    // redacted spans) is never left behind alongside the restored image.
     @Test func imageOnlyClipboardIsRestoredWithoutLeakingScratch() async {
         let pb = NSPasteboard.withUniqueName()
         let image = NSImage(size: NSSize(width: 4, height: 4))
@@ -126,7 +121,7 @@ struct PasteboardSnapshotTests {
         image.unlockFocus()
         let tiff = image.tiffRepresentation!
         let item = NSPasteboardItem()
-        item.setData(tiff, forType: .tiff)  // no .string flavor
+        item.setData(tiff, forType: .tiff)
         pb.clearContents()
         pb.writeObjects([item])
 
@@ -136,13 +131,12 @@ struct PasteboardSnapshotTests {
         pb.setString("scratch dictation text", forType: .string)
         snapshot.restore(to: pb)
 
-        #expect(pb.data(forType: .tiff) == tiff)         // image preserved
-        #expect(pb.string(forType: .string) == nil)      // scratch text not left behind
+        #expect(pb.data(forType: .tiff) == tiff)
+        #expect(pb.string(forType: .string) == nil)
     }
 
-    // A promised/lazy flavor that materializes slowly (a provider sleeping past the deadline) must not hang the
-    // paste: capture returns on the deadline and falls back to plain text. The sub-second elapsed also proves the
-    // render — and the provider it drives — ran off the main actor, so the awaiting main thread was never blocked.
+    // A provider sleeping past the deadline must not hang the paste: capture returns on the deadline and
+    // falls back to plain text. The sub-second elapsed also proves the render ran off the main actor.
     @Test func lazyFlavorThatMissesTheDeadlineFallsBackToPlainTextWithoutHanging() async {
         let pb = NSPasteboard.withUniqueName()
         let slowType = NSPasteboard.PasteboardType("com.keyscribe.test.slow")
@@ -162,8 +156,7 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: slowType) == nil)
     }
 
-    // The gate behind the Add-to-Vocabulary prefill: empty/plain-text round-trips perfectly; any image/rich
-    // flavor does not, so that clipboard is left untouched.
+    // The gate behind the Add-to-Vocabulary prefill: an image/rich flavor is left untouched.
     @Test func emptyAndPlainTextClipboardsRestorePerfectly() {
         let empty = NSPasteboard.withUniqueName()
         empty.clearContents()

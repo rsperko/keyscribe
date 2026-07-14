@@ -37,7 +37,7 @@ struct RewriteServiceTests {
     @Test func fallsBackToLocalWhenClientThrows() async {
         let svc = RewriteService(client: FakeClient([.failure(FakeError())]))
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
-        // The fallback now carries the reason so it is diagnosable rather than silent.
+        // fallback carries a reason so a failure is diagnosable, not silent.
         guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "hello")
         #expect(reason != nil)
@@ -45,8 +45,8 @@ struct RewriteServiceTests {
     }
 
     @Test func retriesOnceThenSucceeds() async {
-        // first output drops the token (gate fail) → retry → second output is clean. Content carries the
-        // token (as the tokenized transcript does in production) so the gate requires it.
+        // content carries the token (as the tokenized transcript does in production), so the gate
+        // requires it back and retries once when the first reply drops it.
         let client = FakeClient([.success("dropped it"), .success("kept ⟦SN:REDACT:1⟧")])
         let svc = RewriteService(client: client)
         let out = await svc.rewrite(
@@ -65,14 +65,13 @@ struct RewriteServiceTests {
         guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "orig ⟦SN:REDACT:1⟧")
         #expect(reason != nil)   // gate-failure fallback is also labeled
-        #expect(received == "still no token")   // the last reply received, kept for the history record
-        #expect(await client.calls == 2)   // initial + one stricter retry, no more
+        #expect(received == "still no token")   // last reply received, kept for the history record
+        #expect(await client.calls == 2)   // initial call + exactly one stricter retry
     }
 
-    // An issued token that was swallowed upstream (a verbatim token captured inside a redaction
-    // span) is absent from the sent content, so the model never sees it. The gate must NOT require it —
-    // a clean output that reproduces only the tokens actually present passes on the first call, no doomed
-    // retry, no spurious fallback for the privacy+verbatim users this targets.
+    // A token issued but swallowed upstream (a verbatim token captured inside a redaction span) never
+    // reaches the sent content, so the gate must not require it back — otherwise every privacy+verbatim
+    // dictation would retry and fall back needlessly.
     @Test func passesWhenIssuedTokenAbsentFromSentContent() async {
         let client = FakeClient([.success("The ⟦SN:REDACT:1⟧ please.")])
         let svc = RewriteService(client: client)

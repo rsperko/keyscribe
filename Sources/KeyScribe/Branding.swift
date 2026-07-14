@@ -1,9 +1,8 @@
 import Foundation
 import KeyScribeKit
 
-// The user-facing product name, resolved once from the running bundle ("KeyScribe" prod, "KeyScribeDev"
-// dev, the bundle name for a `custom` rebrand) — so a downstream rebrand needs no source edits. Use
-// anywhere the app refers to itself in UI copy; never hardcode the literal name.
+// The only place the literal app name should be hardcoded — the white-label seam for downstream
+// rebrands. Interpolate `Branding.appName` everywhere else instead of hardcoding "KeyScribe".
 enum Branding {
     static let appName: String = AppVariant(
         bundleID: Bundle.main.bundleIdentifier,

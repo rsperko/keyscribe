@@ -40,7 +40,6 @@ struct RewriteRequestBuilder {
         let styleRules = plan.fragmentBodies(ids: mode.aiRewrite?.fragments ?? [])
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
-        // Lowercase the content once rather than per term.
         let dictionary = plan.mergedDictionary(for: mode)
         let lowerContent = content.lowercased()
         let validTerms = dictionary.filter { lowerContent.contains($0.lowercased()) }

@@ -12,8 +12,8 @@ struct ConfigRepositoryTests {
         return dir
     }
 
-    // The whole point of routing writes through the repository: the change is visible on the NEXT
-    // config read without waiting on the FSEvents watcher, and the host is notified.
+    // Routing writes through the repository must make the change visible on the NEXT config read
+    // without waiting on the FSEvents watcher, and notify the host.
     @Test func aModeWriteInvalidatesTheCacheAndNotifies() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -22,19 +22,18 @@ struct ConfigRepositoryTests {
         var notified = 0
         repo.onChange = { notified += 1 }
 
-        _ = config.modes                              // populate the cache
+        _ = config.modes
 
         var mode = Mode(id: "note", name: "Note")
         mode.aiRewrite = .init(connection: "", prompt: "x")
         try repo.writeMode(mode)
 
-        #expect(config.modes.contains { $0.id == "note" })   // cache re-read from disk
+        #expect(config.modes.contains { $0.id == "note" })
         #expect(notified == 1)
     }
 
-    // Fragment (AI-rewrite instruction) files are written directly, not through `commit`, so their
-    // self-write must independently invalidate + notify — otherwise the resolved plan keeps the stale
-    // instruction text (baked in at realization and reused across dictations) until relaunch.
+    // Fragment files are written directly, not through `commit`, so their self-write must independently
+    // invalidate + notify — otherwise the resolved plan keeps stale instruction text until relaunch.
     @Test func recordingAFragmentSelfWriteInvalidatesResolvedAndNotifies() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -52,7 +51,7 @@ struct ConfigRepositoryTests {
         var mode = Mode(id: "note", name: "Note")
         mode.aiRewrite = .init(connection: "", prompt: "x", fragments: ["tone"])
         try repo.writeMode(mode)
-        #expect(config.resolved.fragmentBodies(ids: ["tone"]) == ["old instruction"])   // realize + cache
+        #expect(config.resolved.fragmentBodies(ids: ["tone"]) == ["old instruction"])
 
         try FragmentStore.replacingBody(inFile: try String(contentsOf: fragURL, encoding: .utf8), with: "new instruction")
             .write(to: fragURL, atomically: true, encoding: .utf8)
@@ -91,7 +90,7 @@ struct ConfigRepositoryTests {
         #expect(Set(DictionaryStore.loadOrDefault(supportDir: dir).words) == ["Postgres", "Redis"])
     }
 
-    // A repository write records the touched file, so its echo is suppressed — but an external edit
+    // A repository write records the touched file so its own echo is suppressed, but an external edit
     // still reloads.
     @Test func aRepositoryWriteRecordsIntoTheSelfWriteGate() throws {
         let dir = tempDir()
@@ -180,9 +179,8 @@ struct ConfigRepositoryTests {
         #expect(!config.modes.contains { $0.id == "temp" })
     }
 
-    // Connection writes must read-modify-write from disk (like the vocabulary stores), not clobber a whole
-    // caller-supplied set: a connection another surface added between one model's snapshot and its save
-    // must survive a subsequent delete of an unrelated connection.
+    // Connection writes must read-modify-write from disk, not clobber a whole caller-supplied set: a
+    // connection another surface added must survive a subsequent delete of an unrelated connection.
     @Test func deletingAConnectionPreservesOneAddedConcurrentlyOnDisk() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -192,10 +190,8 @@ struct ConfigRepositoryTests {
         ]), to: dir)
         let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
 
-        // Another surface adds C to disk...
         try repo.upsertConnection(Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "kc"))
-        // ...then this surface removes an unrelated connection (from a FRESH read, not a stale set).
-        let after = try repo.deleteConnection(id: "a")
+        let after = try repo.deleteConnection(id: "a")  // must read fresh from disk, not a stale in-memory set
 
         #expect(after.connections.map(\.id).sorted() == ["b", "c"])
         #expect(ConnectionStore.loadOrDefault(supportDir: dir).connections.map(\.id).sorted() == ["b", "c"])
@@ -231,7 +227,6 @@ struct ConfigRepositoryTests {
         #expect((try String(contentsOf: file, encoding: .utf8)) == "schema_version = 99\n")
     }
 
-    // A rename is one operation: the new file lands and the old file is gone — never both (no duplicate).
     @Test func renameModeLeavesNoDuplicateFile() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

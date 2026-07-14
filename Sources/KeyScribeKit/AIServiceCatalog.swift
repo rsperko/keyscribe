@@ -1,15 +1,12 @@
 import Foundation
 
-// The single source of truth for the AI-service lineup: which services the picker and Add chooser
-// offer, their endpoints, default models, key-console links, allowed sign-in methods, and which entry
-// onboarding seeds. A rebranded downstream build replaces this file plus its test-side mirror
-// (AIServiceCatalogTests, the one test file that pins the lineup) — everything else (picker, onboarding
-// default, auth UI, model discovery, every other test) derives from the catalog and stays untouched.
+// The single source of truth for the AI-service lineup (endpoints, default models, key-console links,
+// sign-in methods, onboarding default). A rebranded downstream build swaps only this file plus its
+// test-side mirror (AIServiceCatalogTests) — everything else derives from the catalog untouched.
 //
-// The swap contract: `all`, `defaultPreset`, and `custom` must stay defined; `defaultPreset` must be a
-// member of `all`; `custom` must remain defined even if a lineup chooses not to list it — `matching` and
-// the managed-preset demotion fall back to it. Every other test file is lineup-agnostic (fixtures and
-// contract members only), so no lineup shape beyond this contract is assumed anywhere.
+// Swap contract: `all`, `defaultPreset`, and `custom` must stay defined; `defaultPreset` must be a
+// member of `all`; `custom` must remain defined even if a lineup omits it from the picker — `matching`
+// and the managed-preset demotion fall back to it.
 public enum AIServiceCatalog {
     public static let openAI = ConnectionPreset(
         id: "openai", name: "OpenAI", provider: .openai,

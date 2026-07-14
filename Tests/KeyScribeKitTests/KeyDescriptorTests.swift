@@ -30,6 +30,7 @@ struct KeyDescriptorTests {
     @Test func keycapTokensForChordsAreModifiersThenKeyInCanonicalOrder() {
         #expect(KeyDescriptor.chord(modifiers: [.command], key: .letter("k")).keycapTokens == ["⌘", "K"])
         // canonical ⌃⌥⇧⌘ order regardless of set iteration order
+        // Set iteration order is unspecified; tokens must still come out in canonical ⌃⌥⇧⌘ order.
         #expect(KeyDescriptor.chord(modifiers: [.command, .shift, .control, .option], key: .letter("e")).keycapTokens
             == ["⌃", "⌥", "⇧", "⌘", "E"])
         #expect(KeyDescriptor.chord(modifiers: [], key: .function(5)).keycapTokens == ["F5"])

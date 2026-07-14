@@ -71,7 +71,10 @@ final class HALInputUnit {
                 au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                 &device, UInt32(MemoryLayout<AudioDeviceID>.size)), "setCurrentDevice")
 
-            // Read the native format after binding so the client format matches the actual hardware.
+            // Read the native format after binding and match the client format to it exactly — this is what
+            // avoids -10868 (kAudioUnitErr_FormatNotSupported), which plagued the old AVAudioEngine.inputNode
+            // path. Never dodge that by flipping the system default input device instead (a confirmed
+            // antipattern: it hijacks the user's mic system-wide for every dictation).
             var native = AudioStreamBasicDescription()
             var nativeSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
             try check(AudioUnitGetProperty(
@@ -86,7 +89,7 @@ final class HALInputUnit {
                 au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1,
                 &clientASBD, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)), "setClientFormat")
 
-            // We render into our own scratch buffer.
+            // Render into our own preallocated scratch buffer instead.
             var shouldAllocate: UInt32 = 0
             _ = AudioUnitSetProperty(
                 au, kAudioUnitProperty_ShouldAllocateBuffer, kAudioUnitScope_Output, 1,
@@ -123,7 +126,7 @@ final class HALInputUnit {
         AudioOutputUnitStop(unit)
     }
 
-    // Stop, uninitialize, and dispose, releasing the device entirely.
+    // Releases the device entirely, unlike stop() which leaves it bound for reuse.
     func dispose() {
         guard let unit else { return }
         AudioOutputUnitStop(unit)

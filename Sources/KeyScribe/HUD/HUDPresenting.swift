@@ -1,9 +1,8 @@
 import CoreGraphics
 import KeyScribeKit
 
-// A single repair action an error HUD can offer (ui_design.md §5: an error state gives one clear next
-// step). Only used where a concrete fix exists — a failure with no safe recovery offers nothing rather
-// than a misleading Retry.
+// A single repair action an error HUD can offer (ui_design.md §5: one clear next step). Only used
+// where a concrete fix exists — otherwise the state offers nothing rather than a misleading Retry.
 enum HUDErrorAction: Equatable {
     case openMicrophoneSettings
     case openAccessibilitySettings
@@ -120,9 +119,9 @@ extension HUDState {
         }
     }
 
-    // The data-boundary categories for the cloud-rewrite step, as discrete badge labels rather than a
-    // collapsed text line (ui_components.md). A rewrite is always cloud; redaction forces context off,
-    // mirroring HistoryEntry.dataBoundaryLabels.
+    // Cloud-rewrite data-boundary categories as discrete badges rather than one collapsed line
+    // (ui_components.md). A rewrite is always cloud; redaction forces context off, mirroring
+    // HistoryEntry.dataBoundaryLabels.
     var dataBoundaryBadges: [String] {
         guard case .rewriting(_, _, let redacted, let contextCategories, _) = self else { return [] }
         var labels = ["Cloud rewrite"]
@@ -134,8 +133,8 @@ extension HUDState {
     var offersPasteLast: Bool {
         switch self {
         case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _):
-            // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that
-            // can't work — the text is already on the clipboard for a manual paste.
+            // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that can't
+            // work — the text is already on the clipboard for a manual paste.
             return reason != .accessibilityDenied
         default:
             return false
@@ -165,11 +164,9 @@ extension HUDState {
         return dataBoundaryBadges.isEmpty ? 64 : 78
     }
 
-    // A stable VoiceOver announcement for a state-change edge (ui_design.md §9): recording started, the
-    // processing path, inserted, copied instead, and failure. The per-buffer input level is deliberately
-    // NOT announced (HUDController.render early-returns on a pure level tick before this is read), so a
-    // recording announcement fires once on entry, never per level update. Transient acknowledgements
-    // (ready/arming) and dismissal (hidden) carry no announcement.
+    // A stable VoiceOver announcement per state-change edge (ui_design.md §9). Level ticks are
+    // deliberately NOT announced (HUDController.render early-returns before this is read), so a recording
+    // announcement fires once on entry, never per tick. Transient/dismissal states carry none.
     var voiceOverAnnouncement: String? {
         switch self {
         case .hidden, .ready, .arming:
@@ -187,8 +184,8 @@ extension HUDState {
         }
     }
 
-    // The cancellable states (mirrors DictationController.isCancellable, which keeps machine.state at
-    // .transcribing through the cloud rewrite). The HUD takes key focus in these so ESC cancels locally.
+    // Mirrors DictationController.isCancellable (machine.state stays .transcribing through the cloud
+    // rewrite). The HUD takes key focus in these states so ESC cancels locally.
     var holdsKeyFocus: Bool {
         switch self {
         case .arming, .recording, .loadingModel, .transcribing, .rewriting: return true

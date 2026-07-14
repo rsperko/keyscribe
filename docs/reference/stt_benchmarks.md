@@ -16,9 +16,9 @@ on every engine, plus recognition bias on the Whisper and Qwen3 models). "Recall
 raw engine with an empty dictionary, so the two recall columns show the dictionary's total lift.
 Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26+.
 
-> **Regenerated 2026-07-09**, after recognition bias was narrowed to the **Whisper and Qwen3** models
-> (Parakeet's CTC-WS spotter and Apple's contextual-strings bias were removed for false-firing dictionary
-> terms — see [`agent_notes/fable_bias_test/`](../../agent_notes/fable_bias_test/)). The dictionary still
+> These results use recognition-time dictionary bias only for the **Whisper and Qwen3** models.
+> Parakeet and Apple bias were removed because they could substitute dictionary terms that were never
+> spoken; see the [decision record](../../agent_notes/decisions/recognition_bias.md). The dictionary still
 > lifts recall on **every** engine via after-transcription recovery; on Whisper and Qwen3 recognition
 > bias lifts it further. So the recall gap between the two columns below is the dictionary's whole effect,
 > and it is largest on the bias-capable models.
@@ -30,7 +30,7 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
 | Whisper Small (English) | 6.0% | 0.97 | 0.78 | 0.063 | 217 MB |
 | Parakeet TDT v3 (default) | 7.1% | 0.89 | 0.77 | 0.014 | 480 MB |
 | Qwen3-ASR 0.6B | 8.3% | 0.96 | 0.78 | 0.014 | 1.5 GB |
-| Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 227 MB |
+| Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 330 MB |
 | Apple Speech | 12.8% | 0.62 | 0.53 | 0.032 | managed |
 | Moonshine Base (English) | 14.9% | 0.74 | 0.66 | 0.024 | 141 MB |
 
@@ -44,9 +44,9 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
   no-op — the mechanism just differs by model.
 - **Everything is faster than real time.** Every RTF is well under 1.0, so on this corpus speed is
   rarely the deciding factor — footprint and accuracy are.
-- **The default isn't the most accurate, by design.** Parakeet TDT v3 is the recommended default
-  because it's compact (~480 MB), fast, multilingual, and good enough out of the box — not because it
-  tops the table. "Recommended" means *sensible default*, not *highest score*.
+- **The default isn't the most accurate, by design.** Parakeet TDT-CTC 110M is the recommended
+  English default because it is compact, fast, and low-memory — not because it tops this table.
+  "Recommended" means *sensible starting point*, not *highest score*.
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
   `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 

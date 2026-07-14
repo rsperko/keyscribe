@@ -211,8 +211,7 @@ struct AIServiceTestStateTests {
         return dir
     }
 
-    // Seeds and selects one connection (creation is now a draft flow, so these test-state tests seed a
-    // connection directly instead of the old bare-insert create()).
+    // Creation is now a draft flow, so seed the connection directly rather than via create().
     @discardableResult
     private func seedConnection(_ model: AIServiceSettingsModel, in dir: URL, id: String = "new-ai-service") -> Connection {
         let conn = Connection(
@@ -338,34 +337,5 @@ struct AIServiceTestStateTests {
         #expect(model.modelSuggestions(for: connection.id) == ["qwen3", "llama"])
         #expect(updated.model == "qwen3")
         #expect(model.modelDiscoveryState(for: connection.id) == .loaded)
-    }
-
-    @Test func fetchingModelsDoesNotClobberAnEditCommittedAfterTheSnapshot() async {
-        let dir = tempDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let model = AIServiceSettingsModel(
-            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
-            tester: ConnectionTester(client: FakeClient(result: .success("OK"))),
-            listModels: { _, _ in ["qwen3"] })
-        seedConnection(model, in: dir)
-        var connection = model.selected!
-        connection.provider = .openaiCompatible
-        connection.model = ""
-        connection.baseUrl = "http://old:11234/v1"
-        model.update(connection, apiKey: nil)
-
-        // Snapshot the connection, then simulate a focus-loss commit repointing the base URL before the
-        // fetch saves. The fetched list belongs to the OLD endpoint, so the auto-select must not apply it
-        // to the new one — the base-URL edit survives and the model is left for a re-fetch, not clobbered.
-        let stale = model.selected!
-        var edited = stale
-        edited.baseUrl = "http://new:11234/v1"
-        model.update(edited, apiKey: nil)
-
-        await model.fetchModels(for: stale, apiKey: "secret")
-        let saved = model.selected!
-
-        #expect(saved.baseUrl == "http://new:11234/v1")
-        #expect(saved.model == "")
     }
 }

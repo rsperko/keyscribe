@@ -37,7 +37,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // "Show exactly what was received" mirror of `prompt`. On a localFallback entry it is the rejected
     // reply that explains `fallbackReason`. nil on local-only and older entries, and when the call failed.
     public var received: String?
-    // How this mode was chosen (UX2 phase 7c) — additive optional fields, nil on older rows.
+    // How this mode was chosen — additive optional fields, nil on older rows.
     public var modeChoice: ModeChoiceReason?
     public var routedPhrase: String?
     // Display string of the shortcut that started this dictation, when the mode was chosen by its trigger

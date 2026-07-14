@@ -2,7 +2,6 @@ import Testing
 @testable import KeyScribeKit
 
 struct EvictionPolicyTests {
-    // After a dictation finishes
     @Test func fastestKeepsLoadedAfterDictation() {
         #expect(EvictionPolicy.afterDictation(mode: .fastest, idleSeconds: 120) == .keepLoaded)
     }
@@ -16,14 +15,13 @@ struct EvictionPolicyTests {
             == .scheduleIdleCheck(afterSeconds: 90))
     }
 
-    // When the idle timer fires
     @Test func balancedEvictsWhenIdleElapsed() {
         #expect(EvictionPolicy.onIdleCheck(mode: .balanced, lastUsedAt: 100, now: 230, idleSeconds: 120)
             == .evictNow)
     }
 
     @Test func balancedRescheduleWhenStillActive() {
-        // used again at 200; check fires at 230 — only 30s idle, reschedule the remaining 90
+        // Used again at 200, checked at 230: only 30s idle so far, reschedule the remaining 90.
         #expect(EvictionPolicy.onIdleCheck(mode: .balanced, lastUsedAt: 200, now: 230, idleSeconds: 120)
             == .scheduleIdleCheck(afterSeconds: 90))
     }
@@ -43,7 +41,7 @@ struct EvictionPolicyTests {
             == .scheduleIdleCheck(afterSeconds: EvictionPolicy.defaultIdleSeconds))
     }
 
-    // Idle microphone warm-up rides the same tier as model residency.
+    // Idle mic warm-up is gated on the same Eviction tier as STT model residency.
     @Test func onlyFrugalSkipsPrewarm() {
         #expect(EvictionPolicy.shouldPrewarmCapture(mode: .fastest))
         #expect(EvictionPolicy.shouldPrewarmCapture(mode: .balanced))
@@ -64,7 +62,7 @@ struct EvictionPolicyTests {
 }
 
 struct EvictionCopyTests {
-    // No footer string may ever contain a byte count (UX2 phase 3b) — the copy describes behavior, not size.
+    // Footer copy describes behavior, never a byte size.
     private func hasNoByteCount(_ s: String) -> Bool {
         !s.contains("KB") && !s.contains("MB") && !s.contains("GB")
     }
@@ -97,7 +95,7 @@ struct EvictionCopyTests {
         #expect(hasNoByteCount(s))
     }
 
-    // A model under the small threshold collapses to the "costs you little" line regardless of policy.
+    // Below the small-model threshold, the softener line replaces the policy-specific copy for all policies.
     @Test func smallModelSoftenerReplacesPolicyCopy() {
         for policy: Eviction in [.fastest, .balanced, .frugal] {
             let s = EvictionCopy.footer(

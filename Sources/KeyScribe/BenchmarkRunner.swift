@@ -2,12 +2,11 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --benchmark <dir>`. Drives every shipping SpeechEngine adapter over recorded
-// clips and reports WER (biased vs unbiased), bias term recall, and RTF per engine — so accuracy and
-// speed are measured on the exact code paths that ship (recognition bias is Qwen3 native context and
-// Whisper prompt tokens; the other engines ignore terms), not a re-implementation. Headless: reads
-// wavs, never touches mic/insertion/TCC. Engines whose models aren't installed are skipped, so you
-// control cost by installing only what you want to compare.
+// Drives every shipping SpeechEngine adapter over recorded clips and reports WER (biased vs unbiased),
+// bias term recall, and RTF per engine — so accuracy and speed are measured on the exact code paths that
+// ship (recognition bias is Qwen3 native context and Whisper prompt tokens; other engines ignore terms),
+// not a re-implementation. Headless: reads wavs, never touches mic/insertion/TCC. Engines whose models
+// aren't installed are skipped, so you control cost by installing only what you want to compare.
 enum BenchmarkRunner {
     struct EngineResult {
         var status = "ok"
@@ -143,10 +142,10 @@ enum BenchmarkRunner {
         }
     }
 
-    // `KeyScribe --benchmark <dir> --streaming`: transcribe each clip BOTH ways — batch and streaming (through the
-    // real `StreamingDictationDriver` at realtime cadence, the exact live path: deferred start, chunk replay,
-    // backpressure fallback) — and report WER for each so streaming↔batch parity is visible (P3-1: streaming must
-    // not regress accuracy). A clip that degrades to batch is scored as batch and counted `fellBack`. No bias.
+    // Transcribes each clip BOTH ways — batch and streaming (through the real `StreamingDictationDriver`
+    // at realtime cadence, the exact live path: deferred start, chunk replay, backpressure fallback) —
+    // and reports WER for each so streaming↔batch accuracy parity is visible. A clip that degrades to
+    // batch is scored as batch and counted `fellBack`. No bias.
     static func runStreamingParity(dir: URL, only: Set<String>? = nil, raw: Bool = false) async {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {

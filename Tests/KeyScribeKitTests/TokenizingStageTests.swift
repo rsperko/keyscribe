@@ -1,26 +1,25 @@
 import Testing
 @testable import KeyScribeKit
 
-// Counts lazy clipboard-provider invocations from inside a @Sendable stage closure. The pipeline runs
-// its stages synchronously on one thread in these tests, so the unchecked box never actually races.
+// @unchecked Sendable is safe here: the pipeline runs its stages synchronously on one thread in these
+// tests, so this box never actually races despite being captured in a @Sendable closure.
 private final class Counter: @unchecked Sendable {
     private(set) var value = 0
     func bump() { value += 1 }
 }
 
-// Verbatim/redaction as pipeline commands (design.md §4.2.1): verbatim sorts before the text stages
+// Verbatim/redaction pipeline ordering (design.md §4.2.1): verbatim sorts before the text stages
 // so its span is protected from everything except STT; redaction sorts after; restore() unwinds
 // both in strict LIFO.
 struct TokenizingStageTests {
     @Test func verbatimContentSurvivesTextStages() {
-        // "cat"→"dog" must transform the loose word but never the verbatim-wrapped one.
         let p = Pipeline([
             TokenizingStage.verbatim(),
             ReplacementsStage(rules: [ReplacementRule(heard: "cat", replace: "dog", isRegex: false)]),
         ])
         let payload = p.forward("a cat begin verbatim a cat end verbatim")
         #expect(payload.issuedTokens.count == 1)
-        #expect(!payload.text.contains("end verbatim"))   // markers stripped
+        #expect(!payload.text.contains("end verbatim"))
         #expect(p.restore(payload.text) == "a dog a cat")  // loose word replaced, wrapped word preserved
     }
 
@@ -44,7 +43,7 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "email me at alice@example.com")
     }
 
-    // Both stages issue tokens; restore restores redaction (last in) before verbatim (first in).
+    // Restore unwinds redaction (last in) before verbatim (first in).
     @Test func verbatimAndRedactionUnwindLIFO() {
         let p = Pipeline([
             TokenizingStage.verbatim(),
@@ -57,9 +56,8 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "my note contact alice@example.com")
     }
 
-    // issuedTokens is part of the PipelineStage contract, not an optional downcast: any stage that
-    // returns tokens is collected for the gate, and a plain text stage defaults to none — so a
-    // tokenizing stage can never silently escape the validation gate by forgetting a marker protocol.
+    // issuedTokens is part of the PipelineStage contract, not an optional downcast — a stage can never
+    // silently escape the validation gate by forgetting a marker protocol.
     private struct TokenIssuingStage: PipelineStage {
         let position = StagePosition.postSTTMark
         let order = 0
@@ -77,8 +75,8 @@ struct TokenizingStageTests {
         #expect(p.forward("hi").issuedTokens.isEmpty)
     }
 
-    // "insert clipboard contents" pulls the clipboard into a verbatim token before the text stages,
-    // so the pasted content is opaque to replacements/numbers and to the LLM, then restored.
+    // "insert clipboard contents" pulls the clipboard into a token before the text stages, so pasted
+    // content is opaque to replacements/numbers and to the LLM.
     @Test func clipboardContentSurvivesTextStages() {
         let p = Pipeline([
             TokenizingStage.clipboard(read: { "twenty five" }),
@@ -99,7 +97,7 @@ struct TokenizingStageTests {
         ])
         let payload = p.forward("begin verbatim A end verbatim and insert clipboard contents")
         #expect(payload.issuedTokens.count == 2)
-        #expect(Set(payload.issuedTokens).count == 2)   // two DISTINCT tokens, not one string reused
+        #expect(Set(payload.issuedTokens).count == 2)
         #expect(p.restore(payload.text) == "A and B")
     }
 
@@ -143,7 +141,6 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "hello then hello")
     }
 
-    // The gate's issuedTokens survive an LLM that preserves them; restore then restores the originals.
     @Test func tokensSurviveAPreservingRewriteThenRestore() {
         let v = Tokenizer()
         let p = Pipeline([TokenizingStage.verbatim(tokenizer: v)])

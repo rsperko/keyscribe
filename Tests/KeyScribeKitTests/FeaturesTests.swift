@@ -2,9 +2,8 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Feature ships with zero cases (the empty seam), so these cover the storage behavior that must hold
-// independent of any specific flag: absent table, unknown-id pruning, and round-tripping. Per-flag
-// default-fallback and override tests are added alongside the first real Feature case.
+// Covers storage behavior independent of any specific flag (absent table, unknown-id pruning,
+// round-tripping) since Feature can ship with zero cases; per-flag tests live below with each case.
 struct FeaturesTests {
     @Test func absentFeaturesTableDecodesToNoOverrides() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1")
@@ -43,19 +42,17 @@ struct FeaturesTests {
         #expect(Settings.Features(overrides: ["not_a_real_flag": false]) == Settings.Features())
     }
 
-    // ids are hand-written strings that key both storage and pruning; a collision would make one flag
-    // shadow another and trap the UI's state build. Guards every future case as soon as it is added.
+    // ids are hand-written strings keying both storage and pruning; a collision would make one flag
+    // shadow another. Guards every future case as soon as it is added.
     @Test func featureIdsAreUnique() {
         let ids = Feature.allCases.map(\.id)
         #expect(ids.count == Set(ids).count)
     }
 
-    // P3-1 streaming flag: strictly opt-in, so it is off unless the user turns it on.
     @Test func streamingTranscriptionDefaultsOff() {
         #expect(!Settings.defaults.features.isEnabled(.streamingTranscription))
     }
 
-    // An on deviation persists across an encode/decode round trip and lands in the [features] table.
     @Test func streamingTranscriptionOverridePersists() throws {
         var s = Settings.defaults
         s.features.setEnabled(true, for: .streamingTranscription)
@@ -65,7 +62,7 @@ struct FeaturesTests {
         #expect(decoded.features.isEnabled(.streamingTranscription))
     }
 
-    // Turning the flag back off carries no information (absent already means off), so it is elided.
+    // Absence already means off, so turning the flag back off carries no information and is elided.
     @Test func streamingTranscriptionOffIsElided() throws {
         var s = Settings.defaults
         s.features.setEnabled(true, for: .streamingTranscription)

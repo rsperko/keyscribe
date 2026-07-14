@@ -5,9 +5,8 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var vocabularyShadowed = false
     var pasteLastShadowed = false
-    // The Plain Dictation (Direct mode) shortcut, edited inline here. The Direct mode owns the trigger; edits
-    // route back through onUpdatePlainDictation so the same _direct.toml and live HotkeyMonitor refresh as when
-    // it is changed in Modes. allModes/actionShortcuts feed the conflict and overlap warnings.
+    // Edits route through onUpdatePlainDictation so the same _direct.toml and live HotkeyMonitor refresh
+    // as when this is changed in Modes.
     var directMode: Mode?
     var allModes: [Mode] = []
     var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []

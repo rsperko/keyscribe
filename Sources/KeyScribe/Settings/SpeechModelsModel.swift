@@ -29,10 +29,9 @@ final class SpeechModelsModel: ObservableObject {
     var activeEngineUsable: Bool { self.set.isUsable(self.set.activeId) }
     var hasFailedModel: Bool { rows.contains { $0.verificationFailed } }
 
-    // The Library/Catalog partition for the two list sections (option-1-rollout.md). On This Mac holds every
-    // usable model — the system-managed Apple engine is always usable, so it lives here too. Available to
-    // Download holds the rest: pristine catalog entries, a row mid-download/verify, and a quarantined failure
-    // (still recoverable), until it verifies usable and promotes.
+    // On This Mac holds every usable model — the system-managed Apple engine is always usable, so it
+    // lives here too. Available to Download holds the rest: pristine catalog entries, a row
+    // mid-download/verify, and a quarantined failure, until it verifies usable and promotes.
     var onThisMacRows: [Row] { rows.filter(\.isUsable) }
     var availableRows: [Row] { rows.filter { !$0.isUsable } }
 
@@ -56,7 +55,7 @@ final class SpeechModelsModel: ObservableObject {
     private let markRemoved: (String) -> Void
     private let markFailed: (String) -> Void
     private let clearFailed: (String) -> Void
-    // Runs `work` when idle, else parks it until the current dictation finishes, so a model delete never
+    // Parks `work` until the current dictation finishes if one is in flight, so a model delete never
     // removes files an in-flight dictation still needs.
     private let deferWhileBusy: (@escaping () -> Void) -> Void
 
@@ -98,8 +97,8 @@ final class SpeechModelsModel: ObservableObject {
         rebuild()
     }
 
-    // Sizing recursively enumerates each bundle (many files); doing it synchronously would block the main
-    // actor, including at launch. Snapshot usable ids on the main actor, size on a utility task, publish back.
+    // Sizing recursively enumerates each bundle's files; doing it synchronously would block the main
+    // actor, including at launch, so it runs on a detached utility task and publishes back.
     private func refreshSizes() {
         sizeRefreshGeneration &+= 1
         let generation = sizeRefreshGeneration
@@ -120,8 +119,7 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     // First-run downloads through the engine directly (not startDownload), so the install store never
-    // learned the model is present and kept reading "not installed". Mark installed so onboarding's download
-    // sticks.
+    // learned the model is present. Mark it installed so the onboarding download sticks.
     func noteInstalled(_ id: String) {
         markInstalled(id)
         set.markInstalled(id)
@@ -175,8 +173,8 @@ final class SpeechModelsModel: ObservableObject {
         Task {
             do {
                 try await download(id) { progress in
-                    // Coalesce: skip the row rebuild unless phase or whole-percent changed, so a chatty SDK
-                    // progress stream doesn't thrash the install UI.
+                    // Skip the row rebuild unless phase or whole-percent changed, so a chatty SDK progress
+                    // stream doesn't thrash the install UI.
                     Task { @MainActor in
                         if let last = self.downloading[id], last.phase == progress.phase,
                            Int(last.fraction * 100) == Int(progress.fraction * 100) { return }
@@ -186,9 +184,9 @@ final class SpeechModelsModel: ObservableObject {
                 }
             } catch {
                 Log.models.error("download failed: \(id, privacy: .public): \(error, privacy: .public)")
-                // Wipe partial weights so a retry starts clean and the model never lingers as an undeletable
-                // "on disk but not installed" phantom. Guarded on not-installed so a re-download that fails
-                // never removes a still-good prior install.
+                // Wipe partial weights so a retry starts clean instead of leaving an undeletable "on disk
+                // but not installed" phantom. Guarded on not-installed so a re-download failure never
+                // removes a still-good prior install.
                 if !set.installed.contains(id) { removeFiles(id) }
                 errors[id] = "\(error)"
                 downloading[id] = nil
@@ -203,13 +201,12 @@ final class SpeechModelsModel: ObservableObject {
         }
     }
 
-    // Manually re-run the self-test on an installed engine.
     func test(_ id: String) {
         guard downloading[id] == nil, !verifying.contains(id) else { return }
         Task { await runVerification(id, markInstalledOnPass: false) }
     }
 
-    // Wipe a bad install and download it again (which re-verifies).
+    // Wipes the bad install; the redownload re-verifies.
     func reinstall(_ id: String) {
         guard SpeechModelCatalog.entry(for: id)?.systemManaged == false else { return }
         let wasActive = set.activeId == id
@@ -246,13 +243,13 @@ final class SpeechModelsModel: ObservableObject {
             await evictEngine(id)
             if wasActive && set.activeId != id { onActiveChange(set.activeId) }
         } else {
-            // Passed, or skipped (no clip bundled, dev runs) — treat as installed and clear any prior failure.
+            // result == nil means skipped (no clip bundled, dev runs) — treat the same as a pass.
             clearFailed(id)
             set.clearFailed(id)
             markInstalled(id)
             set.markInstalled(id)
-            // Verifying loaded the engine into RAM. A non-active model verified here would stay resident
-            // until relaunch (~2 GB for Qwen 1.7B), so release it now; activating later reloads on demand.
+            // A non-active model verified here would otherwise stay resident until relaunch (~2 GB for
+            // Qwen 1.7B); release it now and let activating later reload on demand.
             if id != set.activeId { await evictEngine(id) }
             // Only a manual re-test of a confirmed pass shows the transient acknowledgement;
             // a fresh install already shows "Installed".
@@ -304,8 +301,8 @@ final class SpeechModelsModel: ObservableObject {
         let wasActive = set.activeId == id
         Task {
             await evictEngine(id)
-            // Defer file removal until idle so an in-flight dictation keeps its frozen engine; marker + set
-            // update immediately for the UI.
+            // Defer file removal until idle so an in-flight dictation keeps its frozen engine; the
+            // marker/set update immediately for the UI.
             deferWhileBusy { [removeFiles] in removeFiles(id) }
             markRemoved(id)
             clearFailed(id)
@@ -320,15 +317,14 @@ final class SpeechModelsModel: ObservableObject {
         rows = EngineRegistry.availableCatalog.map(makeRow)
     }
 
-    // Rebuild only the changed row (e.g. a download-progress tick, many times/sec): reconstructing every
-    // row and re-statting model dirs each tick was needless churn.
+    // Rebuild only the changed row: a download-progress tick fires many times/sec, and reconstructing
+    // every row + re-statting model dirs each time was needless churn.
     private func updateRow(_ id: String) {
         guard let info = SpeechModelCatalog.all.first(where: { $0.id == id }),
               let index = rows.firstIndex(where: { $0.id == id }) else { rebuild(); return }
         rows[index] = makeRow(info)
     }
 
-    // A model that failed its self-test can't be used until it passes; the actions convey the way out.
     private static func failedMessage(systemManaged: Bool) -> String {
         systemManaged
             ? "This model can’t be used until it passes its self-test. Try testing it again."
@@ -337,7 +333,7 @@ final class SpeechModelsModel: ObservableObject {
 
     private func makeRow(_ info: SpeechModelInfo) -> Row {
         let failed = set.isFailed(info.id)
-        // Failed models are quarantined (not usable) but stay on disk — still size them so the row can show
+        // Failed models are quarantined (not usable) but stay on disk — size them too so the row can show
         // what deleting would reclaim.
         let onDisk = !info.systemManaged && (set.isUsable(info.id) || failed) && downloading[info.id] == nil
         return Row(

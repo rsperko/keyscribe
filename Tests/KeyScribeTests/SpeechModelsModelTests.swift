@@ -71,8 +71,8 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.removed, ["parakeet"])
     }
 
-    // An interrupted/failed download must wipe its partial weights so a retry starts clean and the model
-    // never becomes an "on disk but not installed" phantom with no delete affordance.
+    // Partial weights must be wiped so a retry starts clean and the model never becomes an "on disk but
+    // not installed" phantom with no delete affordance.
     func testFailedDownloadWipesPartialFiles() async throws {
         struct Boom: Error {}
         let recorder = Recorder()
@@ -86,7 +86,6 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.markedInstalled, [])   // never marked installed
     }
 
-    // A failed re-download of an already-installed model must NOT wipe the still-good prior install.
     func testFailedDownloadKeepsAlreadyInstalledModel() async throws {
         struct Boom: Error {}
         let recorder = Recorder()
@@ -132,8 +131,7 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.evicted, [])
     }
 
-    // A failed self-test quarantines the model: it becomes unusable and is persisted as failed, but its
-    // files are kept (not removed) so the user can re-test cheaply or reinstall.
+    // Files are kept (not removed) so the user can re-test cheaply or reinstall.
     func testFailedSelfTestQuarantinesButKeepsFiles() async throws {
         let recorder = Recorder()
         let model = makeModel(
@@ -166,7 +164,6 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertFalse(try row("parakeet", in: model).isUsable)
     }
 
-    // A persisted failure hydrates into the row on launch so the error indicator survives a restart.
     func testPersistedFailureHydratesIntoRow() throws {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder, initialFailedIds: ["parakeet"])
@@ -176,8 +173,7 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertNotNil(try row("parakeet", in: model).errorText)
     }
 
-    // hasFailedModel feeds the Settings problem badge / menu-bar error dot. It reflects any failed row —
-    // hydrated from persisted state on launch, flipped live by a failing test, and cleared by a passing one.
+    // hasFailedModel feeds the Settings problem badge / menu-bar error dot.
     func testHasFailedModelHydratesFromPersistedFailure() {
         let recorder = Recorder()
         XCTAssertFalse(makeModel(recorder: recorder).hasFailedModel)
@@ -206,7 +202,6 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertFalse(model.hasFailedModel)
     }
 
-    // Re-testing a quarantined model that now passes clears the persisted failure and restores usability.
     func testPassingReTestClearsPersistedFailure() async throws {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder, verifyResult: true, initialFailedIds: ["parakeet"])
@@ -219,9 +214,9 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertFalse(try row("parakeet", in: model).verificationFailed)
     }
 
-    // The two list sections partition by residency (option-1-rollout.md): every usable model — including
-    // the always-usable system-managed Apple engine — is On This Mac; everything else is Available to
-    // Download. The partition is exhaustive and disjoint.
+    // The two list sections partition by residency (agent_notes/three_column_designs/option-1-rollout.md):
+    // every usable model, including the always-usable system-managed Apple engine, is On This Mac;
+    // everything else is Available to Download. Exhaustive and disjoint.
     func testRowsPartitionByResidency() {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder)
@@ -236,8 +231,7 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertTrue(model.availableRows.contains { $0.id == "whisper" })
     }
 
-    // A quarantined (self-test failed) model stays under Available — it is not usable — but keeps its
-    // maintenance recovery, so it is not treated as a pristine catalog preview.
+    // A quarantined model keeps its maintenance recovery, so it is not treated as a pristine catalog preview.
     func testFailedModelStaysAvailableWithRecovery() {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder, initialFailedIds: ["parakeet"])

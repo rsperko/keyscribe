@@ -339,8 +339,8 @@ struct ModeEditorView: View {
         }
     }
 
-    // When a mode rewrites, the user must see exactly what leaves the Mac. Privacy and context are mutually
-    // exclusive; the controls stay visible with the reason rather than disappearing.
+    // Privacy and context are mutually exclusive; the controls stay visible with the reason rather than
+    // disappearing, so the user always sees exactly what leaves the Mac.
     @ViewBuilder private var dataSentWithAISection: some View {
         if mode.aiRewrite != nil {
             Section("Data sent with AI") {

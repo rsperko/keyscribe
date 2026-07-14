@@ -26,7 +26,7 @@ final class ConfigCache {
 
     // Per generation: present-but-undecodable files (malformed or newer schema after a downgrade). Recorded
     // so a fat-fingered replacements.toml lights the same user-visible malformed-config warning as
-    // settings.toml instead of silently disabling every replacement / connection (P2-14). Reset by invalidate().
+    // settings.toml instead of silently disabling every replacement / connection. Reset by invalidate().
     private(set) var loadFailures: [String] = []
 
     init(supportDir: URL) {

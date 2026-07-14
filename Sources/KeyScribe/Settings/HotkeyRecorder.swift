@@ -2,15 +2,15 @@ import AppKit
 import KeyScribeKit
 import SwiftUI
 
-// Shared while any shortcut well is capturing. The selection Lists in Settings disable themselves on
-// it so SwiftUI's keyboard type-select can't grab the chord's keystroke before the well sees it.
+// Shared while any shortcut well is capturing, so the selection Lists in Settings can disable themselves —
+// otherwise SwiftUI's keyboard type-select grabs the chord's keystroke before the well sees it.
 final class HotkeyRecordingState: ObservableObject {
-    // Lets the app suspend the global hotkey monitor while a well captures (set by AppDelegate).
+    // Lets the app suspend the global hotkey monitor while a well captures.
     var onChange: ((Bool) -> Void)?
     @Published var isRecording = false { didSet { onChange?(isRecording) } }
 }
 
-// Stable identities for the two global shortcuts in the app-wide hotkey namespace (alongside Mode ids).
+// Stable identities for the two global shortcuts, sharing the app-wide hotkey namespace with Mode ids.
 enum GlobalHotkey {
     static let vocabularyId = "global:add_vocabulary"
     static let pasteLastId = "global:paste_last"
@@ -201,10 +201,10 @@ final class RecorderButtonView: NSButton {
         onHint?(nil)
         window?.makeFirstResponder(self)
         // A local monitor sees the keystroke before SwiftUI's List type-select (which runs ahead of
-        // performKeyEquivalent and ignores first responder). Returning nil swallows the event, so
-        // recording a shortcut never navigates the mode/sidebar list. flagsChanged is observed, not
-        // swallowed: a chord another app reserved globally is consumed before its keyDown reaches this
-        // monitor, so a held-then-released modifier combo with no key is the only signal that fires.
+        // performKeyEquivalent and ignores first responder); returning nil swallows it so recording never
+        // navigates the sidebar. flagsChanged is left unswallowed: a globally-reserved chord is consumed
+        // before its keyDown reaches this monitor, so a held-then-released modifier combo is the only
+        // signal that still fires.
         monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .otherMouseDown, .flagsChanged]
         ) { [weak self] event in

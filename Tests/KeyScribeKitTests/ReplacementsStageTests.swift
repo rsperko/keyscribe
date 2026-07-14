@@ -23,29 +23,27 @@ struct ReplacementsStageTests {
                     on: "email me at gmail dot com") == "email me@gmail.com")
     }
 
-    // A literal rule matches whole words only — it must never fire inside a longer word.
     @Test func literalDoesNotMatchInsideWord() {
         let rule = ReplacementRule(heard: "pipe", replace: "|", isRegex: false)
         #expect(run([rule], on: "the pipeline is great") == "the pipeline is great")
         #expect(run([rule], on: "use a pipe here") == "use a | here")
     }
 
-    // The whole-word constraint is case-insensitive at the boundary too.
     @Test func literalWholeWordIsCaseInsensitive() {
         #expect(run([ReplacementRule(heard: "pipe", replace: "|", isRegex: false)], on: "A Pipe and a PIPELINE")
             == "A | and a PIPELINE")
     }
 
-    // A `\b` word boundary cannot anchor next to a non-word character, so a literal term whose edge is
-    // punctuation (a slash-command "/resume", "c++") would never match with `\b` wrapped on that edge.
-    // The boundary is applied only on word-character edges; a punctuation edge is left unwrapped.
+    // `\b` cannot anchor next to a non-word character, so a term whose edge is punctuation ("/resume",
+    // "c++") would never match with `\b` wrapped on that edge — the boundary is applied only on
+    // word-character edges, punctuation edges are left unwrapped.
     @Test func literalPunctuationLeadingEdgeMatchesCaseInsensitively() {
         let rule = ReplacementRule(heard: "/resume", replace: "/resume", isRegex: false)
         #expect(run([rule], on: "/Resume.") == "/resume.")
         #expect(run([rule], on: "please /Resume now") == "please /resume now")
     }
 
-    // The word-character edge still enforces whole-word matching: "/resume" must not fire inside "/resumes".
+    // The word-character edge still enforces whole-word matching even with punctuation on the other edge.
     @Test func literalPunctuationLeadingEdgeStillGuardsWordEdge() {
         let rule = ReplacementRule(heard: "/resume", replace: "/RESUME", isRegex: false)
         #expect(run([rule], on: "the /resumes list") == "the /resumes list")
@@ -62,20 +60,20 @@ struct ReplacementsStageTests {
             == "give me $5")
     }
 
-    // Regex still controls its own boundaries — substring/partial matches are the user's call.
+    // Unlike literal rules, regex controls its own boundaries — substring/partial matches are the user's call.
     @Test func regexCanMatchInsideWord() {
         #expect(run([ReplacementRule(heard: "pipe(.*)", replace: "X", isRegex: true)], on: "pipeline")
             == "X")
     }
 
     @Test func regexWithCaptureGroup() {
-        // template "\$$1" → literal $ followed by capture group 1
+        // `\$$1` → literal $ followed by capture group 1
         #expect(run([ReplacementRule(heard: #"(\d+) dollars"#, replace: #"\$$1"#, isRegex: true)],
                     on: "that is 5 dollars") == "that is $5")
     }
 
-    // The match input is STT output, whose casing the engine chooses (it commonly capitalizes the
-    // first word) — so regex rules match case-insensitively by default, like literal rules.
+    // STT output's casing is engine-chosen (it commonly capitalizes the first word), so regex rules
+    // match case-insensitively by default, like literal rules.
     @Test func regexIsCaseInsensitiveByDefault() {
         #expect(run([ReplacementRule(heard: #"slash (\w+)"#, replace: "/$1", isRegex: true)], on: "Slash dog")
             == "/dog")
@@ -83,8 +81,7 @@ struct ReplacementsStageTests {
             == "/dog")
     }
 
-    // (?-i) re-enables case sensitivity for the power user who genuinely needs it — the inline flag
-    // must override the default case-insensitive option.
+    // The inline `(?-i)` flag must override the default case-insensitive option.
     @Test func regexCaseSensitivityOptOutWithInlineFlag() {
         let rule = ReplacementRule(heard: #"(?-i)slash (\w+)"#, replace: "/$1", isRegex: true)
         #expect(run([rule], on: "Slash dog") == "Slash dog")
@@ -98,7 +95,7 @@ struct ReplacementsStageTests {
             == "\t")
     }
 
-    // `\\n` is the escape hatch for a literal backslash + n.
+    // `\\n` is the escape hatch for a literal backslash followed by n.
     @Test func regexEscapedBackslashStaysLiteral() {
         #expect(run([ReplacementRule(heard: "back", replace: #"\\n"#, isRegex: true)], on: "back") == #"\n"#)
     }
@@ -113,7 +110,6 @@ struct ReplacementsStageTests {
             ReplacementRule(heard: "cat", replace: "dog", isRegex: false),
             ReplacementRule(heard: "dog", replace: "fish", isRegex: false),
         ]
-        // cat→dog then dog→fish ⇒ everything becomes fish
         #expect(run(rules, on: "cat") == "fish")
     }
 
@@ -145,7 +141,7 @@ struct ReplacementsStageTests {
         #expect(stage.droppedForReturnMarker == [bad])
     }
 
-    // A terminal <CR> is valid (it presses Return), so it applies and is NOT reported as dropped.
+    // <CR> presses Return, so a terminal one is valid and applies without being reported as dropped.
     @Test func terminalReturnMarkerRuleIsNotReportedAsDropped() {
         let stage = ReplacementsStage(rules: [ReplacementRule(heard: "go", replace: "x<CR>", isRegex: true)])
         #expect(stage.droppedForReturnMarker.isEmpty)

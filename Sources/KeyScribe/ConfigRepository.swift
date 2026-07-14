@@ -57,12 +57,8 @@ final class ConfigRepository {
 
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
 
-    // MARK: Reads (the pane models render from these; every write returns the fresh value too)
-
     func dictionaryWords() -> [String] { DictionaryStore.loadOrDefault(supportDir: supportDir).words }
     func replacementRules() -> [ReplacementsSet.Rule] { ReplacementsStore.loadOrDefault(supportDir: supportDir).rules }
-
-    // MARK: Dictionary
 
     @discardableResult
     func addDictionaryWord(_ word: String) -> Bool {
@@ -85,8 +81,6 @@ final class ConfigRepository {
         }
         return updated
     }
-
-    // MARK: Replacements
 
     @discardableResult
     func addReplacement(heard: String, replace: String, regex: Bool = false) -> Bool {
@@ -115,8 +109,6 @@ final class ConfigRepository {
         }
         return set
     }
-
-    // MARK: Modes
 
     func writeMode(_ mode: Mode) throws {
         try commit(touching: [modeFileURL(id: mode.id)]) { try ModeStore.write(mode, to: modesDir) }
@@ -165,8 +157,6 @@ final class ConfigRepository {
             }
         }
     }
-
-    // MARK: Connections
 
     // Read-modify-write insert-or-replace by id, so a connection written by another surface (first-run, a
     // concurrent pane) between this model's snapshot and its save is never clobbered. Returns the fresh set.

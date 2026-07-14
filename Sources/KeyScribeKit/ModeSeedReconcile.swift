@@ -180,8 +180,9 @@ extension ModeStore {
 
     // Carry user-owned knobs from the on-disk file onto the new seed: connection, enabled, and trigger
     // keys. A seed update (rename/version bump) refreshes prompt/behavior but must NEVER silently rebind a
-    // global hotkey the user did not choose (P2-16 — v0.1.17 pushed right_option/right_command this way).
-    // A fresh install still gets the catalog default trigger via the additive path (never carryForward).
+    // global hotkey the user did not choose — a past release once did exactly that by pushing new default
+    // triggers through this path. A fresh install still gets the catalog default trigger via the additive
+    // path (never carryForward).
     private static func carryForward(_ newSeed: Mode, from existing: Mode) -> Mode {
         var carried = newSeed
         if let connection = existing.aiRewrite?.connection { carried.aiRewrite?.connection = connection }

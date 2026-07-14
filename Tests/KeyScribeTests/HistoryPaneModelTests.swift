@@ -69,8 +69,7 @@ struct HistoryPaneModelTests {
         try store.append(entry("first"), today: "2026-07-10")
         let model = model(store)
 
-        // The signature is stable while nothing changes — the consumer (SettingsController) uses it to skip
-        // a redundant reload; the same signature twice means the gate short-circuits.
+        // SettingsController uses this to skip a redundant reload, so it must be stable when nothing changed.
         let a = model.storeSignature()
         let b = model.storeSignature()
         #expect(a == b)
@@ -86,8 +85,7 @@ struct HistoryPaneModelTests {
         let model = model(store)
 
         model.reload()
-        // The load is detached and the auto-select is deferred a tick after the rows commit; poll rather
-        // than race a fixed sleep under suite load.
+        // Auto-select is deferred a tick after rows commit; poll rather than race a fixed sleep.
         for _ in 0..<40 where model.selected == nil { try await Task.sleep(for: .milliseconds(50)) }
 
         #expect(model.selected?.result == "only entry")

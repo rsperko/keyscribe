@@ -5,7 +5,7 @@ import os
 
 private let carbonLog = Logger(subsystem: "com.keyscribe.app", category: "hotkey")
 
-// A registrar for global chord hot keys. The seam lets `HotkeyMonitor` be unit-tested without the OS.
+// A registrar for global chord hot keys; this seam lets `HotkeyMonitor` be unit-tested without the OS.
 @MainActor
 protocol ChordRegistering: AnyObject {
     func update(_ registrations: [CarbonHotKeys.Registration])
@@ -32,8 +32,8 @@ final class CarbonHotKeys: ChordRegistering {
 
     func update(_ registrations: [Registration]) {
         // unregisterAll() drops any in-flight hold: a chord held across an update loses its kEventHotKeyReleased
-        // (the ref that would fire it is gone). Mainline is protected (AppDelegate defers rebuilds while busy), so
-        // this needs an external config edit landing in the arming window. Real fix: skip re-registering unchanged entries.
+        // (the ref that would fire it is gone). Mainline is protected (AppDelegate defers rebuilds while busy);
+        // this needs an external config edit landing in the arming window to trigger.
         unregisterAll()
         guard !registrations.isEmpty else { return }
         installHandlerIfNeeded()

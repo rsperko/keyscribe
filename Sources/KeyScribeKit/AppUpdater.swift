@@ -4,13 +4,11 @@ import Foundation
 // do not inject an updater keep it inert.
 @MainActor
 public protocol AppUpdater: AnyObject {
-    // Called after each dictation finishes; the implementation decides whether it is time to check.
+    // The implementation decides whether it is actually time to check.
     func dictationDidFinish()
 
-    // Set by the host. The updater invokes it when an update becomes available so the host can
-    // surface a passive affordance.
+    // Set by the host; the updater invokes it when an update becomes available.
     var onUpdateAvailable: (@MainActor () -> Void)? { get set }
 
-    // Invoked when the user activates the host's "Update…" affordance.
     func performUpdate()
 }

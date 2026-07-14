@@ -29,17 +29,18 @@ final class AppVariantTests: XCTestCase {
         XCTAssertEqual(AppVariant.sharedModelsFolderName, AppVariant.production.supportFolderName)
     }
 
+    func testOnlyProductionInjectsBundledUpdater() {
+        XCTAssertTrue(AppVariant.production.injectsBundledUpdater)
+        XCTAssertTrue(AppVariant(bundleID: "com.keyscribe.app").injectsBundledUpdater)
+        XCTAssertFalse(AppVariant.dev.injectsBundledUpdater)
+        XCTAssertFalse(AppVariant(bundleID: "com.keyscribe.app.dev").injectsBundledUpdater)
+        XCTAssertFalse(AppVariant(bundleID: "com.acme.customvoice", bundleName: "CustomVoice").injectsBundledUpdater)
+    }
+
     func testCustomBundleIDIsCustomVariant() {
         let variant = AppVariant(bundleID: "com.acme.notes", bundleName: "Acme Notes")
         XCTAssertEqual(variant, .custom(displayName: "Acme Notes", keychainService: "com.acme.notes.llm"))
         XCTAssertFalse(variant.isDev)
-    }
-
-    func testCustomVariantIdentityIsDerivedFromBundle() {
-        let variant = AppVariant(bundleID: "com.acme.notes", bundleName: "Acme Notes")
-        XCTAssertEqual(variant.displayName, "Acme Notes")
-        XCTAssertEqual(variant.supportFolderName, "Acme Notes")
-        XCTAssertEqual(variant.keychainService, "com.acme.notes.llm")
     }
 
     func testCustomVariantFallsBackToBundleIDWhenNameMissing() {

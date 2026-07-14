@@ -2,8 +2,8 @@ import AppKit
 import KeyScribeKit
 
 extension KeyDescriptor {
-    // Display-only glyph: status-item menus are outside `performKeyEquivalent:`'s main-menu walk, so
-    // this never registers a competing hotkey or double-fires the event tap. Only chords map.
+    // Display-only glyph: status-item menus sit outside `performKeyEquivalent:`'s main-menu walk, so
+    // this never registers a competing hotkey or double-fires the event tap.
     var menuItemKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
         guard case .chord(let modifiers, let base) = self else { return nil }
         let key: String

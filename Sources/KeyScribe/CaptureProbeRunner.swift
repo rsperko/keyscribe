@@ -2,12 +2,11 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Headless capture self-test (`--capture-probe`). Drives the REAL capture path (`AudioCapture.start →
-// record → finishDraining`), exercising the RT-thread ring, writer thread, drain gate, and teardown as a
-// live dictation does (which the WAV-fed `--benchmark`/`--commands-check` do NOT). Feed a known pure tone
-// into the input (via an Aggregate/loopback device); the probe reports SINAD, a glitch count, CoreAudio's
-// overload count, and the ring's drop count — all should be 0, a non-zero value being ear-free proof the
-// RT path dropped or corrupted audio.
+// Headless capture self-test. Drives the REAL capture path (`AudioCapture.start → record →
+// finishDraining`), exercising the RT-thread ring, writer thread, drain gate, and teardown as a live
+// dictation does — which the WAV-fed `--benchmark`/`--commands-check` do NOT. Feed a known pure tone into
+// the input (via an Aggregate/loopback device); a non-zero glitch/overload/drop count is ear-free proof
+// the RT path dropped or corrupted audio.
 enum CaptureProbeRunner {
     static func run(seconds: Double, toneHz: Double) async {
         guard Permissions.microphoneStatus() == .granted else {
@@ -16,7 +15,7 @@ enum CaptureProbeRunner {
         }
         let rate = 16_000
         let audio = AudioCapture()
-        // Let the idle prewarm settle so the first bring-up is on the hot path (as in real use).
+        // Settle the idle prewarm first so bring-up below is on the hot path, as in real use.
         audio.prewarm()
         try? await Task.sleep(for: .milliseconds(300))
 
@@ -33,8 +32,8 @@ enum CaptureProbeRunner {
             print("capture-probe: capture produced no file.")
             return
         }
-        // Mainline dictation now transcribes the writer's in-memory samples, NOT the WAV — so verify the two
-        // are identical here (P2-4). Read before the WAV so a divergence surfaces even if the file read fails.
+        // Dictation transcribes the writer's in-memory samples, NOT the WAV — verify the two are identical.
+        // Read before the WAV so a divergence surfaces even if the file read fails.
         let drained = audio.takeDrainedSamples()
         let diag = audio.captureDiagnostics()
 

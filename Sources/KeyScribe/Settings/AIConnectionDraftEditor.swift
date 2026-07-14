@@ -171,8 +171,8 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
-    // The preset's allowed methods plus the draft's current one: a connection whose TOML carries a method
-    // the preset no longer offers (the first-party token-command grace) must stay selectable, not vanish.
+    // Preset's allowed methods plus the draft's current one — a connection whose TOML carries a method the
+    // preset no longer offers must stay selectable, not vanish.
     private var authSegments: [Connection.AuthMethod] {
         var methods = draft.selectedPreset.allowedAuthMethods
         let current = draft.effectiveAuthMethod
@@ -453,9 +453,8 @@ struct AIConnectionDraftEditor: View {
         draft.selectedPreset.isCustom ? "Custom endpoint and sign-in" : "Change service type"
     }
 
-    // The Base URL field lives inside the collapsed "Connection options" section for a custom service, so
-    // a cleared (required) endpoint must raise the section's dot and auto-expand it — otherwise the
-    // required-message hides behind the header with no indication.
+    // Base URL lives inside the collapsed "Connection options" section, so a cleared endpoint must raise
+    // the section's dot and auto-expand it — otherwise the required message hides behind the header.
     private var connectionOptionsError: Bool {
         draft.selectedPreset.isCustom
             && draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -470,8 +469,8 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
-    // An untested connection reports its sign-in shape, not "No key" for methods that never take one:
-    // a no-auth or token-command service always showed "No key" here, contradicting its own auth row.
+    // Reports sign-in shape, not "No key" — a no-auth or token-command service used to always show
+    // "No key" here, contradicting its own auth row.
     private var untestedStatus: (text: String, icon: String, kind: PaneBadge.Kind) {
         switch draft.effectiveAuthMethod {
         case .none: ("No auth", "globe", .neutral)

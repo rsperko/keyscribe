@@ -50,8 +50,6 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published var pendingConnectOffer: ConnectModesOffer?
     @Published private(set) var dependentNamesByConnection: [String: [String]] = [:]
 
-    // Injected: create a disabled mode wired to a connection and route to Modes ("Create a mode with this
-    // service"). Set by SettingsRootView.
     var onCreateModeWithConnection: ((String) -> Void)?
 
     private let repository: ConfigRepository
@@ -63,8 +61,8 @@ final class AIServiceSettingsModel: ObservableObject {
     private let saveAPIKey: (String, String) -> Bool
     private let deleteAPIKey: (String) -> Void
     private(set) var testTask: Task<Void, Never>?
-    // Monotonic per-connection token. A post-test edit bumps it so a slow verdict landing after the reset
-    // can't resurrect a stale error badge (drives the menu error dot + Modes-pane flags).
+    // Monotonic per-connection token: a post-test edit bumps it so a slow verdict landing after the reset
+    // can't resurrect a stale error badge.
     private var testGeneration: [String: Int] = [:]
     private var pendingOfferConnectionId: String?
 
@@ -125,11 +123,9 @@ final class AIServiceSettingsModel: ObservableObject {
         modelDiscoveryStates[id] = .loading
         do {
             let models = try await listModels(connection, apiKey)
-            // Re-read the live connection by id: a text field's focus-loss commit can land between the
-            // snapshot and here. The fetched list describes the endpoint we queried, so if the provider or
-            // base URL changed (or the connection was deleted) while the fetch was in flight, it is a stale
-            // server's list — neither offer it as suggestions for the now-different endpoint nor auto-select
-            // from it. Reset discovery to idle so the user re-fetches against the new endpoint.
+            // Re-read the live connection by id: a focus-loss commit can land while the fetch is in flight.
+            // If the provider or base URL changed (or the connection was deleted) meanwhile, the fetched
+            // list describes a now-stale endpoint — don't offer it as suggestions or auto-select from it.
             guard let latest = connections.first(where: { $0.id == id }),
                   latest.provider == connection.provider, latest.baseUrl == connection.baseUrl else {
                 modelDiscoveryStates[id] = nil
@@ -137,8 +133,8 @@ final class AIServiceSettingsModel: ObservableObject {
             }
             modelSuggestionsByConnection[id] = models
             modelDiscoveryStates[id] = .loaded
-            // The auto-select additionally requires the model to be unchanged — a changed model is the
-            // user's own deliberate pick, so models[0] must not overwrite it.
+            // Auto-select requires the model to be unchanged — a changed model is the user's own
+            // deliberate pick and must not be overwritten.
             if !models.isEmpty, latest.model == connection.model {
                 var updated = latest
                 let current = latest.model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -180,10 +176,9 @@ final class AIServiceSettingsModel: ObservableObject {
         keyedRefs = Set(connections.map(\.keyRef).filter(KeychainStore.has))
     }
 
-    // Acquire a Catalog starter: persist a new connection seeded from the preset immediately and select it, so
-    // the detail becomes its live editor (option-1-rollout.md). Nothing is tested here — the connection lands
-    // in an honest "No key set" / config-issue state and is not usable until the user finishes it in the editor
-    // and Tests it. The API key is entered there and stored in Keychain, never here.
+    // Persists a new connection seeded from the preset immediately and selects it, so the detail becomes
+    // its live editor. Nothing is tested here — it lands in an honest "No key set" / config-issue state
+    // until the user finishes and tests it in the editor.
     func addService(preset: ConnectionPreset) {
         let existing = connections
         let id = ConnectionStore.newID(for: preset.name, existing: existing.map(\.id))
@@ -256,8 +251,7 @@ final class AIServiceSettingsModel: ObservableObject {
         }
     }
 
-    // Rotating a keyRef appends a fresh UUID so the old Keychain item is orphaned rather than reused. Strip
-    // any UUID a prior rotation already appended first, so repeated boundary crossings can't grow the ref
+    // Strips any UUID a prior rotation already appended, so repeated boundary crossings can't grow the ref
     // unboundedly (base.uuid1.uuid2…) — it stays base + exactly one UUID.
     private func rotationBase(_ keyRef: String) -> String {
         let parts = keyRef.split(separator: ".", omittingEmptySubsequences: false)
@@ -490,9 +484,8 @@ private struct AddAIServiceChooser: View {
     }
 }
 
-// The shared status vocabulary for a connection — the list row, the summary, and the coordinator's error
-// surface all derive works/testing/failed/no-key/token-command/no-auth from this one place (UX2 phase 5b),
-// so no two surfaces phrase the same state differently.
+// The shared status vocabulary for a connection — list row, summary, and error surface all derive from
+// this one place, so no two surfaces phrase the same state differently.
 struct AIServiceStatus {
     let text: String
     let icon: String
@@ -614,8 +607,8 @@ private struct AIServiceEditor: View {
             }
     }
 
-    // The saved key is always removed here (this dialog only fires when one existed), but the destination
-    // decides whether a new one is even wanted — a token-command or no-auth endpoint needs none.
+    // The saved key is always removed here (this dialog only fires when one existed) — the destination
+    // decides whether a new one is even wanted.
     private var credentialBoundaryMessage: String {
         switch pendingBoundaryConnection?.authMethod {
         case .some(.tokenCommand):
@@ -640,9 +633,8 @@ private struct AIServiceEditor: View {
             modelDiscoveryState: modelDiscoveryState)
     }
 
-    // Rebuilding from the just-saved connection must not re-derive the picked service from its base URL
-    // (a custom endpoint at a hosted preset's URL would flip to managed and hide its fields) nor drop the
-    // stash that lets a service switch-back restore the previous endpoint.
+    // Must not re-derive the picked service from base URL (a custom endpoint at a hosted preset's URL
+    // would flip to managed and hide its fields), and must not drop the switch-back stash.
     private func refreshDraft(from connection: Connection) {
         var next = Self.draft(
             from: connection,
@@ -670,10 +662,8 @@ private struct AIServiceEditor: View {
         onBoundaryUpdate(pendingBoundaryConnection)
     }
 
-    // Cancel fully reverts the service flip: rebuild the draft from the unchanged connection so the picked
-    // service (presetId) and its stashed values are re-derived from what is actually stored — NOT preserved
-    // like the post-save refreshDraft path, which would keep the flipped presetId over reverted values and
-    // strand the editor showing a managed preset's hidden fields against a custom endpoint's data.
+    // Unlike refreshDraft, this re-derives presetId and stashed values from what's actually stored rather
+    // than preserving them — a cancel must fully revert the service flip, not keep it over reverted values.
     private func cancelCredentialBoundary() {
         pendingBoundaryConnection = nil
         draft = Self.draft(
@@ -690,10 +680,9 @@ private struct AIServiceEditor: View {
     }
 }
 
-// The Catalog detail for a provider starter: a reduced, read-only preview with one CTA, Add Service. Pressing
-// it persists a seeded connection and swaps this preview for that connection's live editor
-// (installed-catalog-behavior.md). No fields, no test, no destructive controls live here — the connection is
-// finished and tested in the editor after it exists.
+// Read-only preview with one CTA (Add Service); pressing it persists a seeded connection and swaps this
+// preview for that connection's live editor. No fields, test, or destructive controls here — the
+// connection is finished and tested in the editor after it exists.
 private struct AIServiceStarterPreview: View {
     let preset: ConnectionPreset
     let onAdd: () -> Void

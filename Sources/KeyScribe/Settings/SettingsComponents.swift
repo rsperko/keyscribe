@@ -2,11 +2,9 @@ import SwiftUI
 
 struct DisclosureSection<Label: View, Content: View>: View {
     @Binding var isExpanded: Bool
-    // A child of `content` needs attention. It must never sit hidden behind a collapsed header, so the
-    // section AUTO-EXPANDS when either flag becomes true (revealing the child's own indicator). The dot is
-    // the fallback: if the user then manually collapses, the header surfaces it (mirroring the Settings
-    // sidebar) so it stays reachable. Its color matches the child's severity — RED for `hasError` (a
-    // failure), ORANGE for `hasWarning` (an advisory) — so the header can't contradict what it reveals.
+    // A child needing attention must never sit hidden behind a collapsed header, so the section
+    // auto-expands when either flag becomes true. If the user then manually re-collapses it, the header's
+    // dot (colored to match the child's severity) keeps it reachable — mirroring the Settings sidebar.
     var hasError: Bool = false
     var hasWarning: Bool = false
     @ViewBuilder var label: () -> Label
@@ -39,8 +37,7 @@ struct DisclosureSection<Label: View, Content: View>: View {
             .accessibilityHint(showsAttentionDot ? "Needs attention" : "")
             if isExpanded { content() }
         }
-        // Reveal the issue the moment it appears (and on open if one is already present). Only forces
-        // OPEN — never auto-collapses — so the user can still close it, falling back to the dot.
+        // Only forces open — never auto-collapses — so the user can still close it, falling back to the dot.
         .onAppear { if needsAttention { isExpanded = true } }
         .onChange(of: needsAttention) { _, now in if now { isExpanded = true } }
     }
@@ -59,10 +56,9 @@ extension DisclosureSection where Label == Text {
     }
 }
 
-// The one inline issue-message idiom: colored caption text, NO leading glyph — the color carries
-// severity (red = failure, orange = advisory) and reachability is the red dot on the owning field
-// label / container. Multi-state status indicators (badges, the connection-test tri-state, permission
-// rows) keep their icon set and are NOT this; they distinguish success/neutral states an icon conveys.
+// Deliberately no leading glyph — the color alone carries severity (red = failure, orange = advisory);
+// reachability is the red dot on the owning field's label/container. Multi-state status indicators
+// (badges, the connection-test tri-state, permission rows) keep their icon set and are not this.
 struct IssueText: View {
     enum Severity { case failure, advisory }
     let message: String
@@ -114,9 +110,8 @@ struct DisclosureSummaryLabel: View {
     }
 }
 
-// ui_components.md "Setting row with help": label + one-line result, the control, an inline "Learn
-// more" disclosure carrying benefit/limit/prerequisite, plus a persistent dependency reason when the
-// control is gated. No hover-only tooltips for anything affecting data, privacy, or output (ui_design.md §3).
+// No hover-only tooltips for anything affecting data, privacy, or output (ui_design.md §3) — the "Learn
+// more" disclosure and persistent dependency reason exist so that information is always reachable.
 struct SettingRow<Control: View>: View {
     let title: String
     var result: String? = nil
@@ -162,9 +157,8 @@ struct SettingRow<Control: View>: View {
     }
 }
 
-// ui_components.md data-boundary badge: one shared capsule for "On this Mac", "Cloud rewrite",
-// "Best-effort redaction", "App shared", "Selected text shared". Label strings come from KeyScribeKit
-// (HistoryEntry); the single view used in HUD, Mode summaries, and History so categories stay distinct.
+// Label strings come from KeyScribeKit (HistoryEntry); this one view is shared by HUD, Mode summaries,
+// and History so data-boundary categories always render identically.
 struct DataBoundaryBadge: View {
     let label: String
 
@@ -177,10 +171,10 @@ struct DataBoundaryBadge: View {
     }
 }
 
-// Settings are modeless / immediate-apply (Apple HIG: no Save/Cancel/Apply/Done). A text field applies
-// on END-OF-EDITING — Return or focus loss, the native AppKit commit point — not per keystroke, avoiding
-// per-character disk writes + config-watcher churn. Esc reverts to the last committed value. The draft
-// re-seeds from the model when it changes externally and the field is not being edited.
+// Settings are modeless / immediate-apply (Apple HIG: no Save/Cancel/Apply/Done). Commits on Return or
+// focus loss, not per keystroke, to avoid per-character disk writes + config-watcher churn. Esc reverts
+// to the last committed value; the draft re-seeds from the model when it changes externally and the
+// field isn't being edited.
 struct CommittedTextField: View {
     let title: String
     let text: String
@@ -215,7 +209,7 @@ struct CommittedTextField: View {
             .onExitCommand { draft = text }
             .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
             .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
-            // A container teardown (`.id` swap, pane switch) removes the field without a focus-loss commit.
+            // A container teardown (`.id` swap, pane switch) can remove the field without a focus-loss commit.
             .onDisappear { commitIfChanged() }
             .onAppear {
                 guard autofocus else { return }
@@ -229,9 +223,8 @@ struct CommittedTextField: View {
     private func commitIfChanged() { if draft != text { commit(draft) } }
 }
 
-// Lets a dismissing container (a popover with a Done button) land the editor's pending edit
-// synchronously before it acts on the saved value — the popover's own onDisappear commit does NOT fire
-// reliably on teardown, so the debounce alone can lose a just-typed edit to a fast Done.
+// A popover's own onDisappear commit does NOT fire reliably on teardown, so the debounce alone can lose
+// a just-typed edit to a fast Done; this lets the dismissing container flush synchronously first.
 @MainActor final class PromptEditorFlush {
     var commit: (() -> Void)?
     func flush() { commit?() }
@@ -241,11 +234,10 @@ struct PromptEditor: View {
     let title: String
     let placeholder: String
     let text: String
-    // Live commit (write on every change) is for an editor that lives in a dismissing container like a
-    // popover: TextEditor's focus-loss/onDisappear commit does NOT fire reliably when the container is
-    // torn down on Done, so the only dependable save is per-change (plus the flush handle on Done).
-    // Inline editors (the writing instruction in the form) keep focus-loss to avoid per-keystroke
-    // config-watcher churn, and commit on teardown via onDisappear.
+    // Live commit (write on every change) is for an editor in a dismissing container like a popover:
+    // TextEditor's focus-loss/onDisappear commit does NOT fire reliably when the container tears down on
+    // Done, so per-change is the only dependable save there (plus the flush handle on Done). Inline
+    // editors keep focus-loss commit to avoid per-keystroke config-watcher churn.
     let commitsOnChange: Bool
     let commit: (String) -> Void
     let flush: PromptEditorFlush?
@@ -275,8 +267,8 @@ struct PromptEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // TextEditor has no onSubmit (Return inserts a newline), so an inline editor commits on
-            // focus loss; a popover editor commits live (see commitsOnChange).
+            // TextEditor has no onSubmit (Return inserts a newline), so commit is driven by focus loss or
+            // commitsOnChange instead.
             TextEditor(text: $draft)
                 .font(.body)
                 .ghostText(placeholder, visible: draft.isEmpty)
@@ -349,8 +341,8 @@ extension View {
     }
 }
 
-// Ghost text for TextEditor, which (unlike TextField) has no native placeholder. Aligns with
-// TextEditor's internal text inset and ignores hits so it never blocks typing.
+// TextEditor, unlike TextField, has no native placeholder. Aligns with TextEditor's internal text inset
+// and ignores hits so it never blocks typing.
 extension View {
     func ghostText(_ placeholder: String, visible: Bool) -> some View {
         overlay(alignment: .topLeading) {

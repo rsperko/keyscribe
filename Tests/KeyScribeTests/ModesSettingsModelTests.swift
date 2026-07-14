@@ -15,7 +15,7 @@ struct ModesSettingsModelTests {
         return (ModesSettingsModel(repository: repository), support, modesDir)
     }
 
-    // User-mode files only — the system Direct floor (`_direct`) is always seeded, so exclude it.
+    // Excludes the system Direct floor (`_direct`), which is always seeded.
     private func tomls(in dir: URL) -> Set<String> {
         let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         return Set(urls.filter { $0.pathExtension == "toml" }
@@ -38,14 +38,14 @@ struct ModesSettingsModelTests {
         #expect(model.globalRules == [.init(heard: "foo", replace: "bar", regex: false)])
     }
 
-    // A template whose save fails must NOT record a seed-ledger entry — a ghost entry marks a mode as
-    // materialized that isn't on disk, and the one-shot seed migration would then never re-run for it.
+    // A ghost ledger entry would mark a mode as materialized when it isn't on disk, so the one-shot
+    // seed migration would never re-run for it — a failed save must not record one.
     @Test func aTemplateThatFailsToSaveRecordsNoSeedLedgerEntry() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
         let template = try #require(ModeStore.templates().first)
 
-        // Force the write to fail deterministically: a directory sits where the mode's .toml must be written.
+        // Forces the write to fail: a directory sits where the mode's .toml must be written.
         try FileManager.default.createDirectory(
             at: modesDir.appendingPathComponent("\(template.id).toml"), withIntermediateDirectories: true)
 
@@ -74,8 +74,8 @@ struct ModesSettingsModelTests {
     }
 
     // Adding an EXISTING fragment by name writes nothing, so it must not record a self-write — else an
-    // external edit to that fragment made just before the add would be swallowed (the watcher would see
-    // a stamp the app "wrote" and skip the reload that the real edit needed).
+    // external edit made just before the add would be swallowed (the watcher would see a stamp the app
+    // "wrote" and skip the reload the real edit needed).
     @Test func addingAnExistingFragmentByNameDoesNotSwallowAnExternalEdit() throws {
         let fm = FileManager.default
         let support = fm.temporaryDirectory.appendingPathComponent("keyscribe-frag-\(UUID().uuidString)")
@@ -88,14 +88,11 @@ struct ModesSettingsModelTests {
         let gate = ConfigSelfWriteGate()
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support), selfWriteGate: gate)
         let model = ModesSettingsModel(repository: repository)
-        // Baseline AFTER init: model init's reload() seeds _direct.toml, so capture it here — the ONLY
-        // delta before the final check must be the external fragment edit, or the test could pass for
-        // the wrong reason.
+        // Baseline must be taken AFTER init, since init's reload() seeds _direct.toml — otherwise the
+        // delta below wouldn't isolate the external fragment edit, and the test could pass for the wrong reason.
         gate.adopt(ConfigTreeSnapshot.capture(supportDir: support))
 
-        // External editor rewrites the fragment (longer content) without the app recording it.
         try "---\nname: My Voice\n---\nExternally rewritten, much longer body.".write(to: file, atomically: true, encoding: .utf8)
-        // User references the SAME fragment by name in-app: no file is written, so no self-write.
         _ = model.addFragmentFile(named: "My Voice")
 
         #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: support)) == true)
@@ -158,12 +155,12 @@ struct ModesSettingsModelTests {
         #expect(copy.name == "Email copy")
         #expect(copy.seedId == nil)
         #expect(copy.triggerKeys.isEmpty)                              // no shortcut clash with the original
-        #expect(copy.constraints == original.constraints)             // everything else carried over
+        #expect(copy.constraints == original.constraints)
         #expect(model.selectedID == "email-copy")
     }
 
-    // Templates are reusable starting points: the Start-from-a-Template chooser always shows the full catalog,
-    // even after every template has been materialized, so a user can add any template again.
+    // The Start-from-a-Template chooser always shows the full catalog, even after every template has
+    // been materialized, so a user can add any template again.
     @Test func templatesStayAvailableAfterMaterialization() throws {
         let (model, support, _) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -186,7 +183,7 @@ struct ModesSettingsModelTests {
         #expect(polish.seedId == "polish")
         #expect(polish.enabled == false)   // added Disabled; user enables after reviewing the seeded editor
         #expect(model.selectedID == "polish")
-        // The materialized seed's ledger entry carries a real fingerprint (participates in seed updates).
+        // A real fingerprint means this entry participates in future seed updates.
         let ledger = ModeStore.loadLedger(in: support.appendingPathComponent("lkg", isDirectory: true))
         #expect(ledger?.entry("polish")?.fingerprint != nil)
     }
@@ -266,8 +263,8 @@ struct ModesSettingsModelTests {
         #expect(ran == 1)
     }
 
-    // P2-19: replays closeFragmentEditor's ordering. The PromptEditor's 300 ms debounce has NOT fired, so
-    // its pending body edit lives only in the flush handle. Flushing before the close lands the body on
+    // Replays closeFragmentEditor's ordering. The PromptEditor's 300 ms debounce has NOT fired, so its
+    // pending body edit lives only in the flush handle; flushing before the close lands the body on
     // disk, so closeFragment's empty-check keeps the instruction instead of discarding it.
     @Test func flushingBeforeCloseSavesTheStillPendingBodyAndKeepsTheInstruction() throws {
         let (model, support, _) = try makeModel()
@@ -283,7 +280,7 @@ struct ModesSettingsModelTests {
         flush.commit = { model.saveFragmentBody(id, "keep it terse") }
         #expect(model.fragmentBody(id).isEmpty)   // debounce not fired: nothing on disk yet
 
-        flush.flush()                             // closeFragmentEditor's flush() step
+        flush.flush()
         model.closeFragment(id, fromMode: try #require(model.selectedID))
 
         #expect(model.fragmentIds.contains(id))
@@ -291,8 +288,8 @@ struct ModesSettingsModelTests {
         #expect(model.selected?.aiRewrite?.fragments == [id])
     }
 
-    // The old bug: closing while the body edit is still pending (never flushed) reads an empty body and
-    // discards the instruction — this is the regression the flush prevents.
+    // Regression: closing while the body edit is still pending (never flushed) used to read an empty
+    // body and discard the instruction — this is what the flush in the test above prevents.
     @Test func closingWithoutFlushingAPendingBodyDiscardsAndDetachesIt() throws {
         let (model, support, _) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

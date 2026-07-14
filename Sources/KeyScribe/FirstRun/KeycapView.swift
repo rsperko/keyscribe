@@ -1,8 +1,8 @@
 import SwiftUI
 import KeyScribeKit
 
-// Renders a trigger as small physical-looking keycaps (phase 2). Pure token mapping lives in
-// `KeyDescriptor.keycapTokens`; a descriptor with no tokens (a mouse button) falls back to plain text.
+// Pure token mapping lives in `KeyDescriptor.keycapTokens`; a descriptor with no tokens (a mouse
+// button) falls back to plain text.
 struct KeycapView: View {
     let descriptor: KeyDescriptor
 

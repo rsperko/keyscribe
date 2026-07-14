@@ -26,7 +26,6 @@ struct StreamingStartPolicyTests {
         }
     }
 
-    // At/above the floor the requested value is honored unchanged.
     @Test func atOrAboveFloorIsHonored() {
         #expect(StreamingStartPolicy(thresholdSeconds: 4, sampleRate: 16000).thresholdSeconds == 4)
         #expect(StreamingStartPolicy(thresholdSeconds: StreamingStartPolicy.minimumThresholdSeconds,

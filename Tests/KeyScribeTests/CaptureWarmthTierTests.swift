@@ -3,8 +3,8 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// Idle microphone warm-up rides the Eviction tier: Fastest/Balanced prewarm the input unit, Frugal never
-// touches it (open-on-trigger). No microphone required — the fake records prewarm/refreshBinding calls.
+// Idle mic warm-up rides the Eviction tier: Fastest/Balanced prewarm the input unit, Frugal never
+// touches it. The fake records prewarm/refreshBinding calls, so no real microphone is needed.
 @MainActor
 struct CaptureWarmthTierTests {
     private final class TinyEngine: SpeechEngine, @unchecked Sendable {
@@ -90,8 +90,8 @@ struct CaptureWarmthTierTests {
         #expect(audio.refreshes == 1)
     }
 
-    // Fastest holds the unit warm via its periodic refresh with no pending idle-eviction checkpoint, so a
-    // downgrade must actively dispose it — else the mic stays held after the user picked a mic-friendlier tier.
+    // Fastest has no pending idle-eviction checkpoint to dispose the unit, so downgrading tiers must do
+    // it explicitly — else the mic stays held after picking a mic-friendlier tier.
     @Test func switchingFromFastestToFrugalDisposesTheWarmUnit() {
         let audio = RecordingAudio()
         let controller = makeController(eviction: .fastest, audio: audio)
@@ -111,8 +111,8 @@ struct CaptureWarmthTierTests {
         #expect(audio.releases >= 1)
     }
 
-    // The launch/prewarm case: a Balanced prewarm outside a dictation has no post-dictation checkpoint, so
-    // the release must be scheduled at prewarm time or the mic is held until the first dictation.
+    // A launch-time Balanced prewarm has no post-dictation checkpoint, so release must be scheduled at
+    // prewarm time or the mic is held until the first dictation.
     @Test func balancedPrewarmDoesNotHoldTheMicIndefinitely() async {
         let audio = RecordingAudio()
         let controller = makeController(eviction: .balanced, idleSeconds: 0, audio: audio)

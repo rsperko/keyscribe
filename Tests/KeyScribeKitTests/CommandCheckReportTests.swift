@@ -2,8 +2,8 @@ import Testing
 @testable import KeyScribeKit
 
 struct CommandCheckReportTests {
-    // Different engines legitimately clean different clips (the clips are transcription-sensitive), so
-    // the gate is a regression check against a known-good per-engine baseline — not an absolute floor.
+    // The gate compares against a known-good per-engine baseline, not an absolute floor — engines
+    // legitimately clean different clips since results are transcription-sensitive.
 
     @Test func passesWhenEveryEngineHoldsItsBaseline() {
         let report = CommandCheckReport(engines: [

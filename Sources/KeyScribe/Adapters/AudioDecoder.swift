@@ -1,11 +1,10 @@
 import AVFoundation
 import Foundation
 
-// Single audio-decode path shared by engines needing raw PCM at a specific rate (Qwen3 @24k, Moonshine
-// @16k). Reads a wav into mono Float32, resampling through AVAudioConverter only when the source rate/layout
-// differs (the common 16 kHz-mono clip takes the fast path). Engines whose SDK consumes a file path
-// (Whisper) or own their converter (Parakeet) don't use this. Chunked decode bounds peak memory to one
-// chunk plus the growing result.
+// Shared decode path for engines needing raw PCM at a specific rate (Qwen3 @24k, Moonshine @16k). Resamples
+// through AVAudioConverter only when the source rate/layout differs from the target (the common 16 kHz-mono
+// clip takes the fast path). Engines whose SDK consumes a file path (Whisper) or own their converter
+// (Parakeet) don't use this. Chunked decode bounds peak memory to one chunk plus the growing result.
 enum AudioDecoder {
     private static let chunkFrames: AVAudioFrameCount = 16384
 

@@ -325,11 +325,9 @@ enum AccessibilityID {
         static let cancel = "correction.cancel"
     }
 
-    // The status menu is pure AppKit (NSMenu / NSMenuItem / NSStatusBarButton). Empirically, macOS does
-    // NOT surface a custom accessibilityIdentifier for these: AppKit derives a menu item's AXIdentifier
-    // from its action selector (e.g. "openSettings"), and the status button's AXMenuBarItem exposes no
-    // identifier at all. So the menu bar has no entries here — items are addressed by title (or by their
-    // action-derived id / representedObject for dynamic rows). See a11y-worklist.md for the finding.
+    // The status menu (NSMenu/NSMenuItem/NSStatusBarButton) has no entries here: AppKit derives a menu
+    // item's AXIdentifier from its action selector, not a custom accessibilityIdentifier, and the status
+    // button's AXMenuBarItem exposes no identifier at all — those items are addressed by title instead.
 
     static let all: [String] = [
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,

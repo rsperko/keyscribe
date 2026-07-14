@@ -14,7 +14,7 @@ private func info(
 private let realCatalog = SpeechModelCatalog.all
 
 struct SpeechModelSetTests {
-    // Usability: system-managed always usable; downloadable only when installed.
+    // Usability
     @Test func systemManagedAlwaysUsable() {
         let s = SpeechModelSet(catalog: realCatalog, installed: [], activeId: "apple")
         #expect(s.isUsable("apple"))
@@ -94,9 +94,8 @@ struct SpeechModelSetTests {
         #expect(s.activeId == "parakeet")
     }
 
-    // Deleting the last usable model must actually remove it from `installed` (into the "no model
-    // installed" state the UI narrates) — not desync the set so the row still reads "Installed" and the
-    // next dictation silently re-downloads.
+    // Must actually remove from `installed` (the "no model installed" state) — not desync so the row
+    // still reads "Installed" and the next dictation silently re-downloads.
     @Test func deletingTheOnlyUsableEngineRemovesItIntoANoUsableState() {
         let cat = [info("only", system: false, defaultEnglish: true)]
         var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
@@ -112,8 +111,8 @@ struct SpeechModelSetTests {
         #expect(s.isUsable("whisper"))
     }
 
-    // Failed overlay: a model that failed its self-test stays installed (on disk) but is not usable and
-    // not selectable, for both downloadable and system-managed engines.
+    // A model that failed its self-test stays installed (on disk) but not usable/selectable, for both
+    // downloadable and system-managed engines.
     @Test func failedModelIsNotUsable() {
         let s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple", failed: ["parakeet"])
         #expect(s.installed.contains("parakeet"))
@@ -145,8 +144,8 @@ struct SpeechModelSetTests {
         #expect(!s.isUsable("whisper"))
     }
 
-    // Failing the only usable engine strands activeId on the now-unusable id — the same "no usable model"
-    // state deleting the last engine produces; callers surface it as the active-engine-unavailable banner.
+    // Strands activeId on the now-unusable id — same "no usable model" state deleting the last engine
+    // produces; callers surface it as the active-engine-unavailable banner.
     @Test func markFailedOnlyUsableStrandsActive() {
         let cat = [info("only", system: false, defaultEnglish: true)]
         var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")

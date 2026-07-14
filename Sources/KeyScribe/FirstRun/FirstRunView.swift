@@ -324,7 +324,7 @@ struct FirstRunView: View {
             }
         }
         // Focus here, not in the parent's `.onChange(of: model.step)`: `.id(model.step)` recreates this
-        // subtree on the cross-fade, so the fresh TextEditor exists only once this content appears.
+        // subtree on the cross-fade, so the fresh TextEditor only exists once this content appears.
         .onAppear(perform: focusTrialField)
     }
 
@@ -510,8 +510,8 @@ struct FirstRunView: View {
 
     private func focusTrialField() {
         trialFieldFocused = true
-        // Re-assert after the subtree settles: the incoming `.onAppear` can fire a hair before the recreated
-        // TextEditor is ready to accept focus (same timing the playground field guards against).
+        // Re-assert after the subtree settles: `.onAppear` can fire a hair before the recreated TextEditor
+        // is ready to accept focus (same timing the playground field guards against).
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { trialFieldFocused = true }
     }
 

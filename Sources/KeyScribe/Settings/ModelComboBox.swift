@@ -69,10 +69,10 @@ struct ModelComboBox: NSViewRepresentable {
             MainActor.assumeIsolated { popupOpen = false }
         }
 
-        // Fires on every keyboard browse through the OPEN list as well as on a confirmed pick, so committing
-        // here directly saves once per arrow key. Defer to the next runloop turn: by then a real pick (mouse
-        // click / Return) has dismissed the popup, while an in-progress browse leaves it open — commit only the
-        // former. Enter and focus-loss are also caught by controlTextDidEndEditing; the value guard dedups.
+        // Fires on every keyboard browse through the open list, not just a confirmed pick. Deferring to the
+        // next runloop turn distinguishes them: by then a real pick (click/Return) has dismissed the popup,
+        // while an in-progress browse leaves it open — commit only the former. Enter/focus-loss are also
+        // caught by controlTextDidEndEditing; the value guard dedups.
         func comboBoxSelectionDidChange(_ notification: Notification) {
             MainActor.assumeIsolated {
                 guard let combo = notification.object as? NSComboBox else { return }

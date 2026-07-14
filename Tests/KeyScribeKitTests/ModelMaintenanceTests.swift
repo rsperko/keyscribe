@@ -18,8 +18,8 @@ struct ModelMaintenanceTests {
     }
 
     @Test func adoptsCompleteButUnmarkedModel() {
-        // completeIds reflects disk reality regardless of the prior marker — a finished download
-        // that never got recorded is adopted rather than deleted.
+        // completeIds reflects disk reality regardless of the prior marker — a finished download that
+        // never got recorded is adopted rather than deleted.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["whisper"],
             dirsOnDisk: ["whisper"])
@@ -28,7 +28,6 @@ struct ModelMaintenanceTests {
     }
 
     @Test func dropsAndDeletesIncompleteModel() {
-        // parakeet partially downloaded (not complete) → not installed, its partial dir removed.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: [],
             dirsOnDisk: ["parakeet-tdt-0.6b-v3"])
@@ -37,9 +36,9 @@ struct ModelMaintenanceTests {
     }
 
     @Test func preservesUnrecognizedDirs() {
-        // The models dir is shared across build variants: a dir this binary doesn't recognize can be a
-        // newer build's engine or the other variant's in-flight download, never safe to delete. Only
-        // dirs owned by a KNOWN-but-incomplete engine are removed.
+        // The models dir is shared across build variants: a dir this binary doesn't recognize could be a
+        // newer build's engine or the other variant's in-flight download, so only dirs owned by a
+        // KNOWN-but-incomplete engine are removed.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["parakeet"],
             dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml", "some-newer-engine"])
@@ -47,8 +46,8 @@ struct ModelMaintenanceTests {
     }
 
     @Test func protectsRecentlyModifiedDirOfIncompleteEngine() {
-        // A partial dir of a known-incomplete engine is normally removed, but not while it is being
-        // actively written — the other variant may be mid-download into the shared dir.
+        // A partial dir is normally removed, but not while actively written — the other variant may be
+        // mid-download into the shared dir.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: [],
             dirsOnDisk: ["parakeet-tdt-0.6b-v3"], protectedDirs: ["parakeet-tdt-0.6b-v3"])
@@ -56,8 +55,8 @@ struct ModelMaintenanceTests {
     }
 
     @Test func preservesUnknownMarkerIds() {
-        // installed.json is shared: an id this binary doesn't know belongs to the other variant / a
-        // newer build and must survive the marker rewrite rather than being clobbered.
+        // installed.json is shared: an id this binary doesn't know belongs to the other variant or a
+        // newer build, so it must survive the marker rewrite rather than being clobbered.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["parakeet"],
             dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml"],
@@ -66,8 +65,8 @@ struct ModelMaintenanceTests {
     }
 
     @Test func keepsPartialSecondaryDirOfInstalledEngine() {
-        // A secondary dir owned by an installed (complete) engine survives reconciliation even if partial;
-        // reconcile only removes an owned dir of a known-but-incomplete engine.
+        // reconcile only removes owned dirs of a known-but-incomplete engine, so a secondary dir of an
+        // installed (complete) engine survives even if partial.
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["parakeet"],
             dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml"])

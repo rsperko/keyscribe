@@ -27,7 +27,7 @@ private extension Pipeline {
 
 struct PipelineTests {
     @Test func runsStagesInCanonicalPositionOrder() {
-        // Added out of order; must run verbatimMark → postSTTText → postSTTMark regardless.
+        // Stages added out of declaration order; must still run verbatimMark → postSTTText → postSTTMark.
         let p = Pipeline([
             AppendStage(position: .postSTTMark, order: 0, mark: "C"),
             AppendStage(position: .verbatimMark, order: 0, mark: "A"),

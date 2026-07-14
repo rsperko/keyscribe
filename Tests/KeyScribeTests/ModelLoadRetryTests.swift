@@ -3,9 +3,8 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// STT engine whose loadIfNeeded() throws for the first `failTimes` calls, then succeeds — models a
-// transient cold CoreML/MLX compile failure right after launch. transcribe() returns fixed text once
-// loaded.
+// Models a transient cold CoreML/MLX compile failure right after launch: loadIfNeeded() throws for
+// the first `failTimes` calls, then succeeds.
 private final class FlakyLoadEngine: SpeechEngine, @unchecked Sendable {
     let id = "flaky"
     let displayName = "Flaky"
@@ -36,8 +35,7 @@ private final class FlakyLoadEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
-// loadIfNeeded always throws a timeout — exercises the "do not auto-retry a 300 s hang" branch
-// without waiting on the real deadline.
+// Exercises the "do not auto-retry a 300 s hang" branch without waiting on the real deadline.
 private final class TimeoutLoadEngine: SpeechEngine, @unchecked Sendable {
     let id = "timeout"
     let displayName = "Timeout"
@@ -51,8 +49,8 @@ private final class TimeoutLoadEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
-// loadIfNeeded() sleeps past the loading-HUD delay on its first call, then succeeds — models a cold
-// CoreML/MLX compile slow enough for the HUD to name the wait (P2-2).
+// Models a cold CoreML/MLX compile slow enough for the HUD to name the wait: loadIfNeeded() sleeps
+// past the loading-HUD delay on its first call, then succeeds.
 private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
     let id = "slow"
     let displayName = "Slow"
@@ -63,8 +61,7 @@ private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
     init(text: String = "hello world") { self.text = text }
     func loadIfNeeded() async throws {
         let already = lock.withLock { let a = loaded; loaded = true; return a }
-        // Comfortably longer than the 1 s loading-HUD delay so the delayed render fires well before the
-        // load resolves even under full-suite parallel CPU contention (a tight margin flaked at 1.3 s).
+        // 2500ms comfortably clears the 1s loading-HUD delay under full-suite CPU contention; 1.3s flaked.
         if !already { try await Task.sleep(for: .milliseconds(2500)) }
     }
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
@@ -213,7 +210,7 @@ struct ModelLoadRetryTests {
         #expect(await insertSpy.calls == 1)
         let sawLoading = hud.states.contains { if case .loadingModel = $0 { return true }; return false }
         #expect(sawLoading)
-        // The loading state is transient — the last processing state before insertion is transcribing again.
+        // Loading is transient, so the last processing state before insertion should be transcribing again.
         let lastProcessing = hud.states.last {
             if case .loadingModel = $0 { return true }
             if case .transcribing = $0 { return true }
@@ -255,7 +252,7 @@ struct ModelLoadRetryTests {
         #expect(recorder.records.count == 1)
         #expect(recorder.records.first?.timedOut == true)
         #expect(sawError(hud.states, message: "Loading the speech model timed out"))
-        // A timeout is terminal on the first attempt — no second load.
+        // A timeout is terminal on the first attempt — unlike a plain load failure, it is not retried.
         #expect(engine.loadCalls == 1)
     }
 }

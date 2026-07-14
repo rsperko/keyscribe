@@ -1,10 +1,10 @@
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --rewrite-eval <dir>`. Runs the text-only rewrite-prompt eval corpus
-// (cases.json) through each prompt variant against a saved BYOK connection, scores every output with
-// the deterministic checks, and prints a paired baseline-vs-variant report split by scenario tag —
-// so a candidate prompt feature ships on data, not faith. Headless: network only, no mic/insertion.
+// Runs the text-only rewrite-prompt eval corpus (cases.json) through each prompt variant against a
+// saved BYOK connection, scores every output with the deterministic checks, and prints a paired
+// baseline-vs-variant report split by scenario tag — so a candidate prompt ships on data, not faith.
+// Headless: network only, no mic/insertion.
 enum RewriteEvalRunner {
     struct AttemptRecord {
         let caseId: String
@@ -107,7 +107,6 @@ enum RewriteEvalRunner {
     private static func printReport(
         records: [AttemptRecord], manifest: RewriteEvalManifest, variantIds: [String]
     ) {
-        // A case "passes" a variant when every attempt passed every applicable check.
         func casePassed(_ caseId: String, _ variant: String) -> Bool {
             let attempts = records.filter { $0.caseId == caseId && $0.variant == variant }
             return !attempts.isEmpty && attempts.allSatisfy(\.passed)

@@ -1,7 +1,7 @@
 import Foundation
 
 // Cheap on-disk fingerprint (size + mtime, no content read) so Settings models skip a full re-decode when
-// nothing changed since the last load. Stat-only, far cheaper than the TOML/markdown decode it guards.
+// nothing changed since the last load.
 enum FileFingerprint {
     static func file(_ url: URL) -> String {
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)

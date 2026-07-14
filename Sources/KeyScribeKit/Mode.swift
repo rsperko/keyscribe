@@ -2,7 +2,7 @@ import Foundation
 import TOMLKit
 
 public struct Mode: Codable, Equatable, Sendable, Identifiable {
-    public var id: String                 // = filename stem; not stored in the TOML body
+    public var id: String
     public var schemaVersion: Int
     public var seedId: String?            // catalog identity if this mode was seeded; nil = user-created
     public var seedVersion: Int?          // catalog version this mode was seeded from
@@ -31,9 +31,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
 
-    // Text appended inside the atomic insert. `space` is suppressed when the insert already ends in
-    // whitespace (else a "\n" command would land a stray "\n " and indent the next dictation); `newline`
-    // is always appended (an explicit per-mode choice).
     public enum Trailing: String, Codable, Sendable {
         case none, space, newline
         public func suffix(after finalText: String) -> String {
@@ -45,8 +42,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         }
     }
 
-    // A keystroke synthesized AFTER a verified insert (outside the undo atom). Never fired on a
-    // clipboard fallback (the text never reached the target).
     public enum Submit: String, Codable, Sendable {
         case none
         case `return` = "return"
@@ -54,9 +49,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case cmdReturn = "cmd_return"
     }
 
-    // Modifier for the synthesized ⌘C/⌘V clipboard keystrokes (never `submit`). `control` targets a
-    // guest VM where ⌃C/⌃V are the paste mechanism; selection capture there is best-effort since the
-    // pasteboard bump is driven by the guest's clipboard-sync, not the OS.
     public enum ClipboardModifier: String, Codable, Sendable {
         case command, control
     }
@@ -81,9 +73,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public struct Constraint: Codable, Equatable, Sendable {
         public var bundleId: String?
-        public var bundlePrefix: String?     // case-insensitive bundle-id prefix, e.g. "com.jetbrains."
+        public var bundlePrefix: String?
         public var urlPattern: String?
-        public var windowTitle: String?      // regex matched against the focused window's title
+        public var windowTitle: String?
         enum CodingKeys: String, CodingKey {
             case bundleId = "bundle_id"
             case bundlePrefix = "bundle_prefix"
@@ -104,7 +96,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public struct Commands: Codable, Equatable, Sendable {
         public var liveEdits: Bool
         public var privacy: Bool
-        public var numbers: Bool          // inverse text normalization ("twenty five" → "25")
+        public var numbers: Bool
         enum CodingKeys: String, CodingKey {
             case liveEdits = "live_edits"; case privacy
             case numbers
@@ -158,7 +150,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public struct ContextOptIn: Codable, Equatable, Sendable {
         public var app: Bool
-        public var precedingText: Bool   // bounded text before the caret (native-only, best-effort)
+        public var precedingText: Bool
         enum CodingKeys: String, CodingKey {
             case app; case precedingText = "preceding_text"
         }
@@ -282,18 +274,10 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
-    // Reserved id namespace the slugger can never produce (`newID` joins letters/numbers with hyphens).
-    // The prefix reserves the namespace for creation only; `isSystem` keys off the exact id, so a stray
-    // hand-written `_foo.toml` is an ordinary editable mode, not a pseudo-system one.
     public static let systemIdPrefix = "_"
     public static let directId = "_direct"
     public var isSystem: Bool { id == Mode.directId }
 
-    // The always-available floor (id `_direct`, shown as "Plain Dictation") a trigger falls through to
-    // when no eligible mode matches, and the everyday mode owning Fn by default (design.md §4.3).
-    // Guaranteed on-device — never an LLM rewrite, context, or edit-in-place — but still dictates fully
-    // (voice edits, trailing/submit/insertion, the GLOBAL dictionary/replacements). A system mode so it
-    // can never be deleted or misconfigured to leak.
     public static var direct: Mode {
         var mode = Mode(id: directId, name: "Plain Dictation")
         mode.commands = Commands(liveEdits: true)
@@ -303,9 +287,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    // Re-impose a system mode's locked guarantees over the canonical base, preserving only the user-
-    // editable fields (trigger keys, insertion, trailing, submit, clipboard modifier, live-edits and
-    // exclude-from-history toggles), so a hand-edited or stale file can never weaken the floor.
     public func systemNormalized() -> Mode {
         guard id == Mode.directId else { return self }
         var mode = Mode.direct
@@ -319,9 +300,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    // A copy forced fully local for a secure (password) field: the whole transcript is the secret, so
-    // even a redacted cloud payload is wrong (design.md §4.4). Dropping aiRewrite removes the LLM call
-    // and context capture; privacy is set so effectiveContext also reports nothing.
     public func localOnlyForSecureField() -> Mode {
         var mode = self
         mode.aiRewrite = nil
@@ -329,7 +307,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    // Context the mode may actually send: privacy mode forces everything off (design.md §4.4).
     public var effectiveContext: ContextOptIn {
         if commands.privacy { return ContextOptIn() }
         return aiRewrite?.context ?? ContextOptIn()
@@ -475,16 +452,12 @@ public enum ModeStore {
         }
     }
 
-    // The starter catalog reordered for presentation (Add Mode menu + template gallery). One catalog, two
-    // orderings — reconcile keeps using `starterModes()` order, which is irrelevant to its logic.
     public static func templates() -> [Mode] {
         let order = ["polish", "message", "email", "markdown", "code", "shell", "ai-prompt", "edit-selection"]
         let byId = Dictionary(starterModes().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return order.compactMap { byId[$0] }
     }
 
-    // One-line user summary for a template row (gallery/menu). Kept as pure data here rather than a persisted
-    // Mode field; phrase-carrying templates name their spoken phrase (phase 7 owns the shared phrase format).
     public static func templateSummary(for seedId: String) -> String {
         switch seedId {
         case "polish": return "Clean up filler and grammar as you dictate"
@@ -499,9 +472,6 @@ public enum ModeStore {
         }
     }
 
-    // A short dictated-input → resulting-output example for a starter preview (option-1-rollout.md). It is an
-    // illustration of the transformation the template performs, not a record that any service ran — kept as
-    // pure data here alongside templateSummary. `result` may contain newlines for multi-line shapes.
     public static func templateExample(for seedId: String) -> (heard: String, result: String)? {
         switch seedId {
         case "polish":
@@ -541,17 +511,6 @@ public enum ModeStore {
         load(in: dir, previous: []).modes
     }
 
-    // Lenient load: a single malformed mode file must not vanish silently (it would change routing
-    // with no signal). Each file is decoded independently; on failure we fall back to the
-    // last-known-good copy — first the in-memory `previous` (an in-progress hand edit keeps the prior
-    // mode live), then, when memory has nothing (the file was already malformed AT LAUNCH), the
-    // disk-backed copy under `lkgDir`. A file that never decoded and has no LKG is reported and
-    // skipped — never substituted with a guess.
-    //
-    // `lkgDir` is the recovery store: on every clean decode the raw TOML is copied there (only when it
-    // changed, so the file system watcher sees at most one redundant reload per genuine edit). It must
-    // live OUTSIDE the `dir` being read so a copy is never mistaken for a real mode. Pass nil to disable
-    // disk LKG (e.g. one-shot reads).
     public static func load(in dir: URL, previous: [Mode], lkgDir: URL? = nil) -> LoadResult {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
@@ -565,8 +524,6 @@ public enum ModeStore {
             do {
                 let toml = try String(contentsOf: url, encoding: .utf8)
                 let decoded = try decode(from: toml, id: id)
-                // A system mode's locked guarantees are enforced at load, so a hand-edited file can never
-                // weaken the floor — only its editable fields survive (Mode.systemNormalized).
                 modes.append(decoded.isSystem ? decoded.systemNormalized() : decoded)
                 if let lkgDir { saveLKG(toml, id: id, in: lkgDir) }
             } catch {
@@ -584,8 +541,6 @@ public enum ModeStore {
         return LoadResult(modes: modes, failures: failures)
     }
 
-    // Copy a cleanly-decoded mode's raw TOML into the recovery store, skipping the write when the stored
-    // copy already matches — so a steady config does no disk churn and the watcher does not see a write.
     private static func saveLKG(_ toml: String, id: String, in lkgDir: URL) {
         let url = lkgDir.appendingPathComponent("\(id).toml")
         if let existing = try? String(contentsOf: url, encoding: .utf8), existing == toml { return }
@@ -593,7 +548,6 @@ public enum ModeStore {
         try? toml.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    // The disk-backed last-known-good for `id`, decoded — nil if there is none or it too fails to decode.
     private static func loadLKG(id: String, in lkgDir: URL) -> Mode? {
         let url = lkgDir.appendingPathComponent("\(id).toml")
         guard let toml = try? String(contentsOf: url, encoding: .utf8),
@@ -611,19 +565,7 @@ public enum ModeStore {
         try FileManager.default.removeItem(at: fileURL(for: mode, in: dir))
     }
 
-    // Ensure every system mode (the Direct floor) exists on disk and is normalized to its locked
-    // guarantees. Idempotent: a present file is re-normalized (healing any hand-edit) while keeping its
-    // editable fields; a missing one is seeded fresh. Writes ONLY when the normalized content differs
-    // from disk, so a steady-state install never rewrites the file (no needless FSEvents churn → no
-    // spurious config reload / hotkey rebuild on every launch or Settings open). Call after
-    // recordStarterOffersIfFresh.
-    //
-    // The FIRST time it runs (no `_direct.toml` yet) it also performs the one-time Plain-Dictation→Direct
-    // migration: if a stock, enabled `plain-dictation.toml` exists, it is removed and its trigger is
-    // carried onto Direct (so Fn — or wherever the user rebound it — keeps doing plain dictation).
-    // Anything else (a customized or disabled Plain Dictation, a promoted different mode) is left
-    // untouched, and Direct takes Fn only if no enabled mode already holds it. NOTE: `_direct.toml`'s
-    // presence IS the migration marker, so this migration runs at most once.
+    // The Direct file also marks the completed Plain Dictation migration.
     public static func ensureSystemModes(in dir: URL, lkgDir: URL? = nil) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = fileURL(for: .direct, in: dir)
@@ -644,7 +586,6 @@ public enum ModeStore {
         try? encoded.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    // First-run Direct profile + Plain-Dictation migration (see ensureSystemModes).
     private static func migratedDirect(in dir: URL) -> Mode {
         var direct = Mode.direct
         let modes = loadAll(in: dir)
@@ -660,9 +601,6 @@ public enum ModeStore {
         return direct.systemNormalized()
     }
 
-    // A Plain Dictation file the user never meaningfully touched (trigger aside): safe to replace with
-    // Direct. Enabled + every template field matches the original seed once the trigger, enabled flag,
-    // and AI connection are normalized out.
     private static func isStockPlainDictation(_ mode: Mode) -> Bool {
         guard mode.id == "plain-dictation", mode.enabled else { return false }
         func shape(_ m: Mode) -> Mode {
@@ -705,11 +643,6 @@ public enum ModeStore {
         dir.appendingPathComponent("\(mode.id).toml")
     }
 
-    // Fresh install (no mode files yet): record every starter as a ledger OFFER (nil fingerprint) instead of
-    // writing a mode file. Starters become templates the user materializes on demand; the offer records are
-    // mandatory — without them reconcile's additive step would re-seed all 8 starters on the next launch. A
-    // nil fingerprint keeps the offer dormant until materialization replaces it with a real entry (4a). No
-    // files written, so the dir may not exist yet — ensureSystemModes creates it and writes _direct.toml next.
     public static func recordStarterOffersIfFresh(in dir: URL, ledgerDir: URL? = nil) {
         let fm = FileManager.default
         let existing = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
@@ -722,10 +655,6 @@ public enum ModeStore {
         saveLedger(ledger, in: ledgerDir)
     }
 
-    // Write a materialized `.seed` template's ledger entry: current version + the template fingerprint of the
-    // mode as written (mirrors reconcile's writeAndRecord). This makes "materialized and unedited ⇒ still
-    // receives seed updates" true (reconcile step 3 fires on a version bump + matching fingerprint), and
-    // overwrites the fresh-install offer record for that id. The mode file itself is written by the caller.
     public static func recordMaterializedSeed(_ mode: Mode, ledgerDir: URL) {
         guard mode.seedId == mode.id else { return }
         var ledger = loadLedger(in: ledgerDir) ?? SeedLedger()

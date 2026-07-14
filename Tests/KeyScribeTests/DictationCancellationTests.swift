@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// One-shot coordination: one side waits, the other fires; safe across actor hops.
 private final class Signal: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
@@ -72,7 +71,7 @@ private final class ThrowAfterReleaseEngine: SpeechEngine, @unchecked Sendable {
 }
 
 // Throws on transcribe and fires a signal when evicted — proves an error terminal still releases the
-// model on Frugal/Balanced instead of pinning it resident (W14 §2.1).
+// model on Frugal/Balanced instead of pinning it resident.
 private final class EvictRecordingEngine: SpeechEngine, @unchecked Sendable {
     let id = "evicting"
     let displayName = "Evicting"
@@ -409,15 +408,15 @@ struct DictationCancellationTests {
         #expect(idleCount == 1)
         #expect(hud.states.filter { $0 == .hidden }.count == 1)
         #expect(controller.isBusy == false)
-        // P2-11: the terminal stays silent (hidden HUD, cancel cue — no scary error for an empty
-        // capture), but it now finalizes a .failed record for THIS dictation instead of leaving
-        // lastRecord describing the previous one and vanishing without a trace.
+        // The terminal stays silent (hidden HUD, cancel cue — no scary error for an empty capture), but
+        // it still finalizes a .failed record for THIS dictation instead of leaving lastRecord describing
+        // the previous one and vanishing without a trace.
         #expect(controller.lastRecord?.outcome == .failed)
     }
 
     // The over-limit abort must finalizeRecord (.failed, "recording limit") and land in a non-busy
-    // terminal — the L1 fix. Before it, the abort used machine.cancel() and skipped the record entirely,
-    // so lastRecord described the PREVIOUS dictation. Driven via the maxRecordingSeconds injection seam.
+    // terminal. A cancel via machine.cancel() that skips the record entirely leaves lastRecord
+    // describing the PREVIOUS dictation. Driven via the maxRecordingSeconds injection seam.
     @Test func overLimitAbortRecordsAFailedOutcomeAndReturnsToIdle() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -453,9 +452,9 @@ struct DictationCancellationTests {
         #expect(hud.states.contains { if case .error = $0 { return true } else { return false } })
     }
 
-    // Fix 2, controller side: a bring-up that lands late must be ADOPTED — the dictation reaches live
-    // recording and inserts — not pre-empted by any controller-side timeout. Guards against a future
-    // controller watchdog that would fail a slow-but-successful start.
+    // A bring-up that lands late must be ADOPTED — the dictation reaches live recording and inserts —
+    // not pre-empted by any controller-side timeout. Guards against a future controller watchdog that
+    // would fail a slow-but-successful start.
     @Test func aSlowButSuccessfulBringUpIsAdoptedAndRecords() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -493,9 +492,9 @@ struct DictationCancellationTests {
         #expect(!hud.states.contains { if case .error = $0 { true } else { false } })
     }
 
-    // #3: a right-modifier "chord wins" abort must cancel ONLY the dictation its own key started. A different
-    // trigger's in-flight transcription must survive — right-⌥ punctuation typed while an Fn dictation is still
-    // transcribing must not discard it.
+    // A right-modifier "chord wins" abort must cancel ONLY the dictation its own key started. A different
+    // trigger's in-flight transcription must survive — right-⌥ punctuation typed while an Fn dictation is
+    // still transcribing must not discard it.
     @Test func modifierAbortLeavesAnotherTriggersTranscriptionAlone() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -513,9 +512,9 @@ struct DictationCancellationTests {
         #expect(await h.insertSpy.calls == 1)                           // its transcript was inserted
     }
 
-    // #3: even the SAME key must not cancel its own dictation once it has reached transcribing — commit happens
-    // on release, so the starting gesture is already up and a still-held aborting press is a new gesture (the
-    // key re-pressed in a chord right after its own tap-to-toggle commit).
+    // Even the SAME key must not cancel its own dictation once it has reached transcribing — commit
+    // happens on release, so the starting gesture is already up and a still-held aborting press is a
+    // new gesture (the key re-pressed in a chord right after its own tap-to-toggle commit).
     @Test func modifierAbortLeavesItsOwnCommittedTranscriptionAlone() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -533,7 +532,7 @@ struct DictationCancellationTests {
         #expect(await h.insertSpy.calls == 1)
     }
 
-    // #3: the legitimate chord-wins case — the key's own still-recording (pre-commit) dictation IS cancelled.
+    // The legitimate chord-wins case — the key's own still-recording (pre-commit) dictation IS cancelled.
     @Test func modifierAbortCancelsItsOwnRecordingDictation() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -605,8 +604,8 @@ struct DictationCancellationTests {
         #expect(hud.states.last == .hidden)
     }
 
-    // W14 §2.1: a dictation that fails in transcribe must still release the model on Frugal — otherwise
-    // the model stays resident until quit because no other terminal re-arms eviction.
+    // A dictation that fails in transcribe must still release the model on Frugal — otherwise the model
+    // stays resident until quit because no other terminal re-arms eviction.
     @Test func aFailedTranscribeStillEvictsOnFrugal() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -1069,10 +1068,10 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy == false)
     }
 
-    // P1-1 regression: with sounds on, capture comes up UNDER the cue and the bring-up task then sleeps until
-    // cue end before flipping to `.recording`. A release during that hold must cancel the task and tear the
-    // mic down AT ONCE (the reviewed edge that regressed) — not leave it live until the hold expires. Drives
-    // a fast bring-up into a long (0.5s) cue hold, releases mid-hold, and asserts teardown far inside the hold.
+    // With sounds on, capture comes up UNDER the cue and the bring-up task then sleeps until cue end
+    // before flipping to `.recording`. A release during that hold must cancel the task and tear the mic
+    // down AT ONCE, not leave it live until the hold expires. Drives a fast bring-up into a long (0.5s)
+    // cue hold, releases mid-hold, and asserts teardown far inside the hold.
     @Test func releasingDuringTheCueHoldStopsCaptureImmediately() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)

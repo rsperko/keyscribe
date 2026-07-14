@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// One-shot coordination across the connect Task and the test body.
 private final class Signal: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
@@ -47,8 +46,8 @@ struct FirstRunAISetupTests {
             onComplete: onComplete)
     }
 
-    // P2-21: the permission relaunch used to drop the user into the permissions-only flow, whose Done
-    // ended onboarding early. Resuming lands on the trial, whose modifier tap the relaunch revives.
+    // The permission relaunch used to drop the user into the permissions-only flow, whose Done ended
+    // onboarding early. Resuming lands on the trial, whose modifier tap the relaunch revives.
     @Test func resumeOnboardingStartsAtTheTrialStep() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-resume-\(UUID().uuidString)", isDirectory: true)

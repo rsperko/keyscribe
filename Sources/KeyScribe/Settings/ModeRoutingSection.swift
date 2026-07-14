@@ -265,8 +265,8 @@ struct ModeRoutingSection: View {
         newURLPattern = ""
     }
 
-    // The friendly domain-first entry: stores a host-anchored regex (host = domain or subdomain), never the
-    // raw domain string, so `github.com` never substring-matches `notgithub.com` (UX2 phase 7a).
+    // Stores a host-anchored regex (host = domain or subdomain), never the raw domain string, so
+    // `github.com` never substring-matches `notgithub.com`.
     private func commitDomainConstraint() {
         guard let pattern = HostPattern.regex(forDomain: newDomain) else { return }
         var updated = mode

@@ -1,9 +1,9 @@
 import Testing
 @testable import KeyScribeKit
 
-// The frozen per-generation config snapshot a dictation captures at record-start (design.md §5; the
-// correctness fix is that a config reload mid-dictation builds a NEW ResolvedConfig without mutating
-// the one an in-flight dictation holds — so a dictation always sees one coherent config).
+// ResolvedConfig is the frozen per-generation config snapshot a dictation captures at record-start
+// (design.md §5): a config reload mid-dictation builds a NEW ResolvedConfig rather than mutating the
+// one an in-flight dictation holds, so a dictation always sees one coherent config.
 struct ResolvedConfigTests {
     private func resolved(
         modes: [Mode] = [], dictionary: [String] = [], replacements: [ReplacementsSet.Rule] = [],
@@ -32,7 +32,7 @@ struct ResolvedConfigTests {
     @Test func nilModeFallsBackToGlobalDictionaryAndDefaultStages() {
         let rc = resolved(dictionary: ["Global"])
         #expect(rc.mergedDictionary(for: nil) == ["Global"])
-        // nil mode defaults: live edits on, replacements, no numbers, plus FuzzyStage (dictionary non-empty).
+        // nil-mode defaults yield 3 stages: LiveEdits + Replacements + FuzzyStage (dictionary non-empty).
         let stages = rc.postSTTTextStages(for: nil)
         #expect(stages.count == 3)
     }
@@ -42,12 +42,12 @@ struct ResolvedConfigTests {
         mode.commands.liveEdits = true
         mode.commands.numbers = true
         let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        // LiveEdits + Replacements + Numbers + FuzzyStage (dictionary non-empty).
+        // LiveEdits + Replacements + Numbers + FuzzyStage.
         #expect(rc.postSTTTextStages(for: mode).count == 4)
     }
 
     @Test func fuzzyStageAppendedOnlyWhenMergedDictionaryNonEmpty() {
-        var mode = Mode(id: "m", name: "M")  // no mode-level fuzzy command exists anymore
+        var mode = Mode(id: "m", name: "M")
         mode.commands.liveEdits = true
         // Non-empty dictionary → LiveEdits + Replacements + FuzzyStage; empty → no FuzzyStage.
         let withDict = resolved(modes: [mode], dictionary: ["ChargeBee"])
@@ -81,8 +81,8 @@ struct ResolvedConfigTests {
         #expect(rc.recognitionBiasTerms(for: nil) == ["Global"])
     }
 
-    // mergedDictionary delegates to the same lock-held path recognitionBias/textStages use, sharing one
-    // cache — priming via bias must not diverge from the public accessor.
+    // mergedDictionary shares its cache with recognitionBiasTerms/postSTTTextStages — priming via bias
+    // must not diverge from the public accessor.
     @Test func mergedDictionaryAndBiasShareCache() {
         var mode = Mode(id: "m", name: "M")
         mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["ChargeBee", "Postgres"])

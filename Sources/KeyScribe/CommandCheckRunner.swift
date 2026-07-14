@@ -2,12 +2,11 @@ import AVFoundation
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --commands-check <dir>`. Drives every installed SpeechEngine over recorded
-// command utterances, runs the REAL local (no-LLM) dictation pipeline for a plain live-edits mode, and
-// checks each case's declarative assertions (CommandCheck) against the exact transcripts real engines
-// produce (spurious terminators, casing, clause segmentation) — what unit tests structurally can't cover.
-// Adding a case is a manifest row, not code (principles.md §2). Headless: reads wavs, never touches
-// mic/insertion/TCC/clipboard (clipboard value from the manifest). Uninstalled engines are skipped.
+// Drives every installed SpeechEngine over recorded command utterances through the REAL local (no-LLM)
+// dictation pipeline, checking each case's declarative assertions against the exact transcripts real
+// engines produce (spurious terminators, casing, clause segmentation) — what unit tests structurally
+// can't cover. Adding a case is a manifest row, not code (principles.md §2). Headless: reads wavs, never
+// touches mic/insertion/TCC/clipboard (clipboard value comes from the manifest).
 enum CommandCheckRunner {
     struct Manifest: Decodable {
         let context: Context?
@@ -83,10 +82,9 @@ enum CommandCheckRunner {
         })
     }
 
-    // The local (no-LLM) pipeline DictationController builds for a plain live-edits mode. Mirrors
+    // Mirrors the local (no-LLM) pipeline DictationController builds for a plain live-edits mode —
     // dictationPipeline + produceDictationText, including the whole-utterance replacement bypass (a rule
-    // owning the entire utterance is inserted verbatim, skipping the reverse pass — the `bareReplacement`
-    // short-circuit).
+    // owning the entire utterance is inserted verbatim, short-circuited via `bareReplacement`).
     static func process(transcript: String, clipboard: String, rules: [ReplacementRule]) -> String {
         var stages: [any PipelineStage] = [LiveEditsStage(), ReplacementsStage(rules: rules)]
         stages.append(TokenizingStage.verbatim())

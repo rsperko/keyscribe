@@ -26,9 +26,8 @@ struct PermissionsSettingsView: View {
                         }
                     },
                     openSettings: { Permissions.openSettings(.microphone) })
-                // macOS caches the mic verdict for the process lifetime and gives no live "granted" signal
-                // to detect a grant made after launch (unlike Accessibility below), so surface the relaunch
-                // step proactively whenever access is missing.
+                // macOS caches the mic verdict for the process lifetime with no live "granted" signal for a
+                // post-launch grant (unlike Accessibility below), so surface the relaunch step proactively.
                 if microphoneStatus == .denied {
                     relaunchBanner("If you just enabled Microphone for \(Branding.appName) in System Settings, quit and reopen it to apply the change — macOS only recognizes a new grant after a relaunch.", permID: "microphone")
                 }
@@ -49,9 +48,9 @@ struct PermissionsSettingsView: View {
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Permission grants land out-of-process (Accessibility is granted in another app that never reactivates
-        // us) and TCC exposes no "permission changed" callback, so poll — but only while this pane is on screen
-        // (.task is cancelled on disappear).
+        // Permission grants land out-of-process (granted in System Settings, which never reactivates us)
+        // and TCC exposes no "permission changed" callback, so poll while this pane is on screen (.task is
+        // cancelled on disappear).
         .task {
             while !Task.isCancelled {
                 refreshPermissions()
@@ -69,7 +68,7 @@ struct PermissionsSettingsView: View {
         tapActive = accessibilityTapActive()
     }
 
-    // A grant that only takes effect after a relaunch (TCC verdicts are cached for the process lifetime).
+    // TCC verdicts are cached for the process lifetime, so a fresh grant needs a relaunch to take effect.
     @ViewBuilder
     private func relaunchBanner(_ message: String, permID: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -105,8 +104,8 @@ private struct PermissionRow: View {
                 Text(unavailable).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    // Present the in-app request first; System Settings is the recovery path that only
-                    // helps once the request has been denied, so it doesn't compete with Allow up front.
+                    // System Settings only helps once the in-app request has been denied, so it doesn't
+                    // compete with Allow up front.
                     if status == .notDetermined {
                         Button("Allow", action: request)
                             .buttonStyle(.borderedProminent)

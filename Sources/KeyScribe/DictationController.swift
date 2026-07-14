@@ -20,8 +20,6 @@ final class DictationController {
     private let provider: SpeechEngineProvider
     private let config: ConfigCache
     private let history: HistoryStore?
-    // Append-only history I/O off the main actor so the disk write never sits on the completion path.
-    // Serial so concurrent dictations can't interleave or reorder appends within a day file.
     private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
     private let audio: AudioCapturing
     private let presenceDetector: SpeechPresenceDetecting
@@ -31,9 +29,6 @@ final class DictationController {
     private let clipboard: @MainActor () -> String?
     private let pressSnapshot: @MainActor () -> TargetSnapshot
     private let shouldAdoptFullSnapshot: Bool
-    // Full snapshot for the hot AX sites (press adoption + insertion), off the main actor so an
-    // unresponsive target can't stall arming/paste. Defaults to the injected sync `snapshot` inline, so a
-    // test injecting only `snapshot` keeps its exact call sequence.
     private let snapshotAsync: @MainActor () async -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
@@ -42,22 +37,14 @@ final class DictationController {
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
-    // Durable sink for a model-load failure surviving both retries. Injected so tests assert it was
-    // recorded without touching the real diagnostics file.
     private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
     private let effects: DuringDictationEffects
-    // Serialises the STT call: a deadline only abandons a wedged transcribe, so this keeps a second
-    // dictation from starting a concurrent transcribe on the same engine until the first truly settles.
     private var transcribeGate = SingleFlightDeadline()
     private var transcribeBusyStreak = 0
     private var transcribeBusyStreakStartedAt: Double?
-    // Modes whose dropped-for-<CR> replacement rules have already been logged, so a vanished rule is
-    // surfaced once per mode rather than on every dictation.
     private var loggedReturnMarkerDropModes: Set<String> = []
     private static let transcribeBusyStreakLimit = 3
     private static let transcribeBusyBackstopSeconds: Double = 600
-    // A counter, not a flag: several model rows can verify at once, and each holder must keep occupancy up
-    // until its own use settles.
     private var selfTestGateUsers = 0
     private static let selfTestSettlePollMs = 20
     private static let selfTestClearancePolls = 150
@@ -66,35 +53,20 @@ final class DictationController {
 
     private var machine = DictationMachine()
 
-    // Per-dictation state bundled so it drops as a unit at every terminal (releaseCapturedPlan) — reset is
-    // structural, no field can leak into the next dictation via a forgotten reset path. `building`
-    // accumulates stage timings + boundary fingerprints (finalizeRecord publishes to `lastRecord`; token
-    // COUNTS + one-way fingerprints only, never the token→original map, design.md §4.2). The frozen
-    // captured* fields insulate the in-flight dictation from a mid-dictation config/engine change (see
-    // `plan`/`activeEngine`).
-    // DictationIdentity: reference identity per dictation. Struct copies (`session?.field = …`) share it, so
-    // `===` distinguishes "still this dictation" from "a successor replaced it" across an await — stops a
-    // suspended streaming build from opening on the SUCCESSOR's captured engine.
     private final class DictationIdentity: Sendable {}
 
     private struct DictationSession {
         let identity = DictationIdentity()
         var building: DictationRecord
-        // Press instant (session creation == top of handleStart); the `arm` stage measures this → mic-live.
         var pressedAt = DispatchTime.now()
         var capturedSnapshot: TargetSnapshot?
         var capturedPlan: ResolvedConfig?
         var capturedEngine: (any SpeechEngine)?
-        // Name of the input device this dictation bound, snapshotted when the mic goes live so history
-        // records the mic actually used even after the session moves on. nil until capture is live.
         var capturedInputDevice: String?
         var capturedRecognitionBias: Bool?
         var activeMode: Mode?
         var eligibleModes: [Mode] = []
         var routingContext = RoutingContext()
-        // How the mode was chosen, for the History "how this was chosen" line (UX2 phase 7c). Set at Phase-A
-        // resolution (key/context/fallback), overridden to .oneShot for a menu pick, and to .spokenPhrase
-        // with the matched phrase when Phase B re-routes.
         var modeChoice: ModeChoiceReason = .fallback
         var routedPhrase: String?
         var triggerDisplay: String?
@@ -109,27 +81,15 @@ final class DictationController {
         var snapshotAdoptionTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
         var levelPollTask: Task<Void, Never>?
-        // Streaming transcription (P3-1), non-nil only when the flag is on AND the active engine streams.
-        // The driver owns the deferred-start session; the continuation is the writer→driver feed; the feed
-        // task drains it. All torn down in releaseCapturedPlan (driver.cancel releases the engine lock).
         var streamingDriver: StreamingDictationDriver?
         var streamingSampleContinuation: AsyncStream<[Float]>.Continuation?
         var streamingFeedTask: Task<Void, Never>?
-        // Preconnect and the preceding-text probe fire only once both are set: mode resolved AND secure-aware
-        // snapshot adopted (so a secure field neuters the mode first).
         var modeReady = false
         var snapshotReady = false
         var preconnectFired = false
         var precedingTextTask: Task<String?, Never>?
     }
-    // Non-nil only while a dictation is in flight. Per-dictation state is `session?.field`; the façade
-    // accessors below stay for call-site ergonomics (building/capturedSnapshot/activeMode) and because tests
-    // observe them (dictationTask/captureBringUpTask). A nil session reads as "no captured state"; a write
-    // outside a dictation no-ops via optional chaining.
     private var session: DictationSession?
-    // The triggerKey that started the in-flight dictation, recorded only once a start is actually admitted
-    // (past beginArming). Lets a right-modifier "chord wins" abort cancel ONLY the dictation its own key
-    // started, never one a different trigger committed. Cleared with the session at every terminal.
     private var activeStartTrigger: String?
 
     private var building: DictationRecord {
@@ -142,8 +102,6 @@ final class DictationController {
     private var activeMode: Mode? {
         get { session?.activeMode } set { session?.activeMode = newValue }
     }
-    // Engine bring-up runs async (off-main, watchdogged) so a wedging device can't freeze the app; the
-    // machine flips `.arming`→`.recording` only once the mic is live. Public read for tests.
     var captureBringUpTask: Task<Void, Never>? {
         get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
     }
@@ -154,74 +112,40 @@ final class DictationController {
         get { session?.dictationTask } set { session?.dictationTask = newValue }
     }
 
-    // Fire-and-forget streaming-session cancel at teardown (releases the engine lock a live session holds);
-    // nil when there was no live streaming session. Exposed so tests await the release deterministically.
     private(set) var streamingCancelTask: Task<Void, Never>?
 
-    // Test seam: whether the shared transcribe/finalize gate is still occupied. A wedged finalize keeps it
-    // busy until it settles — tests assert the abandoned session holds the gate, then that a later dictation
-    // proceeds once freed.
     func transcribeGateBusy() async -> Bool { await transcribeGate.isBusy }
 
     private var hideTask: Task<Void, Never>?
     private var idleEvictionTask: Task<Void, Never>?
-    // BYOK endpoint warm-up (see maybePreconnect); one in flight at a time.
     private var preconnectTask: Task<Void, Never>?
     private var idleEvictionEngine: (any SpeechEngine)?
-    // Re-realizes the audio input binding while idle so the first dictation after a long idle/sleep doesn't
-    // pay a stale unit-realization on the hot path. See scheduleCaptureRefresh.
     private var captureRefreshTask: Task<Void, Never>?
     private static let captureRefreshIdleSeconds: Double = 240
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var lastUsedAt: Double = 0
-    // Retention only changes at a day boundary, so sweep once per day rather than per dictation.
     private var lastRetentionSweepDay: String?
     private(set) var lastResult: String?
-    // Published diagnostics record for the most recent COMPLETED dictation (finalizeRecord copies `building`
-    // here at each terminal); survives past the session for the menu/log. Privacy as above.
     private(set) var lastRecord: DictationRecord?
     private(set) var nextModeOverrideID: String?
 
-    // Safety bound on a runaway hold (stuck key, walked away): a recording grows an unbounded WAV +
-    // in-memory PCM (~3.7 MiB/min @16k). Drop it with a HUD notice rather than spike memory.
     private let maxRecordingSeconds: Double
 
-    // Frozen config snapshot for the in-flight dictation (captured at record-start). A mid-dictation reload
-    // makes a new ResolvedConfig without mutating this one, so one dictation sees one coherent config; nil
-    // between dictations, falling back to live `config.resolved`.
     private var plan: ResolvedConfig { session?.capturedPlan ?? config.resolved }
 
-    // STT engine frozen at record-start alongside the plan. Reading `provider.active` afresh at
-    // transcribe/bias/evict time would let a mid-dictation engine switch transcribe with a different engine
-    // or evict the model mid-call. One capture, used everywhere for this dictation.
     private var activeEngine: any SpeechEngine { session?.capturedEngine ?? provider.active }
 
-    // The in-flight/completed model load for `warmEngineId`, so the press-time warm and commit-time wait
-    // share ONE load instead of racing two compiles of a multi-hundred-MB model. Invalidated on eviction.
     private var warmTask: Task<Void, Error>?
     private var warmEngineId: String?
     private var protectedEngineIds: Set<String> = []
-    // Backstop for a wedged model load. Cold loads are slow (632 MB CoreML measured ~140 s even from a
-    // compiled cache), so this only fires on a genuine hang. Loading runs OUTSIDE the transcribe gate, so a
-    // tripped load surfaces an error without wedging the next dictation.
     private static let modelLoadDeadlineSeconds: Double = 300
 
-    // Last HUD level rendered while recording (quantized). Forwarding only on a meaningful change keeps the
-    // HUD from re-rendering its whole tree at buffer rate. Reset per recording.
     private var lastRenderedLevel: Float = -1
 
-    // Set at handleStart for a tap-to-toggle trigger so the recording HUD can show "tap X again to stop"
-    // (UX2 phase 6b) — a latched recording is otherwise indistinguishable from hold-to-talk. nil for
-    // hold gestures and the context-resolved default (no single key fired it).
     private var latchedTriggerName: String?
 
-    // Mic meter is PULLED, not pushed: the capture adapter publishes the level into an atomic from the RT
-    // thread (no per-buffer main-actor hop), and a ~30 Hz poll reads it only while recording. Renders
-    // deduped by `renderLevel`.
     private static let levelPollInterval: Duration = .milliseconds(33)
 
-    // Output-latency pad on the cue-end admission boundary (P1-1): the chime ends a little after play-call +
-    // file-duration, so admit that much later to keep its tail out of the recording.
     private static let cueAdmitPadSeconds: Double = 0.04
 
     private func pollLevelWhileRecording() {
@@ -237,35 +161,23 @@ final class DictationController {
 
     private func renderLevel(_ level: Float) {
         guard case .recording = machine.state else { return }
-        // Push every poll tick (keeping the 1/20 quantization for visual stability but dropping the equality
-        // skip) so the level indicator keeps moving even when the level is momentarily stable. A 30 Hz publish
-        // rebuilds only LevelIndicator (HUDView holds HUDLevel un-observed), so this stays cheap.
         let quantized = (level * 20).rounded() / 20
         lastRenderedLevel = quantized
         hud?.render(.recording(mode: activeMode?.name, level: quantized, latchedTrigger: latchedTriggerName))
     }
 
-    // Fired after every terminal insertion outcome. First run uses it to require one successful dictation
-    // before completing onboarding (ui_design.md §2) and to attribute a tutorial-playground lesson to the
-    // producing mode.
     var onDictationCompleted: ((DictationCompletion) -> Void)?
 
-    // Fired true when capture starts, false when it ends (commit or a start failure). The menu-bar
-    // glyph tints red while true (ui_design.md §Dynamic status).
     var onRecordingChanged: ((Bool) -> Void)?
 
-    // Fired when the dictation reaches a terminal (idle). Lets the app apply work that must wait for quiet —
-    // e.g. rebinding hotkeys deferred during a hold so a held key isn't stranded by a mid-dictation reload.
     var onBecameIdle: (() -> Void)?
 
     var isBusy: Bool { machine.isBusy }
     var hasResult: Bool { lastResult != nil }
 
-    // Work parked by `runWhenIdle` while a dictation is in flight, drained at the next terminal.
     private var pendingIdleWork: [() -> Void] = []
 
-    // Run `work` now if idle, else defer it until the current dictation reaches a terminal state. Main-actor
-    // confined, so the parked closures need no synchronization.
+    // Main-actor confined, so the parked closures need no synchronization.
     func runWhenIdle(_ work: @escaping () -> Void) {
         guard isBusy else { work(); return }
         pendingIdleWork.append(work)
@@ -337,9 +249,6 @@ final class DictationController {
         installMemoryPressureHandler()
     }
 
-    // Free the resident STT model on critical memory pressure, but only when idle — an in-flight dictation
-    // keeps its engine (evicting mid-flight loses the transcription); a later idle/post-dictation check
-    // reclaims it. Local reaction to a local signal, never reported (no telemetry).
     private func installMemoryPressureHandler() {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: .critical, queue: .main)
         source.setEventHandler { [weak self] in
@@ -365,10 +274,6 @@ final class DictationController {
         if settings.stt.eviction != previousEviction { reconcileCaptureWarmth() }
     }
 
-    // Bring the warm capture unit in line with a just-changed eviction tier. Without this a downgrade from
-    // Fastest strands the unit: Fastest holds it via the periodic refresh with no pending idle-eviction
-    // checkpoint, so switching to Balanced/Frugal has nothing to release it. Fastest re-prewarms + refreshes
-    // and Balanced re-prewarms + schedules the idle release (both via prewarmCapture); Frugal disposes it.
     private func reconcileCaptureWarmth() {
         guard !isBusy else { return }
         if EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) {
@@ -392,7 +297,6 @@ final class DictationController {
         Task { await engine.evict() }
     }
 
-    // Evict an engine on behalf of a Settings delete/reinstall, then return so the caller can delete its files.
     func evictEngineForSettings(_ engine: any SpeechEngine) async {
         guard !isProtectedFromEviction(engine) else {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -415,10 +319,6 @@ final class DictationController {
         protectedEngineIds.contains(engine.id)
     }
 
-    // A Settings self-test transcribes on the SAME non-actor engine a live dictation uses, so it runs
-    // through the transcribe gate — two at once would race a non-Sendable SDK object. Dictation wins:
-    // skipped while a dictation is in flight, and a residual collision surfaces as a skip (nil), never a
-    // failed model.
     func selfTestForSettings(_ engine: any SpeechEngine) async -> Bool? {
         guard !isBusy else { return nil }
         let gate = transcribeGate
@@ -433,8 +333,6 @@ final class DictationController {
                 throw ModelSelfTestRunner.Skipped()
             }
         }
-        // The gate releases on a detached task just after gate.run returns, so hold occupancy until it truly
-        // clears — a waiting dictation must re-enter a free gate, not race the release window.
         if result != nil {
             for _ in 0..<Self.selfTestClearancePolls where await gate.isBusy {
                 try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
@@ -445,46 +343,28 @@ final class DictationController {
     }
     private static let selfTestTimeoutSeconds: Double = 30
 
-    // Bounded, so a genuinely wedged engine still falls through to the Busy → error path.
     private func awaitSelfTestClearance() async {
         for _ in 0..<Self.selfTestClearancePolls where selfTestGateUsers > 0 {
             try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
         }
     }
 
-    // Warm the active STT engine at press, overlapping model load (CoreML/MLX compile, ANE warmup) with
-    // speech instead of paying it after release. Idempotent; never blocks recording (failures surface later
-    // at transcribe time).
     private func warmActiveEngine() {
         _ = warm(activeEngine)
     }
 
-    // Fire-and-forget press-time preheat of a per-dictation engine session (Apple's one-shot analyzer),
-    // consumed at commit. Separate from warm() because warm caches ONE task per residency; a one-shot
-    // analyzer needs a fresh pair per dictation. Not awaited so a settling transcribe can't block.
     private func prepareActiveEngineForDictation() {
         let engine = activeEngine
         Task { await engine.prepareForDictation() }
     }
 
-    // Start (or reuse) the single load for `engine`. Idempotent per engine: a launch preload, the
-    // press-time warm, and the commit-time wait all resolve to the same Task, so the model compiles
-    // once. Cleared by `invalidateWarm` on eviction so the next press reloads.
     @discardableResult
     private func warm(_ engine: any SpeechEngine) -> Task<Void, Error> {
         if warmEngineId == engine.id, let task = warmTask { return task }
         let clip = Self.warmupClipURL
-        // Warm with the user's actual global dictionary, not []. For the bias-capable engines (Whisper,
-        // Qwen3) this compiles the biased decode path on the warmup clip so the first real dictation
-        // doesn't pay it. Empty dictionary ⇒ [] ⇒ the warmup runs unbiased.
         let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
         let task = Task {
             try await engine.loadIfNeeded()
-            // Warm the inference graph on a throwaway clip so the first real dictation doesn't pay the
-            // one-time first-predict compile (MLX kernel JIT / CoreML graph specialization) — Qwen measured
-            // ~3 s cold vs ~50 ms warm. Overlaps speech, so usually invisible. Best-effort: a warmup failure
-            // (e.g. clip absent under `swift run`) must never fail the load. The commit-time await of this
-            // task serializes warmup before the real transcribe, so non-actor engines are never reentered.
             if let clip, engine.benefitsFromWarmupClip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
         }
         warmEngineId = engine.id
@@ -492,8 +372,6 @@ final class DictationController {
         return task
     }
 
-    // Throwaway clip used to warm the inference graph (the bundled self-test recording). Absent under
-    // `swift run`/tests, where warmup is simply skipped.
     private static let warmupClipURL = Bundle.main.url(forResource: "model-selftest", withExtension: "wav")
 
     static func warmupBiasTerms(settings: Settings, engine: any SpeechEngine, plan: ResolvedConfig) -> [String] {
@@ -508,9 +386,6 @@ final class DictationController {
         warmEngineId = nil
     }
 
-    // Launch-time warm so the first dictation isn't a cold load — independent of the eviction profile
-    // (readiness ≠ residency). Only when the model is on disk or system-managed: warming an uninstalled
-    // engine would DOWNLOAD it at launch, racing the first-run wizard's download.
     func preloadActiveEngineIfNeeded() {
         guard InstalledEngineFilter.shouldRun(engineId: activeEngine.id) else { return }
         warmActiveEngine()
@@ -522,9 +397,6 @@ final class DictationController {
         Task { await detector.prewarm() }
     }
 
-    // Realize the audio input unit before the first press so the first capture starts instantly (the
-    // one-time HAL realization is otherwise paid on the hot path). Only when mic is granted — never touch
-    // the input subsystem unauthorized; no stream is opened.
     func prewarmCapture() {
         guard micStatus() == .granted,
               EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) else { return }
@@ -532,9 +404,6 @@ final class DictationController {
         scheduleCaptureRefresh()
     }
 
-    // Wake/long-idle staleness recovery: the cached CoreAudio binding rots while idle/asleep with no
-    // device-topology change to trip the adapter's listeners. Rebuild + re-prewarm WHILE IDLE so the next
-    // dictation finds a fresh binding, not a rotted unit. Never touches an in-flight dictation.
     func refreshCaptureBinding() {
         guard micStatus() == .granted, !isBusy,
               EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) else { return }
@@ -542,10 +411,6 @@ final class DictationController {
         scheduleCaptureRefresh()
     }
 
-    // Single-shot: refresh once after captureRefreshIdleSeconds idle, then STOP — binding rot is rare, so a
-    // perpetual rebuild would be churn. Re-armed on every return-to-idle (releaseCapturedPlan) and on wake,
-    // cancelled at handleStart; a long unbroken idle past one refresh falls back to the bring-up watchdog
-    // rather than more idle rebuilds.
     private func scheduleCaptureRefresh() {
         captureRefreshTask?.cancel()
         let mode = settings.stt.eviction
@@ -559,7 +424,7 @@ final class DictationController {
             // Balanced disposes the warm unit at the idle checkpoint. After a dictation the engine's
             // idle-eviction task does that; but a prewarm OUTSIDE a dictation (launch, wake, a switch into
             // Balanced) has no such task, so schedule the release here — else the mic stays held until the
-            // first dictation, which for a tier chosen to coexist with mic-sensitive apps is a leak.
+            // first dictation, a leak for a tier chosen to coexist with mic-sensitive apps.
             let after = settings.stt.evictionIdleSeconds.map(Double.init) ?? EvictionPolicy.defaultIdleSeconds
             captureRefreshTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(after))
@@ -575,8 +440,7 @@ final class DictationController {
         }
     }
 
-    // ui_design.md §6: a one-shot mode picked from the menu is acknowledged in the HUD before the
-    // next dictation. Only when idle — never stomp an in-flight dictation's state.
+    // ui_design.md §6. Only when idle — never stomp an in-flight dictation's state.
     func acknowledgeNextMode() {
         guard !isBusy, let name = nextModeOverrideName else { return }
         hud?.render(.ready(mode: name))
@@ -585,9 +449,9 @@ final class DictationController {
 
     func handleStart(triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap) {
         // The trigger is a bare modifier event tap with no notion of session state; a key used to
-        // wake/unlock the machine can fire it while the login window still owns the console. Never
-        // arm the mic while the screen is locked — for a privacy-first app, no audio may be captured
-        // while locked. Silent return, same shape as the beginArming guard.
+        // wake/unlock the machine can fire it while the login window still owns the console. Never arm
+        // the mic while the screen is locked — no audio may be captured while locked, ever. Silent
+        // return, same shape as the beginArming guard.
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else { return }
         activeStartTrigger = triggerKey
@@ -596,11 +460,11 @@ final class DictationController {
         hideTask?.cancel()
         idleEvictionTask?.cancel()
         captureRefreshTask?.cancel()
-        // Open the per-dictation session. Every captured*/activeMode/task/building field below writes
-        // through it; it is dropped as a unit at the terminal (releaseCapturedPlan).
+        // Every captured*/activeMode/task/building field below writes through this session; it is
+        // dropped as a unit at the terminal (releaseCapturedPlan).
         session = DictationSession(building: DictationRecord(modeName: currentModeName))
-        // A denied mic does NOT throw — it captures silence, surfacing as a misleading "No speech detected".
-        // Catch the real cause up front and point the user at the fix.
+        // A denied mic does NOT throw — it captures silence, surfacing as a misleading "No speech
+        // detected". Catch the real cause up front and point the user at the fix.
         if micStatus() == .denied {
             finishError("Microphone access is off", action: .openMicrophoneSettings)
             return
@@ -620,8 +484,8 @@ final class DictationController {
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
         // Resolve the Phase-A mode. The only slow step is the browser-URL probe (synchronous AppleScript)
-        // for URL-routed modes; without one we resolve inline so the mode is known before capture. When a
-        // probe is needed we resolve off-main so it never blocks the cue/capture/HUD — the mode is only
+        // for URL-routed modes; without one, resolve inline so the mode is known before capture. When a
+        // probe is needed, resolve off-main so it never blocks the cue/capture/HUD — the mode is only
         // needed at commit (transcribeAndInsert awaits this).
         if ModeResolver.requiresURLContext(plan.modes) || ModeResolver.requiresWindowTitleContext(plan.modes) {
             session?.modeResolveTask = Task { @MainActor [weak self] in
@@ -643,9 +507,9 @@ final class DictationController {
         prepareActiveEngineForDictation()
         prewarmPresenceDetector()
 
-        // Option A cue gating, overlapped (P1-1): the cue plays and the mic comes up UNDER it, but the writer
-        // admits only frames at/after the cue-end host time so the cue never lands in the recording. `.arming`
-        // shows instantly (ESC still cancels); `.recording`/duck are held until cue end (see beginCapture).
+        // Cue gating, overlapped: the cue plays and the mic comes up UNDER it, but the writer admits only
+        // frames at/after the cue-end host time so the cue never lands in the recording. `.arming` shows
+        // instantly (ESC still cancels); `.recording`/duck are held until cue end (see beginCapture).
         let cueDelay = effects.begin(settings.duringDictation)
         hud?.render(.arming(mode: currentModeName))
         if cueDelay > 0 {
@@ -675,9 +539,9 @@ final class DictationController {
         }
     }
 
-    // Deferred-start threshold (Fable adj. #1): audio must exceed this before a streaming session opens, so
-    // a short utterance never pays streaming inference or pins the engine lock. Above the press-time
-    // prepare/prewarm latency, so session creation never races those on the lock.
+    // Audio must exceed this before a streaming session opens, so a short utterance never pays streaming
+    // inference or pins the engine lock. Above the press-time prepare/prewarm latency, so session creation
+    // never races those on the lock.
     nonisolated static let streamingStartThresholdSeconds: Double = 4
 
     // Cap on the writer→feed backlog of undelivered PCM chunks. The healthy path stays near-empty; this
@@ -872,7 +736,7 @@ final class DictationController {
                 return
             }
             // The writer already produced this capture's PCM; a sample-capable engine takes it directly
-            // instead of re-reading/decoding the WAV (P2-1). The WAV stays on disk for archive/probe/fallback.
+            // instead of re-reading/decoding the WAV. The WAV stays on disk for archive/probe/fallback.
             // Read once, right after draining, before a later arm clears it.
             let samples = self.audio.takeDrainedSamples()
             // Capture is done — unmute the output now rather than holding it muted across
@@ -896,9 +760,9 @@ final class DictationController {
             if let reading = await self.noSpeechReading(samples: samples, url: url) {
                 try? FileManager.default.removeItem(at: url)
                 if Task.isCancelled { return }
-                // Two-state no-speech (UX2 phase 6d): nothing-heard (peak never cleared the silence floor — a
-                // muted/dead mic) gets the error+repair render; real audio with no speech keeps the neutral
-                // "No speech detected". Both record the .noSpeech outcome identically.
+                // Two-state no-speech: nothing-heard (peak never cleared the silence floor — a muted/dead
+                // mic) gets the error+repair render; real audio with no speech keeps the neutral "No speech
+                // detected". Both record the .noSpeech outcome identically.
                 if SpeechPresenceGate.isNothingHeard(peak: reading.peak) {
                     self.finishNothingHeard()
                 } else {
@@ -1094,8 +958,10 @@ final class DictationController {
         maybeStartPrecedingProbe()
     }
 
-    // Warm the resolved mode's endpoint once the mode and the secure-aware snapshot are both settled; a
-    // secure field neuters the mode (no connection → no preconnect).
+    // Fires only once the mode is resolved AND the secure-aware snapshot has confirmed the field isn't a
+    // password field (a secure field neuters the mode first, so it has no connection → no preconnect).
+    // llmClient.preconnect is a bodyless, auth-less HEAD — content-free regardless of whether a rewrite
+    // ultimately runs.
     private func maybePreconnect() {
         guard let session, session.modeReady, session.snapshotReady, !session.preconnectFired,
               let mode = activeMode, let connection = connection(for: mode) else { return }
@@ -1164,7 +1030,7 @@ final class DictationController {
         await awaitSelfTestClearance()
         let timeout = max(30, audioSeconds * 20)
         return try await transcribeGate.run(seconds: timeout) {
-            // Prefer the in-memory PCM when the engine accepts it (P2-1); fall back to the WAV otherwise.
+            // Prefer the in-memory PCM when the engine accepts it; fall back to the WAV otherwise.
             if engine.supportsSampleInput, let samples {
                 return try await engine.transcribe(
                     samples: samples, sampleRate: engine.captureSampleRate, biasTerms: biasTerms)
@@ -1225,8 +1091,7 @@ final class DictationController {
             let modelWaitStart = DispatchTime.now()
             // A resident model resolves loadOnce() in ~0 ms; a cold load can run seconds (~140 s for a big ANE
             // model). Rather than leave the HUD on "Transcribing" — a lie during a load — name the wait once
-            // it exceeds ~1 s (P2-2). Cancelled on resolution; guarded on machine.state so a cancel can't
-            // render it stale.
+            // it exceeds ~1 s. Cancelled on resolution; guarded on machine.state so a cancel can't render it stale.
             let loadingHUD = scheduleLoadingModelHUD()
             do {
                 try await loadOnce()
@@ -1756,9 +1621,8 @@ final class DictationController {
             gateApproved = out; fellBack = false; received = raw; building.fingerprints[.llmOut] = .of(out)
         case .localFallback(let local, let reason, let raw):
             gateApproved = local; fellBack = true; fallbackReason = reason; received = raw
-            // The rewrite silently returning a local fallback used to be invisible — the user saw a benign
-            // "local fallback" with no cause. Log the reason on the dictation path so it is diagnosable live,
-            // and stamp it on the diagnostics record (humanSummary) too.
+            // Log the reason on the dictation path (not just the diagnostics record) so a silent
+            // local-fallback is diagnosable live.
             log.notice("rewrite fell back to local: \(reason ?? "unknown", privacy: .public)")
             building.fallbackReason = reason
         }
@@ -1810,7 +1674,7 @@ final class DictationController {
     // tokenization commands (verbatim if live edits, redaction if privacy; a selection rewrite always
     // calls the LLM). No clipboard stage: the selection-capture ⌘C has already clobbered the clipboard
     // with the selection, so "insert clipboard contents" here would be meaningless. `redactionTokenizer`
-    // is exposed so the caller can also redact the spoken instruction through the same tokenizer (H1).
+    // is exposed so the caller can also redact the spoken instruction through the same tokenizer.
     private func selectionPipeline(for mode: Mode, redactionTokenizer: Tokenizer = Tokenizer()) -> Pipeline {
         var stages: [any PipelineStage] = []
         if mode.commands.liveEdits { stages.append(TokenizingStage.verbatim()) }

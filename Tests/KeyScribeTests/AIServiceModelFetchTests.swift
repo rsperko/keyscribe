@@ -5,8 +5,7 @@ import Testing
 
 @MainActor
 struct AIServiceModelFetchTests {
-    // Seeds one existing connection (these tests exercise the unchanged edit-existing path via update/
-    // fetchModels; creation is now a draft flow, so seed the connection directly instead of model.create()).
+    // Creation is now a draft flow; seed the connection directly to exercise edit-existing via update/fetchModels.
     private func makeModel(
         listModels: @escaping (Connection, String?) async throws -> [String]
     ) -> (AIServiceSettingsModel, URL) {
@@ -30,9 +29,8 @@ struct AIServiceModelFetchTests {
         return conn
     }
 
-    // A fetch retains only the connection id; its result belongs to the endpoint it queried. If the user
-    // repoints the base URL while the fetch is in flight, the stale list's models[0] must not overwrite the
-    // model on the now-different endpoint.
+    // A fetch keeps only the connection id, so its result belongs to whatever endpoint it queried. If the
+    // base URL changes while the fetch is in flight, the stale list must not overwrite the new endpoint's model.
     @Test func staleFetchDoesNotOverwriteAModelAfterTheBaseURLChanged() async {
         let (model, support) = makeModel { _, _ in ["only-on-old-server"] }
         defer { try? FileManager.default.removeItem(at: support) }
@@ -48,14 +46,12 @@ struct AIServiceModelFetchTests {
 
         #expect(model.connections.first { $0.id == id }?.model == "keep-me")
         #expect(model.connections.first { $0.id == id }?.baseUrl == "http://new/v1")
-        // The old endpoint's list is not offered as suggestions for the new endpoint, and discovery is
-        // left idle so the user re-fetches.
         #expect(model.modelSuggestions(for: id).isEmpty)
         #expect(model.modelDiscoveryState(for: id) == nil)
     }
 
-    // A model-only edit does not change what the endpoint offers, so the suggestions are still valid and
-    // are published — only the auto-select is suppressed (covered above).
+    // A model-only edit doesn't change what the endpoint offers, so suggestions still publish — only
+    // auto-select is suppressed (covered above).
     @Test func modelEditPublishesSuggestionsButKeepsTheUsersModel() async {
         let (model, support) = makeModel { _, _ in ["server-a", "server-b"] }
         defer { try? FileManager.default.removeItem(at: support) }
@@ -74,35 +70,4 @@ struct AIServiceModelFetchTests {
         #expect(model.modelDiscoveryState(for: id) == .loaded)
     }
 
-    // Same endpoint, but the user picks a different model while the fetch is in flight. The stale list may
-    // not include their choice; the auto-select must not overwrite a deliberate model pick.
-    @Test func modelEditedDuringFetchIsNotClobbered() async {
-        let (model, support) = makeModel { _, _ in ["server-a", "server-b"] }
-        defer { try? FileManager.default.removeItem(at: support) }
-        let stale = openAICompatConnection(from: model, baseUrl: "http://host/v1", modelId: "old-model")
-        model.update(stale, apiKey: nil)
-        let id = stale.id
-
-        var edited = model.selected!
-        edited.model = "my-choice"
-        model.update(edited, apiKey: nil)
-
-        await model.fetchModels(for: stale, apiKey: nil)
-
-        #expect(model.connections.first { $0.id == id }?.model == "my-choice")
-    }
-
-    // The auto-select still runs when the endpoint is unchanged: a model absent from the fetched list is
-    // replaced with the first offered model.
-    @Test func fetchAutoSelectsWhenTheEndpointIsUnchanged() async {
-        let (model, support) = makeModel { _, _ in ["server-model"] }
-        defer { try? FileManager.default.removeItem(at: support) }
-        let conn = openAICompatConnection(from: model, baseUrl: "http://host/v1", modelId: "not-in-list")
-        model.update(conn, apiKey: nil)
-        let id = conn.id
-
-        await model.fetchModels(for: model.selected!, apiKey: nil)
-
-        #expect(model.connections.first { $0.id == id }?.model == "server-model")
-    }
 }

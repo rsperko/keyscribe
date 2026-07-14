@@ -1,16 +1,13 @@
 import Foundation
 import KeyScribeKit
 
-// Runs the post-install smoke test against any engine: transcribe the bundled known clip and check
-// its distinctive words came back (`ModelSelfTest`). Engine-agnostic — covers Parakeet, Whisper, and
-// Apple identically. Returns nil when the clip isn't bundled (e.g. `swift run` / tests) so a missing
-// asset degrades to "skip", never a false failure.
+// Returns nil when the bundled clip is missing (e.g. `swift run` / tests) so a missing asset degrades
+// to "skip", never a false failure.
 enum ModelSelfTestRunner {
     static let expectedWords = ["quick", "brown", "fox"]
     static let minMatches = 2
 
-    // "Engine busy, don't judge it" — mapped to nil (skip), never false, so a collision with a live
-    // dictation can't fail a good model.
+    // Mapped to nil (skip), never false, so a collision with a live dictation can't fail a good model.
     struct Skipped: Error {}
 
     static var clipURL: URL? {

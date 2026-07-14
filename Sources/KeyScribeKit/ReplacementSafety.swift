@@ -10,14 +10,14 @@ import Foundation
 public enum ReplacementSafety {
     public static func isSafe(_ pattern: String) -> Bool {
         let chars = Array(pattern)
-        var stack: [Bool] = []          // per open group: is its body ambiguous (repeats or nullable)?
-        var poppedHadRepeat = false     // was the group that just closed ambiguous?
+        var groupIsAmbiguous: [Bool] = []
+        var poppedHadRepeat = false
         var lastWasGroupClose = false
         var lastWasGroupOpen = false
         var i = 0
 
         func markEnclosingGroupRepeats() {
-            if !stack.isEmpty { stack[stack.count - 1] = true }
+            if !groupIsAmbiguous.isEmpty { groupIsAmbiguous[groupIsAmbiguous.count - 1] = true }
         }
 
         while i < chars.count {
@@ -38,10 +38,10 @@ public enum ReplacementSafety {
                 continue
             }
 
-            if c == "(" { stack.append(false); lastWasGroupClose = false; lastWasGroupOpen = true; i += 1; continue }
+            if c == "(" { groupIsAmbiguous.append(false); lastWasGroupClose = false; lastWasGroupOpen = true; i += 1; continue }
 
             if c == ")" {
-                poppedHadRepeat = stack.popLast() ?? false
+                poppedHadRepeat = groupIsAmbiguous.popLast() ?? false
                 if poppedHadRepeat { markEnclosingGroupRepeats() }
                 lastWasGroupClose = true
                 lastWasGroupOpen = false

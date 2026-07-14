@@ -154,8 +154,8 @@ struct CaptureWriterTests {
         #expect(read.length == 500)  // slots 1…5 × 100 frames; slots 6…20 dropped after the seal
     }
 
-    // P2-4: mainline STT now transcribes drainedSamples(), not the WAV — they must be sample-for-sample
-    // identical, even through the resampler (48 kHz push → 16 kHz record) and its tail flush.
+    // Mainline STT transcribes drainedSamples(), not the WAV — they must be sample-for-sample identical,
+    // even through the resampler (48 kHz push → 16 kHz record) and its tail flush.
     @Test func drainedSamplesAreBitIdenticalToTheWAV() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -165,7 +165,7 @@ struct CaptureWriterTests {
         #expect(drained == wav)
     }
 
-    // P2-2: an engine that can't consume samples (Apple) gets none — the accumulator is skipped and reported
+    // An engine that can't consume samples (Apple) gets none — the accumulator is skipped and reported
     // nil — while the WAV is still written in full.
     @Test func noSamplesAccumulatedWhenEngineCannotConsumeThem() throws {
         let url = tempURL()
@@ -177,8 +177,8 @@ struct CaptureWriterTests {
         #expect(wav.count == 1600)  // file still fully written
     }
 
-    // P2-1 regression: a sealed COMMIT exits run() on the drain-gate trip BEFORE finish(flushConverter:true)
-    // sets flushOnStop, so the "clear when not flushing" logic must not fire — the committed samples the
+    // A sealed COMMIT exits run() on the drain-gate trip BEFORE finish(flushConverter:true) sets
+    // flushOnStop, so the "clear when not flushing" logic must not fire — the committed samples the
     // caller is about to read via drainedSamples() must survive.
     @Test func sealedCommitRetainsTheAccumulatorForTheCaller() throws {
         let url = tempURL()
@@ -190,7 +190,7 @@ struct CaptureWriterTests {
         #expect(drained?.count == 500)  // 5 × 100 frames survive the seal, not cleared to []
     }
 
-    // P2-1: the cancel/discard path (flushConverter == false) must not leave the writer pinning the multi-MiB
+    // The cancel/discard path (flushConverter == false) must not leave the writer pinning the multi-MiB
     // accumulator until the next arm — it is cleared on thread exit.
     @Test func cancelPathClearsTheAccumulator() throws {
         let url = tempURL()
@@ -200,8 +200,8 @@ struct CaptureWriterTests {
         #expect(drained?.isEmpty == true)
     }
 
-    // Review follow-up: a failed WAV write must also keep that chunk out of the in-memory samples mainline STT
-    // transcribes — otherwise STT hears audio the file/archive/probe never got. Both drop it, staying equal.
+    // A failed WAV write must also keep that chunk out of the in-memory samples mainline STT transcribes —
+    // otherwise STT hears audio the file/archive/probe never got. Both drop it, staying equal.
     @Test func aFailedWriteKeepsTheAccumulatorInLockstepWithTheWAV() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -243,7 +243,7 @@ struct CaptureWriterTests {
         #expect(writer.writerDroppedFrames() == 300)
     }
 
-    // AUD-5: post-seal ring overruns (RT keeps pushing after the writer sealed) must not reach the seal snapshot.
+    // Post-seal ring overruns (RT keeps pushing after the writer sealed) must not reach the seal snapshot.
     @Test func postSealRingOverrunsAreExcludedFromTheSealSnapshot() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -267,7 +267,7 @@ struct CaptureWriterTests {
         #expect(writer.ringDropCountAtSeal() == 0)  // but the sealed snapshot excludes them
     }
 
-    // AUD-5: a capture whose gate never trips (backstop/cancel) has no seal snapshot → caller uses the live count.
+    // A capture whose gate never trips (backstop/cancel) has no seal snapshot → caller uses the live count.
     @Test func anUnsealedCaptureHasNoSealSnapshot() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }

@@ -41,18 +41,14 @@ struct DictationMachineTests {
 
     @Test func transitionsAreGuardedToTheirSourceState() {
         var m = DictationMachine()
-        // markRecording only from arming.
-        #expect(m.markRecording() == false)
-        // beginTranscribing only from recording (not arming).
+        #expect(m.markRecording() == false)   // only from arming
         _ = m.beginArming()
-        #expect(m.beginTranscribing() == false)
+        #expect(m.beginTranscribing() == false)   // only from recording
         _ = m.markRecording()
-        // beginInserting only from transcribing (not recording).
-        #expect(m.beginInserting() == false)
+        #expect(m.beginInserting() == false)   // only from transcribing
         #expect(m.beginTranscribing() == true)
         #expect(m.beginInserting() == true)
-        // No further transitions out of inserting.
-        #expect(m.markRecording() == false)
+        #expect(m.markRecording() == false)   // no transitions out of inserting
         #expect(m.beginTranscribing() == false)
     }
 

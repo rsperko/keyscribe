@@ -4,8 +4,8 @@ import Testing
 @testable import KeyScribeKit
 
 // The preferred-device UID must reach the capture adapter both at construction and on every settings
-// change — the adapter holds it standing so its idle device listener can re-resolve the effective device
-// (preferred-if-present, else system default). No microphone required; the fake just records the pushes.
+// change, since the adapter holds it standing so its idle device listener can re-resolve the effective
+// device (preferred-if-present, else system default).
 @MainActor
 struct PreferredInputDeviceTests {
     private final class TinyEngine: SpeechEngine, @unchecked Sendable {

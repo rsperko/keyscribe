@@ -1,8 +1,8 @@
 import CoreAudio
 import Foundation
 
-// Default-output helpers. Ducking uses CoreAudio's process-scoped `AudioDeviceDuck` (OS releases it on
-// exit); the symbol is weak-linked via dlsym, so duck() reports failure when absent.
+// Ducking uses CoreAudio's process-scoped `AudioDeviceDuck` (OS releases it on exit); the symbol is
+// weak-linked via dlsym, so duck() reports failure when absent.
 enum SystemOutputAudio {
     static func defaultOutputDeviceID() -> AudioDeviceID? {
         var deviceID = AudioDeviceID(0)
@@ -16,8 +16,7 @@ enum SystemOutputAudio {
         return status == noErr && deviceID != 0 ? deviceID : nil
     }
 
-    // Ramp other audio on the device to `level` (0 = silence, 1 = full volume) over a short fade.
-    // Returns false when AudioDeviceDuck is unavailable.
+    // level: 0 = silence, 1 = full volume. Returns false when AudioDeviceDuck is unavailable.
     @discardableResult
     static func duck(_ level: Float32, on device: AudioDeviceID) -> Bool {
         guard let duck = audioDeviceDuck else { return false }

@@ -93,8 +93,8 @@ public actor SingleFlightDeadline {
 
     public init() {}
 
-    // Whether an operation is still occupying the gate — true while one runs AND while a deadline-abandoned
-    // one has not yet truly settled. Read-only; used by tests to observe that a wedged call holds the gate.
+    // True while an operation runs AND while a deadline-abandoned one has not yet truly settled — a
+    // wedged call still holds the gate even after its deadline throws.
     public var isBusy: Bool { inFlight }
 
     private func release(generation gen: Int) {

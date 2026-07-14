@@ -2,20 +2,12 @@ import FluidAudio
 import Foundation
 import KeyScribeKit
 
-// Durable install bookkeeping for downloadable engines, independent of each SDK's directory layout.
 enum ModelInstallStore {
-    // One-shot cleanup of the retired Parakeet CTC 0.6B recognition-bias companion (the large
-    // parakeet-ctc-0.6b-coreml dir). The CTC-WS spotter was removed, so it is stranded on existing installs
-    // and nothing re-populates it (only the tdt-ctc-110m load path pulls a CtcHead, and only from the 110m
-    // repo) — while `reconcile` will NOT remove it (it deliberately preserves dirs no engine claims, since
-    // models/ is shared across variants). We deliberately do NOT touch parakeet-ctc-110m-coreml: FluidAudio's
-    // tdt-ctc-110m load re-downloads it as its [Beta] CTC head on every load, so deleting it only churns a
-    // re-download — the 110m engine simply never uses that head. Target the 0.6B dir by its known FluidAudio
-    // name only, never a blanket sweep. Idempotent (a missing dir is a no-op), so it runs every launch; logs
-    // once when it actually frees space.
-    // The CTC companion dirs safe to reclaim: only the 0.6B spotter model, which nothing re-downloads.
-    // Deliberately excludes parakeet-ctc-110m-coreml — the tdt-ctc-110m load re-fetches that as its [Beta]
-    // CTC head, so deleting it churns; it is owned by the 110m engine's installDirNames instead.
+    // One-shot cleanup of the retired Parakeet CTC 0.6B bias companion: the CTC-WS spotter that used it
+    // was removed, so it's stranded on old installs and `reconcile` won't touch it (models/ is shared
+    // across variants, so it preserves dirs no engine claims). Excludes parakeet-ctc-110m-coreml, which
+    // the tdt-ctc-110m load path re-downloads as its CTC head on every load — deleting it would only churn.
+    // Idempotent (missing dir = no-op), so safe to run every launch.
     static var retiredCtcCompanionDirNames: [String] {
         [CtcModelVariant.ctc06b].map {
             CtcModels.defaultCacheDirectory(for: $0).lastPathComponent
@@ -49,7 +41,6 @@ enum ModelInstallStore {
     private static let cacheLock = NSLock()
     nonisolated(unsafe) private static var cachedIds: Set<String>?
 
-    // Reconcile the marker against disk and remove orphaned directories.
     static func reconcile(engines: [any SpeechEngine]) {
         let marked = installedIds()
         var owned: [String: [String]] = [:]
@@ -176,7 +167,6 @@ enum ModelInstallStore {
         }
     }
 
-    // On-disk install directories for an engine that actually exist.
     private static func presentInstallURLs(for id: String) -> [URL] {
         guard let engine = EngineRegistry.engine(id, modelsDir: KeyScribePaths.modelsDir) else { return [] }
         let fm = FileManager.default
@@ -185,7 +175,7 @@ enum ModelInstallStore {
             .filter { fm.fileExists(atPath: $0.path) }
     }
 
-    // Actual bytes on disk across an engine's install directories; nil when nothing is present.
+    // nil when the engine's install directories don't exist yet.
     static func installedBytes(for id: String) -> Int64? {
         let urls = presentInstallURLs(for: id)
         guard !urls.isEmpty else { return nil }

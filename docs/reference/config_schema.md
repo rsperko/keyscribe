@@ -39,7 +39,7 @@
 - Config files are human-editable text. **Model weights** are downloaded at runtime (never
   committed) into `models/`, consolidated under the KeyScribe support dir.
 - **History records** (`history/<day>.jsonl`, one JSON object per line) are additive: each dictation
-  writes `mode`, `heard`, `result`, `outcome`, boundary metadata, and (UX2 phase 7c) two **optional**
+  writes `mode`, `heard`, `result`, `outcome`, boundary metadata, and two **optional**
   fields, `mode_choice` (`one_shot` / `trigger_key` / `context_rule` / `spoken_phrase` / `fallback`)
   and `routed_phrase` (present only for `spoken_phrase`). A cloud rewrite also stores the optional
   `received` — the provider's raw reply, verbatim (pre-enforcement, carrying `⟦SN:…⟧` tokens like
@@ -82,7 +82,7 @@ enabled = true
 source = "dictation"
 output = "cursor"
 
-# Trigger phrases (Phase B). One or more spoken phrases matched at the END of the transcript
+# Trigger phrases. One or more spoken phrases matched at the END of the transcript
 # (raw-suffix routing). Matching is case-insensitive, tolerates trailing punctuation/whitespace
 # that STT appends, and honors word boundaries — so a bare phrase just works:
 trigger_phrases = ['as an email']
@@ -100,14 +100,14 @@ trim_trailing_punctuation = false  # strip a final . ! ? (and trailing whitespac
 exclude_from_history = false
 
 # ── When it runs ─────────────────────────────────────────────────────────────
-# Trigger keys (Phase A). Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle".
+# Trigger keys. Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle".
 # "hold-or-tap" = push-to-talk while held, OR fires on a quick tap.
 [[trigger_keys]]
 key = "right_option"        # canonical key descriptor; also e.g. "fn", "hyper", "control+option+e"
 press_style = "hold-or-tap"
 tap_threshold_ms = 250      # release under this = a tap (latches on); over = push-to-talk hold
 
-# Context eligibility (Phase A). Empty = eligible everywhere. A constraint ANDs its fields; any of
+# Context eligibility. Empty = eligible everywhere. A constraint ANDs its fields; any of
 # bundle_id (exact), bundle_prefix (case-insensitive bundle-id prefix), url_pattern (regex, when
 # detectable), window_title (regex). Also constrains which phrases can route here. Specificity ranks
 # url_pattern > window_title > bundle_id > bundle_prefix (design.md §4.3).
@@ -116,7 +116,7 @@ bundle_id = "com.apple.mail"
 # bundle_prefix = "com.jetbrains."        # optional; matches all bundle ids under the prefix
 # url_pattern = 'mail\.google\.com/.*'    # optional; best-effort
 # window_title = '(?i)pull request'       # optional; regex against the focused window title
-# The editor's friendly "Website…" field (UX2 phase 7a) stores a generated host-anchored url_pattern
+# The editor's friendly "Website…" field stores a generated host-anchored url_pattern
 # (host = the entered domain OR a subdomain of it), e.g. github.com →
 # (?i)^[a-z][a-z0-9+.-]*://([^/?#]*\.)?github\.com([/:?#]|$). The on-disk shape is unchanged (still a
 # url_pattern regex); a hand-written pattern keeps today's unanchored substring semantics.

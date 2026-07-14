@@ -20,8 +20,7 @@ private actor Gate {
 // Records what the base engine actually did, and whether an evict ever overlapped a running transcribe.
 // Models the two-level load split the real engines have: `loadIfNeeded()` is a silent runtime warm, while
 // `load(progress:)` is the install path that also reports progress and verifies a complete download.
-// `loadBodies` counts the full/install bodies; `runtimeBodies` counts the runtime-only bodies;
-// `installBodyRan` proves whether the install body ran.
+// `loadBodies` counts the full/install bodies; `runtimeBodies` counts the runtime-only bodies.
 private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     let id = "spy"
     let displayName = "Spy"
@@ -209,7 +208,7 @@ struct SerializedEngineTests {
         #expect(spy.sampleTranscribeCalled)
         #expect(spy.lastSampleRate == 24000)
         #expect(spy.runtimeBodies == 1)   // ensureRuntimeLocked ran before the base transcribe
-        #expect(spy.loadBodies == 0)      // never the install body
+        #expect(spy.loadBodies == 0)
     }
 
     // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.
@@ -428,7 +427,7 @@ struct SerializedEngineTests {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
         await engine.evict()
-        #expect(!spy.evicted)         // nothing to tear down
+        #expect(!spy.evicted)
     }
 
     @Test func metadataForwardsWithoutLoading() {
@@ -444,9 +443,9 @@ struct SerializedEngineTests {
         let engine = SerializedEngine(spy)
         try await engine.loadIfNeeded()
         #expect(spy.runtimeBodies == 1)
-        #expect(spy.loadBodies == 0)   // the install/full body never ran
+        #expect(spy.loadBodies == 0)
         #expect(spy.loaded)
-        #expect(!spy.installBodyRan)        // install body stays un-run for a runtime warm
+        #expect(!spy.installBodyRan)
     }
 
     // The install path runs the install body (download/verify/compile) so the first dictation never stalls.
@@ -467,7 +466,7 @@ struct SerializedEngineTests {
         try await engine.loadIfNeeded()
         #expect(!spy.installBodyRan)
         try await engine.load(progress: nil)
-        #expect(spy.loadBodies == 1)   // the install body ran despite the runtime already being loaded
+        #expect(spy.loadBodies == 1)
         #expect(spy.installBodyRan)
     }
 

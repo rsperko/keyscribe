@@ -13,15 +13,15 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "the function is ProcessData okay")
     }
 
-    // The reported bug: pausing around the markers made the STT insert commas, which leaked into the
-    // protected content and stranded outside the markers. Pause commas are now absorbed on both sides.
+    // Pausing around the markers made the STT insert commas that leaked into the protected content;
+    // pause commas are absorbed on both sides.
     @Test func pauseCommasAroundMarkersAreAbsorbed() {
         let (out, t) = tokenize("make sure that the begin verbatim, new line, end verbatim, change is in place")
         #expect(out == "make sure that the ⟦SN:VERB:1⟧ change is in place")
         #expect(t.restore(out) == "make sure that the new line change is in place")
     }
 
-    // Content edges keep intended terminators/semicolons — only pause whitespace/commas are trimmed.
+    // Only pause whitespace/commas are trimmed — an intended terminator at the content edge stays.
     @Test func contentTerminatorIsPreserved() {
         let (out, t) = tokenize("say begin verbatim Hello! end verbatim done")
         #expect(t.restore(out) == "say Hello! done")
@@ -32,7 +32,7 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "code foo(); done")
     }
 
-    // A period after the end marker is a real sentence end — keep it attached, do not absorb it.
+    // A period after the end marker is a real sentence end, not a pause artifact — keep it.
     @Test func periodAfterEndMarkerIsPreserved() {
         let (out, t) = tokenize("begin verbatim note end verbatim. Next")
         #expect(out == "⟦SN:VERB:1⟧. Next")
@@ -45,7 +45,7 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "note X done")
     }
 
-    // Commas INSIDE the content (not at the edges) are part of the protected literal — keep them.
+    // Commas inside the content, not at the edges, are part of the protected literal.
     @Test func internalCommasInContentPreserved() {
         let (out, t) = tokenize("begin verbatim a, b, c end verbatim")
         #expect(t.restore(out) == "a, b, c")
@@ -56,60 +56,56 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == ".config")
     }
 
-    // Verbatim spans are NOT folded into a preceding clause (unlike inline clipboard pastes): a
-    // user-delimited span that the speaker set off stays its own clause. (Previously folded to
-    // "the config foo. Next"; that merge was wrong for a standalone span — see the pause-around-markers
-    // report and standaloneVerbatimWithPausesIsNotMerged below.)
+    // Verbatim spans are NOT folded into a preceding clause (unlike inline clipboard pastes) — a
+    // user-delimited span the speaker set off stays its own clause.
     @Test func verbatimIsNotFoldedIntoThePrecedingClause() {
         let (out, t) = tokenize("the config. begin verbatim foo end verbatim. Next")
         #expect(out == "the config. ⟦SN:VERB:1⟧. Next")
         #expect(t.restore(out) == "the config. foo. Next")
     }
 
-    // A terminator GLUED to the begin marker (the STT ending the "begin verbatim" clause on a pause) is
-    // a command artifact and is stripped — distinct from a space-separated content-leading terminal
-    // like ".config" (leadingPeriodInContentPreserved), which survives.
+    // A terminator glued to the begin marker (STT ending the "begin verbatim" clause on a pause) is a
+    // command artifact and is stripped — unlike a space-separated content-leading terminal like
+    // ".config" (leadingPeriodInContentPreserved), which survives.
     @Test func terminatorGluedToBeginMarkerIsStripped() {
         let (out, t) = tokenize("Begin verbatim. keep this end verbatim")
         #expect(t.restore(out) == "keep this")
     }
 
-    // The reported case: pausing around the markers makes the STT terminate each clause with a period
-    // ("…sentence. Begin verbatim. …contents. End verbatim. This…"). The begin-marker-glued period is
-    // stripped, the span is not merged into the previous sentence, and the redundant post-end-marker
-    // period collapses into the content's own — so the whole utterance reads cleanly.
+    // Pausing around the markers makes the STT terminate each clause with a period ("…sentence. Begin
+    // verbatim. …contents. End verbatim. This…"). The begin-marker-glued period is stripped, the span
+    // is not merged into the previous sentence, and the redundant post-end-marker period collapses into
+    // the content's own.
     @Test func standaloneVerbatimWithPausesReadsCleanly() {
         let (out, t) = tokenize(
             "This is the start of the sentence. Begin verbatim. Insert the board contents. End verbatim. This is the end of the sentence.")
         let restored = t.restore(out)
-        #expect(!restored.contains("sentence . Insert"))   // no floating space-period (was the bug)
+        #expect(!restored.contains("sentence . Insert"))   // no floating space-period
         #expect(!restored.contains("sentence Insert"))      // not merged into the previous clause
-        #expect(!restored.contains("contents.."))           // no double period (was the bug)
+        #expect(!restored.contains("contents.."))           // no double period
         #expect(restored == "This is the start of the sentence. Insert the board contents. This is the end of the sentence.")
     }
 
-    // Safe trailing-collapse: the content already ends a clause, so the redundant period the STT put
-    // after the end marker (a pause artifact) is dropped — the content's terminator stands.
+    // The content already ends a clause, so the redundant period the STT put after the end marker
+    // (a pause artifact) is dropped — the content's own terminator stands.
     @Test func redundantPostMarkerTerminatorCollapses() {
         let (out, t) = tokenize("say begin verbatim done. end verbatim. Next")
         #expect(t.restore(out) == "say done. Next")
     }
 
-    // The collapse NEVER strips the content's own terminator: an intended "Hello!" survives, and only
-    // the redundant post-marker period is dropped.
+    // The collapse never strips the content's own terminator — only the redundant post-marker period.
     @Test func intendedContentTerminatorSurvivesTheCollapse() {
         let (out, t) = tokenize("say begin verbatim Hello! end verbatim. Next")
         #expect(t.restore(out) == "say Hello! Next")
     }
 
-    // A wall of pause commas around the markers must resolve (and not backtrack pathologically).
+    // Regex must resolve a wall of pause commas without catastrophic backtracking.
     @Test func manyCommasAroundMarkersResolve() {
         let (out, t) = tokenize("begin verbatim ,,, X ,,, end verbatim")
         #expect(out == "⟦SN:VERB:1⟧")
         #expect(t.restore(out) == "X")
     }
 
-    // Unclosed span keeps "begin verbatim" visible; the preceding pause comma is still absorbed.
     @Test func unterminatedTrimsLeadingCommaAndKeepsMarker() {
         let (out, t) = tokenize("the note, begin verbatim my secret")
         #expect(out == "the note ⟦SN:VERB:1⟧")
@@ -151,7 +147,7 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "say KeepThis done")
     }
 
-    // No end heard: protect to end of utterance, keeping "begin verbatim" visible as the tell.
+    // No end heard: protect to end of utterance, keeping "begin verbatim" visible as the tell that it's unterminated.
     @Test func unterminatedTokenizesToEndKeepingMarker() {
         let (out, t) = tokenize("the password is begin verbatim hunter2 more")
         #expect(out == "the password is ⟦SN:VERB:1⟧")
@@ -184,7 +180,6 @@ struct VerbatimTokenizerTests {
     }
 
     @Test func contentNeverRemainsInTokenizedText() {
-        // the whole point: the protected span must not appear in what goes to the LLM
         let (out, _) = tokenize("begin verbatim TopSecret end verbatim")
         #expect(!out.contains("TopSecret"))
     }
@@ -228,7 +223,7 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "foo and verbatim bar baz")
     }
 
-    // With no open begin there is nothing to rescue — prose containing "and verbatim" is untouched.
+    // With no open begin there is nothing to rescue.
     @Test func loneEndLikePhraseWithoutBeginIsInert() {
         let (out, _) = tokenize("quote it and verbatim please")
         #expect(out == "quote it and verbatim please")
@@ -253,10 +248,9 @@ struct VerbatimTokenizerTests {
         #expect(t.restore(out) == "A begin verbatim B")
     }
 
-    // "verbatim" is a rare, schwa-final word an on-device STT reliably mangles ("verbatum"). Adjacent to
+    // "verbatim" is a rare, schwa-final word an on-device STT reliably mangles ("verbatum"); adjacent to
     // the "begin" marker word it is snapped back to the literal so the span still closes. lev<=1 with no
-    // phonetic gate — "verbatim" has zero real English words within one edit, so only non-word mishearings
-    // snap.
+    // phonetic gate is safe here — "verbatim" has zero real English words within one edit.
     @Test func beginMarkerKeywordMishearIsSnapped() {
         let (out, t) = tokenize("say begin verbatum KeepThis end verbatim done")
         #expect(out == "say ⟦SN:VERB:1⟧ done")
@@ -264,38 +258,30 @@ struct VerbatimTokenizerTests {
     }
 
     // The dropped-r mishear ("vebatim") changes the consonant skeleton, so a phonetic-key gate would
-    // reject it; the lev-only rule still catches it because the pure edit-distance neighbourhood is empty.
+    // reject it; lev-only still catches it since the edit-distance neighbourhood is otherwise empty.
     @Test func endMarkerDroppedConsonantMishearIsSnapped() {
         let (out, t) = tokenize("say begin verbatim KeepThis end vebatim done")
         #expect(out == "say ⟦SN:VERB:1⟧ done")
         #expect(t.restore(out) == "say KeepThis done")
     }
 
-    // The reported case: BOTH markers mistranscribed at once ("begin verbatum … end vebatim").
+    // Both markers mistranscribed at once ("begin verbatum … end vebatim") must still close.
     @Test func bothMarkerKeywordsMisheardStillCloses() {
         let (out, t) = tokenize("blah blah begin verbatum text in between end vebatim blah blah")
         #expect(out == "blah blah ⟦SN:VERB:1⟧ blah blah")
         #expect(t.restore(out) == "blah blah text in between blah blah")
     }
 
-    // A pause comma between the marker words survives the keyword snap.
     @Test func misheardKeywordWithPauseCommaFires() {
         let (out, t) = tokenize("say begin, verbatum KeepThis end, vebatim done")
         #expect(out == "say ⟦SN:VERB:1⟧ done")
         #expect(t.restore(out) == "say KeepThis done")
     }
 
-    // Scope guard: a verbatim-like word NOT adjacent to a marker word is content, never touched — the snap
-    // must not "correct" dictated prose or corrupt the inside of a span.
+    // A verbatim-like word not adjacent to a marker word is content — the snap must not "correct"
+    // dictated prose or corrupt the inside of a span.
     @Test func misheardKeywordAwayFromMarkerIsNotSnapped() {
         let (out, _) = tokenize("the verbatum note is here")
         #expect(out == "the verbatum note is here")
-    }
-
-    // The snap only fires on a NON-exact keyword — an exact "and verbatim" without a begin stays inert
-    // (regression guard for loneEndLikePhraseWithoutBeginIsInert under the new pass).
-    @Test func exactVerbatimIsNeverReSnapped() {
-        let (out, _) = tokenize("quote it and verbatim please")
-        #expect(out == "quote it and verbatim please")
     }
 }

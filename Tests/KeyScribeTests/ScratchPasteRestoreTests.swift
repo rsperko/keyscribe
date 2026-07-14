@@ -5,10 +5,9 @@ import Testing
 
 // A paste that detaches its clipboard-restore (awaitSettle: false, the fast dictation path) must not let
 // the next paste snapshot its still-present scratch text as the user's clipboard — otherwise that scratch
-// text (which can hold a just-restored redacted span) gets restored back and persists. These drive the
-// scratch/restore coordinator on a PRIVATE pasteboard, so no real clipboard is touched and no ⌘V is
-// synthesized (postKey, orthogonal to the restore ordering, is skipped). Serialized because the coordinator
-// keeps process-wide pending-restore state that the dictation state machine only ever touches one at a time.
+// text (which can hold a just-restored redacted span) gets restored back and persists. Runs against a
+// PRIVATE pasteboard (no real clipboard, no synthesized ⌘V). Serialized because the coordinator keeps
+// process-wide pending-restore state the dictation state machine only ever touches one at a time.
 @MainActor
 @Suite(.serialized)
 struct ScratchPasteRestoreTests {
@@ -26,8 +25,7 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "dictationA")
         await TextInserter.settleScratch(first!, awaitSettle: false)
 
-        // The next paste begins while A's restore is still pending; it must drain A first, so it snapshots
-        // the real USER_ORIGINAL rather than "dictationA".
+        // Begins while A's restore is still pending; must drain A first, or it would snapshot "dictationA".
         let second = await TextInserter.beginScratchPaste("dictationB", on: pb)
         #expect(second != nil)
         await TextInserter.settleScratch(second!, awaitSettle: true)
@@ -36,7 +34,7 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // awaitSettle: true restores detached, so drain before asserting the clipboard is back.
+    // awaitSettle: true still restores detached, so drain before asserting the clipboard is back.
     @Test func aSubmitSettleRestoresTheUserClipboardInTheBackground() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -50,7 +48,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // A copy landing during the async snapshot must be preserved, not clobbered by the scratch write.
     @Test func aCopyLandingDuringCaptureIsPreservedNotClobbered() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -67,8 +64,8 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_COPIED_LATE")
     }
 
-    // The bounded stabilize loop re-captures across successive mid-capture copies and preserves the last
-    // one, so a second (or third) copy racing the recovery snapshot is not lost either.
+    // The stabilize loop re-captures across successive mid-capture copies, so a second or third copy
+    // racing the recovery snapshot is not lost either.
     @Test func repeatedCopiesDuringCaptureStabilizeToTheLatest() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -86,8 +83,8 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "COPY_2")
     }
 
-    // With no next interaction to drain it, the scratch stays put (a stalled target still reads our ⌘V,
-    // not the user's old clipboard) and the backstop restores the user's clipboard on its own.
+    // With no next interaction to drain it (a stalled target still reads our ⌘V, not the user's old
+    // clipboard), the backstop must restore the user's clipboard on its own.
     @Test func theBackstopRestoresWhenNothingElseDrains() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -106,8 +103,7 @@ struct ScratchPasteRestoreTests {
         #expect(restored)
     }
 
-    // A clipboard that changes on every capture never stabilizes; the paste fails closed rather than write
-    // scratch over the churning copy, leaving the user's clipboard untouched.
+    // Never stabilizes; the paste must fail closed rather than write scratch over the churning copy.
     @Test func aPersistentlyUnstableClipboardFailsClosedWithoutClobbering() async {
         let pb = makePasteboard()
         pb.clearContents()

@@ -246,7 +246,7 @@ struct DictationPipelineWiringTests {
             accessibilityGranted: { accessibility },
             llmClient: llm)
 
-        controller.setNextModeOverride(id: defaultModeId)   // select the mode under test
+        controller.setNextModeOverride(id: defaultModeId)
         controller.handleStart()
         if let updateSettingsAfterStart {
             updateSettingsAfterStart(&settings)
@@ -681,8 +681,8 @@ struct DictationPipelineWiringTests {
         #expect(out.outcome == .inserted)
     }
 
-    // H1: privacy mode on a selection mode must also redact the spoken instruction (design.md
-    // §4.4), not just the captured selection.
+    // Privacy mode on a selection mode must also redact the spoken instruction (design.md §4.4),
+    // not just the captured selection.
     @Test func selectionInstructionIsRedactedBeforeReachingTheLLM() async {
         let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -696,8 +696,8 @@ struct DictationPipelineWiringTests {
         #expect(sent.contains("⟦SN:REDACT:"))
     }
 
-    // Follow-up to H1: an instruction token must also be USABLE, not just kept off the wire — a
-    // faithful edit that inserts the redacted value must pass the gate and restore to the real value.
+    // An instruction token must also be USABLE, not just kept off the wire — a faithful edit that
+    // inserts the redacted value must pass the gate and restore to the real value.
     @Test func selectionInstructionTokenCanBeUsedInTheRewrittenSelection() async {
         let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -763,8 +763,8 @@ struct DictationPipelineWiringTests {
         #expect(out.insertedText == "send it")       // trailing/insert still happens; only submit is gated
     }
 
-    // W5/H1: the paste silently failed (writeScratchVerified false) — the outcome must NOT claim
-    // "inserted" and the submit Return must not fire (it would send a stale draft in a chat app).
+    // A silently failed paste (writeScratchVerified false) must NOT claim "inserted", and the submit
+    // Return must not fire (it would send a stale draft in a chat app).
     @Test func silentPasteFailureReportsFailedAndSkipsSubmit() async {
         let out = await run(
             transcript: "send it", modes: [mode(id: "s", submit: .return)], defaultModeId: "s",
@@ -774,8 +774,8 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "send it")   // still recoverable via "Paste last dictation"
     }
 
-    // W5/H4: focus moved between the paste-settle window and the submit — the frontmost app at submit
-    // time differs from the captured target, so the Return is skipped (it would fire into the wrong app).
+    // Focus moved between the paste-settle window and the submit — the frontmost app at submit time
+    // differs from the captured target, so the Return is skipped (it would fire into the wrong app).
     @Test func submitSkippedWhenFocusMovesBeforeReturn() async {
         let focus = FocusSequence()   // "test.bundle" for capture + finishInsertion, then "other.bundle"
         let out = await run(
@@ -785,8 +785,8 @@ struct DictationPipelineWiringTests {
         #expect(out.submits.isEmpty)
     }
 
-    // W5/H4, same-app window switch: bundle id is unchanged but the focused window moved, so the submit
-    // must still be suppressed (the insertion focus guard, reused here, compares window id too).
+    // Same-app window switch: bundle id is unchanged but the focused window moved, so the submit must
+    // still be suppressed (the insertion focus guard, reused here, compares window id too).
     @Test func submitSkippedWhenWindowSwitchesWithinSameApp() async {
         let focus = WindowSwitchSequence()
         let out = await run(

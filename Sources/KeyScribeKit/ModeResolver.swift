@@ -11,7 +11,7 @@ public struct RoutingContext: Equatable, Sendable {
     }
 }
 
-// Why a mode was chosen for a dictation, recorded for the History "how this was chosen" line (UX2 phase 7c).
+// Why a mode was chosen for a dictation, recorded for the History "how this was chosen" line.
 // User-facing copy lives in the app; this is the durable, Codable key.
 public enum ModeChoiceReason: String, Codable, Sendable, Equatable {
     case oneShot = "one_shot"           // menu "Dictate with" pick
@@ -59,8 +59,8 @@ public enum ModeResolver {
             eligible: eligibleOverride).mode
     }
 
-    // Same resolution as resolvePhaseA, plus WHY the mode was chosen (UX2 phase 7c). Semantics are unchanged
-    // — the reason just names which branch won.
+    // Same resolution as resolvePhaseA, plus WHY the mode was chosen. Semantics are unchanged — the reason
+    // just names which branch won.
     public static func resolvePhaseAWithReason(
         modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?,
         eligible eligibleOverride: [Mode]? = nil

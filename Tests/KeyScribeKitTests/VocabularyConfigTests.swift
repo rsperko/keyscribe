@@ -25,8 +25,8 @@ struct VocabularyConfigTests {
         #expect(r.toRules() == [ReplacementRule(heard: "teh", replace: "the", isRegex: false)])
     }
 
-    // A single-quoted TOML literal string keeps `\n` as backslash+n, so the regex expansion (not TOML's own
-    // basic-string decoding) is what produces the newline through the stage.
+    // A single-quoted TOML literal string keeps `\n` as backslash+n, so the regex expansion — not TOML's
+    // own basic-string decoding — is what produces the newline.
     @Test func regexEscapeExpansionRunsThroughTheTomlLiteralStringPath() throws {
         let toml = """
         schema_version = 1
@@ -57,8 +57,8 @@ struct VocabularyConfigTests {
         #expect(ctx.text == #"```\n"#)
     }
 
-    // TOMLKit encodes a backslash value as a literal string, so the Settings-UI write→load round-trip
-    // preserves the `\n` the regex expansion needs.
+    // TOMLKit encodes a backslash value as a literal string, so the write→load round-trip preserves the
+    // `\n` the regex expansion needs.
     @Test func settingsWriteRoundTripPreservesBackslashEscape() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-replacements-escape-\(UUID().uuidString)", isDirectory: true)

@@ -1,16 +1,13 @@
 import SwiftUI
 
-// The shared master/detail vocabulary for the list-driven Settings panes — Speech Models, AI Services,
-// Modes, and History (ui_components.md "Settings list pane"). Each pane composes the same pieces so the
-// four read as one system: a fixed-width list column with an optional bottom action bar, a divider, and a
-// detail column whose header/footer follow one shape. Only the row/detail *content* differs per pane.
+// Shared master/detail metrics for the list-driven Settings panes — Speech Models, AI Services, Modes,
+// and History (ui_components.md "Settings list pane") — so the four read as one system.
 enum PaneMetrics {
     static let listWidth: CGFloat = 260
 }
 
-// One capsule for the small inline status words that used to be three divergent ad-hoc styles (the Speech
-// "Recommended" pill, the Modes "Built in" capsule, the History outcome badge). Data-boundary badges stay
-// separate (DataBoundaryBadge) — those carry privacy meaning, these are neutral chrome.
+// Data-boundary badges stay separate (DataBoundaryBadge) — those carry privacy meaning, this is neutral
+// chrome for inline status words (the Speech "Recommended" pill, the Modes "Built in" capsule, etc).
 struct PaneBadge: View {
     enum Kind { case neutral, prominent, warning }
     let text: String
@@ -51,9 +48,8 @@ struct PaneBadge: View {
     }
 }
 
-// A section header for a settings list column. The label uses a small uppercase treatment distinct from the
-// row title font, so it can never be mistaken for a list item. All four list panes share this, so their
-// section breaks read identically.
+// Uses a small uppercase treatment distinct from the row title font, so it can never be mistaken for a
+// list item. Shared by all four list panes so their section breaks read identically.
 struct PaneListSectionHeader: View {
     let title: String
 
@@ -69,17 +65,14 @@ struct PaneListSectionHeader: View {
     }
 }
 
-// A colored one-line health label for a list row (AI connection status, a speech model's readiness). Text +
-// SF Symbol + semantic style, so no two panes phrase or color a status differently.
 struct PaneRowStatus {
     let text: String
     let systemImage: String
     let style: AnyShapeStyle
 }
 
-// The shared row for a settings list column: primary name + inline badges, an optional secondary summary,
-// an optional colored status line, and an optional trailing accessory. History keeps its own transcript row
-// (a log entry, not a config item); the other three panes use this.
+// History keeps its own transcript row (a log entry, not a config item); the other three list panes
+// share this one.
 struct PaneListRow<Badges: View, Trailing: View>: View {
     let title: String
     var subtitle: String? = nil
@@ -134,9 +127,6 @@ extension PaneListRow where Badges == EmptyView, Trailing == EmptyView {
     }
 }
 
-// The bottom action bar of a list column — the create/download affordance ("Add Mode", "Add AI Service",
-// "Download Speech Model") and History's export. A hairline over a bar-material strip, its control left
-// aligned, so the four panes' bottom action reads identically.
 struct ListActionBar<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -157,9 +147,8 @@ extension View {
     }
 }
 
-// The detail-pane header shared by Speech Models, AI Services, and History: a leading SF Symbol, the title,
-// inline badges, an optional one-line subtitle, and an optional trailing accessory. Modes keeps its editable
-// summary card (its name is an editable field, not a title) but rhymes with this visually.
+// Shared by Speech Models, AI Services, and History. Modes keeps its own editable summary card (its name
+// is an editable field, not a title) but rhymes with this visually.
 struct PaneDetailHeader<Badges: View, Trailing: View>: View {
     let systemImage: String
     var symbolStyle: AnyShapeStyle = AnyShapeStyle(.tint)
@@ -221,8 +210,8 @@ extension PaneDetailHeader where Badges == EmptyView, Trailing == EmptyView {
     }
 }
 
-// The destructive footer action, spatially separated at a detail pane's trailing edge in red (the Speech
-// Models pattern ui_design.md §7 calls out — never stacked with routine maintenance). Reused by every pane.
+// Spatially separated at a detail pane's trailing edge in red — never stacked with routine maintenance
+// (ui_design.md §7). Reused by every pane.
 struct PaneDeleteButton: View {
     let title: String
     let action: () -> Void

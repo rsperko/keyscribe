@@ -622,7 +622,7 @@ live in the separate **About & Notices** window, not here.)
 
 ## 8. History
 
-History is a **Settings pane**, not a separate window (UX2 phase 8) — it is the audit,
+History is a **Settings pane**, not a separate window — it is the audit,
 correction, and diagnostics surface, reached via the menu "History…" / ⌘Y (which opens Settings
 on the History pane) and the sidebar. It uses the same list/detail pane layout as Modes: a
 left column with one compact History header for enablement and retention (moved out of General), a search field,

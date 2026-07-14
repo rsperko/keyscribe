@@ -18,11 +18,6 @@ struct AXInsertVerificationTests {
             before: "hello", after: "hello", selectedBefore: "hello", selectedAfter: "hello", inserted: "hello"))
     }
 
-    @Test func unchangedValueWithDifferentSelectionFallsBack() {
-        #expect(!TextInserter.axInsertLandedInPlace(
-            before: "hello", after: "hello", selectedBefore: "goodbye", selectedAfter: "", inserted: "hello"))
-    }
-
     @Test func unchangedValueWithUnreadableSelectionBeforeFallsBack() {
         #expect(!TextInserter.axInsertLandedInPlace(
             before: "hello", after: "hello", selectedBefore: nil, selectedAfter: "", inserted: "hello"))

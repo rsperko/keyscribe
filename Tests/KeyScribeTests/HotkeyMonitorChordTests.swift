@@ -114,10 +114,10 @@ struct HotkeyMonitorChordTests {
         #expect(!m.hasPhysicallyDownGesture)
     }
 
-    // W9: a rebuild (Settings toggle / config reload) mid-hold must NOT strand an in-progress gesture.
-    // With an identical descriptor + style, update() carries the live gesture over, so the release edge
-    // still delivers its commit. Without the carry-over the fresh PressGesture never saw the .down and
-    // the .up would be dropped.
+    // A rebuild (Settings toggle / config reload) mid-hold must NOT strand an in-progress gesture. With
+    // an identical descriptor + style, update() carries the live gesture over, so the release edge still
+    // delivers its commit. Without the carry-over the fresh PressGesture never saw the .down and the .up
+    // would be dropped.
     @Test func updatePreservesInProgressGestureForIdenticalDescriptor() async {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0

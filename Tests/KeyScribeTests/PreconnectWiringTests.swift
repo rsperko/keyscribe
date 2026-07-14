@@ -3,8 +3,8 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// A mode wired to a BYOK connection warms that endpoint during recording so the post-commit rewrite reuses
-// a warm TLS connection; a local-only mode makes no network touch at all.
+// A mode wired to a BYOK connection warms that endpoint during recording so the post-commit rewrite
+// reuses a warm TLS connection; a local-only mode makes no network touch at all.
 @MainActor
 struct PreconnectWiringTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -101,8 +101,8 @@ struct PreconnectWiringTests {
         controller.cancel()
     }
 
-    // Production shape: the fast press snapshot carries no secure-field info; the endpoint is warmed only
-    // after the async full snapshot confirms a non-secure field.
+    // Production shape: the fast press snapshot carries no secure-field info, so the endpoint is warmed
+    // only after the async full snapshot confirms a non-secure field.
     @Test func aRewriteModePreconnectsOnlyAfterANonSecureFullSnapshot() async {
         let llm = PreconnectSpyLLM()
         let controller = makeController(
@@ -118,8 +118,8 @@ struct PreconnectWiringTests {
         controller.cancel()
     }
 
-    // A password field revealed by the async full snapshot neuters the mode, so no preconnect fires even
-    // though the fast press snapshot (bundle id only) did not yet know the field was secure.
+    // The fast press snapshot (bundle id only) doesn't yet know the field is secure; the async full
+    // snapshot reveals it and must still suppress the preconnect.
     @Test func aSecureFieldRevealedByTheFullSnapshotSuppressesPreconnect() async {
         let llm = PreconnectSpyLLM()
         let controller = makeController(

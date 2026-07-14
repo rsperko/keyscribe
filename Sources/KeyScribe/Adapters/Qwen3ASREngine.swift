@@ -3,9 +3,8 @@ import Foundation
 import Qwen3ASR
 import KeyScribeKit
 
-// Per-model identity bundled so adding a Qwen3-ASR variant is adding a profile constant, not editing
-// the engine. `modelId` is the HuggingFace MLX bundle; `subdir` roots its weights under modelsDir so
-// each variant's cache is isolated (delete one without touching the other).
+// `modelId` is the HuggingFace MLX bundle; `subdir` roots its weights under modelsDir so each variant's
+// cache is isolated (delete one without touching the other).
 struct Qwen3ModelProfile {
     let id: String
     let displayName: String
@@ -20,15 +19,13 @@ struct Qwen3ModelProfile {
         modelId: Qwen3ASRModel.largeModelId, subdir: "qwen3-asr-1.7b")
 }
 
-// One adapter, parameterized per Qwen3-ASR variant. MLX/Metal backend: weights download from
-// HuggingFace into modelsDir, then run on the GPU via MLX. Recognition bias is native — dictionary
-// terms are passed as the decoder `context`, an LLM-style prompt prefix that nudges recognition
-// toward those spellings (proven: "KeyScribe" misheard as "Stan word" without context, correct with).
+// Recognition bias is native — dictionary terms are passed as the decoder `context`, an LLM-style
+// prompt prefix that nudges recognition toward those spellings (proven: "KeyScribe" misheard as
+// "Stan word" without context, correct with).
 //
-// Not an actor: Qwen3ASRModel isn't Sendable (and is documented not thread-safe). Access to the
-// `model` handle is serialized by the SerializedEngine actor decorator wrapping this engine at
-// EngineRegistry.makeAll (single-flight load; load/transcribe/evict never overlap), so
-// `nonisolated(unsafe)` storage is safe. Same shape as WhisperEngine.
+// Not an actor: Qwen3ASRModel isn't Sendable (documented not thread-safe). Access to `model` is
+// serialized by the SerializedEngine actor decorator wrapping this engine at EngineRegistry.makeAll
+// (single-flight load; load/transcribe/evict never overlap), so `nonisolated(unsafe)` storage is safe.
 //
 // Requires `mlx.metallib` next to the executable inside the .app: without it MLX hard-fails at the
 // first GPU op ("Failed to load the default metallib"). make-app.sh builds and bundles it.
@@ -44,8 +41,8 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     private let modelsDir: URL
     nonisolated(unsafe) private var model: Qwen3ASRModel?
     // MLX inference is a synchronous, whole-clip call; running it on a Swift-concurrency pool thread
-    // parks a cooperative worker (width = core count) for the duration. Hop it to a dedicated queue so
-    // the pool stays free. SerializedEngine still guarantees one transcribe at a time on this instance.
+    // would park a cooperative worker for the duration. SerializedEngine still guarantees one transcribe
+    // at a time on this instance.
     private let inferenceQueue = DispatchQueue(label: "com.keyscribe.audio.qwen3asr-inference", qos: .userInitiated)
 
     init(profile: Qwen3ModelProfile, modelsDir: URL) {
@@ -66,7 +63,6 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
 
     private func load(progress: (@Sendable (ModelLoadProgress) -> Void)?, allowRepair: Bool) async throws {
         guard model == nil else { return }
-        // Download fills 0–0.9 of the bar; the MLX weight load/first-op warm-up fills the tail.
         let downloadShare = 0.9
         let bridge: (@Sendable (Double, String) -> Void)?
         if let report = progress {
@@ -77,9 +73,8 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         } else {
             bridge = nil
         }
-        // Root each variant under its own modelsDir/<subdir> so the two coexist and reconcile can
-        // own/delete them by id. getCacheDirectory ignores cacheDirName when basePath is set, so the
-        // per-variant isolation has to come from basePath, not cacheDirName.
+        // getCacheDirectory ignores cacheDirName when basePath is set, so per-variant isolation has to
+        // come from basePath.
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(
             for: modelId, basePath: modelsDir.appendingPathComponent(subdir, isDirectory: true))
         let offline = fullInstallPresent(in: cacheDir)
@@ -100,10 +95,9 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
         progress?(.init(phase: "Ready", fraction: 1))
     }
 
-    // A Qwen install is multi-file: weights PLUS tokenizer/config sidecars. weightsExist passes on ANY
-    // single .safetensors, so an interrupted download (weight shard but no vocab.json) would load with the
-    // tokenizer silently skipped → transcribe pastes space-joined raw token IDs. Require the whole set so
-    // a partial is treated as absent, never loaded.
+    // weightsExist passes on ANY single .safetensors, so an interrupted download (weight shard but no
+    // vocab.json) would load with the tokenizer silently skipped, pasting space-joined raw token IDs.
+    // Require the whole set so a partial install is treated as absent, never loaded.
     private static let requiredSidecars = ["config.json", "vocab.json", "merges.txt", "tokenizer_config.json"]
 
     func fullInstallPresent(in cacheDir: URL) -> Bool {
@@ -123,9 +117,8 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
             .appendingPathComponent(modelId, isDirectory: true)
     }
 
-    // Qwen weights are a checkable install footprint, so reconcile does not need the marker to know the
-    // model is present — a completed-but-unmarked download (crash before the marker wrote) is adopted
-    // rather than deleted. A partial install (missing tokenizer/config) reports false so it is NOT adopted.
+    // A completed-but-unmarked download (crash before the marker wrote) is adopted rather than deleted;
+    // a partial install (missing tokenizer/config) reports false so it is not adopted.
     nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? {
         fullInstallPresent(in: existingCacheDirectory(in: modelsDir))
     }
@@ -151,11 +144,10 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
 
     // Do NOT reduce this to `model = nil`: MLX recycles a dropped model's buffers into a process-wide
     // cache pool rather than returning them to the OS, so the GPU working set stays resident (measured:
-    // multi-GB after a bare nil, 0 after clearCache). unload() frees parameters, clears MLX's cache, and
-    // restores the cache limit the 1.7B load path lowered. The clear is process-wide but safe against a
-    // concurrent load/transcribe of the other Qwen variant: MLX's MetalAllocator guards malloc/free/
-    // clear_cache with one mutex, and clear_cache empties only the reusable-buffer pool, never a buffer a
-    // live MLXArray holds — worst case a transient buffer-reuse miss, never a race or use-after-free.
+    // multi-GB after a bare nil, 0 after clearCache). unload() frees parameters and clears MLX's cache.
+    // The clear is process-wide but safe against a concurrent load/transcribe of the other Qwen variant:
+    // MLX's MetalAllocator guards malloc/free/clear_cache with one mutex, and clear_cache empties only
+    // the reusable-buffer pool, never a buffer a live MLXArray holds.
     func evict() async {
         model?.unload()
         model = nil

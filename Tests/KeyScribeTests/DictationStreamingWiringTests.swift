@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// One-shot coordination: one side waits, the other fires; safe across actor hops.
 private final class Signal: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
@@ -26,8 +25,8 @@ private final class Signal: @unchecked Sendable {
     }
 }
 
-// End-to-end wiring of streaming transcription (P3-1) through the REAL DictationController: the writer→
-// driver feed, the deferred-start session, the finalize-at-commit, and the fall-back-to-batch on every
+// End-to-end wiring of streaming transcription through the real DictationController: the writer→driver
+// feed, the deferred-start session, the finalize-at-commit, and the fall-back-to-batch on every
 // short/failed path. Only the OS edges are faked (audio + engine + insertion). No microphone.
 @MainActor
 struct DictationStreamingWiringTests {
@@ -314,7 +313,7 @@ struct DictationStreamingWiringTests {
 
     // A STREAMED transcript flows through the exact same post-transcript pipeline as batch: a whole-utterance
     // replacement (exact-match sensitive, and it bypasses the LLM/trailing/trim) fires on the streamed text
-    // and is inserted bare — proving streaming does not divert around ReplacementsStage (concern #10).
+    // and is inserted bare — proving streaming does not divert around ReplacementsStage.
     @Test func streamedTranscriptFlowsThroughWholeUtteranceReplacement() async {
         let rules = [ReplacementsSet.Rule(heard: "slash replace", replace: "/replace", regex: false)]
         let h = makeHarness(chunk: Self.longChunk, streamText: "slash replace", rules: rules)

@@ -63,7 +63,7 @@ struct ModeTests {
 
     @Test func appliesDefaultsForMinimalMode() throws {
         let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
-        #expect(mode.enabled)              // default true
+        #expect(mode.enabled)
         #expect(mode.source == .dictation)
         #expect(mode.output == .cursor)
         #expect(!mode.commands.liveEdits)
@@ -76,7 +76,7 @@ struct ModeTests {
     }
 
     @Test func privacyModeForcesContextOffSemantics() throws {
-        // The model carries the toggle; the forced-off behavior is enforced at use time.
+        // the toggle is just stored data; forcing context off is enforced at use time (effectiveContext)
         let mode = try ModeStore.decode(
             from: "schema_version = 1\nname = \"Secure\"\n[commands]\nprivacy = true", id: "secure")
         #expect(mode.commands.privacy)
@@ -93,7 +93,7 @@ struct ModeTests {
         #expect(secured.commands.privacy)
         #expect(secured.effectiveContext == Mode.ContextOptIn())
         #expect(secured.effectiveContextCategories.isEmpty)
-        // Identity and name are preserved so the HUD still shows the resolved mode.
+        // identity/name survive so the HUD still shows the resolved mode
         #expect(secured.id == "polished")
         #expect(secured.name == "Polished")
     }
@@ -161,8 +161,8 @@ struct ModeTests {
         #expect(again.commands.liveEdits)
     }
 
-    // Every field set to a non-default value — a full round-trip catches any broken snake_case key
-    // in encode (trigger_keys, ai_rewrite, the nested context opt-ins, etc.).
+    // Every field is set to a non-default value so the round-trip catches any broken snake_case key in
+    // encode (trigger_keys, ai_rewrite, the nested context opt-ins, etc.).
     @Test func fullModeRoundTripPreservesEveryField() throws {
         var m = Mode(id: "email", name: "Email")
         m.enabled = false
@@ -285,8 +285,8 @@ struct ModeTests {
         #expect(Mode.Trailing.newline.suffix(after: "hello") == "\n")
     }
 
-    // A separator space is pointless once the insert already ends in whitespace — suppress it so a
-    // command like "insert new line" ("\n") does not land a stray "\n " (next dictation at column 0).
+    // A separator space is suppressed once the insert already ends in whitespace, so a command like
+    // "insert new line" doesn't land a stray "\n " (next dictation would start at column 0).
     @Test func trailingSpaceSuppressedAfterWhitespace() {
         #expect(Mode.Trailing.space.suffix(after: "\n") == "")
         #expect(Mode.Trailing.space.suffix(after: "\n\n") == "")
@@ -295,8 +295,8 @@ struct ModeTests {
         #expect(Mode.Trailing.space.suffix(after: "trailing ") == "")
     }
 
-    // A trailing NEWLINE is an explicit per-mode choice: always appended, even onto a break (a
-    // line-break-per-dictation mode may legitimately double a spoken newline into a blank line).
+    // Unlike trailing space, a trailing newline always appends, even onto an existing break — a
+    // line-break-per-dictation mode may legitimately double a spoken newline into a blank line.
     @Test func trailingNewlineAlwaysAppends() {
         #expect(Mode.Trailing.newline.suffix(after: "hello") == "\n")
         #expect(Mode.Trailing.newline.suffix(after: "\n") == "\n")

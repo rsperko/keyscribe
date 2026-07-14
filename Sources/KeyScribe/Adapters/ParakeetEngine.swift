@@ -2,8 +2,6 @@ import Foundation
 import FluidAudio
 import KeyScribeKit
 
-// Per-model identity, bundled so adding a Parakeet model is adding a profile constant, not editing
-// the engine.
 struct ParakeetModelProfile {
     let id: String
     let displayName: String
@@ -15,17 +13,14 @@ struct ParakeetModelProfile {
         id: "parakeet-tdt-ctc-110m", displayName: "Parakeet TDT-CTC 110M", version: .tdtCtc110m)
 }
 
-// One adapter, parameterized per Parakeet model (TDT transcription only). Parakeet has no on-device
-// recognition-bias path; dictionary terms are recovered after transcription (see Settings).
 actor ParakeetEngine: SpeechEngine {
     nonisolated let id: String
     nonisolated let displayName: String
     nonisolated let supportsRecognitionBias = false
 
     // Dir names come from FluidAudio (never hardcoded): the TDT bundle, plus — for the 110M hybrid — the
-    // CTC-head companion FluidAudio's load unconditionally fetches (parakeet-ctc-110m-coreml, ~103 MB).
-    // KeyScribe never uses that head (no recognition bias), but it lands on disk, so it is owned by the
-    // model here: counted in the footprint and removed when the model is deleted.
+    // CTC-head companion FluidAudio's load unconditionally fetches (~103 MB), unused (no recognition bias)
+    // but owned here so it's counted in the footprint and removed when the model is deleted.
     nonisolated var installDirNames: [String] {
         var names = [AsrModels.defaultCacheDirectory(for: version).lastPathComponent]
         if version == .tdtCtc110m {
@@ -34,8 +29,8 @@ actor ParakeetEngine: SpeechEngine {
         return names
     }
 
-    // Parakeet can verify its TDT bundle on disk. The other engines have no SDK integrity check and
-    // use the default `nil`.
+    // Unlike the other engines (no SDK integrity check, default `nil`), Parakeet can verify its TDT
+    // bundle on disk.
     nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? {
         let tdt = modelsDir.appendingPathComponent(
             AsrModels.defaultCacheDirectory(for: version).lastPathComponent, isDirectory: true)
@@ -72,7 +67,7 @@ actor ParakeetEngine: SpeechEngine {
             }
         }
         // FluidAudio's `to:` is the full model-bundle path (it downloads into the parent), so
-        // target the bundle *inside* models/. The dir name comes from FluidAudio (not hardcoded).
+        // target the bundle *inside* models/.
         let target = modelsDir.appendingPathComponent(
             AsrModels.defaultCacheDirectory(for: version).lastPathComponent, isDirectory: true)
         let models = try await AsrModels.downloadAndLoad(
@@ -85,7 +80,7 @@ actor ParakeetEngine: SpeechEngine {
 
     nonisolated let supportsSampleInput = true
 
-    // biasTerms are ignored — Parakeet has no recognition-bias path.
+    // biasTerms ignored — Parakeet has no recognition-bias path.
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
         guard let manager else { throw EngineError.notInitialized }
@@ -94,7 +89,7 @@ actor ParakeetEngine: SpeechEngine {
     }
 
     // FluidAudio's sample APIs assume 16 kHz mono (the capture rate for Parakeet), so `sampleRate` is
-    // informational. biasTerms are ignored — Parakeet has no recognition-bias path.
+    // informational. biasTerms ignored — Parakeet has no recognition-bias path.
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
         guard let manager else { throw EngineError.notInitialized }

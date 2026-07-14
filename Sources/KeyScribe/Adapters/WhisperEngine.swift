@@ -2,14 +2,11 @@ import Foundation
 import KeyScribeKit
 import WhisperKit
 
-// WhisperKit (argmax-oss-swift, pinned 1.0.0, WhisperKit product only — Vapor/openapi gated behind
-// BUILD_ALL). Models live under modelsDir/whisper, downloaded once then loaded with download disabled.
-//
 // Not an actor: WhisperKit's class isn't Sendable. `pipe` is serialized by the SerializedEngine actor
 // decorator applied at EngineRegistry.makeAll (single-flight load; load/transcribe/evict never overlap),
 // so `nonisolated(unsafe)` is safe — the decorator is the guarantee, not an "loads between dictations"
-// assumption. Adding a Whisper model is a profile constant; each profile owns its install subdir so
-// reconcile/delete treats variants independently (Large v3 Turbo keeps the original "whisper" dir).
+// assumption. Each profile owns its install subdir so reconcile/delete treats variants independently
+// (Large v3 Turbo keeps the original "whisper" dir).
 struct WhisperModelProfile {
     let id: String
     let displayName: String
@@ -59,8 +56,8 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
 
     private func load(progress: (@Sendable (ModelLoadProgress) -> Void)?, allowRepair: Bool) async throws {
         guard pipe == nil else { return }
-        // Reserve a tail of the bar for the opaque CoreML load/compile step (no progress callback), so the
-        // download doesn't show 100% while WhisperKit loads ~632 MB.
+        // Reserve a tail of the bar for the opaque CoreML load/compile step (no progress callback), so
+        // the download doesn't show 100% while WhisperKit loads the model.
         let downloadShare = 0.9
         let local = localModelFolder(in: modelsDir)
         if installComplete(in: modelsDir) {
@@ -93,14 +90,14 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         folder: URL, progress: (@Sendable (ModelLoadProgress) -> Void)?, downloadShare: Double
     ) async throws -> WhisperKit {
         progress?(.init(phase: "Compiling speech model…", fraction: downloadShare))
-        // GPU, not ANE. WhisperKit's default .cpuAndNeuralEngine pays a ~140 s first-load ANE device-compile
-        // that here failed to cache (paid EVERY load). .cpuAndGPU compiles Metal shaders once (~24 s first,
-        // ~2 s cached, persisted across launches) at a slightly higher RTF (~0.12, still 8× real time). Load
-        // saving dominates for an intermittent dictation model; bias (promptTokens) is unaffected.
+        // GPU, not ANE: WhisperKit's default .cpuAndNeuralEngine pays a ~140 s first-load ANE
+        // device-compile that measured as failing to cache (paid EVERY load). .cpuAndGPU compiles Metal
+        // shaders once (~24 s first, ~2 s cached, persisted across launches) at a slightly higher RTF —
+        // load saving dominates for an intermittent dictation model.
         let compute = ModelComputeOptions(
             melCompute: .cpuAndGPU, audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndGPU)
-        // Pin the tokenizer under installBase; the Hub default writes it to ~/Documents/huggingface
-        // (Documents TCC prompt, cold-load refetch, orphan).
+        // Pin the tokenizer under installBase — the Hub default writes it to ~/Documents/huggingface,
+        // triggering a Documents TCC prompt.
         let config = WhisperKitConfig(
             modelFolder: folder.path, tokenizerFolder: installBase, computeOptions: compute,
             verbose: false, prewarm: false, load: true, download: false)
@@ -111,8 +108,8 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         modelsDir.appendingPathComponent(installDir, isDirectory: true)
     }
 
-    // WhisperKit.download snapshots the whisperkit-coreml repo under downloadBase, so the variant's
-    // CoreML bundles land at <installDir>/models/argmaxinc/whisperkit-coreml/<variant>.
+    // WhisperKit.download snapshots the whole whisperkit-coreml repo under downloadBase, hence the
+    // nested argmaxinc/whisperkit-coreml/<variant> path.
     private func localModelFolder(in modelsDir: URL) -> URL {
         modelsDir
             .appendingPathComponent(installDir, isDirectory: true)
@@ -122,8 +119,8 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
             .appendingPathComponent(variant, isDirectory: true)
     }
 
-    // Require ALL three CoreML bundles: a partial cache (interrupted download) must NOT count as
-    // "installed" — offline load would fail and reconcile could keep a broken install.
+    // A partial cache (interrupted download) must NOT count as "installed" — offline load would fail
+    // and reconcile could keep a broken install.
     private static let requiredBundles = ["MelSpectrogram", "AudioEncoder", "TextDecoder"]
 
     private func modelFilesPresent(at folder: URL) -> Bool {
@@ -153,16 +150,14 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
 
     nonisolated var supportsSampleInput: Bool { true }
 
-    // Routed through the samples entry (not WhisperKit's audioPath) so the short-audio padding covers the
-    // WAV path too — audioPath would feed a sub-1s file into the unpadded seek loop.
+    // Routed through the samples entry (not WhisperKit's audioPath) so the short-audio padding below
+    // covers the WAV path too — audioPath would feed a sub-1s file into the unpadded seek loop.
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         try await transcribe(
             samples: try AudioDecoder.pcmMono(wavURL, sampleRate: WhisperKit.sampleRate),
             sampleRate: WhisperKit.sampleRate, biasTerms: biasTerms)
     }
 
-    // Skip WhisperKit's audioPath file round-trip: it just decodes to 16 kHz mono, which the capture
-    // writer already produced.
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
         guard let pipe else { throw EngineError.notInitialized }
@@ -174,9 +169,9 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
     }
 
     // WhisperKit's seek loop stops `windowClipTime` (default 1 s) short of the clip end to avoid
-    // end-of-window hallucinations, so a clip SHORTER than that never enters the loop: "" for real speech
-    // and a false "No speech detected" on any sub-second utterance. Pad just past the guard with trailing
-    // zeros (same zero-fill WhisperKit uses to reach the 30 s window), so a ≥1 s clip is unaffected.
+    // end-of-window hallucinations, so a clip SHORTER than that never enters the loop — false "No speech
+    // detected" on any sub-second utterance. Pad just past the guard with trailing zeros (same zero-fill
+    // WhisperKit uses to reach the 30 s window); a ≥1 s clip is unaffected.
     static func paddedForDecode(_ samples: [Float], windowClipTime: Float) -> [Float] {
         let minFrames = Int(windowClipTime * Float(WhisperKit.sampleRate)) + 1
         guard samples.count < minFrames else { return samples }
@@ -184,9 +179,9 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
     }
 
     // Whisper bias = conditioning prompt: dictionary terms tokenized and prepended as `promptTokens`,
-    // nudging the decoder toward those spellings (design.md §4.2). A soft hint, not a guarantee.
-    // Requires our fork's prefill-completion fix (Package.swift): stock 1.0.0 aborts to an empty
-    // transcript whenever `promptTokens` are set (#372).
+    // nudging the decoder toward those spellings — a soft hint, not a guarantee. Requires our fork's
+    // prefill-completion fix (Package.swift): stock WhisperKit 1.0.0 aborts to an empty transcript
+    // whenever `promptTokens` are set.
     private func decodeOptions(biasTerms: [String], pipe: WhisperKit) -> DecodingOptions {
         Self.batchDecodingOptions(promptTokens: promptTokens(biasTerms: biasTerms, pipe: pipe))
     }
@@ -198,11 +193,10 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
         return tokens.isEmpty ? nil : tokens
     }
 
-    // WhisperKit's default firstTokenLogProbThreshold (-1.5) EARLY-STOPS a window whose first token is
-    // low-confidence, keeping ZERO word tokens; the temperature fallbacks can all early-stop too, returning
-    // "" for real speech — a short fast utterance surfaces as an intermittent false "No speech detected".
-    // Batch push-to-talk knows the user spoke, so disable that latency gate; true silence still returns ""
-    // via end-of-text. Every other threshold keeps its default.
+    // WhisperKit's default firstTokenLogProbThreshold (-1.5) early-stops a window whose first token is
+    // low-confidence, keeping zero word tokens — a short fast utterance can surface an intermittent false
+    // "No speech detected". Batch push-to-talk knows the user spoke, so disable that latency gate; true
+    // silence still returns "" via end-of-text.
     static func batchDecodingOptions(promptTokens: [Int]?) -> DecodingOptions {
         var options = DecodingOptions(promptTokens: promptTokens)
         options.firstTokenLogProbThreshold = nil

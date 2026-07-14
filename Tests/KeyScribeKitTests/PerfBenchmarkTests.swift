@@ -2,11 +2,9 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Opt-in micro-benchmark for four profiling-gated perf concerns. It isolates each hot-path function
-// and measures it at realistic vs stress sizes so the simplicity-vs-speed call is data-driven rather
-// than guessed. A deterministic scaling benchmark beats a live Instruments trace here: the token
-// path is a sub-millisecond blip inside the multi-hundred-ms STT+LLM dictation, so a live trace
-// can't reveal the O(tokens × length) scaling that is the actual concern.
+// A deterministic scaling benchmark beats a live Instruments trace here: the token path is a
+// sub-millisecond blip inside the multi-hundred-ms STT+LLM dictation, so a live trace can't reveal
+// the O(tokens × length) scaling that is the actual concern.
 //   RUN_PERF_BENCH=1 swift test --filter perfBenchmark
 struct PerfBenchmarkTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["RUN_PERF_BENCH"] != nil))
@@ -18,14 +16,13 @@ struct PerfBenchmarkTests {
         print("=== end ===\n")
     }
 
-    // #2 — token processing: O(tokens × text-length)? Only edit-in-place over a large selection with
-    // many tokens could bite; spoken dictation is short with few tokens. Measure apply/gate/restore
-    // across the realistic → stress range.
+    // Only edit-in-place over a large selection with many tokens could hit O(tokens × text-length)
+    // cost; spoken dictation is short with few tokens.
     private func tokenPath() {
         print("\n[#2] Token path (RedactionTokenizer.apply + ValidationGate.check + Tokenizer.restore)")
         print(pad("chars", 9) + padL("tokens", 8) + padL("apply", 11) + padL("gate", 11)
             + padL("restore", 11) + padL("total", 11))
-        // (text length, redaction-matchable span count). Last row is an unrealistic stress case.
+        // (text length, redaction-matchable span count); last row is an unrealistic stress case.
         let cases: [(Int, Int)] = [(200, 1), (2_000, 5), (10_000, 20), (50_000, 100), (50_000, 500)]
         for (chars, tokenCount) in cases {
             let text = synthText(chars: chars, emails: tokenCount)
@@ -50,8 +47,8 @@ struct PerfBenchmarkTests {
         print("  (realistic spoken dictation ≈ first row; edit-in-place a large selection ≈ rows 3-4)")
     }
 
-    // #3 — Regression check (already fixed): RegexCache memoizes BOTH valid and invalid patterns, so a
-    // persistently-invalid rule is parsed once, not per call. Both figures below should be cache-hit cheap.
+    // Regression check: RegexCache memoizes BOTH valid and invalid patterns, so both figures below
+    // should be cache-hit cheap.
     private func regexCacheInvalid() {
         print("\n[#3] RegexCache — valid vs invalid (both memoized; regression check)")
         let reps = 50_000
@@ -62,8 +59,8 @@ struct PerfBenchmarkTests {
         print("  a persistently-invalid rule is parsed once, not per dictation.")
     }
 
-    // #4 — Regression check (already fixed): HistoryStore.todayString uses a shared static DateFormatter,
-    // so the per-call cost should match a hand-reused formatter rather than a fresh allocation.
+    // Regression check: HistoryStore.todayString uses a shared static DateFormatter, so its per-call
+    // cost should match a hand-reused formatter rather than a fresh allocation.
     private func dateFormatter() {
         print("\n[#4] HistoryStore.todayString — shared formatter vs hand-reused (regression check)")
         let reps = 50_000
@@ -78,15 +75,13 @@ struct PerfBenchmarkTests {
         print("  called once per dictation append.")
     }
 
-    // MARK: - helpers
-
     private func synthText(chars: Int, emails: Int) -> String {
         let filler = "The quick brown fox jumps over the lazy dog and writes some prose. "
         var s = ""
         while s.count < chars { s += filler }
         s = String(s.prefix(chars))
         guard emails > 0 else { return s }
-        // Spread distinct emails evenly so apply() allocates `emails` distinct tokens.
+        // Spread evenly so apply() allocates exactly `emails` distinct tokens.
         var chunks: [String] = []
         let step = max(1, s.count / emails)
         var idx = s.startIndex

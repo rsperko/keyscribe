@@ -47,10 +47,8 @@ struct SpeechModelsView: View {
         return "Deleting \(name)'s downloaded files removes this model. This cannot be undone."
     }
 
-    // The list column: the pane's global Performance control pinned above the list (the same "global controls
-    // above the list" shape History uses for its enable/retention), then the two persistent Library/Catalog
-    // sections. There is no bottom action bar — acquisition is the selected catalog detail's Download button
-    // (option-1-rollout.md), never a name menu.
+    // There is no bottom action bar — acquisition is the selected catalog detail's Download button, never
+    // a name menu.
     private var listColumn: some View {
         VStack(spacing: 0) {
             performanceControls
@@ -254,15 +252,15 @@ struct SpeechModelsView: View {
             set: { model.setRecognitionBias($0, for: row.id) })
     }
 
-    // Advanced (test / reinstall / delete / recognition bias) belongs only to a real local install — a usable
-    // model or a quarantined failure with files still on disk. A pristine catalog preview shows none of it
-    // (installed-catalog-behavior.md), so recognition-bias alone no longer surfaces the section.
+    // Advanced (test / reinstall / delete / recognition bias) belongs only to a real local install — a
+    // usable model or a quarantined failure with files still on disk. A pristine catalog preview shows
+    // none of it, so recognition-bias alone no longer surfaces the section.
     private func hasModelActions(_ row: SpeechModelsModel.Row) -> Bool {
         row.isUsable || (!row.info.systemManaged && row.verificationFailed)
     }
 
-    // A row carries EITHER a colored state line (installed/in-flight models) OR a gray metadata subtitle (a
-    // pristine catalog entry — "English · 466 MB", not a redundant "Download available" under the section head).
+    // A row carries either a colored state line (installed/in-flight models) or a gray metadata subtitle
+    // (a pristine catalog entry — "English · 466 MB", never a redundant "Download available").
     private func listStatus(_ row: SpeechModelsModel.Row) -> PaneRowStatus? {
         if row.isActive {
             return PaneRowStatus(text: "Current", systemImage: "checkmark.seal.fill", style: AnyShapeStyle(.tint))
@@ -298,8 +296,8 @@ struct SpeechModelsView: View {
     private func storageLabel(_ row: SpeechModelsModel.Row) -> String {
         if row.info.systemManaged { return "Built into macOS" }
         let bytes = row.installedBytes ?? row.info.approxDownloadBytes
-        // A quarantined model still has its files on disk (verificationFailed) even though it isn't usable —
-        // "download" would wrongly imply nothing is stored.
+        // A quarantined (verificationFailed) model still has its files on disk even though it isn't
+        // usable — "download" would wrongly imply nothing is stored.
         let label = (row.isUsable || row.verificationFailed) ? "on disk" : "download"
         return "\(ByteCountFormatter.fileStyle.string(fromByteCount: bytes)) \(label)"
     }

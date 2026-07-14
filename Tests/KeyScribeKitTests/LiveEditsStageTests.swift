@@ -57,8 +57,8 @@ struct LiveEditsStageTests {
         #expect(run("def foo, insert tab character, bar") == "def foo\tbar")
     }
 
-    // A pause comma the STT hangs INSIDE a command ("insert, new line") is a prosody artifact, not
-    // content — the command still fires and the comma is consumed with it.
+    // A pause comma hung INSIDE a command ("insert, new line") is a prosody artifact, not content —
+    // the command still fires.
     @Test func interiorPauseCommaStillFires() {
         #expect(run("insert, new line") == "\n")
         #expect(run("alpha insert, new line beta") == "alpha\nbeta")
@@ -69,7 +69,7 @@ struct LiveEditsStageTests {
         #expect(run("insert tab, character here") == "\there")
     }
 
-    // Same pause, tokenized as a standalone comma ("insert , new line") instead of hung on a word.
+    // Same pause artifact, but tokenized as a standalone comma instead of hung on a word.
     @Test func interiorStandaloneCommaTokenStillFires() {
         #expect(run("insert , new line") == "\n")
         #expect(run("alpha insert , new line beta") == "alpha\nbeta")
@@ -85,19 +85,19 @@ struct LiveEditsStageTests {
         #expect(run("drop this scratch , that") == "")
     }
 
-    // A standalone comma inside a scratch phrase does not override the clause-boundary gate: a
-    // continuing word after "that" still means literal text.
+    // A standalone comma does not override the clause-boundary gate: a continuing word after
+    // "that" still means literal text.
     @Test func standaloneCommaScratchWithTrailingWordIsLiteral() {
         #expect(run("scratch , that lottery ticket") == "scratch , that lottery ticket")
     }
 
-    // Interior PERIODS are left to block a match on purpose: a real sentence boundary must survive
-    // rather than be eaten by the command ("insert new." ends a sentence; "Paragraph two…" begins one).
+    // Interior periods block the match on purpose: a real sentence boundary must survive rather
+    // than be eaten by the command.
     @Test func interiorPeriodDoesNotFireCommand() {
         #expect(run("insert new. paragraph two covers") == "insert new. paragraph two covers")
     }
 
-    // A preceding sentence period is real punctuation, not a pause artifact — keep it.
+    // A preceding period is real punctuation, not a pause artifact — keep it.
     @Test func preservesPrecedingPeriod() {
         #expect(run("done. insert new paragraph next") == "done.\n\nnext")
     }
@@ -122,8 +122,8 @@ struct LiveEditsStageTests {
         #expect(run("a, insert new line, b, insert new paragraph, c") == "a\nb\n\nc")
     }
 
-    // Only commas are absorbed as pause artifacts — colon, semicolon, and terminators on a preceding
-    // word are real punctuation and are preserved.
+    // Only commas are absorbed as pause artifacts — colon/semicolon/terminators on a preceding word
+    // are real punctuation and are preserved.
     @Test func preservesPrecedingColon() {
         #expect(run("note: insert new line body") == "note:\nbody")
     }
@@ -158,7 +158,7 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatBackToNewline() {
-        // a newline command also bounds a segment
+        // A newline command also bounds a segment.
         #expect(run("keep this insert new line drop this scratch that. final")
             == "keep this\nfinal")
     }
@@ -172,25 +172,25 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatEmptySegmentEatsPreviousSentence() {
-        // nothing dictated since the last terminator: fall back to the one previous sentence
+        // Nothing dictated since the last terminator: fall back to the one previous sentence.
         #expect(run("done. scratch that. more") == "more")
     }
 
     @Test func scratchThatEatsPreviousSentenceAcrossPeriod() {
-        // a punctuating STT (e.g. Whisper) ends the clause with a period, leaving an empty
-        // segment; scratch still removes the sentence just spoken, and only that one
+        // A punctuating STT (e.g. Whisper) ends the clause with a period, leaving an empty segment;
+        // scratch still removes only the sentence just spoken.
         #expect(run("blah blah. I don't know what I am saying here. scratch that. blah blah blah")
             == "blah blah. blah blah blah")
     }
 
     @Test func scratchAfterNewlineCancelsTheNewline() {
-        // a scratch immediately after a command cancels that command rather than reaching past it
+        // A scratch immediately after a command cancels that command rather than reaching past it.
         #expect(run("keep this insert new line scratch that. final")
             == "keep this final")
     }
 
     @Test func scratchThatEmptySegmentStopsAtComma() {
-        // the fallback removes one clause, not the whole comma-spliced sentence
+        // The fallback removes one clause, not the whole comma-spliced sentence.
         #expect(run("eggs, milk, bread. scratch that. done")
             == "eggs, milk, done")
     }
@@ -201,19 +201,13 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatFollowedByWordIsLiteral() {
-        // a continuing word means it is not a clause boundary — leave it as text
         #expect(run("I told her to scratch that lottery ticket and see if we won")
             == "I told her to scratch that lottery ticket and see if we won")
     }
 
-    @Test func scratchThatDogIsLiteral() {
-        // a continuing word after "that" is not a boundary — the trigger never fires
-        #expect(run("I told them to scratch that dog")
-            == "I told them to scratch that dog")
-    }
-
     @Test func scratchThatRunOnWithoutBoundaryIsLiteral() {
-        // no terminator and not end-of-utterance: the command does not fire (safe failure)
+        // No terminator and not end-of-utterance: the command does not fire (safe failure) rather
+        // than guess where the clause ends.
         #expect(run("I like dogs scratch that I like fish")
             == "I like dogs scratch that I like fish")
     }
@@ -233,7 +227,7 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchAfterTabRemovesOnlyWhatFollowsTheTab() {
-        // tab is a segment boundary, so scratch removes only the words after it, not across it
+        // Tab is a segment boundary, so scratch removes only the words after it, not across it.
         #expect(run("column one insert tab character column two scratch that")
             == "column one\t")
     }
@@ -244,13 +238,12 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchImmediatelyAfterClipboardTokenCancelsIt() {
-        // the user's case: a comma-joined clipboard command cancelled, surrounding text untouched
+        // Regression case: a comma-joined clipboard command cancelled, surrounding text untouched.
         #expect(run("blah blah ⟦SN:CLIP:1⟧, scratch that, foo foo")
             == "blah blah foo foo")
     }
 
     @Test func scratchDoesNotReachPastAClipboardToken() {
-        // words spoken after a clipboard insert scratch away without deleting the insert
         #expect(run("alpha ⟦SN:CLIP:1⟧ beta scratch that")
             == "alpha ⟦SN:CLIP:1⟧")
     }
@@ -266,7 +259,7 @@ struct LiveEditsStageTests {
         #expect(stage.order < StageOrder.replacements)
     }
 
-    // The carrier-less phrases spoken as prose are left as text — they are no longer defaults.
+    // These bare phrases used to be default command triggers; they are literal text now.
     @Test func droppedBarePhrasesAreLiteral() {
         #expect(run("a new line b") == "a new line b")
         #expect(run("alpha newline beta") == "alpha newline beta")

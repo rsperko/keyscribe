@@ -33,7 +33,6 @@ struct HeadAdmitGateTests {
     @Test func onceAdmittedAllLaterSlotsPassEvenIfEarlierInHostTime() {
         var gate = HeadAdmitGate(admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond)
         #expect(gate.observe(slotStartHostTime: base + ms(10), frameCount: 480, sampleRate: 16000) == .admit)
-        // A jittered/earlier timestamp after admission must not re-gate.
         #expect(gate.observe(slotStartHostTime: base - ms(1), frameCount: 480, sampleRate: 16000) == .admit)
     }
 
@@ -51,7 +50,6 @@ struct HeadAdmitGateTests {
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .drop)
         #expect(gate.observe(slotStartHostTime: 0, frameCount: 480, sampleRate: 16000) == .drop)
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
-        // Latched: further slots admit regardless.
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
     }
 

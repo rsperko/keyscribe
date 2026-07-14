@@ -8,9 +8,8 @@ struct TokenizerTests {
         #expect(t.tokenize("hello world", type: .verbatim) == "⟦SN:VERB:1⟧")
     }
 
-    // An external value (a clipboard paste) can map a token to an original that re-contains that same
-    // token — a cycle the acyclic fixpoint assumption does not hold for. restore must terminate (the
-    // pass cap) and leave the self-referential span as the literal pasted text, never hang.
+    // A clipboard paste can map a token to an original that re-contains that same token — a cycle the
+    // acyclic fixpoint assumption doesn't hold for. restore must terminate (pass cap), never hang.
     @Test func selfReferentialOriginalDoesNotHang() {
         let t = Tokenizer()
         let token = t.tokenize("⟦SN:VERB:1⟧", type: .verbatim)   // value equals the token it is assigned
@@ -53,9 +52,9 @@ struct TokenizerTests {
 
     @Test func restoreIsLIFOForNestedTokens() {
         let t = Tokenizer()
-        let inner = t.tokenize("inner", type: .redact)                 // ⟦SN:REDACT:1⟧
-        let outer = t.tokenize("before \(inner) after", type: .redact) // value literally contains inner
-        // forward restore would strand the inner token; LIFO unwinds correctly
+        let inner = t.tokenize("inner", type: .redact)
+        let outer = t.tokenize("before \(inner) after", type: .redact) // original literally embeds inner
+        // forward restore would strand the inner token; LIFO unwinds it correctly
         #expect(t.restore(outer) == "before inner after")
     }
 
@@ -73,13 +72,12 @@ struct TokenizerTests {
         #expect(t.issuedTokens.allSatisfy { $0.hasPrefix("⟦SN:") })
     }
 
-    // A verbatim token allocated first, then a redaction span captured around it: the single-pass
-    // restore must still expand both, even though redaction's original literally embeds the verbatim
-    // token (cross-type nesting, the real pipeline shape).
+    // Cross-type nesting, the real pipeline shape: redaction's original literally embeds a verbatim
+    // token; a single-pass restore must still expand both.
     @Test func restoreUnwindsCrossTypeNesting() {
         let t = Tokenizer()
-        let verb = t.tokenize("keep this", type: .verbatim)      // ⟦SN:VERB:1⟧
-        let red = t.tokenize("a \(verb) b", type: .redact)        // original embeds the verbatim token
+        let verb = t.tokenize("keep this", type: .verbatim)
+        let red = t.tokenize("a \(verb) b", type: .redact)
         #expect(t.restore("x \(red) y") == "x a keep this b y")
     }
 
@@ -92,7 +90,7 @@ struct TokenizerTests {
 
     @Test func restoreDoesNotStrandRealTokenAfterLookalikeOpen() {
         let t = Tokenizer()
-        let tok = t.tokenize("secret", type: .redact)   // ⟦SN:REDACT:1⟧
+        let tok = t.tokenize("secret", type: .redact)
         #expect(t.restore("⟦SN: x \(tok) y") == "⟦SN: x secret y")
     }
 

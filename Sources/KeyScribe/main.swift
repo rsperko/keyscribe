@@ -128,8 +128,6 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     exit(0)
 }
 
-// `--reload-stress <dir>`: cold-reload a model N times and transcribe a known non-silent clip, failing if
-// any reload returns empty (reproduces the low-memory "No speech detected").
 if let i = CommandLine.arguments.firstIndex(of: "--reload-stress"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?
@@ -155,8 +153,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--reload-stress"), i + 1 < Comm
     exit(ok.load(ordering: .relaxed) ? 0 : 1)
 }
 
-// Print every shipped catalog engine and whether it is installed, so a release gate knows which it will
-// actually exercise vs. which are missing (untested).
+// Lets a release gate confirm which shipped catalog engines it will actually exercise vs. which are
+// missing (untested).
 if CommandLine.arguments.contains("--list-engines") {
     let installed = ModelInstallStore.installedIds()
     for e in SpeechModelCatalog.all {

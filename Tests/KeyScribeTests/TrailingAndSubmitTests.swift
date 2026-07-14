@@ -5,8 +5,7 @@ import Testing
 
 // `trailing` is literal text appended to the transcript INSIDE the atomic insert; `submit` is a
 // synthesized keystroke AFTER a verified insert, OUTSIDE the undo atom — and only when the text
-// actually landed in the target (never on a clipboard fallback). These wire both through the REAL
-// DictationController with only the OS edges mocked.
+// actually landed in the target (never on a clipboard fallback).
 @MainActor
 struct TrailingAndSubmitTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -91,20 +90,18 @@ struct TrailingAndSubmitTests {
         #expect(out.insertedText == "hello")
     }
 
-    // A command-only utterance ends in a control char; the trailing SPACE separator is suppressed so
+    // A command-only utterance ends in a control char, so the trailing SPACE separator is suppressed —
     // the insert is a clean "\n" (next dictation at column 0), not "\n ".
     @Test func trailingSpaceSuppressedAfterNewlineCommand() async {
         let out = await run(transcript: "insert new line", trailing: .space, submit: .none, liveEdits: true)
         #expect(out.insertedText == "\n")
     }
 
-    // A trailing SPACE still follows word content that ends in a newline command mid-utterance.
     @Test func trailingSpaceSuppressedAfterTrailingNewlineCommand() async {
         let out = await run(transcript: "hello insert new line", trailing: .space, submit: .none, liveEdits: true)
         #expect(out.insertedText == "hello\n")
     }
 
-    // A trailing NEWLINE is an explicit choice — appended even onto a spoken newline (blank line).
     @Test func trailingNewlineStillAppendsAfterNewlineCommand() async {
         let out = await run(transcript: "insert new line", trailing: .newline, submit: .none, liveEdits: true)
         #expect(out.insertedText == "\n\n")
@@ -127,13 +124,12 @@ struct TrailingAndSubmitTests {
     }
 
     // Clipboard fallback means the text never reached the target — a synthesized Return would hit
-    // whatever app is focused, so submit MUST NOT fire.
+    // whatever app is focused, so submit must not fire.
     @Test func submitDoesNotFireOnClipboardFallback() async {
         let out = await run(transcript: "hello", trailing: .space, submit: .return, accessibilityGranted: false)
         #expect(out.submits.isEmpty)
     }
 
-    // A trailing suffix must not turn an empty (no-speech) transcript into a "real" insert.
     @Test func trailingDoesNotResurrectEmptyTranscript() async {
         let out = await run(transcript: "   ", trailing: .space, submit: .return)
         #expect(out.insertedText == nil)

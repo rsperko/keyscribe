@@ -11,15 +11,11 @@ private func padL(_ s: String, _ w: Int) -> String {
     s.count >= w ? s : String(repeating: " ", count: w - s.count) + s
 }
 
-// Opt-in performance benchmark (loads real ~632MB/Parakeet models + runs live transcription), so it
-// is gated out of the normal suite. Run with:
-//   RUN_BIAS_BENCH=1 swift test --filter biasBenchmark
-// Compares per-dictation latency with vs without recognition bias across all four models on a
-// non-trivial (~36s) real-speech passage, to feel the cost of each engine's bias mechanism —
-// especially Parakeet's second (CTC) acoustic pass vs Whisper/Apple's single pass.
+// Opt-in benchmark (loads real ~632MB+ models, live transcription) — gated out of the normal suite.
+// Run with: RUN_BIAS_BENCH=1 swift test --filter biasBenchmark
 struct BiasBenchmarkTests {
-    // ~12 terms: some spoken in the passage, some distractors that never appear (a realistic
-    // dictionary), >10 so Parakeet hits its "large vocab" rescorer path.
+    // Mix of terms spoken in the passage and distractors that never appear (a realistic dictionary);
+    // >10 terms so Parakeet hits its "large vocab" rescorer path.
     static let bias = [
         "KeyScribe", "FluidBloo", "Parakeet", "WhisperKit", "SpeechAnalyzer", "eigenvector",
         "Bayesian", "transducer", "Kubernetes", "PostgreSQL", "Levenshtein", "Cupertino",

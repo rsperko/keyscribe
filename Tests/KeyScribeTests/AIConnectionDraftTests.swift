@@ -2,10 +2,9 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// Lineup-agnostic by design: these tests reference the catalog only through its contract members
-// (defaultPreset, custom, all) or local fixtures, so a swapped downstream AIServiceCatalog keeps them
-// green with no assumptions about the lineup's shape. Exact public-lineup pinning lives in
-// AIServiceCatalogTests.
+// Lineup-agnostic by design: reference the catalog only through its contract members (defaultPreset,
+// custom, all) or local fixtures, so a swapped downstream AIServiceCatalog stays green. Exact
+// public-lineup pinning lives in AIServiceCatalogTests.
 struct AIConnectionDraftTests {
     private let noAuthGateway = ConnectionPreset(
         id: "gateway-open", name: "Gateway (Open)", provider: .openaiCompatible,
@@ -77,7 +76,7 @@ struct AIConnectionDraftTests {
     }
 
     // A token command is endpoint-scoped: the first visit to a preset starts from that preset's own
-    // default (or empty), never the outgoing service's command — the stash restores it on switch-back.
+    // default (or empty), never the outgoing service's command.
     @Test func applyingAKeyOrCommandPresetPreservesTheAuthChoiceButNotTheCommand() {
         var fromCommand = AIConnectionDraft(
             provider: .openaiCompatible, baseURL: "https://self-hosted.example.com/v1",
@@ -133,8 +132,7 @@ struct AIConnectionDraftTests {
         #expect(draft.tokenCommand == "gateway-cli token mint")
     }
 
-    // Seeding presetId to a non-lineup id makes the switch to Custom a real transition even under a
-    // lineup whose lookup would already resolve the starting draft as Custom.
+    // presetId is seeded to a non-lineup id so the switch to Custom is a real transition, not a no-op.
     @Test func onboardingKeepsAPIKeyAsTheOpenAICompatibleDefault() {
         var draft = AIConnectionDraft(provider: .openai, authMethod: .apiKey)
         draft.presetId = "seed"

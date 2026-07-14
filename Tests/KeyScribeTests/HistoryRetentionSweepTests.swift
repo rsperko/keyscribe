@@ -3,8 +3,8 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// The retention sweep runs on the first dictation of a day and is skipped on the next same-day dictation.
-// An always-expired day file is the observable — a sweep deletes it, a skipped sweep leaves it.
+// The retention sweep runs on the first dictation of a day, then is skipped for same-day dictations —
+// observed via an always-expired day file: a sweep deletes it, a skipped sweep leaves it.
 @MainActor
 struct HistoryRetentionSweepTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {

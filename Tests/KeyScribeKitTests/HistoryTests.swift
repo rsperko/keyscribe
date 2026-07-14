@@ -134,7 +134,7 @@ struct HistoryEntryCodecTests {
     @Test func multilineContentStaysOnOneLine() throws {
         let entry = sampleEntry(heard: "first line\nsecond line", result: "A\n\nB")
         let line = try entry.jsonLine()
-        #expect(!line.contains("\n"))                       // newlines escaped, JSONL integrity holds
+        #expect(!line.contains("\n"))
         #expect(try HistoryEntry(jsonLine: line) == entry)
     }
 
@@ -171,7 +171,7 @@ struct HistoryRetentionTests {
     @Test func dropsFilesOlderThanRetentionDays() {
         let files = ["2026-06-10.jsonl", "2026-06-13.jsonl", "2026-06-19.jsonl", "2026-06-20.jsonl"]
         let expired = HistoryRetention.expired(dayFiles: files, today: "2026-06-20", retentionDays: 7)
-        #expect(expired == ["2026-06-10.jsonl"])            // 10 days old > 7; 13 (7 days) kept
+        #expect(expired == ["2026-06-10.jsonl"])            // 06-10 is 10 days old (expires); 06-13 is exactly 7 (kept)
     }
 
     @Test func zeroRetentionKeepsOnlyToday() {
@@ -213,7 +213,7 @@ struct CorrectionSurfaceTests {
     @Test func addingWordIgnoresBlanksAndCaseInsensitiveDups() {
         var set = DictionarySet().adding(word: "KeyScribe")
         set = set.adding(word: "  ")
-        set = set.adding(word: "keyscribe")            // dup (case-insensitive)
+        set = set.adding(word: "keyscribe")
         set = set.adding(word: "Parakeet")
         #expect(set.words == ["KeyScribe", "Parakeet"])
     }
@@ -259,7 +259,7 @@ struct CorrectionSurfaceTests {
 
     @Test func regexAndLiteralDedupAreIndependentKeyspaces() {
         var set = ReplacementsSet().addingLiteral(heard: "foo", replace: "L")
-        set = set.addingRegex(heard: "foo", replace: "R")          // same text, different rule kind
+        set = set.addingRegex(heard: "foo", replace: "R")          // regex and literal are separate keyspaces
         #expect(set.rules.count == 2)
     }
 
@@ -375,8 +375,7 @@ struct HistoryStoreTests {
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
     }
 
-    // Production appends an entry to the day file named for its own timestamp, so delete resolves that
-    // file directly without scanning the others. A decoy in an unrelated day file must be left alone.
+    // delete resolves the entry's own timestamp day file directly, not the "today" arg used to append it.
     @Test func deleteFindsTheEntryInItsTimestampDayFile() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }
@@ -388,9 +387,7 @@ struct HistoryStoreTests {
         #expect(store.dayFiles() == ["2099-01-01.jsonl"])
     }
 
-    // A privacy-motivated delete on a read-only history dir must report failure, not silently succeed
-    // while the entry stays on disk. The atomic rewrite needs directory write permission, so 0o500 forces
-    // it to throw; the read that locates the entry still works.
+    // 0o500 (no write) on the dir lets the locating read succeed but forces the atomic rewrite to throw.
     @Test func deleteReportsFailureWhenTheRewriteFails() throws {
         let store = tempStore()
         defer {
@@ -406,7 +403,7 @@ struct HistoryStoreTests {
         #expect(store.delete(drop) == .writeFailed)
 
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: store.dir.path)
-        #expect(Set(store.entries().map(\.heard)) == ["keep", "drop"])   // still on disk
+        #expect(Set(store.entries().map(\.heard)) == ["keep", "drop"])
     }
 
     @Test func deleteReturnsNotFoundWhenNoEntryMatches() throws {
@@ -417,8 +414,8 @@ struct HistoryStoreTests {
         #expect(store.entries().count == 1)
     }
 
-    // Two byte-identical dictations in the same whole second are equal after round-trip (the timestamp
-    // encodes at second precision). Deleting one must leave the other, not wipe both.
+    // Timestamps round-trip at second precision, so two same-second identical entries decode equal;
+    // deleting one must remove only one, not both.
     @Test func deleteRemovesOnlyOneOfTwoIdenticalSameSecondEntries() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }
@@ -430,15 +427,15 @@ struct HistoryStoreTests {
         #expect(store.entries().first?.heard == "same")
     }
 
-    // A crash can leave the last line without its trailing newline; the next append must not glue onto
-    // it (which fuses two entries into one undecodable blob, losing both).
+    // A crash can leave the last line without its trailing newline; append must not glue onto it,
+    // which would fuse two entries into one undecodable blob and lose both.
     @Test func appendHealsMissingTrailingNewline() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }
         try store.append(sampleEntry(heard: "first", at: 0), today: "2026-06-20")
         let file = store.dir.appendingPathComponent("2026-06-20.jsonl")
         var content = try String(contentsOf: file, encoding: .utf8)
-        while content.hasSuffix("\n") { content.removeLast() }   // simulate a crash-truncated line
+        while content.hasSuffix("\n") { content.removeLast() }
         try Data(content.utf8).write(to: file)
         try store.append(sampleEntry(heard: "second", at: 10), today: "2026-06-20")
         #expect(Set(store.entries().map(\.heard)) == ["first", "second"])

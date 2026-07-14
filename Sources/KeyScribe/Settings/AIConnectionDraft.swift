@@ -14,9 +14,8 @@ enum ModelDiscoveryState: Equatable {
 }
 
 struct AIConnectionDraft: Equatable {
-    // The endpoint/credential values a service switch would otherwise overwrite, kept per preset so an
-    // accidental Service flip is restorable within the editing session (ui_components.md: never silently
-    // reset a dependent user value — preserve it for restoration).
+    // Kept per preset so an accidental Service flip is restorable within the editing session
+    // (ui_components.md: never silently reset a dependent user value).
     struct ServiceValues: Equatable {
         var model: String
         var baseURL: String
@@ -33,8 +32,8 @@ struct AIConnectionDraft: Equatable {
     var tokenCommand: String
     var availableModels: [String]
     var modelDiscoveryState: ModelDiscoveryState?
-    // The picked service is user intent, stored — deriving it from the base URL made a typed custom URL
-    // that happens to match a hosted preset hide the very fields being edited.
+    // Stored, not derived from baseURL — a typed custom URL matching a hosted preset would otherwise
+    // hide the very fields being edited.
     var presetId: String
     var stashedServiceValues: [String: ServiceValues] = [:]
 
@@ -61,9 +60,8 @@ struct AIConnectionDraft: Equatable {
         self.presetId = Self.derivePresetId(provider: provider, baseURL: baseURL, authMethod: authMethod)
     }
 
-    // A stored connection at a hosted preset's URL but with an auth method that preset does not offer
-    // (creatable in the old UI or hand-edited TOML) opens as Custom: presenting it as managed would hide
-    // the endpoint and auth fields and leave it uneditable.
+    // A connection at a hosted preset's URL with an auth method that preset doesn't offer (hand-edited
+    // TOML) opens as Custom — presenting it as managed would hide the fields needed to fix it.
     static func derivePresetId(
         provider: Connection.Provider, baseURL: String, authMethod: Connection.AuthMethod,
         in presets: [ConnectionPreset] = AIServiceCatalog.all
@@ -240,10 +238,8 @@ struct AIConnectionDraft: Equatable {
         ConnectionPreset.preset(id: presetId) ?? .custom
     }
 
-    // Switch the draft to a picked service. Hosted presets pin the base URL, a lightweight default model,
-    // and API-key auth so the user only pastes a key. The outgoing service's values are stashed and restored
-    // on switch-back, so an accidental flip destroys nothing. The name follows only while it still reads as
-    // a preset default (i.e. the user has not typed their own).
+    // Outgoing values are stashed and restored on switch-back, so an accidental flip destroys nothing.
+    // The name follows the preset only while it still reads as a preset default (not user-typed).
     mutating func applyPreset(_ preset: ConnectionPreset, updateDefaultName: Bool) {
         guard preset.id != presetId else { return }
         stashedServiceValues[presetId] = ServiceValues(
@@ -263,23 +259,23 @@ struct AIConnectionDraft: Equatable {
             baseURL = preset.baseURL ?? ""
             tokenCommand = preset.defaultTokenCommand ?? ""
         }
-        // A disallowed token command survives on a non-managed preset (a first-party connection configured
-        // via TOML keeps its command); any other disallowed method snaps to the preset's default.
+        // A disallowed token command survives on a non-managed preset (hand-edited TOML keeps its command);
+        // any other disallowed method snaps to the preset's default.
         if !preset.allowedAuthMethods.contains(authMethod), preset.isManaged || authMethod != .tokenCommand {
             authMethod = preset.defaultAuthMethod
         }
         if authMethod != .tokenCommand, !preset.allowedAuthMethods.contains(.tokenCommand) {
             tokenCommand = ""
         }
-        // A typed key belongs to the key-signed flow only — carrying it into a no-auth or token-command
-        // preset leaves hasUnsavedAPIKey blocking Test/fetch behind a hidden field.
+        // A typed key belongs to the API-key flow only — carrying it into a no-auth/token-command preset
+        // leaves hasUnsavedAPIKey blocking Test/fetch behind a hidden field.
         if authMethod != .apiKey { apiKey = "" }
         resetModelDiscovery()
     }
 
-    // Params are not editable in the connection form, so an edit preserves whatever the stored connection
-    // carries (including hand-edited TOML) — unless the provider changed, where carrying them over would
-    // send one provider's reasoning knob to another (reasoning_effort to Gemini, or none at all to OpenAI).
+    // Params aren't editable in the form, so an edit preserves the stored connection's params — unless the
+    // provider changed, where carrying them over would send one provider's reasoning knob to another
+    // (e.g. reasoning_effort to Gemini).
     func resolvedParams(for existing: Connection) -> Connection.Params {
         provider == existing.provider ? existing.params : provider.defaultParams
     }
@@ -336,10 +332,9 @@ func providerLabel(_ provider: Connection.Provider) -> String {
     }
 }
 
-// The service label for a stored connection: a hosted preset (OpenRouter/Groq/Mistral) reads as its own
-// name rather than the generic "OpenAI-compatible", so the quick-setup services feel first-class in the
-// list and summary. A custom endpoint still reads "OpenAI-compatible". Uses the same rule as the editor
-// (including the non-API-key demotion), so the list and the editor never name the same connection differently.
+// A hosted preset (OpenRouter/Groq/Mistral) reads as its own name rather than generic "OpenAI-compatible";
+// a custom endpoint still reads "OpenAI-compatible". Mirrors the editor's rule so list and editor never
+// name the same connection differently.
 func serviceLabel(_ connection: Connection) -> String {
     let presetId = AIConnectionDraft.derivePresetId(
         provider: connection.provider, baseURL: connection.baseUrl ?? "", authMethod: connection.authMethod)

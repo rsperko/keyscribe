@@ -3,10 +3,9 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// The dictation trigger is a bare modifier event tap with no notion of session state, so a key used
-// to wake/unlock the machine can fire handleStart while the screen is locked. These prove the
-// injected lock seam gates the start path (no arming, no capture) and that handleScreenLocked cancels
-// an in-flight dictation so no locked-screen audio survives.
+// The dictation trigger is a bare modifier event tap with no notion of session state, so a key used to
+// wake/unlock the machine can fire handleStart while the screen is locked. Proves the injected lock
+// seam gates the start path and that handleScreenLocked cancels an in-flight dictation.
 @MainActor
 struct SessionLockGateTests {
     private final class InstantEngine: SpeechEngine, @unchecked Sendable {

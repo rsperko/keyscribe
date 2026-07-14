@@ -3,7 +3,7 @@ import KeyScribeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-// The user-language "how this mode was chosen" line for History detail (UX2 phase 7c) — no phase names.
+// The user-language "how this mode was chosen" line for History detail.
 // Pure function of the reason (+ the matched phrase / trigger key) so it is directly unit-testable.
 enum ModeChoiceLine {
     static func text(reason: ModeChoiceReason?, routedPhrase: String?, triggerDisplay: String?) -> String? {
@@ -305,7 +305,7 @@ final class HistoryPaneModel: ObservableObject {
     }
 }
 
-// History is a Settings pane (UX2 phase 8), not a window: the Modes-style HStack list/detail, with the
+// History is a Settings pane, not a window: the Modes-style HStack list/detail, with the
 // enable/retention controls (moved out of General) inline above the list and the storage-truth statement
 // pinned at the bottom. Reload/release lifecycle is driven by SettingsRootView on pane selection.
 struct HistoryPaneView: View {

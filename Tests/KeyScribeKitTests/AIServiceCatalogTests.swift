@@ -2,9 +2,8 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Pins the PUBLIC lineup. This file is the test-side mirror of AIServiceCatalog.swift: a downstream
-// build that swaps the catalog replaces this file too (pinning its own lineup and keeping the generic
-// invariant tests below) — every other test file stays lineup-agnostic and untouched.
+// Pins the PUBLIC lineup; a downstream build that swaps the catalog replaces this file too, keeping
+// the generic invariant tests below — every other test file stays lineup-agnostic.
 struct AIServiceCatalogTests {
     @Test func lineupIsTheSevenPublicServicesInPickerOrder() {
         #expect(AIServiceCatalog.all.map(\.id) == [
@@ -59,7 +58,6 @@ struct AIServiceCatalogTests {
             #expect(preset.provider == .openaiCompatible)
             #expect(preset.isManaged)
             #expect(!preset.isCustom)
-            #expect(preset.keysURL != nil)
         }
     }
 

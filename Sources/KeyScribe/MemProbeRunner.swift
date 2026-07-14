@@ -3,9 +3,9 @@ import Darwin
 import Foundation
 import KeyScribeKit
 
-// Dev tool: `KeyScribe --mem-probe`. Measures the real in-memory footprint of each installed SpeechEngine
-// on the exact code paths that ship, so the Settings model list can show honest RAM figures instead of
-// disk size (which overstates it — CoreML memory-maps weights and runs on the ANE). The number reported is
+// Measures the real in-memory footprint of each installed SpeechEngine on the exact code paths that ship,
+// so the Settings model list can show honest RAM figures instead of disk size (which overstates it —
+// CoreML memory-maps weights and runs on the ANE). The number reported is
 // `phys_footprint` (the value Activity Monitor's "Memory" column shows), read from mach TASK_VM_INFO; plain
 // resident_size undercounts because it ignores compressed pages. On Apple Silicon this also captures MLX's
 // unified-memory buffers (Qwen), so no engine-specific counter is needed.

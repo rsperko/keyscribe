@@ -3,11 +3,9 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// Proves the window-level focus guard is actually FED real data, not just unit-tested in isolation.
-// decideInsertion already diverts to the clipboard when the captured and current focusedWindowId
-// differ; this drives the injected snapshot seam to return window A at press and window B at
-// insertion and asserts the real DictationController routes through the clipboard branch. The
-// regression that would catch ContextProbe.snapshot() going back to a hardcoded nil window id.
+// Proves the focus guard is fed real data end-to-end, not just unit-tested: the snapshot seam
+// returns window A at press and window B at insertion, and DictationController must route through
+// the clipboard branch — catches ContextProbe.snapshot() regressing to a hardcoded nil window id.
 @MainActor
 struct FocusGuardWiringTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -47,8 +45,7 @@ struct FocusGuardWiringTests {
         settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
 
         let result = Captured()
-        // snapshot() is read once at press (capture) and once at insertion (current); hand back the
-        // captured window first, the current window thereafter.
+        // snapshot() fires once at press and once at insertion; return captured, then current.
         let calls = LockedCounter()
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
         let controller = DictationController(
@@ -94,8 +91,7 @@ struct FocusGuardWiringTests {
         #expect(decision == .insert)
     }
 
-    // A focused secure field diverts to the clipboard even when app and window match — proves the
-    // controller carries TargetSnapshot.isSecureField from the snapshot seam into decideInsertion.
+    // Diverts even when app/window match, proving isSecureField flows from the snapshot into decideInsertion.
     @Test func secureFieldDivertsToClipboard() async {
         let decision = await run(captured: "cg:101", current: "cg:101", secure: true)
         #expect(decision == .clipboardFallback(reason: .secureField))

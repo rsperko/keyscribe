@@ -22,16 +22,16 @@ final class ModesSettingsModel: ObservableObject {
     private var ledgerDir: URL { supportDir.appendingPathComponent("lkg", isDirectory: true) }
     private var loadedSignature: String?
 
-    // True while THIS model is writing, so the change observer skips the reentrant reload the write's own
+    // True while this model is writing, so the change observer skips the reentrant reload the write's own
     // `onChange` fires — that reload would land mid-mutation and corrupt the create/rename selection state.
-    // External writes run with this false, so those DO reload.
+    // External writes run with this false and do reload.
     private var isApplyingLocalMutation = false
 
     init(repository: ConfigRepository) {
         self.repository = repository
         reload()
-        // Refresh the draft from disk on any EXTERNAL config write (e.g. a mode-scoped term routed through
-        // the correction panel) so it survives the pane's next full-file save. `reload` is signature-guarded.
+        // Refresh from disk on any external config write (e.g. a mode-scoped term from the correction
+        // panel) so it survives the pane's next full-file save. `reload` is signature-guarded.
         repository.addChangeObserver { [weak self] in
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
@@ -45,9 +45,8 @@ final class ModesSettingsModel: ObservableObject {
         return try body()
     }
 
-    // Re-read modes, connections, and fragments from disk. `.onAppear` calls this on every pane visit, but
-    // the decode is skipped when the signature (covering everything reload reads) is unchanged — the
-    // mutators keep memory in sync, so navigate-away-and-back costs nothing.
+    // `.onAppear` calls this on every pane visit, but the decode is skipped when the signature is unchanged
+    // — mutators keep memory in sync, so navigate-away-and-back costs nothing.
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
@@ -90,9 +89,8 @@ final class ModesSettingsModel: ObservableObject {
 
     func consumeCreated() { lastCreatedId = nil }
 
-    // Create a blank mode pre-wired to a connection ("Create a mode with this service", UX2 phase 5b). Like
-    // create() it autofocuses the name; it does NOT enable the mode — it stays a disabled, ordinary mode the
-    // user configures in the editor, consistent with the pendingConnectOffer consent pattern.
+    // Like create() it autofocuses the name; it does NOT enable the mode — it stays disabled until the user
+    // configures it in the editor, consistent with the pendingConnectOffer consent pattern.
     func createWithConnection(connectionId: String) {
         let name = "New Mode"
         var mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
@@ -106,9 +104,8 @@ final class ModesSettingsModel: ObservableObject {
         awaitingInitialName = mode.id
     }
 
-    // Materialize a starter template into a real mode (Add Mode menu + gallery). At its free catalog id it is
-    // a `.seed` — kept migratable via the ledger; if the id is taken it is a `.copy` (plain user mode). No
-    // name autofocus: a template name is already meaningful.
+    // At its free catalog id this is a `.seed`, kept migratable via the ledger; if the id is taken it's a
+    // `.copy` (plain user mode). No name autofocus — a template name is already meaningful.
     func materializeTemplate(_ seedId: String) {
         guard let template = ModeStore.templates().first(where: { $0.id == seedId }) else { return }
         let materialization = ModeTemplateInstantiation.materialize(
@@ -120,15 +117,13 @@ final class ModesSettingsModel: ObservableObject {
         selectedID = materialization.mode.id
     }
 
-    // The Start-from-a-Template chooser: templates are reusable starting points, always the full catalog. The
-    // first instance materialized at a free catalog id is the migratable seed; adding it again yields a plain
-    // suffixed copy (materialize handles the id/name collision), so a template never drops out of the chooser.
+    // Always the full catalog — the first instance materialized at a free catalog id is the migratable seed;
+    // adding it again yields a plain suffixed copy, so a template never drops out of the chooser.
     var allTemplates: [Mode] {
         ModeStore.templates()
     }
 
-    // Duplicate into a new user-created mode (the system Direct floor is not duplicable). The copy drops the
-    // seed identity and trigger keys, so it never clashes with the original's shortcut.
+    // The copy drops the seed identity and trigger keys, so it never clashes with the original's shortcut.
     func duplicate(_ mode: Mode) {
         guard !mode.isSystem else { return }
         let name = "\(mode.name) copy"
@@ -142,8 +137,8 @@ final class ModesSettingsModel: ObservableObject {
         selectedID = copy.id
     }
 
-    // A new mode's id is the slug of "New Mode". The first real name re-slugs the id so the TOML filename
-    // matches (the id is the filename stem); later renames keep the file so external references stay stable.
+    // The first real name re-slugs the id so the TOML filename matches (the id is the filename stem);
+    // later renames keep the file so external references stay stable.
     func update(_ mode: Mode) {
         if mode.id == awaitingInitialName {
             let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
@@ -202,8 +197,7 @@ final class ModesSettingsModel: ObservableObject {
         return ids
     }
 
-    // Create (or resolve) a fragment file by name; returns the id to add to the mode. The caller opens it in
-    // the in-app editor to fill in the instruction text.
+    // Caller opens the returned id in the in-app editor to fill in the instruction text.
     func addFragmentFile(named name: String) -> String? {
         do {
             let (id, created) = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
@@ -242,8 +236,8 @@ final class ModesSettingsModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    // Closing the editor on an empty instruction discards it: detach from the mode and, if no other mode
-    // references it, delete the file. So an instruction created but never written never persists.
+    // Closing the editor on an empty instruction discards it: detach from the mode and, if unused elsewhere,
+    // delete the file — an instruction created but never written never persists.
     func closeFragment(_ id: String, fromMode modeId: String) {
         guard fragmentBody(id).isEmpty else { return }
         if var mode = modes.first(where: { $0.id == modeId }),

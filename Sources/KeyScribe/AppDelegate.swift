@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if forceResumeOnboarding {
             // Relaunched from the onboarding permissions funnel — the grants now read fresh. Resume the
             // full wizard at the post-permissions step (must precede the permissionsReady branch below,
-            // which would otherwise mark setup complete and show nothing, skipping AI + try-it). P2-21.
+            // which would otherwise mark setup complete and show nothing, skipping AI + try-it).
             presentFirstRun(resumeOnboarding: true)
         } else if forcePermissionsSetup {
             presentFirstRun(permissionsOnly: true)
@@ -534,7 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             permissionsOnly: permissionsOnly,
             resumeOnboarding: resumeOnboarding,
             repository: configRepository,
-            // The full onboarding wizard resumes itself after the permission relaunch (P2-21); the
+            // The full onboarding wizard resumes itself after the permission relaunch; the
             // permissions-only repair flow (reached from Settings) stays a permissions-only relaunch.
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup(resumeOnboarding: !permissionsOnly) },
             tapActive: { [weak self] in self?.hotkey?.isTapActive ?? false }
@@ -645,7 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection
     // file surfaced by the config cache — both light the Advanced pane's malformed-config problem and
-    // the menu status line so a broken config file is never silently swallowed (P2-14).
+    // the menu status line so a broken config file is never silently swallowed.
     private var combinedConfigError: String? {
         let parts = [configError, config.configFileError].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

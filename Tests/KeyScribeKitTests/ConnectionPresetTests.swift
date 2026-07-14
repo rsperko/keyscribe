@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Machinery-only: exercises ConnectionPreset semantics over local fixtures and the catalog contract
-// members (custom), never named public-lineup entries — so a swapped downstream AIServiceCatalog keeps
-// this file green. Public-lineup pinning lives in AIServiceCatalogTests.
+// Exercises ConnectionPreset semantics over local fixtures, never named public-lineup entries — a
+// swapped downstream AIServiceCatalog keeps this file green. Public-lineup pinning lives in
+// AIServiceCatalogTests.
 struct ConnectionPresetTests {
     private let hosted = ConnectionPreset(
         id: "gateway-keyed", name: "Gateway (Keyed)", provider: .openaiCompatible,

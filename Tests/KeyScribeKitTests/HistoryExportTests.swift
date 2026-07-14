@@ -13,7 +13,7 @@ private func entry(
         cloudInvolved: cloud, redaction: redaction, contextCategories: contextCategories)
 }
 
-// Deterministic, locale/timezone-independent formatting so the assertions are stable on any machine.
+// Fixed UTC/POSIX formatting keeps assertions stable regardless of the machine's locale/timezone.
 private func utc() -> HistoryExport.Formatting {
     let day = DateFormatter()
     day.calendar = Calendar(identifier: .gregorian); day.locale = Locale(identifier: "en_US_POSIX")

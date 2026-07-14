@@ -1,10 +1,10 @@
 import Foundation
 import KeyScribeKit
 
-// The single implementation of the AI-service connect sequence shared by onboarding and Settings (UX2
-// phase 5b): validate → save the API key under keyscribe.llm.<id> → test the endpoint → on failure/cancel
-// delete the just-saved key and surface the error → on success upsert the connection. Neither surface may
-// fork this; a half-configured, never-tested service must be impossible to persist.
+// The single implementation of the AI-service connect sequence, shared by onboarding and Settings: save the
+// API key → test the endpoint → on failure/cancel roll back the key and surface the error → on success
+// upsert the connection. Neither surface may fork this — a half-configured, never-tested service must be
+// impossible to persist.
 @MainActor
 struct AIServiceConnector {
     let repository: ConfigRepository
@@ -19,8 +19,8 @@ struct AIServiceConnector {
         case cancelled
     }
 
-    // The id used for this attempt is reported back (even on failure) so a retry can reuse it — a re-Connect
-    // after a failed test must not strand a key under a fresh id. Pass `reusingId` from the prior attempt.
+    // Reported back even on failure so a retry can reuse the same id via `reusingId` — a re-Connect after
+    // a failed test must not strand a key under a fresh id.
     struct Result {
         let outcome: Outcome
         let allocatedId: String
@@ -39,9 +39,8 @@ struct AIServiceConnector {
         if connection.authMethod == .apiKey, key.isEmpty {
             return result(.failed("API key is required."))
         }
-        // Reusing an existing connection's id (a retest) reuses its keyRef, so saving overwrites a key that
-        // may already be working. Capture the prior value first and restore it on rollback rather than
-        // deleting — a failed retest must not strand an already-persisted connection without a credential.
+        // A retest reuses the existing keyRef, so saving overwrites a working key. Capture it first and
+        // restore (not delete) on rollback — a failed retest must not strand the connection without a credential.
         let priorKey = connection.authMethod == .apiKey ? readAPIKey(keyRef) : nil
         func rollbackKey() {
             guard connection.authMethod == .apiKey else { return }
@@ -51,9 +50,8 @@ struct AIServiceConnector {
             return result(.failed("Could not save the API key."))
         }
         let testResult = await testConnection(connection)
-        // The caller may have been torn down while the test was in flight (a closed wizard, a discarded
-        // Settings draft). Roll the key back to what it was before the test so a discarded draft neither
-        // strands a fresh key nor destroys a pre-existing one.
+        // The caller may have been torn down mid-test (closed wizard, discarded draft). Roll the key back
+        // so a discarded draft neither strands a fresh key nor destroys a pre-existing one.
         if Task.isCancelled {
             rollbackKey()
             return result(.cancelled)

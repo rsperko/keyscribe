@@ -55,9 +55,9 @@ final class CaptureWriter: @unchecked Sendable {
     // Set once the drain gate trips: the converter tail has been flushed and no further slots are written.
     private var sealed = false
     // Post-conversion mono PCM (record rate), accumulated alongside the file write so a sample-capable engine
-    // gets the committed capture without re-reading the WAV (P2-1). Written on the writer thread; read by
+    // gets the committed capture without re-reading the WAV. Written on the writer thread; read by
     // drainedSamples() only after finish() has joined. Bounded by the recording cap (~19 MiB @16 kHz /
-    // ~29 MiB @24 kHz for the 5-min max). Populated only when `wantsSamples` (P2-2).
+    // ~29 MiB @24 kHz for the 5-min max). Populated only when `wantsSamples`.
     private var accumulated: [Float] = []
     // False for a sample-incapable engine (e.g. Apple): skip accumulation and report no samples so the commit
     // path re-reads the WAV.
@@ -65,9 +65,9 @@ final class CaptureWriter: @unchecked Sendable {
     // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
     // only, on device-native slots (pre-resample).
     private var headGate: HeadAdmitGate?
-    // Streaming feed (P3-1): each post-conversion mono chunk written to the file is also handed here so a
-    // streaming session can transcribe during capture. Writer thread ONLY, and MUST be non-blocking (real
-    // wiring is a bounded AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
+    // Each post-conversion mono chunk written to the file is also handed here so a streaming session can
+    // transcribe during capture. Writer thread ONLY, and MUST be non-blocking (real wiring is a bounded
+    // AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
     private let onSamples: (@Sendable ([Float]) -> Void)?
 
     // Frames accepted off the ring but not persisted — invisible to the ring canaries, so surfaced at teardown.
@@ -131,7 +131,7 @@ final class CaptureWriter: @unchecked Sendable {
         inBuffer = nil
         outBuffer = nil
         // Free the accumulator only on the cancel/discard path so the writer doesn't pin the multi-MiB copy
-        // while idle (P2-1). Guard on `!sealed`: a sealed COMMIT exits here BEFORE finish(flushConverter:true)
+        // while idle. Guard on `!sealed`: a sealed COMMIT exits here BEFORE finish(flushConverter:true)
         // sets `flushOnStop`, so `flushing` reads false — clearing then would drop the committed samples
         // finishWriterAndCloseFile is about to read. Commit paths keep it and clear via releaseSamples() after
         // the copy, once this thread has joined.
@@ -235,7 +235,7 @@ final class CaptureWriter: @unchecked Sendable {
         let inFmt = input.format
         if inFmt.sampleRate == recordFormat.sampleRate && inFmt.channelCount == recordFormat.channelCount {
             // Mirror to the accumulator/streaming sink only if the WAV write landed, so in-memory samples never
-            // contain a chunk the file lacks (P2-4's samples==WAV invariant, true by construction).
+            // contain a chunk the file lacks — samples == WAV, true by construction.
             if writeToFile(file, input) { appendSamples(from: input) }
             return
         }
@@ -279,7 +279,7 @@ final class CaptureWriter: @unchecked Sendable {
         let n = Int(buffer.frameLength)
         guard n > 0, let ptr = buffer.floatChannelData?[0] else { return }
         let slice = UnsafeBufferPointer(start: ptr, count: n)
-        // Skip the accumulator when the engine can't consume in-memory samples (P2-2); the streaming sink is
+        // Skip the accumulator when the engine can't consume in-memory samples; the streaming sink is
         // independent (feeds Apple's live session) and still fires. Only allocates the copy when streaming is on.
         if wantsSamples { accumulated.append(contentsOf: slice) }
         if let onSamples { onSamples(Array(slice)) }
@@ -290,7 +290,7 @@ final class CaptureWriter: @unchecked Sendable {
     func drainedSamples() -> [Float]? { wantsSamples ? accumulated : nil }
 
     // Drop the accumulator after the commit path copied it out, so the writer (retained via `lastWriter`)
-    // doesn't pin a redundant multi-MiB copy while idle (P2-1). Safe only after finish() has joined the thread.
+    // doesn't pin a redundant multi-MiB copy while idle. Safe only after finish() has joined the thread.
     func releaseSamples() { accumulated = [] }
 
     // Drain the resampler's internal latency (a few samples of SRC delay) into the file at end of capture so
@@ -315,9 +315,8 @@ final class CaptureWriter: @unchecked Sendable {
     // backstop fired): commit passes true, cancel passes false (file discarded). Idempotent.
     func finish(flushConverter: Bool) {
         flushOnStop.store(flushConverter, ordering: .releasing)
-        // Record the request and read `didStart` under the lock start() uses, so observing `started == true`
-        // guarantees `done.enter()` ran and the wait() below can't slip past an empty group. A finish() that
-        // raced ahead of start() just records the request (start() honors it); no thread to join yet.
+        // Read `didStart` under the same lock `start()` uses (see `lifecycleLock`); a finish() that raced
+        // ahead of start() just records the request and returns — no thread to join yet.
         let started = lifecycleLock.withLock { () -> Bool in
             finishRequested = true
             return didStart

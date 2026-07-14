@@ -31,8 +31,7 @@ struct MenuBarIconTests {
         #expect(title == "Email — ⌃⌥E")
     }
 
-    // The menu, the Settings mode list, and the hotkey recorder share one label source:
-    // KeyDescriptor.displayString.
+    // Guards the label source shared by the menu, the Settings mode list, and the hotkey recorder.
     @Test func modeItemShortcutMatchesTheSharedLabelSource() {
         for token in ["fn", "right_option", "right_command", "hyper", "control+option+e", "mouse2"] {
             guard let descriptor = try? KeyDescriptor(parsing: token) else {
@@ -157,10 +156,9 @@ struct MenuBarIconTests {
         #expect(settings < check && check < about)
     }
 
-    // H1: without `autoenablesItems = false`, AppKit force-enables "Paste Last Dictation" at display
-    // time (its target responds to its action), overriding `setHasResult(false)` — clicking it would
-    // call `onPasteLast` with nothing to paste. `NSMenu.update()` runs the same validation pass AppKit
-    // runs before showing the menu, without needing the menu to actually be on screen.
+    // Without `autoenablesItems = false`, AppKit force-enables this item at display time (its target
+    // responds to its action), overriding `setHasResult(false)`; `NSMenu.update()` runs the same
+    // validation pass AppKit runs before showing the menu, without needing it on screen.
     @Test func pasteLastDictationStaysDisabledWithNoResultUnderMenuValidation() {
         let controller = MenuBarController()
         controller.install()

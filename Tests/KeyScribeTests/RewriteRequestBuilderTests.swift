@@ -12,8 +12,7 @@ struct RewriteRequestBuilderTests {
         return cal.date(from: comps)!
     }
 
-    // Localized formats use narrow/no-break spaces (U+202F before AM/PM) that don't compare against ASCII;
-    // fold every Unicode space to a plain one before pinning.
+    // Localized formats use narrow/no-break spaces (U+202F before AM/PM) that don't compare against ASCII.
     private func asciiSpaces(_ s: String) -> String {
         String(s.map { $0.isWhitespace ? " " : $0 })
     }
@@ -24,7 +23,6 @@ struct RewriteRequestBuilderTests {
         #expect(asciiSpaces(formatted) == "Friday, July 10, 2026 at 9:00 AM (America/Chicago)")
     }
 
-    // The clock follows the locale: a 24-hour locale renders 09:00, never a forced 12-hour "9:00 AM".
     @Test func formattedDateTimeHonorsA24HourLocale() {
         let formatted = RewriteRequestBuilder.formattedDateTime(
             pinnedDate(), locale: Locale(identifier: "en_GB"), timeZone: TimeZone(identifier: "America/Chicago")!)
@@ -32,8 +30,8 @@ struct RewriteRequestBuilderTests {
         #expect(!formatted.contains("AM"))
     }
 
-    // The dictation path no longer feeds fuzzy near-miss hints to the LLM: FuzzyStage has already snapped
-    // every window candidates() could find, so the hint was provably dead (and unwanted on selections).
+    // FuzzyStage has already snapped every window candidates() could find, so this hint is provably dead
+    // (and unwanted on selections) — the builder must not pass it through.
     @MainActor
     @Test func buildDoesNotHintFuzzyCandidates() async {
         var mode = Mode(id: "ai", name: "AI")
@@ -43,7 +41,7 @@ struct RewriteRequestBuilderTests {
             modes: [mode], dictionary: DictionarySet(words: ["Postgres"]), replacements: ReplacementsSet(),
             connections: ConnectionSet(), fragments: [:])
 
-        // Sanity: this transcript genuinely holds a near-miss the fuzzy corrector would surface…
+        // Sanity: this transcript genuinely holds a near-miss the fuzzy corrector would surface.
         let content = "deployed postgress today"
         #expect(!FuzzyCorrector.candidates(
             content, prepared: FuzzyCorrector.prepare(["Postgres"])).isEmpty)
@@ -52,7 +50,6 @@ struct RewriteRequestBuilderTests {
             mode: mode, content: content, instruction: "", issuedTokens: [],
             capturedBundleId: nil, plan: plan, connection: conn)
         let assembled = await builder.build()
-        // …yet the builder passes none through.
         #expect(assembled.inputs.fuzzyCandidates.isEmpty)
     }
 

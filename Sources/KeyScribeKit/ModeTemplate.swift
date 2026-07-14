@@ -1,6 +1,6 @@
 import Foundation
 
-// Materializing a starter template on demand (design.md §5.1, UX2 phase 4). A template written at its
+// Materializing a starter template on demand (design.md §5.1). A template written at its
 // free catalog id IS a seed — it keeps `seedId`/`seedVersion` so reconcile keeps applying future seed
 // updates until the user edits it. A second copy (catalog id already taken) is a plain user mode at a
 // suffixed id and a suffixed visible name ("Email 2") with no seed identity, so two files never fight
@@ -19,7 +19,7 @@ public enum ModeTemplateInstantiation {
 
     public static func materialize(template: Mode, existing: [Mode], connections: [Connection]) -> Materialization {
         var mode = template
-        // Added modes land Disabled (option-1-rollout.md): the user reviews/wires the seeded editor and flips
+        // Added modes land Disabled: the user reviews/wires the seeded editor and flips
         // Enabled when ready, so nothing goes live and starts failing (e.g. an AI-rewrite mode with no wired
         // service) the instant it is added. Callers that add AND finish setup in one step (first-run) re-enable
         // explicitly.

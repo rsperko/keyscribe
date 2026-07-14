@@ -8,8 +8,8 @@ final class HUDModel: ObservableObject {
     @Published var state: HUDState = .hidden
 }
 
-// The recording level updates every audio buffer; kept on its own object so only `LevelIndicator`
-// (which observes it) rebuilds per tick, not the whole HUD card. See render().
+// Kept separate from HUDModel so only `LevelIndicator` rebuilds on each per-buffer level tick, not
+// the whole HUD card (see render()).
 @MainActor
 final class HUDLevel: ObservableObject {
     @Published var level: Float = 0
@@ -22,9 +22,8 @@ final class HUDController: HUDPresenting {
     private let levelModel = HUDLevel()
     private var panel: NSPanel?
 
-    // The HUD panel's CoreGraphics window id, so the focus-change guard can tell our own overlay apart
-    // from the dictation target when we insert into our own window (the onboarding trial). Nil until the
-    // panel is realized.
+    // Lets the focus-change guard distinguish our own overlay from the dictation target when inserting
+    // into our own window (the onboarding trial). Nil until the panel is realized.
     var hudWindowID: CGWindowID? {
         guard let number = panel?.windowNumber, number > 0 else { return nil }
         return CGWindowID(number)
@@ -40,8 +39,8 @@ final class HUDController: HUDPresenting {
     private var isRepositioning = false
 
     func render(_ state: HUDState) {
-        // Pure per-buffer level update while already recording the same mode + latched trigger: push only the
-        // level so the card chrome (material, badges, text, action buttons) is not rebuilt on every audio tick.
+        // Same mode/latch, only the level changed: push just the level so the card chrome isn't rebuilt
+        // on every audio tick.
         if case .recording(let mode, let level, let latched) = state,
            case .recording(let currentMode, _, let currentLatched) = model.state,
            mode == currentMode, latched == currentLatched {
@@ -60,18 +59,18 @@ final class HUDController: HUDPresenting {
             fadeOutPanel()
         } else {
             showPanelIfNeeded()
-            // Appear is always instant (latency reads as sluggishness on show); reset alpha in case a
-            // fade-out was mid-flight when this dictation started.
+            // Appear is instant (latency reads as sluggishness); reset alpha in case a fade-out was still
+            // in flight.
             panel?.alphaValue = 1
             if let panel {
                 resize(panel, to: state)
             }
-            // Each dictation can target a window on a different display, so move the HUD to the screen
-            // holding the focused window — it should appear where the user is dictating, not where it last
-            // sat. Only on the hidden→visible edge so per-frame level updates during recording do not hop it.
+            // Follow the focused window's screen only on hidden→visible, not on every level tick, so
+            // recording never hops the HUD mid-dictation.
             if wasHidden, let panel { reposition(panel, to: focusedWindowScreen()) }
-            // HUD holds key focus across the cancellable states so ESC-to-cancel reaches it as a local
-            // keystroke; the controller relinquishes momentarily around the synthetic ⌘C/⌘V.
+            // The HUD must hold key focus in every cancellable state so ESC-to-cancel reaches it as a local
+            // keystroke — but synthesized ⌘C/⌘V/Return target whatever window IS key, so the controller
+            // relinquishes focus momentarily around each one (see relinquishKeyFocus()).
             if state.holdsKeyFocus {
                 panel?.makeKeyAndOrderFront(nil)
             } else if panel?.isKeyWindow == true {
@@ -82,9 +81,8 @@ final class HUDController: HUDPresenting {
         }
     }
 
-    // Build the panel and host view ahead of the first dictation so the first `.recording` render
-    // shows instantly instead of paying NSHostingView + window realization on the hot path. Never
-    // orders the panel on screen — render() does that once state leaves .hidden.
+    // Realizes the panel ahead of the first dictation so the first `.recording` render is instant. Never
+    // orders it on screen — render() does that once state leaves .hidden.
     func prewarm() {
         showPanelIfNeeded()
         panel?.layoutIfNeeded()
@@ -103,8 +101,8 @@ final class HUDController: HUDPresenting {
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
                 }
             }))
-        // Let the panel grow to the content's intrinsic height (badges wrap, long reasons ellipsize never —
-        // UX2 phase 6c); the fixed 280 width is unchanged. `resize` reads fittingSize and grows upward.
+        // Let the panel grow to the content's intrinsic height (badges wrap, text never ellipsizes); the
+        // fixed 280 width is unchanged. `resize` reads fittingSize and grows upward.
         hosting.sizingOptions = [.intrinsicContentSize]
         let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: HUDState.hidden.contentHeight),
@@ -126,11 +124,10 @@ final class HUDController: HUDPresenting {
     }
 
     private func resize(_ panel: NSPanel, to state: HUDState) {
-        // contentHeight is a MINIMUM; the actual height is whatever the wrapped/growing content needs. Measure
-        // the hosting view's fitting height at the fixed width and take the max, so truth never clips. Force a
-        // layout pass first: `model.state` was just mutated, and SwiftUI may not have reconciled the hosting
-        // view yet — reading `fittingSize` cold can return the PREVIOUS (smaller) state's height and clip a
-        // wrap-grown state on a state→state transition.
+        // contentHeight is a floor; take the max with the hosting view's actual fitting height. Force a
+        // layout pass first — `model.state` was just mutated and SwiftUI may not have reconciled the
+        // hosting view yet, so a cold `fittingSize` read can return the previous (smaller) state's height
+        // and clip a wrap-grown state on a state→state transition.
         panel.contentView?.layoutSubtreeIfNeeded()
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
         let height = max(state.contentHeight, fittingHeight)
@@ -145,10 +142,9 @@ final class HUDController: HUDPresenting {
         }
     }
 
-    // Post a VoiceOver announcement on a state-change edge. The HUD panel is non-activating and usually
-    // not the focused element, so a changed accessibilityLabel is not read automatically — an explicit
-    // announcement is the only reliable cue for a state change (ui_design.md §9). Continuous level ticks
-    // never reach here (render early-returns on a pure level update).
+    // The HUD panel is non-activating and usually not the focused element, so a changed accessibilityLabel
+    // isn't read automatically — an explicit announcement is the only reliable VoiceOver cue for a state
+    // change (ui_design.md §9). Level ticks never reach here (render early-returns on those).
     private func announce(_ state: HUDState) {
         guard let text = state.voiceOverAnnouncement, !text.isEmpty else { return }
         let element: Any = panel ?? NSApp as Any
@@ -167,9 +163,8 @@ final class HUDController: HUDPresenting {
         panel.orderFrontRegardless()
     }
 
-    // Fade out over ~120 ms on the →hidden edge (abrupt vanish is the most jarring transition); appear stays
-    // instant. The completion re-checks state so a dictation starting mid-fade is not ordered back out;
-    // reduce-motion hides immediately.
+    // Fade out over ~120 ms (abrupt vanish is jarring); appear stays instant. The completion re-checks
+    // state so a dictation starting mid-fade isn't ordered back out; reduce-motion hides immediately.
     private func fadeOutPanel() {
         guard let panel, panel.isVisible else { return }
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -198,14 +193,13 @@ final class HUDController: HUDPresenting {
         }
     }
 
-    // Restore the parked anchor on `screen` (defaults to the panel's current screen). Anchors are
-    // resolution-independent — recomputed from visibleFrame each time — so a saved spot lands correctly on
-    // any display; only the screen changes when the HUD follows the focused window across monitors.
+    // Anchors are resolution-independent — recomputed from visibleFrame each time — so a saved spot lands
+    // correctly on any display; only the screen changes when the HUD follows the focused window.
     private func reposition(_ panel: NSPanel, to screen: NSScreen? = nil) {
         guard let screen = screen ?? panel.screen ?? NSScreen.main else { return }
         let origin = anchor.origin(in: screen.visibleFrame, size: panel.frame.size)
-        // Our own setFrameOrigin posts didMove; guard so it isn't mistaken for a user drag. The flag is
-        // cleared a runloop tick later because the queued notification fires asynchronously.
+        // Our own setFrameOrigin posts didMove; guard so it isn't mistaken for a user drag. Cleared a
+        // runloop tick later since the notification is delivered asynchronously.
         isRepositioning = true
         panel.setFrameOrigin(origin)
         DispatchQueue.main.async { [weak self] in
@@ -213,8 +207,7 @@ final class HUDController: HUDPresenting {
         }
     }
 
-    // The panel is draggable by its background; on each move, debounce until the drag settles, then snap
-    // to the nearest of the eight anchors and persist it.
+    // Debounce until a drag settles, then snap to the nearest of the eight anchors and persist it.
     private func observeMoves(_ panel: NSPanel) {
         moveObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification, object: panel, queue: .main
@@ -248,9 +241,8 @@ final class HUDController: HUDPresenting {
         if let panel { reposition(panel) }
     }
 
-    // The screen holding the frontmost app's focused window, so the HUD shows on the display being
-    // dictated into. Reads window geometry from the window server (CGWindowList), NOT the target app's AX
-    // tree, so it can never block on an unresponsive app. nil ⇒ caller keeps the panel's current screen.
+    // Reads window geometry from the window server (CGWindowList), not the target app's AX tree, so this
+    // can never block on an unresponsive app. nil ⇒ caller keeps the panel's current screen.
     private func focusedWindowScreen() -> NSScreen? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let pid = app.processIdentifier
@@ -288,9 +280,8 @@ private final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-// A minimal flow layout: lays subviews left-to-right, wrapping to a new row when the next subview would
-// exceed the proposed width. Used for the HUD's data-boundary badges so three badges wrap instead of
-// clipping the fixed-width panel (UX2 phase 6c).
+// A minimal flow layout: wraps to a new row when the next subview would exceed the proposed width. Used
+// for the HUD's data-boundary badges so they wrap instead of clipping the fixed-width panel.
 private struct WrapLayout: Layout {
     var spacing: CGFloat = 4
 
@@ -331,7 +322,7 @@ private struct WrapLayout: Layout {
 private struct HUDView: View {
     @ObservedObject var model: HUDModel
     // Held, not observed: only the nested RecordingIcon observes it, so a level tick rebuilds that
-    // subview alone and leaves the rest of `body` untouched.
+    // subview alone, not all of `body`.
     let level: HUDLevel
     let onInsertLocalTranscript: () -> Void
     let onPasteLast: () -> Void
@@ -349,8 +340,8 @@ private struct HUDView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if !model.state.dataBoundaryBadges.isEmpty {
-                        // Wrap to as many rows as needed — three badges must never clip (UX2 phase 6c). Each
-                        // badge is `.fixedSize()` so a label never ellipsizes.
+                        // Wrap to as many rows as needed so badges never clip; each is `.fixedSize()` so a
+                        // label never ellipsizes.
                         WrapLayout(spacing: 4) {
                             ForEach(model.state.dataBoundaryBadges, id: \.self) {
                                 DataBoundaryBadge(label: $0).fixedSize()
@@ -552,9 +543,8 @@ private struct LevelIndicator: View {
     var body: some View {
         let l = CGFloat(min(1, max(0, level)))
         ZStack {
-            // Reduce Motion (ui_design.md §4/§9): the indicator must become a changing value without
-            // bouncing or pulsing, so geometry is fixed and the level is carried by fill intensity alone —
-            // the dot does not grow/shrink per audio buffer.
+            // Reduce Motion (ui_design.md §4/§9): geometry stays fixed and the level is carried by fill
+            // intensity alone — the dot must not grow/shrink per audio buffer.
             if reduceMotion {
                 Circle().fill(.red.opacity(0.16 + l * 0.34)).frame(width: 30, height: 30)
                 Circle().fill(.red).frame(width: 16, height: 16)

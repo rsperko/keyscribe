@@ -3,8 +3,7 @@ import Testing
 @testable import KeyScribe
 
 struct AccessibilityIDTests {
-    // Catalog constants are a lowercase dot-path: each dot-separated segment starts with a lowercase
-    // letter and is otherwise camelCase alphanumerics (e.g. "settings.sidebar.speechModels"). No spaces.
+    // Catalog ids are a lowercase dot-path, e.g. "settings.sidebar.speechModels".
     static let pattern = "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
 
     @Test func everyCatalogIdentifierMatchesTheNamingPattern() {
@@ -43,9 +42,8 @@ struct AccessibilityIDTests {
             == "mode.editor.recognition.replacements.deleteConfirm.cancel")
     }
 
-    // Dynamic ids splice a stable domain id (engine/mode/connection/feature/permission id) into a fixed
-    // dot-path. The domain segment itself may carry '-', '_', or a leading '_' (e.g. "_direct"), so the
-    // catalog pattern does not apply to it — but the fixed prefix must hold and the id never has spaces.
+    // Dynamic ids splice a domain id (e.g. "_direct") into a fixed prefix, so the lowercase dot-path
+    // pattern doesn't apply to the whole id — only the fixed prefix and no-spaces rule are checked here.
     @Test func dynamicRowIdentifiersKeepTheirFixedPrefixAndHaveNoSpaces() {
         let cases: [(String, String)] = [
             (AccessibilityID.Settings.Speech.primaryAction("apple"), "settings.speech.row."),

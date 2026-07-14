@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// One-shot coordination across the download Task and the test body.
 private final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
@@ -107,8 +106,8 @@ struct FirstRunFlowTests {
         #expect(model.downloading == false)
     }
 
-    // An interrupted onboarding download wipes its partial weights so the next attempt starts clean —
-    // otherwise the half-downloaded model wedges retry and can't be deleted (it was never marked installed).
+    // An interrupted download must wipe its partial weights — otherwise it wedges retry and can't be
+    // deleted (it was never marked installed).
     @Test func failedDownloadCleansUpPartialWeights() async {
         let supportDir = tempSupportDir()
         defer { try? FileManager.default.removeItem(at: supportDir) }

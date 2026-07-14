@@ -2,11 +2,8 @@ import Foundation
 import MoonshineVoice
 import KeyScribeKit
 
-// Moonshine — ONNX Runtime backend shipped as a prebuilt xcframework. Low-latency English ASR. The .ort
-// files download from download.moonshine.ai into modelsDir/<subdir>; Transcriber loads that directory.
-//
-// Recognition bias NOT supported on-device (no hotword/context parameter), so supportsRecognitionBias=false
-// and biasTerms are ignored; DictationController skips term assembly and Settings badges it as no-local-bias.
+// Moonshine has no on-device hotword/context parameter, so supportsRecognitionBias=false and biasTerms
+// are ignored.
 //
 // Not an actor: Transcriber is non-Sendable; access is serialized by the SerializedEngine decorator, whose
 // evict() waits for the transcribe lock — so evict()'s transcriber.close() can never fire under a running
@@ -18,7 +15,7 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     var installDirNames: [String] { [Self.subdir] }
 
     private static let baseURL = "https://download.moonshine.ai/model/base-en/quantized/base-en"
-    // Approx download weights (decoder dominates) so the progress bar tracks reality across files.
+    // Weights approximate each file's share of the download so the progress bar tracks reality.
     private static let files: [(name: String, weight: Double)] = [
         ("encoder_model.ort", 0.22), ("decoder_model_merged.ort", 0.77), ("tokenizer.bin", 0.01),
     ]
@@ -64,8 +61,7 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
                 }
                 let (tmp, response) = try await URLSession.shared.download(from: url)
                 // download(from:) doesn't throw on an HTTP error — a 404/5xx/auth body lands in `tmp`, and
-                // promoting it would fail opaquely later AND block retries (the bogus file now exists).
-                // Require a 2xx + non-empty payload first.
+                // promoting it would fail opaquely later and block retries (the bogus file now exists).
                 let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
                 let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path))?[.size] as? Int
                 guard ok, (size ?? 0) > 0 else {
@@ -82,8 +78,8 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
         do {
             transcriber = try Transcriber(modelPath: dir.path, modelArch: .base)
         } catch {
-            // A corrupt/partial artifact on disk. Remove the model dir so the next attempt re-downloads
-            // instead of failing on it forever.
+            // Load failure means a corrupt/partial artifact; remove it so the next attempt re-downloads
+            // instead of failing forever.
             try? FileManager.default.removeItem(at: dir)
             throw error
         }
@@ -91,9 +87,7 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     }
 
     nonisolated var supportsSampleInput: Bool { true }
-    // Streaming DISABLED: it proved the interface (P3-1) but streamed WER ran +2.7% over batch with no
-    // latency win, so it fails the rollout contract. False ⇒ the controller never opens a session, so no
-    // streaming implementation is carried here.
+    // Streaming disabled: measured streamed WER ran +2.7% over batch with no latency win.
     nonisolated var supportsStreaming: Bool { false }
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {

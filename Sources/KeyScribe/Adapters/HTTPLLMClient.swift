@@ -21,7 +21,8 @@ struct HTTPLLMClient: LLMClient {
                           tokenCommandRunner: tokenCommandRunner, tokenCache: tokenCache, now: now)
     }
 
-    // Open the pooled connection to the host (no auth, no body) so a rewrite moments later reuses it.
+    // Bodyless, auth-less HEAD warm-up — carries no user content — so a rewrite moments later reuses the
+    // pooled connection.
     func preconnect(connection: Connection) async {
         guard let url = preconnectURL(for: connection) else { return }
         var req = URLRequest(url: url)

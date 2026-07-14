@@ -541,8 +541,8 @@ struct VocabularyComposer: View {
 
     private enum Field { case heard, replace }
 
-    // The disclosure is open whenever the user opened it OR regex is on — a collapsed section hiding an ON
-    // regex toggle would silently change what Add does (5a).
+    // Stays open while regex is on — a collapsed section hiding an ON regex toggle would silently change
+    // what Add does.
     private var advancedBinding: Binding<Bool> {
         Binding(get: { advancedExpanded || regex }, set: { advancedExpanded = $0 })
     }
@@ -679,7 +679,7 @@ private struct RemoveButton: View {
 }
 
 struct VocabularySettingsView: View {
-    // Placeholder until BiasBenchmark measures where added entries start to raise WER on the
+    // Placeholder until a WER benchmark measures where added entries start to hurt recognition on a
     // real-voice corpus; the nudge threshold should be set from that, not a borrowed number.
     static let dictionaryAdviceThreshold = 60
 
@@ -791,8 +791,8 @@ final class DictionarySettingsModel: ObservableObject {
         self.repository = repository
         reload()
         // The global Add-to-Vocabulary hotkey writes through the same repository while this pane is open;
-        // reload on any external write so the list reflects the just-added word without waiting for a
-        // pane revisit or an in-pane mutation. Skip the reentrant reload our own writes fire.
+        // reload on any external write so the list reflects the just-added entry without waiting for a
+        // pane revisit. Skip the reentrant reload our own writes fire.
         repository.addChangeObserver { [weak self] in
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
@@ -812,9 +812,9 @@ final class DictionarySettingsModel: ObservableObject {
         mutate { $0.removing(word: word) }
     }
 
-    // All writes go through ConfigRepository, which read-modify-writes from disk (not from `@Published words`)
-    // and invalidates the ConfigCache. The global Add-to-Vocabulary hotkey writes through the same repository
-    // while this pane is open, so mutating stale in-memory state would silently drop that just-added word.
+    // Reads-modifies-writes from disk (not from `@Published words`), since the global Add-to-Vocabulary
+    // hotkey writes through the same repository while this pane is open — mutating stale in-memory state
+    // would silently drop a word it just added.
     private func mutate(_ transform: (DictionarySet) -> DictionarySet) {
         isApplyingLocalMutation = true
         defer { isApplyingLocalMutation = false }
@@ -840,7 +840,7 @@ final class ReplacementsSettingsModel: ObservableObject {
         reload()
         // The global Add-to-Vocabulary hotkey writes through the same repository while this pane is open;
         // reload on any external write so the list reflects the just-added rule without waiting for a
-        // pane revisit or an in-pane mutation. Skip the reentrant reload our own writes fire.
+        // pane revisit. Skip the reentrant reload our own writes fire.
         repository.addChangeObserver { [weak self] in
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
@@ -889,9 +889,9 @@ final class ReplacementsSettingsModel: ObservableObject {
         }
     }
 
-    // All writes go through ConfigRepository (see DictionarySettingsModel.mutate). A `remove(at:)`
-    // resolves the displayed row to a rule value first, then removes the matching rule from the
-    // freshly-read set, so a rule the global hotkey appended concurrently is preserved.
+    // See DictionarySettingsModel.mutate. `remove(at:)` resolves the displayed row to a rule value first,
+    // then removes the matching rule from the freshly-read set, so a rule the global hotkey appended
+    // concurrently is preserved.
     private func mutate(_ transform: (inout ReplacementsSet) -> Void) {
         isApplyingLocalMutation = true
         defer { isApplyingLocalMutation = false }

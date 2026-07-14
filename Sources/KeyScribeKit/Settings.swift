@@ -236,7 +236,7 @@ public struct Settings: Codable, Equatable, Sendable {
             self.overrides = Self.pruned(overrides)
         }
 
-        // Type-safe construction for tests and programmatic setup, e.g. `.init([.someFlag: true])`.
+        // `.init([.someFlag: true])` — avoids stringly-typed ids at call sites.
         public init(_ states: [Feature: Bool]) {
             overrides = [:]
             for (feature, enabled) in states { setEnabled(enabled, for: feature) }

@@ -298,11 +298,11 @@ private enum ModeSummaryIssue {
     }
 }
 
-// Shared user-facing summary phrasing (ui_components.md "Mode summary"): when a mode runs and where its text
-// goes, in plain words — never bundle IDs or raw regex.
+// Shared user-facing summary phrasing (ui_components.md "Mode summary") — plain words, never bundle IDs
+// or raw regex.
 enum ModeSummary {
-    // The one place the spoken-phrase format lives, so menu, mode list, and template gallery can never phrase
-    // it differently. Sentence-leading form is capitalized ("Say …"), the inline/annotation form is not.
+    // The one place the spoken-phrase format lives, so menu, list, and gallery never phrase it differently.
+    // Sentence-leading form is capitalized ("Say …"); inline/annotation form is not.
     static func spokenPhrase(_ phrase: String, capitalized: Bool) -> String {
         "\(capitalized ? "Say" : "say") \"\(phrase)\""
     }
@@ -316,8 +316,8 @@ enum ModeSummary {
             }
             return "Fallback"
         }
-        // A shortcut is what makes a mode run automatically. A constrained mode with NO shortcut/phrase never
-        // auto-runs (Fn goes to Plain Dictation) — it's menu-reachable, so don't imply it's automatic.
+        // A constrained mode with no shortcut/phrase never auto-runs (Fn goes to Plain Dictation) — it's
+        // menu-reachable, so don't imply it's automatic.
         if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
             return constrained ? "\(descriptor.displayString) in matching apps"
                                : descriptor.displayString

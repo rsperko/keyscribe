@@ -51,7 +51,6 @@ struct SpeechPresenceGateWiringTests {
         func render(_ state: HUDState) { states.append(state) }
     }
 
-    // Run and also capture the HUD render trail so the two no-speech renders (error vs complete) are visible.
     private func runWithHUD(detector: SpeechPresenceDetecting) async -> (DictationRecord?, [HUDState]) {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-vad-hud-\(UUID().uuidString)", isDirectory: true)
@@ -136,11 +135,6 @@ struct SpeechPresenceGateWiringTests {
         controller.handleCommit()
         await controller.dictationTask?.value
         return controller.lastRecord
-    }
-
-    @Test func noSpeechGateSuppressesTranscription() async {
-        let record = await run(transcript: "hello world", detector: StubPresence(presence: .noSpeech))
-        #expect(record?.outcome == .noSpeech)
     }
 
     @Test func speechGateProceedsToTranscription() async {

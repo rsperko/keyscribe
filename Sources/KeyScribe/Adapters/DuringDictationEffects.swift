@@ -22,10 +22,10 @@ final class DuringDictationEffects {
 
     private var displayAssertion: IOPMAssertionID = 0
     private var hadDisplayAssertion = false
-    // Every device ducked this dictation. A Bluetooth headset shifts the audible output between its A2DP and
-    // HFP instances as the mic opens, so we duck each one we see become the default and unduck them all.
-    // No prior value captured: restore always ramps to full volume (1.0), and the duck is process-scoped so
-    // a crash before restore can't strand a device.
+    // Every device ducked this dictation. A Bluetooth headset shifts the audible output between its A2DP
+    // and HFP instances as the mic opens, so each one seen as default is ducked, then all are unducked
+    // together. No prior value is captured: restore always ramps to full volume, so a crash before restore
+    // can't strand a device.
     private var duckedDevices: Set<AudioDeviceID> = []
     private var ducking = false
     private var duckFollowTask: Task<Void, Never>?

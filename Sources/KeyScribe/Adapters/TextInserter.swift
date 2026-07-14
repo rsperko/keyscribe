@@ -22,9 +22,7 @@ enum TextInserter {
         if case .text(let selection) = axSelectedText() {
             return selection.isEmpty ? nil : selection
         }
-        // Drain a pending scratch-restore FIRST, so the guard and snapshot see the user's real clipboard — not a
-        // prior paste's plain-text scratch, which would pass the guard and then be clobbered once the drain put the
-        // real rich/image clipboard back.
+        // Drain first so the guard below sees the user's real clipboard, not a prior paste's scratch text.
         await drainPendingRestore()
         let pb = NSPasteboard.general
         // The AX-unavailable ⌘C restores byte-perfect only for a plain-text/empty clipboard. Convenience callers

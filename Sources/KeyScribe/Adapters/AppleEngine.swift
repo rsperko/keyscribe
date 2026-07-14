@@ -13,7 +13,7 @@ actor AppleEngine: SpeechEngine {
 
     private let locale: Locale
     private var assetsReady = false
-    // A one-shot analyzer + transcriber preheated at press; consumed by the next transcribe, else rebuilt.
+    // One-shot: preheated at press, consumed by the next transcribe, else rebuilt.
     private var prepared: (analyzer: SpeechAnalyzer, transcriber: DictationTranscriber)?
 
     init(locale: Locale = Locale.current) {
@@ -26,9 +26,8 @@ actor AppleEngine: SpeechEngine {
         assetsReady = true
     }
 
-    // Analyzers are one-shot, so build the next pair at press and prepareToAnalyze it, overlapping the
-    // multi-hundred-ms session setup with speech. Best-effort: any failure leaves `prepared` nil and
-    // transcribe builds fresh (today's behavior).
+    // Analyzers are one-shot, so the next pair is prewarmed at press to overlap session setup with speech.
+    // Best-effort: any failure leaves `prepared` nil and transcribe builds fresh.
     func prepareForDictation() async {
         guard (try? await loadIfNeeded()) != nil else { return }
         let transcriber = DictationTranscriber(locale: locale, preset: .longDictation)
@@ -44,15 +43,13 @@ actor AppleEngine: SpeechEngine {
         return (SpeechAnalyzer(modules: [transcriber]), transcriber)
     }
 
-    // SpeechAnalyzer's native design is a live input sequence (start(inputSequence:) of AnalyzerInput),
-    // volatile results discarded, finalized results collected — we consume only finalized text. This is also
-    // the engine where streaming helps most: per-call session setup dominates release→text today (P3-1).
+    // Only finalized transcriber results are consumed (volatile ones are discarded). Streaming helps most
+    // here since per-call session setup otherwise dominates release→text latency.
     nonisolated var supportsStreaming: Bool { true }
 
-    // Bound the analyzer's input queue so a stalled analyzer can't accumulate converted buffers without limit
-    // (neither the driver's ingest-lag guard nor the writer→driver buffer catches an analyzer-side stall, since
-    // append itself never blocks). Overflow surfaces as a `.dropped` yield → append throws → driver degrades to
-    // batch. Generous headroom (many seconds at ~5 ms writer chunks), far past streaming's latency win.
+    // Bounds the analyzer's input queue: nothing else catches an analyzer-side stall (append never blocks), so
+    // overflow surfaces as a `.dropped` yield → append throws → driver degrades to batch. Generous headroom
+    // (many seconds at ~5 ms writer chunks), far past streaming's latency win.
     static let maxPendingAnalyzerInputs = 512
 
     // biasTerms are ignored — Apple recognition bias (contextualStrings) was removed.
@@ -66,8 +63,7 @@ actor AppleEngine: SpeechEngine {
         let (inputSequence, input) = AsyncStream.makeStream(
             of: AnalyzerInput.self, bufferingPolicy: .bufferingNewest(Self.maxPendingAnalyzerInputs))
         try await analyzer.start(inputSequence: inputSequence)
-        // Collect finalized results (no volatileResults option → results are final) on a task that ends when
-        // the analyzer finishes at finalize. Spun here where the opaque `results` type is known.
+        // No volatileResults option → every result is final. Task ends when the analyzer finishes at finalize.
         let results = transcriber.results
         let resultsTask = Task<String, Error> {
             var transcript = AttributedString()
@@ -105,9 +101,8 @@ actor AppleEngine: SpeechEngine {
     }
 }
 
-// One dictation's Apple streaming session. Feeds capture PCM into the analyzer's live input sequence
-// (converting the 16 kHz mono capture format to the analyzer's preferred format), and returns the
-// finalized transcript at commit. Access is serialized by the driver + SerializedEngine lock.
+// One dictation's Apple streaming session. @unchecked Sendable is safe because access is serialized by
+// the driver + SerializedEngine lock.
 @available(macOS 26, *)
 final class AppleStreamingSession: StreamingSpeechSession, @unchecked Sendable {
     private let analyzer: SpeechAnalyzer
@@ -163,9 +158,8 @@ final class AppleStreamingSession: StreamingSpeechSession, @unchecked Sendable {
         resultsTask.cancel()
     }
 
-    // Wrap the incoming samples in a capture-format buffer, then convert to the analyzer's format if they
-    // differ (a persistent converter keeps resampler continuity across chunks). Throws on a real conversion
-    // failure so the driver can degrade to batch — a failed convert must never silently drop spoken audio.
+    // The converter persists across calls to keep resampler continuity between chunks. Throws on a real
+    // conversion failure so the driver can degrade to batch rather than silently drop spoken audio.
     private func makeBuffer(_ samples: [Float]) throws -> AVAudioPCMBuffer? {
         guard !samples.isEmpty else { return nil }
         guard let inBuf = AVAudioPCMBuffer(pcmFormat: captureFormat, frameCapacity: AVAudioFrameCount(samples.count))
@@ -192,8 +186,7 @@ final class AppleStreamingSession: StreamingSpeechSession, @unchecked Sendable {
         return outBuf.frameLength > 0 ? outBuf : nil
     }
 
-    // End-of-stream flush of the resampler tail at finalize (no-op when capture and analyzer formats match,
-    // so converter is nil). Mirrors CaptureWriter.flushConverterTail.
+    // No-op when capture/analyzer formats match (converter is nil). Mirrors CaptureWriter.flushConverterTail.
     private func flushConverterTail() -> AVAudioPCMBuffer? {
         guard let converter,
               let outBuf = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: 4096) else { return nil }

@@ -10,9 +10,8 @@ struct ModeStoreSeedTests {
             "markdown", "shell",
         ])
 
-        // Plain Dictation is no longer a starter — the Direct floor fills that role; all starters ship
-        // disabled. Polish and Edit Selection carry a default trigger key so a first AI connection makes
-        // them reachable; Email carries a voice-routing phrase; the rest stay triggerless.
+        // Plain Dictation is retired in favor of the Direct floor; all starters ship disabled. Polish and
+        // Edit Selection carry a default trigger key so a first AI connection makes them reachable.
         #expect(starters.allSatisfy { !$0.enabled })
 
         let polish = starters.first { $0.id == "polish" }
@@ -92,15 +91,15 @@ struct ModeStoreSeedTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-\(UUID().uuidString)")
         let ledgerDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-ledger-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: ledgerDir) }
-        // Fresh install already ran (only _direct.toml), then the ledger dir was deleted by hand.
+        // fresh install already ran (only _direct.toml), then the ledger dir was deleted by hand
         ModeStore.ensureSystemModes(in: dir)
         try? FileManager.default.removeItem(at: ledgerDir)
 
         ModeStore.recordStarterOffersIfFresh(in: dir, ledgerDir: ledgerDir)   // dir non-empty → no-op
         ModeStore.reconcileSeeds(modesDir: dir, ledgerDir: ledgerDir, settingsDir: nil)
 
-        // The additive step offers (never writes) any catalog id it has not seen; no starter file is
-        // resurrected. `code` is the one catalog id with no legacy predecessor, so it is freshly offered.
+        // The additive step offers (never writes) unseen catalog ids; `code` has no legacy predecessor,
+        // so it is the one freshly offered here rather than resurrected as a file.
         #expect(ModeStore.loadAll(in: dir).map(\.id) == [Mode.directId])
         let ledger = ModeStore.loadLedger(in: ledgerDir)
         #expect(ledger?.contains("code") == true)
@@ -146,7 +145,7 @@ struct ModeStoreSeedTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-tamper-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        // A hand-edited Direct file that sets editable fields AND tries to weaken the locked ones.
+        // hand-edited Direct file: sets editable fields AND tries to weaken the locked ones
         var tampered = Mode.direct
         tampered.triggerKeys = [.init(key: "right_option")]   // editable — must survive
         tampered.insertion = .type                            // editable — must survive
@@ -282,7 +281,7 @@ struct ModeStoreSeedTests {
 
         ModeStore.ensureSystemModes(in: dir)
 
-        // The user's customized mode is never deleted; Direct does not steal its key.
+        // the customized mode is never deleted; Direct does not steal its key
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("plain-dictation.toml").path))
         let direct = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
         #expect(direct.triggerKeys.isEmpty)

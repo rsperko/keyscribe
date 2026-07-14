@@ -182,7 +182,7 @@ extension KeyDescriptor {
         }
     }
 
-    // Per-cap tokens for the wizard's keycap glyphs (phase 2). The view renders one rounded cap per token;
+    // Per-cap tokens for the wizard's keycap glyphs. The view renders one rounded cap per token;
     // an empty array means "no keycap" — the caller falls back to `displayString` plain text.
     public var keycapTokens: [String] {
         switch self {

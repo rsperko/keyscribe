@@ -3,8 +3,8 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// A preceding-text mode probes the field once during recording and reuses that value for the rewrite prompt,
-// rather than serializing the AX walk between STT and the LLM request.
+// A preceding-text mode probes the field once during recording and reuses that value for the rewrite
+// prompt, rather than serializing the AX walk between STT and the LLM request.
 @MainActor
 struct PrecedingTextProbeWiringTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -23,7 +23,7 @@ struct PrecedingTextProbeWiringTests {
         func stop() -> URL? { url }
     }
 
-    // Echoes the <content> block and records the user prompt so the test can check the probed value landed.
+    // Echoes the <content> block so the test can check the probed value landed in it.
     private actor EchoLLM: LLMClient {
         private(set) var lastUser = ""
         func complete(system: String, user: String, connection: Connection) async throws -> String {
@@ -101,7 +101,7 @@ struct PrecedingTextProbeWiringTests {
         controller.handleCommit()
         await controller.dictationTask?.value
 
-        // Reused, not re-run: still exactly one probe, and its value reached the rewrite prompt.
+        // Reused, not re-run: still exactly one probe.
         #expect(probe.bundleIds == ["test.bundle"])
         #expect(await llm.lastUser.contains("PRECEDINGCTX"))
     }
@@ -121,7 +121,7 @@ struct PrecedingTextProbeWiringTests {
         #expect(probe.bundleIds.isEmpty)
     }
 
-    // A secure field revealed by the async full snapshot neuters the mode before the probe gate opens.
+    // The async full snapshot's isSecureField neuters the mode before the probe gate opens.
     @Test func aSecureFieldSuppressesThePrecedingTextProbe() async {
         let probe = ProbeSpy()
         let controller = makeController(

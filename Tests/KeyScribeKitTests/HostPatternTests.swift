@@ -32,18 +32,18 @@ struct HostPatternTests {
     @Test func domainMetacharactersAreEscaped() throws {
         let p = try #require(HostPattern.regex(forDomain: "a.b.com"))
         #expect(matches(p, "https://a.b.com/x"))
-        #expect(!matches(p, "https://axbxcom/x"))     // the dots are literal, not wildcards
+        #expect(!matches(p, "https://axbxcom/x"))
     }
 
     @Test func rejectsNonDomainInput() {
         #expect(HostPattern.regex(forDomain: "") == nil)
         #expect(HostPattern.regex(forDomain: "   ") == nil)
         #expect(HostPattern.regex(forDomain: "localhost") == nil)      // no dot
-        #expect(HostPattern.regex(forDomain: "github.com/foo") == nil) // contains a slash (a path, not a domain)
+        #expect(HostPattern.regex(forDomain: "github.com/foo") == nil) // a path, not a domain
     }
 
-    // Shapes the old `contains(".")` guard let through — each escaped into a regex that can never match a
-    // real URL host, yet still displayed as a valid rule. They must be rejected outright.
+    // These all pass the old `contains(".")` guard but would escape into a regex that can never match a
+    // real URL host, yet still display as a valid rule — must be rejected outright.
     @Test func rejectsDomainsThatCanNeverMatchAHost() {
         #expect(HostPattern.regex(forDomain: "*.github.com") == nil) // wildcard label
         #expect(HostPattern.regex(forDomain: ".github.com") == nil)  // leading dot / empty label
@@ -54,8 +54,8 @@ struct HostPatternTests {
         #expect(HostPattern.regex(forDomain: "foo..bar.com") == nil) // empty middle label
     }
 
-    // Pin the generated pattern to the verified full-URL matching context (ModeResolver.regexFound matches
-    // unanchored over the whole URL string, so the `^` anchor is load-bearing).
+    // ModeResolver.regexFound matches unanchored over the whole URL string, so the `^` anchor here is
+    // load-bearing — without it the pattern would match mid-URL.
     @Test func generatedPatternIsHostAnchoredFromTheStart() throws {
         let p = try #require(HostPattern.regex(forDomain: "github.com"))
         #expect(p.hasPrefix("(?i)^"))
@@ -78,7 +78,7 @@ struct HostPatternTests {
         #expect(HostPattern.domain(fromRegex: "github\\.com") == nil)
         #expect(HostPattern.domain(fromRegex: "(?i)pull request") == nil)
         #expect(HostPattern.domain(fromRegex: "") == nil)
-        // Right shell, but the middle isn't what our escaper would emit (a bare unescaped dot).
+        // Right shell, but a bare unescaped dot in the middle — not what our escaper would emit.
         #expect(HostPattern.domain(fromRegex: "(?i)^[a-z][a-z0-9+.-]*://([^/?#]*\\.)?github.com([/:?#]|$)") == nil)
     }
 

@@ -339,7 +339,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // Settings mode list and hotkey recorder exactly; the inert reason follows it.
     static func modeItemAnnotation(trigger: KeyDescriptor?, phrase: String? = nil, inertReason: String?) -> String? {
         // The spoken phrase is a headline routing capability that is otherwise invisible — showing the actual
-        // FIRST phrase (`say "as an email"`) here is the menu's discovery surface for it (UX2 phase 7b).
+        // FIRST phrase (`say "as an email"`) here is the menu's discovery surface for it.
         let phrasePart = phrase.map { ModeSummary.spokenPhrase($0, capitalized: false) }
         let parts = [trigger?.displayString, phrasePart, inertReason].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

@@ -119,8 +119,8 @@ struct AIServiceConnectorTests {
     }
 
     // A retest of an already-persisted connection reuses its keyRef, so saving overwrites a possibly-good key.
-    // A failed retest must RESTORE the prior key, never delete it — otherwise a working service is left with no
-    // credential (finding P2).
+    // A failed retest must RESTORE the prior key, never delete it — otherwise a working service is left
+    // with no credential.
     @Test func failedRetestRestoresAPreExistingKeyInsteadOfDeletingIt() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -136,9 +136,9 @@ struct AIServiceConnectorTests {
         let result = await connector.connect(draft: draft(), reusingId: "gemini")
 
         #expect(result.outcome == .failed("Connection test failed: 401 Unauthorized"))
-        #expect(deletedRef == nil)                          // the pre-existing key is not destroyed
+        #expect(deletedRef == nil)
         #expect(saves.last?.ref == "keyscribe.llm.gemini")
-        #expect(saves.last?.value == "existing-good-key")   // restored to its prior value
+        #expect(saves.last?.value == "existing-good-key")
     }
 
     @Test func emptyAPIKeyFailsBeforeSavingOrTesting() async {
@@ -188,8 +188,8 @@ struct AIServiceConnectorTests {
             saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in })
     }
 
-    // Add Service persists a seeded connection immediately and selects it — no test, no key. It lands in an
-    // honest "no key" config state (not usable until the user finishes it in the editor and Tests it).
+    // Persists a seeded connection immediately and selects it — no test, no key — landing in an honest
+    // "no key" config state, not usable until the user finishes it in the editor and tests it.
     @Test func addServicePersistsASeededConnectionAndSelectsIt() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -225,8 +225,8 @@ struct AIServiceConnectorTests {
         #expect(model.pendingConnectOffer?.connectionId == connection.id)
     }
 
-    // update() must persist the typed key through the injected saveAPIKey seam, never KeychainStore directly —
-    // otherwise every test run writes a real entry into the developer's login Keychain.
+    // Must persist through the injected saveAPIKey seam, never KeychainStore directly — otherwise every
+    // test run writes a real entry into the developer's login Keychain.
     @Test func updateSavesTheKeyThroughTheInjectedSeam() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -249,7 +249,6 @@ struct AIServiceConnectorTests {
         #expect(model.hasKey(connection))
     }
 
-    // delete() must remove the key through the injected deleteAPIKey seam, not KeychainStore directly.
     @Test func deleteRemovesTheKeyThroughTheInjectedSeam() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -327,7 +326,7 @@ struct AIServiceConnectorTests {
         #expect(connection.configIssue == nil)
     }
 
-    // A provider starter is reusable: adding a second connection for the same provider disambiguates the name
+    // A provider starter is reusable: a second connection for the same provider disambiguates the name
     // rather than overwriting the first.
     @Test func addingASecondServiceForAProviderKeepsBothWithDistinctNames() {
         let support = tempSupport()
@@ -347,10 +346,7 @@ struct AIServiceConnectorTests {
     @Test func listRowAndSummaryDeriveIdenticalStatus() {
         let connection = Connection(
             id: "c", name: "C", provider: .gemini, model: "m", keyRef: "keyscribe.llm.c")
-        let a = AIServiceStatus.derive(connection: connection, testState: .passed, hasKey: true)
-        let b = AIServiceStatus.derive(connection: connection, testState: .passed, hasKey: true)
-        #expect(a.text == b.text)
-        #expect(a.text == "Connection works")
-        #expect(a.icon == b.icon)
+        let status = AIServiceStatus.derive(connection: connection, testState: .passed, hasKey: true)
+        #expect(status.text == "Connection works")
     }
 }

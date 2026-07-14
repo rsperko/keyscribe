@@ -31,19 +31,16 @@ public final class ResolvedConfig: @unchecked Sendable {
 
     public func connection(id: String) -> Connection? { connections.connection(id: id) }
 
-    // Shared fragment bodies for a mode's rewrite, in the requested order, blanks dropped. Resolved
-    // from the frozen map captured at construction (never re-read from disk mid-dictation).
+    // Resolved from the frozen map captured at construction — never re-read from disk mid-dictation.
     public func fragmentBodies(ids: [String]) -> [String] {
         ids.compactMap { fragments[$0] }.filter { !$0.isEmpty }
     }
 
-    // Global ⊕ mode dictionary (VocabularyMerge dedups in stable order), memoized per mode.
     public func mergedDictionary(for mode: Mode?) -> [String] {
         lock.lock(); defer { lock.unlock() }
         return mergedDictionaryUnlocked(for: mode)
     }
 
-    // Merged dictionary trimmed of whitespace with blanks dropped, ready for engine recognition bias.
     // Memoized per mode so the per-dictation bias path is a cache hit, not a fresh map+filter.
     public func recognitionBiasTerms(for mode: Mode?) -> [String] {
         let key = mode?.id ?? Self.nilModeKey
@@ -55,8 +52,8 @@ public final class ResolvedConfig: @unchecked Sendable {
         return terms
     }
 
-    // Post-STT text stages for a mode, memoized per mode. Verbatim/redaction tokenizers are
-    // per-dictation and added separately by the host; these stages are pure config.
+    // Verbatim/redaction tokenizers are per-dictation and added separately by the host; these stages
+    // are pure config.
     public func postSTTTextStages(for mode: Mode?) -> [any PipelineStage] {
         let key = mode?.id ?? Self.nilModeKey
         lock.lock(); defer { lock.unlock() }
@@ -80,7 +77,7 @@ public final class ResolvedConfig: @unchecked Sendable {
         return stages
     }
 
-    // mergedDictionary, assuming the lock is already held (mergedDictionary and buildTextStages both hold it).
+    // PRECONDITION: caller holds `lock` — mergedDictionary and buildTextStages both hold it.
     private func mergedDictionaryUnlocked(for mode: Mode?) -> [String] {
         let key = mode?.id ?? Self.nilModeKey
         if let cached = mergedDictionaryCache[key] { return cached }

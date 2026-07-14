@@ -76,15 +76,15 @@ struct TriggerKeyConflictTests {
     }
 
     @Test func hyperOverlapsAFullHyperChord() {
-        // Pressing ⌃⌥⇧⌘X engages the Hyper modifiers, so a Hyper-triggered mode fires alongside the chord.
+        // ⌃⌥⇧⌘X engages the Hyper modifiers, so a Hyper-triggered mode fires alongside the chord.
         let overlap = TriggerKeyConflicts.modifierOverlap(
             triggerKey: "hyper", with: [rival("control+option+shift+command+x", "the Snippet mode’s shortcut")])
         #expect(overlap?.rivalLabel == "the Snippet mode’s shortcut")
     }
 
     @Test func rightOptionDoesNotWarnAgainstASubsumingChord() {
-        // right-Option next to ⌃⌥⇧V (Option-inclusive) is a common, legitimate setup. The runtime's
-        // "chord wins" rule suppresses the dictation trigger when the chord is formed, so no warning.
+        // right-Option next to ⌃⌥⇧V is a common, legitimate setup; the runtime's "chord wins" rule
+        // suppresses the dictation trigger when the chord is formed, so no warning is needed.
         #expect(TriggerKeyConflicts.modifierOverlap(
             triggerKey: "right_option", with: [rival("control+option+shift+v", "the Add to Vocabulary shortcut")]) == nil)
     }
@@ -97,13 +97,13 @@ struct TriggerKeyConflictTests {
     }
 
     @Test func hyperDoesNotOverlapAChordMissingCommand() {
-        // ⌃⌥⇧V lacks Command, so Hyper (⌃⌥⇧⌘) is NOT a subset — no double-fire.
+        // ⌃⌥⇧V lacks Command, so Hyper (⌃⌥⇧⌘) is not a subset — no double-fire.
         #expect(TriggerKeyConflicts.modifierOverlap(
             triggerKey: "hyper", with: [rival("control+option+shift+v")]) == nil)
     }
 
     @Test func fnNeverOverlapsAChord() {
-        // Fn keys off the Fn flag, which no chord carries, so it is not a modifier-only overlap source.
+        // Fn keys off the Fn flag, which no chord carries.
         #expect(TriggerKeyConflicts.modifierOverlap(
             triggerKey: "fn", with: [rival("control+option+shift+command+x")]) == nil)
     }
@@ -138,9 +138,9 @@ struct TriggerKeyConflictTests {
         #expect(TriggerKeyConflicts.liveActionRivals([action("global:add_vocabulary", "right_option")], shadowed: []).isEmpty)
     }
 
-    // GPT review scenario: a Hyper-triggered mode alongside an Add-Vocabulary chord that is shadowed by
-    // another mode on the same chord. The warning must NOT name the shadowed (inactive) Add-Vocabulary
-    // shortcut; the overlap is re-attributed to the enabled mode that actually claims that chord.
+    // A Hyper-triggered mode alongside an Add-Vocabulary chord that is shadowed by another mode on the
+    // same chord: the warning must not name the shadowed (inactive) Add-Vocabulary shortcut; the overlap
+    // is re-attributed to the enabled mode that actually claims that chord.
     @Test func shadowedActionShortcutIsNotNamedTheShadowingModeIs() {
         let shortcutKey = "control+option+shift+command+v"
         // Ordered as at runtime: modes first, then the global — so the mode claims the chord and the

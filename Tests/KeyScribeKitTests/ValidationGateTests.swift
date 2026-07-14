@@ -29,7 +29,7 @@ struct ValidationGateTests {
     }
 
     @Test func straySentinelFails() {
-        // model invented a token we never issued
+        // A stray token is one the model invented that was never issued.
         let v = ValidationGate.check(output: "text ⟦SN:REDACT:9⟧", issuedTokens: [])
         #expect(v == .fail(.strayToken("⟦SN:REDACT:9⟧")))
     }
@@ -45,8 +45,7 @@ struct ValidationGateTests {
             == .fail(.duplicatedToken("⟦SN:VERB:1⟧")))
     }
 
-    // A selection-instruction token isn't required to reappear, but one occurrence must not be
-    // rejected as stray (hotkeys-llm-network H1 follow-up).
+    // An allowed token need not reappear in the output, but one occurrence must not be flagged as stray.
     @Test func allowedTokenMayAppearOnceWithoutFailing() {
         let v = ValidationGate.check(
             output: "the value is ⟦SN:REDACT:2⟧", issuedTokens: [], allowedTokens: ["⟦SN:REDACT:2⟧"])

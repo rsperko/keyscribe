@@ -4,9 +4,8 @@ import KeyScribeKit
 
 typealias Settings = KeyScribeKit.Settings
 
-// A live problem that lights the menu-bar error dot and flags the Settings pane that fixes it
-// (ui_design.md §6). `detect` is the single signals→problems mapping, shared by the menu badge and the
-// Settings sidebar so they never disagree.
+// `detect` is the single signals→problems mapping, shared by the menu badge and the Settings sidebar
+// (ui_design.md §6) so they never disagree.
 enum SettingsProblem: Equatable, CaseIterable {
     case malformedConfig
     case microphonePermission
@@ -32,8 +31,8 @@ enum SettingsProblem: Equatable, CaseIterable {
     }
 
     // We never passively probe a provider to judge a connection (privacy invariant; a missing key is fine
-    // for a local/no-auth endpoint). The authoritative AI health signal is a user-initiated Test Connection
-    // that failed; `aiConnectionMisconfigured` is the structural check (no model / no base URL).
+    // for a local/no-auth endpoint), so the authoritative AI health signal is a user-initiated Test
+    // Connection that failed; `aiConnectionMisconfigured` is the structural check (no model / no base URL).
     static func detect(
         hasConfigError: Bool, microphoneGranted: Bool,
         accessibilityGranted: Bool,
@@ -61,8 +60,8 @@ enum SettingsProblem: Equatable, CaseIterable {
     }
 }
 
-// The selected pane, lifted out of the view so the controller can drive it (deep-opening to a pane just
-// sets this before the window shows).
+// Lifted out of the view so the controller can drive it (deep-opening to a pane just sets this before
+// the window shows).
 @MainActor
 final class SettingsNavigationModel: ObservableObject {
     @Published var destination: SettingsDestination? = .general
@@ -93,10 +92,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
-    // The app to hand focus back to for History's "Paste Result" — the Settings window is key while the
-    // pane is up. Captured in `present()` BEFORE we activate our own window (once NSApp.activate runs the
-    // frontmost app is KeyScribe itself), refreshed by the activation observer while the History pane shows,
-    // and cleared when the window closes. Stable across in-window pane navigation.
+    // Captured in `present()` BEFORE we activate our own window (once NSApp.activate runs the frontmost
+    // app is KeyScribe itself), refreshed by the activation observer while the History pane shows, and
+    // cleared when the window closes. Stable across in-window pane navigation.
     private var historyPreviousApp: NSRunningApplication?
     private var historyActivationObserver: NSObjectProtocol?
     private var loadedHistorySignature: String?
@@ -138,7 +136,6 @@ final class SettingsController: NSObject, NSWindowDelegate {
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
         history.copyText = { TextInserter.copyToClipboard($0) }
         history.pasteText = { [weak self] in self?.pasteHistoryResult($0) }
-        // "Create a mode with this service": make a disabled mode wired to the connection and route to Modes.
         aiServices.onCreateModeWithConnection = { [weak self] connectionId in
             guard let self else { return }
             self.modes.createWithConnection(connectionId: connectionId)
@@ -161,10 +158,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
 
     func present(_ destination: SettingsDestination? = nil) {
-        // Capture the app to paste History results back into BEFORE activating our own window — after
-        // NSApp.activate the frontmost app is KeyScribe. Skip when we are already frontmost (a re-invoke while
-        // Settings is key) so a real prior app is not overwritten with self. Re-seeds on every open, so a
-        // reopen replaces any stale value from the previous session.
+        // Capture BEFORE activating our own window — after NSApp.activate the frontmost app is KeyScribe.
+        // Skip when we are already frontmost (a re-invoke while Settings is key) so a real prior app isn't
+        // overwritten with self. Re-seeds on every open, replacing any stale value from a previous session.
         let priorApp = NSWorkspace.shared.frontmostApplication
         if priorApp?.bundleIdentifier != Bundle.main.bundleIdentifier {
             historyPreviousApp = priorApp
@@ -203,7 +199,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         problemPollTask?.cancel()
         problemPollTask = nil
-        // "Navigated away" equals "closed" for retained transcript state (phase 8e memory/privacy invariant).
+        // "Navigated away" equals "closed" for retained transcript state — a memory/privacy invariant.
         handleHistoryPaneChange(active: false)
         // Drop the paste-target only on real close (not on pane-switch, where it must persist) so a reopen
         // re-seeds a fresh one in present() instead of pasting into a stale app from a prior session.
@@ -217,8 +213,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
         if navigation.destination == .history { reloadHistoryIfNeeded() }
     }
 
-    // Reload on entering the History pane; release on leaving (both the memory/privacy invariant: no parsed
-    // transcripts retained while History is not on screen). Also drives the previousApp tracking observer.
+    // Reload on entering the History pane; release on leaving — no parsed transcripts stay retained while
+    // History is off screen (memory/privacy invariant). Also drives the previousApp tracking observer.
     private func handleHistoryPaneChange(active: Bool) {
         if active {
             // previousApp is seeded in present() (before activation) and refreshed by the observer — not
@@ -247,8 +243,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                // Track only while the History pane is selected and the window is visible, so switching panes
-                // does not keep re-seeding previousApp.
+                // Track only while the History pane is selected and the window is visible, so switching
+                // panes doesn't keep re-seeding previousApp.
                 guard let self, self.navigation.destination == .history, self.window?.isVisible == true,
                       let app = NSWorkspace.shared.frontmostApplication,
                       app.bundleIdentifier != selfBundleId else { return }
@@ -264,9 +260,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         historyActivationObserver = nil
     }
 
-    // History's "Paste Result": the Settings window is key while the pane reads, so hand focus back to the
-    // last real app and paste there. Order the Settings window out (through the activation policy), paste,
-    // then close on success or re-present + flash on failure — mirroring the old History-window dance.
+    // The Settings window is key while the History pane reads, so hand focus back to the last real app and
+    // paste there: order Settings out (through the activation policy), paste, then close on success or
+    // re-present + flash on failure.
     private func pasteHistoryResult(_ text: String) {
         guard let target = historyPreviousApp,
               target.bundleIdentifier != Bundle.main.bundleIdentifier else {
@@ -314,10 +310,9 @@ struct SettingsRootView: View {
     var onRelaunch: () -> Void = {}
     var onHistoryPaneChange: (Bool) -> Void = { _ in }
 
-    // Global action shortcuts as double-fire rivals for the mode-trigger overlap warning (a chord like
-    // ⌃⌥⇧V subsumes a right-Option trigger). Read from the live `general` model so editing refreshes the
-    // warning; filtered through the SAME shadow/chord gate as runtime registration so the warning never
-    // names a shortcut that won't fire (a shadowed one is re-attributed to the mode that shadows it).
+    // Filtered through the SAME shadow/chord gate as runtime registration (a chord like ⌃⌥⇧V subsumes a
+    // right-Option trigger) so the overlap warning never names a shortcut that won't actually fire — a
+    // shadowed one is re-attributed to the mode that shadows it.
     private var actionShortcutRivals: [TriggerKeyConflicts.RivalBinding] {
         TriggerKeyConflicts.liveActionRivals([
             .init(id: GlobalHotkey.vocabularyId, key: general.addVocabularyShortcut,

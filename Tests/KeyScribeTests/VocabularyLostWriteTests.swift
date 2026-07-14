@@ -55,9 +55,8 @@ struct VocabularyLostWriteTests {
             == "This mode-only replacement will be removed. This cannot be undone.")
     }
 
-    // The Vocabulary pane is open (its model holds an in-memory list). The global Add-to-Vocabulary
-    // hotkey writes a new term through ConfigRepository. Removing a DIFFERENT word in the pane must not
-    // resurrect the pane's stale list and drop the hotkey-added term.
+    // Removing a DIFFERENT word in the pane must not resurrect the pane's stale in-memory list and drop
+    // a term the global Add-to-Vocabulary hotkey wrote concurrently through ConfigRepository.
     @Test func dictionaryRemovePreservesAWordAddedConcurrentlyOnDisk() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -183,9 +182,8 @@ struct VocabularyLostWriteTests {
         #expect(updated.dictionary.words == ["Postgres", "Kubernetes"])
     }
 
-    // The Modes editor is open on "code". The global Add-to-Vocabulary hotkey routes a term into that
-    // mode via ConfigRepository's on-disk RMW. A subsequent editor control toggle full-file-writes the
-    // whole mode — and must not resurrect the pane's stale draft and drop the just-routed term.
+    // A subsequent editor control toggle full-file-writes the whole mode, and must not resurrect the
+    // pane's stale draft and drop a term the Add-to-Vocabulary hotkey routed in concurrently.
     @Test func modeEditorControlEditPreservesAVocabTermAddedConcurrentlyOnDisk() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -227,8 +225,8 @@ struct VocabularyLostWriteTests {
         #expect(updated.replacements.rules == [.init(heard: "cube cuddle", replace: "kubectl", regex: false)])
     }
 
-    // The Vocabulary pane is open while the config files are edited OUTSIDE the app. The FSEvents reload
-    // path (AppDelegate.reloadConfig) calls notifyExternalChange; the pane models must re-read from disk.
+    // Mirrors the FSEvents reload path (AppDelegate.reloadConfig calls notifyExternalChange) for an
+    // edit made outside the app while the Vocabulary pane is open.
     @Test func externalEditNotificationRefreshesPaneModels() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

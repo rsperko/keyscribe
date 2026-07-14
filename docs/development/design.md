@@ -148,7 +148,7 @@ measured (`principles.md` §1):
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
 **Up to 8 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
 download/install except the system-managed Apple engine:
-- **FluidAudio / Parakeet TDT-CTC 110M** — **default for English.** Compact (~440MB), fast and
+- **FluidAudio / Parakeet TDT-CTC 110M** — **default for English.** Compact (~330MB), fast and
   accurate. English only.
 - **FluidAudio / Parakeet TDT v3** — larger multilingual Parakeet (25 languages), slightly
   stronger raw accuracy; **pyannote speaker diarization bundled** in the same SDK.
@@ -174,9 +174,9 @@ own single-pass mechanism, taking dictionary terms through `transcribe(wavURL:bi
 
 **Parakeet, Apple, and Moonshine do not bias recognition** (`supportsRecognitionBias = false`) and
 ignore `biasTerms`. Parakeet previously used FluidAudio's NeMo CTC-WS keyword spotter and Apple used
-`AnalysisContext` contextual strings; both were **removed** (2026-07-09) — the CTC-WS spotter
-substituted a dictionary term into a majority of ordinary sentences, and Apple's contextual bias
-delivered almost no benefit (see `agent_notes/fable_bias_test/`).
+`AnalysisContext` contextual strings; both were removed because their false substitutions outweighed
+their benefit. The engine-specific policy and bar for revisiting it live in
+`agent_notes/decisions/recognition_bias.md`.
 
 Independently of the engine, the dictionary still reaches the output two ways: post-STT **dictionary
 recovery** (`FuzzyStage`, which runs whenever the mode's dictionary is non-empty) and the LLM "valid

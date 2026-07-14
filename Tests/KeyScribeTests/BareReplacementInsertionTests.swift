@@ -3,11 +3,9 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// A whole-utterance replacement is inserted verbatim and BARE, even in a mode whose `trailing` and
-// `trim_trailing_punctuation` would otherwise decorate the output: when one rule owns the entire
-// utterance, the mode's trailing space / period-trim are suppressed for that insert only. Anything
-// else in the same mode keeps its normal decoration. Wired through the REAL DictationController with
-// only the OS edges mocked (mirrors TrailingAndSubmitTests).
+// A whole-utterance replacement is inserted verbatim and BARE — the mode's trailing space /
+// period-trim are suppressed for that insert only, even though they'd otherwise decorate the output.
+// Wired through the real DictationController with only the OS edges mocked.
 @MainActor
 struct BareReplacementInsertionTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -72,34 +70,28 @@ struct BareReplacementInsertionTests {
     private let slashWord = [ReplacementsSet.Rule(heard: #"slash (\w+)"#, replace: "/$1", regex: true)]
     private let codeFence = [ReplacementsSet.Rule(heard: "insert code fence", replace: #"```\n"#, regex: true)]
 
-    // The whole utterance is the replacement → bare, no trailing space, despite trailing = .space.
     @Test func wholeUtteranceLiteralIsBare() async {
         #expect(await run(transcript: "slash replace", rules: slashReplace) == "/replace")
     }
 
-    // A stray STT period must not defeat the clamp.
     @Test func wholeUtteranceToleratesTrailingPeriod() async {
         #expect(await run(transcript: "slash replace.", rules: slashReplace) == "/replace")
     }
 
-    // Leading residue → not the whole utterance → normal path keeps the trailing space.
     @Test func leadingResidueKeepsTrailing() async {
         #expect(await run(transcript: "send slash replace", rules: slashReplace) == "send /replace ")
     }
 
-    // Trailing word residue → normal path keeps the trailing space.
     @Test func trailingResidueKeepsTrailing() async {
         #expect(await run(transcript: "slash replace now", rules: slashReplace) == "/replace now ")
     }
 
-    // Regex whole-utterance clamps to the substituted value, bare.
     @Test func wholeUtteranceRegexIsBare() async {
         #expect(await run(transcript: "slash dog", rules: slashWord) == "/dog")
     }
 
-    // The real-world bug: STT capitalizes the first word and appends a period ("Slash dog."). The
-    // regex is now case-insensitive by default, so it still matches and clamps to bare "/dog" —
-    // instead of missing and falling through to "Slash Dog. ".
+    // STT capitalizes and punctuates ("Slash dog."); case-insensitive-by-default regex must still
+    // match and clamp bare, not fall through to "Slash Dog. ".
     @Test func capitalizedSTTStillClampsBare() async {
         #expect(await run(transcript: "Slash dog.", rules: slashWord) == "/dog")
     }

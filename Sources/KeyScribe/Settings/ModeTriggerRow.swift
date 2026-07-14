@@ -39,9 +39,8 @@ struct ModeTriggerRow: View {
     }
 }
 
-// The press-style picker and conflict notice pair with the recorder row but sit in different
-// containers per editor (top-level in the system editor, inside the routing disclosure in a normal
-// mode), so callers compose them; the shared trigger state lives in ModeTrigger.
+// Pairs with the recorder row but sits in a different container per editor (top-level in the system
+// editor, inside the routing disclosure in a normal mode), so callers compose it themselves.
 struct PressStyleRow: View {
     let selection: Binding<String>
     let disabled: Bool
@@ -72,9 +71,9 @@ struct TriggerConflictLabel: View {
     }
 }
 
-// A Hyper trigger fires the instant all four modifiers are held, so a ⌃⌥⇧⌘ chord or action shortcut
-// starts this mode too, from a single press. The right-side modifier triggers are disambiguated at
-// runtime ("chord wins"), so only Hyper still surfaces this warning (see TriggerKeyConflicts.modifierOverlap).
+// A Hyper trigger fires the instant all four modifiers are held, so a ⌃⌥⇧⌘ chord or action shortcut starts
+// this mode too. Right-side modifier triggers are disambiguated at runtime ("chord wins"), so only Hyper
+// still surfaces this warning.
 struct TriggerOverlapLabel: View {
     let overlap: TriggerOverlap?
 
@@ -97,8 +96,8 @@ struct ModeTrigger {
         TriggerKeyConflicts.conflict(for: mode, in: allModes)
     }
 
-    // Every enabled rival binding whose modifiers could subsume one of this mode's modifier-only
-    // triggers: other enabled modes' trigger keys plus the global action shortcuts.
+    // Rival bindings whose modifiers could subsume one of this mode's modifier-only triggers: other
+    // enabled modes' trigger keys plus the global action shortcuts.
     var overlap: TriggerOverlap? {
         let rivals = allModes
             .filter { $0.id != mode.id && $0.enabled }

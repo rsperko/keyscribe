@@ -1,10 +1,9 @@
 import CoreAudio
 import Foundation
 
-// CoreAudio input-device enumeration and resolution, shared by the Settings picker (list/label) and
-// AudioCapture (resolve the preferred UID to a live device, classify its transport). All reads are
-// fast, non-blocking HAL property queries — never the AVAudioEngine control path — so they are safe to
-// call from the main thread (picker) or the audio control queue (capture).
+// CoreAudio input-device enumeration and resolution, shared by the Settings picker and AudioCapture. All
+// reads are fast, non-blocking HAL property queries — never the AVAudioEngine control path — so calling
+// from either the main thread (picker) or the audio control queue (capture) is safe.
 enum AudioInputDevices {
     struct Device: Equatable, Sendable {
         let id: AudioDeviceID
@@ -21,16 +20,14 @@ enum AudioInputDevices {
         }
     }
 
-    // Resolve a saved preferred UID to a currently-connected input device, or nil if it is absent.
     static func deviceID(forUID uid: String) -> AudioDeviceID? {
         allDeviceIDs().first { id in
             hasInputStreams(id) && Self.uid(of: id) == uid
         }
     }
 
-    // Resolve a UID to ANY currently-connected device (input or output), or nil if absent. Used by the
-    // crash-recovery reconcile to restore an output device's mute by UID — output devices have no input
-    // streams, so `deviceID(forUID:)` (input-only) would not find them.
+    // Resolves a UID to ANY device (input or output) — `deviceID(forUID:)` is input-only, so it won't find
+    // an output device. Used by the crash-recovery reconcile to restore an output device's mute by UID.
     static func deviceID(forAnyUID uid: String) -> AudioDeviceID? {
         allDeviceIDs().first { Self.uid(of: $0) == uid }
     }
@@ -42,7 +39,7 @@ enum AudioInputDevices {
     }
 
     // The system default *input* device, or nil if it has no input stream (CoreAudio can name an
-    // output-only default during route churn — device 106 in the crash log).
+    // output-only default during route churn).
     static func systemDefaultInputID() -> AudioDeviceID? {
         var deviceID = AudioObjectID(0)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -58,8 +55,8 @@ enum AudioInputDevices {
         return Device(id: id, uid: uid, name: name(of: id) ?? uid)
     }
 
-    // Human-readable name of a live device by its (transient) AudioDeviceID, for labeling the
-    // actually-bound capture device in history. nil if the device is gone or unnamed.
+    // Labels the actually-bound capture device in history by its (transient) AudioDeviceID; nil if the
+    // device is gone or unnamed.
     static func name(forDeviceID id: AudioDeviceID) -> String? {
         name(of: id)
     }
@@ -82,8 +79,6 @@ enum AudioInputDevices {
             AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
             UInt32(MemoryLayout<AudioDeviceID>.size), &deviceID) == noErr
     }
-
-    // MARK: - Property reads
 
     private static func allDeviceIDs() -> [AudioDeviceID] {
         var addr = address(kAudioHardwarePropertyDevices)

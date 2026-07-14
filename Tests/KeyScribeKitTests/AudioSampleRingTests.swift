@@ -2,13 +2,9 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// The lock-free SPSC ring is the RT-safe transport that replaced the per-buffer lock + file write on the
-// CoreAudio IO thread. These exercise it as pure logic: FIFO order, metadata fidelity, wraparound, the
-// overrun/geometry drops, and a concurrent producer/consumer stress that must lose nothing while the ring
-// never overruns.
+// The lock-free SPSC ring is the RT-safe transport that replaced the per-buffer lock + file write on
+// the CoreAudio IO thread.
 struct AudioSampleRingTests {
-    // Fills channel c with the value `base + c` across all frames, so the consumer can verify both the
-    // per-channel routing and that the exact frame count round-tripped.
     private func push(_ ring: AudioSampleRing, base: Float, channels: Int, frames: Int, host: UInt64) -> Bool {
         ring.write(channelCount: channels, frameCount: frames, sampleRate: 48_000, hostTime: host) { c, dest in
             for i in 0..<dest.count { dest[i] = base + Float(c) }
@@ -47,9 +43,8 @@ struct AudioSampleRingTests {
         let ring = AudioSampleRing(slotCount: 2, maxFramesPerSlot: 4, maxChannels: 1)
         #expect(push(ring, base: 1, channels: 1, frames: 1, host: 1))
         #expect(push(ring, base: 2, channels: 1, frames: 1, host: 2))
-        #expect(!push(ring, base: 3, channels: 1, frames: 1, host: 3))  // full
+        #expect(!push(ring, base: 3, channels: 1, frames: 1, host: 3))
         #expect(ring.droppedCount == 1)
-        // Draining one frees a slot for the next write.
         #expect(ring.read { _, _ in })
         #expect(push(ring, base: 4, channels: 1, frames: 1, host: 4))
         #expect(ring.droppedCount == 1)
@@ -81,7 +76,6 @@ struct AudioSampleRingTests {
 
     @Test func wraparoundReusesSlotsCorrectly() {
         let ring = AudioSampleRing(slotCount: 3, maxFramesPerSlot: 2, maxChannels: 1)
-        // Cycle well past slotCount so the monotonic indices wrap the physical slots many times.
         for i in 0..<50 {
             #expect(push(ring, base: Float(i), channels: 1, frames: 1, host: UInt64(i)))
             var value: Float = -1
@@ -170,12 +164,9 @@ struct AudioSampleRingTests {
     }
 
     @Test func concurrentProducerConsumerLosesNothing() async {
-        // The producer emits a strictly increasing host time per buffer and RETRIES the same index whenever
-        // the ring is momentarily full (the consumer runs at a lower priority and lags), so nothing is lost:
-        // the consumer must observe exactly that sequence with no gaps, duplicates, or reorderings — the SPSC
-        // invariant under real thread races. (A transient-full retry legitimately bumps droppedCount, which
-        // is why loss is proven by the observed sequence, not by the drop count — in production the RT
-        // producer does not retry and a full ring IS a real drop.)
+        // The producer retries on a transient full ring (which legitimately bumps droppedCount), so
+        // loss is proven by the consumer observing the exact host-time sequence, not by the drop count —
+        // in production the RT producer never retries and a full ring is a real drop.
         let ring = AudioSampleRing(slotCount: 256, maxFramesPerSlot: 16, maxChannels: 1)
         let total = 200_000
         let producer = Task.detached(priority: .high) {

@@ -50,21 +50,9 @@ final class WebCustomDataTests: XCTestCase {
         XCTAssertEqual(WebCustomData.vscodeIsFromEmptySelection(data), false)
     }
 
-    func testNoVSCodeEntryReturnsNil() {
-        // Obsidian (and other Electron editors) write web-custom-data keyed by content type, with no
-        // emptiness flag. `nil` means "not a VS Code-family editor" — the caller trusts such a copy, because
-        // a genuinely empty selection there copies nothing and is caught by the changeCount timeout before
-        // the trust check runs.
-        let data = pickle([("text/markdown", "some selected text")])
-        XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(data))
-    }
-
-    func testNilAndMalformedDataReturnNil() {
-        XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(nil))
-        XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(Data([0x01, 0x02, 0x03])))
-        XCTAssertNil(WebCustomData.vscodeIsFromEmptySelection(Data()))
-    }
-
+    // Obsidian (and other Electron editors) write web-custom-data keyed by content type, with no
+    // emptiness flag, nil data, and malformed pickle bytes are all exercised end-to-end below via
+    // copyIsTrustworthySelection, the only production caller of vscodeIsFromEmptySelection.
     func testCopyTrustDiscardsOnlyVSCodeEmptySelection() {
         func vscode(_ empty: Bool) -> Data {
             pickle([("vscode-editor-data",
