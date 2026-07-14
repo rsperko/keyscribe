@@ -21,6 +21,7 @@ struct AIConnectionDraft: Equatable {
         var baseURL: String
         var authMethod: Connection.AuthMethod
         var tokenCommand: String
+        var wireAPI: Connection.WireAPI
     }
 
     var name: String
@@ -30,6 +31,7 @@ struct AIConnectionDraft: Equatable {
     var authMethod: Connection.AuthMethod
     var apiKey: String
     var tokenCommand: String
+    var wireAPI: Connection.WireAPI
     var availableModels: [String]
     var modelDiscoveryState: ModelDiscoveryState?
     // Stored, not derived from baseURL — a typed custom URL matching a hosted preset would otherwise
@@ -45,6 +47,7 @@ struct AIConnectionDraft: Equatable {
         authMethod: Connection.AuthMethod = AIServiceCatalog.defaultPreset.defaultAuthMethod,
         apiKey: String = "",
         tokenCommand: String = AIServiceCatalog.defaultPreset.defaultTokenCommand ?? "",
+        wireAPI: Connection.WireAPI = AIServiceCatalog.defaultPreset.wireAPI,
         availableModels: [String] = [],
         modelDiscoveryState: ModelDiscoveryState? = nil
     ) {
@@ -55,6 +58,7 @@ struct AIConnectionDraft: Equatable {
         self.authMethod = authMethod
         self.apiKey = apiKey
         self.tokenCommand = tokenCommand
+        self.wireAPI = wireAPI
         self.availableModels = availableModels
         self.modelDiscoveryState = modelDiscoveryState
         self.presetId = Self.derivePresetId(provider: provider, baseURL: baseURL, authMethod: authMethod)
@@ -85,6 +89,7 @@ struct AIConnectionDraft: Equatable {
             authMethod: connection.authMethod,
             apiKey: apiKey,
             tokenCommand: connection.tokenCommand ?? "",
+            wireAPI: connection.wireAPI,
             availableModels: availableModels,
             modelDiscoveryState: modelDiscoveryState)
     }
@@ -243,7 +248,7 @@ struct AIConnectionDraft: Equatable {
     mutating func applyPreset(_ preset: ConnectionPreset, updateDefaultName: Bool) {
         guard preset.id != presetId else { return }
         stashedServiceValues[presetId] = ServiceValues(
-            model: model, baseURL: baseURL, authMethod: authMethod, tokenCommand: tokenCommand)
+            model: model, baseURL: baseURL, authMethod: authMethod, tokenCommand: tokenCommand, wireAPI: wireAPI)
         if updateDefaultName, ConnectionPreset.all.contains(where: { $0.name == name }) {
             name = preset.name
         }
@@ -254,10 +259,12 @@ struct AIConnectionDraft: Equatable {
             baseURL = restored.baseURL
             authMethod = restored.authMethod
             tokenCommand = restored.tokenCommand
+            wireAPI = restored.wireAPI
         } else {
             model = preset.defaultModel
             baseURL = preset.baseURL ?? ""
             tokenCommand = preset.defaultTokenCommand ?? ""
+            wireAPI = preset.wireAPI
         }
         // A disallowed token command survives on a non-managed preset (hand-edited TOML keeps its command);
         // any other disallowed method snaps to the preset's default.
@@ -314,7 +321,8 @@ struct AIConnectionDraft: Equatable {
             model: model.trimmingCharacters(in: .whitespacesAndNewlines),
             keyRef: keyRef,
             authMethod: effectiveAuthMethod,
-            tokenCommand: effectiveAuthMethod == .tokenCommand && !command.isEmpty ? command : nil)
+            tokenCommand: effectiveAuthMethod == .tokenCommand && !command.isEmpty ? command : nil,
+            wireAPI: wireAPI)
         if provider == .openaiCompatible {
             let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             connection.baseUrl = trimmedBaseURL.isEmpty ? nil : trimmedBaseURL

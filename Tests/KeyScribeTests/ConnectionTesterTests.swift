@@ -79,7 +79,7 @@ struct ConnectionTesterTests {
         #expect(await tester.test(connection) == .failed("The model service returned an error (401)."))
     }
 
-    @Test func chatCompletions404ExplainsTheEndpointRequirement() async {
+    @Test func endpoint404ExplainsTheNextActionWithoutProtocolDetails() async {
         let compat = Connection(
             id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k",
             baseUrl: "http://127.0.0.1:11234/v1")
@@ -88,8 +88,9 @@ struct ConnectionTesterTests {
             Issue.record("expected a 404 to be a failure")
             return
         }
-        #expect(message.contains("Chat Completions API"))
-        #expect(message.contains("/chat/completions"))
+        #expect(message.contains("Check the Base URL"))
+        #expect(!message.contains("API"))
+        #expect(!message.contains("/chat/completions"))
     }
 
     @Test func modelNotFound404PointsAtTheModelID() async {
@@ -239,6 +240,22 @@ struct AIServiceTestStateTests {
 
         model.update(connection, apiKey: nil)
         #expect(model.testState(for: connection.id) == nil)
+    }
+
+    @Test func aPassingTestKeepsProtocolDiscoveryInternal() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = AIServiceSettingsModel(
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
+        let connection = seedConnection(model, in: dir)
+        #expect(connection.wireAPI == .auto)
+
+        model.test(connection)
+        await model.testTask?.value
+
+        #expect(model.testState(for: connection.id) == .passed)
+        #expect(ConnectionStore.loadOrDefault(supportDir: dir).connection(id: connection.id)?.wireAPI == .auto)
     }
 
     @Test func aStaleVerdictLandingAfterAPostTestEditIsDiscarded() async {

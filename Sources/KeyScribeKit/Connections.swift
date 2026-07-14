@@ -11,6 +11,7 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     public var authMethod: AuthMethod
     public var tokenCommand: String?
     public var params: Params
+    public var wireAPI: WireAPI
 
     public enum Provider: String, Codable, Sendable {
         case openai, anthropic, gemini
@@ -29,6 +30,12 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         case apiKey = "api_key"
         case tokenCommand = "token_command"
         case none
+    }
+
+    public enum WireAPI: String, Codable, Sendable {
+        case auto
+        case chatCompletions = "chat_completions"
+        case responses
     }
 
     public struct Params: Codable, Equatable, Sendable {
@@ -64,13 +71,13 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         case baseUrl = "base_url"
         case authMethod = "auth_method"
         case tokenCommand = "token_command"
-        case params
+        case params, wireAPI = "wire_api"
     }
 
     public init(
         id: String, name: String, provider: Provider, model: String,
         keyRef: String, baseUrl: String? = nil, authMethod: AuthMethod? = nil,
-        tokenCommand: String? = nil, params: Params? = nil
+        tokenCommand: String? = nil, params: Params? = nil, wireAPI: WireAPI = .auto
     ) {
         self.id = id
         self.name = name
@@ -81,6 +88,7 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         self.authMethod = authMethod ?? (tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .tokenCommand : .apiKey)
         self.tokenCommand = tokenCommand
         self.params = params ?? provider.defaultParams
+        self.wireAPI = wireAPI
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +103,7 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         authMethod = try c.decodeIfPresent(AuthMethod.self, forKey: .authMethod)
             ?? (tokenCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .tokenCommand : .apiKey)
         params = try c.decodeIfPresent(Params.self, forKey: .params) ?? provider.defaultParams
+        wireAPI = try c.decodeIfPresent(WireAPI.self, forKey: .wireAPI) ?? .auto
     }
 }
 

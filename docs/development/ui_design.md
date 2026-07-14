@@ -390,6 +390,10 @@ capabilities. The sidebar order is fixed:
 General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
+For OpenAI-shaped connections, KeyScribe automatically selects the compatible request format from the endpoint's
+own response. The setup flow never asks people to choose an API protocol, and detection never infers from a
+model name.
+
 ### General
 
 Show the few choices a new user is most likely to need:

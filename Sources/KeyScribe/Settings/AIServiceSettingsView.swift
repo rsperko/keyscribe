@@ -19,12 +19,14 @@ struct ConnectionTester {
 
     static func failureMessage(for error: Error, connection: Connection) -> String {
         if case let ProviderTransportError.http(status, body) = error,
-           status == 404 || status == 405,
            connection.provider == .openai || connection.provider == .openaiCompatible {
-            if OpenAIAPIError.parse(body: body)?.indicatesMissingModel == true {
-                return "The service could not find the model “\(connection.model)”. Check the Model ID — it may be misspelled or unavailable on this endpoint."
+            let apiError = OpenAIAPIError.parse(body: body)
+            if status == 404 || status == 405 {
+                if apiError?.indicatesMissingModel == true {
+                    return "The service could not find the model “\(connection.model)”. Check the Model ID — it may be misspelled or unavailable on this endpoint."
+                }
+                return "This endpoint did not respond to the model request. Check the Base URL and confirm the selected model is available."
             }
-            return "This endpoint did not respond to the Chat Completions API (POST /chat/completions). Check the Base URL — KeyScribe needs a chat model; text-completions-only models will not work."
         }
         return (error as? ProviderTransportError)?.description ?? error.localizedDescription
     }
@@ -189,7 +191,8 @@ final class AIServiceSettingsModel: ObservableObject {
             model: preset.defaultModel,
             keyRef: "keyscribe.llm.\(id)",
             authMethod: preset.defaultAuthMethod,
-            tokenCommand: preset.defaultTokenCommand)
+            tokenCommand: preset.defaultTokenCommand,
+            wireAPI: preset.wireAPI)
         if preset.provider == .openaiCompatible {
             connection.baseUrl = preset.baseURL
         }

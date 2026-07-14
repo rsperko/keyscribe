@@ -12,3 +12,19 @@ actor RequestAdaptationCache {
 
     func reset() { entries.removeAll() }
 }
+
+actor WireAPIOverrideCache {
+    static let shared = WireAPIOverrideCache()
+
+    static func key(for connection: Connection) -> String {
+        [connection.id, connection.model, connection.baseUrl ?? ""].joined(separator: "\n")
+    }
+
+    private var overrides: [String: Connection.WireAPI] = [:]
+
+    func lookup(_ key: String) -> Connection.WireAPI? { overrides[key] }
+
+    func remember(_ wireAPI: Connection.WireAPI, for key: String) { overrides[key] = wireAPI }
+
+    func reset() { overrides.removeAll() }
+}

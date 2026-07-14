@@ -29,7 +29,8 @@ private final class LLMStubProtocol: URLProtocol, @unchecked Sendable {
 
 private func stubbedClient(
     keyProvider: @escaping @Sendable (String) -> String? = { _ in "secret" },
-    cache: RequestAdaptationCache = RequestAdaptationCache()
+    cache: RequestAdaptationCache = RequestAdaptationCache(),
+    wireCache: WireAPIOverrideCache = WireAPIOverrideCache()
 ) -> HTTPLLMClient {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [LLMStubProtocol.self]
@@ -37,7 +38,34 @@ private func stubbedClient(
         session: URLSession(configuration: config),
         keyProvider: { keyProvider($0).map(SecretLookup.found) ?? .absent })
     client.adaptationCache = cache
+    client.wireOverrideCache = wireCache
     return client
+}
+
+private func requiresResponsesBody() -> Data {
+    try! JSONSerialization.data(withJSONObject: [
+        "error": [
+            "message": "This model is only supported in v1/responses and not in v1/chat/completions.",
+            "type": "invalid_request_error",
+        ],
+    ])
+}
+
+private func requiresChatCompletionsBody() -> Data {
+    try! JSONSerialization.data(withJSONObject: [
+        "error": [
+            "message": "This model is only supported in v1/chat/completions and not in v1/responses.",
+            "type": "invalid_request_error",
+        ],
+    ])
+}
+
+private func responsesOK(_ url: URL) -> (HTTPURLResponse, Data) {
+    let data = try! JSONSerialization.data(withJSONObject: [
+        "status": "completed",
+        "output": [["type": "message", "content": [["type": "output_text", "text": "Rewritten."]]]],
+    ])
+    return (resp(url, 200), data)
 }
 
 private func okBody(_ content: String, finishReason: String? = nil) -> Data {
@@ -98,6 +126,316 @@ struct HTTPLLMClientTests {
         _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
 
         #expect(body?["reasoning_effort"] as? String == "none")
+    }
+
+    @Test func responsesWireAPIUsesResponsesEnvelopeAndReadsTypedOutput() async throws {
+        nonisolated(unsafe) var seenURL: String?
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            seenURL = request.url?.absoluteString
+            body = request.decodedBody()
+            let response = try! JSONSerialization.data(withJSONObject: [
+                "status": "completed",
+                "output": [
+                    ["type": "reasoning", "content": []],
+                    ["type": "message", "status": "completed", "content": [
+                        ["type": "output_text", "text": "Rewritten text."],
+                    ]],
+                ],
+            ])
+            return (resp(request.url!, 200), response)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "new-model", keyRef: "k", baseUrl: "https://gateway.example/v1",
+            params: .init(reasoningEffort: "none"), wireAPI: .responses)
+
+        let output = try await stubbedClient().complete(system: "System instruction", user: "User input", connection: connection)
+
+        #expect(output == "Rewritten text.")
+        #expect(seenURL == "https://gateway.example/v1/responses")
+        #expect(body?["instructions"] as? String == "System instruction")
+        #expect(body?["input"] as? String == "User input")
+        #expect(body?["max_output_tokens"] as? Int == 2048)
+        #expect(body?["store"] as? Bool == false)
+        #expect((body?["reasoning"] as? [String: Any])?["effort"] as? String == "none")
+        #expect(body?["messages"] == nil)
+        #expect(body?["temperature"] == nil)
+    }
+
+    @Test func responsesWireAPIAppliesReasoningSafeTokenFloor() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            let response = try! JSONSerialization.data(withJSONObject: [
+                "status": "completed",
+                "output": [["type": "message", "content": [["type": "output_text", "text": "ok"]]]],
+            ])
+            return (resp(request.url!, 200), response)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "reasoner", keyRef: "k", baseUrl: "https://gateway.example/v1",
+            params: .init(maxTokens: 2048, reasoningEffort: "high"), wireAPI: .responses)
+
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        #expect(body?["max_output_tokens"] as? Int == 8192)
+        #expect((body?["reasoning"] as? [String: Any])?["effort"] as? String == "high")
+    }
+
+    @Test func responsesWireAPIDoesNotRetryWithoutStoreFalse() async {
+        nonisolated(unsafe) var bodies: [[String: Any]] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody() ?? [:]
+            bodies.append(body)
+            return (resp(request.url!, 400), errBody("unsupported_parameter", "store"))
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "local", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected rejected store parameter")
+        } catch ProviderTransportError.http(let status, _) {
+            #expect(status == 400)
+        } catch {
+            Issue.record("expected HTTP error, got \(error)")
+        }
+        #expect(bodies.count == 1)
+        #expect(bodies.first?["store"] as? Bool == false)
+    }
+
+    @Test func adaptationCacheDoesNotCrossWireAPIs() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        nonisolated(unsafe) var responseBody: [String: Any]?
+        nonisolated(unsafe) var chatAttempt = 0
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody() ?? [:]
+            if request.url?.path.hasSuffix("/chat/completions") == true {
+                chatAttempt += 1
+                if chatAttempt == 1 {
+                    return (resp(request.url!, 400), errBody("unsupported_parameter", "reasoning_effort"))
+                }
+                return (resp(request.url!, 200), okBody("ok"))
+            }
+            responseBody = body
+            let response = try! JSONSerialization.data(withJSONObject: [
+                "status": "completed",
+                "output": [["type": "message", "content": [["type": "output_text", "text": "ok"]]]],
+            ])
+            return (resp(request.url!, 200), response)
+        }
+        let chat = Connection(id: "service", name: "Service", provider: .openai, model: "model", keyRef: "k")
+        var responses = chat
+        responses.wireAPI = .responses
+
+        _ = try await client.complete(system: "s", user: "u", connection: chat)
+        _ = try await client.complete(system: "s", user: "u", connection: responses)
+
+        #expect((responseBody?["reasoning"] as? [String: Any])?["effort"] as? String == "none")
+    }
+
+    @Test func incompleteResponsesOutputIsTruncated() async {
+        LLMStubProtocol.handler = { request in
+            let response = try! JSONSerialization.data(withJSONObject: [
+                "status": "incomplete",
+                "output": [["type": "message", "content": [["type": "output_text", "text": "Partial"]]]],
+            ])
+            return (resp(request.url!, 200), response)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "new-model", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected truncated Responses output")
+        } catch ProviderTransportError.truncated {
+        } catch {
+            Issue.record("expected truncated Responses output, got \(error)")
+        }
+    }
+
+    @Test func autoWireAPIUpgradesToResponsesWhenEndpointRequiresIt() async throws {
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/chat/completions") {
+                return (resp(request.url!, 404), requiresResponsesBody())
+            }
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1")   // wireAPI defaults to .auto
+
+        let output = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        #expect(output == "Rewritten.")
+        #expect(paths.count == 2)
+        #expect(paths.first?.hasSuffix("/chat/completions") == true)
+        #expect(paths.last?.hasSuffix("/responses") == true)
+    }
+
+    @Test func autoWireAPIUpgradesToResponsesOnMethodNotAllowed() async throws {
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/chat/completions") {
+                return (resp(request.url!, 405), requiresResponsesBody())
+            }
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1")
+
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        #expect(paths.map { $0.hasSuffix("/responses") } == [false, true])
+    }
+
+    @Test func autoWireAPIUpgradesWhenAProxyUsesTopLevelDetail() async throws {
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/chat/completions") {
+                let body = try! JSONSerialization.data(withJSONObject: [
+                    "detail": "This model requires the /responses endpoint.",
+                ])
+                return (resp(request.url!, 422), body)
+            }
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1")
+
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        #expect(paths.map { $0.hasSuffix("/responses") } == [false, true])
+    }
+
+    // Full proxy-envelope reproduction: a string-valued `error` with the actionable remediation in a
+    // top-level `reason`, returned as a live 400. `auto` must parse it, upgrade chat → responses, return
+    // the output, cache the wire override, and send later rewrites straight to /responses.
+    @Test func autoWireAPIUpgradesForAProxyReasonEnvelopeAndCachesIt() async throws {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        nonisolated(unsafe) var paths: [String] = []
+        let proxyReject = try! JSONSerialization.data(withJSONObject: [
+            "error": "BadRequestError",
+            "location": "proxy",
+            "description": "The proxy threw an 'BadRequestError' error",
+            "reason": "Model responses-only is not supported on /v1/chat/completions because it bypasses prompt caching on the first turn. Please use /v1/responses (OpenAI Responses API) instead.",
+        ])
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/chat/completions") {
+                return (resp(request.url!, 400), proxyReject)
+            }
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1")   // wireAPI defaults to .auto
+
+        let output = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(output == "Rewritten.")
+        #expect(paths.map { $0.hasSuffix("/chat/completions") } == [true, false])
+        #expect(paths.map { $0.hasSuffix("/responses") } == [false, true])
+        #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == .responses)
+
+        // A later rewrite on the same host skips /chat/completions entirely.
+        paths.removeAll()
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(paths.count == 1)
+        #expect(paths.first?.hasSuffix("/responses") == true)
+    }
+
+    @Test func autoWireAPIDoesNotUpgradeForAnUnrelatedResponsesReference() async {
+        nonisolated(unsafe) var paths: [String] = []
+        let unrelated = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "See /responses documentation for details."]
+        ])
+        LLMStubProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            return (resp(request.url!, 400), unrelated)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "model", keyRef: "k", baseUrl: "https://gateway.example/v1")
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        }
+
+        #expect(paths.count == 1)
+        #expect(paths[0].hasSuffix("/chat/completions"))
+    }
+
+    @Test func autoWireAPICachesTheUpgradeSoLaterRewritesSkipChat() async throws {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        nonisolated(unsafe) var chatHits = 0
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("/chat/completions") {
+                chatHits += 1
+                return (resp(request.url!, 404), requiresResponsesBody())
+            }
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1")
+
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+
+        #expect(chatHits == 1)   // second rewrite goes straight to /responses
+        #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == .responses)
+    }
+
+    @Test func responsesFallbackToChatCompletionsWhenTheEndpointRequiresIt() async throws {
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/responses") {
+                return (resp(request.url!, 405), requiresChatCompletionsBody())
+            }
+            return (resp(request.url!, 200), okBody("ok"))
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        #expect(try await stubbedClient().complete(system: "s", user: "u", connection: connection) == "ok")
+        #expect(paths.map { $0.hasSuffix("/chat/completions") } == [false, true])
+    }
+
+    @Test func responsesDoesNotSpinRemediationOnANon400Error() async {
+        nonisolated(unsafe) var requests = 0
+        LLMStubProtocol.handler = { request in
+            requests += 1
+            return (resp(request.url!, 422), errBody("unsupported_parameter", "temperature"))
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(requests == 1)   // a non-400 that is not a wire-API redirect fails fast, no wasted retries
     }
 
     @Test func geminiSendsItsDefaultMinimumThinkingLevel() async throws {

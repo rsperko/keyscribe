@@ -66,6 +66,25 @@ struct OpenAICompatTests {
         #expect(error?.message?.contains("reasoning_effort") == true)
     }
 
+    // A proxy can return a string-valued `error` (a bare type name) with the actionable remediation in a
+    // top-level `reason` field. Parse `reason` as the message so the wire-API auto-upgrade can fire; the
+    // generic `description` must not win over it, and the string `error` is kept as the code.
+    @Test func parsesTopLevelReasonFromAStringErrorEnvelope() {
+        let body = #"""
+        {
+          "error": "BadRequestError",
+          "location": "proxy",
+          "description": "The proxy threw an 'BadRequestError' error",
+          "reason": "Model responses-only is not supported on /v1/chat/completions because it bypasses prompt caching on the first turn. Please use /v1/responses (OpenAI Responses API) instead."
+        }
+        """#
+        let error = OpenAIAPIError.parse(body: body)
+        #expect(error?.message?.contains("Please use /v1/responses") == true)
+        #expect(error?.code == "BadRequestError")
+        #expect(error?.indicatesRequiresResponsesAPI == true)
+        #expect(error?.indicatesRequiresChatCompletionsAPI == false)
+    }
+
     @Test func parsesIntegerCode() {
         let body = #"{"error":{"code":400,"message":"reasoning_effort not supported"}}"#
         #expect(OpenAIAPIError.parse(body: body)?.code == "400")
@@ -201,6 +220,45 @@ struct OpenAICompatTests {
         let start = RequestAdaptations.default(for: .openaiCompatible)
         #expect(remediatedAdaptations(start, for: OpenAIAPIError(code: nil, param: nil, message: "The system is busy, try again.")) == nil)
         #expect(remediatedAdaptations(start, for: OpenAIAPIError(code: nil, param: nil, message: "Your account role lacks access.")) == nil)
+    }
+
+    @Test func detectsAnEndpointThatRequiresTheResponsesAPI() {
+        let signals = [
+            "This model is only supported in v1/responses and not in v1/chat/completions.",
+            "This is not a chat model. Did you mean to use v1/responses?",
+            "Use the Responses API for this model.",
+            "This model requires the responses endpoint.",
+        ]
+        for message in signals {
+            #expect(OpenAIAPIError(code: nil, param: nil, message: message).indicatesRequiresResponsesAPI, "\(message)")
+        }
+        // Ordinary errors must not trip it — no false switch away from Chat Completions.
+        #expect(!OpenAIAPIError(code: "model_not_found", param: nil, message: "The model `x` does not exist").indicatesRequiresResponsesAPI)
+        #expect(!OpenAIAPIError(code: nil, param: "temperature", message: "Unsupported parameter: temperature").indicatesRequiresResponsesAPI)
+        #expect(!OpenAIAPIError(code: nil, param: nil, message: nil).indicatesRequiresResponsesAPI)
+    }
+
+    // The canonical wrong-endpoint error names BOTH endpoints. Each direction must attribute the message to
+    // the endpoint it recommends and NOT the one it rejects — otherwise the responses path could read a
+    // "use responses" error as "use chat" and bounce.
+    @Test func requiredAPIDetectorsAreMutuallyExclusive() {
+        func err(_ m: String) -> OpenAIAPIError { OpenAIAPIError(code: nil, param: nil, message: m) }
+
+        let useResponses = err("This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/responses?")
+        #expect(useResponses.indicatesRequiresResponsesAPI)
+        #expect(!useResponses.indicatesRequiresChatCompletionsAPI)
+
+        let useResponsesBoth = err("This model is only supported in v1/responses and not in v1/chat/completions.")
+        #expect(useResponsesBoth.indicatesRequiresResponsesAPI)
+        #expect(!useResponsesBoth.indicatesRequiresChatCompletionsAPI)
+
+        let useChat = err("This model is only supported in v1/chat/completions and not in v1/responses.")
+        #expect(useChat.indicatesRequiresChatCompletionsAPI)
+        #expect(!useChat.indicatesRequiresResponsesAPI)
+
+        let useChatType = err("This is not a responses model. Use the chat completions endpoint.")
+        #expect(useChatType.indicatesRequiresChatCompletionsAPI)
+        #expect(!useChatType.indicatesRequiresResponsesAPI)
     }
 
     @Test func cleanStripsReasoningTags() {

@@ -353,6 +353,15 @@ user just adds a key; reopening the connection recovers the preset from its base
 | `token_command` | Run `token_command` before requests and send its output as `Authorization: Bearer …`. The generated token is kept in memory only and never written to disk. |
 | `none` | Send no Authorization header. Valid for local/no-auth OpenAI-compatible endpoints. |
 
+For OpenAI-shaped connections, KeyScribe automatically selects the compatible request format for each model
+endpoint. Responses requests map the rewrite system instruction to `instructions` and the user text to `input`,
+send `reasoning.effort` when set, and size `max_output_tokens` with the reasoning-safe floor when a reasoning
+effort is active. Every Responses request is stateless — `store = false` is load-bearing for privacy and is never
+dropped: an endpoint that rejects it fails the rewrite rather than silently allowing server-side storage. A
+gateway that rejects `reasoning` self-heals by dropping it (remembered per host). KeyScribe reads typed
+`output_text` content and treats an incomplete response as a rewrite failure, preserving the existing validation,
+retry, and local-fallback path.
+
 `token_command` stdout may be a raw token on the first line, `Bearer <token>`, OAuth-style JSON
 (`access_token`, `token`, or `id_token`), or Kubernetes ExecCredential-style JSON
 (`status.token`). If stdout includes `expires_in`, `expiration`, `expires_at`, or

@@ -206,6 +206,20 @@ struct AIServiceConnectorTests {
         #expect(model.testState(for: connection.id) == nil)   // never claimed as working on add
     }
 
+    @Test func addServicePreservesThePresetWireAPI() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = settingsModel(support: support)
+        let preset = ConnectionPreset(
+            id: "responses", name: "Responses", provider: .openaiCompatible,
+            baseURL: "https://gateway.example/v1", defaultModel: "new-model", wireAPI: .responses)
+
+        model.addService(preset: preset)
+
+        let connection = try #require(ConnectionStore.loadOrDefault(supportDir: support).connections.first)
+        #expect(connection.wireAPI == .responses)
+    }
+
     @Test func firstServiceOfferSurvivesSavingItsKeyUntilTheTestPasses() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }

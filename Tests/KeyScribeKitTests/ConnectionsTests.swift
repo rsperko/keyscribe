@@ -163,6 +163,24 @@ struct ConnectionsTests {
         #expect(c.params.geminiThinkingLevel == "minimal")
     }
 
+    @Test func wireAPIDefaultsToAutoAndDecodesResponses() throws {
+        let defaultConnection = connection(provider: .openaiCompatible, model: "local")
+        #expect(defaultConnection.wireAPI == .auto)
+
+        let t = """
+        schema_version = 1
+        [[connection]]
+        id = "responses"
+        name = "Responses"
+        provider = "openai_compatible"
+        model = "new-model"
+        key_ref = "k"
+        base_url = "https://gateway.example/v1"
+        wire_api = "responses"
+        """
+        #expect(try ConnectionStore.decode(from: t).connection(id: "responses")?.wireAPI == .responses)
+    }
+
     @Test func absentParamsDecodeToProviderDefaults() throws {
         func decode(_ provider: String) throws -> Connection? {
             let t = """

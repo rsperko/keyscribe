@@ -35,6 +35,16 @@ struct AIConnectionDraftTests {
         #expect(draft.selectedPreset.id == preset.id)
     }
 
+    @Test func draftPreservesTheConfiguredWireAPI() {
+        let stored = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible, model: "new-model",
+            keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+        let draft = AIConnectionDraft(connection: stored)
+
+        #expect(draft.wireAPI == .responses)
+        #expect(draft.connection(id: stored.id, keyRef: stored.keyRef).wireAPI == .responses)
+    }
+
     @Test func derivePresetIdKeepsAManagedPresetThatAllowsTheStoredAuth() {
         let lineup = [noAuthGateway, keyedGateway, ConnectionPreset.custom]
 

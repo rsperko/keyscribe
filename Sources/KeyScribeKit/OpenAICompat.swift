@@ -43,9 +43,6 @@ public struct RequestAdaptations: Equatable, Sendable {
 public struct OpenAIAPIError: Equatable, Sendable {
     public let code: String?
     public let param: String?
-    // The prose error message. A proxy fronting a non-OpenAI backend (Azure, a vLLM gateway, a corporate
-    // relay) often rejects a parameter with a plain 400 that carries no machine-readable `param`/`code` —
-    // only this string. Captured so remediation can still recover by scanning it.
     public let message: String?
 
     public init(code: String?, param: String?, message: String? = nil) {
@@ -66,12 +63,28 @@ public struct OpenAIAPIError: Equatable, Sendable {
         return OpenAIAPIError(code: code, param: param, message: message)
     }
 
-    // The `error` object, whether the body is a plain `{"error": {...}}` or a single-element top-level
-    // array `[{"error": {...}}]` — the shape a proxy fronting another backend (e.g. one wrapping Gemini)
-    // can emit. Anything else (a bare list, a non-error object) yields nil.
     private static func errorObject(in json: Any) -> [String: Any]? {
-        if let object = json as? [String: Any] { return object["error"] as? [String: Any] }
+        if let object = json as? [String: Any] {
+            if let error = object["error"] as? [String: Any] { return error }
+            // Some proxies return a string-valued `error` (a bare type name) and put the actionable text in
+            // a top-level field. Synthesize an error object from the most-actionable one, most-specific
+            // first; `reason` beats `description` because a proxy's `description` is generic boilerplate
+            // while `reason` carries the remediation. A string `error` alone (no actionable text) stays
+            // unparseable so an opaque body isn't mistaken for a structured error.
+            if let message = topLevelMessage(in: object) {
+                var synthesized: [String: Any] = ["message": message]
+                if let code = object["error"] as? String { synthesized["code"] = code }
+                return synthesized
+            }
+        }
         if let array = json as? [Any], let first = array.first { return errorObject(in: first) }
+        return nil
+    }
+
+    private static func topLevelMessage(in object: [String: Any]) -> String? {
+        for key in ["message", "detail", "reason", "description"] {
+            if let value = object[key] as? String, !value.isEmpty { return value }
+        }
         return nil
     }
 
@@ -80,6 +93,42 @@ public struct OpenAIAPIError: Equatable, Sendable {
         case "model_not_found", "model_not_available", "invalid_model": true
         default: param == "model"
         }
+    }
+
+    public var indicatesRequiresResponsesAPI: Bool {
+        guard let message = message?.lowercased() else { return false }
+        if message.contains("not a chat model") { return true }   // wrong model *type* names its own subject
+        return Self.pointsTo(Self.responsesCores, over: Self.chatCores, in: message)
+    }
+
+    public var indicatesRequiresChatCompletionsAPI: Bool {
+        guard let message = message?.lowercased() else { return false }
+        if message.contains("not a responses model") { return true }
+        return Self.pointsTo(Self.chatCores, over: Self.responsesCores, in: message)
+    }
+
+    private static let responsesCores = ["responses"]
+    private static let chatCores = ["chat/completions", "chat completions", "chat-completions"]
+    // Phrases that introduce the endpoint the caller should switch TO. Kept off bare "supported in" so the
+    // negation "not supported in {failed}" can never read as a recommendation of the failed endpoint.
+    private static let redirectLeads = [
+        "did you mean to use", "did you mean", "please use", "use the", "use v1", "use /", "switch to",
+        "only supported in", "only available in", "must use", "requires",
+    ]
+
+    // True when a redirect phrase is followed by the target endpoint BEFORE any mention of the other. The
+    // canonical wrong-endpoint error names both endpoints ("not supported in {A}. Did you mean {B}?"), so a
+    // plain token match is ambiguous; attributing the message to the endpoint a redirect actually points at
+    // makes the two detectors mutually exclusive on that shape.
+    private static func pointsTo(_ target: [String], over other: [String], in message: String) -> Bool {
+        for lead in redirectLeads {
+            guard let leadRange = message.range(of: lead) else { continue }
+            let after = message[leadRange.upperBound...]
+            guard let targetPos = target.compactMap({ after.range(of: $0)?.lowerBound }).min() else { continue }
+            let otherPos = other.compactMap { after.range(of: $0)?.lowerBound }.min()
+            if otherPos == nil || targetPos < otherPos! { return true }
+        }
+        return false
     }
 }
 
@@ -130,7 +179,7 @@ private func adaptationDroppingParam(
     case "temperature":
         guard current.includeTemperature else { return nil }
         next.includeTemperature = false
-    case "reasoning_effort":
+    case "reasoning_effort", "reasoning", "reasoning.effort":
         guard current.includeReasoningEffort else { return nil }
         next.includeReasoningEffort = false
     default:

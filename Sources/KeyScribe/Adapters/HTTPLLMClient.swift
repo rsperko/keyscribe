@@ -12,6 +12,7 @@ struct HTTPLLMClient: LLMClient {
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared
     var adaptationCache: RequestAdaptationCache = .shared
+    var wireOverrideCache: WireAPIOverrideCache = .shared
     var now: @Sendable () -> Date = { Date() }
 
     private static let maxRemediations = 4
@@ -50,7 +51,24 @@ struct HTTPLLMClient: LLMClient {
         }
         switch connection.provider {
         case .openai, .openaiCompatible:
-            return try await completeOpenAI(system: system, user: user, connection: connection, key: key)
+            switch connection.wireAPI {
+            case .responses:
+                return try await completeResponses(system: system, user: user, connection: connection, key: key)
+            case .chatCompletions:
+                return try await completeOpenAI(
+                    system: system, user: user, connection: connection, key: key, allowResponsesUpgrade: true)
+            case .auto:
+                // Discovered protocol: skip straight to Responses if this host already told us to; otherwise
+                // try Chat Completions and upgrade on the endpoint's own "use /responses" signal.
+                if await wireOverrideCache.lookup(Self.hostKey(for: connection)) == .responses {
+                    var responsesConn = connection
+                    responsesConn.wireAPI = .responses
+                    return try await completeResponses(
+                        system: system, user: user, connection: responsesConn, key: key)
+                }
+                return try await completeOpenAI(
+                    system: system, user: user, connection: connection, key: key, allowResponsesUpgrade: true)
+            }
         case .anthropic:
             let request = try buildRequest(
                 system: system, user: user, connection: connection, key: key,
@@ -88,7 +106,9 @@ struct HTTPLLMClient: LLMClient {
         }
     }
 
-    private func completeOpenAI(system: String, user: String, connection: Connection, key: String?) async throws -> String {
+    private func completeOpenAI(
+        system: String, user: String, connection: Connection, key: String?, allowResponsesUpgrade: Bool
+    ) async throws -> String {
         let cacheKey = adaptationCacheKey(for: connection)
         var adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
         var attempts = 0
@@ -97,11 +117,48 @@ struct HTTPLLMClient: LLMClient {
                 system: system, user: user, connection: connection, key: key, adaptations: adaptations)
             do {
                 let data = try await transport.send(request)
-                return try parse(data, provider: connection.provider)
-            } catch let ProviderTransportError.http(status, body) where status == 400 {
-                guard attempts < Self.maxRemediations,
-                      let apiError = OpenAIAPIError.parse(body: body),
-                      let next = remediatedAdaptations(adaptations, for: apiError) else {
+                return try parse(data, provider: connection.provider, wireAPI: .chatCompletions)
+            } catch let ProviderTransportError.http(status, body) where status == 400 || status == 404 || status == 405 || status == 422 {
+                let apiError = OpenAIAPIError.parse(body: body)
+                if allowResponsesUpgrade, apiError?.indicatesRequiresResponsesAPI == true {
+                    await wireOverrideCache.remember(.responses, for: Self.hostKey(for: connection))
+                    var responsesConn = connection
+                    responsesConn.wireAPI = .responses
+                    return try await completeResponses(
+                        system: system, user: user, connection: responsesConn, key: key)
+                }
+                guard status == 400, attempts < Self.maxRemediations,
+                      let apiError, let next = remediatedAdaptations(adaptations, for: apiError) else {
+                    throw ProviderTransportError.http(status, body: body)
+                }
+                adaptations = next
+                await adaptationCache.remember(next, for: cacheKey)
+                attempts += 1
+            }
+        }
+    }
+
+    private func completeResponses(system: String, user: String, connection: Connection, key: String?) async throws -> String {
+        let cacheKey = adaptationCacheKey(for: connection)
+        var adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
+        var attempts = 0
+        while true {
+            let request = try buildRequest(
+                system: system, user: user, connection: connection, key: key, adaptations: adaptations)
+            do {
+                let data = try await transport.send(request)
+                return try parse(data, provider: connection.provider, wireAPI: .responses)
+            } catch let ProviderTransportError.http(status, body) where status == 400 || status == 404 || status == 405 || status == 422 {
+                let apiError = OpenAIAPIError.parse(body: body)
+                if apiError?.indicatesRequiresChatCompletionsAPI == true {
+                    await wireOverrideCache.remember(.chatCompletions, for: Self.hostKey(for: connection))
+                    var chatConnection = connection
+                    chatConnection.wireAPI = .chatCompletions
+                    return try await completeOpenAI(
+                        system: system, user: user, connection: chatConnection, key: key, allowResponsesUpgrade: false)
+                }
+                guard status == 400, attempts < Self.maxRemediations,
+                      let apiError, let next = remediatedAdaptations(adaptations, for: apiError) else {
                     throw ProviderTransportError.http(status, body: body)
                 }
                 adaptations = next
@@ -115,7 +172,12 @@ struct HTTPLLMClient: LLMClient {
     // system-fold). Editing a connection's base URL points it at a different server, so the base URL is
     // part of the identity — keying on id+model alone would replay adaptations learned from the old host.
     private func adaptationCacheKey(for connection: Connection) -> String {
-        [connection.id, connection.model, connection.baseUrl ?? ""].joined(separator: "\n")
+        [connection.id, connection.model, connection.baseUrl ?? "", connection.wireAPI.rawValue]
+            .joined(separator: "\n")
+    }
+
+    static func hostKey(for connection: Connection) -> String {
+        WireAPIOverrideCache.key(for: connection)
     }
 
     private func buildRequest(
@@ -128,12 +190,32 @@ struct HTTPLLMClient: LLMClient {
         case .openai, .openaiCompatible:
             let base = connection.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines).removingTrailingSlash
                 ?? (connection.provider == .openai ? "https://api.openai.com/v1" : nil)
-            guard let base, !base.isEmpty, let url = URL(string: base + "/chat/completions") else {
+            let endpoint = connection.wireAPI == .responses ? "/responses" : "/chat/completions"
+            guard let base, !base.isEmpty, let url = URL(string: base + endpoint) else {
                 throw ProviderTransportError.missingBaseURL
             }
             var req = jsonRequest(url)
             transport.applyAuth(key, for: connection.provider, to: &req)
             applyOpenRouterHeaders(to: &req, host: url.host())
+            if connection.wireAPI == .responses {
+                let reasoningEffort = adaptations.includeReasoningEffort ? connection.params.reasoningEffort : nil
+                // Reasoning tokens are billed against max_output_tokens on Responses, so a reasoning model
+                // needs the same safety floor the Chat path applies — otherwise reasoning can consume the
+                // whole budget and the reply comes back status:"incomplete".
+                let usesReasoning = reasoningEffort.map { $0.lowercased() != "none" } ?? false
+                let reasoningModel = adaptations.indicatesReasoningModel || usesReasoning
+                let sizedTokens = reasoningModel ? reasoningSafeMaxTokens(maxTokens) : maxTokens
+                var payload: [String: Any] = [
+                    "model": connection.model,
+                    "instructions": system,
+                    "input": user,
+                    "max_output_tokens": sizedTokens,
+                ]
+                payload["store"] = false
+                if let reasoningEffort { payload["reasoning"] = ["effort": reasoningEffort] }
+                req.httpBody = try body(payload)
+                return req
+            }
             let sizedTokens = adaptations.indicatesReasoningModel ? reasoningSafeMaxTokens(maxTokens) : maxTokens
             var payload: [String: Any] = [
                 "model": connection.model,
@@ -200,7 +282,9 @@ struct HTTPLLMClient: LLMClient {
 
     private static let openRouterReferer = "https://keyscribe.app"
 
-    private func parse(_ data: Data, provider: Connection.Provider) throws -> String {
+    private func parse(
+        _ data: Data, provider: Connection.Provider, wireAPI: Connection.WireAPI = .chatCompletions
+    ) throws -> String {
         // A proxy fronting another backend can wrap the whole payload in a single-element top-level array
         // (`[{...}]`), the same shape it uses for errors. Unwrap it so a success body is read, not rejected.
         guard let root = try? JSONSerialization.jsonObject(with: data),
@@ -211,6 +295,9 @@ struct HTTPLLMClient: LLMClient {
         case .openai, .openaiCompatible:
             if json["error"] is [String: Any] {
                 throw ProviderTransportError.http(400, body: String(data: data, encoding: .utf8))
+            }
+            if wireAPI == .responses {
+                return try responsesText(from: json)
             }
             guard let choices = json["choices"] as? [[String: Any]],
                   let choice = choices.first,
@@ -258,6 +345,22 @@ struct HTTPLLMClient: LLMClient {
             return joined.isEmpty ? nil : joined
         }
         return nil
+    }
+
+    private func responsesText(from json: [String: Any]) throws -> String {
+        if (json["status"] as? String) == "incomplete" { throw ProviderTransportError.truncated }
+        guard (json["status"] as? String) == "completed",
+              let output = json["output"] as? [[String: Any]] else {
+            throw ProviderTransportError.badResponse
+        }
+        let text = output
+            .filter { ($0["type"] as? String) == "message" }
+            .flatMap { $0["content"] as? [[String: Any]] ?? [] }
+            .filter { ($0["type"] as? String) == "output_text" }
+            .compactMap { $0["text"] as? String }
+            .joined()
+        guard let cleaned = ReasoningOutput.clean(text) else { throw ProviderTransportError.badResponse }
+        return cleaned
     }
 
     private func anthropicText(from blocks: [[String: Any]]) -> String? {

@@ -18,6 +18,7 @@ public struct ConnectionPreset: Identifiable, Equatable, Sendable {
     public let allowedAuthMethods: [Connection.AuthMethod]
     public let defaultAuthMethod: Connection.AuthMethod
     public let defaultTokenCommand: String?
+    public let wireAPI: Connection.WireAPI
     public let pickerLabelOverride: String?
 
     public init(
@@ -26,6 +27,7 @@ public struct ConnectionPreset: Identifiable, Equatable, Sendable {
         allowedAuthMethods: [Connection.AuthMethod] = [.apiKey],
         defaultAuthMethod: Connection.AuthMethod = .apiKey,
         defaultTokenCommand: String? = nil,
+        wireAPI: Connection.WireAPI = .auto,
         pickerLabelOverride: String? = nil
     ) {
         self.id = id
@@ -37,6 +39,7 @@ public struct ConnectionPreset: Identifiable, Equatable, Sendable {
         self.allowedAuthMethods = allowedAuthMethods
         self.defaultAuthMethod = defaultAuthMethod
         self.defaultTokenCommand = defaultTokenCommand
+        self.wireAPI = wireAPI
         self.pickerLabelOverride = pickerLabelOverride
     }
 
