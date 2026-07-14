@@ -56,7 +56,9 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | Processing status | HUD/status states: listening, transcribing, rewriting, inserted, copied instead, fallback, no-speech, error. Never show a raw transcript while a rewrite is pending. |
 | Correction action | History + global correction panel: `Add to Dictionary`, `Create Replacement` — pre-filled, showing the resulting rule and its scope. |
 | Vocabulary feedback | Settings and the global correction panel: a checkmark status for an entry that already exists, an info status for an update, and `IssueText` for an advisory. |
-| Editable replacement row | Global and mode scopes in Vocabulary: readable rule text, a compact edit popover, and direct top-to-bottom reordering with keyboard and VoiceOver alternatives. |
+| Replacement value field | The shared **Use instead** control: a compact field that grows one→a few lines on composers and quick-correction surfaces; Global and mode Settings composers place **Larger editor…** beside the label. Pasted CRLF/lone CR normalize to LF at the boundary. |
+| Replacement text editor | The multiline **Use instead** editor with a live `current / 65,536` count: presented as a sheet from Settings composers and inline in saved-rule edit popovers. Add/Update remains the persistence boundary. |
+| Editable replacement row | Global and mode scopes in Vocabulary: readable rule text with a bounded one-line Use-instead preview, a roomy edit popover with an inline multiline editor, and direct top-to-bottom reordering with keyboard and VoiceOver alternatives. |
 | Shortcut well | Every keyboard/mouse shortcut binding; one control that always shows the current binding with an attached menu (never picker⇄recorder mode-swapping). |
 | Keycap glyph | *Displaying* (never editing) a trigger as small physical keys — onboarding trial/playground, the General trigger pointer. |
 | Step indicator | The onboarding wizard's progress dots. |

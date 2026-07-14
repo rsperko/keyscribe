@@ -11,6 +11,8 @@ enum VocabularyDraftValidationIssue: Equatable {
     case invalidRegex
     case replacementRequired
     case invalidInput(UserInputValidation.Issue)
+    case tooLong
+    case nonTerminalReturnMarker
 }
 
 struct VocabularyDraftAnalysis {
@@ -42,33 +44,31 @@ struct VocabularyDraftAnalysis {
         analyze: (VocabularyProposal) -> VocabularyAnalysis
     ) {
         let term = term.trimmingCharacters(in: .whitespacesAndNewlines)
-        let replacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
         let proposal: VocabularyProposal?
         let termIssue = regex
             ? UserInputValidation.regexIssue(term)
             : UserInputValidation.phraseIssue(term)
-        let replacementIssue = UserInputValidation.promptIssue(replacement)
         if term.isEmpty {
             proposal = nil
             validationIssue = nil
         } else if let termIssue {
             proposal = nil
             validationIssue = regex && termIssue == .invalidRegex ? .invalidRegex : .invalidInput(termIssue)
-        } else if let replacementIssue {
-            proposal = nil
-            validationIssue = .invalidInput(replacementIssue)
         } else if regex && !RegexCache.isValidPattern(term) {
             proposal = nil
             validationIssue = .invalidRegex
         } else if regex && replacement.isEmpty {
             proposal = nil
             validationIssue = .replacementRequired
-        } else if regex {
-            proposal = .replacement(heard: term, replace: replacement, regex: true)
-            validationIssue = nil
         } else if replacement.isEmpty && !requiresReplacement {
             proposal = .word(term)
             validationIssue = nil
+        } else if !ReplacementAuthoring.isWithinLimit(replacement) {
+            proposal = nil
+            validationIssue = .tooLong
+        } else if regex && !ReplacementAuthoring.regexReturnMarkerValid(replacement) {
+            proposal = nil
+            validationIssue = .nonTerminalReturnMarker
         } else {
             proposal = .replacement(heard: term, replace: replacement, regex: false)
             validationIssue = nil
@@ -76,7 +76,7 @@ struct VocabularyDraftAnalysis {
         self.proposal = proposal
         let analysis = proposal.map(analyze)
         self.analysis = analysis
-        self.feedback = Self.feedback(for: analysis, term: term)
+        self.feedback = Self.feedback(for: analysis, proposal: proposal, term: term)
     }
 
     var canCommit: Bool {
@@ -115,7 +115,19 @@ struct VocabularyDraftAnalysis {
         return replacementRule != original && !hasReplacementIdentityConflict
     }
 
-    private static func feedback(for analysis: VocabularyAnalysis?, term: String) -> VocabularyFeedback? {
+    static func invisibleOnlyDescription(_ replace: String) -> String? {
+        guard !replace.isEmpty, replace.allSatisfy(\.isWhitespace) else { return nil }
+        let lineBreaks = replace.reduce(0) { $0 + ($1.isNewline ? 1 : 0) }
+        if lineBreaks > 0 {
+            let plural = lineBreaks == 1 ? "" : "s"
+            return "Creates a replacement containing \(lineBreaks) line break\(plural)."
+        }
+        return "Creates a replacement containing only whitespace."
+    }
+
+    private static func feedback(
+        for analysis: VocabularyAnalysis?, proposal: VocabularyProposal?, term: String
+    ) -> VocabularyFeedback? {
         guard let analysis else { return nil }
         switch analysis.action {
         case .noChange(.wordAlreadyListed):
@@ -132,6 +144,10 @@ struct VocabularyDraftAnalysis {
         case .updateWord(let current):
             return .update("Updates the existing word — “\(term)” is currently spelled “\(current)”.")
         case .addWord, .addReplacement:
+            if case let .replacement(_, replace, _) = proposal,
+               let invisible = Self.invisibleOnlyDescription(replace) {
+                return .advisory(invisible)
+            }
             guard let message = analysis.advisories.first(where: { $0.kind == .overridesGlobal })?.message else {
                 return nil
             }

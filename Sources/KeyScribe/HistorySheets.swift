@@ -19,13 +19,12 @@ struct CreateReplacementSheet: View {
     }
 
     private var sourceTrimmed: String { source.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var replaceTrimmed: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var isNoop: Bool {
-        !sourceTrimmed.isEmpty && sourceTrimmed.caseInsensitiveCompare(replaceTrimmed) == .orderedSame
+        !sourceTrimmed.isEmpty && sourceTrimmed.caseInsensitiveCompare(replace) == .orderedSame
     }
     private var sourceIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(sourceTrimmed) }
-    private var replacementIssue: UserInputValidation.Issue? { UserInputValidation.promptIssue(replaceTrimmed) }
-    private var canSave: Bool { sourceIssue == nil && replacementIssue == nil && !isNoop }
+    private var isOverLimit: Bool { !ReplacementAuthoring.isWithinLimit(replace) }
+    private var canSave: Bool { sourceIssue == nil && !isOverLimit && !isNoop }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -39,14 +38,21 @@ struct CreateReplacementSheet: View {
             if let sourceIssue { IssueText(sourceIssue.message) }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Replace with").font(.caption).foregroundStyle(.secondary)
-                TextField("What it should say", text: $replace)
-                    .textFieldStyle(.roundedBorder).focused($focus, equals: .replace).onSubmit { save() }
-                    .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.replace)
+                ReplacementValueField(
+                    title: "Replace with",
+                    placeholder: "What it should say",
+                    text: $replace,
+                    fieldID: AccessibilityID.History.ReplacementSheet.replace,
+                    initiallyFocused: !sourceTrimmed.isEmpty,
+                    onSubmit: save)
             }
-            if let replacementIssue { IssueText(replacementIssue.message) }
             if isNoop {
                 Text("That is the same as what was heard, so it would do nothing.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            ReplacementLimitIssueText(issue: isOverLimit ? .tooLong : nil)
+            if let message = VocabularyDraftAnalysis.invisibleOnlyDescription(replace) {
+                IssueText(message, severity: .advisory)
             }
             Text("Applies to future dictations in every mode that uses replacements.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -59,12 +65,12 @@ struct CreateReplacementSheet: View {
             }
         }
         .padding(20).frame(width: 400)
-        .onAppear { focus = sourceTrimmed.isEmpty ? .source : .replace }
+        .onAppear { if sourceTrimmed.isEmpty { focus = .source } }
     }
 
     private func save() {
         guard canSave else { return }
-        onSave(sourceTrimmed, replaceTrimmed)
+        onSave(sourceTrimmed, replace)
         dismiss()
     }
 }

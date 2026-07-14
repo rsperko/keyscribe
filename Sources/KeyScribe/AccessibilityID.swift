@@ -62,6 +62,9 @@ enum AccessibilityID {
             static func mode(_ modeID: String) -> String { "settings.vocabulary.scope.mode.\(modeID)" }
             static let composerTerm = "settings.vocabulary.composer.term"
             static let composerUseInstead = "settings.vocabulary.composer.useInstead"
+            static let composerUseInsteadExpand = "settings.vocabulary.composer.useInstead.expand"
+            static let composerUseInsteadEditor = "settings.vocabulary.composer.useInstead.editor"
+            static let composerUseInsteadEditorDone = "settings.vocabulary.composer.useInstead.editorDone"
             static let composerRegexToggle = "settings.vocabulary.composer.regexToggle"
             static let composerAdvanced = "settings.vocabulary.composer.advanced"
             static let composerAdd = "settings.vocabulary.composer.add"
@@ -329,6 +332,8 @@ enum AccessibilityID {
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.scopeList, Settings.Vocabulary.global,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
+        Settings.Vocabulary.composerUseInsteadExpand, Settings.Vocabulary.composerUseInsteadEditor,
+        Settings.Vocabulary.composerUseInsteadEditorDone,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.composerStatus, Settings.Vocabulary.recognitionHelp,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.dictionaryDeleteConfirmConfirm,

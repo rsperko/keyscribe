@@ -470,9 +470,16 @@ private struct ReplacementEditor: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($heardFocused)
                 .accessibilityIdentifier(ids.heard)
-            TextField("Use instead", text: $replace)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier(ids.useInstead)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Use instead")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ReplacementTextEditor(
+                    title: "Use instead",
+                    placeholder: "Replacement text",
+                    text: $replace,
+                    editorID: ids.useInstead)
+            }
             DisclosureSection(isExpanded: advancedBinding) {
                 Text("Pattern matching")
                     .accessibilityIdentifier(ids.advanced)
@@ -491,6 +498,9 @@ private struct ReplacementEditor: View {
                     .accessibilityIdentifier(ids.status)
             } else if draft.validationIssue == .replacementRequired {
                 IssueText("Use instead is required for a regular expression.")
+                    .accessibilityIdentifier(ids.status)
+            } else if draft.validationIssue == .tooLong || draft.validationIssue == .nonTerminalReturnMarker {
+                ReplacementLimitIssueText(issue: draft.validationIssue)
                     .accessibilityIdentifier(ids.status)
             } else if case let .invalidInput(issue) = draft.validationIssue {
                 IssueText(issue.message)
@@ -561,15 +571,28 @@ struct VocabularyComposer: View {
                 .onSubmit(commit)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerTerm)
-            TextField(
-                regex ? "Use instead" : "Use instead (optional)",
-                text: $replace,
-                prompt: regex ? Text("Replacement text") : nil)
-                .textFieldStyle(.roundedBorder)
-                .focused($focus, equals: .replace)
-                .onSubmit(commit)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerUseInstead)
+            let replacementTitle = regex ? "Use instead" : "Use instead (optional)"
+            let replacementPlaceholder = regex ? "Replacement text" : ""
+            LabeledContent {
+                ReplacementValueField(
+                    title: replacementTitle,
+                    placeholder: replacementPlaceholder,
+                    text: $replace,
+                    fieldID: AccessibilityID.Settings.Vocabulary.composerUseInstead,
+                    onSubmit: commit)
+            } label: {
+                HStack(spacing: 6) {
+                    Text(replacementTitle)
+                    ReplacementExpandedEditorButton(
+                        title: replacementTitle,
+                        placeholder: replacementPlaceholder,
+                        text: $replace,
+                        ids: ReplacementExpandedEditorIDs(
+                            expand: AccessibilityID.Settings.Vocabulary.composerUseInsteadExpand,
+                            editor: AccessibilityID.Settings.Vocabulary.composerUseInsteadEditor,
+                            done: AccessibilityID.Settings.Vocabulary.composerUseInsteadEditorDone))
+                }
+            }
             if !regex {
                 Text(generalHelpText)
                     .font(.caption)
@@ -593,9 +616,7 @@ struct VocabularyComposer: View {
                 }
             }
             .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdvanced)
-            if let issue = draft.validationIssue {
-                IssueText(validationMessage(issue))
-            }
+            if let issue = draft.validationIssue { validationIssueText(issue) }
             HStack {
                 Spacer()
                 Button(action: commit) {
@@ -611,9 +632,8 @@ struct VocabularyComposer: View {
     }
 
     private var heardTrimmed: String { heard.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var replaceTrimmed: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var draft: VocabularyDraftAnalysis {
-        VocabularyDraftAnalysis(term: heardTrimmed, replacement: replaceTrimmed, regex: regex, analyze: analyze)
+        VocabularyDraftAnalysis(term: heardTrimmed, replacement: replace, regex: regex, analyze: analyze)
     }
 
     private var generalHelpText: String {
@@ -643,11 +663,12 @@ struct VocabularyComposer: View {
         focus = .heard
     }
 
-    private func validationMessage(_ issue: VocabularyDraftValidationIssue) -> String {
+    @ViewBuilder private func validationIssueText(_ issue: VocabularyDraftValidationIssue) -> some View {
         switch issue {
-        case .invalidRegex: "That is not a valid regular expression."
-        case .replacementRequired: "Use instead is required for a regular expression."
-        case .invalidInput(let issue): issue.message
+        case .invalidRegex: IssueText("That is not a valid regular expression.")
+        case .replacementRequired: IssueText("Use instead is required for a regular expression.")
+        case .invalidInput(let issue): IssueText(issue.message)
+        case .tooLong, .nonTerminalReturnMarker: ReplacementLimitIssueText(issue: issue)
         }
     }
 }

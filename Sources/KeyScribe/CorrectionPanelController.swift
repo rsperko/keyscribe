@@ -249,12 +249,12 @@ private struct CorrectionPanelView: View {
                     Text(regex ? "Use instead" : "Use instead (optional)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField(regex ? "Replacement text" : "Optional correction", text: $replace)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($focus, equals: .replace)
-                        .onSubmit(commitSave)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier(AccessibilityID.Correction.useInstead)
+                    ReplacementValueField(
+                        title: regex ? "Use instead" : "Use instead (optional)",
+                        placeholder: regex ? "Replacement text" : "Optional correction",
+                        text: $replace,
+                        fieldID: AccessibilityID.Correction.useInstead,
+                        onSubmit: commitSave)
                 }
             }
 
@@ -295,7 +295,7 @@ private struct CorrectionPanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if let issue = draft.validationIssue {
-                IssueText(validationMessage(issue))
+                validationIssueText(issue)
             }
 
             Text(saveDestinationText)
@@ -333,29 +333,28 @@ private struct CorrectionPanelView: View {
     }
 
     private var trimmedTerm: String { term.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var trimmedReplace: String { replace.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var correctedValue: String {
-        trimmedReplace.isEmpty ? trimmedTerm : trimmedReplace
+        replace.isEmpty ? trimmedTerm : replace
     }
 
     private var canSave: Bool {
         draft.canCommit
     }
 
-    private var hasReplacementValue: Bool { !trimmedReplace.isEmpty }
+    private var hasReplacementValue: Bool { !replace.isEmpty }
 
     private var canCorrectNow: Bool { draft.canApplyCorrection && hasReplacementValue && !correctedValue.isEmpty }
 
     private var draft: VocabularyDraftAnalysis {
         _ = status.revision
         return VocabularyDraftAnalysis(
-            term: trimmedTerm, replacement: trimmedReplace, regex: regex,
+            term: trimmedTerm, replacement: replace, regex: regex,
             analyze: { analyze($0, destination) })
     }
 
     private var entryKind: String {
-        (!regex && trimmedReplace.isEmpty) ? "vocabulary" : "replacements"
+        (!regex && replace.isEmpty) ? "vocabulary" : "replacements"
     }
 
     private var saveDestinationText: String {
@@ -371,9 +370,10 @@ private struct CorrectionPanelView: View {
     // regex rule — the rule applied to the original selection (not to the pattern in the heard field).
     private func correctionPasteText() -> String {
         guard regex else { return correctedValue }
-        guard let re = RegexCache.regex(trimmedTerm) else { return originalSelection }
-        let range = NSRange(originalSelection.startIndex..., in: originalSelection)
-        return re.stringByReplacingMatches(in: originalSelection, range: range, withTemplate: trimmedReplace)
+        return CorrectionReplacement.apply(
+            to: originalSelection,
+            pattern: trimmedTerm,
+            replacement: replace)
     }
 
     private var helpText: String {
@@ -389,17 +389,29 @@ private struct CorrectionPanelView: View {
     }
 
     private func buildResult() -> SaveResult {
-        if !regex && trimmedReplace.isEmpty {
+        if !regex && replace.isEmpty {
             return .dictionary(word: trimmedTerm, destination: destination)
         }
-        return .replacement(heard: trimmedTerm, replace: trimmedReplace, regex: regex, destination: destination)
+        return .replacement(heard: trimmedTerm, replace: replace, regex: regex, destination: destination)
     }
 
-    private func validationMessage(_ issue: VocabularyDraftValidationIssue) -> String {
+    @ViewBuilder private func validationIssueText(_ issue: VocabularyDraftValidationIssue) -> some View {
         switch issue {
-        case .invalidRegex: "That is not a valid regular expression."
-        case .replacementRequired: "Use instead is required for a regular expression."
-        case .invalidInput(let issue): issue.message
+        case .invalidRegex: IssueText("That is not a valid regular expression.")
+        case .replacementRequired: IssueText("Use instead is required for a regular expression.")
+        case .invalidInput(let issue): IssueText(issue.message)
+        case .tooLong, .nonTerminalReturnMarker: ReplacementLimitIssueText(issue: issue)
         }
     }
+}
+
+enum CorrectionReplacement {
+    static func apply(to text: String, pattern: String, replacement: String) -> String {
+        guard let regex = RegexCache.regex(pattern, options: [.caseInsensitive]),
+              let parsed = ReturnSuffix.parse(ReplacementEscapes.expandTemplate(replacement))
+        else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: parsed.template)
+    }
+
 }

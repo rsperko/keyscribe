@@ -483,6 +483,12 @@ composer and lists do not live inside the mode editor.
   away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, the
   composer can create only a replacement — the leave-empty hint disappears and only the regex help
   shows — and the disclosure stays open so an ON regex toggle is never hidden.
+  **Use instead** grows from one line to a few on every surface. Global and mode Settings place **Open
+  in a larger editor…** directly beneath the field for deliberate macro authoring; quick corrections
+  in History and the standalone panel stay compact. A saved rule opens a roomy edit popover with its
+  multiline replacement editor already visible, never a sheet over a popover. Replacement content is
+  stored exactly as authored (only the heard phrase is trimmed); the editor caps a single replacement at
+  **65,536 characters** and refuses to save an over-limit draft rather than silently truncating it.
 - Dictionary: edit/remove saved words, import/export later only if needed. The first scan says only
   that terms use the intended spelling; model-specific recognition behavior and rewrite sharing live
   behind **How recognition works** inline help. Dictionary and replacement rows use the shared red
@@ -497,14 +503,16 @@ composer and lists do not live inside the mode editor.
   recognition pass over the audio — on the order of **a second on a long dictation, negligible on short
   ones** (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
   recognition or a noticeable wait for normal use.
-- Replacements: human-readable `When heard`/`Use instead` rows that wrap long values. Regex rows use
-  `Pattern` and retain a visible `Regex` badge. Rules are applied from top to bottom; the list says so
-  directly. Each row has a subtle drag handle and uses the platform table-reordering interaction. The
+- Replacements: human-readable `When heard`/`Use instead` rows. The `Use instead` value shows as
+  exactly **one bounded preview line** (line breaks and tabs rendered as `\n`/`\r`/`\t`, capped so a row
+  never grows with the replacement body); the full value stays available in the larger editor. Regex
+  rows use `Pattern` and retain a visible `Regex` badge. Rules are applied from top to bottom; the list
+  says so directly. Each row has a subtle drag handle and uses the platform table-reordering interaction. The
   system insertion marker appears only at positions that would change the order, never immediately above
   or below the row's current position. A context menu and accessibility actions provide **Move up**/**Move
   down** without permanent arrow-button clutter. The list expands to fit its rows and relies on the
   Settings pane's scrollbar instead of introducing nested scrolling.
-  A trailing pencil opens a compact popover for changing the heard phrase, replacement text, or regex
+  A trailing pencil opens a roomy popover for changing the heard phrase, replacement text, or regex
   behavior; **Update** applies the fields atomically and preserves the rule's position. Dismissing the
   popover leaves the rule unchanged. If the rule changes or disappears outside the editor before Update,
   the popover stays open and explains that it must be reopened instead of pretending the stale edit saved.

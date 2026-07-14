@@ -74,6 +74,36 @@ struct VocabularyConfigTests {
         #expect(ctx.bareReplacement?.text == "```\n")
     }
 
+    @Test func roundTripsExactMultilineReplacement() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-replacements-multiline-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let body = "  leading spaces\n\ttab-indented line\ntrailing spaces here   \n\nblank line above\n\"double\" 'single' \\ backslash and a visible \\n here\n"
+        let set = ReplacementsSet(rules: [.init(heard: "expand", replace: body, regex: false)])
+        try ReplacementsStore.write(set, to: dir)
+        guard case let .loaded(reloaded) = ReplacementsStore.load(supportDir: dir) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(reloaded.rules[0].replace == body)
+    }
+
+    @Test func oversizedRuleStillLoads() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-replacements-oversized-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let huge = String(repeating: "a", count: ReplacementAuthoring.maxCharacters + 100)
+        let set = ReplacementsSet(rules: [
+            .init(heard: "small", replace: "ok", regex: false),
+            .init(heard: "huge", replace: huge, regex: false),
+        ])
+        try ReplacementsStore.write(set, to: dir)
+        guard case let .loaded(reloaded) = ReplacementsStore.load(supportDir: dir) else {
+            Issue.record("expected .loaded, not a whole-file failure"); return
+        }
+        #expect(reloaded.rules.count == 2)
+        #expect(reloaded.rules[1].replace == huge)
+    }
+
     @Test func missingSchemaVersionThrows() {
         #expect(throws: ConfigError.missingSchemaVersion) {
             try DictionaryStore.decode(from: "words = []")

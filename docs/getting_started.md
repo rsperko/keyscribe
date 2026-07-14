@@ -93,6 +93,12 @@ Use **Replacements** when KeyScribe consistently hears one phrase and you always
 - `at example dot com` -> `@example.com`.
 - `slash resume` -> `/resume`.
 
+A replacement can expand into several lines — a signature, an address block, a boilerplate snippet.
+In Settings, choose **Larger editor…** beside **Use instead**; Return adds a line break.
+Speak a large replacement as its own command for deterministic macro insertion. Inside a longer
+dictation it continues through the mode's normal processing and may be rewritten. Replacements are
+saved as plain text, so do not keep passwords or other secrets in one.
+
 Where to add them:
 
 1. Settings > Vocabulary for deliberate cleanup.

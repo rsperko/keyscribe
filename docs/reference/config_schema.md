@@ -466,6 +466,39 @@ How a rule behaves once it matches:
   - The Return is a real key press, **not** a guaranteed "send" — its effect depends on the focused
     target. It fires only after the text verifiably lands (never on a clipboard fallback, a password
     field, or if focus moved), and `replace = '<CR>'` alone presses nothing (empty output → no-speech).
+  - **A trailing newline immediately before `<CR>` cannot be preserved.** All whitespace right before the
+    marker — spaces, tabs, *and* line breaks — is stripped with it, so `last line\n<CR>` inserts `last
+    line` and then presses Return. That is the intended shape for a submit-style macro; if you need a
+    kept trailing newline, do not follow it with `<CR>`.
+
+### Multiline replacement text & the authoring limit
+
+A replacement may contain real line breaks, so a short spoken phrase can expand into a block of text
+without regex syntax. The Settings **Use instead** field grows to a few lines and offers **Open in a
+larger editor…** for a full multiline body. Quick-correction surfaces keep the compact field, while a
+saved rule's edit popover shows the multiline editor inline.
+
+- **The replacement is preserved exactly.** Only the heard phrase / regex pattern is trimmed; the
+  replacement keeps its leading, trailing, embedded, and repeated whitespace and line breaks verbatim.
+  An empty replacement adds a dictionary word in the composer; any nonempty value — including one made
+  only of spaces or line breaks — is a replacement. (A saved rule may still replace with the empty
+  string through the rule editor, the delete-text capability.)
+- **Newline representation is not converted between forms.** A *literal* rule inserts exactly what you
+  authored, so a real line break inserts a line break and the two characters `\n` stay the visible
+  characters `\` and `n`. A *regex* rule interprets `\n`/`\t`/`\r` as controls (above), so a real line
+  break and `\n` produce the same newline. The one normalization: pasted CRLF and lone CR are converted
+  to LF at the editor boundary (macOS treats LF as the native break).
+- **Authoring limit: 65,536 characters.** The editor shows `current / 65,536` and refuses to save an
+  over-limit draft (the complete draft is retained so you can trim or copy it — never silently
+  truncated). A hand-authored rule already over the limit still **loads** (the limit gates authoring,
+  not loading); Settings surfaces it and requires shortening before that rule can be saved again. The
+  compact list preview is always one bounded line regardless of the stored size.
+- **Later rules can still transform a large macro's output**, because rules apply top-to-bottom over
+  progressively transformed text (a bigger body is likelier to contain a later rule's heard phrase),
+  and such a mutation can also cost the rule its whole-utterance ownership. A large macro is
+  deterministic only when spoken as its own command.
+- **Replacement config is plaintext on disk.** Do not store credentials or other secrets in a
+  replacement.
 
 ### `settings.toml` — general
 ```toml

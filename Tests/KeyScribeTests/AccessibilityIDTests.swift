@@ -38,6 +38,13 @@ struct AccessibilityIDTests {
             == "settings.vocabulary.replacements.deleteConfirm.cancel")
     }
 
+    @Test func vocabularyComposerHasStableExpandedEditorIdentifiers() {
+        #expect(AccessibilityID.Settings.Vocabulary.composerUseInsteadExpand
+            == "settings.vocabulary.composer.useInstead.expand")
+        #expect(AccessibilityID.Settings.Vocabulary.composerUseInsteadEditor
+            == "settings.vocabulary.composer.useInstead.editor")
+    }
+
     // Dynamic ids splice a domain id (e.g. "_direct") into a fixed prefix, so the lowercase dot-path
     // pattern doesn't apply to the whole id — only the fixed prefix and no-spaces rule are checked here.
     @Test func dynamicRowIdentifiersKeepTheirFixedPrefixAndHaveNoSpaces() {
