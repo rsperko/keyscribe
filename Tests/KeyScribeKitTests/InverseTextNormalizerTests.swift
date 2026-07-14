@@ -151,4 +151,21 @@ struct InverseTextNormalizerTests {
     @Test func connectorAndSplitsTheNumberRun() {
         #expect(itn("one hundred and twenty three") == "100 and 23")
     }
+
+    @Test func convertsHyphenatedCompoundCardinals() {
+        #expect(itn("sixty-five") == "65")
+        #expect(itn("twenty-five") == "25")
+        #expect(itn("sixty-five million") == "65000000")
+        #expect(itn("I'm talking about the sixty-five million changes.")
+            == "I'm talking about the 65000000 changes.")
+    }
+
+    @Test func convertsHyphenatedOrdinals() {
+        #expect(itn("twenty-first") == "21st")
+    }
+
+    @Test func leavesHyphenatedNonNumbersUntouched() {
+        #expect(itn("a well-known fact") == "a well-known fact")
+        #expect(itn("state-of-the-art design") == "state-of-the-art design")
+    }
 }

@@ -47,7 +47,8 @@ public enum InverseTextNormalizer {
     ]
 
     public static func apply(_ text: String) -> String {
-        let tokens = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: false)
+            .map(String.init).flatMap(splitHyphenatedNumber)
         var out: [String] = []
         var i = 0
         var precededByNumber = false
@@ -139,6 +140,16 @@ public enum InverseTextNormalizer {
 
     private static func isNumberWord(_ canon: String) -> Bool {
         words[canon] != nil || ordinalToCardinal[canon] != nil
+    }
+
+    // STT commonly emits hyphenated compounds ("sixty-five", "twenty-first"). Split them into their
+    // number-word parts so the run parser sees them, but ONLY when every hyphen-separated part is a
+    // number/ordinal word — otherwise "well-known" / "state-of-the-art" would be corrupted.
+    private static func splitHyphenatedNumber(_ token: String) -> [String] {
+        guard token.contains("-") else { return [token] }
+        let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 2, parts.allSatisfy({ isNumberWord(canonical($0)) }) else { return [token] }
+        return parts
     }
 
     private static func hasTrailingPunct(_ token: String) -> Bool {
