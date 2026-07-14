@@ -309,6 +309,11 @@ struct SettingsRootView: View {
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
     var onHistoryPaneChange: (Bool) -> Void = { _ in }
+    // The sidebar selection is mirrored through local @State so SwiftUI's selection write never mutates the
+    // navigation ObservableObject during a view update (which logs "Publishing changes from within view
+    // updates" and re-enters the backing NSTableView). navigation.destination is synced in `.onChange`,
+    // which runs outside the update pass.
+    @State private var destination: SettingsDestination?
 
     // Filtered through the SAME shadow/chord gate as runtime registration (a chord like ⌃⌥⇧V subsumes a
     // right-Option trigger) so the overlap warning never names a shortcut that won't actually fire — a
@@ -334,7 +339,7 @@ struct SettingsRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsDestination.allCases, selection: $navigation.destination) { destination in
+            List(SettingsDestination.allCases, selection: $destination) { destination in
                 HStack {
                     Label(destination.title, systemImage: destination.symbol)
                     Spacer()
@@ -354,7 +359,7 @@ struct SettingsRootView: View {
             .navigationTitle("Settings")
             .frame(minWidth: 180)
         } detail: {
-            switch navigation.destination ?? .general {
+            switch destination ?? .general {
             case .general:
                 let shadowed = shadowedHotkeys()
                 GeneralSettingsView(
@@ -385,8 +390,13 @@ struct SettingsRootView: View {
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
         .environmentObject(recordingState)
-        .onAppear { if navigation.destination == .history { onHistoryPaneChange(true) } }
+        .onAppear {
+            destination = navigation.destination
+            if navigation.destination == .history { onHistoryPaneChange(true) }
+        }
+        .onChange(of: destination) { _, new in if navigation.destination != new { navigation.destination = new } }
         .onChange(of: navigation.destination) { old, new in
+            if destination != new { destination = new }
             if new == .history { onHistoryPaneChange(true) }
             else if old == .history { onHistoryPaneChange(false) }
         }

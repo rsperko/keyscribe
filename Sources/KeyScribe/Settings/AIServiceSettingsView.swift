@@ -313,6 +313,11 @@ struct AIServiceSettingsView: View {
     @ObservedObject var model: AIServiceSettingsModel
     @State private var pendingDelete: Connection?
     @State private var showingAddService = false
+    // The List selection is mirrored through local @State so SwiftUI's selection write never mutates the
+    // ObservableObject during a view update (which logs "Publishing changes from within view updates" and
+    // re-enters the backing NSTableView). model.selectedID is synced in `.onChange`, which runs outside the
+    // update pass.
+    @State private var selection: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -328,7 +333,7 @@ struct AIServiceSettingsView: View {
 
     private var paneBody: some View {
         HStack(spacing: 0) {
-            List(selection: $model.selectedID) {
+            List(selection: $selection) {
                 Section {
                     ForEach(model.connections) { connection in
                         let status = rowStatus(connection)
@@ -361,7 +366,9 @@ struct AIServiceSettingsView: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { model.reload() }
+        .onAppear { model.reload(); selection = model.selectedID }
+        .onChange(of: selection) { _, id in if model.selectedID != id { model.selectedID = id } }
+        .onChange(of: model.selectedID) { _, id in if selection != id { selection = id } }
         .sheet(isPresented: $showingAddService) {
             AddAIServiceChooser(
                 onAdd: { preset in

@@ -61,12 +61,10 @@ struct AIConnectionDraftEditor: View {
                 textRow("Service name", value: draft.name, prompt: "My AI service", validation: UserInputValidation.nameIssue) { draft.name = $0 }
                     .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.name)
                 credentialFields
-                testRows
             }
             Section("Model") {
                 modelRows
             }
-            Section("Used by") { usedByRow }
             Section {
                 DisclosureSection(isExpanded: $connectionOptionsExpanded, hasError: connectionOptionsError) {
                     DisclosureSummaryLabel(title: "Connection options", summary: connectionOptionsSummary)
@@ -81,15 +79,29 @@ struct AIConnectionDraftEditor: View {
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.connectionOptions)
             }
-            Section {
+            Section("Used by") {
+                usedByRow
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
                     .font(.caption).foregroundStyle(.secondary)
-                if let onDelete {
-                    HStack {
-                        Spacer()
+            }
+            Section {
+                HStack(spacing: 10) {
+                    if let onTest {
+                        Button("Test Connection", action: onTest)
+                            .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
+                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
+                        if testState == .testing { ProgressView().controlSize(.small) }
+                        testStatus
+                    }
+                    Spacer()
+                    if let onDelete {
                         PaneDeleteButton(title: "Delete AI Service", action: onDelete)
                             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
                     }
+                }
+                if case .failed(let message) = testState { IssueText(message) }
+                if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey) {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -125,13 +137,9 @@ struct AIConnectionDraftEditor: View {
     }
 
     @ViewBuilder private var usedByRow: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Used by")
-            Spacer()
-            Text(dependentModeNames.isEmpty ? "No modes yet" : dependentModeNames.joined(separator: ", "))
-                .foregroundStyle(dependentModeNames.isEmpty ? .tertiary : .secondary)
-                .multilineTextAlignment(.trailing)
-        }
+        Text(dependentModeNames.isEmpty ? "No modes yet" : dependentModeNames.joined(separator: ", "))
+            .foregroundStyle(dependentModeNames.isEmpty ? .tertiary : .secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var endpointRows: some View {
@@ -349,7 +357,7 @@ struct AIConnectionDraftEditor: View {
                     combo.frame(maxWidth: 420)
                 }
             case .settings:
-                LabeledContent("Model") { combo.frame(minWidth: 360) }
+                combo.frame(maxWidth: .infinity)
             }
         }
     }
@@ -447,22 +455,6 @@ struct AIConnectionDraftEditor: View {
                 .font(.caption).foregroundStyle(.red)
         case nil:
             EmptyView()
-        }
-    }
-
-    @ViewBuilder private var testRows: some View {
-        if let onTest {
-            HStack(spacing: 10) {
-                Button("Test Connection", action: onTest)
-                    .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
-                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
-                if testState == .testing { ProgressView().controlSize(.small) }
-                testStatus
-            }
-            if case .failed(let message) = testState { IssueText(message) }
-            if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey) {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
-            }
         }
     }
 

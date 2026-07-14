@@ -246,12 +246,9 @@ struct ModeEditorView: View {
             Text("Automatic replacements")
                 .font(.subheadline.weight(.semibold))
                 .padding(.top, 4)
-            Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
+            Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite."
+                + (mode.replacements.rules.count > 1 ? " Applied from top to bottom. Drag to reorder." : ""))
                 .font(.caption).foregroundStyle(.secondary)
-            if mode.replacements.rules.count > 1 {
-                Text("Applied from top to bottom. Drag to reorder.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             ReplacementRows(
                 rules: mode.replacements.rules,
                 advisories: replacementAdvisories,

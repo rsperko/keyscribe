@@ -9,6 +9,11 @@ struct ModesSettingsView: View {
     @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var modePendingDelete: Mode?
     @State private var showingAddMode = false
+    // The List selection is mirrored through local @State so SwiftUI's selection write never mutates the
+    // ObservableObject during a view update (which logs "Publishing changes from within view updates" and
+    // re-enters the backing NSTableView). model.selectedID is synced in `.onChange`, which runs outside the
+    // update pass.
+    @State private var selection: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +33,7 @@ struct ModesSettingsView: View {
 
     private var paneBody: some View {
         HStack(spacing: 0) {
-            List(selection: $model.selectedID) {
+            List(selection: $selection) {
                 Section {
                     ForEach(model.modes) { mode in
                         ModeSummaryRow(mode: mode, issue: issue(for: mode))
@@ -76,7 +81,9 @@ struct ModesSettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { model.reload() }
+        .onAppear { model.reload(); selection = model.selectedID }
+        .onChange(of: selection) { _, id in if model.selectedID != id { model.selectedID = id } }
+        .onChange(of: model.selectedID) { _, id in if selection != id { selection = id } }
         .sheet(isPresented: $showingAddMode) {
             AddModeChooser(
                 templates: model.allTemplates,

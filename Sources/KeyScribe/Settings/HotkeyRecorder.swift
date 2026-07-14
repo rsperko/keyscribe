@@ -64,7 +64,10 @@ struct ShortcutWell: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .onDisappear { recordingState.isRecording = false }
+        .onDisappear {
+            guard recordingState.isRecording else { return }
+            DispatchQueue.main.async { recordingState.isRecording = false }
+        }
     }
 
     private var caption: String? {

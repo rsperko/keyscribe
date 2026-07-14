@@ -313,6 +313,11 @@ struct HistoryPaneView: View {
     @ObservedObject var settings: SettingsModel
     @State private var retentionDays: Int?
     @State private var pendingRetentionDays: Int?
+    // The List selection is mirrored through local @State so SwiftUI's selection write never mutates the
+    // ObservableObject during a view update (which logs "Publishing changes from within view updates" and
+    // re-enters the backing NSTableView). model.selection is synced in `.onChange`, which runs outside the
+    // update pass.
+    @State private var selection: HistoryRow.ID?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -341,6 +346,9 @@ struct HistoryPaneView: View {
         } message: {
             Text("Entries older than the new retention period will be removed. This cannot be undone.")
         }
+        .onAppear { selection = model.selection }
+        .onChange(of: selection) { _, id in if model.selection != id { model.selection = id } }
+        .onChange(of: model.selection) { _, id in if selection != id { selection = id } }
     }
 
     private var leftColumn: some View {
@@ -409,7 +417,7 @@ struct HistoryPaneView: View {
         } else if !model.hasEntries || model.groups.isEmpty {
             Spacer()
         } else {
-            List(selection: $model.selection) {
+            List(selection: $selection) {
                 ForEach(model.groups, id: \.day) { group in
                     Section(group.day) {
                         ForEach(group.rows) { row in
@@ -427,7 +435,12 @@ struct HistoryPaneView: View {
         if !model.hasEntries {
             emptyState
         } else if let entry = model.selected {
+            // Keyed by the selected id so switching entries yields a fresh HistoryDetailView with default
+            // @State (stage/comparison/text-selection), instead of resetting that @State via
+            // `.onChange(of: entry)` — which fired during the selection-driven view update and logged
+            // "Modifying state during view update".
             HistoryDetailView(entry: entry, model: model)
+                .id(model.selection)
         } else if model.groups.isEmpty {
             ContentUnavailableView(
                 "No matching dictations", systemImage: "magnifyingglass",
@@ -562,12 +575,6 @@ private struct HistoryDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This dictation will be removed from local history. This cannot be undone.")
-        }
-        .onChange(of: entry.timestamp) {
-            selectedText = ""
-            selectedRole = nil
-            stage = .result
-            comparisonStage = .heardInserted
         }
         .onChange(of: stage) {
             selectedText = ""
