@@ -107,6 +107,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         correctionPanel = CorrectionPanelController(
             destinations: { [weak self] in self?.correctionDestinations() ?? [.global] },
+            analyze: { [weak self] proposal, destination in
+                guard let self else {
+                    switch proposal {
+                    case .word: return VocabularyAnalysis(action: .addWord)
+                    case .replacement: return VocabularyAnalysis(action: .addReplacement)
+                    }
+                }
+                return VocabularyAdvisor.analyze(proposal, in: self.vocabularyScope(for: destination))
+            },
             addDictionaryWord: { [weak self] word, destination in
                 switch destination.scope {
                 case .global:
@@ -550,6 +559,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func correctionDestinations() -> [CorrectionDestination] {
         CorrectionDestination.list(for: config.modes)
+    }
+
+    private func vocabularyScope(for destination: CorrectionDestination) -> VocabularyScope {
+        let globalWords = configRepository.dictionaryWords()
+        let globalRules = configRepository.replacementRules()
+        guard case .mode(let id) = destination.scope,
+              let mode = config.modes.first(where: { $0.id == id }) else {
+            return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
+        }
+        return VocabularyScope(
+            globalWords: globalWords, globalRules: globalRules,
+            local: VocabularyScope.Local(
+                words: mode.dictionary.words, rules: mode.replacements.rules,
+                includeGlobalWords: mode.dictionary.includeGlobal,
+                includeGlobalRules: mode.replacements.includeGlobal))
     }
 
     // Relaunch into guided setup so the new process reads the just-granted Accessibility verdict fresh

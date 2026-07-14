@@ -55,6 +55,8 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | Speech model choice | The Speech Models pane: inspect-only list + a detail pane with one primary lifecycle action; testing/reinstall/delete/dictionary-tuning behind its Advanced disclosure. |
 | Processing status | HUD/status states: listening, transcribing, rewriting, inserted, copied instead, fallback, no-speech, error. Never show a raw transcript while a rewrite is pending. |
 | Correction action | History + global correction panel: `Add to Dictionary`, `Create Replacement` — pre-filled, showing the resulting rule and its scope. |
+| Vocabulary feedback | Settings and the global correction panel: a checkmark status for an entry that already exists, an info status for an update, and `IssueText` for an advisory. |
+| Editable replacement row | Global and mode vocabulary lists: readable rule text, a compact edit popover, and direct top-to-bottom reordering with keyboard and VoiceOver alternatives. |
 | Shortcut well | Every keyboard/mouse shortcut binding; one control that always shows the current binding with an attached menu (never picker⇄recorder mode-swapping). |
 | Keycap glyph | *Displaying* (never editing) a trigger as small physical keys — onboarding trial/playground, the General trigger pointer. |
 | Step indicator | The onboarding wizard's progress dots. |

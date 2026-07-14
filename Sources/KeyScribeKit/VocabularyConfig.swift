@@ -111,6 +111,34 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
     public func adding(heard: String, replace: String, regex: Bool) -> ReplacementsSet {
         regex ? addingRegex(heard: heard, replace: replace) : addingLiteral(heard: heard, replace: replace)
     }
+
+    public func replacing(_ original: Rule, with updated: Rule) -> ReplacementsSet {
+        let heard = updated.heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !heard.isEmpty, let index = rules.firstIndex(of: original) else { return self }
+        let replacement = Rule(heard: heard, replace: updated.replace, regex: updated.regex)
+        guard !rules.indices.contains(where: {
+            $0 != index && Self.sameIdentity(rules[$0], replacement)
+        }) else { return self }
+        var copy = self
+        copy.rules[index] = replacement
+        return copy
+    }
+
+    public func reordering(_ orderedRules: [Rule]) -> ReplacementsSet {
+        var remaining = orderedRules.filter { candidate in rules.contains(candidate) }
+        guard remaining.count > 1 else { return self }
+        var copy = self
+        copy.rules = rules.map { rule in
+            guard orderedRules.contains(rule), !remaining.isEmpty else { return rule }
+            return remaining.removeFirst()
+        }
+        return copy
+    }
+
+    private static func sameIdentity(_ lhs: Rule, _ rhs: Rule) -> Bool {
+        guard lhs.regex == rhs.regex else { return false }
+        return lhs.regex ? lhs.heard == rhs.heard : lhs.heard.caseInsensitiveCompare(rhs.heard) == .orderedSame
+    }
 }
 
 extension [ReplacementsSet.Rule] {
@@ -123,7 +151,9 @@ public enum VocabularyMerge {
     public static func words(global: [String], local: [String], includeGlobal: Bool) -> [String] {
         let combined = includeGlobal ? global + local : local
         var seen = Set<String>()
-        return combined.filter { seen.insert($0).inserted }
+        return combined.filter { word in
+            seen.insert(word.folding(options: .caseInsensitive, locale: nil)).inserted
+        }
     }
 
     public static func rules(

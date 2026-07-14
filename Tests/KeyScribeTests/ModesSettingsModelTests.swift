@@ -23,6 +23,21 @@ struct ModesSettingsModelTests {
             .filter { !$0.hasPrefix(Mode.systemIdPrefix) })
     }
 
+    @Test func reloadPicksUpGlobalVocabulary() throws {
+        let (model, support, _) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        #expect(model.globalWords.isEmpty)
+        #expect(model.globalRules.isEmpty)
+
+        try DictionaryStore.write(DictionarySet(words: ["Kubernetes"]), to: support)
+        try ReplacementsStore.write(
+            ReplacementsSet(rules: [.init(heard: "foo", replace: "bar", regex: false)]), to: support)
+        model.reload()
+
+        #expect(model.globalWords == ["Kubernetes"])
+        #expect(model.globalRules == [.init(heard: "foo", replace: "bar", regex: false)])
+    }
+
     // A template whose save fails must NOT record a seed-ledger entry — a ghost entry marks a mode as
     // materialized that isn't on disk, and the one-shot seed migration would then never re-run for it.
     @Test func aTemplateThatFailsToSaveRecordsNoSeedLedgerEntry() throws {

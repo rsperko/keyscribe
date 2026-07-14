@@ -6,6 +6,8 @@ import KeyScribeKit
 final class ModesSettingsModel: ObservableObject {
     @Published private(set) var modes: [Mode] = []
     @Published private(set) var connections: [Connection] = []
+    @Published private(set) var globalWords: [String] = []
+    @Published private(set) var globalRules: [ReplacementsSet.Rule] = []
     @Published private(set) var fragmentIds: [String] = []
     @Published private(set) var fragmentNames: [String: String] = [:]
     @Published var selectedID: String?
@@ -54,6 +56,8 @@ final class ModesSettingsModel: ObservableObject {
         modes = result.modes
         loadFailures = result.failures
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
+        globalWords = DictionaryStore.loadOrDefault(supportDir: supportDir).words
+        globalRules = ReplacementsStore.loadOrDefault(supportDir: supportDir).rules
         fragmentIds = loadFragmentIds()
         let selectionStillValid = selectedID != nil
             && (modes.contains { $0.id == selectedID } || ModeStore.templates().contains { $0.id == selectedID })
@@ -68,7 +72,9 @@ final class ModesSettingsModel: ObservableObject {
 
     private func configSignature() -> String {
         let connections = FileFingerprint.file(supportDir.appendingPathComponent(ConnectionStore.fileName))
-        return "m:\(FileFingerprint.dir(modesDir))|c:\(connections)|f:\(FileFingerprint.dir(fragmentsDir))"
+        let dictionary = FileFingerprint.file(supportDir.appendingPathComponent(DictionaryStore.fileName))
+        let replacements = FileFingerprint.file(supportDir.appendingPathComponent(ReplacementsStore.fileName))
+        return "m:\(FileFingerprint.dir(modesDir))|c:\(connections)|f:\(FileFingerprint.dir(fragmentsDir))|d:\(dictionary)|r:\(replacements)"
     }
 
     func create() {

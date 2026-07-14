@@ -132,6 +132,11 @@ struct VocabularyConfigTests {
         #expect(VocabularyMerge.words(global: ["a", "b"], local: ["b", "c"], includeGlobal: true) == ["a", "b", "c"])
     }
 
+    @Test func mergeWordsDedupesCaseInsensitively() {
+        #expect(VocabularyMerge.words(global: ["kubernetes"], local: ["Kubernetes"], includeGlobal: true)
+            == ["kubernetes"])
+    }
+
     @Test func mergeWordsEmptyWhenAllInputsEmpty() {
         #expect(VocabularyMerge.words(global: [], local: [], includeGlobal: true) == [])
         #expect(VocabularyMerge.words(global: [], local: [], includeGlobal: false) == [])
@@ -181,6 +186,55 @@ struct VocabularyConfigTests {
         let g = [ReplacementRule(heard: "Foo(.*)", replace: "global", isRegex: true)]
         let l = [ReplacementRule(heard: "foo(.*)", replace: "local", isRegex: true)]
         #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == g + l)
+    }
+
+    @Test func replacingRulePreservesItsPosition() {
+        let original = ReplacementsSet.Rule(heard: "teh", replace: "the", regex: false)
+        let updated = ReplacementsSet.Rule(heard: "teh", replace: "The", regex: false)
+        let other = ReplacementsSet.Rule(heard: "wont", replace: "won't", regex: false)
+
+        let result = ReplacementsSet(rules: [original, other]).replacing(original, with: updated)
+
+        #expect(result.rules == [updated, other])
+    }
+
+    @Test func replacingRuleDoesNotCreateAConflictingIdentity() {
+        let first = ReplacementsSet.Rule(heard: "teh", replace: "the", regex: false)
+        let second = ReplacementsSet.Rule(heard: "wont", replace: "won't", regex: false)
+        let conflicting = ReplacementsSet.Rule(heard: "WONT", replace: "will not", regex: false)
+
+        let result = ReplacementsSet(rules: [first, second]).replacing(first, with: conflicting)
+
+        #expect(result.rules == [first, second])
+    }
+
+    @Test func reorderingKnownRulesPreservesRulesAddedElsewhere() {
+        let first = ReplacementsSet.Rule(heard: "first", replace: "1", regex: false)
+        let second = ReplacementsSet.Rule(heard: "second", replace: "2", regex: false)
+        let added = ReplacementsSet.Rule(heard: "added", replace: "3", regex: false)
+
+        let result = ReplacementsSet(rules: [first, second, added]).reordering([second, first])
+
+        #expect(result.rules == [second, first, added])
+    }
+
+    @Test func reorderingIgnoresAVisibleRuleChangedElsewhere() {
+        let first = ReplacementsSet.Rule(heard: "first", replace: "1", regex: false)
+        let second = ReplacementsSet.Rule(heard: "second", replace: "2", regex: false)
+        let changed = ReplacementsSet.Rule(heard: "first", replace: "one", regex: false)
+
+        let result = ReplacementsSet(rules: [changed, second]).reordering([second, first])
+
+        #expect(result.rules == [changed, second])
+    }
+
+    @Test func reorderingPreservesDuplicateRulesAddedOutsideTheApp() {
+        let first = ReplacementsSet.Rule(heard: "first", replace: "1", regex: false)
+        let second = ReplacementsSet.Rule(heard: "second", replace: "2", regex: false)
+
+        let result = ReplacementsSet(rules: [first, second, first]).reordering([second, first])
+
+        #expect(result.rules == [second, first, first])
     }
 
     @Test func removingDictionaryWordMatchesCaseInsensitively() {

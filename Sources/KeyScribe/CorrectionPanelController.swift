@@ -15,6 +15,7 @@ import SwiftUI
 final class CorrectionPanelController {
     private var window: NSWindow?
     private let destinations: () -> [CorrectionDestination]
+    private let analyze: (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis
     private let addDictionaryWord: (String, CorrectionDestination) -> Bool
     private let addReplacement: (String, String, Bool, CorrectionDestination) -> Bool
     private let captureSelection: () async -> String?
@@ -23,11 +24,13 @@ final class CorrectionPanelController {
 
     init(
         destinations: @escaping () -> [CorrectionDestination] = { [.global] },
+        analyze: @escaping (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis,
         addDictionaryWord: @escaping (String, CorrectionDestination) -> Bool,
         addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Bool,
         captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) }
     ) {
         self.destinations = destinations
+        self.analyze = analyze
         self.addDictionaryWord = addDictionaryWord
         self.addReplacement = addReplacement
         self.captureSelection = captureSelection
@@ -53,12 +56,16 @@ final class CorrectionPanelController {
             prefill: prefill ?? "",
             canCorrect: prefill != nil && hasPasteTarget,
             destinations: destinations(),
+            analyze: analyze,
             status: status,
             onSave: { [weak self] result in
                 guard let self else { return }
-                if self.apply(result) {
+                switch self.apply(result) {
+                case .saved:
                     self.window?.close()
-                } else {
+                case .noChange:
+                    self.status.refresh()
+                case .failed:
                     self.status.message = Self.saveFailedMessage(for: Self.destination(of: result))
                 }
             },
@@ -74,12 +81,19 @@ final class CorrectionPanelController {
         self.window = window
     }
 
-    private func apply(_ result: CorrectionPanelView.SaveResult) -> Bool {
-        switch result {
-        case .dictionary(let word, let destination): return addDictionaryWord(word, destination)
-        case .replacement(let heard, let replace, let regex, let destination):
-            return addReplacement(heard, replace, regex, destination)
+    private enum SaveOutcome { case saved, noChange, failed }
+
+    private func apply(_ result: CorrectionPanelView.SaveResult) -> SaveOutcome {
+        if case .noChange = analyze(Self.proposal(of: result), Self.destination(of: result)).action {
+            return .noChange
         }
+        let saved: Bool
+        switch result {
+        case .dictionary(let word, let destination): saved = addDictionaryWord(word, destination)
+        case .replacement(let heard, let replace, let regex, let destination):
+            saved = addReplacement(heard, replace, regex, destination)
+        }
+        return saved ? .saved : .failed
     }
 
     static func saveFailedMessage(for destination: CorrectionDestination) -> String {
@@ -98,10 +112,21 @@ final class CorrectionPanelController {
         }
     }
 
+    private static func proposal(of result: CorrectionPanelView.SaveResult) -> VocabularyProposal {
+        switch result {
+        case .dictionary(let word, _): return .word(word)
+        case .replacement(let heard, let replace, let regex, _):
+            return .replacement(heard: heard, replace: replace, regex: regex)
+        }
+    }
+
     private func applyAndCorrect(_ result: CorrectionPanelView.SaveResult, pasteText: String) {
-        guard apply(result) else {
+        switch apply(result) {
+        case .failed:
             status.message = Self.saveFailedMessage(for: Self.destination(of: result))
             return
+        case .noChange, .saved:
+            break
         }
         status.message = nil
         guard hasPasteTarget, let target = previousApp, !pasteText.isEmpty else {
@@ -124,6 +149,9 @@ final class CorrectionPanelController {
 @MainActor
 final class CorrectionPanelStatus: ObservableObject {
     @Published var message: String?
+    @Published private(set) var revision = 0
+
+    func refresh() { revision += 1 }
 }
 
 struct CorrectionDestination: Hashable, Identifiable {
@@ -162,6 +190,7 @@ private struct CorrectionPanelView: View {
     let originalSelection: String
     let canCorrect: Bool
     let destinations: [CorrectionDestination]
+    let analyze: (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis
     let onSave: (SaveResult) -> Void
     let onCorrect: (SaveResult, String) -> Void
     let onCancel: () -> Void
@@ -178,6 +207,7 @@ private struct CorrectionPanelView: View {
     init(
         prefill: String, canCorrect: Bool,
         destinations: [CorrectionDestination],
+        analyze: @escaping (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis,
         status: CorrectionPanelStatus,
         onSave: @escaping (SaveResult) -> Void, onCorrect: @escaping (SaveResult, String) -> Void,
         onCancel: @escaping () -> Void
@@ -186,6 +216,7 @@ private struct CorrectionPanelView: View {
         self.originalSelection = prefill
         self.canCorrect = canCorrect
         self.destinations = destinations
+        self.analyze = analyze
         self.status = status
         self.onSave = onSave
         self.onCorrect = onCorrect
@@ -225,6 +256,12 @@ private struct CorrectionPanelView: View {
                         .frame(maxWidth: .infinity)
                         .accessibilityIdentifier(AccessibilityID.Correction.useInstead)
                 }
+            }
+
+            if let feedback = draft.feedback {
+                VocabularyFeedbackView(feedback: feedback)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(AccessibilityID.Correction.status)
             }
 
             Toggle("Match heard phrase as a regular expression", isOn: $regex)
@@ -280,7 +317,7 @@ private struct CorrectionPanelView: View {
                     Button("Add & Replace Selection") { onCorrect(buildResult(), correctionPasteText()) }.disabled(!canCorrectNow)
                         .accessibilityIdentifier(AccessibilityID.Correction.addAndReplace)
                 }
-                Button("Add", action: commitSave)
+                Button(draft.buttonTitle, action: commitSave)
                     .keyboardShortcut(.defaultAction).disabled(!canSave)
                     .accessibilityIdentifier(AccessibilityID.Correction.add)
             }
@@ -307,12 +344,19 @@ private struct CorrectionPanelView: View {
     }
 
     private var canSave: Bool {
-        !trimmedTerm.isEmpty && (!regex || !trimmedReplace.isEmpty) && !regexInvalid
+        draft.canCommit
     }
 
     private var hasReplacementValue: Bool { !trimmedReplace.isEmpty }
 
-    private var canCorrectNow: Bool { canSave && hasReplacementValue && !correctedValue.isEmpty }
+    private var canCorrectNow: Bool { draft.canApplyCorrection && hasReplacementValue && !correctedValue.isEmpty }
+
+    private var draft: VocabularyDraftAnalysis {
+        _ = status.revision
+        return VocabularyDraftAnalysis(
+            term: trimmedTerm, replacement: trimmedReplace, regex: regex,
+            analyze: { analyze($0, destination) })
+    }
 
     private var entryKind: String {
         (!regex && trimmedReplace.isEmpty) ? "vocabulary" : "replacements"

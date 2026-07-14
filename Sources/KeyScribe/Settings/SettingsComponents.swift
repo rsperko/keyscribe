@@ -83,6 +83,25 @@ struct IssueText: View {
     }
 }
 
+struct VocabularyFeedbackView: View {
+    let feedback: VocabularyFeedback
+
+    var body: some View {
+        switch feedback {
+        case .existing(let message):
+            Label(message, systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.green)
+        case .update(let message):
+            Label(message, systemImage: "info.circle.fill")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+        case .advisory(let message):
+            IssueText(message, severity: .advisory)
+        }
+    }
+}
+
 struct DisclosureSummaryLabel: View {
     let title: String
     let summary: String

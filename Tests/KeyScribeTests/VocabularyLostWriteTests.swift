@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
@@ -10,6 +11,48 @@ struct VocabularyLostWriteTests {
             .appendingPathComponent("keyscribe-vocab-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    @Test func replacementDropRejectsBoundariesThatWouldNotMoveTheRule() {
+        #expect(!ReplacementDropValidation.isValid(source: 0, proposedRow: 0))
+        #expect(!ReplacementDropValidation.isValid(source: 0, proposedRow: 1))
+        #expect(ReplacementDropValidation.isValid(source: 0, proposedRow: 2))
+        #expect(ReplacementDropValidation.isValid(source: 2, proposedRow: 1))
+        #expect(!ReplacementDropValidation.isValid(source: 2, proposedRow: 2))
+        #expect(!ReplacementDropValidation.isValid(source: 2, proposedRow: 3))
+    }
+
+    @Test func replacementMoveRejectsStaleIndicesAndInvalidDestinations() {
+        #expect(ReplacementMoveValidation.isValid(source: IndexSet(integer: 1), destination: 0, count: 2))
+        #expect(!ReplacementMoveValidation.isValid(source: IndexSet(integer: 2), destination: 0, count: 2))
+        #expect(!ReplacementMoveValidation.isValid(source: IndexSet(integer: 0), destination: 3, count: 2))
+        #expect(!ReplacementMoveValidation.isValid(source: [], destination: 0, count: 2))
+    }
+
+    @Test func replacementTableLayoutInvalidatesWhenItsWidthChanges() {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: 100))
+        var invalidationCount = 0
+        let observer = ReplacementTableFrameObserver(view: view) {
+            invalidationCount += 1
+        }
+
+        view.setFrameSize(NSSize(width: 300, height: 100))
+        #expect(invalidationCount == 1)
+
+        view.setFrameSize(NSSize(width: 300, height: 200))
+        #expect(invalidationCount == 1)
+        _ = observer
+    }
+
+    @Test func vocabularyRemovalConfirmationNamesTheEntryAndScope() {
+        #expect(VocabularyRemovalCopy.dictionary("Kubernetes", scope: .global).title
+            == "Remove “Kubernetes” from Words to Recognize?")
+        #expect(VocabularyRemovalCopy.dictionary("Kubernetes", scope: .mode).message
+            == "This mode-only word will be removed. This cannot be undone.")
+        #expect(VocabularyRemovalCopy.replacement("code fence", scope: .global).title
+            == "Delete the replacement for “code fence”?")
+        #expect(VocabularyRemovalCopy.replacement("code fence", scope: .mode).message
+            == "This mode-only replacement will be removed. This cannot be undone.")
     }
 
     // The Vocabulary pane is open (its model holds an in-memory list). The global Add-to-Vocabulary
@@ -53,6 +96,73 @@ struct VocabularyLostWriteTests {
         #expect(onDisk.contains { $0.heard == "recieve" })
         #expect(onDisk.contains { $0.heard == "wont" })
         #expect(!onDisk.contains { $0.heard == "teh" })
+    }
+
+    @Test func replacementEditPreservesARuleAddedConcurrentlyOnDisk() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = ReplacementsSet.Rule(heard: "teh", replace: "the", regex: false)
+        try ReplacementsStore.write(ReplacementsSet(rules: [original]), to: dir)
+
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = ReplacementsSettingsModel(repository: repo)
+        repo.addReplacement(heard: "recieve", replace: "receive")
+
+        model.update(original, to: .init(heard: "teh", replace: "The", regex: false))
+
+        let onDisk = ReplacementsStore.loadOrDefault(supportDir: dir).rules
+        #expect(onDisk == [
+            .init(heard: "teh", replace: "The", regex: false),
+            .init(heard: "recieve", replace: "receive", regex: false),
+        ])
+    }
+
+    @Test func replacementEditReportsWhenTheOriginalVanishedFromDisk() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = ReplacementsSet.Rule(heard: "teh", replace: "the", regex: false)
+        try ReplacementsStore.write(ReplacementsSet(rules: [original]), to: dir)
+
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = ReplacementsSettingsModel(repository: repo)
+        try ReplacementsStore.write(ReplacementsSet(), to: dir)
+
+        let updated = model.update(original, to: .init(heard: "teh", replace: "The", regex: false))
+
+        #expect(!updated)
+        #expect(ReplacementsStore.loadOrDefault(supportDir: dir).rules.isEmpty)
+    }
+
+    @Test func replacementReorderPreservesARuleAddedConcurrentlyOnDisk() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = ReplacementsSet.Rule(heard: "first", replace: "1", regex: false)
+        let second = ReplacementsSet.Rule(heard: "second", replace: "2", regex: false)
+        try ReplacementsStore.write(ReplacementsSet(rules: [first, second]), to: dir)
+
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = ReplacementsSettingsModel(repository: repo)
+        repo.addReplacement(heard: "added", replace: "3")
+
+        model.move(from: IndexSet(integer: 1), to: 0)
+
+        let onDisk = ReplacementsStore.loadOrDefault(supportDir: dir).rules
+        #expect(onDisk == [second, first, .init(heard: "added", replace: "3", regex: false)])
+    }
+
+    @Test func replacementReorderIgnoresAStaleDragIndex() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = ReplacementsSet.Rule(heard: "first", replace: "1", regex: false)
+        let second = ReplacementsSet.Rule(heard: "second", replace: "2", regex: false)
+        try ReplacementsStore.write(ReplacementsSet(rules: [first, second]), to: dir)
+
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        let model = ReplacementsSettingsModel(repository: repo)
+
+        model.move(from: IndexSet(integer: 2), to: 0)
+
+        #expect(ReplacementsStore.loadOrDefault(supportDir: dir).rules == [first, second])
     }
 
     @Test func modeDictionaryAddWritesOnlyToThatMode() throws {

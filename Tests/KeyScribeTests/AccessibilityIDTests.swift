@@ -32,6 +32,17 @@ struct AccessibilityIDTests {
         #expect(AccessibilityID.History.row("2026-07-12T09-00-00") == "history.list.row.2026-07-12T09-00-00")
     }
 
+    @Test func vocabularyDeletionDialogsHaveStableActions() {
+        #expect(AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmConfirm
+            == "settings.vocabulary.dictionary.deleteConfirm.confirm")
+        #expect(AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmCancel
+            == "settings.vocabulary.replacements.deleteConfirm.cancel")
+        #expect(AccessibilityID.Mode.Editor.Recognition.dictionaryDeleteConfirmConfirm
+            == "mode.editor.recognition.dictionary.deleteConfirm.confirm")
+        #expect(AccessibilityID.Mode.Editor.Recognition.replacementDeleteConfirmCancel
+            == "mode.editor.recognition.replacements.deleteConfirm.cancel")
+    }
+
     // Dynamic ids splice a stable domain id (engine/mode/connection/feature/permission id) into a fixed
     // dot-path. The domain segment itself may carry '-', '_', or a leading '_' (e.g. "_direct"), so the
     // catalog pattern does not apply to it — but the fixed prefix must hold and the id never has spaces.

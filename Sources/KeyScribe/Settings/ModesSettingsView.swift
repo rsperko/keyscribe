@@ -54,6 +54,7 @@ struct ModesSettingsView: View {
                 if let mode = model.selected {
                     ModeEditorView(
                         mode: mode, allModes: model.modes, actionShortcuts: actionShortcuts,
+                        globalWords: model.globalWords, globalRules: model.globalRules,
                         connections: model.connections, fragmentIds: model.fragmentIds,
                         fragmentNames: model.fragmentNames,
                         autofocusName: model.lastCreatedId == mode.id,

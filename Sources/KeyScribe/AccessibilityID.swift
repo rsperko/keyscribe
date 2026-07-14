@@ -62,11 +62,24 @@ enum AccessibilityID {
             static let composerRegexToggle = "settings.vocabulary.composer.regexToggle"
             static let composerAdvanced = "settings.vocabulary.composer.advanced"
             static let composerAdd = "settings.vocabulary.composer.add"
+            static let composerStatus = "settings.vocabulary.composer.status"
             static let recognitionHelp = "settings.vocabulary.recognitionHelp"
             static let dictionaryList = "settings.vocabulary.dictionary.list"
             static func dictionaryRemove(_ word: String) -> String { "settings.vocabulary.dictionary.remove.\(word)" }
+            static let dictionaryDeleteConfirmConfirm = "settings.vocabulary.dictionary.deleteConfirm.confirm"
+            static let dictionaryDeleteConfirmCancel = "settings.vocabulary.dictionary.deleteConfirm.cancel"
             static let replacementsList = "settings.vocabulary.replacements.list"
+            static let replacementEditorHeard = "settings.vocabulary.replacements.editor.heard"
+            static let replacementEditorUseInstead = "settings.vocabulary.replacements.editor.useInstead"
+            static let replacementEditorRegex = "settings.vocabulary.replacements.editor.regex"
+            static let replacementEditorAdvanced = "settings.vocabulary.replacements.editor.advanced"
+            static let replacementEditorStatus = "settings.vocabulary.replacements.editor.status"
+            static let replacementEditorUpdate = "settings.vocabulary.replacements.editor.update"
+            static func replacementEdit(_ index: Int) -> String { "settings.vocabulary.replacements.edit.\(index)" }
             static func replacementRemove(_ index: Int) -> String { "settings.vocabulary.replacements.remove.\(index)" }
+            static func replacementAdvisory(_ index: Int) -> String { "settings.vocabulary.replacements.advisory.\(index)" }
+            static let replacementDeleteConfirmConfirm = "settings.vocabulary.replacements.deleteConfirm.confirm"
+            static let replacementDeleteConfirmCancel = "settings.vocabulary.replacements.deleteConfirm.cancel"
         }
 
         enum AI {
@@ -200,8 +213,20 @@ enum AccessibilityID {
                 static let disclosure = "mode.editor.recognition.disclosure"
                 static let dictionaryList = "mode.editor.recognition.dictionary.list"
                 static func dictionaryRemove(_ word: String) -> String { "mode.editor.recognition.dictionary.remove.\(word)" }
+                static let dictionaryDeleteConfirmConfirm = "mode.editor.recognition.dictionary.deleteConfirm.confirm"
+                static let dictionaryDeleteConfirmCancel = "mode.editor.recognition.dictionary.deleteConfirm.cancel"
                 static let replacementsList = "mode.editor.recognition.replacements.list"
+                static let replacementEditorHeard = "mode.editor.recognition.replacements.editor.heard"
+                static let replacementEditorUseInstead = "mode.editor.recognition.replacements.editor.useInstead"
+                static let replacementEditorRegex = "mode.editor.recognition.replacements.editor.regex"
+                static let replacementEditorAdvanced = "mode.editor.recognition.replacements.editor.advanced"
+                static let replacementEditorStatus = "mode.editor.recognition.replacements.editor.status"
+                static let replacementEditorUpdate = "mode.editor.recognition.replacements.editor.update"
+                static func replacementEdit(_ index: Int) -> String { "mode.editor.recognition.replacements.edit.\(index)" }
                 static func replacementRemove(_ index: Int) -> String { "mode.editor.recognition.replacements.remove.\(index)" }
+                static func replacementAdvisory(_ index: Int) -> String { "mode.editor.recognition.replacements.advisory.\(index)" }
+                static let replacementDeleteConfirmConfirm = "mode.editor.recognition.replacements.deleteConfirm.confirm"
+                static let replacementDeleteConfirmCancel = "mode.editor.recognition.replacements.deleteConfirm.cancel"
             }
         }
     }
@@ -294,6 +319,7 @@ enum AccessibilityID {
         static let useInstead = "correction.useInstead"
         static let regexToggle = "correction.regexToggle"
         static let destination = "correction.destination"
+        static let status = "correction.status"
         static let add = "correction.add"
         static let addAndReplace = "correction.addAndReplace"
         static let cancel = "correction.cancel"
@@ -317,8 +343,13 @@ enum AccessibilityID {
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
-        Settings.Vocabulary.recognitionHelp,
-        Settings.Vocabulary.dictionaryList, Settings.Vocabulary.replacementsList,
+        Settings.Vocabulary.composerStatus, Settings.Vocabulary.recognitionHelp,
+        Settings.Vocabulary.dictionaryList, Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
+        Settings.Vocabulary.dictionaryDeleteConfirmCancel, Settings.Vocabulary.replacementsList,
+        Settings.Vocabulary.replacementEditorHeard, Settings.Vocabulary.replacementEditorUseInstead,
+        Settings.Vocabulary.replacementEditorRegex, Settings.Vocabulary.replacementEditorAdvanced,
+        Settings.Vocabulary.replacementEditorStatus, Settings.Vocabulary.replacementEditorUpdate,
+        Settings.Vocabulary.replacementDeleteConfirmConfirm, Settings.Vocabulary.replacementDeleteConfirmCancel,
         Settings.AI.list, Settings.AI.add, Settings.AI.chooserCancel, Settings.AI.deleteConfirmConfirm,
         Settings.AI.deleteConfirmCancel, Settings.AI.connectOfferConnect, Settings.AI.connectOfferDismiss,
         Settings.AI.Editor.name, Settings.AI.Editor.provider, Settings.AI.Editor.baseURL,
@@ -341,6 +372,8 @@ enum AccessibilityID {
         Mode.Editor.privacy, Mode.Editor.excludeFromHistory,
         Mode.Editor.trimTrailingPunctuation, Mode.Editor.numbersAsDigits, Mode.Editor.trailing,
         Mode.Editor.duplicate, Mode.Editor.delete,
+        Mode.Editor.Recognition.dictionaryDeleteConfirmConfirm, Mode.Editor.Recognition.dictionaryDeleteConfirmCancel,
+        Mode.Editor.Recognition.replacementDeleteConfirmConfirm, Mode.Editor.Recognition.replacementDeleteConfirmCancel,
         Mode.Editor.Context.app, Mode.Editor.Context.precedingText,
         Mode.Editor.Routing.disclosure, Mode.Editor.Routing.addAppRule,
         Mode.Editor.Routing.chooseFromApplications, Mode.Editor.Routing.enterBundleID,
@@ -351,6 +384,9 @@ enum AccessibilityID {
         Mode.Editor.Routing.phraseAdd, Mode.Editor.Routing.websitePattern, Mode.Editor.Routing.websitePatternAdd,
         Mode.Editor.Recognition.disclosure, Mode.Editor.Recognition.dictionaryList,
         Mode.Editor.Recognition.replacementsList,
+        Mode.Editor.Recognition.replacementEditorHeard, Mode.Editor.Recognition.replacementEditorUseInstead,
+        Mode.Editor.Recognition.replacementEditorRegex, Mode.Editor.Recognition.replacementEditorAdvanced,
+        Mode.Editor.Recognition.replacementEditorStatus, Mode.Editor.Recognition.replacementEditorUpdate,
         FirstRun.Intro.getStarted,
         FirstRun.Model.advancedDisclosure, FirstRun.Model.enginePicker, FirstRun.Model.progress,
         FirstRun.Model.useAppleSpeech, FirstRun.Model.download,
@@ -366,7 +402,7 @@ enum AccessibilityID {
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
         History.DictionarySheet.term, History.DictionarySheet.save,
-        Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination,
+        Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination, Correction.status,
         Correction.add, Correction.addAndReplace, Correction.cancel,
     ]
 }

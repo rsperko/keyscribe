@@ -1,0 +1,284 @@
+import Foundation
+
+public enum VocabularyProposal: Equatable, Sendable {
+    case word(String)
+    case replacement(heard: String, replace: String, regex: Bool)
+}
+
+public struct VocabularyScope: Equatable, Sendable {
+    public struct Local: Equatable, Sendable {
+        public var words: [String]
+        public var rules: [ReplacementsSet.Rule]
+        public var includeGlobalWords: Bool
+        public var includeGlobalRules: Bool
+
+        public init(
+            words: [String] = [], rules: [ReplacementsSet.Rule] = [],
+            includeGlobalWords: Bool = true, includeGlobalRules: Bool = true
+        ) {
+            self.words = words
+            self.rules = rules
+            self.includeGlobalWords = includeGlobalWords
+            self.includeGlobalRules = includeGlobalRules
+        }
+    }
+
+    public var globalWords: [String]
+    public var globalRules: [ReplacementsSet.Rule]
+    public var local: Local?
+
+    public init(globalWords: [String] = [], globalRules: [ReplacementsSet.Rule] = [], local: Local? = nil) {
+        self.globalWords = globalWords
+        self.globalRules = globalRules
+        self.local = local
+    }
+}
+
+public struct VocabularyAnalysis: Equatable, Sendable {
+    public enum Action: Equatable, Sendable {
+        case addWord
+        case addReplacement
+        case updateReplacement(currentReplace: String)
+        case noChange(Reason)
+    }
+
+    public enum Reason: Equatable, Sendable {
+        case wordAlreadyListed
+        case wordCoveredByGlobal
+        case replacementAlreadyListed
+        case replacementCoveredByGlobal
+    }
+
+    public struct Advisory: Equatable, Sendable {
+        public enum Kind: Equatable, Sendable {
+            case overridesGlobal
+            case preempted
+            case cascades
+        }
+
+        public let kind: Kind
+        public let message: String
+
+        public init(kind: Kind, message: String) {
+            self.kind = kind
+            self.message = message
+        }
+    }
+
+    public let action: Action
+    public let advisories: [Advisory]
+
+    public init(action: Action, advisories: [Advisory] = []) {
+        self.action = action
+        self.advisories = advisories
+    }
+}
+
+public enum VocabularyAdvisor {
+    public static func analyze(_ proposal: VocabularyProposal, in scope: VocabularyScope) -> VocabularyAnalysis {
+        switch proposal {
+        case .word(let word):
+            return analyzeWord(word, in: scope)
+        case .replacement(let heard, let replace, let regex):
+            return analyzeReplacement(heard: heard, replace: replace, isRegex: regex, in: scope)
+        }
+    }
+
+    public static func ruleAdvisories(in scope: VocabularyScope) -> [[VocabularyAnalysis.Advisory]] {
+        let target = scope.local?.rules ?? scope.globalRules
+        guard !target.isEmpty else { return [] }
+        let effective = effectiveRules(in: scope)
+        let prepared: [Prepared?] = effective.map { rule in
+            switch ReplacementsStage.prepare(rule) {
+            case .ready(let regex, let template, _): return Prepared(regex: regex, template: template)
+            case .droppedForReturnMarker, .dropped: return nil
+            }
+        }
+        let offset = effective.count - target.count
+        return target.indices.map { index in
+            let position = offset + index
+            var result = advisories(at: position, effective: effective, prepared: prepared)
+            if scope.local != nil {
+                result += incomingGlobalAdvisories(
+                    at: position, globalCount: offset, effective: effective, prepared: prepared)
+            }
+            var seen = Set<String>()
+            return result.filter { seen.insert($0.message).inserted }
+        }
+    }
+
+    private static func analyzeWord(_ word: String, in scope: VocabularyScope) -> VocabularyAnalysis {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return VocabularyAnalysis(action: .addWord) }
+        func listed(in words: [String]) -> Bool {
+            words.contains { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        }
+        if let local = scope.local {
+            if listed(in: local.words) { return VocabularyAnalysis(action: .noChange(.wordAlreadyListed)) }
+            if local.includeGlobalWords, listed(in: scope.globalWords) {
+                return VocabularyAnalysis(action: .noChange(.wordCoveredByGlobal))
+            }
+            return VocabularyAnalysis(action: .addWord)
+        }
+        if listed(in: scope.globalWords) { return VocabularyAnalysis(action: .noChange(.wordAlreadyListed)) }
+        return VocabularyAnalysis(action: .addWord)
+    }
+
+    private static func analyzeReplacement(
+        heard: String, replace: String, isRegex: Bool, in scope: VocabularyScope
+    ) -> VocabularyAnalysis {
+        let trimmed = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return VocabularyAnalysis(action: .addReplacement) }
+        func identityMatches(_ rule: ReplacementsSet.Rule) -> Bool {
+            rule.regex == isRegex && sameIdentity(rule.heard, trimmed, isRegex: isRegex)
+        }
+
+        let targetRules = scope.local?.rules ?? scope.globalRules
+        if let existing = targetRules.first(where: identityMatches) {
+            if existing.replace == replace {
+                return VocabularyAnalysis(action: .noChange(.replacementAlreadyListed))
+            }
+            return VocabularyAnalysis(action: .updateReplacement(currentReplace: existing.replace))
+        }
+        if let local = scope.local, local.includeGlobalRules,
+           let global = scope.globalRules.first(where: identityMatches) {
+            if global.replace == replace {
+                return VocabularyAnalysis(action: .noChange(.replacementCoveredByGlobal))
+            }
+            return VocabularyAnalysis(action: .addReplacement, advisories: [VocabularyAnalysis.Advisory(
+                kind: .overridesGlobal,
+                message: "Overrides the global replacement for “\(global.heard)”, which currently becomes \(quoted(global.replace)).")])
+        }
+        return VocabularyAnalysis(action: .addReplacement)
+    }
+
+    private struct Prepared {
+        let regex: NSRegularExpression
+        let template: String
+    }
+
+    private static func effectiveRules(in scope: VocabularyScope) -> [ReplacementRule] {
+        guard let local = scope.local else { return scope.globalRules.toReplacementRules() }
+        return VocabularyMerge.rules(
+            global: scope.globalRules.toReplacementRules(),
+            local: local.rules.toReplacementRules(),
+            includeGlobal: local.includeGlobalRules)
+    }
+
+    private static func advisories(
+        at position: Int, effective: [ReplacementRule], prepared: [Prepared?]
+    ) -> [VocabularyAnalysis.Advisory] {
+        guard let rule = prepared[position] else { return [] }
+        let subject = effective[position]
+        var advisories: [VocabularyAnalysis.Advisory] = []
+
+        var witnesses: [String] = []
+        if subject.isRegex {
+            for i in effective.indices where !effective[i].isRegex && prepared[i] != nil {
+                if matches(rule.regex, effective[i].heard) { witnesses.append(effective[i].heard) }
+            }
+        } else {
+            witnesses = [subject.heard]
+        }
+        for witness in witnesses {
+            var current = witness
+            var firstChanger: Int?
+            for i in 0..<position {
+                guard let earlier = prepared[i] else { continue }
+                let next = applying(earlier, to: current)
+                if next != current, firstChanger == nil { firstChanger = i }
+                current = next
+            }
+            if current != witness, let changer = firstChanger, !matches(rule.regex, current) {
+                advisories.append(VocabularyAnalysis.Advisory(
+                    kind: .preempted,
+                    message: "When you say “\(witness)”, the replacement for “\(effective[changer].heard)” runs first and changes it to \(quoted(current)), so this rule will not apply."))
+            }
+        }
+
+        for execution in executions(at: position, effective: effective, prepared: prepared)
+        where position + 1 < effective.count {
+            var current = execution.output
+            var firstChanger: Int?
+            for i in (position + 1)..<effective.count {
+                guard let later = prepared[i] else { continue }
+                let next = applying(later, to: current)
+                if next != current, firstChanger == nil { firstChanger = i }
+                current = next
+            }
+            if current != execution.output, let changer = firstChanger {
+                advisories.append(VocabularyAnalysis.Advisory(
+                    kind: .cascades,
+                    message: "When you say “\(execution.witness)”, this rule produces \(quoted(execution.output)), then the replacement for “\(effective[changer].heard)” changes it to \(quoted(current))."))
+                break
+            }
+        }
+
+        return advisories
+    }
+
+    private static func incomingGlobalAdvisories(
+        at position: Int, globalCount: Int, effective: [ReplacementRule], prepared: [Prepared?]
+    ) -> [VocabularyAnalysis.Advisory] {
+        guard position >= globalCount, let subject = prepared[position] else { return [] }
+        return (0..<globalCount).compactMap { globalPosition in
+            let globalRule = effective[globalPosition]
+            guard let execution = executions(
+                at: globalPosition, effective: effective, prepared: prepared).first else { return nil }
+            var value = execution.output
+            for index in (globalPosition + 1)..<position {
+                guard let intervening = prepared[index] else { continue }
+                value = applying(intervening, to: value)
+            }
+            guard value == execution.output else { return nil }
+            let changed = applying(subject, to: value)
+            guard changed != value else { return nil }
+            return VocabularyAnalysis.Advisory(
+                kind: .cascades,
+                message: "When you say “\(execution.witness)”, the global replacement for “\(globalRule.heard)” produces \(quoted(execution.output)), which this rule changes to \(quoted(changed)).")
+        }
+    }
+
+    private struct Execution {
+        let witness: String
+        let output: String
+    }
+
+    private static func executions(
+        at position: Int, effective: [ReplacementRule], prepared: [Prepared?]
+    ) -> [Execution] {
+        guard let subject = prepared[position] else { return [] }
+        let candidates = effective[position].isRegex
+            ? effective.filter { !$0.isRegex }.map(\.heard)
+            : [effective[position].heard]
+        var seen = Set<String>()
+        return candidates.compactMap { witness in
+            guard seen.insert(witness).inserted else { return nil }
+            var input = witness
+            for index in 0..<position {
+                guard let earlier = prepared[index] else { continue }
+                input = applying(earlier, to: input)
+            }
+            guard matches(subject.regex, input) else { return nil }
+            return Execution(witness: witness, output: applying(subject, to: input))
+        }
+    }
+
+    private static func sameIdentity(_ a: String, _ b: String, isRegex: Bool) -> Bool {
+        isRegex ? a == b : a.caseInsensitiveCompare(b) == .orderedSame
+    }
+
+    private static func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
+        regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    private static func applying(_ rule: Prepared, to text: String) -> String {
+        let range = NSRange(text.startIndex..., in: text)
+        guard rule.regex.firstMatch(in: text, range: range) != nil else { return text }
+        return rule.regex.stringByReplacingMatches(in: text, range: range, withTemplate: rule.template)
+    }
+
+    private static func quoted(_ text: String) -> String {
+        text.isEmpty ? "nothing" : "“\(text)”"
+    }
+}

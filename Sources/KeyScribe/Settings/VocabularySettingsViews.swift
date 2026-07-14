@@ -1,9 +1,49 @@
+import AppKit
 import SwiftUI
 import KeyScribeKit
+
+enum VocabularyRemovalScope {
+    case global
+    case mode
+}
+
+struct VocabularyRemovalCopy {
+    let title: String
+    let message: String
+
+    static func dictionary(_ word: String, scope: VocabularyRemovalScope) -> Self {
+        switch scope {
+        case .global:
+            Self(
+                title: "Remove “\(word)” from Words to Recognize?",
+                message: "This word will no longer help recognition or AI rewrites. This cannot be undone.")
+        case .mode:
+            Self(
+                title: "Remove “\(word)” from this mode?",
+                message: "This mode-only word will be removed. This cannot be undone.")
+        }
+    }
+
+    static func replacement(_ heard: String, scope: VocabularyRemovalScope) -> Self {
+        switch scope {
+        case .global:
+            Self(
+                title: "Delete the replacement for “\(heard)”?",
+                message: "This replacement will no longer be applied. This cannot be undone.")
+        case .mode:
+            Self(
+                title: "Delete the replacement for “\(heard)” from this mode?",
+                message: "This mode-only replacement will be removed. This cannot be undone.")
+        }
+    }
+}
 
 struct DictionaryRows: View {
     let words: [String]
     let removeID: (String) -> String
+    let deletionScope: VocabularyRemovalScope
+    let deleteConfirmConfirmID: String
+    let deleteConfirmCancelID: String
     let onRemove: (String) -> Void
 
     var body: some View {
@@ -11,7 +51,12 @@ struct DictionaryRows: View {
             HStack {
                 Text(word)
                 Spacer()
-                RemoveButton { onRemove(word) }
+                RemoveButton(
+                    confirmation: VocabularyRemovalCopy.dictionary(word, scope: deletionScope),
+                    accessibilityLabel: "Delete word",
+                    confirmID: deleteConfirmConfirmID,
+                    cancelID: deleteConfirmCancelID
+                ) { onRemove(word) }
                     .accessibilityIdentifier(removeID(word))
             }
         }
@@ -20,44 +65,472 @@ struct DictionaryRows: View {
 
 struct ReplacementRows: View {
     let rules: [ReplacementsSet.Rule]
-    let removeID: (Int) -> String
+    let advisories: [[VocabularyAnalysis.Advisory]]
+    let ids: ReplacementRowAccessibilityIDs
+    let deletionScope: VocabularyRemovalScope
+    let analyzeEdit: (ReplacementsSet.Rule, VocabularyProposal) -> VocabularyAnalysis
+    let onUpdate: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
+    let onMove: (IndexSet, Int) -> Void
     let onRemove: (Int) -> Void
+    @State private var editingRule: ReplacementsSet.Rule?
+    @State private var tableHeight: CGFloat = 76
 
     var body: some View {
-        ForEach(rules.indices, id: \.self) { index in
-            let rule = rules[index]
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(rule.regex ? "Pattern" : "When heard")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if rule.regex {
-                            Text("Regex")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(rule.heard)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                    Text("Use instead")
+        if !rules.isEmpty {
+            ReplacementTable(
+                rows: rules.indices.map { AnyView(replacementRow(at: $0)) },
+                listID: ids.list,
+                height: $tableHeight,
+                onMove: onMove
+            )
+            .frame(height: tableHeight)
+        }
+    }
+
+    private func replacementRow(at index: Int) -> some View {
+        let rule = rules[index]
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .frame(width: 14, height: 24)
+                .accessibilityLabel("Drag to reorder")
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(rule.regex ? "Pattern" : "When heard")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(rule.replace.isEmpty ? "Nothing" : rule.replace)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .foregroundStyle(.secondary)
+                    if rule.regex {
+                        Text("Regex")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
-                RemoveButton { onRemove(index) }
-                    .accessibilityIdentifier(removeID(index))
+                Text(rule.heard)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                Text("Use instead")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(rule.replace.isEmpty ? "Nothing" : rule.replace)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+                if advisories.indices.contains(index), !advisories[index].isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(advisories[index], id: \.message) { advisory in
+                            IssueText(advisory.message, severity: .advisory)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityIdentifier(ids.advisory(index))
+                }
+            }
+            Spacer()
+            Button { editingRule = rule } label: {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Edit replacement")
+            .accessibilityIdentifier(ids.edit(index))
+            .popover(isPresented: Binding(
+                get: { editingRule == rule },
+                set: { if !$0, editingRule == rule { editingRule = nil } })) {
+                    ReplacementEditor(
+                        rule: rule,
+                        ids: ids.editor,
+                        analyze: { analyzeEdit(rule, $0) }) { updated in
+                            guard onUpdate(rule, updated) else { return false }
+                            editingRule = nil
+                            return true
+                        }
+                }
+            RemoveButton(
+                confirmation: VocabularyRemovalCopy.replacement(rule.heard, scope: deletionScope),
+                accessibilityLabel: "Delete replacement",
+                confirmID: ids.deleteConfirmConfirm,
+                cancelID: ids.deleteConfirmCancel
+            ) { onRemove(index) }
+                .accessibilityIdentifier(ids.remove(index))
+        }
+        .padding(.leading, 2)
+        .padding(.trailing, 10)
+        .padding(.vertical, 4)
+        .fixedSize(horizontal: false, vertical: true)
+        .contextMenu {
+            Button("Move up") { onMove(IndexSet(integer: index), index - 1) }
+                .disabled(index == rules.startIndex)
+            Button("Move down") { onMove(IndexSet(integer: index), index + 2) }
+                .disabled(index == rules.index(before: rules.endIndex))
+        }
+        .accessibilityAction(named: Text("Move up")) {
+            guard index > rules.startIndex else { return }
+            onMove(IndexSet(integer: index), index - 1)
+        }
+        .accessibilityAction(named: Text("Move down")) {
+            guard index < rules.index(before: rules.endIndex) else { return }
+            onMove(IndexSet(integer: index), index + 2)
+        }
+    }
+
+}
+
+enum ReplacementDropValidation {
+    static func isValid(source: Int, proposedRow: Int) -> Bool {
+        proposedRow != source && proposedRow != source + 1
+    }
+}
+
+enum ReplacementMoveValidation {
+    static func isValid(source: IndexSet, destination: Int, count: Int) -> Bool {
+        !source.isEmpty
+            && source.allSatisfy { (0..<count).contains($0) }
+            && (0...count).contains(destination)
+    }
+}
+
+private struct ReplacementTable: NSViewRepresentable {
+    let rows: [AnyView]
+    let listID: String
+    @Binding var height: CGFloat
+    let onMove: (IndexSet, Int) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let tableView = HandleDragTableView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("replacement"))
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        tableView.style = .plain
+        tableView.headerView = nil
+        tableView.delegate = context.coordinator
+        tableView.dataSource = context.coordinator
+        tableView.backgroundColor = .clear
+        tableView.intercellSpacing = .zero
+        tableView.selectionHighlightStyle = .none
+        tableView.allowsEmptySelection = true
+        tableView.rowHeight = 76
+        tableView.verticalMotionCanBeginDrag = true
+        tableView.registerForDraggedTypes([.string])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
+
+        let scrollView = PassThroughScrollView()
+        scrollView.documentView = tableView
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.setAccessibilityIdentifier(listID)
+        context.coordinator.observeFrameChanges(of: tableView)
+        context.coordinator.refreshLayout(of: tableView)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        let previousRowCount = context.coordinator.parent.rows.count
+        context.coordinator.parent = self
+        guard let tableView = scrollView.documentView as? NSTableView else { return }
+        guard previousRowCount == rows.count else {
+            tableView.reloadData()
+            context.coordinator.refreshLayout(of: tableView)
+            return
+        }
+        for row in rows.indices {
+            let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? ReplacementTableCellView
+            cell?.set(rootView: rows[row])
+        }
+        context.coordinator.refreshLayout(of: tableView)
+    }
+
+    @MainActor final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        var parent: ReplacementTable
+        var rowHeights: [CGFloat] = []
+        var frameObserver: ReplacementTableFrameObserver?
+
+        init(parent: ReplacementTable) {
+            self.parent = parent
+        }
+
+        func numberOfRows(in tableView: NSTableView) -> Int {
+            parent.rows.count
+        }
+
+        func observeFrameChanges(of tableView: NSTableView) {
+            frameObserver = ReplacementTableFrameObserver(view: tableView) { [weak self, weak tableView] in
+                guard let self, let tableView else { return }
+                self.refreshLayout(of: tableView)
+            }
+        }
+
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            rowHeights.indices.contains(row) ? rowHeights[row] : tableView.rowHeight
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            viewFor tableColumn: NSTableColumn?,
+            row: Int
+        ) -> NSView? {
+            let identifier = NSUserInterfaceItemIdentifier("replacementRow")
+            let cell = tableView.makeView(withIdentifier: identifier, owner: nil)
+                as? ReplacementTableCellView ?? ReplacementTableCellView()
+            cell.identifier = identifier
+            cell.set(rootView: parent.rows[row])
+            return cell
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            pasteboardWriterForRow row: Int
+        ) -> NSPasteboardWriting? {
+            let item = NSPasteboardItem()
+            item.setString(String(row), forType: .string)
+            return item
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            validateDrop info: NSDraggingInfo,
+            proposedRow row: Int,
+            proposedDropOperation dropOperation: NSTableView.DropOperation
+        ) -> NSDragOperation {
+            guard (info.draggingSource as? NSTableView) === tableView,
+                  let value = info.draggingPasteboard.string(forType: .string),
+                  let source = Int(value)
+            else { return [] }
+
+            let proposedRow = dropOperation == .on && source < row ? row + 1 : row
+            guard ReplacementDropValidation.isValid(source: source, proposedRow: proposedRow)
+            else { return [] }
+            tableView.setDropRow(proposedRow, dropOperation: .above)
+            return .move
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            acceptDrop info: NSDraggingInfo,
+            row: Int,
+            dropOperation: NSTableView.DropOperation
+        ) -> Bool {
+            guard let value = info.draggingPasteboard.string(forType: .string),
+                  let source = Int(value),
+                  ReplacementDropValidation.isValid(source: source, proposedRow: row)
+            else { return false }
+            parent.onMove(IndexSet(integer: source), row)
+            return true
+        }
+
+        func refreshLayout(of tableView: NSTableView) {
+            DispatchQueue.main.async { [weak self, weak tableView] in
+                guard let self, let tableView else { return }
+                tableView.layoutSubtreeIfNeeded()
+                guard tableView.bounds.width > 0 else { return }
+                self.rowHeights = self.parent.rows.map { row in
+                    NSHostingController(rootView: row).sizeThatFits(in: CGSize(
+                        width: tableView.bounds.width,
+                        height: CGFloat.greatestFiniteMagnitude)).height
+                }
+                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(self.parent.rows.indices))
+                tableView.layoutSubtreeIfNeeded()
+                let height = tableView.numberOfRows == 0
+                    ? CGFloat.zero
+                    : tableView.rect(ofRow: tableView.numberOfRows - 1).maxY
+                guard abs(self.parent.height - height) > 0.5 else { return }
+                self.parent.height = height
             }
         }
     }
 }
 
+@MainActor
+final class ReplacementTableFrameObserver: NSObject {
+    private weak var view: NSView?
+    private let onWidthChange: () -> Void
+    private var width: CGFloat
+
+    init(view: NSView, onWidthChange: @escaping () -> Void) {
+        self.view = view
+        self.onWidthChange = onWidthChange
+        self.width = view.frame.width
+        super.init()
+        view.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(frameDidChange),
+            name: NSView.frameDidChangeNotification,
+            object: view)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func frameDidChange() {
+        guard let view, view.frame.width != width else { return }
+        width = view.frame.width
+        onWidthChange()
+    }
+}
+
+private final class PassThroughScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
+private final class HandleDragTableView: NSTableView {
+    override func canDragRows(with rowIndexes: IndexSet, at mouseDownPoint: NSPoint) -> Bool {
+        mouseDownPoint.x <= 24
+    }
+}
+
+private final class ReplacementTableCellView: NSTableCellView {
+    private var hostingView: NSHostingView<AnyView>?
+
+    func set(rootView: AnyView) {
+        if let hostingView {
+            hostingView.rootView = rootView
+            return
+        }
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostingView)
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        self.hostingView = hostingView
+    }
+}
+
+struct ReplacementRowAccessibilityIDs {
+    let list: String
+    let edit: (Int) -> String
+    let remove: (Int) -> String
+    let advisory: (Int) -> String
+    let deleteConfirmConfirm: String
+    let deleteConfirmCancel: String
+    let editor: ReplacementEditorAccessibilityIDs
+}
+
+struct ReplacementEditorAccessibilityIDs {
+    let heard: String
+    let useInstead: String
+    let regex: String
+    let advanced: String
+    let status: String
+    let update: String
+}
+
+private struct ReplacementEditor: View {
+    let rule: ReplacementsSet.Rule
+    let ids: ReplacementEditorAccessibilityIDs
+    let analyze: (VocabularyProposal) -> VocabularyAnalysis
+    let onUpdate: (ReplacementsSet.Rule) -> Bool
+    @State private var heard: String
+    @State private var replace: String
+    @State private var regex: Bool
+    @State private var advancedExpanded: Bool
+    @State private var staleUpdate = false
+    @FocusState private var heardFocused: Bool
+
+    init(
+        rule: ReplacementsSet.Rule,
+        ids: ReplacementEditorAccessibilityIDs,
+        analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
+        onUpdate: @escaping (ReplacementsSet.Rule) -> Bool
+    ) {
+        self.rule = rule
+        self.ids = ids
+        self.analyze = analyze
+        self.onUpdate = onUpdate
+        _heard = State(initialValue: rule.heard)
+        _replace = State(initialValue: rule.replace)
+        _regex = State(initialValue: rule.regex)
+        _advancedExpanded = State(initialValue: rule.regex)
+    }
+
+    private var advancedBinding: Binding<Bool> {
+        Binding(get: { advancedExpanded || regex }, set: { advancedExpanded = $0 })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Edit replacement").font(.headline)
+            TextField(regex ? "Heard pattern" : "When heard", text: $heard)
+                .textFieldStyle(.roundedBorder)
+                .focused($heardFocused)
+                .accessibilityIdentifier(ids.heard)
+            TextField("Use instead", text: $replace)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier(ids.useInstead)
+            DisclosureSection(isExpanded: advancedBinding) {
+                Text("Pattern matching")
+                    .accessibilityIdentifier(ids.advanced)
+            } content: {
+                Toggle("Match heard phrase as a regular expression", isOn: $regex)
+                    .toggleStyle(.checkbox)
+                    .accessibilityIdentifier(ids.regex)
+                if regex {
+                    Text("Use captures like $1.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+            }
+            if draft.validationIssue == .invalidRegex {
+                IssueText("That is not a valid regular expression.")
+                    .accessibilityIdentifier(ids.status)
+            } else if draft.validationIssue == .replacementRequired {
+                IssueText("Use instead is required for a regular expression.")
+                    .accessibilityIdentifier(ids.status)
+            } else if draft.hasReplacementIdentityConflict {
+                IssueText("Another replacement already uses this heard phrase or pattern.")
+                    .accessibilityIdentifier(ids.status)
+            } else if staleUpdate {
+                IssueText("This replacement changed elsewhere. Close this editor and try again.")
+                    .accessibilityIdentifier(ids.status)
+            } else if case let .advisory(message) = draft.feedback {
+                IssueText(message, severity: .advisory)
+                    .accessibilityIdentifier(ids.status)
+            }
+            HStack {
+                Spacer()
+                Button("Update", action: commit)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canUpdate)
+                    .accessibilityIdentifier(ids.update)
+            }
+        }
+        .padding(16)
+        .frame(width: 420)
+        .onAppear { heardFocused = true }
+    }
+
+    private var draft: VocabularyDraftAnalysis {
+        VocabularyDraftAnalysis(
+            replacementTerm: heard, replacement: replace, regex: regex, analyze: analyze)
+    }
+
+    private var canUpdate: Bool { draft.canUpdateReplacement(from: rule) }
+
+    private func commit() {
+        guard canUpdate, let updatedRule = draft.replacementRule else { return }
+        staleUpdate = !onUpdate(updatedRule)
+    }
+}
+
 struct VocabularyComposer: View {
+    let analyze: (VocabularyProposal) -> VocabularyAnalysis
     let onAddWord: (String) -> Void
     let onAddReplacement: (String, String, Bool) -> Void
     @State private var heard = ""
@@ -100,6 +573,11 @@ struct VocabularyComposer: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let feedback = draft.feedback {
+                VocabularyFeedbackView(feedback: feedback)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerStatus)
+            }
             DisclosureSection("Pattern matching", isExpanded: advancedBinding) {
                 Toggle("Match heard phrase as a regular expression", isOn: $regex)
                     .toggleStyle(.checkbox)
@@ -112,19 +590,17 @@ struct VocabularyComposer: View {
                 }
             }
             .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdvanced)
-            // Kept OUTSIDE the disclosure: it gates canAdd, so it must stay visible while regex is on even if
-            // the section is somehow collapsed.
             if regexInvalid {
                 IssueText("That is not a valid regular expression.")
             }
             HStack {
                 Spacer()
                 Button(action: commit) {
-                    Label("Add", systemImage: "plus")
+                    Label(draft.buttonTitle, systemImage: draft.isUpdate ? "pencil" : "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                    .disabled(!canAdd)
+                    .disabled(!draft.canCommit)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdd)
             }
         }
@@ -136,7 +612,10 @@ struct VocabularyComposer: View {
     private var regexInvalid: Bool {
         regex && !heardTrimmed.isEmpty && !RegexCache.isValidPattern(heardTrimmed)
     }
-    private var canAdd: Bool { !heardTrimmed.isEmpty && (!regex || !replaceTrimmed.isEmpty) && !regexInvalid }
+
+    private var draft: VocabularyDraftAnalysis {
+        VocabularyDraftAnalysis(term: heardTrimmed, replacement: replaceTrimmed, regex: regex, analyze: analyze)
+    }
 
     private var generalHelpText: String {
         "Leave Use instead empty to add a word. Fill it in to create an automatic replacement."
@@ -147,11 +626,12 @@ struct VocabularyComposer: View {
     }
 
     private func commit() {
-        guard canAdd else { return }
-        if !regex && replaceTrimmed.isEmpty {
-            onAddWord(heardTrimmed)
-        } else {
-            onAddReplacement(heardTrimmed, replaceTrimmed, regex)
+        guard draft.canCommit, let proposal = draft.proposal else { return }
+        switch proposal {
+        case .word(let word):
+            onAddWord(word)
+        case .replacement(let heard, let replace, let regex):
+            onAddReplacement(heard, replace, regex)
         }
         reset()
     }
@@ -166,14 +646,35 @@ struct VocabularyComposer: View {
 }
 
 private struct RemoveButton: View {
+    let confirmation: VocabularyRemovalCopy
+    let accessibilityLabel: String
+    let confirmID: String
+    let cancelID: String
     let action: () -> Void
+    @State private var isConfirming = false
 
     var body: some View {
-        Button(role: .destructive, action: action) {
-            Image(systemName: "minus.circle.fill")
+        Button(role: .destructive) {
+            isConfirming = true
+        } label: {
+            Image(systemName: "trash")
+                .foregroundStyle(.red)
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
+        .accessibilityLabel(accessibilityLabel)
+        .help(accessibilityLabel)
+        .confirmationDialog(
+            confirmation.title,
+            isPresented: $isConfirming,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive, action: action)
+                .accessibilityIdentifier(confirmID)
+            Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(cancelID)
+        } message: {
+            Text(confirmation.message)
+        }
     }
 }
 
@@ -186,10 +687,16 @@ struct VocabularySettingsView: View {
     @ObservedObject var replacements: ReplacementsSettingsModel
     @State private var recognitionHelpExpanded = false
 
+    private var scope: VocabularyScope {
+        VocabularyScope(globalWords: dictionary.words, globalRules: replacements.rules)
+    }
+
     var body: some View {
+        let replacementAdvisories = VocabularyAdvisor.ruleAdvisories(in: scope)
         Form {
             Section("Add to Vocabulary") {
                 VocabularyComposer(
+                    analyze: { [scope] in VocabularyAdvisor.analyze($0, in: scope) },
                     onAddWord: dictionary.add,
                     onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) })
             }
@@ -205,6 +712,9 @@ struct VocabularySettingsView: View {
                 DictionaryRows(
                     words: dictionary.words,
                     removeID: AccessibilityID.Settings.Vocabulary.dictionaryRemove,
+                    deletionScope: .global,
+                    deleteConfirmConfirmID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
+                    deleteConfirmCancelID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmCancel,
                     onRemove: dictionary.remove)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
                 if dictionary.words.count >= Self.dictionaryAdviceThreshold {
@@ -218,11 +728,32 @@ struct VocabularySettingsView: View {
             Section("Automatic Replacements") {
                 Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
                     .font(.caption).foregroundStyle(.secondary)
+                if replacements.rules.count > 1 {
+                    Text("Applied from top to bottom. Drag to reorder.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 ReplacementRows(
                     rules: replacements.rules,
-                    removeID: AccessibilityID.Settings.Vocabulary.replacementRemove,
+                    advisories: replacementAdvisories,
+                    ids: ReplacementRowAccessibilityIDs(
+                        list: AccessibilityID.Settings.Vocabulary.replacementsList,
+                        edit: AccessibilityID.Settings.Vocabulary.replacementEdit,
+                        remove: AccessibilityID.Settings.Vocabulary.replacementRemove,
+                        advisory: AccessibilityID.Settings.Vocabulary.replacementAdvisory,
+                        deleteConfirmConfirm: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmConfirm,
+                        deleteConfirmCancel: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmCancel,
+                        editor: ReplacementEditorAccessibilityIDs(
+                            heard: AccessibilityID.Settings.Vocabulary.replacementEditorHeard,
+                            useInstead: AccessibilityID.Settings.Vocabulary.replacementEditorUseInstead,
+                            regex: AccessibilityID.Settings.Vocabulary.replacementEditorRegex,
+                            advanced: AccessibilityID.Settings.Vocabulary.replacementEditorAdvanced,
+                            status: AccessibilityID.Settings.Vocabulary.replacementEditorStatus,
+                            update: AccessibilityID.Settings.Vocabulary.replacementEditorUpdate)),
+                    deletionScope: .global,
+                    analyzeEdit: analyzeReplacementEdit,
+                    onUpdate: replacements.update,
+                    onMove: replacements.move,
                     onRemove: replacements.remove(at:))
-                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementsList)
                 if let error = replacements.error {
                     IssueText(error)
                 }
@@ -235,6 +766,16 @@ struct VocabularySettingsView: View {
             dictionary.reload()
             replacements.reload()
         }
+    }
+
+    private func analyzeReplacementEdit(
+        _ original: ReplacementsSet.Rule, _ proposal: VocabularyProposal
+    ) -> VocabularyAnalysis {
+        var editingScope = scope
+        if let index = editingScope.globalRules.firstIndex(of: original) {
+            editingScope.globalRules.remove(at: index)
+        }
+        return VocabularyAdvisor.analyze(proposal, in: editingScope)
     }
 }
 
@@ -324,6 +865,27 @@ final class ReplacementsSettingsModel: ObservableObject {
         let target = rules[index]
         mutate { set in
             if let i = set.rules.firstIndex(of: target) { set.rules.remove(at: i) }
+        }
+    }
+
+    @discardableResult
+    func update(_ original: ReplacementsSet.Rule, to updated: ReplacementsSet.Rule) -> Bool {
+        var didUpdate = false
+        mutate { set in
+            let replacement = set.replacing(original, with: updated)
+            didUpdate = replacement != set
+            set = replacement
+        }
+        return didUpdate
+    }
+
+    func move(from source: IndexSet, to destination: Int) {
+        guard ReplacementMoveValidation.isValid(source: source, destination: destination, count: rules.count)
+        else { return }
+        var ordered = rules
+        ordered.move(fromOffsets: source, toOffset: destination)
+        mutate { set in
+            set = set.reordering(ordered)
         }
     }
 

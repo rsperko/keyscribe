@@ -6,6 +6,8 @@ struct ModeEditorView: View {
     let mode: Mode
     let allModes: [Mode]
     var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
+    var globalWords: [String] = []
+    var globalRules: [ReplacementsSet.Rule] = []
     let connections: [Connection]
     let fragmentIds: [String]
     let fragmentNames: [String: String]
@@ -20,6 +22,7 @@ struct ModeEditorView: View {
     var onDuplicate: () -> Void = {}
     let onDelete: () -> Void
     @State private var recognitionExpanded = false
+    @State private var replacementAdvisories: [[VocabularyAnalysis.Advisory]] = []
 
     private var bind: ModeBinding { ModeBinding(mode: mode, onUpdate: onUpdate) }
     private var trigger: ModeTrigger {
@@ -140,7 +143,11 @@ struct ModeEditorView: View {
         }
         .formStyle(.grouped)
         .padding(16)
-        .onAppear { if autofocusName { onConsumeFocus() } }
+        .onAppear {
+            if autofocusName { onConsumeFocus() }
+            refreshReplacementAdvisories(vocabularyScope)
+        }
+        .onChange(of: vocabularyScope) { _, scope in refreshReplacementAdvisories(scope) }
     }
 
     private var usesMouseShortcut: Bool {
@@ -197,6 +204,15 @@ struct ModeEditorView: View {
         return "Cloud rewrite via \(name)\(redaction)"
     }
 
+    private var vocabularyScope: VocabularyScope {
+        VocabularyScope(
+            globalWords: globalWords, globalRules: globalRules,
+            local: VocabularyScope.Local(
+                words: mode.dictionary.words, rules: mode.replacements.rules,
+                includeGlobalWords: mode.dictionary.includeGlobal,
+                includeGlobalRules: mode.replacements.includeGlobal))
+    }
+
     @ViewBuilder private var recognitionDisclosure: some View {
         DisclosureSection(isExpanded: $recognitionExpanded) {
             DisclosureSummaryLabel(title: "Recognition and replacements", summary: recognitionSummary)
@@ -204,6 +220,7 @@ struct ModeEditorView: View {
             Text("Add to this mode")
                 .font(.subheadline.weight(.semibold))
             VocabularyComposer(
+                analyze: { [vocabularyScope] in VocabularyAdvisor.analyze($0, in: vocabularyScope) },
                 onAddWord: addWord,
                 onAddReplacement: addReplacementRule)
             Text("Mode-only words and replacements apply on top of the global lists for this mode.")
@@ -217,6 +234,9 @@ struct ModeEditorView: View {
             DictionaryRows(
                 words: mode.dictionary.words,
                 removeID: AccessibilityID.Mode.Editor.Recognition.dictionaryRemove,
+                deletionScope: .mode,
+                deleteConfirmConfirmID: AccessibilityID.Mode.Editor.Recognition.dictionaryDeleteConfirmConfirm,
+                deleteConfirmCancelID: AccessibilityID.Mode.Editor.Recognition.dictionaryDeleteConfirmCancel,
                 onRemove: removeWord)
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.dictionaryList)
             if mode.dictionary.words.isEmpty {
@@ -228,11 +248,32 @@ struct ModeEditorView: View {
                 .padding(.top, 4)
             Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite.")
                 .font(.caption).foregroundStyle(.secondary)
+            if mode.replacements.rules.count > 1 {
+                Text("Applied from top to bottom. Drag to reorder.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             ReplacementRows(
                 rules: mode.replacements.rules,
-                removeID: AccessibilityID.Mode.Editor.Recognition.replacementRemove,
+                advisories: replacementAdvisories,
+                ids: ReplacementRowAccessibilityIDs(
+                    list: AccessibilityID.Mode.Editor.Recognition.replacementsList,
+                    edit: AccessibilityID.Mode.Editor.Recognition.replacementEdit,
+                    remove: AccessibilityID.Mode.Editor.Recognition.replacementRemove,
+                    advisory: AccessibilityID.Mode.Editor.Recognition.replacementAdvisory,
+                    deleteConfirmConfirm: AccessibilityID.Mode.Editor.Recognition.replacementDeleteConfirmConfirm,
+                    deleteConfirmCancel: AccessibilityID.Mode.Editor.Recognition.replacementDeleteConfirmCancel,
+                    editor: ReplacementEditorAccessibilityIDs(
+                        heard: AccessibilityID.Mode.Editor.Recognition.replacementEditorHeard,
+                        useInstead: AccessibilityID.Mode.Editor.Recognition.replacementEditorUseInstead,
+                        regex: AccessibilityID.Mode.Editor.Recognition.replacementEditorRegex,
+                        advanced: AccessibilityID.Mode.Editor.Recognition.replacementEditorAdvanced,
+                        status: AccessibilityID.Mode.Editor.Recognition.replacementEditorStatus,
+                        update: AccessibilityID.Mode.Editor.Recognition.replacementEditorUpdate)),
+                deletionScope: .mode,
+                analyzeEdit: analyzeReplacementEdit,
+                onUpdate: updateReplacement,
+                onMove: moveReplacement,
                 onRemove: removeReplacement(at:))
-                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.replacementsList)
             if mode.replacements.rules.isEmpty {
                 Text("None yet").font(.caption).foregroundStyle(.tertiary)
             }
@@ -362,6 +403,42 @@ struct ModeEditorView: View {
         var updated = mode
         updated.replacements.rules.remove(at: index)
         onUpdate(updated)
+    }
+
+    private func updateReplacement(
+        _ original: ReplacementsSet.Rule, _ replacement: ReplacementsSet.Rule
+    ) -> Bool {
+        let replacementSet = ReplacementsSet(rules: mode.replacements.rules)
+            .replacing(original, with: replacement)
+        guard replacementSet.rules != mode.replacements.rules else { return false }
+        var updated = mode
+        updated.replacements.rules = replacementSet.rules
+        onUpdate(updated)
+        return true
+    }
+
+    private func moveReplacement(from source: IndexSet, to destination: Int) {
+        var rules = mode.replacements.rules
+        guard ReplacementMoveValidation.isValid(source: source, destination: destination, count: rules.count)
+        else { return }
+        rules.move(fromOffsets: source, toOffset: destination)
+        var updated = mode
+        updated.replacements.rules = rules
+        onUpdate(updated)
+    }
+
+    private func analyzeReplacementEdit(
+        _ original: ReplacementsSet.Rule, _ proposal: VocabularyProposal
+    ) -> VocabularyAnalysis {
+        var editingScope = vocabularyScope
+        if let index = editingScope.local?.rules.firstIndex(of: original) {
+            editingScope.local?.rules.remove(at: index)
+        }
+        return VocabularyAdvisor.analyze(proposal, in: editingScope)
+    }
+
+    private func refreshReplacementAdvisories(_ scope: VocabularyScope) {
+        replacementAdvisories = VocabularyAdvisor.ruleAdvisories(in: scope)
     }
 
     private var selectionMode: Binding<Bool> {

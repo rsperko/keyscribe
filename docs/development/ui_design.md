@@ -455,7 +455,9 @@ Both screens prioritize fast correction over configuration theory.
   shows — and the disclosure stays open so an ON regex toggle is never hidden.
 - Dictionary: edit/remove saved words, import/export later only if needed. The first scan says only
   that terms use the intended spelling; model-specific recognition behavior and rewrite sharing live
-  behind **How recognition works** inline help.
+  behind **How recognition works** inline help. Dictionary and replacement rows use the shared red
+  trash action; deleting either opens an item-specific confirmation that distinguishes global entries
+  from mode-only entries.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
   Apple; a soft nudge on Whisper/Parakeet), and dictionary terms always help the optional rewrite
@@ -466,7 +468,36 @@ Both screens prioritize fast correction over configuration theory.
   ones** (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
   recognition or a noticeable wait for normal use.
 - Replacements: human-readable `When heard`/`Use instead` rows that wrap long values. Regex rows use
-  `Pattern` and retain a visible `Regex` badge.
+  `Pattern` and retain a visible `Regex` badge. Rules are applied from top to bottom; the list says so
+  directly. Each row has a subtle drag handle and uses the platform table-reordering interaction. The
+  system insertion marker appears only at positions that would change the order, never immediately above
+  or below the row's current position. A context menu and accessibility actions provide **Move up**/**Move
+  down** without permanent arrow-button clutter. The list expands to fit its rows and relies on the
+  Settings pane's scrollbar instead of introducing nested scrolling.
+  A trailing pencil opens a compact popover for changing the heard phrase, replacement text, or regex
+  behavior; **Update** applies the fields atomically and preserves the rule's position. Dismissing the
+  popover leaves the rule unchanged. If the rule changes or disappears outside the editor before Update,
+  the popover stays open and explains that it must be reopened instead of pretending the stale edit saved.
+  Mode rules with the same identity override their included global
+  counterpart; unrelated included global rules run first, followed by mode rules in their displayed order.
+- **The composer says what Add will do before it is pressed in Settings, mode settings, and the standalone panel.** A live status directly below the relevant fields covers
+  the non-obvious cases: a duplicate word ("Already in Words to Recognize", or "…already included from
+  your global vocabulary" in a mode), an identical replacement, and an update — the button relabels to
+  **Update** and the caption names the current output ("…“foo” currently becomes “barn”"). Duplicates
+  disable the button but keep the composer populated (a clearly visible existing-entry status, never an error);
+  a mode-local rule that overrides a global one adds normally with a caption naming the overridden
+  output. Nothing here blocks — deliberate re-entry is answered with facts, not warnings.
+  In the standalone correction panel, an already-saved replacement still allows **Add & Replace Selection**;
+  the existing rule needs no write, but its correction is still applied to the selected text.
+- **Rule overlaps are persistent row advisories, not creation-time warnings.** Like mode trigger
+  conflicts, each replacement row shows an orange advisory (`IssueText`, advisory severity) whenever
+  the committed state demonstrates it with a concrete phrase: an earlier rule rewrites this rule's
+  heard phrase first ("When you say “colour”, the replacement for “colou?r” runs first…"), or a later
+  rule changes this rule's output ("When you say “foo”, this rule produces “barn”…"). State-based, so
+  rules added by the global shortcut, the correction panel, or external edits get the same feedback;
+  mode rows are judged against the merged global+local order and also identify when a local rule changes
+  an included global rule's output. Advisories never block, reorder, or disable rules, and no general
+  regex equivalence is attempted — only overlaps with a concrete witness.
 
 ### AI Services
 
