@@ -62,9 +62,24 @@ final class CaptureWriter: @unchecked Sendable {
     // False for a sample-incapable engine (e.g. Apple): skip accumulation and report no samples so the commit
     // path re-reads the WAV.
     private let wantsSamples: Bool
-    // Discards head buffers before the cue-end admission boundary (nil when nothing is gated). Writer-thread-
-    // only, on device-native slots (pre-resample).
-    private var headGate: HeadAdmitGate?
+    // Writer-thread-only, on device-native slots (pre-resample). Starts CLOSED: capture is armed before the
+    // start cue plays, so every buffer up to the cue-end boundary is audio the user was never invited to
+    // speak. `.gated` trims the cue window; `.open` is the no-cue case (sounds off).
+    private enum Admission {
+        case closed
+        case gated(HeadAdmitGate)
+        case open
+    }
+    private var admission: Admission = .closed
+    // Published by the control side at cue time and installed by the writer thread, so gate state keeps a
+    // single owner. nil until the cue-end boundary is known — which cannot happen before readiness.
+    private let admissionLock = NSLock()
+    private var pendingAdmission: (afterHostTime: UInt64, hostTicksPerSecond: Double, cueWindowSeconds: Double)?
+    // One-shot readiness signal. The first VALID buffer off the ring is the only proof the route actually
+    // delivers audio — configure/initialize/start all succeed on a route that never will. Fired from the
+    // writer thread; the RT callback must never signal the control path.
+    private let onFirstBuffer: (@Sendable () -> Void)?
+    private var signalledReady = false
     // Each post-conversion mono chunk written to the file is also handed here so a streaming session can
     // transcribe during capture. Writer thread ONLY, and MUST be non-blocking (real wiring is a bounded
     // AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
@@ -79,21 +94,17 @@ final class CaptureWriter: @unchecked Sendable {
     private var ringDropsAtSeal: Int?
 
     init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
-         admitAfterHostTime: UInt64 = 0, hostTicksPerSecond: Double = 0, cueWindowSeconds: Double = .infinity,
          wantsSamples: Bool = true,
          onSamples: (@Sendable ([Float]) -> Void)? = nil,
+         onFirstBuffer: (@Sendable () -> Void)? = nil,
          observeHostTime: @escaping (UInt64?) -> Bool) {
         self.ring = ring
         self.file = file
         self.recordFormat = recordFormat
         self.wantsSamples = wantsSamples
         self.onSamples = onSamples
+        self.onFirstBuffer = onFirstBuffer
         self.observeHostTime = observeHostTime
-        if admitAfterHostTime != 0, hostTicksPerSecond > 0 {
-            headGate = HeadAdmitGate(
-                admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: hostTicksPerSecond,
-                fallbackDropSeconds: cueWindowSeconds)
-        }
         // Pre-size to ~30 s of record-rate mono so a multi-minute dictation avoids re-copying the multi-MiB
         // prefix through repeated doubling.
         if wantsSamples { accumulated.reserveCapacity(Int(recordFormat.sampleRate * 30)) }
@@ -155,13 +166,20 @@ final class CaptureWriter: @unchecked Sendable {
             recordDrop(frames: info.frameCount, reason: "unusable input format")
             return
         }
+        // Readiness FIRST: this buffer is what proves the mic is live, and admission is still closed while the
+        // cue has not played — so a readiness check below the gate would never see the buffer it needs.
+        signalReadyIfFirst()
+        installPendingAdmission()
         // Head admission: drop/trim cue-window frames before the boundary, before conversion/write.
         var offset = 0
         var count = info.frameCount
-        if var gate = headGate {
+        switch admission {
+        case .closed: return  // pre-cue audio, discarded by design — never a drop canary
+        case .open: break
+        case .gated(var gate):
             let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
             let outcome = gate.observe(slotStartHostTime: host, frameCount: info.frameCount, sampleRate: info.sampleRate)
-            headGate = gate
+            admission = .gated(gate)
             switch outcome {
             case .admit: break
             case .drop: return
@@ -189,6 +207,32 @@ final class CaptureWriter: @unchecked Sendable {
             flushConverterTail()
             sealed = true
         }
+    }
+
+    private func signalReadyIfFirst() {
+        guard !signalledReady else { return }
+        signalledReady = true
+        onFirstBuffer?()
+    }
+
+    // Publish the cue-end boundary. Control side (any thread); the writer thread does the install.
+    func openAdmission(afterHostTime: UInt64, hostTicksPerSecond: Double, cueWindowSeconds: Double) {
+        admissionLock.withLock {
+            pendingAdmission = (afterHostTime, hostTicksPerSecond, cueWindowSeconds)
+        }
+    }
+
+    // Writer thread only. A 0 boundary means no cue played, so there is nothing to keep out of the recording.
+    private func installPendingAdmission() {
+        guard case .closed = admission else { return }
+        guard let pending = admissionLock.withLock({ pendingAdmission }) else { return }
+        guard pending.afterHostTime != 0, pending.hostTicksPerSecond > 0 else {
+            admission = .open
+            return
+        }
+        admission = .gated(HeadAdmitGate(
+            admitAfterHostTime: pending.afterHostTime, hostTicksPerSecond: pending.hostTicksPerSecond,
+            fallbackDropSeconds: pending.cueWindowSeconds))
     }
 
     // Rebuild when the native rate/channels change, which also resets the resampler.

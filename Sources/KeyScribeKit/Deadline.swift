@@ -54,28 +54,65 @@ public func runWithDeadline<T: Sendable>(
     operation: @escaping @Sendable () async throws -> T,
     onSettled: (@Sendable () -> Void)? = nil
 ) async throws -> T {
-    let work = Task<T, Error> { try await operation() }
+    try await runWithBudget(allowedSeconds: { seconds }, operation: operation, onSettled: onSettled)
+}
+
+// runWithDeadline over a window that may be EXTENDED while the operation runs, for work whose acceptable
+// duration is not known when it starts. `allowedSeconds` is re-read as it elapses rather than committing to
+// one sleep, so a raise always lands. Bounding the extension is the caller's job; this waits as told.
+public func runWithBudget<T: Sendable>(
+    allowedSeconds: @escaping @Sendable () -> Double,
+    operation: @escaping @Sendable () async throws -> T,
+    onSettled: (@Sendable () -> Void)? = nil
+) async throws -> T {
     let gate = DeadlineContinuation<T>()
+    // The operation publishes its own result the instant it settles. Routing it through the observer below
+    // leaves a window — arbitrarily wide if that observer is starved — where the work has finished but nothing
+    // has claimed the gate, letting the timer fail an operation that already succeeded.
+    let work = Task<T, Error> {
+        do {
+            let value = try await operation()
+            gate.resume(.success(value))
+            return value
+        } catch {
+            gate.resume(.failure(error))
+            throw error
+        }
+    }
     return try await withTaskCancellationHandler {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
             gate.set(cont)
             let timeout = Task {
-                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
-                work.cancel()
+                // The window opens when the TIMER arms, not when the caller called: a timer starved by the
+                // operation blocking the cooperative pool must still grant the full window rather than wake to
+                // find it already gone (DeadlineTests.cancelledTimerNeverResumesFailureAfterFastSuccess).
+                let origin = DispatchTime.now()
+                while true {
+                    let elapsed = Double(DispatchTime.now().uptimeNanoseconds - origin.uptimeNanoseconds) / 1e9
+                    let remaining = allowedSeconds() - elapsed
+                    if remaining <= 0 { break }
+                    do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+                }
+                // `break` can reach here without ever touching a cancellable sleep, so the sleep's throw is NOT
+                // the only thing that must stop a doomed timer.
+                guard !Task.isCancelled else { return }
+                // Claim the gate BEFORE cancelling: cancelling a cancellation-aware operation makes it throw
+                // CancellationError and publish that itself, which would report a timeout as an ordinary
+                // failure. Callers branch on DeadlineExceeded, so the identity is the contract.
                 gate.resume(.failure(DeadlineExceeded()))
+                work.cancel()
             }
+            // Owns only the timer and onSettled — the result is the operation's to publish. onSettled fires
+            // when the work TRULY finishes, which on an abandoned operation is long after the gate resumed.
             Task {
-                let result: Result<T, Error>
-                do { result = .success(try await work.value) }
-                catch { result = .failure(error) }
+                _ = try? await work.value
                 timeout.cancel()
-                gate.resume(result)
                 onSettled?()
             }
         }
     } onCancel: {
-        work.cancel()
         gate.resume(.failure(CancellationError()))
+        work.cancel()
     }
 }
 

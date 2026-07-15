@@ -247,3 +247,27 @@ struct ObjCExceptionShimTests {
         #expect(ran)
     }
 }
+
+// An idle-only rebuild swaps the control generation, which invalidates any in-flight bring-up. A start is in
+// flight from beginArming — BEFORE its session is published — so `session != nil` alone reads a CONFIGURING
+// start as idle. On a Bluetooth route that configure is exactly what blocks (A2DP->HFP), which is when a
+// topology change is most likely to fire, so this is the window where an idle rebuild would kill the trigger
+// and surface the spurious "Could not start the microphone" this phase exists to remove.
+struct CaptureIdleRebuildTests {
+    @Test func anIdleFlaggedCaptureRebuilds() {
+        #expect(AudioCapture.shouldRebuildWhileIdle(mustRebuild: true, hasSession: false, isArming: false))
+    }
+
+    @Test func anUnflaggedIdleCaptureDoesNotRebuild() {
+        #expect(!AudioCapture.shouldRebuildWhileIdle(mustRebuild: false, hasSession: false, isArming: false))
+    }
+
+    @Test func aRecordingCaptureIsNeverRebuiltUnderneath() {
+        #expect(!AudioCapture.shouldRebuildWhileIdle(mustRebuild: true, hasSession: true, isArming: false))
+    }
+
+    // The regression: arming without a published session is a start mid-configure, not an idle capture.
+    @Test func aStartStillConfiguringIsNotIdle() {
+        #expect(!AudioCapture.shouldRebuildWhileIdle(mustRebuild: true, hasSession: false, isArming: true))
+    }
+}

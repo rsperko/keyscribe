@@ -148,16 +148,46 @@ This file is the entry point. Read the design docs before writing code — they 
   forced from A2DP into HFP the moment capture opens an input stream — and doing that on the main thread
   froze the whole app *and* (via the event tap) global input. `AudioCapture` confines every `HALInputUnit`
   control call to a private serial `controlQueue`; `start()` is `async` and bounded by a watchdog
-  (`runWithDeadline`). The watchdog is **non-destructive**: the interactive `start()` path waits
-  `bringUpTimeout` (2 s) **plus** `bringUpGrace` (2 s) and **adopts** a bring-up that lands anywhere in
-  that ~4 s window rather than discarding it — a resident unit whose cached binding went stale over idle
-  can need ~2 s to re-realize the input unit on the hot path, and a tight 2 s watchdog used to throw that
-  late success on the floor as a spurious "Could not start the microphone". Only after the full window (a
-  genuinely wedged device) does it abandon the wedged call on its (now-orphaned) queue and let the next
-  dictation rebuild a fresh unit + queue — so the healthy path keeps reusing the prewarmed unit (no fresh
-  build per dictation) and a true wedge degrades to a graceful "Could not start the microphone" instead of
-  a hang. Waiting the grace window cannot reintroduce the freeze — bring-up is off-main, so the main actor
-  only `await`s. (`prewarm` keeps the tight `bringUpTimeout` — it configures/initializes the unit but does
+  (`runWithBudget`). **`start()` resolves on READINESS — the input's first valid buffer — not on the
+  AudioUnit start call returning**: bind/initialize/start can all succeed on a route that never delivers audio,
+  so a start return proves nothing. Readiness is observed on the **writer thread**
+  (`CaptureWriter.onFirstBuffer` → `SignalLatch`), ABOVE head admission — the proving buffer arrives while
+  admission is still closed, so a check below the gate would never see it — and **never signalled from the RT
+  callback**. `AudioCapture.awaitReadiness` releases its wait on cancellation (the deadline ABANDONS the
+  operation, so an unsignalled latch would strand the continuation) and therefore MUST keep its
+  `Task.checkCancellation()`: without it a released wait can return success and beat the timer to
+  `runWithBudget`'s one-shot gate, reporting a ready mic that never delivered a buffer. Capture **arms with
+  admission CLOSED and records nothing** until `openAdmission(afterHostTime:)` publishes the cue-end boundary
+  (0 ⇒ admit from now): the start cue is the go-signal, so it may not sound until the route is proven live,
+  and it then plays into an already-open mic that must not record it. Every `AudioCapture.start` caller must
+  open admission or it captures silence — `DictationController.beginCapture` and `--capture-probe` are the two.
+  **One extensible `ReadinessBudget` bounds the WHOLE operation** — configure, start, and the wait for a
+  buffer — since any of them can be the slow step on a transitioning route: `bringUpTimeout` (2 s) **plus**
+  `bringUpGrace` (2 s) for local devices, `bluetoothReadyTimeout` (9 s) for Bluetooth, whose A2DP→HFP
+  negotiation can outrun the 4 s window and surface as a spurious "Could not start the microphone" (observed
+  once as two failures then a success on the third trigger; the exact route state during the failures was
+  never established — see `agent_notes/mic_issue`). **The budget must not stay fixed at the initial target**:
+  the delivering device can change after it is sized — a failed default bind re-reads the system default, and
+  an arming-time restart can rebind (the session is published before readiness, so topology changes act on it).
+  `selectRoute` RAISES the budget as each route is CHOSEN — before the configure/start it pays for, since that
+  call is itself what blocks, and the latch is one-shot so a budget that already expired cannot be recovered.
+  It never lowers. Repeated churn cannot wait forever because the window is measured from ONE origin (the
+  timer arming inside `runWithBudget`), not restarted per raise — so the total wait is bounded by the slowest
+  transport's value however many times a route is reselected. There is deliberately no separate clamp: with
+  only two transports the only reachable values are 4 s and 9 s, and a cap over them would be unreachable
+  code. A future transport slower than Bluetooth raises that ceiling by construction — decide then whether an
+  absolute cap is wanted, rather than carrying a dead one now.
+  Drop the raise and a local target that rebinds onto Bluetooth inherits the 4 s cliff: the
+  original bug, one route change removed. Policy label and diagnostics likewise key off ONE `captureTarget()`
+  resolution threaded into `armSync` (sampling transport separately from the bind also mislabels a
+  disconnected preference as `explicit`). The watchdog is **non-destructive**: it **adopts** a bring-up
+  landing anywhere in the window rather than discarding it — a resident unit whose cached binding went stale
+  over idle can need ~2 s to re-realize the input unit on the hot path, and a tight 2 s watchdog used to throw
+  that late success on the floor. Only after the budget is spent (a genuinely wedged or never-delivering
+  device) does it abandon the call on its (now-orphaned) queue and let the next dictation rebuild a fresh unit
+  + queue — so the healthy path keeps reusing the prewarmed unit (no fresh build per dictation) and a true
+  wedge degrades to a graceful "Could not start the microphone" instead of a hang. Waiting cannot reintroduce
+  the freeze — bring-up is off-main, so the main actor only `await`s. (`prewarm` keeps the tight `bringUpTimeout` — it configures/initializes the unit but does
   NOT start the IOProc, so the mic indicator never lights; it is skipped for Bluetooth so idle never forces
   HFP.) A complementary idle/wake **binding refresh** attacks the same staleness proactively:
   `refreshBinding()` rebuilds + re-prewarms the idle unit, driven by `DictationController` on a ~4 min idle
@@ -170,10 +200,19 @@ This file is the entry point. Read the design docs before writing code — they 
   `releasesWarmCaptureOnIdle`). This exists because the periodic dispose→re-init cycle is observable to
   mic-usage monitors as a repeated grab/release; Balanced/Frugal exist for coexistence with mic-sensitive apps.
   To diagnose the next occurrence rather than
-  infer it, `start()` logs `bringUp=<ms>ms` on the `audio` category (`Log.audio`, `.debug`): a healthy
-  prewarmed start is a few ms; a value **past `bringUpTimeout` is tagged ` grace-adopted`** (subject to the
-  `log show` unreliability footgun below — capture it live or via `log stream --predicate 'category ==
-  "audio"'`). A disposed unit's render callback cannot fire (`AudioOutputUnitStop` is synchronous), and a
+  infer it, `start()` emits ONE structured record per capture start on the `audio` category
+  (`CaptureStartRecord`; `Log.audio`, `.debug`, `.error` on a terminal failure): `capture-start
+  outcome=ready|never-ready|cancelled|failed policy=explicit|default transport=bluetooth|other
+  bound-transport=… target=… bound=… configure=…ms start-returned=…ms first-buffer=…ms events=[…]`. A healthy
+  prewarmed start is a few ms to first buffer; the gap between `start-returned` and `first-buffer` is the
+  route actually opening. **Group by the transport that DELIVERED — `bound-transport` when present, else
+  `transport`**: they differ when a rebind moved the route, and grouping on `transport` alone files a capture
+  that delivered over Bluetooth under `other`. `bound`/`bound-transport` are frozen at the first buffer on a
+  `ready` outcome, so a restart landing just after readiness cannot re-file that timing under a device which
+  never delivered it. Timings are from `start()`, **not** from the trigger (the press pays the synchronous
+  secure-field probe and mode resolution first) — trigger-to-recording is `DictationRecord.stageMillis[.arm]`.
+  Subject to the `log show` unreliability footgun below — capture it live via `log stream --predicate
+  'category == "audio"'`. A disposed unit's render callback cannot fire (`AudioOutputUnitStop` is synchronous), and a
   stray late buffer is a no-op because the RT handler guards on the `capturing` atomic (set false at teardown
   before the unit is stopped). Because bring-up is async, `handleCommit` before `captureStarted` cancels the not-yet-live attempt rather
   than queueing a commit against audio that was not recording yet. Two idle HAL listeners

@@ -122,7 +122,7 @@ struct DictationStreamingWiringTests {
             self.drainGate = drainGate
         }
         func start(sampleRate: Int) async throws -> URL { url }
-        func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+        func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
             lock.withLock { sink = onSamples }
             if let onSamples { onSamples(chunk) }
             return url

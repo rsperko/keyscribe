@@ -7,11 +7,14 @@ import os
 import Synchronization
 
 protocol AudioCapturing: AnyObject, Sendable {
+    // Returns only once capture is READY — the input has delivered a valid buffer. A successful AudioUnit
+    // start proves nothing: bind/initialize/start all succeed on a Bluetooth route that never delivers audio.
     func start(sampleRate: Int) async throws -> URL
-    func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL
-    func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
-    func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
-               onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
+    func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
+    func start(sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
+    // Open recording admission at the cue-end boundary (0 ⇒ no cue played, admit immediately). Capture arms
+    // with admission closed, so this is what turns a live mic into a recording.
+    func openAdmission(afterHostTime: UInt64)
     var currentLevel: Float { get }
     var currentInputName: String? { get }
     func stop() -> URL?
@@ -27,20 +30,17 @@ extension AudioCapturing {
     func prewarm() {}
     func refreshBinding() {}
     func releaseWarm() {}
+    func openAdmission(afterHostTime: UInt64) {}
     func finishDraining() async -> URL? { stop() }
     func takeDrainedSamples() -> [Float]? { nil }
     func setPreferredInputUID(_ uid: String?) {}
     var currentLevel: Float { 0 }
     var currentInputName: String? { nil }
-    func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL {
+    func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         try await start(sampleRate: sampleRate)
     }
-    func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
-        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime)
-    }
-    func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
-               onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
-        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: onSamples)
+    func start(sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+        try await start(sampleRate: sampleRate, onSamples: onSamples)
     }
 }
 
@@ -55,7 +55,8 @@ private final class UnitBox: @unchecked Sendable {
     init(_ unit: HALInputUnit) { self.unit = unit }
 }
 
-final class TeardownLatch: @unchecked Sendable {
+// One-shot signal, awaitable across threads.
+final class SignalLatch: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
     private var signaled = false
@@ -108,6 +109,19 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var preferredInputUID: String?
     private var boundInputName: String?
     private var session: CaptureSession?
+    // Per-start, seeded from the start's own target: `lastEffectiveDeviceID` is a long-lived idle cursor and
+    // would report a transition from some earlier dictation.
+    private final class ArmingContext {
+        let record: CaptureStartRecord
+        let budget: ReadinessBudget
+        var routeCursor: AudioDeviceID?
+        init(record: CaptureStartRecord, budget: ReadinessBudget, routeCursor: AudioDeviceID?) {
+            self.record = record
+            self.budget = budget
+            self.routeCursor = routeCursor
+        }
+    }
+    private var arming: ArmingContext?
 
     private var ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
     private let capturing = Atomic<Bool>(false)
@@ -127,6 +141,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private static let bringUpTimeout: Double = 2.0
 
     private static let bringUpGrace: Double = 2.0
+
+    // Covers an A2DP->HFP negotiation the local-device deadline is far too tight for.
+    private static let bluetoothReadyTimeout: Double = 9.0
 
     private let deviceListenerQueue = DispatchQueue(label: "com.keyscribe.audio.device-listener")
     private var defaultInputListenerBlock: AudioObjectPropertyListenerBlock?
@@ -169,63 +186,121 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             return true
         }
         guard changed else { return }
-        let recording = lock.withLock { session != nil }
         markRebuild()
-        if !recording { prewarm() }
+        if !captureIsActive { prewarm() }
     }
 
     var currentLevel: Float { Float(bitPattern: levelBits.load(ordering: .relaxed)) }
 
     var currentInputName: String? { lock.withLock { boundInputName } }
 
+    // THE chokepoint for "a device is now bound" — armSync's initial bind, its failed-default retry, and the
+    // arming-time restart all land here, and it must run BEFORE the unit that delivers is started.
     private func publishBoundInputName(for deviceID: AudioDeviceID) {
         let name = AudioInputDevices.name(forDeviceID: deviceID)
-        lock.withLock { boundInputName = name }
+        let isBluetooth = AudioInputDevices.isBluetooth(deviceID)
+        let arming = lock.withLock { () -> ArmingContext? in
+            boundInputName = name
+            return self.arming
+        }
+        guard let arming else { return }
+        arming.record.noteBound(name, isBluetooth: isBluetooth)
     }
 
     func start(sampleRate: Int) async throws -> URL {
-        try await start(sampleRate: sampleRate, admitAfterHostTime: 0, onSamples: nil)
+        try await start(sampleRate: sampleRate, onSamples: nil)
     }
 
-    func start(sampleRate: Int, admitAfterHostTime: UInt64) async throws -> URL {
-        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, onSamples: nil)
+    func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+        try await start(sampleRate: sampleRate, wantsSamples: true, onSamples: onSamples)
     }
 
-    func start(sampleRate: Int, admitAfterHostTime: UInt64, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
-        try await start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: true, onSamples: onSamples)
-    }
-
-    func start(sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool,
+    func start(sampleRate: Int, wantsSamples: Bool,
                onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
         rebuildIfNeeded()
+        // Resolved ONCE and threaded through: the deadline, the policy label, the diagnostics and the bind
+        // must describe the same device. Sampling transport separately hands a Bluetooth route the 4 s deadline.
+        let target = captureTarget()
+        let targetIsBluetooth = Self.isBluetooth(target)
+        let ready = SignalLatch()
+        let record = CaptureStartRecord(
+            targetIsBluetooth: targetIsBluetooth,
+            explicitDevice: target.isPreferredPresent,
+            target: target.deviceID.flatMap(AudioInputDevices.name(forDeviceID:)))
+        let budget = ReadinessBudget(allowed: Self.startDeadlineSeconds(targetIsBluetooth: targetIsBluetooth))
+        beginArming(ArmingContext(record: record, budget: budget, routeCursor: target.deviceID))
+        defer { endArming(record) }
+        // Read AFTER arming is published, never before: the CoreAudio target resolution above is long enough
+        // for an idle rebuild to swap the generation, and a generation captured ahead of it would bind this
+        // start to an abandoned queue — every subsequent isGeneration check fails and the trigger dies.
+        // Publishing arming first also closes the window for good: shouldRebuildWhileIdle now refuses to swap.
         let (queue, generation) = currentQueueAndGeneration()
-        let started = DispatchTime.now()
         do {
-            // Adopts a bring-up landing anywhere in the timeout+grace window rather than discarding it; only
-            // the DeadlineExceeded branch below (a genuinely wedged device) tears the half-open capture down.
-            let url = try await runWithDeadline(seconds: Self.bringUpTimeout + Self.bringUpGrace) { [self] in
-                try await bringUp(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples, queue: queue, generation: generation)
+            // ONE budget spans configure, start, and the wait for the first buffer: any can be the slow step,
+            // and a wedged LOCAL device must still fail at its own deadline rather than inherit Bluetooth's.
+            let url = try await runWithBudget(allowedSeconds: { budget.allowedSeconds }) { [self] in
+                let url = try await bringUp(
+                    sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples,
+                    target: target, ready: ready, record: record, queue: queue, generation: generation)
+                try await Self.awaitReadiness(ready)
+                return url
             }
-            let ms = Self.elapsedMs(since: started)
-            let band = ms > Self.bringUpTimeout * 1000 ? " grace-adopted" : ""
-            Log.audio.debug("bringUp=\(ms, privacy: .public)ms\(band, privacy: .public)")
+            Log.audio.debug("capture-start \(record.summary(outcome: "ready"), privacy: .public)")
             return url
         } catch let error where Self.bringUpAbortSupersedes(error) {
-            // The queued armSync completes regardless of a watchdog timeout or cancellation, so supersede it
-            // eagerly (generation-gated mutations then no-op — no stranded hot mic) before dropping the
-            // half-open file. Rethrow the original error so the controller still distinguishes a timeout from
-            // a cancellation.
-            if error is DeadlineExceeded {
-                Log.audio.error("bringUp timed out after \(Self.elapsedMs(since: started), privacy: .public)ms")
-            }
+            // The queued armSync completes regardless of a timeout or cancellation, so supersede it eagerly
+            // before dropping the half-open file. Which error wins the gate is a race, so ask the CALLER's
+            // task which happened: cancelled ⇒ the controller dropped us; not cancelled ⇒ our deadline fired.
+            let timedOut = !Task.isCancelled
             swapToFreshGeneration()
             discardPendingCapture()
-            throw error is DeadlineExceeded ? AudioCaptureError.bringUpTimedOut : error
+            // Unit disposal may still be outstanding on an orphaned queue — this is not "unit gone".
+            record.stage("capture-discarded")
+            let summary = record.summary(outcome: timedOut ? "never-ready" : "cancelled")
+            if timedOut {
+                Log.audio.error("capture-start \(summary, privacy: .public)")
+            } else {
+                Log.audio.debug("capture-start \(summary, privacy: .public)")
+            }
+            throw timedOut ? AudioCaptureError.bringUpTimedOut : error
+        } catch {
+            Log.audio.error("capture-start \(record.summary(outcome: "failed"), privacy: .public)")
+            throw error
         }
     }
 
-    private static func elapsedMs(since start: DispatchTime) -> Double {
-        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
+    private func beginArming(_ context: ArmingContext) {
+        lock.withLock { arming = context }
+    }
+
+    // Identity-guarded: a cancel followed by a fast re-trigger overlaps two starts, and the first one's exit
+    // must not clear the successor's context.
+    private func endArming(_ record: CaptureStartRecord) {
+        lock.withLock { if arming?.record === record { arming = nil } }
+    }
+
+    // A route has been CHOSEN — not yet bound. Buys that transport's deadline BEFORE the configure/start it
+    // pays for, since that call is what blocks; the latch is one-shot, so an expired budget cannot be
+    // recovered. Called from two queues, so the cursor compare-and-set is under `lock`.
+    private func selectRoute(_ deviceID: AudioDeviceID?, label: String) {
+        // Explicit lock/unlock: returning the context and previous cursor as a tuple from a withLock closure
+        // crashes swiftc 6.3.3's SendNonSendable pass.
+        lock.lock()
+        guard let context = arming, context.routeCursor != deviceID else {
+            lock.unlock()
+            return
+        }
+        let previous = context.routeCursor
+        context.routeCursor = deviceID
+        lock.unlock()
+
+        if let deviceID {
+            context.budget.allow(
+                atLeast: Self.startDeadlineSeconds(targetIsBluetooth: AudioInputDevices.isBluetooth(deviceID)))
+        }
+        let from = previous.flatMap(AudioInputDevices.name(forDeviceID:)) ?? "none"
+        let to = deviceID.flatMap(AudioInputDevices.name(forDeviceID:)) ?? "none"
+        context.record.event("\(label)(\(from)->\(to))")
     }
 
     // mach_absolute_time() ticks per second, from the timebase (nanos = ticks * numer / denom). Used to
@@ -243,17 +318,53 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func bringUp(
-        sampleRate: Int, admitAfterHostTime: UInt64, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?,
+        sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?,
+        target: CaptureTarget, ready: SignalLatch, record: CaptureStartRecord,
         queue: DispatchQueue, generation: Int
     ) async throws -> URL {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
             queue.async { [self] in
                 do {
                     cont.resume(returning: try armSync(
-                        sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples, generation: generation))
+                        sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples,
+                        target: target, ready: ready, record: record, generation: generation))
                 } catch { cont.resume(throwing: error) }
             }
         }
+    }
+
+    // Releasing the wait on cancellation is REQUIRED: runWithBudget abandons this task rather than awaiting
+    // it, so an unsignalled latch strands the continuation forever. checkCancellation is what makes the release
+    // safe — without it a released wait returns success, reporting a ready mic that never delivered a buffer.
+    static func awaitReadiness(_ ready: SignalLatch) async throws {
+        await withTaskCancellationHandler { await ready.wait() } onCancel: { ready.signal() }
+        try Task.checkCancellation()
+    }
+
+    private static func isBluetooth(_ target: CaptureTarget) -> Bool {
+        target.deviceID.map(AudioInputDevices.isBluetooth) ?? false
+    }
+
+    // A Bluetooth route mid A2DP->HFP negotiation can outrun a local-sized deadline and surface as a spurious
+    // "Could not start the microphone"; every other transport keeps the fast deadline, so a wedged built-in mic
+    // still fails quickly. Key this on the RESOLVED target, never a separately-sampled default. The Bluetooth
+    // value is an unvalidated initial cap.
+    static func startDeadlineSeconds(targetIsBluetooth: Bool) -> Double {
+        targetIsBluetooth ? bluetoothReadyTimeout : bringUpTimeout + bringUpGrace
+    }
+
+    // Publish the cue-end admission boundary to the live capture. No-op once the capture is gone (a release
+    // during the cue), so a late cue can never open admission on a successor.
+    func openAdmission(afterHostTime: UInt64) {
+        guard let writer = lock.withLock({ session?.writer }) else { return }
+        let now = mach_absolute_time()
+        // Approximates the remaining cue window so the head gate's invalid-timestamp fallback drops about the
+        // cue's worth of audio on a device that never stamps hostTime.
+        let cueWindowSeconds = afterHostTime > now
+            ? Double(afterHostTime - now) / Self.hostTicksPerSecond : 0
+        writer.openAdmission(
+            afterHostTime: afterHostTime, hostTicksPerSecond: Self.hostTicksPerSecond,
+            cueWindowSeconds: cueWindowSeconds)
     }
 
     // Realizes the input HAL unit before the first dictation so the hot path skips the one-time realization
@@ -285,6 +396,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard let deviceID = effectiveDeviceID() else { return }
         let outgoing = lock.withLock { () -> (keep: Bool, dispose: HALInputUnit?) in
             guard self.generation == generation else { return (true, nil) }
+            // prewarm() is scheduled asynchronously while idle, so this can land AFTER a capture began. Below
+            // it would steal and dispose `unit` whenever the route moved — during a capture that is the unit
+            // currently delivering audio. Same lock section as the steal, or the guard is decorative.
+            guard !captureIsActiveLocked else { return (true, nil) }
             if unit != nil && configuredDeviceID == deviceID { return (true, nil) }
             let old = unit; unit = nil; configuredDeviceID = nil
             return (false, old)
@@ -309,8 +424,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // for its real IO period BEFORE the ring is touched, start the writer BEFORE publishing the
     // session/`capturing`, and start the unit's IOProc LAST — so the first delivered buffer already lands in a
     // correctly-sized, actively-drained ring.
-    private func armSync(sampleRate: Int, admitAfterHostTime: UInt64 = 0, wantsSamples: Bool = true,
-                         onSamples: (@Sendable ([Float]) -> Void)? = nil, generation: Int) throws -> URL {
+    private func armSync(sampleRate: Int, wantsSamples: Bool,
+                         onSamples: (@Sendable ([Float]) -> Void)? = nil,
+                         target: CaptureTarget, ready: SignalLatch, record: CaptureStartRecord,
+                         generation: Int) throws -> URL {
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
@@ -326,14 +443,15 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
         // Configure before sizing the ring below: a retry here may bind a different default device, and the
         // ring must be sized for whichever device actually ends up bound.
-        let target = captureTarget()
         let boundDeviceID: AudioDeviceID
         do {
-            boundDeviceID = try configureCaptureDevice(target: target, generation: generation)
+            boundDeviceID = try configureCaptureDevice(target: target, record: record, generation: generation)
         } catch {
+            record.stage("configure-failed")
             try? FileManager.default.removeItem(at: url)
             throw error
         }
+        record.stage("configure")
         publishBoundInputName(for: boundDeviceID)
 
         // Quiescent window for resetting/replacing the shared ring before the IOProc starts.
@@ -354,17 +472,16 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // The previous capture's samples are consumed by the controller right after finishDraining; clear any
         // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
         lock.withLock { lastDrainedSamples = nil }
-        // Approximate the remaining cue window from arm time so the head gate's invalid-timestamp fallback
-        // drops about the cue's worth of audio (not a fixed slot count) on a device that never stamps hostTime.
-        let now = mach_absolute_time()
-        let cueWindowSeconds = admitAfterHostTime > now
-            ? Double(admitAfterHostTime - now) / Self.hostTicksPerSecond : 0
+        // Admission opens later, at the cue-end boundary the controller publishes once this writer reports the
+        // route live (openAdmission) — so the writer starts closed and discards everything until then.
         let writer = CaptureWriter(
             ring: ring, file: file, recordFormat: recordFormat,
-            admitAfterHostTime: admitAfterHostTime, hostTicksPerSecond: Self.hostTicksPerSecond,
-            cueWindowSeconds: cueWindowSeconds,
             wantsSamples: wantsSamples,
             onSamples: onSamples,
+            onFirstBuffer: {
+                record.noteFirstBuffer()
+                ready.signal()
+            },
             observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
         let mySession = CaptureSession(url: url, file: file, writer: writer)
         // Started before publishing session/lastWriter: a teardown that observed a published-but-unstarted
@@ -388,11 +505,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // Start the IOProc last so the first buffer lands in the correctly-sized ring.
         do {
             try startConfiguredUnit(generation: generation)
+            record.stage("start-returned")
         } catch {
+            record.stage("start-failed")
             // A superseded arm must not unwind a newer generation's unit or session.
             if isGeneration(generation) {
                 removeActiveDeviceListener()
-                disposeUnitInline()
+                disposeUnitInline(generation: generation)
                 discardPendingCapture()
             } else {
                 writer.finish(flushConverter: false)
@@ -409,7 +528,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     // Bind and initialize the target device, retrying a failed system default once.
-    private func configureCaptureDevice(target: CaptureTarget, generation: Int) throws -> AudioDeviceID {
+    private func configureCaptureDevice(
+        target: CaptureTarget, record: CaptureStartRecord, generation: Int
+    ) throws -> AudioDeviceID {
         guard let deviceID = target.deviceID else { throw AudioCaptureError.formatUnavailable }
         do {
             try configureUnit(deviceID: deviceID, generation: generation)
@@ -417,17 +538,23 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         } catch {
             // A superseded configure must not retry or touch shared state.
             guard isGeneration(generation) else { throw error }
-            disposeUnitInline()
-            if target.isPreferredPresent { throw AudioCaptureError.preferredInputFailed }
+            disposeUnitInline(generation: generation)
+            if target.isPreferredPresent {
+                record.event("preferred-input-failed")
+                throw AudioCaptureError.preferredInputFailed
+            }
+            record.event("configure-retry")
             Thread.sleep(forTimeInterval: 0.25)
             guard let retryID = AudioInputDevices.systemDefaultInputID() else {
                 throw AudioCaptureError.formatUnavailable
             }
+            // Before configureUnit, not after: on a Bluetooth default that is what blocks.
+            selectRoute(retryID, label: "retry-rebind")
             do {
                 try configureUnit(deviceID: retryID, generation: generation)
                 return retryID
             } catch {
-                if isGeneration(generation) { disposeUnitInline() }
+                disposeUnitInline(generation: generation)
                 throw AudioCaptureError.formatUnavailable
             }
         }
@@ -459,7 +586,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         do {
             try liveUnit.start()
         } catch {
-            if isGeneration(generation) { disposeUnitInline() }
+            disposeUnitInline(generation: generation)
             throw error
         }
     }
@@ -561,25 +688,38 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // could land after the next dictation re-adopted the resident unit and stop a live capture.
     static func enqueueTeardown(
         _ enqueue: (@escaping @Sendable () -> Void) -> Void, teardown: @escaping @Sendable () -> Void
-    ) -> TeardownLatch {
-        let latch = TeardownLatch()
+    ) -> SignalLatch {
+        let latch = SignalLatch()
         enqueue { teardown(); latch.signal() }
         return latch
     }
 
     // Non-Bluetooth units are stopped for reuse; Bluetooth units are disposed to release HFP.
     private func teardownUnit(generation: Int) {
-        let proceed = lock.withLock {
-            Self.shouldTeardownUnit(
-                generation: generation, currentGeneration: self.generation, captureActive: session != nil)
+        // Claim the EXACT unit in the same critical section that validates the generation. The transport
+        // classification below is a blocking CoreAudio call, and a swap during it runs the next generation on a
+        // fresh queue — concurrently with this block — which can install a new unit. Re-reading the global
+        // afterwards would stop or dispose that new capture's unit, not this one's.
+        let claimed = lock.withLock { () -> (unit: HALInputUnit, device: AudioDeviceID?)? in
+            guard Self.shouldTeardownUnit(
+                generation: generation, currentGeneration: self.generation, captureActive: session != nil),
+                let u = unit
+            else { return nil }
+            return (u, configuredDeviceID)
         }
-        guard proceed else { return }
-        let bound = lock.withLock { configuredDeviceID }
-        switch Self.teardownAction(boundDeviceIsBluetooth: bound.map(AudioInputDevices.isBluetooth)) {
+        guard let claimed else { return }
+        switch Self.teardownAction(boundDeviceIsBluetooth: claimed.device.map(AudioInputDevices.isBluetooth)) {
         case .dispose:
-            disposeUnitInline()
+            // Clear the shared slot only if it STILL holds this unit: a swap that already took it owns its
+            // disposal (swapToFreshGeneration disposes what it takes, on this same serial queue).
+            let owned = lock.withLock { () -> Bool in
+                guard unit === claimed.unit else { return false }
+                unit = nil; configuredDeviceID = nil
+                return true
+            }
+            if owned { claimed.unit.dispose() }
         case .stop:
-            lock.withLock { unit }?.stop()
+            claimed.unit.stop()
         }
     }
 
@@ -709,28 +849,49 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lock.withLock { (controlQueue, generation) }
     }
     private func isGeneration(_ g: Int) -> Bool { lock.withLock { generation == g } }
+    // Recording OR still arming — a start is live from beginArming, BEFORE its session exists, so `session`
+    // alone reads a configuring start as idle. THE definition for every idle-only path; the _locked form exists
+    // so a caller that must decide and mutate atomically can do both in one critical section.
+    private var captureIsActiveLocked: Bool { session != nil || arming != nil }
+    private var captureIsActive: Bool { lock.withLock { captureIsActiveLocked } }
     private func markRebuild() { lock.withLock { mustRebuild = true } }
 
-    // MUST run on the control queue. Dispose the current unit (its realized I/O proc + device hold) and
+    // MUST run on the control queue. Dispose this generation's unit (its realized I/O proc + device hold) and
     // clear the binding, so the next bring-up configures fresh.
-    private func disposeUnitInline() {
+    //
+    // Generation-scoped in the SAME critical section as the steal. Every caller used to check isGeneration and
+    // then call this, and a swap landing between the two runs the next generation on a FRESH queue —
+    // concurrently with the caller — so the stale block would dispose the new capture's unit.
+    private func disposeUnitInline(generation: Int) {
         let outgoing = lock.withLock { () -> HALInputUnit? in
-            let u = unit; unit = nil; configuredDeviceID = nil; return u
+            guard self.generation == generation else { return nil }
+            let u = unit; unit = nil; configuredDeviceID = nil
+            return u
         }
         outgoing?.dispose()
     }
 
-    private func rebuildIfNeeded() {
-        guard lock.withLock({ mustRebuild }) else { return }
-        swapToFreshGeneration()
+    // A start is in flight from beginArming, which happens BEFORE its session is published — so an idle check
+    // on `session != nil` alone reads a CONFIGURING start as idle and swaps the generation out from under it,
+    // failing the trigger. Evaluated under the same lock that publishes both, so a start that begins between a
+    // caller's check and here cannot be clobbered either.
+    private func rebuildIfNeeded() { swapToFreshGeneration(onlyIfIdle: true) }
+
+    static func shouldRebuildWhileIdle(mustRebuild: Bool, hasSession: Bool, isArming: Bool) -> Bool {
+        mustRebuild && !hasSession && !isArming
     }
 
     // Bump to a fresh generation on a fresh serial control queue, abandoning the outgoing unit's queue (used by
     // rebuildIfNeeded and eagerly on a watchdog timeout, so a wedged bring-up is superseded immediately). Dispose
     // the outgoing unit on its OWN queue, async fire-and-forget: a healthy one disposes orderly off the caller; a
     // wedged one never disposes and is left behind — the intended abandonment, no dealloc on the caller's thread.
-    private func swapToFreshGeneration() {
+    private func swapToFreshGeneration(onlyIfIdle: Bool = false) {
         lock.lock()
+        if onlyIfIdle, !Self.shouldRebuildWhileIdle(
+            mustRebuild: mustRebuild, hasSession: session != nil, isArming: arming != nil) {
+            lock.unlock()
+            return
+        }
         mustRebuild = false
         let outgoing = unit
         let outgoingQueue = controlQueue
@@ -904,8 +1065,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func applyTopologyChange() {
-        let recording = lock.withLock { session != nil }
+        let (recording, arming) = lock.withLock { (session != nil, self.arming != nil) }
         let current = effectiveDeviceID()
+        // Recorded against the in-flight start before the recording/idle split below acts on it.
+        selectRoute(current, label: "effective-device-changed")
         if recording {
             // A NEW preferred device appearing or the default switching (follow mode) changes the effective
             // device without the bound device dying — restart onto it. (A disconnect / format flip of the
@@ -913,6 +1076,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             if current != lock.withLock({ configuredDeviceID }) { requestMidRecordingRestart() }
             return
         }
+        // Arming but no session yet: the start is mid-configure. It has already taken the budget raise above,
+        // and its own retry re-reads the default if the bind fails — let it finish rather than rebuilding.
+        if arming { return }
         // Skip the rebuild when the effective device is unchanged: the device list churns for reasons that
         // don't affect us. lastEffectiveDeviceID is touched only here (on deviceListenerQueue), no lock.
         guard current != lastEffectiveDeviceID else { return }
@@ -925,8 +1091,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // proxy), so the first dictation afterward would pay a stale realization on the hot path — or fail at the
     // watchdog edge. Rebuild + re-prewarm while idle; no-op while recording.
     func refreshBinding() {
-        let recording = lock.withLock { session != nil }
-        guard !recording else { return }
+        guard !captureIsActive else { return }
         markRebuild()
         prewarm()
     }
@@ -937,16 +1102,26 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     func releaseWarm() {
         let (queue, generation) = currentQueueAndGeneration()
         queue.async { [self] in
-            guard isGeneration(generation) else { return }
-            let recording = lock.withLock { session != nil } || capturing.load(ordering: .acquiring)
-            guard !recording else { return }
-            disposeUnitInline()
+            // capturing is only ever raised by armSync on THIS queue, so it cannot flip under this block.
+            guard !capturing.load(ordering: .acquiring) else { return }
+            // Generation, activity and the steal in ONE critical section: validating the generation separately
+            // lets an idle swap install a freshly prewarmed unit that this stale block then disposes.
+            let outgoing = lock.withLock { () -> HALInputUnit? in
+                guard self.generation == generation, !captureIsActiveLocked else { return nil }
+                let u = unit; unit = nil; configuredDeviceID = nil
+                return u
+            }
+            outgoing?.dispose()
         }
     }
 
     private func installActiveDeviceListener(deviceID: AudioDeviceID, generation: Int) {
         removeActiveDeviceListener()
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.handleActiveDeviceChanged() }
+        // The addresses say WHICH property fired: liveness / sample-rate / IO period.
+        let block: AudioObjectPropertyListenerBlock = { [weak self] count, addresses in
+            let selectors = (0..<Int(count)).map { addresses[$0].mSelector }
+            self?.handleActiveDeviceChanged(selectors: selectors)
+        }
         for selector in Self.activeDeviceSelectors {
             var addr = AudioObjectPropertyAddress(
                 mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
@@ -1009,7 +1184,20 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
     }
 
-    private func handleActiveDeviceChanged() {
+    private static func activeDeviceEventName(_ selector: AudioObjectPropertySelector) -> String {
+        switch selector {
+        case kAudioDevicePropertyDeviceIsAlive: return "bound-device-liveness"
+        case kAudioDevicePropertyNominalSampleRate: return "bound-device-sample-rate"
+        case kAudioDevicePropertyBufferFrameSize: return "bound-device-io-period"
+        default: return "bound-device-changed"
+        }
+    }
+
+    private func handleActiveDeviceChanged(selectors: [AudioObjectPropertySelector]) {
+        // Installed by armSync BEFORE readiness, so these fire during the start-return → first-buffer window.
+        if let arming = lock.withLock({ arming }) {
+            for selector in selectors { arming.record.event(Self.activeDeviceEventName(selector)) }
+        }
         // The bound device disconnected or changed sample rate (Bluetooth A2DP↔HFP flip). Coalesce a storm into
         // one restart; the debounce work item is also cancellable from the control queue (teardown), so guard it under the lock.
         let work = DispatchWorkItem { [weak self] in self?.requestMidRecordingRestart() }
@@ -1039,11 +1227,15 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 return
             }
             guard let deviceID = effectiveDeviceID() else { return }
+            // The session is published before readiness, so this can fire mid-ARM onto a route the budget was
+            // never sized for. Buy its deadline HERE — the fresh.configure/start below is what blocks on a
+            // Bluetooth route, so raising after they succeed would come after the wait had already expired.
+            selectRoute(deviceID, label: "restart-rebind")
             Log.audio.debug("mid-recording device change → restart attempt \(attempts, privacy: .public)")
             lock.withLock {
                 oversizeDropsAccumulated += unit?.oversizeDropCount ?? 0
             }
-            disposeUnitInline()
+            disposeUnitInline(generation: generation)
             do {
                 let fresh = makeUnit(generation: generation)
                 try fresh.configure(deviceID: deviceID)
@@ -1054,6 +1246,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                     fresh.dispose()
                     return
                 }
+                // Before start, not after: start can deliver a buffer immediately and the record freezes the
+                // delivering device at that instant. configure() has already bound it, so this is also true here.
+                publishBoundInputName(for: deviceID)
                 do {
                     try fresh.start()
                 } catch {
@@ -1069,14 +1264,13 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                     fresh.dispose()
                     return
                 }
-                publishBoundInputName(for: deviceID)
                 installActiveDeviceListener(deviceID: deviceID, generation: generation)
             } catch {
                 // A restart fails transiently precisely because the device is mid-transition (the Bluetooth
                 // A2DP↔HFP case that triggered it), and giving up records dead air. Schedule a bounded retry
                 // (still capped by maxConfigRestarts via configRestartCount) so a device that settles a beat
                 // later is picked back up; only after the cap does the partial capture finalize on release.
-                disposeUnitInline()
+                disposeUnitInline(generation: generation)
                 queue.asyncAfter(deadline: .now() + 0.25) { [self] in
                     requestMidRecordingRestart(expectedSession: sessionForRetry, expectedGeneration: generation)
                 }

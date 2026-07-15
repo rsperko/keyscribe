@@ -478,7 +478,15 @@ final class DictationController {
             finishError("The selected speech model is not installed", action: nil)
             return
         }
+        // ACCEPTED ORDERING: this synchronous AX probe runs BEFORE the arming HUD below, so it bounds how fast
+        // the press can be acknowledged (two AX calls, each capped by a 100 ms messaging timeout, so ~200 ms
+        // worst case against an unresponsive target; sub-ms normally). It stays first on purpose — the
+        // secure-field flag must be captured at press, before anything can act on the field, and moving the
+        // render above it would not paint any sooner anyway: nothing displays until this main-actor turn
+        // returns to the run loop. Measured rather than assumed, so the cost is visible if a target regresses.
+        let snapshotStart = DispatchTime.now()
         capturedSnapshot = pressSnapshot()
+        Log.context.debug("press snapshot=\(self.elapsedMs(since: snapshotStart), privacy: .public)ms")
         adoptFullSnapshot()
         building.targetBundleId = capturedSnapshot?.bundleId
         session?.capturedPlan = config.resolved
@@ -507,23 +515,16 @@ final class DictationController {
             applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
         }
 
+        // Acknowledge the press before any model/mic/sound work, so a slow route never delays visual feedback
+        // (ESC already cancels from here). The cue is NOT part of acknowledgement: it is the go-signal, and it
+        // may not sound until capture is proven live — see beginCapture.
+        hud?.render(.arming(mode: currentModeName))
+
         warmActiveEngine()
         prepareActiveEngineForDictation()
         prewarmPresenceDetector()
 
-        // Cue gating, overlapped: the cue plays and the mic comes up UNDER it, but the writer admits only
-        // frames at/after the cue-end host time so the cue never lands in the recording. `.arming` shows
-        // instantly (ESC still cancels); `.recording`/duck are held until cue end (see beginCapture).
-        let cueDelay = effects.begin(settings.duringDictation)
-        hud?.render(.arming(mode: currentModeName))
-        if cueDelay > 0 {
-            let hold = cueDelay + Self.cueAdmitPadSeconds
-            let admitAfter = mach_absolute_time() &+ AudioCapture.hostTicks(seconds: hold)
-            let holdUntil = DispatchTime.now() + .nanoseconds(Int(hold * 1e9))
-            beginCapture(admitAfterHostTime: admitAfter, holdRecordingUntil: holdUntil)
-        } else {
-            beginCapture()
-        }
+        beginCapture()
     }
 
     private func adoptFullSnapshot() {
@@ -618,7 +619,7 @@ final class DictationController {
         return try await engine.makeStreamingSession(sampleRate: engine.captureSampleRate, biasTerms: recognitionBiasTerms())
     }
 
-    private func beginCapture(admitAfterHostTime: UInt64 = 0, holdRecordingUntil: DispatchTime? = nil) {
+    private func beginCapture() {
         lastRenderedLevel = 0
         let sampleRate = activeEngine.captureSampleRate
         let wantsSamples = activeEngine.supportsSampleInput
@@ -626,7 +627,9 @@ final class DictationController {
         captureBringUpTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.audio.start(sampleRate: sampleRate, admitAfterHostTime: admitAfterHostTime, wantsSamples: wantsSamples, onSamples: onSamples)
+                // Resolves on the input's first delivered buffer, not on the AudioUnit start returning: a
+                // Bluetooth route that binds and starts but never delivers must not read as a live mic.
+                _ = try await self.audio.start(sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples)
                 self.session?.capturedInputDevice = self.audio.currentInputName
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
@@ -655,16 +658,20 @@ final class DictationController {
                 self.finishCanceledBringUp(stopAudio: true)
                 return
             }
+            // The mic is live, so the cue can honestly invite speech. It plays into an OPEN mic, so admission
+            // opens only at cue end: the cue stays out of the recording and speech right after it is kept
+            // whole. No cue (sounds off) ⇒ a 0 boundary admits from here.
+            let cueSeconds = self.effects.begin(self.settings.duringDictation)
+            let hold = cueSeconds > 0 ? cueSeconds + Self.cueAdmitPadSeconds : 0
+            self.audio.openAdmission(
+                afterHostTime: hold > 0 ? mach_absolute_time() &+ AudioCapture.hostTicks(seconds: hold) : 0)
             // Hold "Listening" and the duck until the cue actually ends, so the go-signal and the mute never
-            // precede the admission boundary. A no-op when bring-up already outran the cue (or no cue plays).
-            if let holdRecordingUntil {
-                let remaining = Int64(holdRecordingUntil.uptimeNanoseconds) - Int64(DispatchTime.now().uptimeNanoseconds)
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining))
-                    guard !Task.isCancelled, self.machine.state == .arming else {
-                        self.finishCanceledBringUp(stopAudio: true)
-                        return
-                    }
+            // precede the admission boundary.
+            if hold > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(hold * 1e9))
+                guard !Task.isCancelled, self.machine.state == .arming else {
+                    self.finishCanceledBringUp(stopAudio: true)
+                    return
                 }
             }
             if let pressedAt = self.session?.pressedAt {
