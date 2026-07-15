@@ -33,7 +33,7 @@ final class DictationController {
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
     private let frontmostBundleId: @MainActor () -> String?
-    private let precedingTextProbe: @MainActor (String) async -> String?
+    private let precedingTextProbe: @MainActor (pid_t, String?) async -> String?
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
@@ -87,6 +87,10 @@ final class DictationController {
         var modeReady = false
         var snapshotReady = false
         var preconnectFired = false
+        // Set when the secure-aware full snapshot could not confirm the captured target (it moved before the
+        // probe finished). We can't prove the field is safe, so the dictation is forced fully local — no
+        // cloud rewrite, no context, no history — exactly like a confirmed secure field (KS-01).
+        var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
     }
     private var session: DictationSession?
@@ -210,7 +214,7 @@ final class DictationController {
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         frontmostBundleId: @escaping @MainActor () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
-        precedingTextProbe: @escaping @MainActor (String) async -> String? = { await ContextProbe.precedingText(forBundleId: $0) },
+        precedingTextProbe: @escaping @MainActor (pid_t, String?) async -> String? = { await ContextProbe.precedingText(pid: $0, windowId: $1) },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
             InstalledEngineFilter.shouldRun(engineId: engine.id)
         },
@@ -525,17 +529,37 @@ final class DictationController {
     private func adoptFullSnapshot() {
         // No async adoption: the press snapshot is already authoritative (incl. its secure-field flag).
         guard shouldAdoptFullSnapshot else { markSnapshotReady(); return }
-        let captured = capturedSnapshot?.bundleId
+        let capturedBundle = capturedSnapshot?.bundleId
+        let capturedPid = capturedSnapshot?.pid
         session?.snapshotAdoptionTask?.cancel()
         session?.snapshotAdoptionTask = Task { @MainActor [weak self] in
             await Task.yield()
-            guard let self, !Task.isCancelled, self.capturedSnapshot?.bundleId == captured else { return }
+            // Clean bail: the dictation was torn down or superseded while we yielded — nothing to protect.
+            guard let self, !Task.isCancelled,
+                  self.capturedSnapshot?.bundleId == capturedBundle,
+                  self.capturedSnapshot?.pid == capturedPid else { return }
             let full = await self.snapshotAsync()
-            guard !Task.isCancelled, self.capturedSnapshot?.bundleId == captured, full.bundleId == captured else { return }
-            self.capturedSnapshot = full
-            self.building.targetBundleId = full.bundleId
+            guard !Task.isCancelled,
+                  self.capturedSnapshot?.bundleId == capturedBundle,
+                  self.capturedSnapshot?.pid == capturedPid else { return }
+            // Adopt the fuller (secure-aware) snapshot only if the target is unchanged — same bundle AND same
+            // pid at capture and after the detached AX work. If it moved, we could not confirm the field is
+            // safe (a dictation begun in a password field must not leak just because focus shifted during the
+            // probe), so force the dictation fully local — no cloud, no context, no history (KS-01).
+            guard full.bundleId == capturedBundle, full.pid == capturedPid else {
+                self.session?.targetUnconfirmed = true
+                self.activeMode = self.securePolicyApplied(self.activeMode)
+                return   // leave the gate closed: no preconnect, no context probe
+            }
+            var adopted = full
+            // Secure is sticky: if the press snapshot already saw a password field, a later non-secure read
+            // of the same process must not clear it — a same-PID secure→nonsecure flip during the probe
+            // window can't re-enable cloud/history (KS-01).
+            adopted.isSecureField = adopted.isSecureField || (self.capturedSnapshot?.isSecureField ?? false)
+            self.capturedSnapshot = adopted
+            self.building.targetBundleId = adopted.bundleId
             self.activeMode = self.securePolicyApplied(self.activeMode)
-            self.markSnapshotReady()   // a bail-out above leaves the gate closed (no preconnect / probe)
+            self.markSnapshotReady()
         }
     }
 
@@ -975,21 +999,28 @@ final class DictationController {
     private func maybeStartPrecedingProbe() {
         guard let session, session.modeReady, session.snapshotReady, session.precedingTextTask == nil,
               activeMode?.effectiveContext.precedingText == true,
-              let bundleId = capturedSnapshot?.bundleId else { return }
+              let pid = capturedSnapshot?.pid else { return }
         let probe = precedingTextProbe
-        self.session?.precedingTextTask = Task { await probe(bundleId) }
+        let windowId = capturedSnapshot?.focusedWindowId
+        self.session?.precedingTextTask = Task { await probe(pid, windowId) }
     }
 
     // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no
     // context, never recorded (design.md §4.4). Applied at every site that sets activeMode so a Phase-B
     // voice re-route to a cloud mode is neutered too. Best-effort — depends on the field exposing the
-    // AXSecureTextField subrole (captured in TargetSnapshot.isSecureField).
+    // AXSecureTextField subrole (captured in TargetSnapshot.isSecureField). An unconfirmed target (the
+    // secure-aware snapshot could not prove the field is safe because focus moved during the probe) is
+    // treated identically — forced fully local (KS-01).
     private func securePolicyApplied(_ mode: Mode?) -> Mode? {
-        guard capturedSnapshot?.isSecureField == true else { return mode }
+        guard capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true else { return mode }
         return mode?.localOnlyForSecureField()
     }
 
     private func resolveModeProbing(triggerKey: String?) async {
+        // Settle the secure-aware snapshot first so the title probe can bind to the captured window id (the
+        // press snapshot has none). Bounded by the same AX timeout the URL probe already tolerates; mode is
+        // only needed at commit, so this cannot delay anything user-visible past the HUD.
+        await session?.snapshotAdoptionTask?.value
         var url: String?
         var windowTitle: String?
         if let bundleId = capturedSnapshot?.bundleId {
@@ -997,10 +1028,17 @@ final class DictationController {
             // Automation prompt), the title probe an extra AX round trip — neither runs unless a mode's
             // constraints depend on it.
             if ModeResolver.requiresURLContext(plan.modes) {
-                url = await ContextProbe.browserURLAsync(forBundleId: bundleId)
+                // The URL selects the mode (which can differ in connection/rewrite/context), so it is bound to
+                // the captured process+window: the probe confirms the captured target is still focused before
+                // and after the AppleScript read and discards the URL otherwise. Only the same-bundle
+                // multiple-instance ambiguity of `tell application id` remains irreducible.
+                url = await ContextProbe.browserURLAsync(
+                    forBundleId: bundleId, pid: capturedSnapshot?.pid, windowId: capturedSnapshot?.focusedWindowId)
             }
-            if ModeResolver.requiresWindowTitleContext(plan.modes) {
-                windowTitle = ContextProbe.focusedWindowTitle(bundleId: bundleId)
+            // Title routing reads the exact captured process AND, when a window was captured, only that
+            // window — a same-app switch to another window won't route on its title.
+            if ModeResolver.requiresWindowTitleContext(plan.modes), let pid = capturedSnapshot?.pid {
+                windowTitle = ContextProbe.focusedWindowTitle(pid: pid, expectedWindowId: capturedSnapshot?.focusedWindowId)
             }
         }
         // The probe is the one per-dictation task that can outlive a cancel (browser-URL round trip runs
@@ -1058,6 +1096,10 @@ final class DictationController {
 
     private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, streamedTranscript: String? = nil) async {
         await session?.modeResolveTask?.value
+        // The secure-aware snapshot decides whether the mode is neutered (secure/unconfirmed target). Settle
+        // it before any cloud rewrite reads activeMode, so a target that couldn't be confirmed can't leak
+        // (KS-01). Adoption is not cancelled on commit, so this observes the real result.
+        await session?.snapshotAdoptionTask?.value
         let engine = activeEngine
         building.audioSeconds = audioSeconds
 
@@ -1326,10 +1368,12 @@ final class DictationController {
         rewrite: RewriteDetails?
     ) {
         // A secure-field dictation is never persisted, regardless of the history setting or the mode —
-        // the spoken text is a password (design.md §4.4). The diagnostics record holds only fingerprints
-        // (hashes), never the transcript, so it is safe to keep; this guards the verbatim history store.
+        // the spoken text is a password (design.md §4.4). An unconfirmed target (focus moved before the
+        // secure-aware snapshot could vet the field) is treated the same way (KS-01). The diagnostics record
+        // holds only fingerprints (hashes), never the transcript, so it is safe to keep; this guards the
+        // verbatim history store.
         guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false),
-              capturedSnapshot?.isSecureField != true else { return }
+              capturedSnapshot?.isSecureField != true, session?.targetUnconfirmed != true else { return }
         let outcome: HistoryEntry.Outcome
         switch insertion {
         case .noSpeech: return
@@ -1581,25 +1625,29 @@ final class DictationController {
         if mode.commands.privacy {
             log.debug("redaction: \(issuedTokens.count, privacy: .public) span(s) tokenized before cloud rewrite")
         }
+        // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus the
+        // size-bumped connection — the change-prone assembly lives in its own builder. `issuedTokens`
+        // here also lists `instructionTokens` so the model gets the opaque-marker rule even when the
+        // selection itself issued none. Built BEFORE the HUD render so the "shared context" badges reflect
+        // what actually crossed (request.contextCategories) — a probe that returned nil must not display
+        // "Preceding text shared" (KS-02). build() only awaits the already-running probe; no network yet.
+        let request = await RewriteRequestBuilder(
+            mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
+            capturedBundleId: capturedSnapshot?.bundleId, capturedPid: capturedSnapshot?.pid,
+            capturedWindowId: capturedSnapshot?.focusedWindowId,
+            plan: plan, connection: connection,
+            precedingTextTask: session?.precedingTextTask, precedingTextProbe: precedingTextProbe).build()
+
         // Edit-in-place must leave the selection untouched on abandon, so the local-transcript
         // escape hatch is dictation-only — never offer to paste the captured selection back.
         if mode.source != .selection {
             session?.pendingLocalTranscript = localProcessed
             session?.pendingLocalIssuedTokens = issuedTokens
-            scheduleRewriteEscapeHatch(connection: connection, mode: mode)
+            scheduleRewriteEscapeHatch(connection: connection, mode: mode, contextCategories: request.contextCategories)
         }
         hud?.render(.rewriting(
             connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
-            contextCategories: mode.effectiveContextCategories, offerLocalTranscript: false))
-
-        // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus the
-        // size-bumped connection — the change-prone assembly lives in its own builder. `issuedTokens`
-        // here also lists `instructionTokens` so the model gets the opaque-marker rule even when the
-        // selection itself issued none.
-        let request = await RewriteRequestBuilder(
-            mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
-            capturedBundleId: capturedSnapshot?.bundleId, plan: plan, connection: connection,
-            precedingTextTask: session?.precedingTextTask, precedingTextProbe: precedingTextProbe).build()
+            contextCategories: request.contextCategories, offerLocalTranscript: false))
 
         if mode.source != .selection {
             session?.pendingLocalRewriteDetails = RewriteDetails(
@@ -1760,7 +1808,7 @@ final class DictationController {
         }
     }
 
-    private func scheduleRewriteEscapeHatch(connection: Connection, mode: Mode) {
+    private func scheduleRewriteEscapeHatch(connection: Connection, mode: Mode, contextCategories: [String]) {
         session?.rewriteEscapeTask?.cancel()
         session?.rewriteEscapeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(5))
@@ -1768,7 +1816,7 @@ final class DictationController {
                   self.machine.state == .transcribing else { return }
             self.hud?.render(.rewriting(
                 connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
-                contextCategories: mode.effectiveContextCategories, offerLocalTranscript: true))
+                contextCategories: contextCategories, offerLocalTranscript: true))
         }
     }
 

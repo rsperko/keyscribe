@@ -1,11 +1,16 @@
 public struct TargetSnapshot: Equatable, Sendable {
     public var bundleId: String?
+    // The exact process that owned focus when the snapshot was taken. Two apps can share a bundle id, so
+    // secure-field state, context, and insertion must all be bound to this pid — not just the bundle id.
+    // Int32 (not pid_t) keeps KeyScribeKit free of a Darwin dependency; the app passes processIdentifier.
+    public var pid: Int32?
     public var focusedWindowId: String?
     // Best-effort secure-field signal; secure dictation is diverted to concealed clipboard delivery.
     public var isSecureField: Bool
 
-    public init(bundleId: String?, focusedWindowId: String? = nil, isSecureField: Bool = false) {
+    public init(bundleId: String?, pid: Int32? = nil, focusedWindowId: String? = nil, isSecureField: Bool = false) {
         self.bundleId = bundleId
+        self.pid = pid
         self.focusedWindowId = focusedWindowId
         self.isSecureField = isSecureField
     }
@@ -33,6 +38,13 @@ public func decideInsertion(captured: TargetSnapshot, current: TargetSnapshot) -
         return .clipboardFallback(reason: .unknownTarget)
     }
     guard current.bundleId == capturedBundle else {
+        return .clipboardFallback(reason: .appChanged)
+    }
+    // Require the exact process to match: a same-bundle helper with a different pid is a different target,
+    // and a pid known on one side but missing on the other is an indeterminate identity. Both are treated
+    // conservatively (divert) rather than inserted on a maybe. Two unknown pids (no pid tracking at all,
+    // e.g. a test seam) compare equal and fall through to the bundle/window checks.
+    if captured.pid != current.pid {
         return .clipboardFallback(reason: .appChanged)
     }
     if let capturedWindow = captured.focusedWindowId,

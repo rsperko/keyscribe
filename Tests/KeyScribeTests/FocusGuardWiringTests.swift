@@ -29,7 +29,8 @@ struct FocusGuardWiringTests {
     }
 
     private func run(
-        captured capturedWindow: String?, current currentWindow: String?, secure: Bool = false
+        captured capturedWindow: String?, current currentWindow: String?, secure: Bool = false,
+        capturedPid: pid_t? = nil, currentPid: pid_t? = nil
     ) async -> InsertionDecision? {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-focus-\(UUID().uuidString)", isDirectory: true)
@@ -56,7 +57,8 @@ struct FocusGuardWiringTests {
             snapshot: {
                 let n = calls.next()
                 return TargetSnapshot(
-                    bundleId: "test.bundle", focusedWindowId: n == 0 ? capturedWindow : currentWindow,
+                    bundleId: "test.bundle", pid: n == 0 ? capturedPid : currentPid,
+                    focusedWindowId: n == 0 ? capturedWindow : currentWindow,
                     isSecureField: secure)
             },
             micStatus: { .granted },
@@ -95,5 +97,19 @@ struct FocusGuardWiringTests {
     @Test func secureFieldDivertsToClipboard() async {
         let decision = await run(captured: "cg:101", current: "cg:101", secure: true)
         #expect(decision == .clipboardFallback(reason: .secureField))
+    }
+
+    // Same bundle id, different process (a same-bundle helper stole focus) must divert — proving the pid
+    // captured at press flows into decideInsertion, not just the bundle id.
+    @Test func sameBundleDifferentPidDivertsToClipboard() async {
+        let decision = await run(
+            captured: "cg:101", current: "cg:101", capturedPid: 100, currentPid: 200)
+        #expect(decision == .clipboardFallback(reason: .appChanged))
+    }
+
+    @Test func sameBundleSamePidInserts() async {
+        let decision = await run(
+            captured: "cg:101", current: "cg:101", capturedPid: 100, currentPid: 100)
+        #expect(decision == .insert)
     }
 }

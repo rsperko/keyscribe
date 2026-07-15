@@ -34,11 +34,21 @@ struct PrecedingTextProbeWiringTests {
         }
     }
 
+    private actor CountingLLM: LLMClient {
+        private(set) var callCount = 0
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            callCount += 1
+            return user
+        }
+    }
+
     @MainActor private final class ProbeSpy {
-        private(set) var bundleIds: [String] = []
+        private(set) var pids: [pid_t] = []
+        private(set) var windowIds: [String?] = []
         var value: String? = "PRECEDINGCTX"
-        func probe(_ bundleId: String) async -> String? {
-            bundleIds.append(bundleId)
+        func probe(_ pid: pid_t, _ windowId: String?) async -> String? {
+            pids.append(pid)
+            windowIds.append(windowId)
             return value
         }
     }
@@ -74,11 +84,11 @@ struct PrecedingTextProbeWiringTests {
             insert: { _, _, _, _, _ in true },
             submitKey: { _ in },
             pressSnapshot: pressSnapshot,
-            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle", pid: 4242, focusedWindowId: "cg:99") },
             snapshotAsync: fullSnapshot,
             micStatus: { .granted },
             accessibilityGranted: { true },
-            precedingTextProbe: { await probe.probe($0) },
+            precedingTextProbe: { await probe.probe($0, $1) },
             llmClient: llm)
     }
 
@@ -96,13 +106,14 @@ struct PrecedingTextProbeWiringTests {
         controller.handleStart()
         await controller.captureBringUpTask?.value
 
-        #expect(await poll { probe.bundleIds == ["test.bundle"] })
+        #expect(await poll { probe.pids == [4242] })
 
         controller.handleCommit()
         await controller.dictationTask?.value
 
-        // Reused, not re-run: still exactly one probe.
-        #expect(probe.bundleIds == ["test.bundle"])
+        // Reused, not re-run: still exactly one probe, carrying the captured pid AND window id.
+        #expect(probe.pids == [4242])
+        #expect(probe.windowIds == ["cg:99"])
         #expect(await llm.lastUser.contains("PRECEDINGCTX"))
     }
 
@@ -118,7 +129,7 @@ struct PrecedingTextProbeWiringTests {
         controller.handleCommit()
         await controller.dictationTask?.value
 
-        #expect(probe.bundleIds.isEmpty)
+        #expect(probe.pids.isEmpty)
     }
 
     // The async full snapshot's isSecureField neuters the mode before the probe gate opens.
@@ -126,15 +137,59 @@ struct PrecedingTextProbeWiringTests {
         let probe = ProbeSpy()
         let controller = makeController(
             mode: contextMode(), probe: probe, llm: EchoLLM(),
-            pressSnapshot: { TargetSnapshot(bundleId: "app") },
-            fullSnapshot: { TargetSnapshot(bundleId: "app", isSecureField: true) })
+            pressSnapshot: { TargetSnapshot(bundleId: "app", pid: 77) },
+            fullSnapshot: { TargetSnapshot(bundleId: "app", pid: 77, isSecureField: true) })
 
         controller.setNextModeOverride(id: "m")
         controller.handleStart()
         await controller.snapshotAdoptionTask?.value
         try? await Task.sleep(for: .milliseconds(80))
 
-        #expect(probe.bundleIds.isEmpty)
+        #expect(probe.pids.isEmpty)
         controller.cancel()
+    }
+
+    // Secure is sticky: the press snapshot saw a password field (same pid 5), but the async full snapshot
+    // read a non-secure field (focus moved within the process). The full read must NOT clear secure — the
+    // cloud LLM stays uncalled and the probe stays shut (KS-01).
+    @Test func aStickySecurePressSnapshotSuppressesCloudEvenIfFullSnapshotIsNonSecure() async {
+        let probe = ProbeSpy()
+        let llm = CountingLLM()
+        let controller = makeController(
+            mode: contextMode(), probe: probe, llm: llm,
+            pressSnapshot: { TargetSnapshot(bundleId: "app", pid: 5, isSecureField: true) },
+            fullSnapshot: { TargetSnapshot(bundleId: "app", pid: 5, isSecureField: false) })
+
+        controller.setNextModeOverride(id: "m")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        await controller.snapshotAdoptionTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+
+        #expect(await llm.callCount == 0)
+        #expect(probe.pids.isEmpty)
+    }
+
+    // The target moved before the secure-aware snapshot could confirm it (press pid 1, full pid 2). We can't
+    // prove the field was safe, so the dictation is forced local — the cloud LLM must never be called, and
+    // the preceding-text probe must stay shut (KS-01).
+    @Test func anUnconfirmedTargetSuppressesTheCloudRewrite() async {
+        let probe = ProbeSpy()
+        let llm = CountingLLM()
+        let controller = makeController(
+            mode: contextMode(), probe: probe, llm: llm,
+            pressSnapshot: { TargetSnapshot(bundleId: "app", pid: 1) },
+            fullSnapshot: { TargetSnapshot(bundleId: "other", pid: 2) })
+
+        controller.setNextModeOverride(id: "m")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        await controller.snapshotAdoptionTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+
+        #expect(await llm.callCount == 0)
+        #expect(probe.pids.isEmpty)
     }
 }

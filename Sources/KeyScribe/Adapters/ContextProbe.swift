@@ -9,20 +9,40 @@ private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMut
 @MainActor
 enum ContextProbe {
     static func initialSnapshot() -> TargetSnapshot {
-        TargetSnapshot(bundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        let front = NSWorkspace.shared.frontmostApplication
+        guard let pid = front?.processIdentifier else {
+            return TargetSnapshot(bundleId: front?.bundleIdentifier, pid: nil)
+        }
+        // Capture the secure-field flag synchronously at press so a dictation begun in a password field is
+        // protected immediately — before, and independent of, the async full snapshot, which could otherwise
+        // read a non-secure field if focus moved within the same process before it ran (secure is sticky:
+        // adoption OR-s this with the full read, KS-01). Bounded by the AX messaging timeout; the window id
+        // is left to the async snapshot, which carries the HUD exclusion this hot path doesn't.
+        return TargetSnapshot(bundleId: front?.bundleIdentifier, pid: pid, isSecureField: focusedIsSecure(pid: pid))
+    }
+
+    // Pid-scoped secure-field check (focused element's subrole), no window walk — for the synchronous press
+    // path where only the secure flag is needed and latency matters.
+    nonisolated static func focusedIsSecure(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        guard let focused = axChild(app, attribute: kAXFocusedUIElementAttribute) else { return false }
+        return subrole(of: focused) == (kAXSecureTextFieldSubrole as String)
     }
 
     // Exclude our HUD when dictating into KeyScribe itself, where the HUD can become the key window.
     static func snapshot(excludingWindow excluded: CGWindowID? = nil) -> TargetSnapshot {
-        // Read the frontmost app once and use its own pid, so the focused-window probe queries the exact
-        // process that supplied the bundle id — not an arbitrary same-bundle instance a bundle-id lookup
-        // might resolve to.
+        // Read the frontmost app once and use its own pid, so every AX probe queries the exact process that
+        // supplied the bundle id — not an arbitrary same-bundle instance a bundle-id lookup might resolve to,
+        // and not whichever process happens to own system-wide focus at read time.
         let front = NSWorkspace.shared.frontmostApplication
-        let pid = front?.processIdentifier
+        guard let pid = front?.processIdentifier else {
+            return TargetSnapshot(bundleId: front?.bundleIdentifier, pid: nil)
+        }
+        let state = focusedState(pid: pid, excluding: excluded)
         return TargetSnapshot(
-            bundleId: front?.bundleIdentifier,
-            focusedWindowId: pid.flatMap { focusedWindowId(pid: $0, excluding: excluded) },
-            isSecureField: focusedIsSecure())
+            bundleId: front?.bundleIdentifier, pid: pid,
+            focusedWindowId: state.windowId, isSecureField: state.isSecure)
     }
 
     // Off-main variant of `snapshot`: the frontmost-app identity is read on the main actor, then the AX
@@ -32,49 +52,74 @@ enum ContextProbe {
         let front = NSWorkspace.shared.frontmostApplication
         let bundleId = front?.bundleIdentifier
         let pid = front?.processIdentifier
-        return await Task.detached {
-            TargetSnapshot(
-                bundleId: bundleId,
-                focusedWindowId: pid.flatMap { focusedWindowId(pid: $0, excluding: excluded) },
-                isSecureField: focusedIsSecure())
+        let snapshot: TargetSnapshot = await Task.detached {
+            guard let pid else { return TargetSnapshot(bundleId: bundleId, pid: nil) }
+            let state = focusedState(pid: pid, excluding: excluded)
+            return TargetSnapshot(bundleId: bundleId, pid: pid,
+                                  focusedWindowId: state.windowId, isSecureField: state.isSecure)
         }.value
+        // Focus can move during the (potentially stalling) detached AX walk. If the frontmost process is no
+        // longer the one we walked, the window/secure fields describe a stale target — report the CURRENT
+        // identity instead, so snapshot adoption bails conservatively and insertion diverts (KS-01).
+        let now = NSWorkspace.shared.frontmostApplication
+        if now?.processIdentifier != pid {
+            return TargetSnapshot(bundleId: now?.bundleIdentifier, pid: now?.processIdentifier)
+        }
+        return snapshot
     }
 
-    // Best-effort secure-field detection; AX failures return false.
-    nonisolated static func focusedIsSecure() -> Bool {
-        let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.1)
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return false }
-        let element = focusedRef as! AXUIElement
-        AXUIElementSetMessagingTimeout(element, 0.1)
-        var subroleRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subroleRef) == .success,
-              let subrole = subroleRef as? String else { return false }
-        return subrole == (kAXSecureTextFieldSubrole as String)
-    }
-
-    // Best-effort stable focused-window id; nil never blocks insertion. Nonisolated (pure AX) so the
-    // async snapshot path can run it off the main actor.
-    nonisolated static func focusedWindowId(pid: pid_t, excluding excluded: CGWindowID? = nil) -> String? {
+    // One AX walk from the captured pid's focused element, so the window id and secure-field flag describe
+    // the SAME focused element — a field/window switch between two independent reads can't pair one window
+    // with another field's secure status (KS-01). AX failures degrade to a best-effort window id and
+    // non-secure; a nil window never blocks insertion.
+    nonisolated static func focusedState(pid: pid_t, excluding excluded: CGWindowID? = nil) -> (windowId: String?, isSecure: Bool) {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
-        guard let focused = axWindow(app, attribute: kAXFocusedWindowAttribute) else { return nil }
+        guard let focused = axChild(app, attribute: kAXFocusedUIElementAttribute) else {
+            return (appFocusedWindowId(app: app, excluding: excluded), false)
+        }
+        let isSecure = subrole(of: focused) == (kAXSecureTextFieldSubrole as String)
+        return (windowId(ofElement: focused, app: app, excluding: excluded), isSecure)
+    }
+
+    // The window id string for a given element's containing window, honoring the HUD exclusion. Falls back to
+    // the app's focused window when the element exposes no window attribute.
+    nonisolated private static func windowId(ofElement element: AXUIElement, app: AXUIElement, excluding excluded: CGWindowID?) -> String? {
+        guard let window = axChild(element, attribute: kAXWindowAttribute) else {
+            return appFocusedWindowId(app: app, excluding: excluded)
+        }
+        if let excluded, cgWindowID(of: window) == excluded {
+            guard let main = axChild(app, attribute: kAXMainWindowAttribute) else { return nil }
+            return windowIdString(of: main)
+        }
+        return windowIdString(of: window)
+    }
+
+    nonisolated private static func appFocusedWindowId(app: AXUIElement, excluding excluded: CGWindowID?) -> String? {
+        guard let focused = axChild(app, attribute: kAXFocusedWindowAttribute) else { return nil }
         if let excluded, cgWindowID(of: focused) == excluded {
-            guard let main = axWindow(app, attribute: kAXMainWindowAttribute) else { return nil }
+            guard let main = axChild(app, attribute: kAXMainWindowAttribute) else { return nil }
             return windowIdString(of: main)
         }
         return windowIdString(of: focused)
     }
 
-    nonisolated private static func axWindow(_ app: AXUIElement, attribute: String) -> AXUIElement? {
+    nonisolated private static func subrole(of element: AXUIElement) -> String? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, attribute as CFString, &ref) == .success,
+        guard AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &ref) == .success,
+              let subrole = ref as? String else { return nil }
+        return subrole
+    }
+
+    // Generic AX child-element fetch with a bounded messaging timeout; nil when the attribute is absent or
+    // isn't an element.
+    nonisolated private static func axChild(_ element: AXUIElement, attribute: String) -> AXUIElement? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
               let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        let window = ref as! AXUIElement
-        AXUIElementSetMessagingTimeout(window, 0.1)
-        return window
+        let child = ref as! AXUIElement
+        AXUIElementSetMessagingTimeout(child, 0.1)
+        return child
     }
 
     nonisolated private static func cgWindowID(of window: AXUIElement) -> CGWindowID? {
@@ -110,17 +155,18 @@ enum ContextProbe {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName
     }
 
-    // Best-effort title for window-title-constrained modes.
-    static func focusedWindowTitle(bundleId: String) -> String? {
-        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-            .first?.processIdentifier else { return nil }
+    // Best-effort title for window-title-constrained modes. Bound to the captured pid so routing reads the
+    // title of the exact process that started the dictation, not the first process sharing its bundle id.
+    // When a captured window id is supplied, the focused window must still be that window (a cg-backed
+    // captured id that no longer matches routes on no title) — a same-app window switch can't route on the
+    // wrong window's title. A nil captured id means none was established (best-effort, as before).
+    static func focusedWindowTitle(pid: pid_t, expectedWindowId: String? = nil) -> String? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
-              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return nil }
-        let window = focusedRef as! AXUIElement
-        AXUIElementSetMessagingTimeout(window, 0.1)
+        guard let window = axChild(app, attribute: kAXFocusedWindowAttribute) else { return nil }
+        if let expectedWindowId, expectedWindowId.hasPrefix("cg:") {
+            guard let current = cgWindowID(of: window), "cg:\(current)" == expectedWindowId else { return nil }
+        }
         var titleRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
               let title = titleRef as? String, !title.isEmpty else { return nil }
@@ -128,23 +174,25 @@ enum ContextProbe {
     }
 
     // Bounded text immediately before the caret in the focused field. Chromium/Electron expose no caret
-    // range through AX, so this returns nil there.
-    static func precedingText(forBundleId bundleId: String, maxChars: Int = 600) async -> String? {
-        // Read only while the captured app is still frontmost.
-        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId,
-              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-                  .first?.processIdentifier else { return nil }
-        return await Task.detached { precedingTextSync(pid: pid, maxChars: maxChars) }.value
+    // range through AX, so this returns nil there. Bound to both the captured pid and window: the caller
+    // passes the window id frozen at dictation start, and a same-app switch to a different document before or
+    // during the read discards the context rather than sourcing it from the wrong window (KS-02).
+    static func precedingText(pid: pid_t, windowId: String? = nil, maxChars: Int = 600) async -> String? {
+        // Read only while the exact captured process is still frontmost — context is optional, so an
+        // identity mismatch discards it silently rather than reading another process's field.
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return nil }
+        return await Task.detached { precedingTextSync(pid: pid, windowId: windowId, maxChars: maxChars) }.value
     }
 
     // Synchronous AX walk; caller runs it off the main actor.
-    nonisolated private static func precedingTextSync(pid: pid_t, maxChars: Int) -> String? {
+    nonisolated private static func precedingTextSync(pid: pid_t, windowId expected: String?, maxChars: Int) -> String? {
         let app = AXUIElementCreateApplication(pid)
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef else { return nil }
-        let element = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        guard let element = axFocusedElement(app) else { return nil }
         AXUIElementSetMessagingTimeout(element, 0.3)
+
+        // Confirm the focused field is still in the captured window BEFORE reading its content.
+        guard elementInExpectedWindow(element, expected: expected) else { return nil }
 
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
@@ -158,13 +206,43 @@ enum ContextProbe {
         var out: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(element, "AXStringForRange" as CFString, wantedValue, &out) == .success,
               let text = out as? String, !text.isEmpty else { return nil }
+        // Re-confirm AFTER by re-reading the app's CURRENT focused element (not the element we captured — its
+        // own window never changes): if focus moved to another window mid-read, discard the text (KS-02).
+        guard let afterFocused = axFocusedElement(app),
+              elementInExpectedWindow(afterFocused, expected: expected) else { return nil }
         return text
     }
 
-    // Browser URL for URL-constrained modes; AppleScript runs on a serial queue with a timeout race.
-    static func browserURLAsync(forBundleId bundleId: String) async -> String? {
+    nonisolated private static func axFocusedElement(_ app: AXUIElement) -> AXUIElement? {
+        axChild(app, attribute: kAXFocusedUIElementAttribute)
+    }
+
+    // Whether the element's containing window matches the captured window id. Fails CLOSED for outbound
+    // context: once a window boundary was captured, an id we can't confirm (unreadable current window, or a
+    // captured non-cg composite id that can't be compared against a live CGWindowID) discards the context
+    // rather than sending text from a possibly-different document. A nil captured id means no boundary was
+    // ever established (nothing to enforce), so it reads best-effort.
+    nonisolated private static func elementInExpectedWindow(_ element: AXUIElement, expected: String?) -> Bool {
+        guard let expected else { return true }
+        guard expected.hasPrefix("cg:"),
+              let window = axChild(element, attribute: kAXWindowAttribute),
+              let current = cgWindowID(of: window) else { return false }
+        return "cg:\(current)" == expected
+    }
+
+    // Browser URL for URL-constrained modes; AppleScript runs on a serial queue with a timeout race. The URL
+    // selects the mode, and modes can differ in LLM connection, rewrite enablement, and context sharing — so
+    // a wrong-window/wrong-process URL affects a content boundary, not just cosmetics. It is therefore bound
+    // to the captured target: the captured process must be frontmost and the captured window still focused
+    // BOTH immediately before AND after the AppleScript read, else the URL is discarded (the mode falls back
+    // to unconstrained routing). Two residuals are irreducible with this mechanism and can't be bound tighter
+    // without CGWindowID-targeted browser scripting (out of scope): the same-bundle/multiple-instance ambiguity
+    // of `tell application id` (one bundle, several processes), and a tab switch WITHIN the captured window
+    // (browser tabs share one AX/CGWindow identity, so there is nothing to validate a tab against).
+    static func browserURLAsync(forBundleId bundleId: String, pid: pid_t?, windowId: String?) async -> String? {
         guard handlesHTTPS(bundleId) else { return nil }
-        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+        guard targetStillFocused(pid: pid, windowId: windowId) else { return nil }
+        let url: String? = await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
             let once = OnceResume()
             appleScriptQueue.async {
                 let url = fetchBrowserURL(bundleId)
@@ -174,6 +252,17 @@ enum ContextProbe {
                 if once.claim() { continuation.resume(returning: nil) }
             }
         }
+        guard url != nil, targetStillFocused(pid: pid, windowId: windowId) else { return nil }
+        return url
+    }
+
+    // The captured process is frontmost and (when a cg window was captured) still the focused window. A nil
+    // pid or non-cg window id means no such boundary was established, so the weaker available check applies.
+    private static func targetStillFocused(pid: pid_t?, windowId: String?) -> Bool {
+        guard let pid else { return true }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+        guard let windowId, windowId.hasPrefix("cg:") else { return true }
+        return focusedState(pid: pid).windowId == windowId
     }
 
     private final class OnceResume: @unchecked Sendable {

@@ -48,9 +48,32 @@ struct RewriteRequestBuilderTests {
 
         let builder = RewriteRequestBuilder(
             mode: mode, content: content, instruction: "", issuedTokens: [],
-            capturedBundleId: nil, plan: plan, connection: conn)
+            capturedBundleId: nil, capturedPid: nil, plan: plan, connection: conn)
         let assembled = await builder.build()
         #expect(assembled.inputs.fuzzyCandidates.isEmpty)
+    }
+
+    // History must not claim "preceding text" was shared when the probe returned nothing (KS-02).
+    @MainActor
+    @Test func contextCategoriesOmitsPrecedingTextWhenProbeReturnsNil() async {
+        var mode = Mode(id: "ai", name: "AI")
+        mode.aiRewrite = .init(connection: "c", prompt: "Clean up.", context: .init(precedingText: true))
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let plan = ResolvedConfig(
+            modes: [mode], dictionary: DictionarySet(), replacements: ReplacementsSet(),
+            connections: ConnectionSet(), fragments: [:])
+
+        var absent = RewriteRequestBuilder(
+            mode: mode, content: "hi", instruction: "", issuedTokens: [],
+            capturedBundleId: nil, capturedPid: 7, plan: plan, connection: conn)
+        absent.precedingTextProbe = { _, _ in nil }
+        #expect(await absent.build().contextCategories == [])
+
+        var present = RewriteRequestBuilder(
+            mode: mode, content: "hi", instruction: "", issuedTokens: [],
+            capturedBundleId: nil, capturedPid: 7, plan: plan, connection: conn)
+        present.precedingTextProbe = { _, _ in "CTX" }
+        #expect(await present.build().contextCategories == ["preceding text"])
     }
 
     @MainActor
@@ -64,7 +87,7 @@ struct RewriteRequestBuilderTests {
 
         var builder = RewriteRequestBuilder(
             mode: mode, content: "meeting next Friday", instruction: "", issuedTokens: [],
-            capturedBundleId: nil, plan: plan, connection: conn)
+            capturedBundleId: nil, capturedPid: nil, plan: plan, connection: conn)
         builder.now = { self.pinnedDate() }
         builder.locale = Locale(identifier: "en_US")
         builder.timeZone = TimeZone(identifier: "America/Chicago")!

@@ -11,10 +11,15 @@ struct RewriteRequestBuilder {
     let instruction: String
     let issuedTokens: [String]
     let capturedBundleId: String?
+    // The captured process' pid + focused window — the preceding-text probe reads only this exact process
+    // and window, so context can't be sourced from another same-bundle instance or a document the user
+    // switched to during recording (KS-02).
+    let capturedPid: pid_t?
+    var capturedWindowId: String? = nil
     let plan: ResolvedConfig
     let connection: Connection
     var precedingTextTask: Task<String?, Never>? = nil
-    var precedingTextProbe: @MainActor (String) async -> String? = { await ContextProbe.precedingText(forBundleId: $0) }
+    var precedingTextProbe: @MainActor (pid_t, String?) async -> String? = { await ContextProbe.precedingText(pid: $0, windowId: $1) }
     // Clock/locale seam so tests can pin the date/time line and spelling variant.
     var now: () -> Date = { Date() }
     var locale: Locale = .current
@@ -49,19 +54,22 @@ struct RewriteRequestBuilder {
         let ctx = mode.effectiveContext
         let bundleId = ctx.app ? capturedBundleId : nil
         let appName = bundleId.map { ContextProbe.appName(forBundleId: $0) ?? $0 }
-        var contextCategories: [String] = []
-        if ctx.app { contextCategories.append("app") }
-        if ctx.precedingText { contextCategories.append("preceding text") }
 
-        let precedingBundleId = ctx.precedingText ? capturedBundleId : nil
+        let precedingPid = ctx.precedingText ? capturedPid : nil
         let precedingText: String? = await {
-            guard let precedingBundleId else { return nil }
+            guard let precedingPid else { return nil }
             if let precedingTextTask { return await precedingTextTask.value }
-            return await precedingTextProbe(precedingBundleId)
+            return await precedingTextProbe(precedingPid, capturedWindowId)
         }()
         if ctx.precedingText {
             Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")
         }
+
+        // Report a context channel only when it actually contributed content — history must not claim
+        // "preceding text" was shared when the probe returned nothing (KS-02).
+        var contextCategories: [String] = []
+        if ctx.app { contextCategories.append("app") }
+        if ctx.precedingText, precedingText != nil { contextCategories.append("preceding text") }
 
         let language = "English"
         let localeIdentifier = language == "English" ? locale.identifier(.bcp47) : nil
