@@ -227,7 +227,8 @@ private struct CorrectionPanelView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let draft = draft
+        return VStack(alignment: .leading, spacing: 14) {
             Text("Add a word \(Branding.appName) should recognize, or fill in Use instead to replace a phrase \(Branding.appName) keeps hearing wrong.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -295,7 +296,7 @@ private struct CorrectionPanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if let issue = draft.validationIssue {
-                validationIssueText(issue)
+                VocabularyDraftIssueText(issue: issue)
             }
 
             Text(saveDestinationText)
@@ -314,11 +315,12 @@ private struct CorrectionPanelView: View {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier(AccessibilityID.Correction.cancel)
                 if canCorrect && hasReplacementValue {
-                    Button("Add & Replace Selection") { onCorrect(buildResult(), correctionPasteText()) }.disabled(!canCorrectNow)
+                    Button("Add & Replace Selection") { onCorrect(buildResult(), correctionPasteText()) }
+                        .disabled(!(draft.canApplyCorrection && hasReplacementValue && !correctedValue.isEmpty))
                         .accessibilityIdentifier(AccessibilityID.Correction.addAndReplace)
                 }
                 Button(draft.buttonTitle, action: commitSave)
-                    .keyboardShortcut(.defaultAction).disabled(!canSave)
+                    .keyboardShortcut(.defaultAction).disabled(!draft.canCommit)
                     .accessibilityIdentifier(AccessibilityID.Correction.add)
             }
         }
@@ -343,8 +345,6 @@ private struct CorrectionPanelView: View {
     }
 
     private var hasReplacementValue: Bool { !replace.isEmpty }
-
-    private var canCorrectNow: Bool { draft.canApplyCorrection && hasReplacementValue && !correctedValue.isEmpty }
 
     private var draft: VocabularyDraftAnalysis {
         _ = status.revision
@@ -394,20 +394,12 @@ private struct CorrectionPanelView: View {
         }
         return .replacement(heard: trimmedTerm, replace: replace, regex: regex, destination: destination)
     }
-
-    @ViewBuilder private func validationIssueText(_ issue: VocabularyDraftValidationIssue) -> some View {
-        switch issue {
-        case .invalidRegex: IssueText("That is not a valid regular expression.")
-        case .replacementRequired: IssueText("Use instead is required for a regular expression.")
-        case .invalidInput(let issue): IssueText(issue.message)
-        case .tooLong, .nonTerminalReturnMarker: ReplacementLimitIssueText(issue: issue)
-        }
-    }
 }
 
 enum CorrectionReplacement {
     static func apply(to text: String, pattern: String, replacement: String) -> String {
-        guard let regex = RegexCache.regex(pattern, options: [.caseInsensitive]),
+        guard ReplacementSafety.isSafe(pattern),
+              let regex = RegexCache.regex(pattern, options: [.caseInsensitive]),
               let parsed = ReturnSuffix.parse(ReplacementEscapes.expandTemplate(replacement))
         else { return text }
         let range = NSRange(text.startIndex..., in: text)

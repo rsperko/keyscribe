@@ -406,6 +406,11 @@ How a rule behaves once it matches:
   `\$` for a literal `$`) works as usual. Note the capture preserves the *matched* text's case — the
   replacement template has no case-folding, so `slash (\w+)` → `/$1` on a spoken "Dog" yields `/Dog`,
   not `/dog`.
+- **A nested-quantifier ("evil") pattern is refused at authoring.** The pipeline screens patterns like
+  `(a+)+` before running them (they can catastrophically backtrack; see `design.md` §4.2 table), so the
+  editors reject such a pattern instead of saving a rule that would be silently dropped at dictation
+  time. A hand-authored rule that fails the screen still loads but never runs; re-saving it requires
+  simplifying the pattern.
 - **Regex rules interpret `\n` / `\t` / `\r` in the replacement as real newline / tab / carriage
   return** — the same convention as an editor's regex-mode replace field (VS Code, Sublime). A
   literal rule does *not* interpret them; write `\\` for a literal backslash. **Spell the escape with a

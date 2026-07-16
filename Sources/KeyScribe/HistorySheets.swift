@@ -23,8 +23,10 @@ struct CreateReplacementSheet: View {
         !sourceTrimmed.isEmpty && sourceTrimmed.caseInsensitiveCompare(replace) == .orderedSame
     }
     private var sourceIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(sourceTrimmed) }
-    private var isOverLimit: Bool { !ReplacementAuthoring.isWithinLimit(replace) }
-    private var canSave: Bool { sourceIssue == nil && !isOverLimit && !isNoop }
+    private var replaceIssue: VocabularyDraftValidationIssue? {
+        VocabularyDraftAnalysis.replacementValidationIssue(replace)
+    }
+    private var canSave: Bool { sourceIssue == nil && replaceIssue == nil && !isNoop }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -50,7 +52,7 @@ struct CreateReplacementSheet: View {
                 Text("That is the same as what was heard, so it would do nothing.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ReplacementLimitIssueText(issue: isOverLimit ? .tooLong : nil)
+            VocabularyDraftIssueText(issue: replaceIssue)
             if let message = VocabularyDraftAnalysis.invisibleOnlyDescription(replace) {
                 IssueText(message, severity: .advisory)
             }
@@ -100,7 +102,8 @@ struct AddToDictionarySheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let draft = draft
+        return VStack(alignment: .leading, spacing: 14) {
             Text("Add to Dictionary").font(.headline)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Word or term").font(.caption).foregroundStyle(.secondary)

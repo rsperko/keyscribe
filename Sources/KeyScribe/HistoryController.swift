@@ -593,7 +593,7 @@ private struct HistoryDetailView: View {
         .sheet(isPresented: $showReplacementSheet) {
             CreateReplacementSheet(initialSource: replacementSource) { heard, replace in
                 if model.addReplacement(heard, replace) {
-                    model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : replace)\u{201D}.")
+                    model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : ReplacementAuthoring.preview(for: replace).text)\u{201D}.")
                 } else {
                     model.flash(HistoryPaneModel.saveFailedMessage)
                 }

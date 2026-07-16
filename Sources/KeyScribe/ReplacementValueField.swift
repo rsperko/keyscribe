@@ -41,7 +41,7 @@ struct ReplacementExpandedEditorButton: View {
     @State private var expanded = false
 
     var body: some View {
-        Button("Larger editor…") { expanded = true }
+        Button("Open in a larger editor…") { expanded = true }
             .font(.caption)
             .buttonStyle(.link)
             .accessibilityIdentifier(ids.expand)
@@ -112,6 +112,9 @@ private struct ReplacementEditorSheet: View {
                 minHeight: 320)
                 .frame(minWidth: 480)
             HStack {
+                Text("Done returns this text to the form — it is saved when you add or update the replacement.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
@@ -123,16 +126,24 @@ private struct ReplacementEditorSheet: View {
     }
 }
 
-struct ReplacementLimitIssueText: View {
+struct VocabularyDraftIssueText: View {
     let issue: VocabularyDraftValidationIssue?
 
     var body: some View {
         switch issue {
+        case .invalidRegex:
+            IssueText("That is not a valid regular expression.")
+        case .unsafePattern:
+            IssueText("This pattern repeats a group that can itself repeat (like (a+)+), which can make matching too slow. Simplify it to save.")
+        case .replacementRequired:
+            IssueText("Use instead is required for a regular expression.")
+        case .invalidInput(let issue):
+            IssueText(issue.message)
         case .tooLong:
             IssueText("Too long — shorten it to \(ReplacementAuthoring.maxCharacters.formatted()) characters or fewer to save.")
         case .nonTerminalReturnMarker:
             IssueText("A <CR> can only go at the very end. Write \\<CR> to insert the literal text “<CR>”.")
-        default:
+        case nil:
             EmptyView()
         }
     }

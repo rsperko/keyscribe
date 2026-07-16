@@ -90,6 +90,79 @@ struct VocabularyDraftExactnessTests {
             to: "foo", pattern: "foo", replacement: "value<CR>") == "value")
     }
 
+    @Test func regexReplacementProposalKeepsTheRegexFlag() {
+        let draft = VocabularyDraftAnalysis(
+            term: "colou?r", replacement: "color", regex: true, analyze: addReplacement)
+        #expect(draft.proposal == .replacement(heard: "colou?r", replace: "color", regex: true))
+    }
+
+    @Test func unchangedRegexRuleCannotUpdate() {
+        let original = ReplacementsSet.Rule(heard: "colou?r", replace: "color", regex: true)
+        let draft = VocabularyDraftAnalysis(
+            replacementTerm: "colou?r", replacement: "color", regex: true, analyze: addReplacement)
+        #expect(!draft.canUpdateReplacement(from: original))
+    }
+
+    @Test func controlCharactersInReplacementAreRejected() {
+        let draft = VocabularyDraftAnalysis(
+            term: "foo", replacement: "bar\u{1B}[31m", regex: false, analyze: addReplacement)
+        #expect(draft.validationIssue == .invalidInput(.controlCharacters))
+        #expect(draft.proposal == nil)
+    }
+
+    @Test func tabsAndNewlinesAreNotControlIssues() {
+        let draft = VocabularyDraftAnalysis(
+            term: "foo", replacement: "a\tb\nc", regex: false, analyze: addReplacement)
+        #expect(draft.validationIssue == nil)
+        #expect(draft.canCommit)
+    }
+
+    @Test func overridesGlobalAdvisoryOutranksInvisibleOnly() {
+        let message = "Overrides the global replacement for “foo”."
+        let draft = VocabularyDraftAnalysis(
+            term: "foo", replacement: "\n", regex: false,
+            analyze: { _ in
+                VocabularyAnalysis(
+                    action: .addReplacement,
+                    advisories: [.init(kind: .overridesGlobal, message: message)])
+            })
+        #expect(draft.feedback == .advisory(message))
+    }
+
+    @Test func updateFeedbackUsesABoundedPreviewOfTheCurrentReplacement() {
+        let huge = String(repeating: "a", count: 1_000)
+        let draft = VocabularyDraftAnalysis(
+            term: "foo", replacement: "new", regex: false,
+            analyze: { _ in VocabularyAnalysis(action: .updateReplacement(currentReplace: huge)) })
+        guard case let .update(message) = draft.feedback else {
+            Issue.record("expected update feedback")
+            return
+        }
+        #expect(message.count < 300)
+        #expect(message.contains("…"))
+    }
+
+    @Test func unsafeRegexPatternIsRejectedAtAuthoring() {
+        let draft = VocabularyDraftAnalysis(
+            term: "(a+)+$", replacement: "x", regex: true, analyze: addReplacement)
+        #expect(draft.validationIssue == .unsafePattern)
+        #expect(draft.proposal == nil)
+        #expect(!draft.canCommit)
+        #expect(!draft.canApplyCorrection)
+    }
+
+    @Test func safeQuantifiedRegexPatternIsStillAccepted() {
+        let draft = VocabularyDraftAnalysis(
+            term: "(https?)://", replacement: "link", regex: true, analyze: addReplacement)
+        #expect(draft.validationIssue == nil)
+        #expect(draft.canCommit)
+    }
+
+    @Test func correctionRefusesAnUnsafePattern() {
+        #expect(CorrectionReplacement.apply(
+            to: "aaaa", pattern: "(a+)+$", replacement: "x") == "aaaa")
+    }
+
     @Test func oversizedRuleEditRequiresShorteningBeforeUpdate() {
         let huge = String(repeating: "a", count: ReplacementAuthoring.maxCharacters + 100)
         let original = ReplacementsSet.Rule(heard: "huge", replace: huge, regex: false)

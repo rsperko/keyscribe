@@ -504,7 +504,8 @@ composer and lists do not live inside the mode editor.
   ones** (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
   recognition or a noticeable wait for normal use.
 - Replacements: human-readable `When heard`/`Use instead` rows. The `Use instead` value shows as
-  exactly **one bounded preview line** (line breaks and tabs rendered as `\n`/`\r`/`\t`, capped so a row
+  exactly **one bounded preview line** (line breaks and tabs rendered as `\n`/`\r`/`\t`, a
+  whitespace-only value showing its spaces as `␣` so it never looks empty, capped so a row
   never grows with the replacement body); the full value stays available in the larger editor. Regex
   rows use `Pattern` and retain a visible `Regex` badge. Rules are applied from top to bottom; the list
   says so directly. Each row has a subtle drag handle and uses the platform table-reordering interaction. The

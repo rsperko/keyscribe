@@ -23,6 +23,19 @@ struct VocabularyAdvisorTests {
                 includeGlobalWords: includeGlobalWords, includeGlobalRules: includeGlobalRules))
     }
 
+    @Test func overrideAdvisoryBoundsAHugeGlobalReplacement() {
+        let huge = String(repeating: "a", count: 1_000)
+        let analysis = VocabularyAdvisor.analyze(
+            .replacement(heard: "foo", replace: "short", regex: false),
+            in: mode(globalRules: [rule("foo", huge)]))
+        guard let advisory = analysis.advisories.first(where: { $0.kind == .overridesGlobal }) else {
+            Issue.record("expected an overridesGlobal advisory")
+            return
+        }
+        #expect(advisory.message.count < 300)
+        #expect(advisory.message.contains("…"))
+    }
+
     @Test func newWordIsAnAdd() {
         let analysis = VocabularyAdvisor.analyze(.word("Kubernetes"), in: global(words: ["Postgres"]))
         #expect(analysis.action == .addWord)

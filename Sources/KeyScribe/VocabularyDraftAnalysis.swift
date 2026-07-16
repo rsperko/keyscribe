@@ -9,6 +9,7 @@ enum VocabularyFeedback: Equatable {
 
 enum VocabularyDraftValidationIssue: Equatable {
     case invalidRegex
+    case unsafePattern
     case replacementRequired
     case invalidInput(UserInputValidation.Issue)
     case tooLong
@@ -57,20 +58,23 @@ struct VocabularyDraftAnalysis {
         } else if regex && !RegexCache.isValidPattern(term) {
             proposal = nil
             validationIssue = .invalidRegex
+        } else if regex && !ReplacementSafety.isSafe(term) {
+            proposal = nil
+            validationIssue = .unsafePattern
         } else if regex && replacement.isEmpty {
             proposal = nil
             validationIssue = .replacementRequired
         } else if replacement.isEmpty && !requiresReplacement {
             proposal = .word(term)
             validationIssue = nil
-        } else if !ReplacementAuthoring.isWithinLimit(replacement) {
+        } else if let replacementIssue = Self.replacementValidationIssue(replacement) {
             proposal = nil
-            validationIssue = .tooLong
+            validationIssue = replacementIssue
         } else if regex && !ReplacementAuthoring.regexReturnMarkerValid(replacement) {
             proposal = nil
             validationIssue = .nonTerminalReturnMarker
         } else {
-            proposal = .replacement(heard: term, replace: replacement, regex: false)
+            proposal = .replacement(heard: term, replace: replacement, regex: regex)
             validationIssue = nil
         }
         self.proposal = proposal
@@ -115,6 +119,12 @@ struct VocabularyDraftAnalysis {
         return replacementRule != original && !hasReplacementIdentityConflict
     }
 
+    static func replacementValidationIssue(_ replacement: String) -> VocabularyDraftValidationIssue? {
+        guard ReplacementAuthoring.isWithinLimit(replacement) else { return .tooLong }
+        guard let issue = UserInputValidation.promptIssue(replacement) else { return nil }
+        return .invalidInput(issue)
+    }
+
     static func invisibleOnlyDescription(_ replace: String) -> String? {
         guard !replace.isEmpty, replace.allSatisfy(\.isWhitespace) else { return nil }
         let lineBreaks = replace.reduce(0) { $0 + ($1.isNewline ? 1 : 0) }
@@ -139,19 +149,21 @@ struct VocabularyDraftAnalysis {
         case .noChange(.replacementCoveredByGlobal):
             return .existing("Already included from your global replacements.")
         case .updateReplacement(let current):
-            let current = current.isEmpty ? "nothing" : "“\(current)”"
+            let current = current.isEmpty
+                ? "nothing"
+                : "“\(ReplacementAuthoring.preview(for: current).text)”"
             return .update("Updates the existing replacement — “\(term)” currently becomes \(current).")
         case .updateWord(let current):
             return .update("Updates the existing word — “\(term)” is currently spelled “\(current)”.")
         case .addWord, .addReplacement:
+            if let message = analysis.advisories.first(where: { $0.kind == .overridesGlobal })?.message {
+                return .advisory(message)
+            }
             if case let .replacement(_, replace, _) = proposal,
                let invisible = Self.invisibleOnlyDescription(replace) {
                 return .advisory(invisible)
             }
-            guard let message = analysis.advisories.first(where: { $0.kind == .overridesGlobal })?.message else {
-                return nil
-            }
-            return .advisory(message)
+            return nil
         }
     }
 }

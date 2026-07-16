@@ -83,4 +83,18 @@ struct ReplacementAuthoringTests {
         #expect(ReplacementAuthoring.normalizingLineEndings("a\nb") == "a\nb")
         #expect(ReplacementAuthoring.normalizingLineEndings("a\r\nb\rc\nd") == "a\nb\nc\nd")
     }
+
+    @Test func crlfOnlyStringStillNormalizes() {
+        #expect(ReplacementAuthoring.normalizingLineEndings("\r\n") == "\n")
+        #expect(ReplacementAuthoring.normalizingLineEndings("line one\r\nline two") == "line one\nline two")
+    }
+
+    @Test func previewMakesWhitespaceOnlySpacesVisible() {
+        #expect(ReplacementAuthoring.preview(for: "  ").text == "␣␣")
+        #expect(ReplacementAuthoring.preview(for: " \t ").text == #"␣\t␣"#)
+    }
+
+    @Test func previewLeavesSpacesAlongsideContentAlone() {
+        #expect(ReplacementAuthoring.preview(for: " a ").text == " a ")
+    }
 }

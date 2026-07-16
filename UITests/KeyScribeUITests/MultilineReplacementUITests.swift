@@ -33,11 +33,13 @@ final class MultilineReplacementUITests: XCTestCase {
         element("settings.sidebar.vocabulary", in: window).click()
         let label = window.staticTexts["Use instead (optional)"]
         XCTAssertTrue(label.waitForExistence(timeout: 8))
+        let field = element("settings.vocabulary.composer.useInstead", in: window)
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
         let expand = element("settings.vocabulary.composer.useInstead.expand", in: window)
         XCTAssertTrue(expand.waitForExistence(timeout: 8))
-        XCTAssertLessThan(abs(expand.frame.midY - label.frame.midY), 4)
-        XCTAssertGreaterThan(expand.frame.minX, label.frame.maxX)
-        XCTAssertLessThan(expand.frame.minX - label.frame.maxX, 16)
+        XCTAssertEqual(expand.label, "Open in a larger editor…")
+        XCTAssertGreaterThan(expand.frame.minY, field.frame.maxY - 1)
+        XCTAssertLessThan(expand.frame.minY - field.frame.maxY, 16)
         expand.click()
         let editor = element("settings.vocabulary.composer.useInstead.editor", in: window)
         XCTAssertTrue(editor.waitForExistence(timeout: 8))
@@ -51,6 +53,17 @@ final class MultilineReplacementUITests: XCTestCase {
                        "first\nsecond")
         let stored = try String(contentsOf: config.appendingPathComponent("replacements.toml"), encoding: .utf8)
         XCTAssertFalse(stored.contains("first\nsecond"))
+
+        let term = element("settings.vocabulary.composer.term", in: window)
+        term.click()
+        term.typeText("multi test")
+        element("settings.vocabulary.composer.add", in: window).click()
+        let newRowEdit = element("settings.vocabulary.replacements.edit.1", in: window)
+        XCTAssertTrue(newRowEdit.waitForExistence(timeout: 8))
+        let saved = try String(contentsOf: config.appendingPathComponent("replacements.toml"), encoding: .utf8)
+        XCTAssertTrue(saved.contains("multi test"))
+        XCTAssertTrue(saved.contains("first"))
+        XCTAssertTrue(saved.contains("second"))
     }
 
     func testSavedRuleEditorUsesInlineLargeEditor() throws {

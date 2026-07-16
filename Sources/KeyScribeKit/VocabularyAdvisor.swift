@@ -285,6 +285,6 @@ public enum VocabularyAdvisor {
     }
 
     private static func quoted(_ text: String) -> String {
-        text.isEmpty ? "nothing" : "“\(text)”"
+        text.isEmpty ? "nothing" : "“\(ReplacementAuthoring.preview(for: text).text)”"
     }
 }
