@@ -29,6 +29,18 @@ import Testing
     @Test func regularExpressionsHaveBoundedValidSyntax() {
         #expect(UserInputValidation.regexIssue("(?i)draft") == nil)
         #expect(UserInputValidation.regexIssue("[") == .invalidRegex)
+        #expect(UserInputValidation.regexIssue(#"(a+)+$"#) == .unsafeRegex)
         #expect(UserInputValidation.regexIssue(String(repeating: "a", count: 4_097)) == .tooLong(limit: 4_096))
+    }
+
+    @Test func literalPhrasesDoNotReceiveRegularExpressionValidation() {
+        #expect(UserInputValidation.phraseIssue("C (programming)") == nil)
+        #expect(UserInputValidation.phraseIssue(#"(a+)+$"#) == nil)
+    }
+
+    @Test func triggerPhrasesAreSafeRegularExpressions() {
+        #expect(UserInputValidation.triggerPhraseIssue("as a note") == nil)
+        #expect(UserInputValidation.triggerPhraseIssue("[") == .invalidRegex)
+        #expect(UserInputValidation.triggerPhraseIssue(#"(a+)+$"#) == .unsafeRegex)
     }
 }

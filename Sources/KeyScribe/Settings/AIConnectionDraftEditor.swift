@@ -488,10 +488,6 @@ struct AIConnectionDraftEditor: View {
         }
     }
 
-    private func requiredLabel(_ text: String) -> some View {
-        IssueText(text, severity: .advisory)
-    }
-
     private func saveKey() {
         guard draft.hasUnsavedAPIKey, draft.apiKeyIssue == nil else { return }
         draft.authMethod = .apiKey

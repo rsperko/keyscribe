@@ -72,6 +72,19 @@ struct ConfigCacheErrorTests {
         #expect(message.contains("broken"))
     }
 
+    @Test func unsafeRoutingExpressionLeavesTheModeAvailableForRepair() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modesDir = dir.appendingPathComponent("modes", isDirectory: true)
+        try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        try "schema_version = 1\nname = \"Unsafe\"\ntrigger_phrases = ['(a+)+$']".write(
+            to: modesDir.appendingPathComponent("unsafe.toml"), atomically: true, encoding: .utf8)
+
+        let cache = ConfigCache(supportDir: dir)
+        #expect(cache.configFileError == nil)
+        #expect(cache.modes.first?.invalidRoutingPatternFields == ["trigger_phrases"])
+    }
+
     @Test func newerSchemaConnectionsSurfacesAsFileError() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -284,4 +284,26 @@ struct VerbatimTokenizerTests {
         let (out, _) = tokenize("the verbatum note is here")
         #expect(out == "the verbatum note is here")
     }
+
+    @Test func endLikeKeywordMishearWithoutAnEarlierBeginIsNotSnapped() {
+        let (out, _) = tokenize("and verbatum")
+        #expect(out == "and verbatum")
+    }
+
+    @Test func sentencePunctuationBetweenMarkerWordsDoesNotSnapAMishear() {
+        let (out, _) = tokenize("begin. Verbatum")
+        #expect(out == "begin. Verbatum")
+    }
+
+    @Test func leadingPunctuationBeforeBeginMarkerStillSnapsAMishear() {
+        let (out, t) = tokenize("(begin verbatum KeepThis end verbatim")
+        #expect(out == "(⟦SN:VERB:1⟧")
+        #expect(t.restore(out) == "(KeepThis")
+    }
+
+    @Test func leadingPunctuationBeforeEndLikeMarkerStillSnapsAMishear() {
+        let (out, t) = tokenize("begin verbatim KeepThis (and verbatum")
+        #expect(out == "⟦SN:VERB:1⟧")
+        #expect(t.restore(out) == "KeepThis (")
+    }
 }

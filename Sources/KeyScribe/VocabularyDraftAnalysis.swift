@@ -54,13 +54,14 @@ struct VocabularyDraftAnalysis {
             validationIssue = nil
         } else if let termIssue {
             proposal = nil
-            validationIssue = regex && termIssue == .invalidRegex ? .invalidRegex : .invalidInput(termIssue)
-        } else if regex && !RegexCache.isValidPattern(term) {
-            proposal = nil
-            validationIssue = .invalidRegex
-        } else if regex && !ReplacementSafety.isSafe(term) {
-            proposal = nil
-            validationIssue = .unsafePattern
+            switch termIssue {
+            case .invalidRegex:
+                validationIssue = .invalidRegex
+            case .unsafeRegex:
+                validationIssue = .unsafePattern
+            default:
+                validationIssue = .invalidInput(termIssue)
+            }
         } else if regex && replacement.isEmpty {
             proposal = nil
             validationIssue = .replacementRequired

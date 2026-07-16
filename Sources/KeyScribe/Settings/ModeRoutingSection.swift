@@ -42,7 +42,8 @@ struct ModeRoutingSection: View {
                 .foregroundStyle(.secondary)
             availabilityLevel
             DisclosureSection(
-                isExpanded: $advancedMatchingExpanded
+                isExpanded: $advancedMatchingExpanded,
+                hasError: hasInvalidConstraintPatterns
             ) {
                 DisclosureSummaryLabel(
                     title: "More precise matching",
@@ -60,7 +61,11 @@ struct ModeRoutingSection: View {
                         .disabled(windowTitleIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitleAdd)
                 }
-                if let windowTitleIssue { IssueText(windowTitleIssue.message) }
+                if newWindowTitlePattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    requiredLabel("Enter a window title pattern.")
+                } else if let windowTitleIssue {
+                    IssueText(windowTitleIssue.message)
+                }
                 Text("URL (regular expression)")
                     .font(.subheadline.weight(.semibold)).padding(.top, 4)
                 HStack {
@@ -73,7 +78,15 @@ struct ModeRoutingSection: View {
                         .disabled(urlPatternIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
                 }
-                if let urlPatternIssue { IssueText(urlPatternIssue.message) }
+                if newURLPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    requiredLabel("Enter a URL pattern.")
+                } else if let urlPatternIssue {
+                    IssueText(urlPatternIssue.message)
+                }
+
+                if hasInvalidConstraintPatterns {
+                    IssueText("A saved URL or window title pattern is disabled because it is invalid or unsafe. Remove it and add a corrected pattern.")
+                }
 
                 Text("These patterns narrow where this mode is available. URLs are never sent to a rewrite provider.")
                     .font(.caption)
@@ -107,7 +120,11 @@ struct ModeRoutingSection: View {
                         .disabled(phraseIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
                 }
-                if let phraseIssue { IssueText(phraseIssue.message) }
+                if newPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    requiredLabel("Enter a spoken phrase.")
+                } else if let phraseIssue {
+                    IssueText(phraseIssue.message)
+                }
             } else {
                 Button(mode.triggerPhrases.isEmpty ? "Add spoken phrase…" : "Add another spoken phrase…") {
                     enteringPhrase = true
@@ -121,6 +138,9 @@ struct ModeRoutingSection: View {
                     Button("Remove", role: .destructive) { removePhrase(phrase) }
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseRemove(index))
                 }
+            }
+            if hasInvalidTriggerPhrase {
+                IssueText("A saved spoken phrase is disabled because it is invalid or unsafe. Remove it and add a corrected phrase.")
             }
         }
     }
@@ -160,7 +180,11 @@ struct ModeRoutingSection: View {
                         .disabled(bundleIDIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleIDAdd)
                 }
-                if let bundleIDIssue { IssueText(bundleIDIssue.message) }
+                if manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    requiredLabel("Enter a bundle ID.")
+                } else if let bundleIDIssue {
+                    IssueText(bundleIDIssue.message)
+                }
             }
             if enteringDomain {
                 VStack(alignment: .leading, spacing: 2) {
@@ -234,7 +258,7 @@ struct ModeRoutingSection: View {
 
     private func commitPhrase() {
         let phrase = newPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard UserInputValidation.phraseIssue(phrase) == nil else { return }
+        guard UserInputValidation.triggerPhraseIssue(phrase) == nil else { return }
         if !mode.triggerPhrases.contains(phrase) {
             var updated = mode
             updated.triggerPhrases.append(phrase)
@@ -301,7 +325,15 @@ struct ModeRoutingSection: View {
         onUpdate(updated)
     }
 
-    private var phraseIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(newPhrase) }
+    private var hasInvalidTriggerPhrase: Bool {
+        mode.invalidRoutingPatternFields.contains("trigger_phrases")
+    }
+
+    private var hasInvalidConstraintPatterns: Bool {
+        mode.invalidRoutingPatternFields.contains { $0.hasPrefix("constraints[") }
+    }
+
+    private var phraseIssue: UserInputValidation.Issue? { UserInputValidation.triggerPhraseIssue(newPhrase) }
     private var urlPatternIssue: UserInputValidation.Issue? { UserInputValidation.regexIssue(newURLPattern) }
     private var windowTitleIssue: UserInputValidation.Issue? { UserInputValidation.regexIssue(newWindowTitlePattern) }
     private var bundleIDIssue: UserInputValidation.Issue? { UserInputValidation.identifierIssue(manualBundleId, required: true) }

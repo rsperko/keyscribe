@@ -187,35 +187,23 @@ public enum VocabularyAdvisor {
             witnesses = [subject.heard]
         }
         for witness in witnesses {
-            var current = witness
-            var firstChanger: Int?
-            for i in 0..<position {
-                guard let earlier = prepared[i] else { continue }
-                let next = applying(earlier, to: current)
-                if next != current, firstChanger == nil { firstChanger = i }
-                current = next
-            }
-            if current != witness, let changer = firstChanger, !matches(rule.regex, current) {
+            let propagation = propagate(witness, through: 0..<position, prepared: prepared)
+            if propagation.value != witness, let changer = propagation.firstChanger,
+               !matches(rule.regex, propagation.value) {
                 advisories.append(VocabularyAnalysis.Advisory(
                     kind: .preempted,
-                    message: "When you say “\(witness)”, the replacement for “\(effective[changer].heard)” runs first and changes it to \(quoted(current)), so this rule will not apply."))
+                    message: "When you say “\(witness)”, the replacement for “\(effective[changer].heard)” runs first and changes it to \(quoted(propagation.value)), so this rule will not apply."))
             }
         }
 
         for execution in executions(at: position, effective: effective, prepared: prepared)
         where position + 1 < effective.count {
-            var current = execution.output
-            var firstChanger: Int?
-            for i in (position + 1)..<effective.count {
-                guard let later = prepared[i] else { continue }
-                let next = applying(later, to: current)
-                if next != current, firstChanger == nil { firstChanger = i }
-                current = next
-            }
-            if current != execution.output, let changer = firstChanger {
+            let propagation = propagate(
+                execution.output, through: (position + 1)..<effective.count, prepared: prepared)
+            if propagation.value != execution.output, let changer = propagation.firstChanger {
                 advisories.append(VocabularyAnalysis.Advisory(
                     kind: .cascades,
-                    message: "When you say “\(execution.witness)”, this rule produces \(quoted(execution.output)), then the replacement for “\(effective[changer].heard)” changes it to \(quoted(current))."))
+                    message: "When you say “\(execution.witness)”, this rule produces \(quoted(execution.output)), then the replacement for “\(effective[changer].heard)” changes it to \(quoted(propagation.value))."))
                 break
             }
         }
@@ -231,14 +219,11 @@ public enum VocabularyAdvisor {
             let globalRule = effective[globalPosition]
             guard let execution = executions(
                 at: globalPosition, effective: effective, prepared: prepared).first else { return nil }
-            var value = execution.output
-            for index in (globalPosition + 1)..<position {
-                guard let intervening = prepared[index] else { continue }
-                value = applying(intervening, to: value)
-            }
-            guard value == execution.output else { return nil }
-            let changed = applying(subject, to: value)
-            guard changed != value else { return nil }
+            let propagation = propagate(
+                execution.output, through: (globalPosition + 1)..<position, prepared: prepared)
+            guard propagation.value == execution.output else { return nil }
+            let changed = applying(subject, to: propagation.value)
+            guard changed != propagation.value else { return nil }
             return VocabularyAnalysis.Advisory(
                 kind: .cascades,
                 message: "When you say “\(execution.witness)”, the global replacement for “\(globalRule.heard)” produces \(quoted(execution.output)), which this rule changes to \(quoted(changed)).")
@@ -248,6 +233,20 @@ public enum VocabularyAdvisor {
     private struct Execution {
         let witness: String
         let output: String
+    }
+
+    private static func propagate(
+        _ value: String, through indices: Range<Int>, prepared: [Prepared?]
+    ) -> (value: String, firstChanger: Int?) {
+        var value = value
+        var firstChanger: Int?
+        for index in indices {
+            guard let rule = prepared[index] else { continue }
+            let next = applying(rule, to: value)
+            if next != value, firstChanger == nil { firstChanger = index }
+            value = next
+        }
+        return (value, firstChanger)
     }
 
     private static func executions(

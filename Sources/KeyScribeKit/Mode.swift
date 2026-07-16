@@ -322,6 +322,30 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         if context.precedingText { categories.append("preceding text") }
         return categories
     }
+
+    public var invalidRoutingPatternFields: [String] {
+        var fields: [String] = []
+        for phrase in triggerPhrases {
+            if RegexCache.routingRegex(phrase, options: [.caseInsensitive]) == nil {
+                if !fields.contains("trigger_phrases") { fields.append("trigger_phrases") }
+            }
+        }
+        for (index, constraint) in constraints.enumerated() {
+            if let pattern = constraint.urlPattern {
+                if RegexCache.routingRegex(pattern) == nil {
+                    let field = "constraints[\(index)].url_pattern"
+                    if !fields.contains(field) { fields.append(field) }
+                }
+            }
+            if let pattern = constraint.windowTitle {
+                if RegexCache.routingRegex(pattern) == nil {
+                    let field = "constraints[\(index)].window_title"
+                    if !fields.contains(field) { fields.append(field) }
+                }
+            }
+        }
+        return fields
+    }
 }
 
 public enum ModeStore {

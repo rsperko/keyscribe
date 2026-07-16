@@ -280,6 +280,14 @@ struct ModeResolverTests {
         #expect(ModeResolver.requiresURLContext([plain, disabledURLMode]) == false)
     }
 
+    @Test func invalidRoutingPatternsDoNotRequestContextProbes() {
+        let unsafeURL = mode("unsafe-url", urlPattern: #"(a+)+$"#)
+        var unsafeTitle = mode("unsafe-title")
+        unsafeTitle.constraints = [.init(windowTitle: #"(a+)+$"#)]
+        #expect(!ModeResolver.requiresURLContext([unsafeURL]))
+        #expect(!ModeResolver.requiresWindowTitleContext([unsafeTitle]))
+    }
+
     @Test func phaseBTiesBreakByDeclarationOrder() {
         let search = #"(?i)\bas search$"#
         let d1 = mode("d1", phrases: [search])

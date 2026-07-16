@@ -14,6 +14,13 @@ struct RegexCacheTests {
         #expect(RegexCache.regex("(unclosed") == nil)
     }
 
+    @Test func routingSafetyRejectsAPatternAlreadyCompiledForAnotherUse() {
+        let pattern = #"(a+)+$-routing-safety"#
+        #expect(RegexCache.regex(pattern, options: [.caseInsensitive]) != nil)
+        #expect(RegexCache.routingRegex(pattern, options: [.caseInsensitive]) == nil)
+        #expect(!RegexCache.isKnownInvalid(pattern, options: [.caseInsensitive]))
+    }
+
     @Test func invalidPatternIsMemoizedAsFailed() {
         let pattern = "(still-unclosed-\(#function)"
         #expect(!RegexCache.isKnownInvalid(pattern))

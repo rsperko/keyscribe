@@ -33,6 +33,21 @@ public enum VerbatimTokenizer {
     private static let keywordEdgePunct = CharacterSet(charactersIn: ".,!?;:'\"()[]")
 
     private static func snapMarkerKeyword(_ text: String) -> String {
+        let beginSnapped = snapKeywordAfterMarker(in: text) { marker, _ in
+            markerCore(marker) == beginWord
+        }
+        guard let beginRe = RegexCache.regex("(?i)\(beginTrigger)", options: []) else { return beginSnapped }
+        // An earlier begin trigger makes an end-like correction plausible, but not guaranteed to be consumed.
+        return snapKeywordAfterMarker(in: beginSnapped) { marker, keywordRange in
+            guard let marker = markerCore(marker), endLike(marker) else { return false }
+            return beginRe.firstMatch(
+                in: beginSnapped, range: NSRange(location: 0, length: keywordRange.location)) != nil
+        }
+    }
+
+    private static func snapKeywordAfterMarker(
+        in text: String, matchesMarker: (String, NSRange) -> Bool
+    ) -> String {
         guard let tokenRe = RegexCache.regex("\\S+", options: []) else { return text }
         let ns = text as NSString
         let ranges = tokenRe.matches(in: text, range: NSRange(location: 0, length: ns.length)).map(\.range)
@@ -41,14 +56,25 @@ public enum VerbatimTokenizer {
         for i in 1..<ranges.count {
             let raw = ns.substring(with: ranges[i])
             guard keywordLike(core(of: raw)) else { continue }
-            let prev = core(of: ns.substring(with: ranges[i - 1])).lowercased()
-            guard prev == beginWord || endLike(prev) else { continue }
+            let marker = ns.substring(with: ranges[i - 1]).lowercased()
+            guard matchesMarker(marker, ranges[i]) else { continue }
             edits.append((ranges[i], swapCore(raw, into: keyword)))
         }
         guard !edits.isEmpty else { return text }
         let mutable = NSMutableString(string: text)
         for edit in edits.reversed() { mutable.replaceCharacters(in: edit.range, with: edit.replacement) }
         return mutable as String
+    }
+
+    private static func markerCore(_ marker: String) -> String? {
+        var marker = String(marker.drop(while: isKeywordEdgePunctuation))
+        guard !marker.isEmpty else { return nil }
+        if let trailing = marker.last, ",;:".contains(trailing) { marker.removeLast() }
+        return marker.isEmpty ? nil : marker
+    }
+
+    private static func isKeywordEdgePunctuation(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy(keywordEdgePunct.contains)
     }
 
     private static func keywordLike(_ token: String) -> Bool {
@@ -64,9 +90,8 @@ public enum VerbatimTokenizer {
     // Preserve the token's outer punctuation (a pause comma / marker-glued terminator the marker regexes
     // still expect to handle); only the alphabetic core is replaced.
     private static func swapCore(_ token: String, into replacement: String) -> String {
-        let isEdge = { (c: Character) in c.unicodeScalars.allSatisfy(keywordEdgePunct.contains) }
-        let lead = String(token.prefix(while: isEdge))
-        let trail = String(token.reversed().prefix(while: isEdge).reversed())
+        let lead = String(token.prefix(while: isKeywordEdgePunctuation))
+        let trail = String(token.reversed().prefix(while: isKeywordEdgePunctuation).reversed())
         return lead + replacement + trail
     }
 

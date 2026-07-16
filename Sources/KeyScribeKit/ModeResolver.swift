@@ -121,13 +121,21 @@ public enum ModeResolver {
     // Whether any enabled mode could match on URL — the gate for probing the browser URL at all
     // (the probe needs Apple Events + the Automation prompt, so it's opt-in; design.md §4.4).
     public static func requiresURLContext(_ modes: [Mode]) -> Bool {
-        modes.contains { $0.enabled && $0.constraints.contains { $0.urlPattern != nil } }
+        modes.contains { mode in
+            mode.enabled && mode.constraints.contains { constraint in
+                constraint.urlPattern.map { RegexCache.routingRegex($0) != nil } ?? false
+            }
+        }
     }
 
     // Whether any enabled mode could match on the window title — the gate for reading the focused
     // window's title at all (an extra AX round trip, so it is read only when a mode actually needs it).
     public static func requiresWindowTitleContext(_ modes: [Mode]) -> Bool {
-        modes.contains { $0.enabled && $0.constraints.contains { $0.windowTitle != nil } }
+        modes.contains { mode in
+            mode.enabled && mode.constraints.contains { constraint in
+                constraint.windowTitle.map { RegexCache.routingRegex($0) != nil } ?? false
+            }
+        }
     }
 
     private static func isEligible(_ mode: Mode, _ context: RoutingContext) -> Bool {
@@ -178,7 +186,7 @@ public enum ModeResolver {
     }
 
     private static func regexFound(_ pattern: String, in text: String) -> Bool {
-        guard let re = RegexCache.regex(pattern) else { return false }
+        guard let re = RegexCache.routingRegex(pattern) else { return false }
         return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
@@ -191,7 +199,7 @@ public enum ModeResolver {
     //   3. a leading word boundary, so "as prompt" doesn't fire inside "has prompt".
     private static func matchSuffix(_ pattern: String, in transcript: String) -> String? {
         let trimmed = trimTrailingNoise(transcript)
-        guard let re = RegexCache.regex(pattern, options: [.caseInsensitive]) else { return nil }
+        guard let re = RegexCache.routingRegex(pattern, options: [.caseInsensitive]) else { return nil }
         let full = NSRange(trimmed.startIndex..., in: trimmed)
         guard let match = re.matches(in: trimmed, range: full).last,
               match.range.length > 0,

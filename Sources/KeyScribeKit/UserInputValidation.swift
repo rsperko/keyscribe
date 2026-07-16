@@ -9,6 +9,7 @@ public enum UserInputValidation {
         case invalidURL
         case credentialsNotAllowed
         case invalidRegex
+        case unsafeRegex
 
         public var message: String {
             switch self {
@@ -19,6 +20,7 @@ public enum UserInputValidation {
             case .invalidURL: "Enter a complete http or https URL."
             case .credentialsNotAllowed: "Remove the username and password from this URL."
             case .invalidRegex: "That is not a valid regular expression."
+            case .unsafeRegex: "That regular expression could make routing unresponsive."
             }
         }
     }
@@ -43,6 +45,11 @@ public enum UserInputValidation {
         singleLineIssue(value, required: true, limit: phraseLimit)
     }
 
+    public static func triggerPhraseIssue(_ value: String) -> Issue? {
+        if let issue = phraseIssue(value) { return issue }
+        return regexSyntaxIssue(value)
+    }
+
     public static func endpointIssue(_ value: String) -> Issue? {
         if let issue = singleLineIssue(value, required: true, limit: endpointLimit) { return issue }
         guard let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -55,7 +62,7 @@ public enum UserInputValidation {
 
     public static func regexIssue(_ value: String) -> Issue? {
         if let issue = singleLineIssue(value, required: true, limit: regexLimit) { return issue }
-        return RegexCache.isValidPattern(value) ? nil : .invalidRegex
+        return regexSyntaxIssue(value)
     }
 
     public static func secretIssue(_ value: String) -> Issue? {
@@ -79,5 +86,10 @@ public enum UserInputValidation {
         if value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) { return .controlCharacters }
         if value.count > limit { return .tooLong(limit: limit) }
         return nil
+    }
+
+    private static func regexSyntaxIssue(_ value: String) -> Issue? {
+        if !ReplacementSafety.isSafe(value) { return .unsafeRegex }
+        return RegexCache.isValidPattern(value) ? nil : .invalidRegex
     }
 }

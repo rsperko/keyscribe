@@ -80,6 +80,11 @@ struct IssueText: View {
     }
 }
 
+@MainActor
+func requiredLabel(_ text: String) -> some View {
+    IssueText(text, severity: .advisory)
+}
+
 struct VocabularyFeedbackView: View {
     let feedback: VocabularyFeedback
 

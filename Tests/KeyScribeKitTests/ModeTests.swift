@@ -110,6 +110,46 @@ struct ModeTests {
         }
     }
 
+    @Test func preservesUnsafeRoutingPatternsForRepairWhileDisablingThem() throws {
+        let unsafePatterns = [
+            ("trigger_phrases = ['(a+)+$']", "trigger_phrases"),
+            ("[[constraints]]\nurl_pattern = '(a+)+$'", "constraints[0].url_pattern"),
+            ("[[constraints]]\nwindow_title = '(a+)+$'", "constraints[0].window_title"),
+        ]
+        for (pattern, field) in unsafePatterns {
+            let mode = try ModeStore.decode(
+                from: "schema_version = 1\nname = \"Unsafe\"\n\(pattern)", id: "unsafe")
+            #expect(mode.invalidRoutingPatternFields == [field])
+        }
+    }
+
+    @Test func preservesMalformedSpokenPhraseRegexForRepairWhileDisablingIt() throws {
+        let mode = try ModeStore.decode(
+            from: "schema_version = 1\nname = \"Malformed\"\ntrigger_phrases = ['[']", id: "malformed")
+        #expect(mode.invalidRoutingPatternFields == ["trigger_phrases"])
+    }
+
+    @Test func groupsMultipleInvalidTriggerPhrasesIntoOneRepairField() throws {
+        let mode = try ModeStore.decode(
+            from: "schema_version = 1\nname = \"Malformed\"\ntrigger_phrases = ['[', '(a+)+$']", id: "malformed")
+        #expect(mode.invalidRoutingPatternFields == ["trigger_phrases"])
+    }
+
+    @Test func acceptsValidRoutingPatternsWithInlineFlags() throws {
+        let mode = try ModeStore.decode(from: """
+        schema_version = 1
+        name = "Precise"
+        trigger_phrases = ['(?-i)as a note']
+
+        [[constraints]]
+        url_pattern = '(?i)notes\\.example\\.com'
+        window_title = '(?i)project notes'
+        """, id: "precise")
+        #expect(mode.triggerPhrases == ["(?-i)as a note"])
+        #expect(mode.constraints.first?.urlPattern == #"(?i)notes\.example\.com"#)
+        #expect(mode.constraints.first?.windowTitle == "(?i)project notes")
+    }
+
     @Test func seedProvenanceRoundTrips() throws {
         let toml = "schema_version = 1\nseed_id = \"polish\"\nseed_version = 2\nname = \"Polish\""
         let mode = try ModeStore.decode(from: toml, id: "polish")

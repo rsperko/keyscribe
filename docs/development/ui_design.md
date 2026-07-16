@@ -401,9 +401,10 @@ capabilities. The sidebar order is fixed:
 General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
-Editable fields preserve the typed draft while it is invalid and explain the correction inline. Names,
-phrases, identifiers, endpoints, and regular expressions reject empty, multi-line, malformed, or
-unreasonably large values; multiline writing instructions remain supported with a visible size limit.
+Editable fields preserve the typed draft while invalid and explain the correction inline. Blank required
+fields give a neutral hint; entered invalid values show an inline error. Names, phrases, identifiers,
+endpoints, and regular expressions reject empty, multi-line, malformed, or unreasonably large values;
+multiline writing instructions remain supported with a visible size limit.
 Editable textual input explicitly uses leading alignment. A field may sit in a trailing form-value
 column, but its content does not become trailing-aligned; that alignment is reserved for form labels
 and comparable numeric scalar values.

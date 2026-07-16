@@ -28,6 +28,13 @@ public enum RegexCache {
         return compiled
     }
 
+    public static func routingRegex(
+        _ pattern: String, options: NSRegularExpression.Options = []
+    ) -> NSRegularExpression? {
+        guard ReplacementSafety.isSafe(pattern) else { return nil }
+        return regex(pattern, options: options)
+    }
+
     #if DEBUG
     static func isKnownInvalid(_ pattern: String, options: NSRegularExpression.Options = []) -> Bool {
         let key = "\(options.rawValue)\u{1}\(pattern)"
