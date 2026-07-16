@@ -159,8 +159,7 @@ enum ModelInstallStore {
     }
 
     private static func write(_ ids: Set<String>) throws {
-        try FileManager.default.createDirectory(
-            at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
+        KeyScribePaths.ensureModelsDir()
         try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
         cacheLock.lock()
         cachedIds = ids

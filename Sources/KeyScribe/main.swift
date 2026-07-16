@@ -128,6 +128,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--reset") {
     exit(0)
 }
 
+// Every CLI runner below downloads weights without ever reaching AppDelegate, so the exclusion is applied
+// here — after --reset, which would delete the dir again.
+KeyScribePaths.ensureModelsDir()
+
 if let i = CommandLine.arguments.firstIndex(of: "--reload-stress"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     var only: Set<String>?

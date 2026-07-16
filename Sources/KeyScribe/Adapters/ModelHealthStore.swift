@@ -54,8 +54,7 @@ enum ModelHealthStore {
 
     private static func write(_ ids: Set<String>) {
         do {
-            try FileManager.default.createDirectory(
-                at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
+            KeyScribePaths.ensureModelsDir()
             try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
             // Update the cache only after the durable write succeeds, so a failed write never leaves the
             // process believing a health change happened.

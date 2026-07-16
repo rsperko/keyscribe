@@ -34,6 +34,16 @@ enum KeyScribePaths {
             .appendingPathComponent("models", isDirectory: true)
     }
 
+    // The one creator of modelsDir. Exclusion only takes on an existing path, and an engine downloading into
+    // a subdir can recreate modelsDir without it, so this re-applies on every call rather than setting once.
+    @discardableResult
+    static func ensureModelsDir() -> URL {
+        let dir = modelsDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        BackupExclusion.exclude(dir)
+        return dir
+    }
+
     // Runtime marker of global system audio state to restore after a crash. Lives as a sibling FILE of
     // supportDir, NOT inside the FSEvents-watched config tree, so per-dictation record/clear writes don't
     // fire ConfigWatcher. Keyed by variant but never redirected by `--config-dir` — it is real system state,
