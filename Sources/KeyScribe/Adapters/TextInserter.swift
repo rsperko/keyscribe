@@ -30,7 +30,7 @@ enum TextInserter {
         // non-essential copy — they just get no prefill in that app.
         if requirePerfectRestore, !clipboardRestoresPerfectly(pb) { return nil }
         return await withMutedAlertVolume {
-            let snapshot = await PasteboardSnapshot.capture(from: pb)
+            let snapshot = PasteboardSnapshot.capture(from: pb)
             postKey(cKeyCode, flags: eventFlags(modifier))
             guard await waitForChange(since: snapshot.changeCount) else { return nil }
             let copied = pb.string(forType: .string)
@@ -165,14 +165,18 @@ enum TextInserter {
     // (restoring that would leak dictated content). nil ⇒ scratch write unverified, caller must not ⌘V.
     static func beginScratchPaste(_ text: String, on pb: NSPasteboard, afterCapture: (() -> Void)? = nil) async -> ScratchPaste? {
         await drainPendingRestore()
-        var snapshot = await PasteboardSnapshot.capture(from: pb)
+        // ONE deadline across every capture below: each renders on the main thread, so a per-capture budget
+        // would let a promised-flavor clipboard stall main for up to 4x the bound. A retry that finds it spent
+        // degrades to a plain-text snapshot, which is the safe direction — restore still clears the scratch.
+        let renderDeadline = PasteboardSnapshot.renderDeadline()
+        var snapshot = PasteboardSnapshot.capture(from: pb, renderDeadline: renderDeadline)
         afterCapture?()
         // Re-capture until a snapshot spans no concurrent copy, so the scratch write can't clobber a copy
         // that landed mid-capture. If it never stabilizes within the cap, fail closed below rather than
         // clobber an actively-changing clipboard.
         var stabilizeAttempts = 0
         while pb.changeCount != snapshot.changeCount && stabilizeAttempts < maxSnapshotStabilizeAttempts {
-            snapshot = await PasteboardSnapshot.capture(from: pb)
+            snapshot = PasteboardSnapshot.capture(from: pb, renderDeadline: renderDeadline)
             afterCapture?()
             stabilizeAttempts += 1
         }
@@ -377,58 +381,59 @@ enum TextInserter {
         let changeCount: Int
         private let storage: Storage
         private static let maxSnapshotBytes = 8 * 1024 * 1024
-        // A flavor that misses this window is abandoned (see capture): eager images beat it, a lazy/promised
-        // payload that would otherwise hang the paste blows through it.
-        static let renderDeadlineSeconds = 0.25
+        // Bounds the render ACROSS flavors, checked between them (see capture): eager images render fully, a
+        // clipboard whose lazy/promised payloads blow through it falls back to plain text.
+        static let renderBudgetSeconds = 0.25
 
         private enum Storage {
             case full([[NSPasteboard.PasteboardType: Data]])
             case plainText(String?)
         }
 
-        // Snapshot every flavor so restore returns the user's exact clipboard. `data(forType:)` fully renders a
-        // promised/lazy flavor (a cross-process TIFF can be 50–100 MB), so it runs off-main (no HUD stall) AND under
-        // a deadline (no paste hang on a slow source app — beginScratchPaste/captureSelection await this). Missing
-        // the deadline, exceeding the 8 MB cap, or nothing renderable all fall back to the plain-text snapshot,
-        // which still clears the scratch on restore so no dictated/redacted text leaks. Read off-main as the
-        // detached restore already writes off-main; changeCount guards a concurrent copy.
+        static func renderDeadline() -> ContinuousClock.Instant {
+            ContinuousClock.now.advanced(by: .seconds(renderBudgetSeconds))
+        }
+
         @MainActor
-        static func capture(from pb: NSPasteboard = .general) async -> PasteboardSnapshot {
+        static func capture(from pb: NSPasteboard = .general) -> PasteboardSnapshot {
+            capture(from: pb, renderDeadline: renderDeadline())
+        }
+
+        // Snapshot every flavor so restore returns the user's exact clipboard. NSPasteboard/NSPasteboardItem are
+        // main-thread-only (an off-main render PAC-trapped in CFPasteboard's XPC bridge), so this is deliberately
+        // synchronous main-actor code: no suspension point means nothing can rewrite the pasteboard between two
+        // flavors, and no render outlives the call. `data(forType:)` fully renders a promised/lazy flavor (a
+        // cross-process TIFF can be 50–100 MB) and macOS exposes no bounded pasteboard read, so the budget is
+        // checked BEFORE each one — the aggregate is bounded, but one wedged flavor blocks main for its render.
+        // A spent budget, the 8 MB cap, or nothing renderable fall back to the plain-text snapshot, which still
+        // clears the scratch on restore so no dictated/redacted text leaks. changeCount guards a concurrent copy.
+        @MainActor
+        static func capture(from pb: NSPasteboard, renderDeadline: ContinuousClock.Instant) -> PasteboardSnapshot {
             let changeCount = pb.changeCount
             let plainText = pb.string(forType: .string)
-            let box = ItemBox(pb.pasteboardItems ?? [])
-            let cap = maxSnapshotBytes
-            // `try?` collapses the deadline throw and `?? nil` the over-cap inner nil, both to the plain-text
-            // fallback; a render that ignores cancellation is abandoned to finish off-main and be discarded.
-            let rendered = (try? await runWithDeadline(seconds: renderDeadlineSeconds) { () -> [[String: Data]]? in
-                var total = 0
-                var items: [[String: Data]] = []
-                for item in box.items {
-                    var byType: [String: Data] = [:]
-                    for type in item.types {
-                        guard let data = item.data(forType: type) else { continue }
-                        total += data.count
-                        if total > cap { return nil }
-                        byType[type.rawValue] = data
+            var total = 0
+            var items: [[NSPasteboard.PasteboardType: Data]] = []
+            for item in pb.pasteboardItems ?? [] {
+                var byType: [NSPasteboard.PasteboardType: Data] = [:]
+                for type in item.types {
+                    guard ContinuousClock.now < renderDeadline else {
+                        return PasteboardSnapshot(changeCount: changeCount, storage: .plainText(plainText))
                     }
-                    items.append(byType)
+                    guard let data = item.data(forType: type) else { continue }
+                    total += data.count
+                    guard total <= maxSnapshotBytes else {
+                        return PasteboardSnapshot(changeCount: changeCount, storage: .plainText(plainText))
+                    }
+                    byType[type] = data
                 }
-                return items
-            }) ?? nil
-            guard let rendered else {
-                return PasteboardSnapshot(changeCount: changeCount, storage: .plainText(plainText))
+                items.append(byType)
             }
-            let full = rendered.map { byType in
-                Dictionary(uniqueKeysWithValues: byType.map { (NSPasteboard.PasteboardType($0.key), $0.value) })
-            }
-            return PasteboardSnapshot(changeCount: changeCount, storage: .full(full))
+            return PasteboardSnapshot(changeCount: changeCount, storage: .full(items))
         }
 
-        private struct ItemBox: @unchecked Sendable {
-            let items: [NSPasteboardItem]
-            init(_ items: [NSPasteboardItem]) { self.items = items }
-        }
-
+        // Main-actor for the same reason as capture: the write side touches NSPasteboard too. Nested types do
+        // NOT inherit the enclosing @MainActor, so this must be stated, not assumed from `enum TextInserter`.
+        @MainActor
         func restore(to pb: NSPasteboard = .general) {
             switch storage {
             case .full(let items):
@@ -442,6 +447,7 @@ enum TextInserter {
             }
         }
 
+        @MainActor
         private func restoreFull(_ items: [[NSPasteboard.PasteboardType: Data]], to pb: NSPasteboard) {
             pb.clearContents()
             guard !items.isEmpty else { return }
