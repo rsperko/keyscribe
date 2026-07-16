@@ -34,6 +34,7 @@ struct CreateReplacementSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("When \(Branding.appName) hears").font(.caption).foregroundStyle(.secondary)
                 TextField("The misheard words", text: $source)
+                    .multilineTextAlignment(.leading)
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .source).onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.source)
             }
@@ -108,6 +109,7 @@ struct AddToDictionarySheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Word or term").font(.caption).foregroundStyle(.secondary)
                 TextField("A name, product term, or jargon", text: $term)
+                    .multilineTextAlignment(.leading)
                     .textFieldStyle(.roundedBorder).focused($termFocused)
                     .onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.term)

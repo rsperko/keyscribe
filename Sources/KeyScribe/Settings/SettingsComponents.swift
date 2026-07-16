@@ -213,8 +213,10 @@ struct CommittedTextField: View {
         VStack(alignment: .leading, spacing: 4) {
             if let prompt {
                 TextField(title, text: $draft, prompt: Text(prompt))
+                    .multilineTextAlignment(.leading)
             } else {
                 TextField(title, text: $draft)
+                    .multilineTextAlignment(.leading)
             }
             if let validationIssue {
                 IssueText(validationIssue.message)
@@ -296,6 +298,7 @@ struct PromptEditor: View {
             // commitsOnChange instead.
             TextEditor(text: $draft)
                 .font(.body)
+                .multilineTextAlignment(.leading)
                 .ghostText(placeholder, visible: draft.isEmpty)
                 .frame(minHeight: 120, maxHeight: 220)
                 .padding(4)
@@ -357,6 +360,7 @@ private struct PromptEditorSheet: View {
             Text(title).font(.headline)
             TextEditor(text: $text)
                 .font(.body)
+                .multilineTextAlignment(.leading)
                 .ghostText(placeholder, visible: text.isEmpty)
                 .frame(minWidth: 480, minHeight: 360)
                 .padding(6)

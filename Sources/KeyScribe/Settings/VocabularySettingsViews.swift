@@ -468,6 +468,7 @@ private struct ReplacementEditor: View {
         return VStack(alignment: .leading, spacing: 12) {
             Text("Edit replacement").font(.headline)
             TextField(regex ? "Heard pattern" : "When heard", text: $heard)
+                .multilineTextAlignment(.leading)
                 .textFieldStyle(.roundedBorder)
                 .focused($heardFocused)
                 .accessibilityIdentifier(ids.heard)
@@ -554,15 +555,20 @@ struct VocabularyComposer: View {
     var body: some View {
         let draft = draft
         return VStack(alignment: .leading, spacing: 12) {
-            TextField(
-                regex ? "Heard pattern" : "Word or heard phrase",
-                text: $heard,
-                prompt: Text(regex ? "Regular expression" : "e.g. Kubernetes"))
-                .textFieldStyle(.roundedBorder)
-                .focused($focus, equals: .heard)
-                .onSubmit(commit)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerTerm)
+            LabeledContent {
+                TextField(
+                    "",
+                    text: $heard,
+                    prompt: Text(regex ? "Regular expression" : "e.g. Kubernetes"))
+                    .multilineTextAlignment(.leading)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focus, equals: .heard)
+                    .onSubmit(commit)
+                    .accessibilityLabel(regex ? "Heard pattern" : "Word or heard phrase")
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerTerm)
+            } label: {
+                Text(regex ? "Heard pattern" : "Word or heard phrase")
+            }
             let replacementTitle = regex ? "Use instead" : "Use instead (optional)"
             let replacementPlaceholder = regex ? "Replacement text" : ""
             LabeledContent {

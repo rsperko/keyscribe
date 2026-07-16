@@ -20,6 +20,7 @@ struct ReplacementValueField: View {
     var body: some View {
         TextField("", text: $text, prompt: Text(placeholder), axis: .vertical)
             .lineLimit(1...4)
+            .multilineTextAlignment(.leading)
             .textFieldStyle(.roundedBorder)
             .accessibilityLabel(title)
             .accessibilityIdentifier(fieldID)
@@ -69,6 +70,7 @@ struct ReplacementTextEditor: View {
         VStack(alignment: .leading, spacing: 6) {
             TextEditor(text: $text)
                 .font(.body)
+                .multilineTextAlignment(.leading)
                 .ghostText(placeholder, visible: text.isEmpty)
                 .frame(minHeight: minHeight)
                 .padding(6)

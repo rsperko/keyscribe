@@ -240,6 +240,7 @@ private struct CorrectionPanelView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TextField(regex ? "Regular expression" : "e.g. Kubernetes", text: $term)
+                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.roundedBorder)
                         .focused($focus, equals: .term)
                         .onSubmit(commitSave)

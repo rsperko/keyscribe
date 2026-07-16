@@ -18,6 +18,7 @@ struct ModelComboBox: NSViewRepresentable {
         combo.isEditable = true
         combo.numberOfVisibleItems = 12
         combo.focusRingType = .none
+        combo.alignment = .natural
         combo.placeholderString = prompt
         combo.stringValue = text
         context.coordinator.allItems = items

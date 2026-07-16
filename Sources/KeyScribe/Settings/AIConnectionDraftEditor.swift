@@ -218,7 +218,7 @@ struct AIConnectionDraftEditor: View {
                     Text("API key")
                     Spacer()
                     SecureField("Paste API key", text: apiKeyBinding)
-                        .multilineTextAlignment(.trailing)
+                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 260)
                         .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.apiKey)
@@ -248,7 +248,7 @@ struct AIConnectionDraftEditor: View {
                         Text("API key")
                         Spacer()
                         SecureField("", text: apiKeyBinding, prompt: Text("Paste API key"))
-                            .multilineTextAlignment(.trailing)
+                            .multilineTextAlignment(.leading)
                             .textFieldStyle(.plain)
                             .frame(maxWidth: 360)
                             .onSubmit(saveKey)
@@ -386,7 +386,7 @@ struct AIConnectionDraftEditor: View {
                         get: { value },
                         set: { update($0); commit(nil) }
                     ), prompt: prompt.map(Text.init))
-                        .multilineTextAlignment(.trailing)
+                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 260)
                 }

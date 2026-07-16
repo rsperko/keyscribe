@@ -408,6 +408,7 @@ struct HistoryPaneView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Search history", text: $model.query)
+                .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
                 .accessibilityIdentifier(AccessibilityID.History.search)
         }
