@@ -310,6 +310,7 @@ enum AccessibilityID {
 
         enum DictionarySheet {
             static let term = "history.dictionarySheet.term"
+            static let status = "history.dictionarySheet.status"
             static let save = "history.dictionarySheet.save"
         }
     }
@@ -399,7 +400,7 @@ enum AccessibilityID {
         History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
-        History.DictionarySheet.term, History.DictionarySheet.save,
+        History.DictionarySheet.term, History.DictionarySheet.status, History.DictionarySheet.save,
         Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination, Correction.status,
         Correction.add, Correction.addAndReplace, Correction.cancel,
     ]

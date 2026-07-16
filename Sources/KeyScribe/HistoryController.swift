@@ -75,6 +75,7 @@ final class HistoryPaneModel: ObservableObject {
 
     private let store: HistoryStore
     let addDictionaryWord: (String) -> Bool
+    let analyzeDictionaryWord: (String) -> VocabularyAnalysis
     let addReplacement: (String, String) -> Bool
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
@@ -93,11 +94,13 @@ final class HistoryPaneModel: ObservableObject {
     init(
         store: HistoryStore,
         addDictionaryWord: @escaping (String) -> Bool,
+        analyzeDictionaryWord: @escaping (String) -> VocabularyAnalysis,
         addReplacement: @escaping (String, String) -> Bool,
         openSettings: @escaping (SettingsDestination) -> Void
     ) {
         self.store = store
         self.addDictionaryWord = addDictionaryWord
+        self.analyzeDictionaryWord = analyzeDictionaryWord
         self.addReplacement = addReplacement
         self.openSettings = openSettings
     }
@@ -597,9 +600,18 @@ private struct HistoryDetailView: View {
             }
         }
         .sheet(isPresented: $showDictionarySheet) {
-            AddToDictionarySheet(initialTerm: dictionarySource) { term in
+            AddToDictionarySheet(initialTerm: dictionarySource, analyze: { proposal in
+                guard case let .word(word) = proposal else {
+                    return VocabularyAnalysis(action: .addWord)
+                }
+                return model.analyzeDictionaryWord(word)
+            }) { term, action in
                 if model.addDictionaryWord(term) {
-                    model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
+                    if case let .updateWord(currentWord) = action {
+                        model.flash("Updated \u{201C}\(currentWord)\u{201D} to \u{201C}\(term)\u{201D} in your dictionary — a recognition hint for future dictations.")
+                    } else {
+                        model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
+                    }
                 } else {
                     model.flash(HistoryPaneModel.saveFailedMessage)
                 }

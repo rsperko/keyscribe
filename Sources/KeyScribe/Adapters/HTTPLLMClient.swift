@@ -51,24 +51,7 @@ struct HTTPLLMClient: LLMClient {
         }
         switch connection.provider {
         case .openai, .openaiCompatible:
-            switch connection.wireAPI {
-            case .responses:
-                return try await completeResponses(system: system, user: user, connection: connection, key: key)
-            case .chatCompletions:
-                return try await completeOpenAI(
-                    system: system, user: user, connection: connection, key: key, allowResponsesUpgrade: true)
-            case .auto:
-                // Discovered protocol: skip straight to Responses if this host already told us to; otherwise
-                // try Chat Completions and upgrade on the endpoint's own "use /responses" signal.
-                if await wireOverrideCache.lookup(Self.hostKey(for: connection)) == .responses {
-                    var responsesConn = connection
-                    responsesConn.wireAPI = .responses
-                    return try await completeResponses(
-                        system: system, user: user, connection: responsesConn, key: key)
-                }
-                return try await completeOpenAI(
-                    system: system, user: user, connection: connection, key: key, allowResponsesUpgrade: true)
-            }
+            return try await completeOpenAICompatible(system: system, user: user, connection: connection, key: key)
         case .anthropic:
             let request = try buildRequest(
                 system: system, user: user, connection: connection, key: key,
@@ -106,66 +89,131 @@ struct HTTPLLMClient: LLMClient {
         }
     }
 
-    private func completeOpenAI(
-        system: String, user: String, connection: Connection, key: String?, allowResponsesUpgrade: Bool
+    // The configured wireAPI is a starting hint; the SERVER is authoritative about which wire a model
+    // speaks. Once an endpoint has redirected us, later rewrites start at the wire that actually worked —
+    // for explicitly configured connections too, which otherwise repeat the known-failing round trip on
+    // every dictation despite having already recorded the fallback.
+    private func completeOpenAICompatible(
+        system: String, user: String, connection: Connection, key: String?
     ) async throws -> String {
-        let cacheKey = adaptationCacheKey(for: connection)
-        var adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
+        do {
+            return try await routedComplete(system: system, user: user, connection: connection, key: key)
+        } catch let redirected as RedirectedWireFailure {
+            throw redirected.underlying
+        }
+    }
+
+    // A failure from a wire we were REDIRECTED to. It carries the real error but marks that the cross-wire
+    // correction has already run, so the stale-override fallback below must not repeat the very same
+    // request — with two wires, a redirect's target and that fallback's target are the same endpoint.
+    private struct RedirectedWireFailure: Error {
+        let underlying: Error
+    }
+
+    private func routedComplete(
+        system: String, user: String, connection: Connection, key: String?
+    ) async throws -> String {
+        let hostKey = Self.hostKey(for: connection)
+        let override = await wireOverrideCache.lookup(hostKey)
+        let configured = Self.startingWire(for: connection)
+        do {
+            return try await completeWire(
+                override ?? configured, system: system, user: user, connection: connection, key: key,
+                allowRedirect: true)
+        } catch let ProviderTransportError.http(status, body) where Self.wireMismatchStatuses.contains(status) {
+            // The remembered wire isn't there any more — e.g. the host behind an unchanged base URL was
+            // swapped for one that doesn't serve it, and a bare 404 body carries nothing the error itself
+            // could correct the override with. Forget it and probe the configured wire once, so a dead
+            // endpoint can't pin every later rewrite until restart.
+            //
+            // Only the endpoint-mismatch statuses qualify. Everything else the endpoint can return — 401,
+            // 429, an exhausted 5xx, a 400 about the prompt — says the wire was found and answered, so it
+            // is not evidence against the override; resending through the other wire would just multiply
+            // requests (and re-send the prompt) on a connection that is merely unauthorized or throttled.
+            // A parse or truncation failure is likewise not evidence: the wire was spoken correctly.
+            //
+            // Nor is every 404: a structured missing-MODEL error is the endpoint answering about the model
+            // id (which is itself part of this cache key), not about the wire. Only an unexplained 404/405
+            // implicates the endpoint.
+            guard OpenAIAPIError.parse(body: body)?.indicatesMissingModel != true,
+                  let override, override != configured else {
+                throw ProviderTransportError.http(status, body: body)
+            }
+            await wireOverrideCache.forget(hostKey)
+            return try await completeWire(
+                configured, system: system, user: user, connection: connection, key: key, allowRedirect: true)
+        }
+    }
+
+    // One remediation loop for both OpenAI wires: they differ only in which wire a redirect points at, and
+    // `buildRequest`/`parse` already key their envelope off the wire.
+    private func completeWire(
+        _ wire: Connection.WireAPI, system: String, user: String, connection: Connection, key: String?,
+        allowRedirect: Bool
+    ) async throws -> String {
+        var wired = connection
+        wired.wireAPI = wire
+        let cacheKey = adaptationCacheKey(for: wired)
+        let initial = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
+        var adaptations = initial
         var attempts = 0
         while true {
             let request = try buildRequest(
-                system: system, user: user, connection: connection, key: key, adaptations: adaptations)
+                system: system, user: user, connection: wired, key: key, adaptations: adaptations)
             do {
-                let data = try await transport.send(request)
-                return try parse(data, provider: connection.provider, wireAPI: .chatCompletions)
-            } catch let ProviderTransportError.http(status, body) where status == 400 || status == 404 || status == 405 || status == 422 {
+                let output = try parse(
+                    try await transport.send(request), provider: connection.provider, wireAPI: wire)
+                // Remember only a remediation the server actually accepted (as completeGemini does).
+                // Caching before the retry proves it lets one 400 with an unrelated cause pin a wrong
+                // remediation for the process lifetime — a max_tokens VALUE error, for instance, message-
+                // scans to a max_completion_tokens FIELD remap that no reverse remediation can undo.
+                if adaptations != initial { await adaptationCache.remember(adaptations, for: cacheKey) }
+                return output
+            } catch let ProviderTransportError.http(status, body) where Self.adaptableStatuses.contains(status) {
                 let apiError = OpenAIAPIError.parse(body: body)
-                if allowResponsesUpgrade, apiError?.indicatesRequiresResponsesAPI == true {
-                    await wireOverrideCache.remember(.responses, for: Self.hostKey(for: connection))
-                    var responsesConn = connection
-                    responsesConn.wireAPI = .responses
-                    return try await completeResponses(
-                        system: system, user: user, connection: responsesConn, key: key)
+                let other = Self.otherWire(than: wire)
+                if allowRedirect, apiError?.indicatesRequires(other) == true {
+                    // The endpoint has just disowned this wire, so a remembered override naming it is
+                    // proven stale whether or not the redirect target then works — drop it now. (A redirect
+                    // only ever fires from the wire this call started at, which is the override when one
+                    // exists, so this clears exactly that entry.) Leaving it would make every later rewrite
+                    // repeat the same doomed pair of requests.
+                    await wireOverrideCache.forget(Self.hostKey(for: connection))
+                    let output: String
+                    do {
+                        output = try await completeWire(
+                            other, system: system, user: user, connection: connection, key: key,
+                            allowRedirect: false)
+                    } catch {
+                        throw RedirectedWireFailure(underlying: error)
+                    }
+                    // The target earns its own entry only once it has actually produced a reply — the same
+                    // rule the adaptation cache above follows.
+                    await wireOverrideCache.remember(other, for: Self.hostKey(for: connection))
+                    return output
                 }
                 guard status == 400, attempts < Self.maxRemediations,
                       let apiError, let next = remediatedAdaptations(adaptations, for: apiError) else {
                     throw ProviderTransportError.http(status, body: body)
                 }
                 adaptations = next
-                await adaptationCache.remember(next, for: cacheKey)
                 attempts += 1
             }
         }
     }
 
-    private func completeResponses(system: String, user: String, connection: Connection, key: String?) async throws -> String {
-        let cacheKey = adaptationCacheKey(for: connection)
-        var adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
-        var attempts = 0
-        while true {
-            let request = try buildRequest(
-                system: system, user: user, connection: connection, key: key, adaptations: adaptations)
-            do {
-                let data = try await transport.send(request)
-                return try parse(data, provider: connection.provider, wireAPI: .responses)
-            } catch let ProviderTransportError.http(status, body) where status == 400 || status == 404 || status == 405 || status == 422 {
-                let apiError = OpenAIAPIError.parse(body: body)
-                if apiError?.indicatesRequiresChatCompletionsAPI == true {
-                    await wireOverrideCache.remember(.chatCompletions, for: Self.hostKey(for: connection))
-                    var chatConnection = connection
-                    chatConnection.wireAPI = .chatCompletions
-                    return try await completeOpenAI(
-                        system: system, user: user, connection: chatConnection, key: key, allowResponsesUpgrade: false)
-                }
-                guard status == 400, attempts < Self.maxRemediations,
-                      let apiError, let next = remediatedAdaptations(adaptations, for: apiError) else {
-                    throw ProviderTransportError.http(status, body: body)
-                }
-                adaptations = next
-                await adaptationCache.remember(next, for: cacheKey)
-                attempts += 1
-            }
-        }
+    private static let adaptableStatuses: Set<Int> = [400, 404, 405, 422]
+
+    // The endpoint isn't there / won't take a POST: the only answers that speak to the WIRE rather than to
+    // the request, the key, or the model behind it.
+    private static let wireMismatchStatuses: Set<Int> = [404, 405]
+
+    private static func startingWire(for connection: Connection) -> Connection.WireAPI {
+        connection.wireAPI == .responses ? .responses : .chatCompletions
+    }
+
+    private static func otherWire(than wire: Connection.WireAPI) -> Connection.WireAPI {
+        wire == .responses ? .chatCompletions : .responses
     }
 
     // Adaptations are what a specific SERVER accepts (temperature support, token-limit field name,
@@ -212,6 +260,11 @@ struct HTTPLLMClient: LLMClient {
                     "max_output_tokens": sizedTokens,
                 ]
                 payload["store"] = false
+                // Responses lists temperature as an optional request parameter, so a connection's
+                // configured value must be honored on both wires — the auto-upgrade can flip wires
+                // mid-lifetime, and sampling must not change with it. A server that rejects it self-heals
+                // through the same remediation loop the chat payload relies on.
+                if adaptations.includeTemperature { payload["temperature"] = temp }
                 if let reasoningEffort { payload["reasoning"] = ["effort": reasoningEffort] }
                 req.httpBody = try body(payload)
                 return req
@@ -348,8 +401,12 @@ struct HTTPLLMClient: LLMClient {
     }
 
     private func responsesText(from json: [String: Any]) throws -> String {
-        if (json["status"] as? String) == "incomplete" { throw ProviderTransportError.truncated }
-        guard (json["status"] as? String) == "completed",
+        let status = json["status"] as? String
+        if status == "incomplete" { throw ProviderTransportError.truncated }
+        // A minimal proxy can implement /responses without the `status` field at all. Accept that when the
+        // output itself is well-formed rather than dropping a good reply to local. A status that IS present
+        // must still say completed, so a genuinely unfinished reply is never inserted.
+        guard status == nil || status == "completed",
               let output = json["output"] as? [[String: Any]] else {
             throw ProviderTransportError.badResponse
         }

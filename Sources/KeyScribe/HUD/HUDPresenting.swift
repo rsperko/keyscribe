@@ -139,7 +139,9 @@ extension HUDState {
         case .accessibilityDenied:
             return "Accessibility is off — copied to the clipboard. Paste with ⌘V."
         case .secureField:
-            return "Password field — kept local and copied to the clipboard. Paste with ⌘V."
+            // Says only what the insert path can prove. A field that turns secure after the commit-time probe
+            // is caught here but may already have been rewritten, so this must not claim "kept local" (X-1).
+            return "Password field — copied to the clipboard. Paste with ⌘V."
         case .appChanged, .focusChanged, .unknownTarget:
             return "Focus changed while \(Branding.appName) was working"
         }

@@ -84,15 +84,6 @@ struct AudioSampleRingTests {
         }
     }
 
-    @Test func resetReturnsToEmpty() {
-        let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 4, maxChannels: 1)
-        _ = push(ring, base: 1, channels: 1, frames: 1, host: 1)
-        _ = push(ring, base: 9, channels: 1, frames: 9, host: 1)  // dropped (over capacity)
-        ring.reset()
-        #expect(!ring.read { _, _ in Issue.record("ring must be empty after reset") })
-        #expect(ring.droppedCount == 0)
-    }
-
     // Adaptive geometry: slot count grows for small-buffer devices to keep headroom above the writer poll
     // tick; per-slot/channel capacity never shrinks below the fixed baseline.
     private let poll = 0.005

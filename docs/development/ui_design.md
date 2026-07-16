@@ -415,7 +415,8 @@ Show the few choices a new user is most likely to need:
 
 - The dictation key, with a clearly exposed **Change key…** button. The key remains owned by Plain
   Dictation (Direct mode), so the button routes to that editor instead of creating a second setting.
-- **Audio and system behavior** groups start/stop sounds, keeping the Mac awake, and muting other audio.
+- **During dictation** groups start/stop sounds, keeping the Mac awake, and muting other audio. Its
+  footer makes clear that all three apply only while the user dictates.
 - Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
 - (History enable and retention live in the **History** pane, not here.)
@@ -465,8 +466,10 @@ Both screens prioritize fast correction over configuration theory.
   in-field example prompt) and **Use instead (optional)** — each field carries exactly one label, in
   global settings, mode settings, and the standalone panel. Leaving **Use instead** empty adds a
   dictionary word; filling it in creates a replacement. Adding a heard phrase that already has a
-  replacement updates that rule in place — never a silent drop or a duplicate row. The first field
-  keeps focus after adding so repeated entries are fast. The composer's first level is just the two
+  replacement updates that rule in place — never a silent drop or a duplicate row. Entering a
+  dictionary word that differs only in casing updates that existing word in place; the composer names
+  the current spelling and uses **Update** rather than **Add**. The first field keeps focus after
+  adding so repeated entries are fast. The composer's first level is just the two
   fields, the leave-empty hint, and the Add button; **Match heard phrase as a regular expression**
   lives behind the composer's **Pattern matching** disclosure (regex stays fully available, one disclosure
   away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, the

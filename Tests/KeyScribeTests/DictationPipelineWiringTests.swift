@@ -146,11 +146,16 @@ struct DictationPipelineWiringTests {
     // Returns the captured target's bundle for the first two snapshot() reads (handleStart capture +
     // finishInsertion entry), then a different bundle for the pre-submit re-snapshot — simulating the
     // user switching apps during the paste-settle window.
+    // The snapshot seam is read three times before the submit — press, the commit-time secure probe, and
+    // finishInsertion — all of which see the captured target. Only the fourth (pre-submit) read moves.
+    private static let readsBeforeSubmit = 3
+
     @MainActor private final class FocusSequence {
         private var calls = 0
         func next() -> TargetSnapshot {
             defer { calls += 1 }
-            return TargetSnapshot(bundleId: calls < 2 ? "test.bundle" : "other.bundle")
+            return TargetSnapshot(
+                bundleId: calls < readsBeforeSubmit ? "test.bundle" : "other.bundle")
         }
     }
 
@@ -160,7 +165,8 @@ struct DictationPipelineWiringTests {
         private var calls = 0
         func next() -> TargetSnapshot {
             defer { calls += 1 }
-            return TargetSnapshot(bundleId: "test.bundle", focusedWindowId: calls < 2 ? "w1" : "w2")
+            return TargetSnapshot(
+                bundleId: "test.bundle", focusedWindowId: calls < readsBeforeSubmit ? "w1" : "w2")
         }
     }
 

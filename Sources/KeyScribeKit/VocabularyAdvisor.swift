@@ -38,6 +38,7 @@ public struct VocabularyAnalysis: Equatable, Sendable {
     public enum Action: Equatable, Sendable {
         case addWord
         case addReplacement
+        case updateWord(currentWord: String)
         case updateReplacement(currentReplace: String)
         case noChange(Reason)
     }
@@ -110,17 +111,22 @@ public enum VocabularyAdvisor {
     private static func analyzeWord(_ word: String, in scope: VocabularyScope) -> VocabularyAnalysis {
         let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return VocabularyAnalysis(action: .addWord) }
-        func listed(in words: [String]) -> Bool {
-            words.contains { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        func action(for words: [String]) -> VocabularyAnalysis.Action? {
+            guard let existing = words.first(where: {
+                $0.caseInsensitiveCompare(trimmed) == .orderedSame
+            }) else { return nil }
+            return existing == trimmed
+                ? .noChange(.wordAlreadyListed)
+                : .updateWord(currentWord: existing)
         }
         if let local = scope.local {
-            if listed(in: local.words) { return VocabularyAnalysis(action: .noChange(.wordAlreadyListed)) }
-            if local.includeGlobalWords, listed(in: scope.globalWords) {
+            if let action = action(for: local.words) { return VocabularyAnalysis(action: action) }
+            if local.includeGlobalWords, scope.globalWords.contains(trimmed) {
                 return VocabularyAnalysis(action: .noChange(.wordCoveredByGlobal))
             }
             return VocabularyAnalysis(action: .addWord)
         }
-        if listed(in: scope.globalWords) { return VocabularyAnalysis(action: .noChange(.wordAlreadyListed)) }
+        if let action = action(for: scope.globalWords) { return VocabularyAnalysis(action: action) }
         return VocabularyAnalysis(action: .addWord)
     }
 

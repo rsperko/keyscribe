@@ -62,6 +62,15 @@ final class SidebarNavigationTests: XCTestCase {
                        "the Shortcuts section should not repeat menu availability")
     }
 
+    func testGeneralMakesDuringDictationScopeVisible() {
+        let (_, window) = launchIntoSettings()
+
+        XCTAssertTrue(window.staticTexts["During dictation"].waitForExistence(timeout: 8),
+                      "the audio and system options should say that they apply only during dictation")
+        XCTAssertTrue(window.staticTexts["These settings apply only while you dictate."].exists,
+                      "the audio and system options should explain their scope")
+    }
+
     func testAddAIServiceChooserHasVisibleCancelAction() {
         let (_, window) = launchIntoSettings()
 

@@ -68,13 +68,17 @@ struct GeneralSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Audio and system behavior") {
+            Section {
                 Toggle("Play start and stop sounds", isOn: $model.sounds)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
                 Toggle("Keep your Mac awake", isOn: $model.keepDisplayAwake)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.keepDisplayAwake)
                 Toggle("Mute all other audio", isOn: $model.muteSystemAudio)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.muteSystemAudio)
+            } header: {
+                Text("During dictation")
+            } footer: {
+                Text("These settings apply only while you dictate.")
             }
 
             Section("Startup") {

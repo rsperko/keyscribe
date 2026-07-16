@@ -88,8 +88,10 @@ struct VocabularyDraftAnalysis {
     var canApplyCorrection: Bool { proposal != nil }
 
     var isUpdate: Bool {
-        if case .updateReplacement = analysis?.action { return true }
-        return false
+        switch analysis?.action {
+        case .updateWord, .updateReplacement: true
+        default: false
+        }
     }
 
     var buttonTitle: String {
@@ -127,6 +129,8 @@ struct VocabularyDraftAnalysis {
         case .updateReplacement(let current):
             let current = current.isEmpty ? "nothing" : "“\(current)”"
             return .update("Updates the existing replacement — “\(term)” currently becomes \(current).")
+        case .updateWord(let current):
+            return .update("Updates the existing word — “\(term)” is currently spelled “\(current)”.")
         case .addWord, .addReplacement:
             guard let message = analysis.advisories.first(where: { $0.kind == .overridesGlobal })?.message else {
                 return nil

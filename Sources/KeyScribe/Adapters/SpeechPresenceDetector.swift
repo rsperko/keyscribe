@@ -21,6 +21,14 @@ extension SpeechPresenceDetecting {
     func prewarm() async {}
 }
 
+struct SpeechPresenceManager: Sendable {
+    let process: @Sendable ([Float]?, URL, Int) async throws -> [Float]
+
+    init(process: @escaping @Sendable ([Float]?, URL, Int) async throws -> [Float]) {
+        self.process = process
+    }
+}
+
 enum VADModel {
     static let dirName = Repo.vad.folderName
 
@@ -67,31 +75,73 @@ enum VADModel {
 }
 
 actor SpeechPresenceDetector: SpeechPresenceDetecting {
-    private let modelsDir: URL
     private let deadlineSeconds: Double
-    private var manager: VadManager?
-    private var loadFailed = false
+    private let loadRetryBaseSeconds: Double
+    private let now: @Sendable () -> Date
+    private let modelPresent: @Sendable () -> Bool
+    private let loadManager: @Sendable () async throws -> SpeechPresenceManager
+    private let inferenceGate = SingleFlightDeadline()
+    private var manager: SpeechPresenceManager?
+    private var managerTask: Task<SpeechPresenceManager, Error>?
+    private var loadFailureCount = 0
+    private var retryAfter: Date?
 
-    init(modelsDir: URL, deadlineSeconds: Double = 0.25) {
-        self.modelsDir = modelsDir
+    init(
+        modelsDir: URL,
+        deadlineSeconds: Double = 0.25,
+        loadRetryBaseSeconds: Double = 1,
+        now: @escaping @Sendable () -> Date = { Date() },
+        modelPresent: (@Sendable () -> Bool)? = nil,
+        loadManager: (@Sendable () async throws -> SpeechPresenceManager)? = nil
+    ) {
         self.deadlineSeconds = deadlineSeconds
+        self.loadRetryBaseSeconds = loadRetryBaseSeconds
+        self.now = now
+        self.modelPresent = modelPresent ?? { VADModel.isPresent(in: modelsDir) }
+        self.loadManager = loadManager ?? {
+            let manager = VadManager(
+                config: .default, vadModel: try await VADModel.load(in: modelsDir))
+            return SpeechPresenceManager { samples, url, sampleRate in
+                let results: [VadResult]
+                if sampleRate == VadManager.sampleRate, let samples {
+                    results = try await manager.process(samples)
+                } else {
+                    results = try await manager.process(url)
+                }
+                return results.map(\.probability)
+            }
+        }
     }
 
     func prewarm() async {
         _ = await ensureManager()
     }
 
-    private func ensureManager() async -> VadManager? {
+    func inferenceInFlight() async -> Bool {
+        await inferenceGate.isBusy
+    }
+
+    private func ensureManager() async -> SpeechPresenceManager? {
         if let manager { return manager }
-        if loadFailed { return nil }
-        guard VADModel.isPresent(in: modelsDir) else { return nil }
+        if let managerTask {
+            return try? await managerTask.value
+        }
+        if let retryAfter, now() < retryAfter { return nil }
+        guard modelPresent() else { return nil }
+        let task = Task { try await loadManager() }
+        managerTask = task
         do {
-            let model = try await VADModel.load(in: modelsDir)
-            let manager = VadManager(config: .default, vadModel: model)
+            let manager = try await task.value
+            managerTask = nil
+            loadFailureCount = 0
+            retryAfter = nil
             self.manager = manager
             return manager
         } catch {
-            loadFailed = true
+            managerTask = nil
+            loadFailureCount = min(loadFailureCount + 1, 6)
+            let delay = min(loadRetryBaseSeconds * pow(2, Double(loadFailureCount - 1)), 30)
+            retryAfter = now().addingTimeInterval(delay)
             Log.audio.error("vad load failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
@@ -109,15 +159,9 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
         let probabilities: [Float]?
         do {
-            probabilities = try await runWithDeadline(seconds: deadlineSeconds) { [self] () async throws -> [Float]? in
+            probabilities = try await inferenceGate.run(seconds: deadlineSeconds) { [self] () async throws -> [Float]? in
                 guard let manager = await ensureManager() else { return nil }
-                let results: [VadResult]
-                if sampleRate == VadManager.sampleRate, let samples {
-                    results = try await manager.process(samples)
-                } else {
-                    results = try await manager.process(url)
-                }
-                return results.map(\.probability)
+                return try await manager.process(samples, url, sampleRate)
             }
         } catch {
             probabilities = nil

@@ -52,19 +52,56 @@ public enum FragmentStore {
         return body.isEmpty ? header + "\n" : header + "\n" + body + "\n"
     }
 
-    /// The display name for `dir/<id>.md`, or `nil` when the file is missing or has no `name:`.
+    /// Largest fragment file that will be read into a prompt.
+    public static let maxFragmentBytes = 128 * 1024
+
+    private static let maxIDBytes = 200
+
+    private static let forbiddenIDCharacters = CharacterSet(charactersIn: "/\\:%")
+        .union(.controlCharacters)
+        .union(.illegalCharacters)
+
+    /// A fragment id is a single filename stem: nonempty, canonically composed, no path separators,
+    /// no `.`/`..` or leading dot, no control characters, no surrounding whitespace.
+    public static func isValidID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.utf8.count <= maxIDBytes else { return false }
+        guard Array(id.unicodeScalars)
+            == Array(id.precomposedStringWithCanonicalMapping.unicodeScalars) else { return false }
+        guard id == id.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        guard !id.hasPrefix("."), id != "..", id != "." else { return false }
+        return id.rangeOfCharacter(from: forbiddenIDCharacters) == nil
+    }
+
+    /// The file URL for a fragment id, or `nil` when the id is not a valid stem or the file (after
+    /// symlink resolution) does not sit directly in `dir`.
+    public static func url(forID id: String, in dir: URL) -> URL? {
+        guard isValidID(id) else { return nil }
+        let base = dir.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = base.appendingPathComponent("\(id).md").standardizedFileURL
+        let parent = candidate.resolvingSymlinksInPath().deletingLastPathComponent()
+        guard parent.standardizedFileURL.path == base.path else { return nil }
+        return candidate
+    }
+
+    private static func contents(id: String, in dir: URL) -> String? {
+        guard let url = url(forID: id, in: dir),
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= maxFragmentBytes else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// The display name for `dir/<id>.md`, or `nil` when the id is invalid, the file is missing, or
+    /// it has no `name:`.
     public static func name(id: String, in dir: URL) -> String? {
-        let url = dir.appendingPathComponent("\(id).md")
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let content = contents(id: id, in: dir) else { return nil }
         return name(ofFile: content)
     }
 
-    /// Bodies for the given fragment ids, read from `dir/<id>.md`, in order. Missing/unreadable
-    /// fragments are skipped.
+    /// Bodies for the given fragment ids, read from `dir/<id>.md`, in order. Ids that are not valid
+    /// stems, resolve outside `dir`, are missing/unreadable, or exceed `maxFragmentBytes` are skipped.
     public static func load(ids: [String], from dir: URL) -> [String] {
         ids.compactMap { id in
-            let url = dir.appendingPathComponent("\(id).md")
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            guard let content = contents(id: id, in: dir) else { return nil }
             let text = body(ofFile: content)
             return text.isEmpty ? nil : text
         }
@@ -83,6 +120,7 @@ public enum FragmentStore {
             at: dir, includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "md" }
             .map { $0.deletingPathExtension().lastPathComponent }
+            .filter(isValidID)
             .sorted()
     }
 
@@ -96,10 +134,10 @@ public enum FragmentStore {
     @discardableResult
     public static func createIfNeeded(name: String, in dir: URL) throws -> (id: String, created: Bool) {
         let id = slug(for: name)
-        guard !id.isEmpty else { throw FragmentError.emptyName }
-        let url = dir.appendingPathComponent("\(id).md")
-        guard !FileManager.default.fileExists(atPath: url.path) else { return (id, false) }
+        guard isValidID(id) else { throw FragmentError.emptyName }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard let url = url(forID: id, in: dir) else { throw FragmentError.emptyName }
+        guard !FileManager.default.fileExists(atPath: url.path) else { return (id, false) }
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let starter = """
             ---

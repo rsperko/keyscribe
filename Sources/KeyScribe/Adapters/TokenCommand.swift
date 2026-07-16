@@ -1,11 +1,13 @@
 import Darwin
 import Foundation
+import KeyScribeKit
 
 enum TokenCommandError: Error, CustomStringConvertible, LocalizedError {
     case emptyCommand
     case emptyOutput
     case failed(Int32, message: String?)
     case timedOut
+    case outputTooLarge
 
     var description: String {
         switch self {
@@ -15,10 +17,27 @@ enum TokenCommandError: Error, CustomStringConvertible, LocalizedError {
             if let message, !message.isEmpty { "Token command failed (exit \(status)): \(message)" }
             else { "Token command failed with exit status \(status)." }
         case .timedOut: "Token command timed out."
+        case .outputTooLarge: "Token command printed too much output to be a token."
         }
     }
 
     var errorDescription: String? { description }
+}
+
+// `description` keeps the stderr excerpt for ephemeral UI (a connection Test), where seeing what the command
+// printed is the whole point of the button. The persisted/publicly-logged reason cannot: the command is
+// user-supplied and a broker that echoes the token before failing would write credential material into
+// history JSONL, against the "credential material is never persisted" invariant (KS-07 / LC-4).
+extension TokenCommandError: RewriteFailureReporting {
+    var rewriteFailureReason: String {
+        switch self {
+        case .emptyCommand: return "The token command is empty."
+        case .emptyOutput: return "The token command returned no token."
+        case .failed(let status, _): return "The token command failed (exit \(status))."
+        case .timedOut: return "The token command timed out."
+        case .outputTooLarge: return "The token command printed too much output to be a token."
+        }
+    }
 }
 
 struct ParsedToken: Equatable, Sendable {
@@ -136,6 +155,34 @@ enum TokenCommandRunner {
     // an unread buffer.
     private static let queue = DispatchQueue(label: "com.keyscribe.token-command", attributes: .concurrent)
 
+    static let stderrExcerptLimit = 300
+    // Only a bounded diagnostic excerpt of stderr is ever used, so retain barely more than one.
+    static let stderrCaptureLimit = 8 * 1024
+    // stdout is the token. Any real credential is orders of magnitude under this, so exceeding it means the
+    // command is not producing a token — fail rather than truncate, which would yield a corrupt credential.
+    static let stdoutCaptureLimit = 1024 * 1024
+
+    // Drain to EOF while retaining at most `limit` bytes. Draining MUST continue past the limit: the child
+    // blocks once the ~64 KB pipe buffer fills, so bounding by "stop reading" would deadlock it instead —
+    // the very hazard the concurrent readers exist to avoid. Bounding memory and draining are separate jobs.
+    static func drain(_ handle: FileHandle, limit: Int) -> (data: Data, truncated: Bool) {
+        var out = Data()
+        var truncated = false
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { return (out, truncated) }
+            let room = limit - out.count
+            if room <= 0 {
+                truncated = true
+            } else if chunk.count > room {
+                out.append(chunk.prefix(room))
+                truncated = true
+            } else {
+                out.append(chunk)
+            }
+        }
+    }
+
     static func run(_ command: String, timeout: TimeInterval = 10) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
@@ -172,18 +219,19 @@ enum TokenCommandRunner {
 
         let stderrData = DataBox()
         let stderrReader = DispatchWorkItem {
-            stderrData.set(stderrPipe.fileHandleForReading.readDataToEndOfFile())
+            stderrData.set(drain(stderrPipe.fileHandleForReading, limit: stderrCaptureLimit).data)
         }
         queue.async(execute: stderrReader)
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = drain(stdoutPipe.fileHandleForReading, limit: stdoutCaptureLimit)
         process.waitUntilExit()
         killer.cancel()
         stderrReader.wait()
 
+        if stdout.truncated { throw TokenCommandError.outputTooLarge }
         return try outcome(
             terminationStatus: process.terminationStatus, timedOut: timedOut.value,
-            stdout: stdoutData, stderr: stderrData.value)
+            stdout: stdout.data, stderr: stderrData.value)
     }
 
     // A command that finished right as the deadline killer fired still produced a valid token, so exit 0
@@ -191,10 +239,13 @@ enum TokenCommandRunner {
     static func outcome(terminationStatus: Int32, timedOut: Bool, stdout: Data, stderr: Data) throws -> String {
         guard terminationStatus == 0 else {
             if timedOut { throw TokenCommandError.timedOut }
-            let message = String(data: stderr, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Bounded at capture: an unbounded excerpt rides the error into every consumer, and a chatty or
+            // runaway command should not be able to size that (KS-07).
+            let excerpt = String(data: stderr, encoding: .utf8).map {
+                String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(stderrExcerptLimit))
+            }
             throw TokenCommandError.failed(
-                terminationStatus, message: (message?.isEmpty == false) ? message : nil)
+                terminationStatus, message: (excerpt?.isEmpty == false) ? excerpt : nil)
         }
         guard let output = String(data: stdout, encoding: .utf8) else {
             throw TokenCommandError.emptyOutput

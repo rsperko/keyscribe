@@ -182,6 +182,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             connection = try c.decode(String.self, forKey: .connection)
             prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
             fragments = try c.decodeIfPresent([String].self, forKey: .fragments) ?? []
+            if let bad = fragments.first(where: { !FragmentStore.isValidID($0) }) {
+                throw ConfigError.invalid("ai_rewrite.fragments has an invalid instruction id '\(bad)'")
+            }
             context = try c.decodeIfPresent(ContextOptIn.self, forKey: .context) ?? .init()
         }
     }

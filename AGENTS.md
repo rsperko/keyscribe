@@ -111,8 +111,15 @@ This file is the entry point. Read the design docs before writing code — they 
   (`AVAudioConverter`), the `AVAudioFile` write, and feeding the `TailDrainGate` — runs on a dedicated writer
   thread (`CaptureWriter`) that polls the ring off-RT (5 ms tick, no wakeup is EVER signalled from the RT
   thread). The HUD meter is **pulled** at ~30 Hz (`DictationController` polls `AudioCapture.currentLevel`), not
-  pushed per buffer — there is no per-buffer main-actor hop. The ring is owned by `AudioCapture` and reset (or,
-  when the bound device's IO period changed, REALLOCATED) per capture in the quiescent arm window — `armSync`
+  pushed per buffer — there is no per-buffer main-actor hop. The ring is **bound to the unit that writes it**
+  (`HALInputUnit.ringSlot`, captured immutably by that unit's RT handler) and a FRESH one is ALLOCATED per
+  capture in the quiescent arm window — never reset in place and never reachable through a mutable
+  `AudioCapture` property. Both halves are load-bearing and neither suffices alone: the RT callback passes its
+  gate and can then resume arbitrarily late, so reading a shared mutable `ring` let a stale generation's buffer
+  land in the successor's recording (KS-05); and since a matching geometry used to be reset in place, the
+  abandoned generation's ring WAS the successor's object, so per-unit binding without per-arm allocation would
+  have changed nothing. Allocating per arm costs one bounded control-queue malloc (~2 MiB baseline) and makes a
+  stray write land in a ring nothing will ever read. `armSync`
   sizes `slotCount` to target ~30 ms of headroom for the device's actual period (`AudioSampleRing.geometry`,
   clamped to ≤64 slots but always above one writer poll tick), so a small pro-interface buffer can't starve the
   ring below a poll tick. **The arm order is load-bearing for this: `armSync` CONFIGURES the unit first
@@ -121,11 +128,14 @@ This file is the entry point. Read the design docs before writing code — they 
   for that bound device, starts the writer (BEFORE publishing the session/`lastWriter`, so no teardown path can
   observe a published-but-not-yet-started writer and skip joining its thread), sets `capturing=true`, and calls
   `startConfiguredUnit` LAST — so the first delivered buffer already lands in a correctly-sized ring with no head
-  clip, and a retry that rebinds a different device cannot leave the ring mis-sized.** The swapped-in ring is published to the RT thread by the
-  same `capturing.store(true, .releasing)` the callback's acquire load pairs with, and is NEVER reassigned while
-  `capturing` is true (the mid-recording restart keeps its ring — the one remaining case where the ring can
-  outlast a device change, bounded by the drain backstop). The previous capture's writer is JOINED
-  (`CaptureWriter.finish`, multi-waiter via a `DispatchGroup`) before the next arm resets/replaces the ring, so
+  clip, and a retry that rebinds a different device cannot leave the ring mis-sized.** The ring is published into
+  the unit's slot inside the SAME generation-checked critical section that publishes the session, and the RT
+  thread sees it via the `capturing.store(true, .releasing)` its acquire load pairs with; the unit is not started
+  yet, so its handler cannot be reading the slot. A slot is written in exactly two places — that arm, and the
+  mid-recording restart, which SEEDS the replacement unit's slot with the SAME `session.ring` (before
+  `fresh.start()`), because a fresh ring there would strand the frames the outgoing unit queued. Never write a
+  slot a started unit can read. The previous capture's writer is JOINED
+  (`CaptureWriter.finish`, multi-waiter via a `DispatchGroup`) before the next arm, so
   a cancel's async teardown can never race a still-draining consumer. On
   commit, `finishDraining` awaits the writer join before returning the URL, and the writer drops its `AVAudioFile`
   reference on exit so the session's is the last one — the WAV is finalized/closed before transcription reads it.

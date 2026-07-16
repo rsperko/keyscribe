@@ -29,19 +29,34 @@ struct VocabularyAdvisorTests {
         #expect(analysis.advisories.isEmpty)
     }
 
-    @Test func globalWordDuplicateIsCaseInsensitive() {
-        let analysis = VocabularyAdvisor.analyze(.word("kubernetes"), in: global(words: ["Kubernetes"]))
+    @Test func globalWordDuplicateWithMatchingCasingIsNoChange() {
+        let analysis = VocabularyAdvisor.analyze(.word("Kubernetes"), in: global(words: ["Kubernetes"]))
         #expect(analysis.action == .noChange(.wordAlreadyListed))
     }
 
-    @Test func modeLocalWordDuplicateIsCaseInsensitive() {
-        let analysis = VocabularyAdvisor.analyze(.word("POSTGRES"), in: mode(words: ["Postgres"]))
+    @Test func globalWordCanRecaseAnExistingWord() {
+        let analysis = VocabularyAdvisor.analyze(.word("Kubernetes"), in: global(words: ["kubernetes"]))
+        #expect(analysis.action == .updateWord(currentWord: "kubernetes"))
+    }
+
+    @Test func modeLocalWordDuplicateWithMatchingCasingIsNoChange() {
+        let analysis = VocabularyAdvisor.analyze(.word("Postgres"), in: mode(words: ["Postgres"]))
         #expect(analysis.action == .noChange(.wordAlreadyListed))
     }
 
-    @Test func modeWordCoveredByIncludedGlobalIsCaseInsensitive() {
-        let analysis = VocabularyAdvisor.analyze(.word("postgres"), in: mode(globalWords: ["Postgres"]))
+    @Test func modeLocalWordCanRecaseAnExistingWord() {
+        let analysis = VocabularyAdvisor.analyze(.word("Postgres"), in: mode(words: ["postgres"]))
+        #expect(analysis.action == .updateWord(currentWord: "postgres"))
+    }
+
+    @Test func modeWordCoveredByIncludedGlobalWithMatchingCasing() {
+        let analysis = VocabularyAdvisor.analyze(.word("Postgres"), in: mode(globalWords: ["Postgres"]))
         #expect(analysis.action == .noChange(.wordCoveredByGlobal))
+    }
+
+    @Test func modeWordCanOverrideIncludedGlobalCasing() {
+        let analysis = VocabularyAdvisor.analyze(.word("Postgres"), in: mode(globalWords: ["postgres"]))
+        #expect(analysis.action == .addWord)
     }
 
     @Test func modeWordIsAnAddWhenGlobalWordsAreExcluded() {

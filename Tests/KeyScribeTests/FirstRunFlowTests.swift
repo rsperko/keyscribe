@@ -130,6 +130,46 @@ struct FirstRunFlowTests {
         #expect(model.downloading == false)
     }
 
+    @Test func failedDownloadSurfacesPartialWeightCleanupFailure() async {
+        let supportDir = tempSupportDir()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        struct Boom: Error {}
+        let model = FirstRunModel(
+            initialEngineId: "whisper",
+            download: { _, _ in throw Boom() },
+            selectEngine: { _ in },
+            cleanupFailedDownload: { _ in throw Boom() },
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            onComplete: {})
+
+        model.beginDownload()
+        await model.downloadTask?.value
+
+        #expect(model.downloadError == "Download failed, and partial model files couldn’t be removed. Try again.")
+        #expect(model.downloading == false)
+    }
+
+    @Test func installMarkerFailureKeepsCompletedDownloadOnDisk() async {
+        let supportDir = tempSupportDir()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        final class Box { var cleaned = false }
+        let box = Box()
+        let model = FirstRunModel(
+            initialEngineId: "whisper",
+            download: { _, _ in throw FirstRunDownloadError.installStateNotSaved },
+            selectEngine: { _ in },
+            cleanupFailedDownload: { _ in box.cleaned = true },
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            onComplete: {})
+
+        model.beginDownload()
+        await model.downloadTask?.value
+
+        #expect(box.cleaned == false)
+        #expect(model.downloadError == "The model downloaded, but its install state couldn’t be saved. Check available disk space and try again.")
+        #expect(model.downloading == false)
+    }
+
     // MARK: 2b — step-dot mapping
 
     @Test func stepIndexMapsEveryStepAndPlaygroundSharesTheLastDot() {

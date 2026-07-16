@@ -72,13 +72,6 @@ public final class AudioSampleRing: @unchecked Sendable {
             maxChannels: geometry.maxChannels)
     }
 
-    // True when this ring already has `geometry`'s shape, so the arm path can `reset()` in place instead of
-    // reallocating (the common case, where the bound device did not change period between captures).
-    public func matches(_ geometry: RingGeometry) -> Bool {
-        slotCount == geometry.slotCount && maxFramesPerSlot == geometry.maxFramesPerSlot
-            && maxChannels == geometry.maxChannels
-    }
-
     public init(slotCount: Int, maxFramesPerSlot: Int, maxChannels: Int) {
         precondition(slotCount >= 2 && maxFramesPerSlot >= 1 && maxChannels >= 1)
         self.slotCount = slotCount
@@ -154,11 +147,4 @@ public final class AudioSampleRing: @unchecked Sendable {
 
     public var droppedCount: Int { overruns.load(ordering: .relaxed) }
 
-    // Return the ring to its empty state. ONLY call when quiescent (no producer or consumer running) —
-    // between captures, after the previous writer has joined and before the next unit starts.
-    public func reset() {
-        head.store(0, ordering: .relaxed)
-        tail.store(0, ordering: .relaxed)
-        overruns.store(0, ordering: .relaxed)
-    }
 }

@@ -26,5 +26,7 @@ actor WireAPIOverrideCache {
 
     func remember(_ wireAPI: Connection.WireAPI, for key: String) { overrides[key] = wireAPI }
 
+    func forget(_ key: String) { overrides[key] = nil }
+
     func reset() { overrides.removeAll() }
 }

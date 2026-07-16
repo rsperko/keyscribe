@@ -95,6 +95,14 @@ public struct OpenAIAPIError: Equatable, Sendable {
         }
     }
 
+    public func indicatesRequires(_ wireAPI: Connection.WireAPI) -> Bool {
+        switch wireAPI {
+        case .responses: indicatesRequiresResponsesAPI
+        case .chatCompletions: indicatesRequiresChatCompletionsAPI
+        case .auto: false
+        }
+    }
+
     public var indicatesRequiresResponsesAPI: Bool {
         guard let message = message?.lowercased() else { return false }
         if message.contains("not a chat model") { return true }   // wrong model *type* names its own subject

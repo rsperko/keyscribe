@@ -5,6 +5,8 @@ import KeyScribeKit
 @MainActor
 final class SpeechModelsModelTests: XCTestCase {
     private final class Recorder {
+        struct Failure: Error {}
+
         var deferred: [() -> Void] = []
         var evicted: [String] = []
         var removed: [String] = []
@@ -13,11 +15,14 @@ final class SpeechModelsModelTests: XCTestCase {
         var markedFailed: [String] = []
         var clearedFailed: [String] = []
         var activeChanges: [String] = []
+        var removeShouldFail = false
+        var markInstalledShouldFail = false
+        var markRemovedShouldFail = false
     }
 
     private func makeModel(
         recorder: Recorder,
-        verifyResult: Bool? = nil,
+        verifyResult: ModelVerificationResult = .skipped,
         activeId: String = "parakeet-tdt-ctc-110m",
         initialFailedIds: Set<String>? = nil,
         deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil,
@@ -34,9 +39,18 @@ final class SpeechModelsModelTests: XCTestCase {
             deferWhileBusy: deferWhileBusy ?? { $0() },
             initialInstalledIds: ["parakeet-tdt-ctc-110m", "parakeet"],
             initialFailedIds: initialFailedIds,
-            removeFiles: { recorder.removed.append($0) },
-            markInstalled: { recorder.markedInstalled.append($0) },
-            markRemoved: { recorder.markedRemoved.append($0) },
+            removeFiles: {
+                recorder.removed.append($0)
+                if recorder.removeShouldFail { throw Recorder.Failure() }
+            },
+            markInstalled: {
+                recorder.markedInstalled.append($0)
+                if recorder.markInstalledShouldFail { throw Recorder.Failure() }
+            },
+            markRemoved: {
+                recorder.markedRemoved.append($0)
+                if recorder.markRemovedShouldFail { throw Recorder.Failure() }
+            },
             markFailed: { recorder.markedFailed.append($0) },
             clearFailed: { recorder.clearedFailed.append($0) })
     }
@@ -61,14 +75,18 @@ final class SpeechModelsModelTests: XCTestCase {
         await settleTasks()
 
         XCTAssertEqual(recorder.evicted, ["parakeet"])
-        XCTAssertEqual(recorder.markedRemoved, ["parakeet"])
+        XCTAssertEqual(recorder.markedRemoved, [])
         XCTAssertEqual(recorder.removed, [])
         XCTAssertEqual(recorder.deferred.count, 1)
-        XCTAssertFalse(try row("parakeet", in: model).isUsable)
+        XCTAssertTrue(try row("parakeet", in: model).isUsable)
+        XCTAssertEqual(try row("parakeet", in: model).downloadPhase, "Removing…")
 
         recorder.deferred[0]()
+        await settleTasks()
 
         XCTAssertEqual(recorder.removed, ["parakeet"])
+        XCTAssertEqual(recorder.markedRemoved, ["parakeet"])
+        XCTAssertFalse(try row("parakeet", in: model).isUsable)
     }
 
     // Partial weights must be wiped so a retry starts clean and the model never becomes an "on disk but
@@ -110,7 +128,7 @@ final class SpeechModelsModelTests: XCTestCase {
 
     func testPassingSelfTestEvictsAnInactiveEngine() async throws {
         let recorder = Recorder()
-        let model = makeModel(recorder: recorder, verifyResult: true)
+        let model = makeModel(recorder: recorder, verifyResult: .passed)
 
         // "parakeet" is installed but not the active engine ("parakeet-tdt-ctc-110m").
         model.test("parakeet")
@@ -123,7 +141,7 @@ final class SpeechModelsModelTests: XCTestCase {
 
     func testPassingSelfTestKeepsTheActiveEngineResident() async throws {
         let recorder = Recorder()
-        let model = makeModel(recorder: recorder, verifyResult: true)
+        let model = makeModel(recorder: recorder, verifyResult: .passed)
 
         model.test("parakeet-tdt-ctc-110m")   // the active engine
         await settleTasks()
@@ -136,7 +154,7 @@ final class SpeechModelsModelTests: XCTestCase {
         let recorder = Recorder()
         let model = makeModel(
             recorder: recorder,
-            verifyResult: false,
+            verifyResult: .failed,
             deferWhileBusy: { recorder.deferred.append($0) })
 
         model.test("parakeet")
@@ -153,7 +171,7 @@ final class SpeechModelsModelTests: XCTestCase {
 
     func testFailingTheActiveModelHandsOffToAUsableEngine() async throws {
         let recorder = Recorder()
-        let model = makeModel(recorder: recorder, verifyResult: false, activeId: "parakeet")
+        let model = makeModel(recorder: recorder, verifyResult: .failed, activeId: "parakeet")
 
         model.test("parakeet")   // the active engine
         await settleTasks()
@@ -182,7 +200,7 @@ final class SpeechModelsModelTests: XCTestCase {
 
     func testHasFailedModelFlipsLiveOnAFailingTest() async throws {
         let recorder = Recorder()
-        let model = makeModel(recorder: recorder, verifyResult: false)
+        let model = makeModel(recorder: recorder, verifyResult: .failed)
         XCTAssertFalse(model.hasFailedModel)
 
         model.test("parakeet")
@@ -193,7 +211,7 @@ final class SpeechModelsModelTests: XCTestCase {
 
     func testHasFailedModelClearsWhenTheOnlyFailurePasses() async throws {
         let recorder = Recorder()
-        let model = makeModel(recorder: recorder, verifyResult: true, initialFailedIds: ["parakeet"])
+        let model = makeModel(recorder: recorder, verifyResult: .passed, initialFailedIds: ["parakeet"])
         XCTAssertTrue(model.hasFailedModel)
 
         model.test("parakeet")
@@ -204,7 +222,7 @@ final class SpeechModelsModelTests: XCTestCase {
 
     func testPassingReTestClearsPersistedFailure() async throws {
         let recorder = Recorder()
-        let model = makeModel(recorder: recorder, verifyResult: true, initialFailedIds: ["parakeet"])
+        let model = makeModel(recorder: recorder, verifyResult: .passed, initialFailedIds: ["parakeet"])
 
         model.test("parakeet")
         await settleTasks()
@@ -212,6 +230,149 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.clearedFailed, ["parakeet"])
         XCTAssertTrue(try row("parakeet", in: model).isUsable)
         XCTAssertFalse(try row("parakeet", in: model).verificationFailed)
+    }
+
+    func testSkippedSelfTestKeepsAQuarantinedModelQuarantined() async throws {
+        let recorder = Recorder()
+        let model = makeModel(
+            recorder: recorder, verifyResult: .skipped, initialFailedIds: ["parakeet"])
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertTrue(try row("parakeet", in: model).verificationFailed)
+        XCTAssertFalse(try row("parakeet", in: model).isUsable)
+        XCTAssertEqual(recorder.clearedFailed, [])
+        XCTAssertEqual(recorder.markedInstalled, [])
+        XCTAssertNotNil(try row("parakeet", in: model).errorText)
+    }
+
+    func testSkippedPostDownloadVerificationDoesNotInstallModel() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: .skipped)
+
+        model.startDownload("whisper")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.markedInstalled, [])
+        XCTAssertEqual(recorder.markedFailed, ["whisper"])
+        XCTAssertFalse(try row("whisper", in: model).isUsable)
+        XCTAssertTrue(try row("whisper", in: model).verificationFailed)
+        XCTAssertNotNil(try row("whisper", in: model).errorText)
+    }
+
+    func testFailedPostDownloadVerificationKeepsQuarantinedInstallRecoverable() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: .failed)
+
+        model.startDownload("whisper")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.markedInstalled, ["whisper"])
+        XCTAssertTrue(try row("whisper", in: model).verificationFailed)
+        XCTAssertFalse(try row("whisper", in: model).isUsable)
+    }
+
+    func testFailedDownloadReportsPartialFileCleanupFailure() async throws {
+        struct Boom: Error {}
+        let recorder = Recorder()
+        recorder.removeShouldFail = true
+        let model = makeModel(recorder: recorder, download: { _, _ in throw Boom() })
+
+        model.startDownload("whisper")
+        await settleTasks()
+
+        XCTAssertEqual(
+            try row("whisper", in: model).errorText,
+            "Download failed, and partial model files couldn’t be removed. Try again.")
+    }
+
+    func testLateProgressAfterDownloadCompletionIsIgnored() async throws {
+        final class ProgressBox: @unchecked Sendable {
+            var callback: (@Sendable (ModelLoadProgress) -> Void)?
+        }
+        let recorder = Recorder()
+        let progress = ProgressBox()
+        let model = makeModel(
+            recorder: recorder,
+            verifyResult: .passed,
+            download: { _, callback in progress.callback = callback })
+
+        model.startDownload("whisper")
+        await settleTasks()
+        progress.callback?(ModelLoadProgress(phase: "Downloading…", fraction: 0.5))
+        await settleTasks()
+
+        XCTAssertNil(try row("whisper", in: model).downloadFraction)
+        XCTAssertTrue(try row("whisper", in: model).isUsable)
+    }
+
+    func testPartialDeleteFailureQuarantinesModelAndKeepsItRetryable() async throws {
+        let recorder = Recorder()
+        recorder.removeShouldFail = true
+        let model = makeModel(recorder: recorder)
+
+        model.requestDelete("parakeet")
+        model.confirmDelete()
+        await settleTasks()
+
+        XCTAssertFalse(try row("parakeet", in: model).isUsable)
+        XCTAssertTrue(try row("parakeet", in: model).verificationFailed)
+        XCTAssertNotNil(try row("parakeet", in: model).errorText)
+        XCTAssertEqual(recorder.markedRemoved, ["parakeet"])
+        XCTAssertEqual(recorder.markedInstalled, ["parakeet"])
+        XCTAssertEqual(recorder.markedFailed, ["parakeet"])
+        model.reinstall("parakeet")
+        await settleTasks()
+        XCTAssertEqual(recorder.removed, ["parakeet", "parakeet"])
+    }
+
+    func testMarkerFailureDoesNotReportDeletionAsSuccessful() async throws {
+        let recorder = Recorder()
+        recorder.markRemovedShouldFail = true
+        let model = makeModel(recorder: recorder)
+
+        model.requestDelete("parakeet")
+        model.confirmDelete()
+        await settleTasks()
+
+        XCTAssertTrue(try row("parakeet", in: model).isUsable)
+        XCTAssertNotNil(try row("parakeet", in: model).errorText)
+        XCTAssertEqual(recorder.removed, [])
+    }
+
+    func testDeletingActiveModelBlocksNewDictationAdmission() async {
+        let recorder = Recorder()
+        let model = makeModel(
+            recorder: recorder,
+            activeId: "parakeet",
+            deferWhileBusy: { recorder.deferred.append($0) })
+
+        model.requestDelete("parakeet")
+        model.confirmDelete()
+
+        XCTAssertFalse(model.activeEngineUsable)
+    }
+
+    func testDeletingModelCannotBeSelectedBeforeIdleDeletionRuns() async throws {
+        let recorder = Recorder()
+        let model = makeModel(
+            recorder: recorder,
+            deferWhileBusy: { recorder.deferred.append($0) })
+
+        model.requestDelete("parakeet")
+        model.confirmDelete()
+        model.select("parakeet")
+        model.syncActive("parakeet")
+
+        XCTAssertEqual(recorder.activeChanges, [])
+        XCTAssertFalse(try row("parakeet", in: model).isActive)
+    }
+
+    func testQuarantinedAdoptedInstallCannotRunAfterRelaunch() {
+        XCTAssertFalse(
+            InstalledEngineFilter.shouldRun(
+                engineId: "whisper", installedIds: ["whisper"], failedIds: ["whisper"]))
     }
 
     // The two list sections partition by residency (agent_notes/three_column_designs/option-1-rollout.md):

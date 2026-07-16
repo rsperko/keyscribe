@@ -212,13 +212,16 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     func fragmentBody(_ id: String) -> String {
-        let url = fragmentsDir.appendingPathComponent("\(id).md")
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        guard let url = FragmentStore.url(forID: id, in: fragmentsDir),
+              let content = try? String(contentsOf: url, encoding: .utf8) else { return "" }
         return FragmentStore.body(ofFile: content)
     }
 
     func saveFragmentBody(_ id: String, _ body: String) {
-        let url = fragmentsDir.appendingPathComponent("\(id).md")
+        guard let url = FragmentStore.url(forID: id, in: fragmentsDir) else {
+            error = "Could not save the instruction: '\(id)' is not a valid instruction name."
+            return
+        }
         do {
             let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             try FragmentStore.replacingBody(inFile: content, with: body)
@@ -231,8 +234,8 @@ final class ModesSettingsModel: ObservableObject {
     }
 
     func revealFragment(_ id: String) {
-        let url = fragmentsDir.appendingPathComponent("\(id).md")
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        guard let url = FragmentStore.url(forID: id, in: fragmentsDir),
+              FileManager.default.fileExists(atPath: url.path) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
@@ -248,7 +251,7 @@ final class ModesSettingsModel: ObservableObject {
         }
         let stillUsed = modes.contains { $0.aiRewrite?.fragments.contains(id) == true }
         if !stillUsed {
-            let url = fragmentsDir.appendingPathComponent("\(id).md")
+            guard let url = FragmentStore.url(forID: id, in: fragmentsDir) else { return }
             try? FileManager.default.removeItem(at: url)
             applyingLocalMutation { repository.recordSelfWrite(at: url) }
             fragmentIds = loadFragmentIds()

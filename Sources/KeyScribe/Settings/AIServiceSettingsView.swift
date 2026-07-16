@@ -2,6 +2,10 @@ import SwiftUI
 import KeyScribeKit
 
 struct ConnectionTester {
+    // One tester, so connect attempts share a single pooled URLSession. Constructing one per attempt built
+    // a fresh session that was never invalidated, accumulating one per Connect press.
+    static let shared = ConnectionTester()
+
     var client: any LLMClient = HTTPLLMClient()
 
     func test(_ connection: Connection) async -> ConnectionTestState {

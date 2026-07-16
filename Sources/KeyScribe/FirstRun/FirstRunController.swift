@@ -2,6 +2,10 @@ import AppKit
 import KeyScribeKit
 import SwiftUI
 
+enum FirstRunDownloadError: Error {
+    case installStateNotSaved
+}
+
 @MainActor
 final class FirstRunController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
@@ -23,7 +27,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
         readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
-        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
+        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) },
         onRelaunch: @escaping () -> Void = {},
         tapActive: @escaping () -> Bool = { true },
         onComplete: @escaping () -> Void
@@ -158,7 +162,7 @@ final class FirstRunModel: ObservableObject {
     // Removes a partially-downloaded model's files when a download fails or is cancelled, so the next
     // attempt starts clean instead of choking on (or silently trusting) half-written weights. Guarded on
     // the model not already being installed so a completed prior install is never wiped.
-    private let cleanupFailedDownload: (String) -> Void
+    private let cleanupFailedDownload: (String) async throws -> Void
     private let selectEngine: (String) -> Void
     private let repository: ConfigRepository
     private var supportDir: URL { repository.supportDir }
@@ -220,9 +224,11 @@ final class FirstRunModel: ObservableObject {
         initialEngineId: String,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
-        cleanupFailedDownload: @escaping (String) -> Void = { id in
+        cleanupFailedDownload: @escaping (String) async throws -> Void = { id in
             guard !ModelInstallStore.installedIds().contains(id) else { return }
-            ModelInstallStore.removeFiles(for: id)
+            try await Task.detached(priority: .utility) {
+                try ModelInstallStore.removeFiles(for: id)
+            }.value
         },
         permissionsOnly: Bool = false,
         resumeOnboarding: Bool = false,
@@ -230,7 +236,7 @@ final class FirstRunModel: ObservableObject {
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
         readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
-        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) },
+        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) },
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
         },
@@ -300,12 +306,21 @@ final class FirstRunModel: ObservableObject {
                 downloading = false
                 step = .permissions
             } catch {
+                if error is FirstRunDownloadError {
+                    downloadError = "The model downloaded, but its install state couldn’t be saved. Check available disk space and try again."
+                    downloading = false
+                    return
+                }
                 // A failed or cancelled download leaves partial weights on disk. Left behind, they wedge
                 // the next attempt (the SDK may trust or trip over them), and there is no delete affordance
                 // for a model that was never marked installed — the "can't recover without switching
                 // models" trap. Wipe them so retry is clean.
-                cleanupFailedDownload(id)
-                downloadError = "Download failed. Check your connection and try again."
+                do {
+                    try await cleanupFailedDownload(id)
+                    downloadError = "Download failed. Check your connection and try again."
+                } catch {
+                    downloadError = "Download failed, and partial model files couldn’t be removed. Try again."
+                }
                 downloading = false
             }
         }

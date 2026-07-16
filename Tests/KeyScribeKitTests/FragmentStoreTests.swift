@@ -106,6 +106,106 @@ struct FragmentStoreTests {
         #expect(throws: (any Error).self) { try FragmentStore.createIfNeeded(name: "   ", in: dir) }
     }
 
+    @Test func validIDsAreSingleFilenameStems() {
+        #expect(FragmentStore.isValidID("my-voice"))
+        #expect(FragmentStore.isValidID("café-notes"))
+        #expect(FragmentStore.isValidID("私の声"))
+        #expect(FragmentStore.isValidID("my notes"))
+        #expect(FragmentStore.isValidID("v1.2"))
+    }
+
+    @Test func invalidIDsAreRejected() {
+        #expect(!FragmentStore.isValidID(""))
+        #expect(!FragmentStore.isValidID("   "))
+        #expect(!FragmentStore.isValidID("."))
+        #expect(!FragmentStore.isValidID(".."))
+        #expect(!FragmentStore.isValidID(".hidden"))
+        #expect(!FragmentStore.isValidID("../x"))
+        #expect(!FragmentStore.isValidID("../../notes/private"))
+        #expect(!FragmentStore.isValidID("/etc/passwd"))
+        #expect(!FragmentStore.isValidID("/Users/someone/notes"))
+        #expect(!FragmentStore.isValidID("sub/dir"))
+        #expect(!FragmentStore.isValidID("sub\\dir"))
+        #expect(!FragmentStore.isValidID("a:b"))
+        #expect(!FragmentStore.isValidID("..%2F..%2Fsecrets"))
+        #expect(!FragmentStore.isValidID("%2e%2e%2fx"))
+        #expect(!FragmentStore.isValidID("a\u{0000}b"))
+        #expect(!FragmentStore.isValidID("a\nb"))
+        #expect(!FragmentStore.isValidID(" leading"))
+        #expect(!FragmentStore.isValidID("trailing "))
+        #expect(!FragmentStore.isValidID("cafe\u{0301}-notes"))
+        #expect(!FragmentStore.isValidID(String(repeating: "a", count: 201)))
+    }
+
+    @Test func urlForIDResolvesInsideTheFragmentsDirectory() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = try #require(FragmentStore.url(forID: "my-voice", in: dir))
+        #expect(url.lastPathComponent == "my-voice.md")
+        #expect(url.deletingLastPathComponent().resolvingSymlinksInPath().path
+            == dir.resolvingSymlinksInPath().path)
+        #expect(FragmentStore.url(forID: "../escape", in: dir) == nil)
+        #expect(FragmentStore.url(forID: "/etc/passwd", in: dir) == nil)
+        #expect(FragmentStore.url(forID: "", in: dir) == nil)
+    }
+
+    @Test func loadRejectsTraversalIDsInsteadOfReadingOutsideTheDirectory() throws {
+        let root = tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let dir = root.appendingPathComponent("fragments", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let secret = root.appendingPathComponent("private.md")
+        try "Secret notes.".write(to: secret, atomically: true, encoding: .utf8)
+
+        #expect(FragmentStore.load(ids: ["../private"], from: dir) == [])
+        #expect(FragmentStore.load(ids: [secret.deletingPathExtension().path], from: dir) == [])
+        #expect(FragmentStore.load(ids: ["../../etc/hosts"], from: dir) == [])
+    }
+
+    @Test func loadRejectsAnInDirectorySymlinkPointingOutside() throws {
+        let root = tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let dir = root.appendingPathComponent("fragments", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let secret = root.appendingPathComponent("private.md")
+        try "Secret notes.".write(to: secret, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: dir.appendingPathComponent("leak.md"), withDestinationURL: secret)
+
+        #expect(FragmentStore.load(ids: ["leak"], from: dir) == [])
+        #expect(FragmentStore.url(forID: "leak", in: dir) == nil)
+    }
+
+    @Test func loadReadsAnOrdinaryUnicodeSlugFragment() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "---\nname: Café\n---\nWrite warmly."
+            .write(to: dir.appendingPathComponent("café-notes.md"), atomically: true, encoding: .utf8)
+        #expect(FragmentStore.load(ids: ["café-notes"], from: dir) == ["Write warmly."])
+        #expect(FragmentStore.name(id: "café-notes", in: dir) == "Café")
+    }
+
+    @Test func loadSkipsAFragmentOverTheByteLimit() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let big = String(repeating: "a", count: FragmentStore.maxFragmentBytes + 1)
+        try big.write(to: dir.appendingPathComponent("huge.md"), atomically: true, encoding: .utf8)
+        try "small".write(to: dir.appendingPathComponent("small.md"), atomically: true, encoding: .utf8)
+        #expect(FragmentStore.load(ids: ["huge", "small"], from: dir) == ["small"])
+    }
+
+    @Test func idsOmitsFilesWithInvalidStems() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "x".write(to: dir.appendingPathComponent("good.md"), atomically: true, encoding: .utf8)
+        try "x".write(to: dir.appendingPathComponent(".hidden.md"), atomically: true, encoding: .utf8)
+        #expect(FragmentStore.ids(in: dir) == ["good"])
+    }
+
     private func tempDir() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-frag-\(UUID().uuidString)", isDirectory: true)

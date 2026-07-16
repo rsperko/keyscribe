@@ -130,6 +130,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         history = HistoryPaneModel(
             store: historyStore,
             addDictionaryWord: { repository.addDictionaryWord($0) },
+            analyzeDictionaryWord: {
+                VocabularyAdvisor.analyze(.word($0), in: VocabularyScope(globalWords: repository.dictionaryWords()))
+            },
             addReplacement: { repository.addReplacement(heard: $0, replace: $1) },
             openSettings: { _ in })
         super.init()

@@ -23,6 +23,9 @@ final class HALInputUnit {
 
     private var unit: AudioUnit?
     private let context: HALRenderContext
+    // The ring THIS unit's realtime handler writes into. Held here so a unit and the ring its callback targets
+    // cannot drift apart: the owner publishes into it while the unit is stopped, never while it can deliver.
+    let ringSlot: CaptureRingSlot
     // Device-native Float32 non-interleaved format; conversion happens in the owner.
     private(set) var clientFormat: AVAudioFormat?
 
@@ -35,9 +38,17 @@ final class HALInputUnit {
     // Zero the per-capture drop count at arm; a reused (non-Bluetooth) unit carries its context across captures.
     func resetOversizeDropCount() { context.oversizeDrops.store(0, ordering: .relaxed) }
 
-    init(handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) {
+    init(ringSlot: CaptureRingSlot, handler: @escaping (AVAudioPCMBuffer, UInt64?) -> Void) {
+        self.ringSlot = ringSlot
         self.context = HALRenderContext(handler: handler)
     }
+
+    #if DEBUG
+    // Test seam: drives the exact handler this unit's realtime callback invokes, without a device.
+    func invokeHandlerForTesting(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
+        context.handler(buffer, hostTime)
+    }
+    #endif
 
     var isConfigured: Bool { unit != nil }
 

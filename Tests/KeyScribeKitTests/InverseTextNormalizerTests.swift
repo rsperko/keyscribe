@@ -164,6 +164,21 @@ struct InverseTextNormalizerTests {
         #expect(itn("twenty-first") == "21st")
     }
 
+    @Test func preservesRejectedHyphenatedNumberCompounds() {
+        #expect(itn("one-one") == "one-one")
+        #expect(itn("twenty-twenty") == "twenty-twenty")
+        #expect(itn("one-one, twenty-five.") == "one-one, 25.")
+        #expect(itn("one-one twenty-five") == "one-one twenty-five")
+        #expect(itn("one-one hundred") == "one-one hundred")
+        #expect(itn("twenty-twenty minus five") == "twenty-twenty minus five")
+    }
+
+    @Test func doesNotDuplicatePartiallyConsumedHyphenatedCompounds() {
+        #expect(itn("one point five-first") == "1.5 first")
+        #expect(itn("sixty-first-one") == "61st one")
+        #expect(itn("one one point five-first") == "one one point five first")
+    }
+
     @Test func leavesHyphenatedNonNumbersUntouched() {
         #expect(itn("a well-known fact") == "a well-known fact")
         #expect(itn("state-of-the-art design") == "state-of-the-art design")

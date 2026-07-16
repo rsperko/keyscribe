@@ -62,7 +62,12 @@ enum ModelInstallStore {
             dirsOnDisk: directoriesOnDisk(), markedIds: marked, keep: [markerFile, VADModel.dirName])
         let adopted = plan.installed.subtracting(marked)
         let dropped = marked.subtracting(plan.installed)
-        write(plan.installed)
+        do {
+            try write(plan.installed)
+        } catch {
+            Log.models.error("reconcile marker write failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
 
         // Recency-check only the candidate dirs (usually none), so the steady state does no per-file stat.
         let cutoff = Date().addingTimeInterval(-downloadRecencyWindow)
@@ -126,45 +131,40 @@ enum ModelInstallStore {
         return result
     }
 
-    static func markInstalled(_ id: String) {
+    static func markInstalled(_ id: String) throws {
         var ids = installedIds()
         ids.insert(id)
-        write(ids)
+        try write(ids)
         Log.models.notice("marked installed: \(id, privacy: .public)")
     }
 
-    static func markRemoved(_ id: String) {
+    static func markRemoved(_ id: String) throws {
         var ids = installedIds()
         ids.remove(id)
-        write(ids)
+        try write(ids)
         Log.models.notice("marked removed: \(id, privacy: .public)")
     }
 
-    static func removeFiles(for id: String) {
+    static func removeFiles(for id: String) throws {
         guard let engine = EngineRegistry.engine(id, modelsDir: KeyScribePaths.modelsDir) else {
             Log.models.error("removeFiles: no engine for \(id, privacy: .public)")
-            return
+            throw EngineUnavailable.notWired(id)
         }
         Log.models.notice("removing files for \(id, privacy: .public): \(engine.installDirNames, privacy: .public)")
         for name in engine.installDirNames {
-            try? FileManager.default.removeItem(
-                at: KeyScribePaths.modelsDir.appendingPathComponent(name))
+            let url = KeyScribePaths.modelsDir.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            try FileManager.default.removeItem(at: url)
         }
     }
 
-    private static func write(_ ids: Set<String>) {
-        do {
-            try FileManager.default.createDirectory(
-                at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
-            try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
-            // Update the cache only after the durable write succeeds, so a failed write never leaves the
-            // process believing an install/removal happened.
-            cacheLock.lock()
-            cachedIds = ids
-            cacheLock.unlock()
-        } catch {
-            Log.models.error("install marker write failed: \(error.localizedDescription, privacy: .public)")
-        }
+    private static func write(_ ids: Set<String>) throws {
+        try FileManager.default.createDirectory(
+            at: KeyScribePaths.modelsDir, withIntermediateDirectories: true)
+        try JSONEncoder().encode(ids.sorted()).write(to: markerURL, options: .atomic)
+        cacheLock.lock()
+        cachedIds = ids
+        cacheLock.unlock()
     }
 
     private static func presentInstallURLs(for id: String) -> [URL] {

@@ -11,7 +11,7 @@ struct AIServiceConnector {
     var saveAPIKey: (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) }
     var deleteAPIKey: (String) -> Void = { KeychainStore.delete($0) }
     var readAPIKey: (String) -> String? = { KeychainStore.get($0) }
-    var testConnection: (Connection) async -> ConnectionTestState = { await ConnectionTester().test($0) }
+    var testConnection: (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) }
 
     enum Outcome: Equatable {
         case connected(Connection)

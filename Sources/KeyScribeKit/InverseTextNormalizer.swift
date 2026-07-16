@@ -15,6 +15,14 @@ import Foundation
 public enum InverseTextNormalizer {
     private enum Kind { case ones, teen, tens, hundred, scale }
 
+    private struct Token {
+        let text: String
+        let source: Int
+        let original: String
+        let isFirstPart: Bool
+        let isLastPart: Bool
+    }
+
     private static let words: [String: (value: Int, kind: Kind)] = {
         var m: [String: (Int, Kind)] = [
             "zero": (0, .ones), "one": (1, .ones), "two": (2, .ones), "three": (3, .ones),
@@ -48,7 +56,9 @@ public enum InverseTextNormalizer {
 
     public static func apply(_ text: String) -> String {
         let tokens = text.split(separator: " ", omittingEmptySubsequences: false)
-            .map(String.init).flatMap(splitHyphenatedNumber)
+            .map(String.init)
+            .enumerated()
+            .flatMap { source, token in splitHyphenatedNumber(token, source: source) }
         var out: [String] = []
         var i = 0
         var precededByNumber = false
@@ -58,9 +68,10 @@ public enum InverseTextNormalizer {
                 i += consumed
                 precededByNumber = true
             } else {
-                out.append(tokens[i])
-                precededByNumber = !tokens[i].isEmpty && words[canonical(tokens[i])] != nil
-                i += 1
+                let token = tokens[i]
+                out.append(token.original)
+                precededByNumber = isNumberWord(canonical(token.text))
+                i = tokens[i...].firstIndex(where: { $0.source != token.source }) ?? tokens.endIndex
             }
         }
         return out.joined(separator: " ")
@@ -70,12 +81,12 @@ public enum InverseTextNormalizer {
     // run, then optional decimal and percent decorators. Returns the token count consumed and the
     // rendered string — digits when the run validates and clears the conservatism gate, otherwise the
     // spoken words verbatim. Returns nil when `from` is not the start of a number expression at all.
-    private static func matchExpression(_ tokens: [String], from start: Int, precededByNumber: Bool) -> (Int, String)? {
+    private static func matchExpression(_ tokens: [Token], from start: Int, precededByNumber: Bool) -> (Int, String)? {
         var idx = start
         var sign = ""
-        let firstCanon = canonical(tokens[start])
+        let firstCanon = canonical(tokens[start].text)
         if firstCanon == "minus" || firstCanon == "negative" {
-            guard !precededByNumber, !hasTrailingPunct(tokens[start]), idx + 1 < tokens.count, isNumberWord(canonical(tokens[idx + 1])) else { return nil }
+            guard !precededByNumber, !hasTrailingPunct(tokens[start].text), idx + 1 < tokens.count, isNumberWord(canonical(tokens[idx + 1].text)) else { return nil }
             sign = "-"
             idx += 1
         }
@@ -85,11 +96,11 @@ public enum InverseTextNormalizer {
         var stopped = false
         while idx < tokens.count && !stopped {
             let raw = tokens[idx]
-            let c = canonical(raw)
+            let c = canonical(raw.text)
             if words[c] != nil {
                 run.append(c)
                 idx += 1
-                if hasTrailingPunct(raw) { stopped = true }
+                if hasTrailingPunct(raw.text) { stopped = true }
             } else if let cardinal = ordinalToCardinal[c] {
                 run.append(cardinal)
                 isOrdinal = true
@@ -102,16 +113,16 @@ public enum InverseTextNormalizer {
         guard !run.isEmpty else { return nil }
 
         var fractional = ""
-        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx]) == "point" && !hasTrailingPunct(tokens[idx]) {
+        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx].text) == "point" && !hasTrailingPunct(tokens[idx].text) {
             var j = idx + 1
             var digits = ""
             var digitStopped = false
             while j < tokens.count && !digitStopped {
                 let raw = tokens[j]
-                guard let (value, kind) = words[canonical(raw)], kind == .ones else { break }
+                guard let (value, kind) = words[canonical(raw.text)], kind == .ones else { break }
                 digits += String(value)
                 j += 1
-                if hasTrailingPunct(raw) { digitStopped = true }
+                if hasTrailingPunct(raw.text) { digitStopped = true }
             }
             if !digits.isEmpty {
                 fractional = digits
@@ -121,21 +132,21 @@ public enum InverseTextNormalizer {
         }
 
         var percent = false
-        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx]) == "percent" {
+        if !isOrdinal && !stopped && idx < tokens.count && canonical(tokens[idx].text) == "percent" {
             percent = true
             idx += 1
         }
 
         let hasDecorator = !sign.isEmpty || !fractional.isEmpty || percent
         guard let value = parse(run), hasDecorator || run.count >= 2 || value >= 10 else {
-            return (idx - start, tokens[start..<idx].joined(separator: " "))
+            return (idx - start, verbatim(tokens[start..<idx]))
         }
 
         var core = sign + "\(value)"
         if !fractional.isEmpty { core += "." + fractional }
         if isOrdinal { core += ordinalSuffix(value) }
         if percent { core += "%" }
-        return (idx - start, leadingPunct(tokens[start]) + core + trailingPunct(tokens[idx - 1]))
+        return (idx - start, leadingPunct(tokens[start].text) + core + trailingPunct(tokens[idx - 1].text))
     }
 
     private static func isNumberWord(_ canon: String) -> Bool {
@@ -145,11 +156,39 @@ public enum InverseTextNormalizer {
     // STT commonly emits hyphenated compounds ("sixty-five", "twenty-first"). Split them into their
     // number-word parts so the run parser sees them, but ONLY when every hyphen-separated part is a
     // number/ordinal word — otherwise "well-known" / "state-of-the-art" would be corrupted.
-    private static func splitHyphenatedNumber(_ token: String) -> [String] {
-        guard token.contains("-") else { return [token] }
+    private static func splitHyphenatedNumber(_ token: String, source: Int) -> [Token] {
+        guard token.contains("-") else {
+            return [Token(text: token, source: source, original: token, isFirstPart: true, isLastPart: true)]
+        }
         let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
-        guard parts.count >= 2, parts.allSatisfy({ isNumberWord(canonical($0)) }) else { return [token] }
-        return parts
+        guard parts.count >= 2, parts.allSatisfy({ isNumberWord(canonical($0)) }) else {
+            return [Token(text: token, source: source, original: token, isFirstPart: true, isLastPart: true)]
+        }
+        return parts.enumerated().map { index, part in
+            Token(
+                text: part,
+                source: source,
+                original: token,
+                isFirstPart: index == 0,
+                isLastPart: index == parts.index(before: parts.endIndex))
+        }
+    }
+
+    private static func verbatim(_ tokens: ArraySlice<Token>) -> String {
+        var rendered: [String] = []
+        var index = tokens.startIndex
+        while index < tokens.endIndex {
+            let token = tokens[index]
+            let sourceEnd = tokens[index...].firstIndex(where: { $0.source != token.source }) ?? tokens.endIndex
+            if token.isFirstPart, tokens[sourceEnd - 1].isLastPart {
+                rendered.append(token.original)
+                index = sourceEnd
+            } else {
+                rendered.append(token.text)
+                index += 1
+            }
+        }
+        return rendered.joined(separator: " ")
     }
 
     private static func hasTrailingPunct(_ token: String) -> Bool {

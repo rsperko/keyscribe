@@ -21,14 +21,16 @@ public struct DictionarySet: Codable, Equatable, Sendable {
         words = try c.decodeIfPresent([String].self, forKey: .words) ?? []
     }
 
-    // Correction surface (design.md §4.7): add a term, ignoring blanks and case-insensitive dups.
     public func adding(word: String) -> DictionarySet {
         let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              !words.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame })
-        else { return self }
+        guard !trimmed.isEmpty else { return self }
         var copy = self
-        copy.words.append(trimmed)
+        if let index = copy.words.firstIndex(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            guard copy.words[index] != trimmed else { return self }
+            copy.words[index] = trimmed
+        } else {
+            copy.words.append(trimmed)
+        }
         return copy
     }
 
@@ -149,11 +151,25 @@ extension [ReplacementsSet.Rule] {
 
 public enum VocabularyMerge {
     public static func words(global: [String], local: [String], includeGlobal: Bool) -> [String] {
-        let combined = includeGlobal ? global + local : local
         var seen = Set<String>()
-        return combined.filter { word in
-            seen.insert(word.folding(options: .caseInsensitive, locale: nil)).inserted
+        let uniqueLocal = local.filter { seen.insert(wordKey($0)).inserted }
+        guard includeGlobal else { return uniqueLocal }
+        let localByKey = Dictionary(uniqueKeysWithValues: uniqueLocal.map { (wordKey($0), $0) })
+        seen.removeAll()
+        var merged: [String] = []
+        for word in global {
+            let key = wordKey(word)
+            guard seen.insert(key).inserted else { continue }
+            merged.append(localByKey[key] ?? word)
         }
+        for word in uniqueLocal where seen.insert(wordKey(word)).inserted {
+            merged.append(word)
+        }
+        return merged
+    }
+
+    private static func wordKey(_ word: String) -> String {
+        word.folding(options: .caseInsensitive, locale: nil)
     }
 
     public static func rules(

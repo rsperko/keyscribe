@@ -1,6 +1,12 @@
 import Foundation
 import KeyScribeKit
 
+enum ModelVerificationResult: Sendable {
+    case passed
+    case failed
+    case skipped
+}
+
 @MainActor
 final class SpeechModelsModel: ObservableObject {
     struct Row: Identifiable {
@@ -26,8 +32,12 @@ final class SpeechModelsModel: ObservableObject {
 
     // False means the active model was deleted out from under us and dictation is silently on a fallback —
     // flagged per ui_design.md §6.
-    var activeEngineUsable: Bool { self.set.isUsable(self.set.activeId) }
+    var activeEngineUsable: Bool { isEngineUsable(set.activeId) }
     var hasFailedModel: Bool { rows.contains { $0.verificationFailed } }
+
+    func isEngineUsable(_ id: String) -> Bool {
+        set.isUsable(id) && !deleting.contains(id)
+    }
 
     // On This Mac holds every usable model — the system-managed Apple engine is always usable, so it
     // lives here too. Available to Download holds the rest: pristine catalog entries, a row
@@ -46,33 +56,38 @@ final class SpeechModelsModel: ObservableObject {
     private var stt: Settings.STT
 
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
-    private let verify: (String) async -> Bool?
+    private let verify: (String) async -> ModelVerificationResult
     private let evictEngine: (String) async -> Void
     private let onActiveChange: (String) -> Void
     private let onDictionaryMatchingChange: (Settings.STT) -> Void
-    private let removeFiles: (String) -> Void
-    private let markInstalled: (String) -> Void
-    private let markRemoved: (String) -> Void
+    private let removeFiles: (String) async throws -> Void
+    private let markInstalled: (String) throws -> Void
+    private let markRemoved: (String) throws -> Void
     private let markFailed: (String) -> Void
     private let clearFailed: (String) -> Void
     // Parks `work` until the current dictation finishes if one is in flight, so a model delete never
     // removes files an in-flight dictation still needs.
     private let deferWhileBusy: (@escaping () -> Void) -> Void
+    private var deleting: Set<String> = []
 
     init(
         activeId: String,
         stt: Settings.STT,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
-        verify: @escaping (String) async -> Bool?,
+        verify: @escaping (String) async -> ModelVerificationResult,
         evictEngine: @escaping (String) async -> Void,
         onActiveChange: @escaping (String) -> Void,
         onDictionaryMatchingChange: @escaping (Settings.STT) -> Void,
         deferWhileBusy: @escaping (@escaping () -> Void) -> Void = { $0() },
         initialInstalledIds: Set<String>? = nil,
         initialFailedIds: Set<String>? = nil,
-        removeFiles: @escaping (String) -> Void = { ModelInstallStore.removeFiles(for: $0) },
-        markInstalled: @escaping (String) -> Void = { ModelInstallStore.markInstalled($0) },
-        markRemoved: @escaping (String) -> Void = { ModelInstallStore.markRemoved($0) },
+        removeFiles: @escaping (String) async throws -> Void = { id in
+            try await Task.detached(priority: .utility) {
+                try ModelInstallStore.removeFiles(for: id)
+            }.value
+        },
+        markInstalled: @escaping (String) throws -> Void = { try ModelInstallStore.markInstalled($0) },
+        markRemoved: @escaping (String) throws -> Void = { try ModelInstallStore.markRemoved($0) },
         markFailed: @escaping (String) -> Void = { ModelHealthStore.markFailed($0) },
         clearFailed: @escaping (String) -> Void = { ModelHealthStore.clearFailed($0) }
     ) {
@@ -120,8 +135,8 @@ final class SpeechModelsModel: ObservableObject {
 
     // First-run downloads through the engine directly (not startDownload), so the install store never
     // learned the model is present. Mark it installed so the onboarding download sticks.
-    func noteInstalled(_ id: String) {
-        markInstalled(id)
+    func noteInstalled(_ id: String) throws {
+        try markInstalled(id)
         set.markInstalled(id)
         VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
         refreshSizes()
@@ -129,7 +144,7 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     func syncActive(_ id: String) {
-        guard set.isUsable(id), set.activeId != id else { return }
+        guard isEngineUsable(id), set.activeId != id else { return }
         try? set.select(id)
         rebuild()
     }
@@ -155,19 +170,17 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     func select(_ id: String) {
-        guard set.isUsable(id) else { return }
+        guard isEngineUsable(id) else { return }
         try? set.select(id)
         onActiveChange(set.activeId)
         rebuild()
     }
 
     func startDownload(_ id: String) {
-        guard downloading[id] == nil, !verifying.contains(id),
+        guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id),
             SpeechModelCatalog.entry(for: id)?.systemManaged == false else { return }
         downloading[id] = ModelLoadProgress(phase: "Starting…", fraction: 0)
         errors[id] = nil
-        clearFailed(id)
-        set.clearFailed(id)
         rebuild()
         Log.models.notice("download started: \(id, privacy: .public)")
         Task {
@@ -176,6 +189,7 @@ final class SpeechModelsModel: ObservableObject {
                     // Skip the row rebuild unless phase or whole-percent changed, so a chatty SDK progress
                     // stream doesn't thrash the install UI.
                     Task { @MainActor in
+                        guard self.downloading[id] != nil else { return }
                         if let last = self.downloading[id], last.phase == progress.phase,
                            Int(last.fraction * 100) == Int(progress.fraction * 100) { return }
                         self.downloading[id] = progress
@@ -187,7 +201,16 @@ final class SpeechModelsModel: ObservableObject {
                 // Wipe partial weights so a retry starts clean instead of leaving an undeletable "on disk
                 // but not installed" phantom. Guarded on not-installed so a re-download failure never
                 // removes a still-good prior install.
-                if !set.installed.contains(id) { removeFiles(id) }
+                if !set.installed.contains(id) {
+                    do {
+                        try await removeFiles(id)
+                    } catch {
+                        errors[id] = "Download failed, and partial model files couldn’t be removed. Try again."
+                        downloading[id] = nil
+                        rebuild()
+                        return
+                    }
+                }
                 errors[id] = "\(error)"
                 downloading[id] = nil
                 rebuild()
@@ -195,28 +218,48 @@ final class SpeechModelsModel: ObservableObject {
             }
             Log.models.notice("download complete: \(id, privacy: .public)")
             downloading[id] = nil
-            markInstalled(id)
             VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
             await runVerification(id, markInstalledOnPass: true)
         }
     }
 
     func test(_ id: String) {
-        guard downloading[id] == nil, !verifying.contains(id) else { return }
+        guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id) else { return }
         Task { await runVerification(id, markInstalledOnPass: false) }
     }
 
     // Wipes the bad install; the redownload re-verifies.
     func reinstall(_ id: String) {
-        guard SpeechModelCatalog.entry(for: id)?.systemManaged == false else { return }
-        let wasActive = set.activeId == id
+        guard SpeechModelCatalog.entry(for: id)?.systemManaged == false,
+              !deleting.contains(id) else { return }
+        deleting.insert(id)
+        errors[id] = nil
+        rebuild()
         Task {
             await evictEngine(id)
-            removeFiles(id)
-            markRemoved(id)
+            await waitUntilIdle()
+            let wasActive = set.activeId == id
+            var markerRemoved = false
+            do {
+                try markRemoved(id)
+                markerRemoved = true
+                try await removeFiles(id)
+            } catch {
+                if markerRemoved {
+                    try? markInstalled(id)
+                    markFailed(id)
+                    set.markFailed(id)
+                }
+                deleting.remove(id)
+                errors[id] = "Couldn’t remove this model. Try again."
+                if wasActive && set.activeId != id { onActiveChange(set.activeId) }
+                rebuild()
+                return
+            }
             clearFailed(id)
             set.clearFailed(id)
             set.delete(id)
+            deleting.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             rebuild()
             startDownload(id)
@@ -231,7 +274,20 @@ final class SpeechModelsModel: ObservableObject {
         let result = await verify(id)
         verifying.remove(id)
 
-        if result == false {
+        switch result {
+        case .failed:
+            if markInstalledOnPass {
+                do {
+                    try markInstalled(id)
+                    set.markInstalled(id)
+                } catch {
+                    errors[id] = "The model test failed, and its install state couldn’t be saved. Try again."
+                    await evictEngine(id)
+                    refreshSizes()
+                    rebuild()
+                    return
+                }
+            }
             // Quarantine, don't delete: a model that can't transcribe the known clip must not stay
             // selectable, but it keeps its (possibly multi-GB) files so the user can re-test cheaply or
             // reinstall. markFailed persists the verdict across relaunch and hands the active slot off to a
@@ -242,21 +298,34 @@ final class SpeechModelsModel: ObservableObject {
             // The verify loaded the engine into RAM; it's now quarantined, so release it.
             await evictEngine(id)
             if wasActive && set.activeId != id { onActiveChange(set.activeId) }
-        } else {
-            // result == nil means skipped (no clip bundled, dev runs) — treat the same as a pass.
+        case .passed:
+            do {
+                try markInstalled(id)
+            } catch {
+                errors[id] = "The model passed its test, but its install state couldn’t be saved. Try again."
+                await evictEngine(id)
+                refreshSizes()
+                rebuild()
+                return
+            }
             clearFailed(id)
             set.clearFailed(id)
-            markInstalled(id)
             set.markInstalled(id)
             // A non-active model verified here would otherwise stay resident until relaunch (~2 GB for
             // Qwen 1.7B); release it now and let activating later reload on demand.
             if id != set.activeId { await evictEngine(id) }
             // Only a manual re-test of a confirmed pass shows the transient acknowledgement;
             // a fresh install already shows "Installed".
-            if result == true && !markInstalledOnPass {
+            if !markInstalledOnPass {
                 verifiedOk.insert(id)
                 scheduleClearVerified(id)
             }
+        case .skipped:
+            if markInstalledOnPass {
+                markFailed(id)
+                set.markFailed(id)
+            }
+            errors[id] = "The model test couldn’t run. Try again when dictation is idle."
         }
         refreshSizes()
         rebuild()
@@ -271,6 +340,7 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     func requestDelete(_ id: String) {
+        guard !deleting.contains(id) else { return }
         switch set.deletionConsequence(id) {
         case .notDeletable, .notInstalled:
             return
@@ -298,18 +368,42 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     private func performDelete(_ id: String) {
-        let wasActive = set.activeId == id
+        deleting.insert(id)
+        errors[id] = nil
+        rebuild()
         Task {
             await evictEngine(id)
-            // Defer file removal until idle so an in-flight dictation keeps its frozen engine; the
-            // marker/set update immediately for the UI.
-            deferWhileBusy { [removeFiles] in removeFiles(id) }
-            markRemoved(id)
+            await waitUntilIdle()
+            let wasActive = set.activeId == id
+            var markerRemoved = false
+            do {
+                try markRemoved(id)
+                markerRemoved = true
+                try await removeFiles(id)
+            } catch {
+                if markerRemoved {
+                    try? markInstalled(id)
+                    markFailed(id)
+                    set.markFailed(id)
+                }
+                deleting.remove(id)
+                errors[id] = "Couldn’t remove this model. Try again."
+                if wasActive && set.activeId != id { onActiveChange(set.activeId) }
+                rebuild()
+                return
+            }
             clearFailed(id)
             set.delete(id)
+            deleting.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             refreshSizes()
             rebuild()
+        }
+    }
+
+    private func waitUntilIdle() async {
+        await withCheckedContinuation { continuation in
+            deferWhileBusy { continuation.resume() }
         }
     }
 
@@ -340,8 +434,8 @@ final class SpeechModelsModel: ObservableObject {
             info: info,
             isActive: set.activeId == info.id,
             isUsable: set.isUsable(info.id),
-            downloadFraction: downloading[info.id]?.fraction,
-            downloadPhase: downloading[info.id]?.phase,
+            downloadFraction: deleting.contains(info.id) ? 0 : downloading[info.id]?.fraction,
+            downloadPhase: deleting.contains(info.id) ? "Removing…" : downloading[info.id]?.phase,
             verifying: verifying.contains(info.id),
             verificationFailed: failed,
             testPassed: verifiedOk.contains(info.id),

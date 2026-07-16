@@ -141,4 +141,15 @@ final class EngineInstallDetectionTests: XCTestCase {
         try writeFiles(["encoder_model.ort"], into: moonshineDir())
         XCTAssertEqual(MoonshineEngine(modelsDir: dir).verifyInstalled(in: dir), false)
     }
+
+    func testMoonshineColdLoadRefusesToDownloadMissingFiles() async {
+        let engine = MoonshineEngine(modelsDir: dir)
+
+        do {
+            try await engine.loadIfNeeded()
+            XCTFail("Expected an incomplete install to fail")
+        } catch {}
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moonshineDir().path))
+    }
 }

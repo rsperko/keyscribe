@@ -160,7 +160,93 @@ struct HTTPLLMClientTests {
         #expect(body?["store"] as? Bool == false)
         #expect((body?["reasoning"] as? [String: Any])?["effort"] as? String == "none")
         #expect(body?["messages"] == nil)
-        #expect(body?["temperature"] == nil)
+        // The configured temperature is honored on both wires — a connection's sampling must not change
+        // just because the wire did.
+        #expect(body?["temperature"] as? Double == 0.2)
+    }
+
+    @Test func responsesWireAPISendsTheConnectionsConfiguredTemperature() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1",
+            params: .init(temperature: 0.7), wireAPI: .responses)
+
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+
+        #expect(body?["temperature"] as? Double == 0.7)
+    }
+
+    // A Responses server that rejects temperature self-heals through the same remediation loop the chat
+    // wire uses, and the accepted adaptation is cached so the next rewrite pays no rejected round trip.
+    @Test func responsesTemperatureRejectionRetriesWithoutItAndCaches() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "reasoner", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        nonisolated(unsafe) var firstRun: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody()
+            firstRun.append(body)
+            guard body?["temperature"] == nil else {
+                return (resp(request.url!, 400), errBody("unsupported_value", "temperature"))
+            }
+            return responsesOK(request.url!)
+        }
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "Rewritten.")
+        #expect(firstRun.count == 2)
+        #expect(firstRun[0]?["temperature"] != nil)
+        #expect(firstRun[1]?["temperature"] == nil)
+
+        nonisolated(unsafe) var secondRun: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            secondRun.append(request.decodedBody())
+            return responsesOK(request.url!)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(secondRun.count == 1)
+        #expect(secondRun[0]?["temperature"] == nil)
+    }
+
+    // A minimal gateway can implement /responses without a `status` field; a well-formed output must still
+    // be read rather than dropped to local.
+    @Test func responsesWithoutAStatusFieldIsAcceptedWhenOutputIsWellFormed() async throws {
+        LLMStubProtocol.handler = { request in
+            let data = try! JSONSerialization.data(withJSONObject: [
+                "output": [["type": "message", "content": [["type": "output_text", "text": "Rewritten."]]]],
+            ])
+            return (resp(request.url!, 200), data)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        #expect(try await stubbedClient().complete(system: "s", user: "u", connection: connection) == "Rewritten.")
+    }
+
+    // But a status that IS present and is not `completed` stays strict — an unfinished reply is never
+    // inserted just because it parsed.
+    @Test func responsesWithAnUnfinishedStatusIsRejected() async {
+        LLMStubProtocol.handler = { request in
+            let data = try! JSONSerialization.data(withJSONObject: [
+                "status": "in_progress",
+                "output": [["type": "message", "content": [["type": "output_text", "text": "Partial"]]]],
+            ])
+            return (resp(request.url!, 200), data)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        }
     }
 
     @Test func responsesWireAPIAppliesReasoningSafeTokenFloor() async throws {
@@ -874,6 +960,272 @@ struct HTTPLLMClientTests {
         #expect(secondRun.count == 1)
         #expect(secondRun[0]?["max_tokens"] != nil)
         #expect(secondRun[0]?["max_completion_tokens"] == nil)
+    }
+
+    // A remediation the server never accepted must not be cached. A max_tokens VALUE error carries no
+    // structured param, so the message scan remaps the FIELD name — the wrong remediation — and the retry
+    // fails identically. Caching it would pin max_completion_tokens for the process lifetime with no
+    // reverse remediation, 400ing every later rewrite including ones that would have succeeded.
+    @Test func aRemediationTheServerNeverAcceptedIsNotCached() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let connection = compatConnection()
+        let valueError = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "max_tokens must be less than or equal to 4096"]])
+
+        nonisolated(unsafe) var attempts = 0
+        LLMStubProtocol.handler = { request in
+            attempts += 1
+            return (resp(request.url!, 400), valueError)
+        }
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(attempts == 2)   // the original request plus the one unproven remediation
+
+        nonisolated(unsafe) var next: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            next = request.decodedBody()
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(next?["max_tokens"] != nil)
+        #expect(next?["max_completion_tokens"] == nil)
+    }
+
+    // The host behind an unchanged base URL was swapped for a chat-only server: the remembered /responses
+    // override now 404s with a body naming no redirect, so nothing in the error can correct it. It must be
+    // forgotten rather than pinning a dead endpoint for every later rewrite until restart.
+    @Test func aStaleResponsesOverrideIsForgottenAndFallsBackToChat() async throws {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1")   // wireAPI defaults to .auto
+        await wireCache.remember(.responses, for: WireAPIOverrideCache.key(for: connection))
+
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/responses") {
+                let notFound = try! JSONSerialization.data(withJSONObject: ["detail": "Not Found"])
+                return (resp(request.url!, 404), notFound)
+            }
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "OK")
+        #expect(paths.map { $0.hasSuffix("/responses") } == [true, false])
+        #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == nil)
+
+        paths.removeAll()
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(paths.count == 1)   // the dead endpoint is not probed again
+        #expect(paths.first?.hasSuffix("/chat/completions") == true)
+    }
+
+    // An endpoint that answers 401/429/5xx was FOUND — that says nothing about the wire, so the override
+    // must survive and the prompt must not be resent through the other wire. Only an endpoint-mismatch
+    // status (404/405) is evidence the remembered wire is gone.
+    @Test(arguments: [401, 429, 502])
+    func anAnsweringEndpointDoesNotForgetTheWireOverride(status: Int) async {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1")   // wireAPI defaults to .auto
+        let overrideKey = WireAPIOverrideCache.key(for: connection)
+        await wireCache.remember(.responses, for: overrideKey)
+
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            return (resp(request.url!, status), Data("nope".utf8))
+        }
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(paths.allSatisfy { $0.hasSuffix("/responses") })   // never resent through chat
+        #expect(await wireCache.lookup(overrideKey) == .responses)
+    }
+
+    // With two wires, a redirect's target and the stale-override fallback's target are the same endpoint.
+    // A redirect that already ran and failed must not be repeated by that fallback — the prompt would be
+    // sent to the same failing endpoint twice.
+    @Test func aFailedRedirectFromAStaleOverrideIsNotRetriedTwice() async throws {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1")   // wireAPI defaults to .auto
+        await wireCache.remember(.responses, for: WireAPIOverrideCache.key(for: connection))
+
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            // The remembered wire points at chat, and chat is gone too.
+            if path.hasSuffix("/responses") {
+                return (resp(request.url!, 404), requiresChatCompletionsBody())
+            }
+            return (resp(request.url!, 404), Data("gone".utf8))
+        }
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(paths.map { $0.hasSuffix("/responses") } == [true, false])   // not [true, false, false]
+
+        // The endpoint disowned /responses, so that override is stale even though the redirect target also
+        // failed. Leaving it cached would repeat this doomed pair on every later rewrite.
+        #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == nil)
+
+        paths.removeAll()
+        LLMStubProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "OK")
+        #expect(paths.count == 1)
+        #expect(paths.first?.hasSuffix("/chat/completions") == true)
+    }
+
+    // OpenAI answers a bad model id with a structured 404. That is the endpoint speaking about the model —
+    // which is itself part of the override's cache key — not about the wire, so the override must survive
+    // and the prompt must not be resent through the other wire.
+    @Test func aMissingModel404DoesNotForgetTheWireOverride() async {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "typo-model", keyRef: "k", baseUrl: "https://gateway.example/v1")   // wireAPI defaults to .auto
+        let overrideKey = WireAPIOverrideCache.key(for: connection)
+        await wireCache.remember(.responses, for: overrideKey)
+
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            let missingModel = try! JSONSerialization.data(withJSONObject: [
+                "error": [
+                    "message": "The model `typo-model` does not exist or you do not have access to it.",
+                    "type": "invalid_request_error",
+                    "code": "model_not_found",
+                ],
+            ])
+            return (resp(request.url!, 404), missingModel)
+        }
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(paths.count == 1)   // no chat re-probe
+        #expect(paths.first?.hasSuffix("/responses") == true)
+        #expect(await wireCache.lookup(overrideKey) == .responses)
+    }
+
+    // An endpoint that names a wire it then fails to serve must not leave that wire behind for every later
+    // rewrite to start at.
+    @Test func aRedirectThatFailsIsNotRememberedAsTheWire() async {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("/chat/completions") {
+                return (resp(request.url!, 400), requiresResponsesBody())
+            }
+            return (resp(request.url!, 500), Data("responses is broken".utf8))
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1")
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == nil)
+    }
+
+    // A response the endpoint spoke correctly is not evidence against the override — only an endpoint-
+    // mismatch status is. A truncated reply must leave the remembered wire alone.
+    @Test func aTruncatedReplyDoesNotForgetTheWireOverride() async {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1")
+        await wireCache.remember(.responses, for: WireAPIOverrideCache.key(for: connection))
+
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            let data = try! JSONSerialization.data(withJSONObject: [
+                "status": "incomplete",
+                "output": [["type": "message", "content": [["type": "output_text", "text": "Partial"]]]],
+            ])
+            return (resp(request.url!, 200), data)
+        }
+
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await client.complete(system: "s", user: "u", connection: connection)
+        }
+        #expect(paths.count == 1)   // no chat re-probe
+        #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == .responses)
+    }
+
+    // An explicitly configured wire is a starting hint, not a strict contract — the client already falls
+    // back when the endpoint says so. Having learned that, it must not repeat the known-failing round trip
+    // on every dictation.
+    @Test func anExplicitChatConnectionStartsAtTheWireItFellBackTo() async throws {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/chat/completions") {
+                return (resp(request.url!, 400), requiresResponsesBody())
+            }
+            return responsesOK(request.url!)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "responses-only", keyRef: "k", baseUrl: "https://gateway.example/v1",
+            wireAPI: .chatCompletions)
+
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(paths.map { $0.hasSuffix("/responses") } == [false, true])
+
+        paths.removeAll()
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "Rewritten.")
+        #expect(paths.count == 1)
+        #expect(paths.first?.hasSuffix("/responses") == true)
+    }
+
+    @Test func anExplicitResponsesConnectionStartsAtTheWireItFellBackTo() async throws {
+        let wireCache = WireAPIOverrideCache()
+        let client = stubbedClient(wireCache: wireCache)
+        nonisolated(unsafe) var paths: [String] = []
+        LLMStubProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path.hasSuffix("/responses") {
+                return (resp(request.url!, 405), requiresChatCompletionsBody())
+            }
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(paths.map { $0.hasSuffix("/chat/completions") } == [false, true])
+
+        paths.removeAll()
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "OK")
+        #expect(paths.count == 1)
+        #expect(paths.first?.hasSuffix("/chat/completions") == true)
     }
 
     @Test func reasoningTagsAreStrippedFromContent() async throws {

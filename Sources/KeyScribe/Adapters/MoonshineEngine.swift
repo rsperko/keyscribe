@@ -43,7 +43,9 @@ final class MoonshineEngine: SpeechEngine, @unchecked Sendable {
     }
 
     func loadIfNeeded() async throws {
-        try await load(progress: nil)
+        guard transcriber == nil else { return }
+        guard modelFilesPresent(at: modelDir) else { throw EngineError.notInitialized }
+        transcriber = try Transcriber(modelPath: modelDir.path, modelArch: .base)
     }
 
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {

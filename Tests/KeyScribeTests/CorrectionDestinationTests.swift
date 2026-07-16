@@ -49,6 +49,16 @@ struct CorrectionDestinationTests {
         #expect(draft.buttonTitle == "Update")
     }
 
+    @Test func wordUpdateExplainsTheCasingChangeAndUsesUpdateAction() {
+        let draft = VocabularyDraftAnalysis(
+            term: "GitHub", replacement: "", regex: false,
+            analyze: { _ in VocabularyAnalysis(action: .updateWord(currentWord: "github")) })
+
+        #expect(draft.feedback == .update("Updates the existing word — “GitHub” is currently spelled “github”."))
+        #expect(draft.canCommit)
+        #expect(draft.buttonTitle == "Update")
+    }
+
     @Test func globalCoverageProducesVisibleExistingStatusAndDisablesCommit() {
         let draft = VocabularyDraftAnalysis(
             term: "KeyScribe", replacement: "", regex: false,

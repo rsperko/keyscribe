@@ -71,19 +71,27 @@ struct CreateReplacementSheet: View {
 
 struct AddToDictionarySheet: View {
     let initialTerm: String
-    let onSave: (String) -> Void
+    let analyze: (VocabularyProposal) -> VocabularyAnalysis
+    let onSave: (String, VocabularyAnalysis.Action) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var term: String
     @FocusState private var termFocused: Bool
 
-    init(initialTerm: String, onSave: @escaping (String) -> Void) {
+    init(
+        initialTerm: String,
+        analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
+        onSave: @escaping (String, VocabularyAnalysis.Action) -> Void
+    ) {
         self.initialTerm = initialTerm
+        self.analyze = analyze
         self.onSave = onSave
         _term = State(initialValue: initialTerm)
     }
 
     private var trimmed: String { term.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var validationIssue: UserInputValidation.Issue? { UserInputValidation.phraseIssue(trimmed) }
+    private var draft: VocabularyDraftAnalysis {
+        VocabularyDraftAnalysis(term: trimmed, replacement: "", regex: false, analyze: analyze)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -95,14 +103,18 @@ struct AddToDictionarySheet: View {
                     .onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.term)
             }
-            if let validationIssue { IssueText(validationIssue.message) }
+            if case let .invalidInput(issue) = draft.validationIssue { IssueText(issue.message) }
+            if let feedback = draft.feedback {
+                VocabularyFeedbackView(feedback: feedback)
+                    .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.status)
+            }
             Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Add to Dictionary") { save() }
-                    .keyboardShortcut(.defaultAction).disabled(validationIssue != nil)
+                Button(draft.buttonTitle) { save() }
+                    .keyboardShortcut(.defaultAction).disabled(!draft.canCommit)
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.save)
             }
         }
@@ -111,8 +123,11 @@ struct AddToDictionarySheet: View {
     }
 
     private func save() {
-        guard validationIssue == nil else { return }
-        onSave(trimmed)
+        guard draft.canCommit,
+              case let .word(word) = draft.proposal,
+              let action = draft.analysis?.action
+        else { return }
+        onSave(word, action)
         dismiss()
     }
 }

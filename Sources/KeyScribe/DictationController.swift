@@ -1105,6 +1105,11 @@ final class DictationController {
         // it before any cloud rewrite reads activeMode, so a target that couldn't be confirmed can't leak
         // (KS-01). Adoption is not cancelled on commit, so this observes the real result.
         await session?.snapshotAdoptionTask?.value
+        // A password field can steal focus AFTER adoption settled (autofill, a manager prompt, the user
+        // clicking a login form mid-recording). The press/adoption snapshots cannot see that, so re-probe at
+        // commit and fold the result in before the rewrite and history read it (X-1). Started here so the AX
+        // walk overlaps transcription; awaited just before Phase-B, so it costs no user-visible latency.
+        let commitSecureProbe = Task { @MainActor [snapshotAsync] in await snapshotAsync().isSecureField }
         let engine = activeEngine
         building.audioSeconds = audioSeconds
 
@@ -1216,6 +1221,12 @@ final class DictationController {
         if let phraseModeId = routed.routedModeId, eligible.contains(where: { $0.id == phraseModeId }) {
             session?.modeChoice = .spokenPhrase
             session?.routedPhrase = routed.matchedPhrase
+        }
+        // Fold the commit-time probe in before anything reads the flag. Secure is sticky and only the flag is
+        // adopted: bundleId/pid must stay the PRESS-time target, since decideInsertion compares captured
+        // against current to detect focus moves.
+        if await commitSecureProbe.value, capturedSnapshot != nil {
+            capturedSnapshot?.isSecureField = true
         }
         // Neuter the routed mode BEFORE it drives the rewrite: produceFinalText resolves the connection off
         // this mode, so a Phase-B re-route to a cloud mode from a secure field must be local-only here, not
@@ -1379,6 +1390,10 @@ final class DictationController {
         // verbatim history store.
         guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false),
               capturedSnapshot?.isSecureField != true, session?.targetUnconfirmed != true else { return }
+        // Last line of defense: a password field that stole focus after the commit-time probe is still caught
+        // by the inserter, which diverts to a concealed copy. That verdict is the system classifying the text
+        // as password-grade — it must veto history too (X-1).
+        if case .copied(.secureField) = insertion { return }
         let outcome: HistoryEntry.Outcome
         switch insertion {
         case .noSpeech: return
@@ -1642,6 +1657,18 @@ final class DictationController {
             capturedWindowId: capturedSnapshot?.focusedWindowId,
             plan: plan, connection: connection,
             precedingTextTask: session?.precedingTextTask, precedingTextProbe: precedingTextProbe).build()
+
+        // Cancelled while the request built: return before scheduling the escape hatch or rendering.
+        // `.rewriting` holds key focus, so a stale render re-takes it after cancel already hid the HUD, on a
+        // machine state that is no longer cancellable — the panel then sits there swallowing keystrokes meant
+        // for the user's app (X-2). releaseCapturedPlan cancels the preceding-text probe this awaits, which
+        // makes the resume prompt, so the interleaving is near-guaranteed once ESC lands in this window. The
+        // caller re-checks isCancelled before any insert or history write.
+        if Task.isCancelled {
+            return (localProcessed, false, RewriteDetails(
+                connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
+                contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true))
+        }
 
         // Edit-in-place must leave the selection untouched on abandon, so the local-transcript
         // escape hatch is dictation-only — never offer to paste the captured selection back.

@@ -43,6 +43,7 @@ struct HistoryPaneModelTests {
     private func model(_ store: HistoryStore) -> HistoryPaneModel {
         HistoryPaneModel(
             store: store, addDictionaryWord: { _ in true },
+            analyzeDictionaryWord: { _ in VocabularyAnalysis(action: .addWord) },
             addReplacement: { _, _ in true }, openSettings: { _ in })
     }
 

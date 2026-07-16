@@ -88,13 +88,33 @@ private final class CaptureSession: @unchecked Sendable {
     let url: URL
     let file: AVAudioFile
     let writer: CaptureWriter
+    // This capture's own ring. Never shared with, or reused by, another capture: a ring instance belongs to
+    // exactly one arm, so a stray realtime write from an abandoned capture cannot reach a live one's audio.
+    let ring: AudioSampleRing
     var configRestartCount = 0
 
-    init(url: URL, file: AVAudioFile, writer: CaptureWriter) {
+    init(url: URL, file: AVAudioFile, writer: CaptureWriter, ring: AudioSampleRing) {
         self.url = url
         self.file = file
         self.writer = writer
+        self.ring = ring
     }
+}
+
+// The ring a single HAL unit's realtime handler writes into. The handler captures the SLOT immutably, so it can
+// never read some other capture's ring out of a shared mutable property — which is what made a late callback
+// from an abandoned generation able to write into its successor's audio.
+//
+// A unit belongs to exactly ONE generation (swapToFreshGeneration bumps the generation and drops the unit in the
+// same critical section; configureUnit reuses the resident unit only within a generation), so slot ⇔ generation
+// is 1:1 too.
+//
+// `ring` is written ONLY while this slot's unit cannot deliver: at arm, before the
+// `capturing.store(true, .releasing)` whose acquiring load in the handler is the publishing edge; and on a
+// mid-recording restart, before the replacement unit is started. Never while its unit is running — which is why
+// the realtime read needs no lock and no atomic.
+final class CaptureRingSlot: @unchecked Sendable {
+    var ring: AudioSampleRing?
 }
 
 final class AudioCapture: AudioCapturing, @unchecked Sendable {
@@ -123,7 +143,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
     private var arming: ArmingContext?
 
-    private var ring = AudioSampleRing(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8)
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
     private let overloadCount = Atomic<Int>(0)
@@ -159,9 +178,20 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         [kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyNominalSampleRate,
          kAudioDevicePropertyBufferFrameSize]
 
+    #if DEBUG
+    // Test seam: called by the realtime handler between its admission gate and `handle`, so a test can park a
+    // callback past the gate across finalization. An immutable `let`, so the realtime read is of a constant.
+    private let realtimeBarrier: (@Sendable () -> Void)?
+
+    init(realtimeBarrier: (@Sendable () -> Void)? = nil) {
+        self.realtimeBarrier = realtimeBarrier
+        registerInputListeners()
+    }
+    #else
     init() {
         registerInputListeners()
     }
+    #endif
 
     deinit {
         if let defaultInputListenerBlock {
@@ -458,49 +488,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         producerGeneration.store(-1, ordering: .releasing)
         capturing.store(false, ordering: .releasing)
         lock.withLock { lastWriter }?.finish(flushConverter: false)
-        let desiredRing = Self.ringGeometry(for: boundDeviceID)
-        if ring.matches(desiredRing) {
-            ring.reset()
-        } else {
-            ring = AudioSampleRing(desiredRing)
-            Log.audio.debug(
-                "ring resized: slots=\(desiredRing.slotCount, privacy: .public) framesPerSlot=\(desiredRing.maxFramesPerSlot, privacy: .public)")
-        }
-        overloadCount.store(0, ordering: .relaxed)
-        lock.withLock { unit?.resetOversizeDropCount(); oversizeDropsAccumulated = 0 }
-        levelBits.store(Float(0).bitPattern, ordering: .relaxed)
-        // The previous capture's samples are consumed by the controller right after finishDraining; clear any
-        // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
-        lock.withLock { lastDrainedSamples = nil }
-        // Admission opens later, at the cue-end boundary the controller publishes once this writer reports the
-        // route live (openAdmission) — so the writer starts closed and discards everything until then.
-        let writer = CaptureWriter(
-            ring: ring, file: file, recordFormat: recordFormat,
-            wantsSamples: wantsSamples,
-            onSamples: onSamples,
-            onFirstBuffer: {
-                record.noteFirstBuffer()
-                ready.signal()
-            },
-            observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
-        let mySession = CaptureSession(url: url, file: file, writer: writer)
-        // Started before publishing session/lastWriter: a teardown that observed a published-but-unstarted
-        // writer would return from finish() without joining its thread, and finishWriterAndCloseFile relies on
-        // that join before it closes the file. The writer just polls the reset ring until the IOProc starts.
-        writer.start()
-        let published = lock.withLock { () -> Bool in
-            guard generation == self.generation else { return false }
-            session = mySession
-            lastWriter = writer
-            return true
-        }
-        guard published else {
-            writer.finish(flushConverter: false)
-            try? FileManager.default.removeItem(at: url)
-            throw AudioCaptureError.bringUpTimedOut
-        }
-        producerGeneration.store(generation, ordering: .releasing)
-        capturing.store(true, ordering: .releasing)
+        let mySession = try prepareRingAndPublishSession(
+            desiredRing: Self.ringGeometry(for: boundDeviceID), file: file, url: url,
+            recordFormat: recordFormat, wantsSamples: wantsSamples, onSamples: onSamples,
+            ready: ready, record: record, generation: generation)
+        let writer = mySession.writer
 
         // Start the IOProc last so the first buffer lands in the correctly-sized ring.
         do {
@@ -525,6 +517,64 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard isGeneration(generation) else { return url }
         installActiveDeviceListener(deviceID: boundDeviceID, generation: generation)
         return url
+    }
+
+    // Control queue only, inside the quiescent window armSync opened above. Build this capture's ring, start the
+    // writer, and publish the ring + session.
+    //
+    // The ring is allocated fresh per arm and never reused or reset in place. That costs one bounded
+    // control-queue allocation (nothing on the realtime path) and buys the invariant the realtime gate cannot:
+    // a callback admitted an instant before its generation was abandoned resumes into a ring that belongs to
+    // that dead capture alone, so its stray frames cannot land in the successor's audio.
+    private func prepareRingAndPublishSession(
+        desiredRing: AudioSampleRing.RingGeometry, file: AVAudioFile, url: URL, recordFormat: AVAudioFormat,
+        wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?,
+        ready: SignalLatch, record: CaptureStartRecord, generation: Int
+    ) throws -> CaptureSession {
+        let ring = AudioSampleRing(desiredRing)
+        Log.audio.debug(
+            "ring armed: slots=\(desiredRing.slotCount, privacy: .public) framesPerSlot=\(desiredRing.maxFramesPerSlot, privacy: .public)")
+        overloadCount.store(0, ordering: .relaxed)
+        lock.withLock { unit?.resetOversizeDropCount(); oversizeDropsAccumulated = 0 }
+        levelBits.store(Float(0).bitPattern, ordering: .relaxed)
+        // The previous capture's samples are consumed by the controller right after finishDraining; clear any
+        // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
+        lock.withLock { lastDrainedSamples = nil }
+        // Admission opens later, at the cue-end boundary the controller publishes once this writer reports the
+        // route live (openAdmission) — so the writer starts closed and discards everything until then.
+        let writer = CaptureWriter(
+            ring: ring, file: file, recordFormat: recordFormat,
+            wantsSamples: wantsSamples,
+            onSamples: onSamples,
+            onFirstBuffer: {
+                record.noteFirstBuffer()
+                ready.signal()
+            },
+            observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
+        let mySession = CaptureSession(url: url, file: file, writer: writer, ring: ring)
+        // Started before publishing session/lastWriter: a teardown that observed a published-but-unstarted
+        // writer would return from finish() without joining its thread, and finishWriterAndCloseFile relies on
+        // that join before it closes the file. The writer just polls the empty ring until the IOProc starts.
+        writer.start()
+        // Binding the ring to this generation's unit happens in the SAME critical section as the generation
+        // check: an arm the watchdog abandoned must not seed the successor's unit, and the unit resident here is
+        // this generation's by construction (a generation bump drops the unit). The unit is not started yet, so
+        // its handler cannot be reading the slot.
+        let published = lock.withLock { () -> Bool in
+            guard generation == self.generation else { return false }
+            unit?.ringSlot.ring = ring
+            session = mySession
+            lastWriter = writer
+            return true
+        }
+        guard published else {
+            writer.finish(flushConverter: false)
+            try? FileManager.default.removeItem(at: url)
+            throw AudioCaptureError.bringUpTimedOut
+        }
+        producerGeneration.store(generation, ordering: .releasing)
+        capturing.store(true, ordering: .releasing)
+        return mySession
     }
 
     // Bind and initialize the target device, retrying a failed system default once.
@@ -592,16 +642,30 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func makeUnit(generation: Int) -> HALInputUnit {
-        HALInputUnit(handler: { [weak self] buffer, hostTime in
+        let ringSlot = CaptureRingSlot()
+        return HALInputUnit(
+            ringSlot: ringSlot, handler: realtimeHandler(generation: generation, ringSlot: ringSlot))
+    }
+
+    // The handler resolves its ring from the slot it captured at construction — NOT from a shared property. That
+    // is what makes an already-admitted callback harmless when its generation is abandoned mid-flight: it can
+    // only ever reach the ring its own arm published, which no successor reuses.
+    private func realtimeHandler(
+        generation: Int, ringSlot: CaptureRingSlot
+    ) -> @Sendable (AVAudioPCMBuffer, UInt64?) -> Void {
+        { [weak self] buffer, hostTime in
             // Realtime thread: gate, copy to the ring, and publish meter level only.
             guard let self,
                   Self.shouldAcceptRealtimeBuffer(
                     capturing: self.capturing.load(ordering: .acquiring),
                     producerGeneration: self.producerGeneration.load(ordering: .acquiring),
                     unitGeneration: generation
-                  ) else { return }
-            self.handle(buffer, hostTime: hostTime)
-        })
+                  ), let ring = ringSlot.ring else { return }
+            #if DEBUG
+            self.realtimeBarrier?()
+            #endif
+            self.handle(buffer, hostTime: hostTime, ring: ring)
+        }
     }
 
     func finishDraining() async -> URL? {
@@ -761,7 +825,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // thread could not keep up (the ring overran); `overloads` means CoreAudio saw the RT callback miss its
         // deadline. Report ring drops AS OF the seal so post-release overruns the sealed writer discards anyway
         // don't trip the canary; backstop/cancel paths drained to the end (no seal) → live count.
-        lastRingDroppedCount = s.writer.ringDropCountAtSeal() ?? ring.droppedCount
+        lastRingDroppedCount = s.writer.ringDropCountAtSeal() ?? s.ring.droppedCount
         lastWriterDroppedCount = s.writer.writerDroppedFrames()
         // Snapshot before teardown disposes the unit's context; add drops harvested from any unit a mid-capture
         // restart already disposed. `oversizeDropped` is a silent-loss class upstream of the ring (device grew
@@ -769,12 +833,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lastOversizeDroppedCount = lock.withLock { oversizeDropsAccumulated + (unit?.oversizeDropCount ?? 0) }
         Log.audio.debug(
             "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public) writerDropped=\(self.lastWriterDroppedCount, privacy: .public) oversizeDropped=\(self.lastOversizeDroppedCount, privacy: .public)")
-        // Writer joined and `capturing` false → ring is quiescent (the window armSync reassigns in). A small-period
-        // pro interface can have grown it to ~16.7 MiB that a menu-bar app would retain for its lifetime, so shrink
-        // back to baseline here; the next arm re-grows it for the bound device if needed. Zero hot-path cost.
-        if !ring.matches(Self.baselineRingGeometry()) {
-            ring = AudioSampleRing(Self.baselineRingGeometry())
-        }
+        // Nothing resets or replaces a ring here, and nothing needs to: this capture's ring dies with its
+        // session, and the next arm builds its own. `capturing` false and a joined writer would NOT have made it
+        // safe to — this runs on the caller's thread while the unit is still started (teardown is only
+        // *scheduled* below), so a callback admitted an instant before the flip can be inside `handle` now.
     }
 
     // Valid from capture end until the next arm resets the counters.
@@ -811,7 +873,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // Copy delivered frames into the shared ring and publish the meter level. The realtime path stays
     // lock-free, allocation-free, and syscall-free; resampling and file I/O happen on the writer thread.
-    private func handle(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
+    private func handle(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?, ring: AudioSampleRing) {
         guard let channels = buffer.floatChannelData else { return }
         let channelCount = Int(buffer.format.channelCount)
         let frameCount = Int(buffer.frameLength)
@@ -1249,6 +1311,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 // Before start, not after: start can deliver a buffer immediately and the record freezes the
                 // delivering device at that instant. configure() has already bound it, so this is also true here.
                 publishBoundInputName(for: deviceID)
+                // The restart keeps the capture's ring: this is a new unit for the SAME session, so its slot is
+                // seeded with the ring already being written and drained, not a new one — a fresh ring here
+                // would strand the frames the outgoing unit had queued and confuse the writer's drain gate.
+                // Written before start(), so the unit's handler cannot be reading the slot yet.
+                fresh.ringSlot.ring = sessionForRetry.ring
                 do {
                     try fresh.start()
                 } catch {
@@ -1293,4 +1360,42 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     static func bringUpAbortSupersedes(_ error: Error) -> Bool {
         error is DeadlineExceeded || error is CancellationError
     }
+
+    #if DEBUG
+    // Test seams. Between them they drive the REAL ring/session publication, the REAL realtime entry (gates and
+    // per-unit slot included), and the REAL finalization — without a microphone, which no device-bound path
+    // allows. The unit installed here is deliberately NOT configured: it owns the ring slot the production
+    // publication path writes into, and every CoreAudio call on it is a no-op while unconfigured.
+    @discardableResult
+    func armForTesting(url: URL, geometry: AudioSampleRing.RingGeometry, sampleRate: Int = 16_000) throws
+        -> HALInputUnit {
+        guard let recordFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
+            channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
+        let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
+        producerGeneration.store(-1, ordering: .releasing)
+        capturing.store(false, ordering: .releasing)
+        let generation = currentGeneration()
+        let testUnit = makeUnit(generation: generation)
+        lock.withLock { unit = testUnit }
+        _ = try prepareRingAndPublishSession(
+            desiredRing: geometry, file: file, url: url, recordFormat: recordFormat,
+            wantsSamples: true, onSamples: nil, ready: SignalLatch(),
+            record: CaptureStartRecord(targetIsBluetooth: false, explicitDevice: false, target: nil),
+            generation: generation)
+        return testUnit
+    }
+
+    // Finalization ALONE — the KS-05 site: it runs on the caller's thread with the unit still started.
+    func finalizeForTesting() {
+        finishWriterAndCloseFile(flushConverter: true)
+    }
+
+    // The watchdog's abandonment of an in-flight generation.
+    func swapToFreshGenerationForTesting() {
+        swapToFreshGeneration()
+    }
+
+    var armedRingForTesting: AudioSampleRing? { lock.withLock { session?.ring } }
+    #endif
 }

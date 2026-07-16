@@ -32,6 +32,30 @@ enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
     }
 }
 
+// `description` above is for ephemeral UI (Settings, first run), where showing the provider's own message
+// helps a user fix a misconfigured connection. History and the public log are a different boundary: a
+// compatible endpoint or proxy can echo request content into an error body, so the persisted reason is built
+// from the status code alone (KS-07). The body stays in the associated value for OpenAIAPIError.parse and the
+// remediation loop — in memory only.
+extension ProviderTransportError: RewriteFailureReporting {
+    var rewriteFailureReason: String {
+        switch self {
+        case .missingKey: return "No API key is stored for this connection."
+        case .keychainDenied: return "The keychain would not release the API key."
+        case .missingBaseURL: return "This connection needs a base URL."
+        case .http(let code, _): return "The model service returned an error (\(code))."
+        case .badResponse: return "The model service returned an unexpected response."
+        case .truncated: return "The model service cut the response off at its length limit."
+        }
+    }
+}
+
+// URLError's copy is Foundation's own ("The Internet connection appears to be offline."), derived from the
+// transport state rather than from any response the endpoint controls.
+extension URLError: RewriteFailureReporting {
+    public var rewriteFailureReason: String { localizedDescription }
+}
+
 struct ProviderTransport: Sendable {
     var session: URLSession
     var keyProvider: @Sendable (String) -> SecretLookup

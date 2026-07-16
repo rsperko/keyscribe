@@ -134,7 +134,19 @@ struct VocabularyConfigTests {
 
     @Test func mergeWordsDedupesCaseInsensitively() {
         #expect(VocabularyMerge.words(global: ["kubernetes"], local: ["Kubernetes"], includeGlobal: true)
-            == ["kubernetes"])
+            == ["Kubernetes"])
+    }
+
+    @Test func mergeWordsDedupesLocalWordsWhenGlobalWordsAreExcluded() {
+        #expect(VocabularyMerge.words(global: [], local: ["Kubernetes", "kubernetes"], includeGlobal: false)
+            == ["Kubernetes"])
+    }
+
+    @Test func mergeWordsPreservesGlobalOrderWhenLocalCasingOverrides() {
+        #expect(VocabularyMerge.words(
+            global: ["alpha", "github", "omega"],
+            local: ["GitHub", "beta"],
+            includeGlobal: true) == ["alpha", "GitHub", "omega", "beta"])
     }
 
     @Test func mergeWordsEmptyWhenAllInputsEmpty() {
@@ -240,5 +252,10 @@ struct VocabularyConfigTests {
     @Test func removingDictionaryWordMatchesCaseInsensitively() {
         let set = DictionarySet(words: ["KeyScribe", "Parakeet"])
         #expect(set.removing(word: "keyscribe").words == ["Parakeet"])
+    }
+
+    @Test func addingDictionaryWordRecasesAnExistingWord() {
+        let set = DictionarySet(words: ["github"]).adding(word: "GitHub")
+        #expect(set.words == ["GitHub"])
     }
 }

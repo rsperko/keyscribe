@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loadSettings()
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
-        ModelInstallStore.deleteRetiredCtcCompanions()
+        Task.detached(priority: .utility) { ModelInstallStore.deleteRetiredCtcCompanions() }
         let hasUsableEngine = !ModelInstallStore.installedIds().isEmpty
             || (SpeechModelCatalog.entry(for: settings.stt.engine)?.systemManaged ?? false)
         if hasUsableEngine {
@@ -94,7 +94,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: settings, provider: provider, config: config, history: history, hud: hud,
             pressSnapshot: ContextProbe.initialSnapshot,
             snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) },
-            snapshotAsync: { [hud] in await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID) })
+            snapshotAsync: { [hud] in await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID) },
+            activeEngineUsable: { [weak self] engine in
+                InstalledEngineFilter.shouldRun(engineId: engine.id)
+                    && (self?.speechModels?.isEngineUsable(engine.id) ?? true)
+            })
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
@@ -180,8 +184,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try await engine.load(progress: progress)
             },
             verify: { [weak self] id in
-                guard let self, let engine = self.provider.engine(id) else { return false }
-                return await self.controller.selfTestForSettings(engine)
+                guard let self, let engine = self.provider.engine(id) else { return .failed }
+                switch await self.controller.selfTestForSettings(engine) {
+                case true: return .passed
+                case false: return .failed
+                case nil: return .skipped
+                }
             },
             evictEngine: { [weak self] id in
                 guard let self, let engine = self.provider.engine(id) else { return }
@@ -524,7 +532,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             download: { [weak self] id, progress in
                 guard let engine = self?.provider.engine(id) else { throw EngineUnavailable.notWired(id) }
                 try await engine.load(progress: progress)
-                self?.speechModels?.noteInstalled(id)
+                do {
+                    try self?.speechModels?.noteInstalled(id)
+                } catch {
+                    throw FirstRunDownloadError.installStateNotSaved
+                }
             },
             selectEngine: { [weak self] id in self?.setEngine(id) },
             onReadyToDictate: { [weak self] in

@@ -317,4 +317,32 @@ struct ModeTests {
         #expect(again.trailing == .space)
         #expect(again.submit == .cmdReturn)
     }
+
+    @Test(arguments: ["../../notes/private", "/etc/passwd", "sub/dir", "..", "", "  ", ".hidden", "a:b"])
+    func decodeRejectsAFragmentIDThatIsNotAFilenameStem(_ id: String) {
+        let toml = """
+        schema_version = 1
+        name = "Leaky"
+
+        [ai_rewrite]
+        connection = "gemini-flash"
+        prompt = "Rewrite."
+        fragments = ["\(id)"]
+        """
+        #expect(throws: ConfigError.self) { try ModeStore.decode(from: toml, id: "leaky") }
+    }
+
+    @Test func decodeAcceptsOrdinaryFragmentIDs() throws {
+        let toml = """
+        schema_version = 1
+        name = "Fine"
+
+        [ai_rewrite]
+        connection = "gemini-flash"
+        prompt = "Rewrite."
+        fragments = ["my-voice", "café-notes"]
+        """
+        let mode = try ModeStore.decode(from: toml, id: "fine")
+        #expect(mode.aiRewrite?.fragments == ["my-voice", "café-notes"])
+    }
 }

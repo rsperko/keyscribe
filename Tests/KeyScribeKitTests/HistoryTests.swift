@@ -210,12 +210,12 @@ struct HistorySearchTests {
 }
 
 struct CorrectionSurfaceTests {
-    @Test func addingWordIgnoresBlanksAndCaseInsensitiveDups() {
+    @Test func addingWordIgnoresBlanksAndRecasesCaseInsensitiveDups() {
         var set = DictionarySet().adding(word: "KeyScribe")
         set = set.adding(word: "  ")
         set = set.adding(word: "keyscribe")
         set = set.adding(word: "Parakeet")
-        #expect(set.words == ["KeyScribe", "Parakeet"])
+        #expect(set.words == ["keyscribe", "Parakeet"])
     }
 
     @Test func addingLiteralRuleIgnoresBlankHeard() {

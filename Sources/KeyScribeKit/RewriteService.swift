@@ -19,10 +19,22 @@ public enum RewriteOutcome: Equatable, Sendable {
     // Like the sent prompt, it carries ⟦SN:…⟧ tokens, never their originals.
     case rewritten(String, received: String)
     // `reason` records WHY the rewrite was abandoned (an HTTP error, a missing key, a validation failure)
-    // so the fallback is diagnosable instead of silent. It is provider error text or a fixed local string,
-    // never user content, so it is safe to log and to store in history. `received` is the last reply the
-    // provider returned before the fallback (the evidence for `reason`); nil when the call itself failed.
+    // so the fallback is diagnosable instead of silent. It is persisted to history and logged publicly, so
+    // it must never carry raw provider bodies or command stderr — a user-supplied token command can print a
+    // credential and a compatible endpoint can echo request content back (KS-07). Client errors are
+    // sanitized through `RewriteFailureReporting`; anything that does not opt in is reported generically
+    // rather than trusted. `received` is the last reply the provider returned before the fallback (the
+    // evidence for `reason`); nil when the call itself failed.
     case localFallback(localText: String, reason: String?, received: String?)
+}
+
+// An error that can name itself in persisted history and public logs. Conformance is an assertion that
+// `rewriteFailureReason` is a stable, sanitized string built only from the error's own structure (a status
+// code, an exit code) — never from a response body, stderr, or anything else an untrusted process or
+// endpoint controls. Default-deny: RewriteService reports a non-conforming error generically instead of
+// reaching for `localizedDescription`, so a new error type cannot leak by omission.
+public protocol RewriteFailureReporting: Error {
+    var rewriteFailureReason: String { get }
 }
 
 // Orchestrates one optional rewrite (design.md §4.2, prompt_design.md): assemble the prompt, call the
@@ -35,6 +47,12 @@ public actor RewriteService {
         "IMPORTANT: Return ONLY the transformed text and reproduce every ⟦SN:…⟧ token verbatim, exactly once."
 
     public init(client: LLMClient) { self.client = client }
+
+    static let genericFailureReason = "The AI service could not be reached."
+
+    static func sanitizedReason(for error: Error) -> String {
+        (error as? RewriteFailureReporting)?.rewriteFailureReason ?? genericFailureReason
+    }
 
     public func rewrite(
         payload: TokenizedPayload, inputs: PromptInputs, connection: Connection,
@@ -54,7 +72,8 @@ public actor RewriteService {
             do {
                 output = try await client.complete(system: system, user: base.user, connection: connection)
             } catch {
-                return .localFallback(localText: localText, reason: error.localizedDescription, received: lastReceived)
+                return .localFallback(
+                    localText: localText, reason: Self.sanitizedReason(for: error), received: lastReceived)
             }
             lastReceived = output
             // Unwrap a whole-output <content> echo BEFORE the gate, so an echo whose inside is empty
