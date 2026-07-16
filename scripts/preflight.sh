@@ -371,13 +371,19 @@ chk_b_benchmark() {
   if timeout --foreground 2400 "$EXE" --config-dir "$PF_CFG" --benchmark "$REPO_ROOT/corpus/stt" >/tmp/preflight-bench.log 2>&1; then
     local RES="$REPO_ROOT/corpus/stt/results.json" WORST
     [ -f "$RES" ] || { result skip "--benchmark ran but wrote no results.json"; return; }
-    WORST=$(python3 - "$RES" "$MAX_WER" <<'PY'
+    if ! WORST=$(python3 - "$RES" "$MAX_WER" <<'PY'
 import json, sys
 res = json.load(open(sys.argv[1])); ceil = float(sys.argv[2])
-bad = [(k, v.get("werBiased", 0)) for k, v in res.items() if v.get("werBiased", 0) > ceil]
+engines = res["engines"]
+if not engines:
+    sys.exit("results.json carries no engines")
+bad = [(k, v["werBiased"]) for k, v in engines.items() if v["werBiased"] > ceil]
 print("\n".join(f"{k}={w:.3f}" for k, w in sorted(bad, key=lambda x: -x[1])))
 PY
-)
+); then
+      result fail "--benchmark: could not read $RES — the WER ceiling was NOT checked"
+      return
+    fi
     if [ -z "$WORST" ]; then
       result pass "--benchmark: all engines under the ${MAX_WER} biased-WER ceiling"
     else
