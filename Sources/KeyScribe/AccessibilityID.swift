@@ -57,6 +57,9 @@ enum AccessibilityID {
         }
 
         enum Vocabulary {
+            static let scopeList = "settings.vocabulary.scopeList"
+            static let global = "settings.vocabulary.scope.global"
+            static func mode(_ modeID: String) -> String { "settings.vocabulary.scope.mode.\(modeID)" }
             static let composerTerm = "settings.vocabulary.composer.term"
             static let composerUseInstead = "settings.vocabulary.composer.useInstead"
             static let composerRegexToggle = "settings.vocabulary.composer.regexToggle"
@@ -210,23 +213,7 @@ enum AccessibilityID {
             }
 
             enum Recognition {
-                static let disclosure = "mode.editor.recognition.disclosure"
-                static let dictionaryList = "mode.editor.recognition.dictionary.list"
-                static func dictionaryRemove(_ word: String) -> String { "mode.editor.recognition.dictionary.remove.\(word)" }
-                static let dictionaryDeleteConfirmConfirm = "mode.editor.recognition.dictionary.deleteConfirm.confirm"
-                static let dictionaryDeleteConfirmCancel = "mode.editor.recognition.dictionary.deleteConfirm.cancel"
-                static let replacementsList = "mode.editor.recognition.replacements.list"
-                static let replacementEditorHeard = "mode.editor.recognition.replacements.editor.heard"
-                static let replacementEditorUseInstead = "mode.editor.recognition.replacements.editor.useInstead"
-                static let replacementEditorRegex = "mode.editor.recognition.replacements.editor.regex"
-                static let replacementEditorAdvanced = "mode.editor.recognition.replacements.editor.advanced"
-                static let replacementEditorStatus = "mode.editor.recognition.replacements.editor.status"
-                static let replacementEditorUpdate = "mode.editor.recognition.replacements.editor.update"
-                static func replacementEdit(_ index: Int) -> String { "mode.editor.recognition.replacements.edit.\(index)" }
-                static func replacementRemove(_ index: Int) -> String { "mode.editor.recognition.replacements.remove.\(index)" }
-                static func replacementAdvisory(_ index: Int) -> String { "mode.editor.recognition.replacements.advisory.\(index)" }
-                static let replacementDeleteConfirmConfirm = "mode.editor.recognition.replacements.deleteConfirm.confirm"
-                static let replacementDeleteConfirmCancel = "mode.editor.recognition.replacements.deleteConfirm.cancel"
+                static let editVocabulary = "mode.editor.recognition.editVocabulary"
             }
         }
     }
@@ -340,6 +327,7 @@ enum AccessibilityID {
         Settings.General.dictationTrigger,
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
+        Settings.Vocabulary.scopeList, Settings.Vocabulary.global,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.composerStatus, Settings.Vocabulary.recognitionHelp,
@@ -371,8 +359,6 @@ enum AccessibilityID {
         Mode.Editor.privacy, Mode.Editor.excludeFromHistory,
         Mode.Editor.trimTrailingPunctuation, Mode.Editor.numbersAsDigits, Mode.Editor.trailing,
         Mode.Editor.duplicate, Mode.Editor.delete,
-        Mode.Editor.Recognition.dictionaryDeleteConfirmConfirm, Mode.Editor.Recognition.dictionaryDeleteConfirmCancel,
-        Mode.Editor.Recognition.replacementDeleteConfirmConfirm, Mode.Editor.Recognition.replacementDeleteConfirmCancel,
         Mode.Editor.Context.app, Mode.Editor.Context.precedingText,
         Mode.Editor.Routing.disclosure, Mode.Editor.Routing.addAppRule,
         Mode.Editor.Routing.chooseFromApplications, Mode.Editor.Routing.enterBundleID,
@@ -381,11 +367,7 @@ enum AccessibilityID {
         Mode.Editor.Routing.windowTitle, Mode.Editor.Routing.windowTitleAdd, Mode.Editor.Routing.phraseStart,
         Mode.Editor.Routing.phrase,
         Mode.Editor.Routing.phraseAdd, Mode.Editor.Routing.websitePattern, Mode.Editor.Routing.websitePatternAdd,
-        Mode.Editor.Recognition.disclosure, Mode.Editor.Recognition.dictionaryList,
-        Mode.Editor.Recognition.replacementsList,
-        Mode.Editor.Recognition.replacementEditorHeard, Mode.Editor.Recognition.replacementEditorUseInstead,
-        Mode.Editor.Recognition.replacementEditorRegex, Mode.Editor.Recognition.replacementEditorAdvanced,
-        Mode.Editor.Recognition.replacementEditorStatus, Mode.Editor.Recognition.replacementEditorUpdate,
+        Mode.Editor.Recognition.editVocabulary,
         FirstRun.Intro.getStarted,
         FirstRun.Model.advancedDisclosure, FirstRun.Model.enginePicker, FirstRun.Model.progress,
         FirstRun.Model.useAppleSpeech, FirstRun.Model.download,

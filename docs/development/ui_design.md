@@ -462,9 +462,17 @@ deleting it still requires confirmation.
 
 Both screens prioritize fast correction over configuration theory.
 
+**Vocabulary** is the management home for both global and mode-only vocabulary. It uses the shared
+Settings list/detail layout: **Global** is first and applies everywhere; enabled modes follow; disabled
+modes remain visible in their own group so their existing vocabulary and pre-enable setup never disappear.
+Selecting a scope edits only its own words and replacements. A mode detail states whether it also includes
+Global vocabulary, rather than mixing inherited entries into its editable lists. Mode editors keep an
+always-visible **Recognition and replacements** summary with an **Edit Vocabulary…** action; the full
+composer and lists do not live inside the mode editor.
+
 - Add to Vocabulary: one compact composer with two labeled fields, **Word or heard phrase** (with an
   in-field example prompt) and **Use instead (optional)** — each field carries exactly one label, in
-  global settings, mode settings, and the standalone panel. Leaving **Use instead** empty adds a
+  Global, a selected mode, and the standalone panel. Leaving **Use instead** empty adds a
   dictionary word; filling it in creates a replacement. Adding a heard phrase that already has a
   replacement updates that rule in place — never a silent drop or a duplicate row. Entering a
   dictionary word that differs only in casing updates that existing word in place; the composer names
@@ -596,9 +604,10 @@ sections:
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
    **More precise matching**. Availability is separate from the ways a user starts or selects a mode.
 4. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
-   (inverse text normalization), dictionary, and replacements. Dictionary/replacement editing lives
-   under `Recognition and replacements`. (Dictionary recovery is no longer a mode setting — it is a
-   per-engine option on bias-less speech models; see the Speech Models settings.)
+   (inverse text normalization), and an always-visible **Recognition and replacements** summary. Its
+   **Edit Vocabulary…** action opens Vocabulary with that mode selected. (Dictionary recovery is no
+   longer a mode setting — it is a per-engine option on bias-less speech models; see the Speech Models
+   settings.)
 5. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
    mode's **reusable writing instructions** (fragments): listed by name directly under the
    instruction they extend, reorderable (they append in order), edited in place in a popover, and

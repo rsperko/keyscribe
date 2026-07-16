@@ -36,10 +36,6 @@ struct AccessibilityIDTests {
             == "settings.vocabulary.dictionary.deleteConfirm.confirm")
         #expect(AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmCancel
             == "settings.vocabulary.replacements.deleteConfirm.cancel")
-        #expect(AccessibilityID.Mode.Editor.Recognition.dictionaryDeleteConfirmConfirm
-            == "mode.editor.recognition.dictionary.deleteConfirm.confirm")
-        #expect(AccessibilityID.Mode.Editor.Recognition.replacementDeleteConfirmCancel
-            == "mode.editor.recognition.replacements.deleteConfirm.cancel")
     }
 
     // Dynamic ids splice a domain id (e.g. "_direct") into a fixed prefix, so the lowercase dot-path

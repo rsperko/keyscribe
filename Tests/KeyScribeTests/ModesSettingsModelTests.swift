@@ -23,21 +23,6 @@ struct ModesSettingsModelTests {
             .filter { !$0.hasPrefix(Mode.systemIdPrefix) })
     }
 
-    @Test func reloadPicksUpGlobalVocabulary() throws {
-        let (model, support, _) = try makeModel()
-        defer { try? FileManager.default.removeItem(at: support) }
-        #expect(model.globalWords.isEmpty)
-        #expect(model.globalRules.isEmpty)
-
-        try DictionaryStore.write(DictionarySet(words: ["Kubernetes"]), to: support)
-        try ReplacementsStore.write(
-            ReplacementsSet(rules: [.init(heard: "foo", replace: "bar", regex: false)]), to: support)
-        model.reload()
-
-        #expect(model.globalWords == ["Kubernetes"])
-        #expect(model.globalRules == [.init(heard: "foo", replace: "bar", regex: false)])
-    }
-
     // A ghost ledger entry would mark a mode as materialized when it isn't on disk, so the one-shot
     // seed migration would never re-run for it — a failed save must not record one.
     @Test func aTemplateThatFailsToSaveRecordsNoSeedLedgerEntry() throws {

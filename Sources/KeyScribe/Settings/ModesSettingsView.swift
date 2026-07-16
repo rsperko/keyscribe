@@ -6,6 +6,7 @@ struct ModesSettingsView: View {
     @ObservedObject var model: ModesSettingsModel
     var brokenConnectionIds: Set<String> = []
     var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
+    var onEditVocabulary: (String) -> Void = { _ in }
     @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var modePendingDelete: Mode?
     @State private var showingAddMode = false
@@ -59,7 +60,6 @@ struct ModesSettingsView: View {
                 if let mode = model.selected {
                     ModeEditorView(
                         mode: mode, allModes: model.modes, actionShortcuts: actionShortcuts,
-                        globalWords: model.globalWords, globalRules: model.globalRules,
                         connections: model.connections, fragmentIds: model.fragmentIds,
                         fragmentNames: model.fragmentNames,
                         autofocusName: model.lastCreatedId == mode.id,
@@ -71,6 +71,7 @@ struct ModesSettingsView: View {
                         onRevealFragment: model.revealFragment,
                         onConsumeFocus: model.consumeCreated,
                         onDuplicate: { model.duplicate(mode) },
+                        onEditVocabulary: { onEditVocabulary(mode.id) },
                         onDelete: { modePendingDelete = mode })
                         .id(mode.id)
                 } else {

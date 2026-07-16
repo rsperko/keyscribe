@@ -65,6 +65,12 @@ enum SettingsProblem: Equatable, CaseIterable {
 @MainActor
 final class SettingsNavigationModel: ObservableObject {
     @Published var destination: SettingsDestination? = .general
+    @Published var vocabularyScope: VocabularyScopeDestination = .global
+
+    func openVocabulary(for modeID: String) {
+        vocabularyScope = .mode(modeID)
+        destination = .vocabulary
+    }
 }
 
 @MainActor
@@ -376,12 +382,16 @@ struct SettingsRootView: View {
             case .speechModels:
                 SpeechModelsView(model: speechModels, settings: general)
             case .vocabulary:
-                VocabularySettingsView(dictionary: dictionary, replacements: replacements)
+                VocabularySettingsView(
+                    dictionary: dictionary, replacements: replacements, modes: modes,
+                    navigationSelection: $navigation.vocabularyScope)
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:
                 ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds,
-                                  actionShortcuts: actionShortcutRivals)
+                                  actionShortcuts: actionShortcutRivals) { modeID in
+                    navigation.openVocabulary(for: modeID)
+                }
             case .history:
                 HistoryPaneView(model: history, settings: general)
             case .permissions:

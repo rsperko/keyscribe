@@ -692,23 +692,233 @@ struct VocabularySettingsView: View {
 
     @ObservedObject var dictionary: DictionarySettingsModel
     @ObservedObject var replacements: ReplacementsSettingsModel
-    @State private var recognitionHelpExpanded = false
-
-    private var scope: VocabularyScope {
-        VocabularyScope(globalWords: dictionary.words, globalRules: replacements.rules)
-    }
+    @ObservedObject var modes: ModesSettingsModel
+    @Binding var navigationSelection: VocabularyScopeDestination
+    @State private var selection: VocabularyScopeDestination = .global
 
     var body: some View {
-        let replacementAdvisories = VocabularyAdvisor.ruleAdvisories(in: scope)
+        VStack(spacing: 0) {
+            if let error = modes.error {
+                IssueText(error)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                Divider()
+            }
+            HStack(spacing: 0) {
+                List(selection: $selection) {
+                    Section {
+                        PaneListRow(
+                            title: "Global",
+                            subtitle: VocabularyScopePicker.globalSummary(
+                                words: dictionary.words, rules: replacements.rules))
+                            .tag(VocabularyScopeDestination.global)
+                            .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.global)
+                    } header: {
+                        PaneListSectionHeader("Everywhere")
+                    }
+
+                    if !sections.enabled.isEmpty {
+                        Section {
+                            ForEach(sections.enabled) { mode in
+                                scopeRow(mode)
+                            }
+                        } header: {
+                            PaneListSectionHeader("Enabled Modes")
+                        }
+                    }
+
+                    if !sections.disabled.isEmpty {
+                        Section {
+                            ForEach(sections.disabled) { mode in
+                                scopeRow(mode, disabled: true)
+                            }
+                        } header: {
+                            PaneListSectionHeader("Disabled Modes")
+                        }
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.scopeList)
+                .frame(width: PaneMetrics.listWidth)
+
+                Divider()
+
+                selectedDetail
+                    .id(resolvedSelection)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            dictionary.reload()
+            replacements.reload()
+            modes.reload()
+            synchronizeSelection(navigationSelection, in: modes.modes)
+        }
+        .onChange(of: selection) { _, current in
+            synchronizeSelection(current, in: modes.modes)
+        }
+        .onChange(of: navigationSelection) { _, current in
+            synchronizeSelection(current, in: modes.modes)
+        }
+        .onChange(of: modes.modes) { _, current in
+            synchronizeSelection(selection, in: current)
+        }
+    }
+
+    private var sections: VocabularyScopeSections {
+        VocabularyScopePicker.sections(for: modes.modes)
+    }
+
+    private var resolvedSelection: VocabularyScopeDestination {
+        VocabularyScopePicker.resolved(selection, in: modes.modes)
+    }
+
+    private func synchronizeSelection(_ requested: VocabularyScopeDestination, in modes: [Mode]) {
+        let resolved = VocabularyScopePicker.resolved(requested, in: modes)
+        if selection != resolved { selection = resolved }
+        if navigationSelection != resolved { navigationSelection = resolved }
+    }
+
+    private func scopeRow(_ mode: Mode, disabled: Bool = false) -> some View {
+        PaneListRow(title: mode.name, subtitle: VocabularyScopePicker.summary(for: mode), badges: {
+            if disabled { PaneBadge("Disabled") }
+        })
+        .tag(VocabularyScopeDestination.mode(mode.id))
+        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.mode(mode.id))
+    }
+
+    @ViewBuilder private var selectedDetail: some View {
+        switch resolvedSelection {
+        case .global:
+            VocabularyEditor(
+                title: "Global Vocabulary",
+                subtitle: "Applies in every mode unless that mode opts out.",
+                wordsDescription: "Names, product terms, and jargon that should use your spelling everywhere.",
+                scope: VocabularyScope(globalWords: dictionary.words, globalRules: replacements.rules),
+                words: dictionary.words,
+                rules: replacements.rules,
+                deletionScope: .global,
+                dictionaryError: dictionary.error,
+                replacementsError: replacements.error,
+                dictionaryAdvice: dictionary.words.count >= Self.dictionaryAdviceThreshold
+                    ? "You have \(dictionary.words.count) entries. That is fine — but a phrase \(Branding.appName) always mishears the same way works better as a Replacement, which changes it exactly."
+                    : nil,
+                onAddWord: dictionary.add,
+                onRemoveWord: dictionary.remove,
+                onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) },
+                onUpdateReplacement: replacements.update,
+                onMoveReplacement: replacements.move,
+                onRemoveReplacement: replacements.remove(at:))
+        case let .mode(id):
+            if let mode = modes.modes.first(where: { $0.id == id && !$0.isSystem }) {
+                modeDetail(mode)
+            } else {
+                ContentUnavailableView(
+                    "Choose a vocabulary scope", systemImage: "text.book.closed",
+                    description: Text("Select Global or a mode to edit its vocabulary."))
+            }
+        }
+    }
+
+    private func modeDetail(_ mode: Mode) -> some View {
+        let scope = VocabularyScope(
+            globalWords: dictionary.words,
+            globalRules: replacements.rules,
+            local: VocabularyScope.Local(
+                words: mode.dictionary.words,
+                rules: mode.replacements.rules,
+                includeGlobalWords: mode.dictionary.includeGlobal,
+                includeGlobalRules: mode.replacements.includeGlobal))
+        return VocabularyEditor(
+            title: mode.name,
+            subtitle: modeScopeDescription(mode),
+            wordsDescription: "Names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.",
+            scope: scope,
+            words: mode.dictionary.words,
+            rules: mode.replacements.rules,
+            deletionScope: .mode,
+            onAddWord: { word in
+                var updated = mode
+                updated.dictionary.words = DictionarySet(words: mode.dictionary.words).adding(word: word).words
+                modes.update(updated)
+            },
+            onRemoveWord: { word in
+                var updated = mode
+                updated.dictionary.words.removeAll { $0 == word }
+                modes.update(updated)
+            },
+            onAddReplacement: { heard, replace, regex in
+                var updated = mode
+                updated.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
+                    .adding(heard: heard, replace: replace, regex: regex).rules
+                modes.update(updated)
+            },
+            onUpdateReplacement: { original, replacement in
+                let set = ReplacementsSet(rules: mode.replacements.rules).replacing(original, with: replacement)
+                guard set.rules != mode.replacements.rules else { return false }
+                var updated = mode
+                updated.replacements.rules = set.rules
+                modes.update(updated)
+                return true
+            },
+            onMoveReplacement: { source, destination in
+                var rules = mode.replacements.rules
+                guard ReplacementMoveValidation.isValid(source: source, destination: destination, count: rules.count)
+                else { return }
+                rules.move(fromOffsets: source, toOffset: destination)
+                var updated = mode
+                updated.replacements.rules = rules
+                modes.update(updated)
+            },
+            onRemoveReplacement: { index in
+                guard mode.replacements.rules.indices.contains(index) else { return }
+                var updated = mode
+                updated.replacements.rules.remove(at: index)
+                modes.update(updated)
+            })
+    }
+
+    private func modeScopeDescription(_ mode: Mode) -> String {
+        switch (mode.dictionary.includeGlobal, mode.replacements.includeGlobal) {
+        case (true, true): "Adds mode-only vocabulary on top of Global."
+        case (false, false): "Uses only the vocabulary listed here."
+        default: "Some Global vocabulary is included in this mode."
+        }
+    }
+}
+
+private struct VocabularyEditor: View {
+    let title: String
+    let subtitle: String
+    let wordsDescription: String
+    let scope: VocabularyScope
+    let words: [String]
+    let rules: [ReplacementsSet.Rule]
+    let deletionScope: VocabularyRemovalScope
+    var dictionaryError: String? = nil
+    var replacementsError: String? = nil
+    var dictionaryAdvice: String? = nil
+    let onAddWord: (String) -> Void
+    let onRemoveWord: (String) -> Void
+    let onAddReplacement: (String, String, Bool) -> Void
+    let onUpdateReplacement: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
+    let onMoveReplacement: (IndexSet, Int) -> Void
+    let onRemoveReplacement: (Int) -> Void
+    @State private var recognitionHelpExpanded = false
+
+    var body: some View {
+        let advisories = VocabularyAdvisor.ruleAdvisories(in: scope)
         Form {
+            Section {
+                PaneDetailHeader(systemImage: "text.book.closed", title: title, subtitle: subtitle)
+            }
             Section("Add to Vocabulary") {
                 VocabularyComposer(
                     analyze: { [scope] in VocabularyAdvisor.analyze($0, in: scope) },
-                    onAddWord: dictionary.add,
-                    onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) })
+                    onAddWord: onAddWord,
+                    onAddReplacement: onAddReplacement)
             }
             Section("Words to Recognize") {
-                Text("Names, product terms, and jargon that should use your spelling.")
+                Text(wordsDescription)
                     .font(.caption).foregroundStyle(.secondary)
                 DisclosureSection("How recognition works", isExpanded: $recognitionHelpExpanded) {
                     Text("Recognition support varies by speech model. These terms also guide a rewrite when one runs, including in privacy modes.")
@@ -717,28 +927,28 @@ struct VocabularySettingsView: View {
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.recognitionHelp)
                 DictionaryRows(
-                    words: dictionary.words,
+                    words: words,
                     removeID: AccessibilityID.Settings.Vocabulary.dictionaryRemove,
-                    deletionScope: .global,
+                    deletionScope: deletionScope,
                     deleteConfirmConfirmID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
                     deleteConfirmCancelID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmCancel,
-                    onRemove: dictionary.remove)
+                    onRemove: onRemoveWord)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
-                if dictionary.words.count >= Self.dictionaryAdviceThreshold {
-                    Label("You have \(dictionary.words.count) entries. That is fine — but a phrase \(Branding.appName) always mishears the same way works better as a Replacement, which changes it exactly.", systemImage: "info.circle")
+                if let dictionaryAdvice {
+                    Label(dictionaryAdvice, systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                if let error = dictionary.error {
-                    IssueText(error)
+                if let dictionaryError {
+                    IssueText(dictionaryError)
                 }
             }
             Section("Automatic Replacements") {
                 Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite."
-                    + (replacements.rules.count > 1 ? " Applied from top to bottom. Drag to reorder." : ""))
+                    + (rules.count > 1 ? " Applied from top to bottom. Drag to reorder." : ""))
                     .font(.caption).foregroundStyle(.secondary)
                 ReplacementRows(
-                    rules: replacements.rules,
-                    advisories: replacementAdvisories,
+                    rules: rules,
+                    advisories: advisories,
                     ids: ReplacementRowAccessibilityIDs(
                         list: AccessibilityID.Settings.Vocabulary.replacementsList,
                         edit: AccessibilityID.Settings.Vocabulary.replacementEdit,
@@ -753,33 +963,25 @@ struct VocabularySettingsView: View {
                             advanced: AccessibilityID.Settings.Vocabulary.replacementEditorAdvanced,
                             status: AccessibilityID.Settings.Vocabulary.replacementEditorStatus,
                             update: AccessibilityID.Settings.Vocabulary.replacementEditorUpdate)),
-                    deletionScope: .global,
+                    deletionScope: deletionScope,
                     analyzeEdit: analyzeReplacementEdit,
-                    onUpdate: replacements.update,
-                    onMove: replacements.move,
-                    onRemove: replacements.remove(at:))
-                if let error = replacements.error {
-                    IssueText(error)
+                    onUpdate: onUpdateReplacement,
+                    onMove: onMoveReplacement,
+                    onRemove: onRemoveReplacement)
+                if let replacementsError {
+                    IssueText(replacementsError)
                 }
             }
         }
         .formStyle(.grouped)
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            dictionary.reload()
-            replacements.reload()
-        }
     }
 
     private func analyzeReplacementEdit(
         _ original: ReplacementsSet.Rule, _ proposal: VocabularyProposal
     ) -> VocabularyAnalysis {
-        var editingScope = scope
-        if let index = editingScope.globalRules.firstIndex(of: original) {
-            editingScope.globalRules.remove(at: index)
-        }
-        return VocabularyAdvisor.analyze(proposal, in: editingScope)
+        VocabularyAdvisor.analyze(
+            proposal, in: VocabularyEditAnalysis.scope(for: scope, excluding: original))
     }
 }
 

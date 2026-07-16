@@ -118,11 +118,20 @@ struct SettingRow<Control: View>: View {
     var result: String? = nil
     let help: String
     var dependencyReason: String? = nil
+    var combinesAccessibilityChildren = true
     @ViewBuilder var control: () -> Control
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        if combinesAccessibilityChildren {
+            content.accessibilityElement(children: .combine)
+        } else {
+            content.accessibilityElement(children: .contain)
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -153,7 +162,6 @@ struct SettingRow<Control: View>: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .accessibilityElement(children: .combine)
         .accessibilityLabel([title, result].compactMap { $0 }.joined(separator: ", "))
     }
 }
