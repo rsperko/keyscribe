@@ -16,6 +16,9 @@ struct ResetTool {
     // The shared models cache, preserved by every reset. Nested inside supportDir for production; outside it
     // (under the production folder) for the dev variant.
     var modelsDir: URL = KeyScribePaths.modelsDir
+    // Retained capture WAVs (`[audio] keep_captures`). A sibling of supportDir, so no supportDir wipe reaches
+    // it — but it is raw user speech, which is exactly what an erase promises to destroy.
+    var captureArchiveDir: URL = KeyScribePaths.captureArchiveDir
     var bundleID: String = Bundle.main.bundleIdentifier ?? "com.keyscribe.app"
     // Test seam: dispatch without touching the real TCC database.
     var resetTCCService: (_ service: String, _ bundleID: String) -> String = ResetTool.tccutilReset
@@ -34,13 +37,23 @@ struct ResetTool {
         }
     }
 
-    // The full user-facing erase: wipe the support dir (shared models kept) and the variant's BYOK Keychain
-    // keys. TCC grants are deliberately left alone — they're system permissions, not KeyScribe data, and
-    // resetting them mid-run would break the live mic/event tap.
+    // The full user-facing erase: wipe the support dir (shared models kept), any retained capture WAVs, and
+    // the variant's BYOK Keychain keys. TCC grants are deliberately left alone — they're system permissions,
+    // not KeyScribe data, and resetting them mid-run would break the live mic/event tap.
     private func eraseAllData() -> [String] {
         var actions = wipeAll()
+        actions += eraseCaptureArchive()
         actions += eraseKeychain()
         return actions
+    }
+
+    // The archive lives OUTSIDE supportDir (so a WAV can't fire the config watcher), so no supportDir wipe
+    // reaches it. It holds raw speech, so the erase must name it explicitly or "permanently delete" is a lie.
+    private func eraseCaptureArchive() -> [String] {
+        let contents = (try? fileManager.contentsOfDirectory(at: captureArchiveDir, includingPropertiesForKeys: nil)) ?? []
+        guard !contents.isEmpty else { return [] }
+        try? fileManager.removeItem(at: captureArchiveDir)
+        return ["Erased \(contents.count) retained recording\(contents.count == 1 ? "" : "s") from \(captureArchiveDir.path)."]
     }
 
     private static func eraseKeychainKeys() -> [String] {

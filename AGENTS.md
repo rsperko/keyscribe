@@ -150,7 +150,16 @@ This file is the entry point. Read the design docs before writing code — they 
   odd-format-converter failure that is invisible to the ring counters; `oversizeDropped` counts frames the RT
   callback dropped because the device grew its IO period past scratch mid-capture — upstream of the ring, so
   invisible to `ringDropped`, and now watched for recovery via a `BufferFrameSize` restart), and
-  `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection.
+  `KEYSCRIBE_KEEP_CAPTURE=<dir>` to retain WAVs for offline inspection — or `[audio] keep_captures` in
+  `settings.toml` for a persistent per-variant archive under `<support-dir>-captures/`, bounded by
+  `keep_captures_max_mb` (a SOFT budget — oldest pruned first, newest always kept even if it alone
+  exceeds it; the env var's directory is never pruned and wins when both are set). The archive is a
+  `COPYFILE_CLONE_FORCE`, not a copy: it sits inline on the commit path the pipeline awaits before
+  transcribing, so it must stay metadata-only — never reintroduce a plain `FileManager.copyItem` as the
+  primary path, and keep the prune on its own queue. The clone-impossible fallback still copies (loudly)
+  rather than skipping, because `--capture-probe` deletes its working file trusting the archive. The
+  archive lives OUTSIDE `supportDir` so a WAV can't fire `ConfigWatcher` — which means every wipe path
+  misses it by default, so `ResetTool.eraseAll` deletes it explicitly (it is raw speech).
   See `agent_notes/fable_review/audio-capture.md` H4 and the W17 entry in `worklist.md`.
 - **HAL unit bring-up/teardown run off the main thread on a serial queue, watchdogged — never move them
   back onto `@MainActor`.** `AudioUnitInitialize`/`AudioOutputUnitStart`/`Stop`/`AudioComponentInstanceDispose`

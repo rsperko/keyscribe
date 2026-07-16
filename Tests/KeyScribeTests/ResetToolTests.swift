@@ -109,6 +109,48 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
+    // Retained capture WAVs (`[audio] keep_captures`) live OUTSIDE supportDir, so every supportDir wipe
+    // misses them. They are raw speech and the UI promises permanent deletion, so the erase must take them.
+    @Test func eraseAllRemovesRetainedCaptureRecordings() throws {
+        let dir = try makeSupportDir()
+        let captures = dir.deletingLastPathComponent()
+            .appendingPathComponent("KeyScribeTest-captures-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.removeItem(at: captures)
+        }
+        let fm = FileManager.default
+        try fm.createDirectory(at: captures, withIntermediateDirectories: true)
+        try Data("wav".utf8).write(to: captures.appendingPathComponent("commit-a.wav"))
+        try Data("wav".utf8).write(to: captures.appendingPathComponent("commit-b.wav"))
+
+        var tool = ResetTool(supportDir: dir, defaults: ephemeralDefaults())
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        tool.captureArchiveDir = captures
+        tool.eraseKeychain = { [] }
+        tool.resetTCCService = { _, _ in "" }
+        let actions = tool.run(.eraseAll)
+
+        #expect(!fm.fileExists(atPath: captures.path))
+        #expect(actions.contains { $0.contains("2 retained recordings") })
+    }
+
+    // The archive is opt-in and usually absent; an erase must not claim to have deleted recordings that
+    // never existed.
+    @Test func eraseAllReportsNoRecordingsWhenTheArchiveIsAbsent() throws {
+        let dir = try makeSupportDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var tool = ResetTool(supportDir: dir, defaults: ephemeralDefaults())
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        tool.captureArchiveDir = dir.deletingLastPathComponent()
+            .appendingPathComponent("keyscribe-absent-\(UUID().uuidString)", isDirectory: true)
+        tool.eraseKeychain = { [] }
+        tool.resetTCCService = { _, _ in "" }
+
+        #expect(!tool.run(.eraseAll).contains { $0.contains("retained recording") })
+    }
+
     @Test func permissionsResetsEachTCCServiceWithoutTouchingFilesOrFlag() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -90,6 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
         history.applyRetention(retentionDays: settings.history.retentionDays)
+        // Before the controller exists, so the first dictation already archives.
+        CaptureArchive.publish(settings.audio)
+        CaptureArchive.applyRetention()
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history, hud: hud,
             pressSnapshot: ContextProbe.initialSnapshot,
@@ -476,6 +479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // so an externally-changed field isn't round-tripped and clobbered).
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
+        let previousAudio = settings.audio
         if updated.stt.engine != settings.stt.engine {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
@@ -487,6 +491,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings = updated
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
+        }
+        // Sweep on change too, so a lowered budget reclaims now rather than after the next dictation.
+        if updated.audio != previousAudio {
+            CaptureArchive.publish(updated.audio)
+            CaptureArchive.applyRetention()
         }
         controller.updateSettings(updated)
         rebuildHotkeyMonitor()
@@ -510,7 +519,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let uid = settings.audio.inputDeviceUID,
               let device = AudioInputDevices.available().first(where: { $0.uid == uid }),
               settings.audio.inputDeviceName != device.name else { return }
-        settings.audio = .init(inputDeviceUID: uid, inputDeviceName: device.name)
+        // Mutate the one field, never rebuild the table: a fresh `.init` would silently reset every other
+        // [audio] key (keep_captures and its budget) to defaults and persist that over the user's file.
+        settings.audio.inputDeviceName = device.name
         do {
             try SettingsStore.write(settings, to: KeyScribePaths.supportDir)
             recordSettingsSelfWrite()

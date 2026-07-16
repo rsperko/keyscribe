@@ -210,21 +210,51 @@ public struct Settings: Codable, Equatable, Sendable {
     public struct Audio: Codable, Equatable, Sendable {
         public var inputDeviceUID: String?
         public var inputDeviceName: String?
+        // Debug hook: retain a clone of each committed capture WAV (which normally lives only
+        // record→transcribe→delete) in an app-owned per-variant archive, pruned oldest-first to
+        // `keepCapturesMaxMB`. `KEYSCRIBE_KEEP_CAPTURE` overrides the directory and is never pruned.
+        public var keepCaptures: Bool
+        public var keepCapturesMaxMB: Int
+
+        // Validation keeps keepCapturesMaxMB inside this bound, so the conversion below cannot overflow.
+        public static let maxKeepCapturesMB = Int(Int64.max / 1_048_576)
+
+        public var keepCapturesMaxBytes: Int64 { Int64(keepCapturesMaxMB) * 1_048_576 }
 
         enum CodingKeys: String, CodingKey {
             case inputDeviceUID = "input_device_uid"
             case inputDeviceName = "input_device_name"
+            case keepCaptures = "keep_captures"
+            case keepCapturesMaxMB = "keep_captures_max_mb"
         }
 
-        public init(inputDeviceUID: String? = nil, inputDeviceName: String? = nil) {
+        public init(
+            inputDeviceUID: String? = nil, inputDeviceName: String? = nil,
+            keepCaptures: Bool = false, keepCapturesMaxMB: Int = 500
+        ) {
             self.inputDeviceUID = inputDeviceUID
             self.inputDeviceName = inputDeviceName
+            self.keepCaptures = keepCaptures
+            self.keepCapturesMaxMB = keepCapturesMaxMB
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
+            let d = Settings.defaults.audio
             inputDeviceUID = try c.decodeIfPresent(String.self, forKey: .inputDeviceUID)
             inputDeviceName = try c.decodeIfPresent(String.self, forKey: .inputDeviceName)
+            keepCaptures = try c.decodeIfPresent(Bool.self, forKey: .keepCaptures) ?? d.keepCaptures
+            keepCapturesMaxMB = try c.decodeIfPresent(Int.self, forKey: .keepCapturesMaxMB) ?? d.keepCapturesMaxMB
+        }
+
+        // Deviations only: off already means off, so the debug keys stay out of a normal user's file.
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(inputDeviceUID, forKey: .inputDeviceUID)
+            try c.encodeIfPresent(inputDeviceName, forKey: .inputDeviceName)
+            guard keepCaptures else { return }
+            try c.encode(keepCaptures, forKey: .keepCaptures)
+            try c.encode(keepCapturesMaxMB, forKey: .keepCapturesMaxMB)
         }
     }
 
@@ -280,6 +310,13 @@ public struct Settings: Codable, Equatable, Sendable {
     func validate() throws {
         guard history.retentionDays >= 0 else {
             throw ConfigError.invalid("history.retention_days must be >= 0")
+        }
+        // The upper bound is not cosmetic: keepCapturesMaxBytes multiplies by a MiB, and Swift traps on Int64
+        // overflow — so an absurd-but-positive value would crash the app at launch, when publish() reads it.
+        let budget = audio.keepCapturesMaxMB
+        guard !audio.keepCaptures || (budget > 0 && budget <= Settings.Audio.maxKeepCapturesMB) else {
+            throw ConfigError.invalid(
+                "audio.keep_captures_max_mb must be 1...\(Settings.Audio.maxKeepCapturesMB) when keep_captures is set")
         }
     }
 }

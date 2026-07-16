@@ -50,6 +50,14 @@ enum KeyScribePaths {
             "\(variant.supportFolderName)-model-load-diagnostics.log", isDirectory: false)
     }
 
+    // Retained capture WAVs (`[audio] keep_captures`). A sibling DIRECTORY of supportDir, deliberately
+    // outside the FSEvents-watched config tree — ConfigTreeSnapshot stat-stamps every file it finds, so a
+    // WAV landing inside would fire a full config reload after every dictation. Keyed by variant, so the dev
+    // build archives on its own; never redirected by `--config-dir` (diagnostics, not user config).
+    static var captureArchiveDir: URL {
+        appSupportBase.appendingPathComponent("\(variant.supportFolderName)-captures", isDirectory: true)
+    }
+
     static var modesDir: URL {
         supportDir.appendingPathComponent("modes", isDirectory: true)
     }

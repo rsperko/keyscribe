@@ -501,7 +501,32 @@ retention_days = 7              # default; delete day-files older than this
 [shortcuts]                                 # global shortcuts for menu-bar actions
 add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
 paste_last_dictation = ""                        # canonical chord; "" = off (default)
+
+[audio]                                     # written by the Settings mic picker; no UI for the debug keys
+# input_device_uid = "BuiltInMicrophoneDevice"   # preferred capture device; absent = follow the system default
+# input_device_name = "MacBook Pro Microphone"   # possibly-stale label, so a disconnected device still reads as itself
+# keep_captures = false                          # debug: retain a copy of each committed capture WAV
+# keep_captures_max_mb = 500                     # soft budget for the archive; oldest pruned first
 ```
+
+> **`[audio]`** — `input_device_uid` is a CoreAudio UID (stable across reconnect, unlike the ephemeral
+> device id), resolved live at each bring-up: the preferred device if present, else the system default.
+> Capture never changes the macOS system default input.
+>
+> `keep_captures` is a **debug affordance, default off, with no Settings UI** — a capture WAV normally
+> lives only record→transcribe→delete. Turned on, each committed capture is cloned into
+> `~/Library/Application Support/<KeyScribe|KeyScribeDev>-captures/` (a sibling of the config dir, so a
+> WAV can never fire the config watcher) and the archive is pruned oldest-first to `keep_captures_max_mb`.
+> The clone is COW, so retention writes no extra bytes — it only stops the WAV's blocks from being
+> reclaimed. At the 16 kHz mono-float capture format, **100 MB ≈ 27 minutes** of speech.
+>
+> `keep_captures_max_mb` is a **soft budget, not a hard cap**: the newest capture is always retained even
+> if it alone exceeds it, since deleting it would leave nothing to inspect — the one thing the archive
+> exists for. So the archive can transiently hold one over-budget file.
+>
+> `KEYSCRIBE_KEEP_CAPTURE=<dir>` (or `--keep-capture <dir>`) overrides the directory, wins when both are
+> set, and is **never pruned** — retention only ever deletes inside the app-owned archive. Both keys are
+> omitted from the file while `keep_captures` is off, and **Erase All Data** removes the archive.
 
 > **`[shortcuts]`** drive the standalone **Add to Vocabulary…** panel and
 > the **Paste Last Dictation** action (both also always available in the menu bar). Add to Vocabulary

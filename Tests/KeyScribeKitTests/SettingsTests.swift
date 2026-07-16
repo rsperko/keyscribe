@@ -204,6 +204,70 @@ struct SettingsTests {
         #expect(s.audio.inputDeviceName == nil)
     }
 
+    @Test func keepCapturesDefaultsOffWhenTheAudioTableIsAbsent() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(s.audio.keepCaptures == false)
+        #expect(s.audio.keepCapturesMaxMB == 500)
+    }
+
+    @Test func keepCapturesDecodesFromTheAudioTable() throws {
+        let s = try SettingsStore.decode(
+            from: "schema_version = 1\n[audio]\nkeep_captures = true\nkeep_captures_max_mb = 250")
+        #expect(s.audio.keepCaptures)
+        #expect(s.audio.keepCapturesMaxMB == 250)
+        #expect(s.audio.keepCapturesMaxBytes == 250 * 1_048_576)
+    }
+
+    @Test func keepCapturesRoundTripsThroughEncodeAndDecode() throws {
+        var s = Settings.defaults
+        s.audio = .init(inputDeviceUID: "BuiltInMic", keepCaptures: true, keepCapturesMaxMB: 64)
+        let decoded = try SettingsStore.decode(from: SettingsStore.encode(s))
+        #expect(decoded.audio.keepCaptures)
+        #expect(decoded.audio.keepCapturesMaxMB == 64)
+        #expect(decoded.audio == s.audio)
+    }
+
+    // Off carries no information (absent already means off), so a normal user's settings.toml never grows
+    // the debug keys — same deviations-only rule as [features].
+    @Test func encodeOmitsKeepCapturesWhenOff() throws {
+        var s = Settings.defaults
+        s.audio = .init(inputDeviceUID: "BuiltInMic")
+        let encoded = try SettingsStore.encode(s)
+        #expect(!encoded.contains("keep_captures"))
+        #expect(!encoded.contains("keep_captures_max_mb"))
+    }
+
+    @Test func aNonPositiveCaptureBudgetIsRejected() {
+        #expect(throws: ConfigError.self) {
+            try SettingsStore.decode(
+                from: "schema_version = 1\n[audio]\nkeep_captures = true\nkeep_captures_max_mb = 0")
+        }
+    }
+
+    // keepCapturesMaxBytes multiplies by a MiB and Swift traps on Int64 overflow, so an absurd-but-positive
+    // budget must be refused at decode — otherwise it crashes the app at launch, unrecoverably from the UI.
+    @Test func anOverflowingCaptureBudgetIsRejected() {
+        #expect(throws: ConfigError.self) {
+            try SettingsStore.decode(
+                from: "schema_version = 1\n[audio]\nkeep_captures = true\nkeep_captures_max_mb = 9223372036854775807")
+        }
+    }
+
+    @Test func theLargestNonOverflowingCaptureBudgetSurvivesConversion() throws {
+        var s = Settings.defaults
+        s.audio = .init(keepCaptures: true, keepCapturesMaxMB: Settings.Audio.maxKeepCapturesMB)
+        try s.validate()
+        #expect(s.audio.keepCapturesMaxBytes > 0)
+    }
+
+    // An absurd budget with the feature OFF is inert (it is never converted), so it must not lock the user
+    // out of a config they can still fix by other means.
+    @Test func anOversizedCaptureBudgetIsIgnoredWhileKeepCapturesIsOff() throws {
+        let s = try SettingsStore.decode(
+            from: "schema_version = 1\n[audio]\nkeep_captures_max_mb = 9223372036854775807")
+        #expect(s.audio.keepCaptures == false)
+    }
+
     @Test func negativeRetentionIsRejected() {
         #expect(throws: ConfigError.self) {
             try SettingsStore.decode(from: "schema_version = 1\n[history]\nretention_days = -1")
