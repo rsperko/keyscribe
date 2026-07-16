@@ -478,12 +478,10 @@ final class DictationController {
             finishError("The selected speech model is not installed", action: nil)
             return
         }
-        // ACCEPTED ORDERING: this synchronous AX probe runs BEFORE the arming HUD below, so it bounds how fast
-        // the press can be acknowledged (two AX calls, each capped by a 100 ms messaging timeout, so ~200 ms
-        // worst case against an unresponsive target; sub-ms normally). It stays first on purpose — the
-        // secure-field flag must be captured at press, before anything can act on the field, and moving the
-        // render above it would not paint any sooner anyway: nothing displays until this main-actor turn
-        // returns to the run loop. Measured rather than assumed, so the cost is visible if a target regresses.
+        // This synchronous AX probe stays first: the secure-field flag must be captured at press, before
+        // anything can act on the field (two AX calls, each capped by a 100 ms messaging timeout, so ~200 ms
+        // worst case against an unresponsive target; sub-ms normally). Measured rather than assumed, so the
+        // cost is visible if a target regresses.
         let snapshotStart = DispatchTime.now()
         capturedSnapshot = pressSnapshot()
         Log.context.debug("press snapshot=\(self.elapsedMs(since: snapshotStart), privacy: .public)ms")
@@ -504,10 +502,9 @@ final class DictationController {
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
                 guard !Task.isCancelled else { return }
+                // Only while recording: a late resolution must not paint anything before admission opens.
                 if self.machine.state == .recording {
                     self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel), latchedTrigger: self.latchedTriggerName))
-                } else if self.machine.state == .arming {
-                    self.hud?.render(.arming(mode: self.activeMode?.name ?? self.currentModeName))
                 }
             }
         } else {
@@ -515,10 +512,11 @@ final class DictationController {
             applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
         }
 
-        // Acknowledge the press before any model/mic/sound work, so a slow route never delays visual feedback
-        // (ESC already cancels from here). The cue is NOT part of acknowledgement: it is the go-signal, and it
-        // may not sound until capture is proven live — see beginCapture.
-        hud?.render(.arming(mode: currentModeName))
+        // The press shows NOTHING. The HUD is the visual half of the go-signal, so it may not appear until
+        // admission actually opens (beginCapture) — a panel here invites speech into the bring-up + cue window
+        // and every word of it is discarded. Rendering .hidden rather than nothing clears a previous
+        // dictation's lingering error/complete HUD and drops key focus, so the keyboard works while arming.
+        hud?.render(.hidden)
 
         warmActiveEngine()
         prepareActiveEngineForDictation()
@@ -1748,8 +1746,10 @@ final class DictationController {
         Task { await TextInserter.insertViaPaste(lastResult) }
     }
 
-    // ESC-cancellable only while arming, recording, or transcribing/rewriting — never mid-insert, where the
-    // text is already landing and cancel() would race finishInsertion (conflicting state + double cue).
+    // Cancellable while arming, recording, or transcribing/rewriting — never mid-insert, where the text is
+    // already landing and cancel() would race finishInsertion (conflicting state + double cue). This gates
+    // the HUD's ESC monitor, which can only fire while the HUD is key, i.e. NOT while arming — an arming
+    // dictation is cancelled by the trigger (handleCommit), the chord-wins abort, a screen lock, or quit.
     var isCancellable: Bool { machine.isCancellable }
 
     func cancel() {

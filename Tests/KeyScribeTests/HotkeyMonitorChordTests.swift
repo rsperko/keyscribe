@@ -357,12 +357,13 @@ struct HotkeyMonitorChordTests {
         #expect(fake.lastRegistrations.count == 1)
     }
 
-    @Test func hudHoldsKeyFocusOnlyAcrossCancellableStates() {
+    // Only the VISIBLE cancellable states: arming is cancellable but shows no HUD, so there is no panel to
+    // take key focus — ESC does not reach an arming dictation and the trigger cancels it instead.
+    @Test func hudHoldsKeyFocusOnlyAcrossVisibleCancellableStates() {
         #expect(HUDState.recording(mode: nil, level: 0, latchedTrigger: nil).holdsKeyFocus)
         #expect(HUDState.transcribing(mode: "m").holdsKeyFocus)
         #expect(HUDState.rewriting(
             connection: "c", mode: "m", redacted: false, contextCategories: [], offerLocalTranscript: false).holdsKeyFocus)
-        #expect(HUDState.arming(mode: "m").holdsKeyFocus)
         #expect(!HUDState.ready(mode: "m").holdsKeyFocus)
         #expect(!HUDState.error(message: "x", action: nil).holdsKeyFocus)
         #expect(!HUDState.hidden.holdsKeyFocus)

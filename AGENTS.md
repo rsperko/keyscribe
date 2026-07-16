@@ -221,10 +221,17 @@ This file is the entry point. Read the design docs before writing code — they 
   the BOUND device (`DeviceIsAlive` + `NominalSampleRate` + `BufferFrameSize`, for disconnect, a Bluetooth
   A2DP↔HFP flip, and a mid-capture IO-period growth past scratch) restarts capture into the same file on the
   control queue, bounded by `maxConfigRestarts`.
-- **The recording HUD is key ⟺ recording.** Synthesized ⌘C/⌘V/Return go to the key window, so the
+- **The recording HUD is key ⟺ the HUD is visible and cancellable** (`HUDState.holdsKeyFocus`).
+  Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs in `finishInsertion`, in `rewriteSelection`, in
   `pasteLast`, and on every non-recording `render`.
+  **Arming is deliberately outside this**: it shows no HUD (`ui_design.md` §5's timing contract — a
+  panel before admission invites speech that is discarded), so the panel is NOT key while the mic
+  comes up and ESC does not reach us there. That is not a gap: `handleCommit`'s `.arming` case means
+  the TRIGGER cancels an arming dictation — release for a hold trigger, second tap for a latched one.
+  It also means a wedged bring-up can no longer swallow the user's typing, which it did when arming
+  held key focus. Do not add an arming HUD to "restore" ESC.
   `CorrectionPanelController`/`HistoryController` solve the same problem by capturing `previousApp`
   + selection first, then orderOut → activate → wait → paste.
 - **`NSPasteboard`/`NSPasteboardItem` are main-thread-only — `PasteboardSnapshot.capture` is deliberately
@@ -385,7 +392,9 @@ keyscribe/
       `HotkeyRecorder` is capturing, so a mouse button can be recorded as the raw click. Mouse cannot ride
       Carbon (keyboard-only) or the modifier tap (listen-only can't consume).
     - **ESC-to-cancel** → handled as a **local** keystroke by the recording HUD, made key only while
-      recording (see the HUD-is-key footgun above). A local `NSEvent` monitor needs no permission.
+      the HUD is visible and cancellable (see the HUD-is-key footgun above — arming shows no HUD, so
+      ESC does not apply there; the trigger cancels instead). A local `NSEvent` monitor needs no
+      permission, but it only sees keys routed to a key window of THIS process.
 - **Context:** frontmost bundle id always available; **⌘C→pasteboard is the universal selection
   capture**; **browser URL via AppleScript/Apple Events, NOT AX** (AX returns nil on Chromium).
   Footgun: synthesized ⌘C has a settle-time race — wait for the pasteboard changeCount to bump (or

@@ -18,7 +18,6 @@ enum HUDErrorAction: Equatable {
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
-    case arming(mode: String?)
     case recording(mode: String?, level: Float, latchedTrigger: String?)
     case loadingModel(mode: String)
     case transcribing(mode: String)
@@ -46,8 +45,6 @@ extension HUDState {
             return .none
         case .ready:
             return .ready
-        case .arming:
-            return .preparing
         case .recording:
             return .recording
         case .loadingModel:
@@ -68,8 +65,6 @@ extension HUDState {
         case .hidden:
             return nil
         case .ready(let mode):
-            return mode
-        case .arming(let mode):
             return mode
         case .recording(let mode, _, _):
             return mode
@@ -98,8 +93,6 @@ extension HUDState {
         switch self {
         case .ready:
             return "Next dictation"
-        case .arming:
-            return "Preparing dictation"
         case .recording(_, _, let latchedTrigger):
             return latchedTrigger.map { "Listening — tap \($0) again to stop" } ?? "Listening"
         case .loadingModel:
@@ -169,7 +162,7 @@ extension HUDState {
     // announcement fires once on entry, never per tick. Transient/dismissal states carry none.
     var voiceOverAnnouncement: String? {
         switch self {
-        case .hidden, .ready, .arming:
+        case .hidden, .ready:
             return nil
         case .recording:
             return "Recording"
@@ -184,11 +177,12 @@ extension HUDState {
         }
     }
 
-    // Mirrors DictationController.isCancellable (machine.state stays .transcribing through the cloud
-    // rewrite). The HUD takes key focus in these states so ESC cancels locally.
+    // The cancellable states that are also VISIBLE (machine.state stays .transcribing through the cloud
+    // rewrite). The HUD takes key focus in these so ESC cancels locally. Arming is cancellable but shows no
+    // HUD, so ESC does not reach us there — the trigger itself cancels an arming dictation (handleCommit).
     var holdsKeyFocus: Bool {
         switch self {
-        case .arming, .recording, .loadingModel, .transcribing, .rewriting: return true
+        case .recording, .loadingModel, .transcribing, .rewriting: return true
         default: return false
         }
     }

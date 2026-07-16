@@ -6,7 +6,7 @@ import Testing
 struct HUDStateTests {
     @Test func previewFixturesCoverEveryVisibleHUDState() {
         #expect(HUDPreview.names == [
-            "ready", "arming", "recording", "recording-latched", "loading-model", "transcribing",
+            "ready", "recording", "recording-latched", "loading-model", "transcribing",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
             "microphone-error", "accessibility-error",
@@ -54,15 +54,6 @@ struct HUDStateTests {
         let state = HUDState.ready(mode: "Edit Selection")
         #expect(state.primaryText == "Edit Selection")
         #expect(state.secondaryText == "Next dictation")
-    }
-
-    @Test func armingDictationIsCancellable() {
-        let state = HUDState.arming(mode: "Plain Dictation")
-        #expect(state.primaryText == "Plain Dictation")
-        #expect(state.secondaryText == "Preparing dictation")
-        #expect(state.holdsKeyFocus)
-        #expect(state.indicator == .preparing)
-        #expect(HUDState.recording(mode: "Plain Dictation", level: 0, latchedTrigger: nil).indicator == .recording)
     }
 
     @Test func transcribingLeadsWithTheResolvedModeName() {
@@ -159,7 +150,6 @@ struct HUDStateTests {
     @Test func transientAndDismissalStatesAreNotAnnounced() {
         #expect(HUDState.hidden.voiceOverAnnouncement == nil)
         #expect(HUDState.ready(mode: "Edit Selection").voiceOverAnnouncement == nil)
-        #expect(HUDState.arming(mode: "Plain Dictation").voiceOverAnnouncement == nil)
     }
 
     @Test func recordingSecondaryTextShowsTheStopCueOnlyWhenLatched() {

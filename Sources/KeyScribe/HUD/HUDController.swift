@@ -479,7 +479,7 @@ private struct PreparingIcon: View {
         .frame(width: 30, height: 30)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
         .onAppear { pulse = true }
-        .accessibilityLabel("Preparing dictation")
+        .accessibilityLabel("Loading speech model")
     }
 }
 

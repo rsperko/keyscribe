@@ -194,14 +194,16 @@ public enum PromptAssembler {
         return s
     }
 
-    // Some models (Mistral Small, observed 2026-07-13) echo the prompt's <content> wrapper onto their
-    // output despite the no-tags rule — the same delimiter-echo class as a code-fence wrap, and prompt
-    // rules alone provably don't stop it. Strip a clean whole-output echo deterministically; anything
-    // ragged (unmatched tag, interior tags) is left for the validation gate / caller unchanged, because
-    // partial stripping could corrupt real text. The guard on `sentContent` keeps faithful output intact:
-    // if the content sent to the model itself carried <content> tags (a replacement or captured selection
-    // can), the wrap is the model preserving user text, not scaffolding — never remove it. This unwrap
-    // exists ONLY because `user(_:)` above wraps content in these exact tags; if that wrapper ever
+    // Some models (Mistral Small, observed 2026-07-13 and again 2026-07-15) echo the prompt's <content>
+    // wrapper onto their output despite the no-tags rule — the same delimiter-echo class as a code-fence
+    // wrap, and prompt rules alone provably don't stop it. The echo is not reliably balanced: the 07-15
+    // occurrence was a bare opener and a newline with no closer, which reached insertion verbatim. So each
+    // boundary tag is stripped independently — a tag anchored at an edge is scaffolding whether or not its
+    // partner showed up. Interior tags are still left for the validation gate / caller unchanged, because
+    // partial stripping there could corrupt real text. The guard on `sentContent` keeps faithful output
+    // intact: if the content sent to the model itself carried <content> tags (a replacement or captured
+    // selection can), the wrap is the model preserving user text, not scaffolding — never remove it. This
+    // unwrap exists ONLY because `user(_:)` above wraps content in these exact tags; if that wrapper ever
     // changes, remove this along with it (PromptAssemblerTests.contentWrapperIsLoadBearingForEchoUnwrap
     // is the tripwire).
     public static func unwrappingContentEcho(_ output: String, sentContent: String) -> String {
@@ -213,16 +215,20 @@ public enum PromptAssembler {
         guard anyTag.firstMatch(in: sentContent, range: NSRange(sentContent.startIndex..., in: sentContent)) == nil
         else { return output }
 
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let range = NSRange(trimmed.startIndex..., in: trimmed)
-        guard let openMatch = open.firstMatch(in: trimmed, range: range),
-              let closeMatch = close.firstMatch(in: trimmed, range: range),
-              openMatch.range.upperBound <= closeMatch.range.lowerBound,
-              let openEnd = Range(openMatch.range, in: trimmed)?.upperBound,
-              let closeStart = Range(closeMatch.range, in: trimmed)?.lowerBound
-        else { return output }
+        var inner = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        var strippedABoundary = false
+        for (tag, keepSideAfterMatch) in [(open, true), (close, false)] {
+            guard let match = tag.firstMatch(in: inner, range: NSRange(inner.startIndex..., in: inner)),
+                  let range = Range(match.range, in: inner)
+            else { continue }
+            inner = keepSideAfterMatch
+                ? String(inner[range.upperBound...])
+                : String(inner[..<range.lowerBound])
+            strippedABoundary = true
+        }
+        guard strippedABoundary else { return output }
 
-        let inner = String(trimmed[openEnd..<closeStart]).trimmingCharacters(in: .whitespacesAndNewlines)
+        inner = inner.trimmingCharacters(in: .whitespacesAndNewlines)
         guard anyTag.firstMatch(in: inner, range: NSRange(inner.startIndex..., in: inner)) == nil
         else { return output }
         return inner

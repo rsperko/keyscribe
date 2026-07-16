@@ -2,7 +2,7 @@ import KeyScribeKit
 
 enum HUDPreview {
     static let names = [
-        "ready", "arming", "recording", "recording-latched", "loading-model", "transcribing",
+        "ready", "recording", "recording-latched", "loading-model", "transcribing",
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
         "microphone-error", "accessibility-error",
@@ -20,8 +20,6 @@ enum HUDPreview {
         switch name {
         case "ready":
             .ready(mode: "Edit Selection")
-        case "arming":
-            .arming(mode: "Plain Dictation")
         case "recording":
             .recording(mode: "Plain Dictation", level: 0.7, latchedTrigger: nil)
         case "recording-latched":

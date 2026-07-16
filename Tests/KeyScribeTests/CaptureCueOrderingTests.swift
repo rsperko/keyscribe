@@ -3,10 +3,13 @@ import Testing
 @testable import KeyScribe
 @testable import KeyScribeKit
 
-// Phase 1 of agent_notes/mic_issue: the start cue is the user's signal to speak, so it must not sound while
-// the mic is still negotiating a Bluetooth profile. The order is: arming HUD immediately -> first buffer ->
-// cue -> publish the cue-end admission boundary -> recording + duck. Nothing before readiness may open
-// admission or invite speech.
+// THE CONTRACT: if the recording HUD is visible, admission is open and the user's next word will be
+// captured. The HUD is the visual half of the start cue, so it may not appear one instant before the cue
+// sounds — a HUD at trigger time invites speech into the ~200-500ms the mic is still negotiating, and every
+// word of it is discarded (admission stays closed so the cue itself is never recorded).
+//
+// The order is: hidden at the press -> first buffer -> cue -> publish the cue-end admission boundary ->
+// recording HUD + duck. Nothing before that boundary may invite speech.
 @MainActor
 struct CaptureCueOrderingTests {
     private final class TinyEngine: SpeechEngine, @unchecked Sendable {
@@ -21,7 +24,8 @@ struct CaptureCueOrderingTests {
     private final class RecordingHUD: HUDPresenting {
         var states: [HUDState] = []
         func render(_ state: HUDState) { states.append(state) }
-        var sawArming: Bool { states.contains { if case .arming = $0 { return true }; return false } }
+        // The press renders .hidden (clearing any stale HUD), so "nothing shown" is not "nothing rendered".
+        var sawVisibleHUD: Bool { states.contains { $0 != .hidden } }
         var sawRecording: Bool { states.contains { if case .recording = $0 { return true }; return false } }
         var errorMessage: String? {
             for state in states { if case .error(let message, _) = state { return message } }
@@ -79,8 +83,8 @@ struct CaptureCueOrderingTests {
         }
     }
 
-    // The core regression: a mic that has started but delivered nothing must leave the user in arming, with
-    // no cue-end boundary published — never "Listening" over a mic that cannot yet hear.
+    // The core regression: a mic that has started but delivered nothing shows the user NOTHING, and
+    // publishes no cue-end boundary — never "Listening", and never a panel, over a mic that cannot yet hear.
     @Test func admissionStaysClosedWhileTheMicHasNotDeliveredABuffer() async {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
@@ -89,27 +93,57 @@ struct CaptureCueOrderingTests {
         controller.handleStart()
         await poll { audio.startCalls == 1 }
         #expect(audio.boundaries.isEmpty)
-        #expect(hud.sawArming)
-        #expect(!hud.sawRecording)
+        #expect(!hud.sawVisibleHUD)
         ready.signal()
         await poll { hud.sawRecording }
         #expect(audio.boundaries.count == 1)
     }
 
-    // The press is acknowledged before any microphone work: a slow route may not delay visual feedback.
-    @Test func theArmingHUDIsRenderedBeforeTheMicrophoneIsRequested() async {
+    // The press shows nothing. Asserted in the same main-actor turn handleStart ran on, so the capture task
+    // provably has not run yet: no panel can precede the microphone, let alone the admission boundary.
+    @Test func thePressShowsNoVisibleHUDBeforeTheMicrophoneIsRequested() async {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
         let hud = RecordingHUD()
         let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
         controller.handleStart()
-        // Still inside the main-actor turn that handleStart ran on, so the capture task provably has not run:
-        // the acknowledgement is not waiting on the microphone.
-        #expect(hud.sawArming)
+        #expect(!hud.sawVisibleHUD)
         #expect(audio.startCalls == 0)
         ready.signal()
         await poll { hud.sawRecording }
         #expect(audio.startCalls == 1)
+    }
+
+    // A failed arm shows the error and nothing before it — the error HUD is the first thing the user sees.
+    @Test func armingFailureShowsTheErrorHUDWithNoPriorVisibleHUD() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(
+            url: URL(fileURLWithPath: "/dev/null"), ready: ready, failWith: AudioCaptureError.bringUpTimedOut)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        controller.handleStart()
+        await poll { audio.startCalls == 1 }
+        #expect(!hud.sawVisibleHUD)
+        ready.signal()
+        await poll { hud.errorMessage != nil }
+        #expect(hud.states.filter { $0 != .hidden }.count == 1)
+    }
+
+    // The HUD must stay hidden for the WHOLE cue, not merely until readiness. The boundary is published at
+    // cue start, so its arrival proves the cue is playing — and the panel may not appear until that boundary
+    // is reached. A long cue makes the two instants far apart enough to tell.
+    @Test func theHUDStaysHiddenThroughTheCueAndAppearsOnlyAtAdmission() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.3)
+        controller.handleStart()
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        await poll { !audio.boundaries.isEmpty }
+        #expect(!hud.sawVisibleHUD)
+        await poll { hud.sawRecording }
+        #expect(hud.sawRecording)
     }
 
     // Anchoring proof: the boundary is cue-end, so a boundary still in the future once readiness lands can
@@ -159,7 +193,29 @@ struct CaptureCueOrderingTests {
         ready.signal()
         await poll { !controller.isBusy }
         #expect(audio.boundaries.isEmpty)
-        #expect(!hud.sawRecording)
+        #expect(!hud.sawVisibleHUD)
         #expect(audio.stops == 1)
+    }
+
+    // The scenario that opened this investigation: a mic error, then an immediate retry that fails the same
+    // way. "Could not start the microphone" lingers 8s, so without the press resetting the HUD to .hidden the
+    // identical second error is deduplicated by HUDController.render and the retry looks like it did nothing.
+    @Test func aRepeatedArmingErrorIsStillShown() async throws {
+        let hud = RecordingHUD()
+        for _ in 0..<2 {
+            let ready = SignalLatch()
+            let audio = GatedAudio(
+                url: URL(fileURLWithPath: "/dev/null"), ready: ready,
+                failWith: AudioCaptureError.bringUpTimedOut)
+            let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+            controller.handleStart()
+            await poll { audio.startCalls == 1 }
+            ready.signal()
+            await poll { !controller.isBusy }
+        }
+        // A .hidden must separate the two identical errors, or render's dedupe swallows the second.
+        let visible = hud.states.enumerated().filter { $0.element != .hidden }.map(\.offset)
+        try #require(visible.count == 2)
+        #expect(hud.states[(visible[0] + 1)..<visible[1]].contains(.hidden))
     }
 }

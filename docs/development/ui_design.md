@@ -194,6 +194,17 @@ the only signal.
 The HUD is a movable, transient status surface. It is not a transcript editor and it never
 becomes a second destination for configuration.
 
+**Timing contract: the HUD never appears until speech spoken immediately after its appearance will
+be admitted.** The HUD is the visual half of the start cue (start/end sounds are optional and must
+have equivalent visual feedback), so it appears at the same instant the cue ends and admission
+opens — never at the press. A trigger is therefore acknowledged by *silence*: nothing is shown while
+the microphone is brought up, which on a cold Bluetooth route is 200–500 ms (a built-in mic with
+sounds off is ~50 ms and reads as instant). Recording is the first thing the user sees; a failed arm
+shows Error with no HUD before it; a dictation released or cancelled during bring-up shows nothing at
+all. There is no "arming"/"preparing" HUD: a panel that appears before admission grants visual
+permission to speak into a window whose audio is discarded, and users react to the panel appearing,
+not to its label.
+
 ### Required states
 
 | State | Primary content | Secondary content | Available action |
@@ -216,8 +227,8 @@ only when the take's audio peak never cleared the digital-silence floor.
 
 The local-only states — Recording, Transcribing, Complete, Target changed, and Error — are the
 whole HUD for a local dictation. The Ready state is the brief acknowledgment shown only when a
-one-shot mode is chosen from the menu; there is no separate ready flash on hotkey invoke, because
-recording feedback begins on the same run-loop turn as capture (§4). Rewriting and Rewrite fallback
+one-shot mode is chosen from the menu; there is no separate ready flash on hotkey invoke — see the
+HUD timing contract below. Rewriting and Rewrite fallback
 appear when AI rewrite is enabled for the dictation. There is **one** Rewriting state: a rewrite is
 always treated as a cloud data boundary — it names the connection and shows the
 `Cloud rewrite` badge even for a local endpoint — so the boundary-badge behavior below always

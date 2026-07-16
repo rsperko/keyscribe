@@ -139,7 +139,13 @@ use.
 
 **Latency budgets (perceived speed).** Batch must still *feel* instant; budgets are explicit and
 measured (`principles.md` §1):
-- **hotkey → recording feedback:** immediate (HUD + start sound on the same runloop turn).
+- **hotkey → recording feedback:** gated on the microphone actually being live, NOT immediate. The
+  start cue BEGINS at first-buffer readiness and plays into an already-open mic; admission opens at
+  cue END, and the HUD appears there with it (`ui_design.md` §5's timing contract). So the press is
+  acknowledged by silence: ~50 ms on a built-in mic with sounds off (no cue ⇒ admission opens at
+  readiness), 200–500 ms on a cold Bluetooth route. The budget here is READINESS (first delivered
+  buffer), not paint — painting sooner would only invite speech into a window whose audio is
+  discarded.
 - **release → local text ready:** p50/p95 per engine — a short utterance must feel instant.
 - **release → cloud-rewrite ready:** p50/p95 per provider/model (the LLM is the slow leg).
 - **max wait → escape hatch:** past a threshold the HUD offers "insert without rewriting," so the

@@ -372,7 +372,9 @@ struct DictationCancellationTests {
         await task?.value
 
         #expect(idleCount == 1)
-        #expect(hud.states.filter { $0 == .hidden }.count == 1)
+        // The press renders .hidden to clear any stale HUD, so count the terminal's own hide separately.
+        #expect(hud.states.first == .hidden)
+        #expect(hud.states.dropFirst().filter { $0 == .hidden }.count == 1)
     }
 
     // An empty/failed capture (finishDraining returns nil) reaches the cancel terminal exactly once — one
@@ -406,7 +408,9 @@ struct DictationCancellationTests {
         await controller.dictationTask?.value
 
         #expect(idleCount == 1)
-        #expect(hud.states.filter { $0 == .hidden }.count == 1)
+        // The press renders .hidden to clear any stale HUD, so count the terminal's own hide separately.
+        #expect(hud.states.first == .hidden)
+        #expect(hud.states.dropFirst().filter { $0 == .hidden }.count == 1)
         #expect(controller.isBusy == false)
         // The terminal stays silent (hidden HUD, cancel cue — no scary error for an empty capture), but
         // it still finalizes a .failed record for THIS dictation instead of leaving lastRecord describing
@@ -1100,7 +1104,10 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy == false)
     }
 
-    @Test func startShowsCancellableArmingBeforeCaptureIsLive() {
+    // Cancellable from the press, with nothing on screen. Arming shows no HUD, so ESC cannot reach us there;
+    // this state is cancelled by the trigger (handleCommit's .arming case) and by cancel()'s non-ESC callers
+    // — the chord-wins abort, a screen lock, and quit.
+    @Test func startIsCancellableWithNoVisibleHUDBeforeCaptureIsLive() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
@@ -1111,8 +1118,7 @@ struct DictationCaptureStartTests {
 
         controller.handleStart()
 
-        // No key, nothing matches → the Direct floor (shown as "Plain Dictation").
-        #expect(hud.states.last == .arming(mode: "Plain Dictation"))
+        #expect(!hud.states.contains { $0 != .hidden })
         #expect(controller.isCancellable)
     }
 

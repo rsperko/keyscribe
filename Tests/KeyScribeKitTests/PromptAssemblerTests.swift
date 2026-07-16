@@ -276,10 +276,30 @@ struct ContentEchoUnwrapTests {
         #expect(PromptAssembler.unwrappingContentEcho("Hi there.", sentContent: "hi there") == "Hi there.")
     }
 
-    @Test func leavesUnmatchedOpeningTagAlone() {
+    @Test func stripsUnmatchedOpeningTag() {
         #expect(PromptAssembler.unwrappingContentEcho(
             "<content>Hi there.", sentContent: "hi there"
-        ) == "<content>Hi there.")
+        ) == "Hi there.")
+    }
+
+    @Test func stripsUnmatchedClosingTag() {
+        #expect(PromptAssembler.unwrappingContentEcho(
+            "Hi there.</content>", sentContent: "hi there"
+        ) == "Hi there.")
+    }
+
+    // Mistral Small, observed live 2026-07-15: an opener and a newline, no closer, inserted verbatim.
+    @Test func stripsHalfEchoObservedFromMistralSmall() {
+        #expect(PromptAssembler.unwrappingContentEcho(
+            "<content>\nHow does it feel when we're making a call to an LLM?",
+            sentContent: "How does it feel when we're make c making a call to an LLM?"
+        ) == "How does it feel when we're making a call to an LLM?")
+    }
+
+    // A boundary tag is scaffolding, but a tag facing the wrong way is not a wrap at all.
+    @Test func leavesReversedBoundaryTagsAlone() {
+        let reversed = "</content>Hi there.<content>"
+        #expect(PromptAssembler.unwrappingContentEcho(reversed, sentContent: "hi there") == reversed)
     }
 
     @Test func leavesInteriorTagsAlone() {
