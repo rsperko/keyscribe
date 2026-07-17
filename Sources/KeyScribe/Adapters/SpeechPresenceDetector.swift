@@ -10,6 +10,11 @@ struct SpeechPresenceReading: Sendable {
     let peak: Float
     let latencyMs: Double
     let modelUsed: Bool
+    // Where speech began, when the model ran and found it after provable leading silence — the evidence the
+    // empty-transcript recovery trims on. Nil when the model didn't run, no chunk cleared the gate, or speech
+    // started in chunk zero. Wall-clock: FluidAudio resamples to 16 kHz before chunking, so a 24 kHz capture
+    // (Qwen3) still reads back in take time.
+    var speechStart: TimeInterval? = nil
 }
 
 protocol SpeechPresenceDetecting: Sendable {
@@ -177,7 +182,8 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
             chunkProbabilities: probabilities, peak: peak ?? 1)
         return SpeechPresenceReading(
             presence: verdict, maxProbability: probabilities.max() ?? 0, peak: peak ?? 1,
-            latencyMs: Self.elapsedMs(since: start), modelUsed: true)
+            latencyMs: Self.elapsedMs(since: start), modelUsed: true,
+            speechStart: SpeechPresenceGate.speechStart(chunkProbabilities: probabilities))
     }
 
     private static func peakMagnitude(_ samples: [Float]) -> Float {

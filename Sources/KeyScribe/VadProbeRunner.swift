@@ -31,9 +31,13 @@ enum VadProbeRunner {
             let reading = await detector.read(samples: samples, url: wav, sampleRate: 16000)
             latencies.append(reading.latencyMs)
             let verdict = reading.presence == .noSpeech ? "noSpeech" : "speech"
+            // speechStart doubles as the empty-transcript recovery's trim boundary: "-" means chunk zero
+            // already had speech, so a silent-engine take on this clip would not be retried.
+            let speechStart = reading.speechStart.map { String(format: "%.3fs", $0) } ?? "-"
             print(String(
-                format: "  %-28@  %-8@  maxP=%.3f  %.1fms",
-                entry.id as NSString, verdict as NSString, reading.maxProbability, reading.latencyMs))
+                format: "  %-28@  %-8@  maxP=%.3f  speechStart=%-7@  %.1fms",
+                entry.id as NSString, verdict as NSString, reading.maxProbability,
+                speechStart as NSString, reading.latencyMs))
             if reading.presence == .noSpeech {
                 suppressed.append(entry.id)
             } else {

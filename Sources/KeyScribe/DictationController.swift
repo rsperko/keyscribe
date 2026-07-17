@@ -786,7 +786,8 @@ final class DictationController {
             } else {
                 self.log.error("wav unreadable at \(url.path, privacy: .public)")
             }
-            if let reading = await self.noSpeechReading(samples: samples, url: url) {
+            let reading = await self.presenceReading(samples: samples, url: url)
+            if reading.presence == .noSpeech {
                 try? FileManager.default.removeItem(at: url)
                 if Task.isCancelled { return }
                 // Two-state no-speech: nothing-heard (peak never cleared the silence floor — a muted/dead
@@ -808,9 +809,9 @@ final class DictationController {
             case .streamed(let text):
                 // The streamed arm never re-transcribes, so it has no use for the PCM copy — drop it here
                 // rather than carry a multi-MiB buffer through the call for nothing.
-                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: nil, streamedTranscript: text)
+                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: nil, reading: reading, streamedTranscript: text)
             case .batch:
-                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, streamedTranscript: nil)
+                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, reading: reading, streamedTranscript: nil)
             case .busy:
                 try? FileManager.default.removeItem(at: url)
                 self.noteTranscribeBusyRejection()
@@ -828,13 +829,14 @@ final class DictationController {
         }
     }
 
-    // The VAD reading when the take is no-speech (so the caller can split nothing-heard vs no-speech on the
-    // peak), or nil when speech is present and transcription should proceed.
-    private func noSpeechReading(samples: [Float]?, url: URL) async -> SpeechPresenceReading? {
+    // The take's VAD reading. A noSpeech verdict ends the dictation here (the caller splits nothing-heard vs
+    // no-speech on the peak); a speech verdict carries through to transcription, where its speech-start
+    // evidence drives the empty-transcript recovery.
+    private func presenceReading(samples: [Float]?, url: URL) async -> SpeechPresenceReading {
         let reading = await presenceDetector.read(
             samples: samples, url: url, sampleRate: activeEngine.captureSampleRate)
-        Log.audio.debug("vad \(reading.presence == .noSpeech ? "noSpeech" : "speech", privacy: .public) maxP=\(reading.maxProbability, privacy: .public) peak=\(reading.peak, privacy: .public) model=\(reading.modelUsed, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
-        return reading.presence == .noSpeech ? reading : nil
+        Log.audio.debug("vad \(reading.presence == .noSpeech ? "noSpeech" : "speech", privacy: .public) maxP=\(reading.maxProbability, privacy: .public) peak=\(reading.peak, privacy: .public) model=\(reading.modelUsed, privacy: .public) speechStart=\(reading.speechStart ?? -1, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
+        return reading
     }
 
     private func finishNoSpeech() {
@@ -856,6 +858,19 @@ final class DictationController {
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .error,
                state: .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings),
+               hideAfter: 8, record: (.noSpeech, nil), evict: true, completion: completion)
+    }
+
+    // VAD heard speech but the speech model returned no text. Names the model instead of claiming silence —
+    // there is no user repair for an engine failure, so no action button. Records .noSpeech like the other
+    // no-text terminals (the finishNothingHeard pattern): honest HUD copy, untouched history semantics.
+    private func finishHeardButNoText(engine: any SpeechEngine) {
+        guard machine.beginInserting() else { return }
+        hud?.relinquishKeyFocus()
+        let completion = DictationCompletion(
+            outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
+        finish(machine: .finish(.noSpeech), cue: .error,
+               state: .error(message: "Heard speech, but \(engine.displayName) returned no text", action: nil),
                hideAfter: 8, record: (.noSpeech, nil), evict: true, completion: completion)
     }
 
@@ -1069,17 +1084,129 @@ final class DictationController {
     // abandons a true hang. The gate runs the engine as an unstructured task, so even an engine that ignores
     // cancellation is abandoned at the deadline; a late result no-ops. An abandoned transcribe may still run,
     // so the gate refuses a second concurrent call (throws `Busy`) until it settles — two never run at once.
-    private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL, samples: [Float]?) async throws -> String {
+    // Test seam, mirroring streamingFinalizeTimeoutOverride: production scales the deadline with the recording
+    // length; tests pin it to exercise the retry's budget check in bounded time.
+    var transcribeTimeoutOverride: Double?
+    private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL, samples: [Float]?, reading: SpeechPresenceReading?, recovery: RecoveryProgress) async throws -> String {
         await awaitSelfTestClearance()
-        let timeout = max(30, audioSeconds * 20)
-        return try await transcribeGate.run(seconds: timeout) {
+        let timeout = transcribeTimeoutOverride ?? max(30, audioSeconds * 20)
+        let result = try await transcribeGate.run(seconds: timeout) { () async throws -> TranscribeResult in
+            let firstStart = DispatchTime.now()
             // Prefer the in-memory PCM when the engine accepts it; fall back to the WAV otherwise.
+            let first: String
             if engine.supportsSampleInput, let samples {
-                return try await engine.transcribe(
+                first = try await engine.transcribe(
                     samples: samples, sampleRate: engine.captureSampleRate, biasTerms: biasTerms)
+            } else {
+                first = try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
             }
-            return try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
+            guard first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return TranscribeResult(text: first)
+            }
+            // "No output, some sound" — the engine returned nothing on a take VAD heard speech in, after
+            // provable leading silence. Parakeet TDT v3 collapses to all-blank on exactly that shape
+            // (agent_notes/parakeet_silent_bug_recovery), but nothing here is engine-specific: the gate is the
+            // declared sample capability, never an identity. A nonempty engine annotation (`[BLANK_AUDIO]`) is
+            // the engine asserting blank audio, not a silent failure — it is nonempty here, so it never
+            // retries. Streamed transcripts never reach this call.
+            func skip(_ reason: String) -> TranscribeResult {
+                TranscribeResult(text: first, decision: RecoveryDecision(attempted: false, outcome: reason))
+            }
+            guard reading?.modelUsed == true else { return skip("skipped-vad-fail-open") }
+            guard let speechStart = reading?.speechStart else { return skip("skipped-speech-in-first-chunk") }
+            guard engine.supportsSampleInput else { return skip("skipped-wav-only-engine") }
+            guard let samples else { return skip("skipped-no-pcm") }
+            // Trim BEFORE committing to the retry: speechStart can sit exactly one chunk in, where the 256 ms
+            // pre-roll reaches back to the take's start and the "trim" is the original PCM. Re-running the
+            // engine on identical input can only burn the deadline for the same answer.
+            let trimmed = LeadingSilenceTrim.trimming(
+                samples: samples, sampleRate: engine.captureSampleRate, speechStart: speechStart)
+            guard trimmed.count < samples.count else { return skip("skipped-trim-removed-nothing") }
+            // The two attempts share ONE deadline — extending it would weaken the wedge protection it exists
+            // for. The trimmed input is strictly shorter, so the first attempt's cost is an upper bound on the
+            // retry's: skip rather than risk spending the deadline and reporting a spurious timeout.
+            let firstElapsed = Self.seconds(since: firstStart)
+            guard timeout - firstElapsed >= firstElapsed * Self.retryBudgetMargin else {
+                return skip("skipped-deadline-budget")
+            }
+            let removed = Double(samples.count - trimmed.count) / Double(engine.captureSampleRate)
+            recovery.noteRetryStarted(trimmedSeconds: removed)
+            let second: String
+            do {
+                second = try await engine.transcribe(
+                    samples: trimmed, sampleRate: engine.captureSampleRate, biasTerms: biasTerms)
+            } catch {
+                // The engine already returned nothing once; a failed repair does not make that a different,
+                // generic failure. Report it as what it is — the model produced no text — via the empty
+                // response the caller already knows how to name.
+                return TranscribeResult(
+                    text: "",
+                    decision: RecoveryDecision(attempted: true, outcome: "retry-error: \(error)", trimmedSeconds: removed))
+            }
+            return TranscribeResult(
+                text: second,
+                decision: RecoveryDecision(
+                    attempted: true,
+                    outcome: second.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "retry-still-empty" : "recovered",
+                    trimmedSeconds: removed))
         }
+        // Only a result the GATE ACCEPTED is the dictation's outcome, so the decision is logged here and never
+        // from inside the closure. A closure abandoned at the deadline keeps running and can still return
+        // `recovered` — logging in there would race the deadline's terminal and could record a success for a
+        // dictation the user saw fail. An abandoned closure never reaches this line; the deadline catch in
+        // transcribeAndInsert owns that line instead.
+        if let decision = result.decision {
+            self.logRecovery(engine: engine, audioSeconds: audioSeconds, reading: reading, decision: decision)
+        }
+        return result.text
+    }
+
+    // Load jitter headroom on the retry's budget check: the retry should cost no more than the first attempt,
+    // but a machine under load can make the same work take somewhat longer.
+    private nonisolated static let retryBudgetMargin = 1.25
+
+    private nonisolated static func seconds(since start: DispatchTime) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e9
+    }
+
+    // What the recovery decided, carried OUT of the gate closure as a value instead of logged from inside it.
+    private struct RecoveryDecision: Sendable {
+        let attempted: Bool
+        let outcome: String
+        var trimmedSeconds: Double = 0
+    }
+
+    private struct TranscribeResult: Sendable {
+        let text: String
+        // nil ⇔ the first pass produced text, so no recovery decision was ever reached.
+        var decision: RecoveryDecision?
+    }
+
+    // Whether a retry BEGAN — the one fact the caller cannot learn from a return value, because the gate
+    // abandons its closure at the deadline. It is what separates an initial-attempt deadline (a plain
+    // timeout) from a deadline that landed mid-retry (the engine failing to produce text on speech).
+    final class RecoveryProgress: @unchecked Sendable {
+        private let lock = NSLock()
+        private var trimmedSeconds: Double?
+        // Non-nil ⇔ a retry began, carrying what it trimmed for the deadline's log line.
+        var retryTrimmedSeconds: Double? { lock.withLock { trimmedSeconds } }
+        func noteRetryStarted(trimmedSeconds: Double) { lock.withLock { self.trimmedSeconds = trimmedSeconds } }
+    }
+
+    // Test seam: sees each recovery decision line as it is emitted. Production leaves it nil and the line goes
+    // only to Log.audio, which tests cannot read back (see AGENTS.md — `log show` is unreliable here).
+    var recoveryDecisionObserver: ((String) -> Void)?
+
+    // One line per dictation that reached a recovery decision: what the engine and VAD saw, whether the retry
+    // ran, and how it ended. Diagnostics only — never transcript text. Every caller is on the main actor and
+    // owns the dictation's authoritative outcome, so the line always matches the terminal the user saw.
+    private func logRecovery(
+        engine: any SpeechEngine, audioSeconds: Double, reading: SpeechPresenceReading?, decision: RecoveryDecision
+    ) {
+        let speechStart = reading?.speechStart.map { String(format: "%.3fs", $0) } ?? "none"
+        let line = "engine=\(engine.id) audio=\(String(format: "%.2f", audioSeconds))s vad-model=\(reading?.modelUsed == true) speechStart=\(speechStart) attempted=\(decision.attempted) trimmed=\(String(format: "%.3f", decision.trimmedSeconds))s outcome=\(decision.outcome)"
+        Log.audio.notice("empty-transcript recovery: \(line, privacy: .public)")
+        recoveryDecisionObserver?(line)
     }
 
     private func noteTranscribeBusyRejection() {
@@ -1099,7 +1226,7 @@ final class DictationController {
         transcribeBusyStreakStartedAt = nil
     }
 
-    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, streamedTranscript: String? = nil) async {
+    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, reading: SpeechPresenceReading? = nil, streamedTranscript: String? = nil) async {
         await session?.modeResolveTask?.value
         // The secure-aware snapshot decides whether the mode is neutered (secure/unconfirmed target). Settle
         // it before any cloud rewrite reads activeMode, so a target that couldn't be confirmed can't leak
@@ -1112,6 +1239,7 @@ final class DictationController {
         let commitSecureProbe = Task { @MainActor [snapshotAsync] in await snapshotAsync().isSecureField }
         let engine = activeEngine
         building.audioSeconds = audioSeconds
+        let recovery = RecoveryProgress()
 
         let rawFromEngine: String
         if let streamedTranscript {
@@ -1120,6 +1248,12 @@ final class DictationController {
             // proves the model is loaded, so running load machinery here could only fabricate an impossible
             // "model load failed" after a successful transcript.
             rawFromEngine = streamedTranscript
+            // A streamed session is spent once finalized and its PCM is deliberately dropped, so there is
+            // nothing to retry on — record the decision rather than leaving the streamed arm silent.
+            if streamedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.logRecovery(engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
+                                 decision: RecoveryDecision(attempted: false, outcome: "skipped-streamed"))
+            }
             try? FileManager.default.removeItem(at: url)
         } else {
             // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a one-time cost (632 MB
@@ -1175,7 +1309,8 @@ final class DictationController {
             let transcribeStart = DispatchTime.now()
             do {
                 rawFromEngine = try await transcribeBounded(
-                    audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples)
+                    audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples,
+                    reading: reading, recovery: recovery)
                 resetTranscribeBusyStreak()
             } catch is SingleFlightDeadline.Busy {
                 try? FileManager.default.removeItem(at: url)
@@ -1189,6 +1324,17 @@ final class DictationController {
                 // A user cancel cancels this task too; cancel() already handled the terminal state, so a
                 // late deadline/error must not stomp the next dictation's HUD/effects/state.
                 if Task.isCancelled { return }
+                // The deadline landed during the retry: the engine already returned nothing on a take with
+                // speech in it, so this is that silent failure — not a timeout to hand the user. The
+                // abandoned call keeps the gate closed exactly as it does for any other deadline.
+                if let trimmedSeconds = recovery.retryTrimmedSeconds {
+                    self.logRecovery(
+                        engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
+                        decision: RecoveryDecision(
+                            attempted: true, outcome: "retry-deadline", trimmedSeconds: trimmedSeconds))
+                    finishHeardButNoText(engine: engine)
+                    return
+                }
                 log.error("transcribe timed out (\(engine.id, privacy: .public))")
                 finishError("Transcription timed out")
                 return
@@ -1213,6 +1359,16 @@ final class DictationController {
         // ended effects and hid the HUD — a stale task must not run the cloud rewrite, touch the
         // target, or mutate routing state a newer dictation may now own.
         if Task.isCancelled { return }
+
+        // The engine produced nothing on a take the VAD model positively heard speech in — recovery either
+        // didn't apply or didn't help. Say that, rather than the misleading "No speech detected" that blames
+        // the user for the engine's silent failure. Tested on the raw response: an annotation the cleanup
+        // above blanked is the engine asserting blank audio, and keeps the ordinary no-speech path.
+        if rawFromEngine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let reading, reading.modelUsed, reading.presence == .speech {
+            finishHeardButNoText(engine: engine)
+            return
+        }
 
         // Phase B (design.md §4.3): a trigger-phrase suffix re-routes to that mode's pipeline
         // and is stripped from the transcript; otherwise the Phase-A mode stands.

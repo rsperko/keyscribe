@@ -20,6 +20,7 @@ flat and are organized by **semantic id prefix**, not subfolders. A clip needed 
 | `bias/` | Recognition-bias stress + streaming-vs-batch + engine onboarding (ContextASR-Bench derived) | `manifest.json` | `KeyScribe --benchmark corpus/bias [--streaming] [--raw]` — build via `bias/build.py` |
 | `commands/` | Spoken-command regression on real transcripts | `manifest.json` | `KeyScribe --commands-check corpus/commands` |
 | `voices/` | Multi-voice TTS/human studies of command phrasing | `manifest.json` | `KeyScribe --benchmark corpus/voices --raw` |
+| `silence-lead/` | Leading-silence empty-transcript regression (derived clips via `silence-lead/gen.sh` + real repro takes) | `manifest.json` | `KeyScribe --benchmark corpus/silence-lead --raw` |
 
 ## Manifest schema (unified, `schemaVersion: 1`)
 

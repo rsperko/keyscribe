@@ -40,6 +40,9 @@ corpus/distractors/.tmpwav
 corpus/bias/*.wav
 corpus/bias/shard.tar
 corpus/bias/ContextASR-Speech_English.jsonl
+# silence-lead/ leading-silence empty-transcript regression corpus: derived clips + real repro takes
+# stay local; manifest.json + gen.sh + README.md IS committed (reproducible via gen.sh)
+corpus/silence-lead/*.wav
 
 # rewrite-prompt eval (`KeyScribe --rewrite-eval`): cases.json + README ARE committed; per-run
 # attempt dumps (model outputs, connection/model identity) stay local

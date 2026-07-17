@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "corpus": "silence-lead",
+  "description": "Leading-silence stress set for the empty-transcript recovery: human stt clips with a fixed span of digital silence (or faint hiss) prepended, replayed to detect engines that return no text when speech follows a long silent lead.",
+  "clips": [
+    {
+      "id": "lead_repro1",
+      "file": "lead_repro1.wav",
+      "text": "Pi lean.",
+      "source": "human",
+      "tags": ["repro", "parakeet-tdt-v3", "nemo-15757"]
+    },
+    {
+      "id": "lead_01_2s",
+      "file": "lead_01_2s.wav",
+      "text": "The quarterly report is due on Friday afternoon.",
+      "source": "human",
+      "tags": ["derived-silence", "base:01", "lead:2s"]
+    },
+    {
+      "id": "lead_01_5s",
+      "file": "lead_01_5s.wav",
+      "text": "The quarterly report is due on Friday afternoon.",
+      "source": "human",
+      "tags": ["derived-silence", "base:01", "lead:5s"]
+    },
+    {
+      "id": "lead_01_10s",
+      "file": "lead_01_10s.wav",
+      "text": "The quarterly report is due on Friday afternoon.",
+      "source": "human",
+      "tags": ["derived-silence", "base:01", "lead:10s"]
+    },
+    {
+      "id": "lead_03_2s",
+      "file": "lead_03_2s.wav",
+      "text": "I think we should rewrite this paragraph to be more concise.",
+      "source": "human",
+      "tags": ["derived-silence", "base:03", "lead:2s"]
+    },
+    {
+      "id": "lead_03_5s",
+      "file": "lead_03_5s.wav",
+      "text": "I think we should rewrite this paragraph to be more concise.",
+      "source": "human",
+      "tags": ["derived-silence", "base:03", "lead:5s"]
+    },
+    {
+      "id": "lead_03_10s",
+      "file": "lead_03_10s.wav",
+      "text": "I think we should rewrite this paragraph to be more concise.",
+      "source": "human",
+      "tags": ["derived-silence", "base:03", "lead:10s"]
+    },
+    {
+      "id": "lead_04_2s",
+      "file": "lead_04_2s.wav",
+      "text": "Let's deploy the service to Kubernetes before the demo.",
+      "source": "human",
+      "tags": ["derived-silence", "base:04", "lead:2s"]
+    },
+    {
+      "id": "lead_04_5s",
+      "file": "lead_04_5s.wav",
+      "text": "Let's deploy the service to Kubernetes before the demo.",
+      "source": "human",
+      "tags": ["derived-silence", "base:04", "lead:5s"]
+    },
+    {
+      "id": "lead_04_10s",
+      "file": "lead_04_10s.wav",
+      "text": "Let's deploy the service to Kubernetes before the demo.",
+      "source": "human",
+      "tags": ["derived-silence", "base:04", "lead:10s"]
+    },
+    {
+      "id": "lead_01_hiss5s",
+      "file": "lead_01_hiss5s.wav",
+      "text": "The quarterly report is due on Friday afternoon.",
+      "source": "human",
+      "tags": ["derived-silence", "base:01", "lead:hiss5s"]
+    }
+  ]
+}

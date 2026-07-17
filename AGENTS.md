@@ -514,6 +514,44 @@ voice): over `corpus/stt` (107 clips) every clip read `speech` with a minimum ta
 of 0.397 (margin 0.097 above the 0.30 threshold); generated silence/hiss all read `noSpeech` (hiss max
 probability 0.198) — a clean gap around 0.30.
 
+**The inverse failure — VAD heard speech but the engine returned nothing — is recovered, once, generically.**
+Parakeet TDT v3 collapses to an all-blank decode on a short take with substantial leading silence
+(TDT-v3-only; root cause **unconfirmed** — NVIDIA-NeMo/Speech #15757 is *related* evidence of
+silence-sensitive feature normalization, but it is *trailing* silence and a reporter's hypothesis, not a
+confirmed diagnosis of this *leading*-silence case). It is a real engine behavior, not one machine's
+quirk — observed and verified on a separate machine from the one that verified the recovery. **But there
+is no distributable repro:** `corpus/silence-lead/lead_repro1.wav` is a local-only, gitignored,
+irreplaceable observation — absent from a fresh checkout, unreproducible by any synthetic construction
+tried, so never tune trim behavior against generated clips and never treat a passing corpus run as proof
+the bug is gone. Finding a
+shareable regression case is open future work; the unit tests are the real safety net. Nothing in the
+trigger or the repair is engine-specific, so there is **no `SpeechEngine` hook and no per-engine code**: one
+capability-gated policy in `DictationController.transcribeBounded` re-transcribes the trimmed PCM
+(`LeadingSilenceTrim`, KeyScribeKit) when the raw response is empty, the VAD model ran and found speech
+after chunk zero (`SpeechPresenceGate.speechStart` — the proof of leading silence), and the engine is
+sample-capable with the PCM in hand. The retry runs INSIDE the existing single-flight gate and shares its
+one deadline (never extended — it is the wedge protection): it is budget-checked against the first
+attempt's elapsed time and skipped rather than risk a spurious timeout. **Never retried:** a nonempty
+engine annotation (`[BLANK_AUDIO]` is the engine asserting blank audio, not a silent failure), a fail-open
+VAD reading, speech starting in chunk zero, a trim that removes nothing (a `speechStart` of exactly one
+chunk — the pre-roll reaches the take's start, so the retry input would be byte-identical and can only
+burn the deadline for the same answer), a WAV-only engine (Apple — no trimmed-temp-WAV path exists by
+design), or a streamed result (stated policy, not an accident: the session is spent). Never twice. The
+256 ms pre-roll is load-bearing — trimming to 0.768 s turns the repro into a different word. Only the
+LEAD is trimmed; trailing audio is never touched. **Once the first pass has returned empty, the recovery
+owns every later failure:** an engine error or the shared deadline expiring mid-retry both surface as the
+named-model terminal, never a generic `Transcription failed`/`timed out` — a failed repair does not change
+what happened (the model produced no text on speech). Cancellation alone keeps its own semantics. When no
+text survives, the HUD names the model (`Heard speech, but <model> returned no text`) over a `.noSpeech`
+record. One `Log.audio` line per dictation records the decision (engine, audio seconds, whether VAD ran,
+`speechStart`, attempted/skipped + reason, trimmed seconds, outcome) — never transcript text. **The gate
+closure must never log it**: an abandoned closure keeps running and can still return `recovered` for a
+dictation the user saw fail, so the decision is RETURNED as a value and logged only once the gate has
+ACCEPTED the result (the deadline path logs `retry-deadline` itself). Whoever owns the authoritative
+outcome writes the line, so it always matches the terminal. `--vad-probe` prints
+each clip's `speechStart` (the trim boundary). Full rationale + rejected alternatives:
+`agent_notes/parakeet_silent_bug_recovery/`.
+
 **A streaming session is a DISTINCT no-speech path — sweep it separately.** An engine's `makeStreamingSession`
 feed→finalize can emit different silence artifacts than its batch `transcribe`, so a model that ships a
 streaming path (`supportsStreaming=true`) must be exercised against silence **both ways**. Use
