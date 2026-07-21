@@ -6,6 +6,13 @@
     <description>KeyScribe app updates</description>
     <language>en</language>
     <item>
+      <title>0.3.3</title>
+      <sparkle:version>230</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/rsperko/keyscribe/releases/download/v0.3.3/KeyScribe-0.3.3.dmg" sparkle:edSignature="ZaUzd1FjdugmuPC2IhP3Ehns+pl5qaFkpzXfU02BDpQ5ver88cIUwLiFWNrEQ6343IhWunafv4yPMg0THFL7BA==" length="77133177" type="application/octet-stream" />
+    </item>
+    <item>
       <title>0.3.2</title>
       <sparkle:version>228</sparkle:version>
       <sparkle:shortVersionString>0.3.2</sparkle:shortVersionString>
