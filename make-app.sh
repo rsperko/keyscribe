@@ -99,6 +99,22 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/KeyScribe"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+mkdir -p "$APP/Contents/Resources/Legal"
+cp LICENSE "$APP/Contents/Resources/Legal/LICENSE"
+cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/Legal/THIRD-PARTY-NOTICES.md"
+DEPENDENCY_LEGAL="$APP/Contents/Resources/Legal/Dependencies"
+mkdir -p "$DEPENDENCY_LEGAL"
+for dependency in .build/checkouts/*; do
+  [ -d "$dependency" ] || continue
+  dependency_name="$(basename "$dependency")"
+  if [ "$dependency_name" = "Sparkle" ] && ! otool -L "$APP/Contents/MacOS/KeyScribe" 2>/dev/null | grep -q "Sparkle.framework"; then
+    continue
+  fi
+  for notice in "$dependency"/LICENSE* "$dependency"/NOTICE*; do
+    [ -f "$notice" ] || continue
+    cp "$notice" "$DEPENDENCY_LEGAL/$dependency_name-$(basename "$notice")"
+  done
+done
 # MLX loads mlx.metallib from next to the executable — place it in MacOS/, beside the binary.
 METALLIB=".build/$CONFIG/mlx.metallib"
 if [ -f "$METALLIB" ]; then

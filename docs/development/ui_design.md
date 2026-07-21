@@ -327,6 +327,12 @@ so they sit together above Settings instead of competing with the primary loop.
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
 
+**About & Notices…** names the licenses for bundled libraries and runtime-downloaded models, including
+the Silero VAD support model and production-only Sparkle binary. The app bundle carries the GPLv3
+license, component index, and resolved dependencies' supplied license/notice files under
+`Contents/Resources/Legal` so the notices travel with binary distributions instead of existing only in
+the source checkout.
+
 The modes listed under `Next Dictation` are the user's enabled modes; a fresh install shows only
 **Plain Dictation** (the on-device Direct floor, on Fn) until the user adds an AI service. First AI
 setup materializes and connects the two headline rewrite modes (Cleanup and Edit Selection); the other
@@ -511,8 +517,12 @@ composer and lists do not live inside the mode editor.
   exactly **one bounded preview line** (line breaks and tabs rendered as `\n`/`\r`/`\t`, a
   whitespace-only value showing its spaces as `␣` so it never looks empty, capped so a row
   never grows with the replacement body); the full value stays available in the larger editor. Regex
-  rows use `Pattern` and retain a visible `Regex` badge. Rules are applied from top to bottom; the list
-  says so directly. Each row has a subtle drag handle and uses the platform table-reordering interaction. The
+  rows use `Pattern` and retain a visible `Regex` badge. Rules match the heard text once and replacement
+  output is never matched again. When rules overlap, the longest actual match wins; equal matches prefer
+  the selected mode's rule over Global, then the topmost rule within the same scope. The list explains
+  that replacements happen before any AI rewrite, which may still adjust the result; a longer phrase wins
+  when two rules could match; and, when multiple rules are listed, the higher rule wins if two match the
+  same words. Each row has a subtle drag handle and uses the platform table-reordering interaction. The
   system insertion marker appears only at positions that would change the order, never immediately above
   or below the row's current position. A context menu and accessibility actions provide **Move up**/**Move
   down** without permanent arrow-button clutter. The list expands to fit its rows and relies on the
@@ -521,8 +531,8 @@ composer and lists do not live inside the mode editor.
   behavior; **Update** applies the fields atomically and preserves the rule's position. Dismissing the
   popover leaves the rule unchanged. If the rule changes or disappears outside the editor before Update,
   the popover stays open and explains that it must be reopened instead of pretending the stale edit saved.
-  Mode rules with the same identity override their included global
-  counterpart; unrelated included global rules run first, followed by mode rules in their displayed order.
+  Mode rules with the same identity override their included Global counterpart. Reordering changes only
+  the tie priority between rules in the displayed scope.
 - **The composer says what Add will do before it is pressed in Settings, mode settings, and the standalone panel.** A live status directly below the relevant fields covers
   the non-obvious cases: a duplicate word ("Already in Words to Recognize", or "…already included from
   your global vocabulary" in a mode), an identical replacement, and an update — the button relabels to
@@ -532,16 +542,6 @@ composer and lists do not live inside the mode editor.
   output. Nothing here blocks — deliberate re-entry is answered with facts, not warnings.
   In the standalone correction panel, an already-saved replacement still allows **Add & Replace Selection**;
   the existing rule needs no write, but its correction is still applied to the selected text.
-- **Rule overlaps are persistent row advisories, not creation-time warnings.** Like mode trigger
-  conflicts, each replacement row shows an orange advisory (`IssueText`, advisory severity) whenever
-  the committed state demonstrates it with a concrete phrase: an earlier rule rewrites this rule's
-  heard phrase first ("When you say “colour”, the replacement for “colou?r” runs first…"), or a later
-  rule changes this rule's output ("When you say “foo”, this rule produces “barn”…"). State-based, so
-  rules added by the global shortcut, the correction panel, or external edits get the same feedback;
-  mode rows are judged against the merged global+local order and also identify when a local rule changes
-  an included global rule's output. Advisories never block, reorder, or disable rules, and no general
-  regex equivalence is attempted — only overlaps with a concrete witness.
-
 ### AI Services
 
 An AI service is a named connection, not a global provider choice. The persistent list is **Your

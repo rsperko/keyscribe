@@ -178,7 +178,7 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-swift-test a-artifact a-codesign a-metallib a-plist b-commands b-benchmark"
+REQ_CORE="a-swift-test a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -252,6 +252,31 @@ chk_a_plist() {
   fi
 }
 guard a-plist "$(sig_artifact)" chk_a_plist
+
+chk_a_licenses() {
+  [ -d "$APP_PATH" ] || { result skip "license notices — artifact missing"; return; }
+  local LEGAL="$APP_PATH/Contents/Resources/Legal"
+  local DEPS="$LEGAL/Dependencies"
+  if [ ! -f "$LEGAL/LICENSE" ]; then
+    result fail "GPLv3 license missing from the app bundle"
+  elif [ ! -f "$LEGAL/THIRD-PARTY-NOTICES.md" ]; then
+    result fail "third-party notices missing from the app bundle"
+  elif [ ! -f "$DEPS/FluidAudio-LICENSE" ] || [ ! -f "$DEPS/argmax-oss-swift-NOTICES" ]; then
+    result fail "dependency license texts and notices missing from the app bundle"
+  elif ! grep -q "Silero VAD" "$LEGAL/THIRD-PARTY-NOTICES.md"; then
+    result fail "third-party notices omit the downloaded Silero VAD model"
+  elif ! grep -q "Sparkle" "$LEGAL/THIRD-PARTY-NOTICES.md"; then
+    result fail "third-party notices omit the production-only Sparkle binary"
+  elif ! grep -q "prebuilt Moonshine.xcframework" "$LEGAL/THIRD-PARTY-NOTICES.md" ||
+       ! grep -q "statically linked into Moonshine.xcframework" "$LEGAL/THIRD-PARTY-NOTICES.md"; then
+    result fail "third-party notices do not identify the Moonshine binary and its linked ONNX Runtime"
+  elif otool -L "$EXE" 2>/dev/null | grep -q "Sparkle.framework" && [ ! -f "$DEPS/Sparkle-LICENSE" ]; then
+    result fail "Sparkle is linked but its binary license notices are missing"
+  else
+    result pass "GPLv3 license and dependency notices bundled"
+  fi
+}
+guard a-licenses "$(sig_artifact)" chk_a_licenses
 
 if [ "$PHASE" = "pre" ]; then
   :

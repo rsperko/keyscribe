@@ -177,7 +177,7 @@ public enum VocabularyMerge {
     ) -> [ReplacementRule] {
         guard includeGlobal else { return local }
         let overridden = Set(local.map(key))
-        return global.filter { !overridden.contains(key($0)) } + local
+        return local + global.filter { !overridden.contains(key($0)) }
     }
 
     private static func key(_ rule: ReplacementRule) -> String {

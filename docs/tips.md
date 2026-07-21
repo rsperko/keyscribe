@@ -55,13 +55,14 @@ awkward, so here it is as config:
 
 ```toml
 [[rules]]
-heard = '\s*code fence[\s.,]*'
+heard = '\s*(?:insert )?code fence[\s.,]*'
 replace = '\n```\n'
 regex = true
 ```
 
-Say "code fence" to open a block, dictate your code, say "code fence" again to close it. Because the
-replacement is written with a TOML **literal** (single-quoted) string, the `\n` becomes a real
+Say "code fence" or "insert code fence" to open a block, dictate your code, then say either phrase
+again to close it. Because the replacement is written with a TOML **literal** (single-quoted) string,
+the `\n` becomes a real
 newline (Regex mode) instead of the two characters backslash-n.
 
 These recipes are most predictable in a mode with AI rewrite **off**, where output is inserted exactly

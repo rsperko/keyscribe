@@ -398,6 +398,10 @@ regex = false
 
 How a rule behaves once it matches:
 
+- **Rules match the heard text once.** Replacement output is inserted as-is and is never scanned by
+  another replacement. When matches overlap at the same position, the longest actual match wins. Equal
+  matches prefer a mode rule over a Global rule, then the topmost rule in the same scope. Regex and
+  literal rules use the same actual-match-length comparison; zero-length regex matches do nothing.
 - **Literal rules match case-insensitively, on whole words** (`pipe` never fires inside `pipeline`);
   the replacement text is inserted verbatim (`$` / `\` are not template refs).
 - **Regex rules also match case-insensitively by default.** The input is STT output, whose casing
@@ -446,8 +450,7 @@ How a rule behaves once it matches:
   The trailing `. ` in the last two rows is the mode's normal decoration (rewrite punctuation +
   `trailing`); only the first row, where the command *is* the whole utterance, comes out bare. The
   rule is "one replacement owned the whole thing," so it never fires for a fuzzy-dictionary
-  correction or a chain of rules whose outputs combine — only an explicit replacement that consumed
-  the entire utterance.
+  correction — only an explicit replacement that consumed the entire utterance.
 
 - **A regex replacement can press Return with a terminal `<CR>`.** Appending `<CR>` to the *end* of a
   **regex** replacement template requests a physical **Return** key press after the whole-utterance
@@ -498,10 +501,9 @@ saved rule's edit popover shows the multiline editor inline.
   truncated). A hand-authored rule already over the limit still **loads** (the limit gates authoring,
   not loading); Settings surfaces it and requires shortening before that rule can be saved again. The
   compact list preview is always one bounded line regardless of the stored size.
-- **Later rules can still transform a large macro's output**, because rules apply top-to-bottom over
-  progressively transformed text (a bigger body is likelier to contain a later rule's heard phrase),
-  and such a mutation can also cost the rule its whole-utterance ownership. A large macro is
-  deterministic only when spoken as its own command.
+- **A large macro's output is not scanned again.** Its content is inserted exactly as authored by the
+  replacement stage, regardless of text that resembles another rule's heard phrase. An AI rewrite may
+  still transform it unless the macro owns the whole utterance.
 - **Replacement config is plaintext on disk.** Do not store credentials or other secrets in a
   replacement.
 

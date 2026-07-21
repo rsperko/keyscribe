@@ -48,16 +48,18 @@ private struct NoticesView: View {
                     .font(.callout)
                 Text("Open-source notices").font(.headline)
                 Text("""
-                Speech-recognition model weights (downloaded at runtime, not part of this app's source):
+                Speech-recognition and supporting model weights (downloaded at runtime, not part of this app's source):
                 • Parakeet TDT v3 / TDT-CTC 110M — NVIDIA, CC-BY-4.0.
                 • pyannote segmentation/speaker models — CC-BY-4.0.
+                • Silero VAD speech-presence model — Silero Team; Core ML conversion by Fluid Inference, MIT.
                 • Whisper — OpenAI, MIT.
                 • Qwen3-ASR 0.6B / 1.7B — Alibaba Cloud (Qwen), Apache-2.0.
                 • Moonshine Base (English) — Moonshine AI, MIT.
                 • Apple on-device speech — macOS system framework.
 
                 Bundled libraries: FluidAudio, swift-transformers, swift-jinja (Apache-2.0); WhisperKit, \
-                moonshine-swift, ONNX Runtime, MLX Swift, TOMLKit (MIT). See THIRD-PARTY-NOTICES for the full list.
+                moonshine-swift, Moonshine, ONNX Runtime, MLX Swift, TOMLKit (MIT). Public releases also include \
+                Sparkle (MIT; its upstream license includes additional notices). License and notice files are included with this app.
                 """)
                 .font(.callout).foregroundStyle(.secondary)
             }

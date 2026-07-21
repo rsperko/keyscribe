@@ -65,7 +65,6 @@ struct DictionaryRows: View {
 
 struct ReplacementRows: View {
     let rules: [ReplacementsSet.Rule]
-    let advisories: [[VocabularyAnalysis.Advisory]]
     let ids: ReplacementRowAccessibilityIDs
     let deletionScope: VocabularyRemovalScope
     let analyzeEdit: (ReplacementsSet.Rule, VocabularyProposal) -> VocabularyAnalysis
@@ -115,15 +114,6 @@ struct ReplacementRows: View {
                     .textSelection(.enabled)
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
-                if advisories.indices.contains(index), !advisories[index].isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(advisories[index], id: \.message) { advisory in
-                            IssueText(advisory.message, severity: .advisory)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .accessibilityIdentifier(ids.advisory(index))
-                }
             }
             Spacer()
             Button { editingRule = rule } label: {
@@ -416,7 +406,6 @@ struct ReplacementRowAccessibilityIDs {
     let list: String
     let edit: (Int) -> String
     let remove: (Int) -> String
-    let advisory: (Int) -> String
     let deleteConfirmConfirm: String
     let deleteConfirmCancel: String
     let editor: ReplacementEditorAccessibilityIDs
@@ -916,7 +905,6 @@ private struct VocabularyEditor: View {
     @State private var recognitionHelpExpanded = false
 
     var body: some View {
-        let advisories = VocabularyAdvisor.ruleAdvisories(in: scope)
         Form {
             Section {
                 PaneDetailHeader(systemImage: "text.book.closed", title: title, subtitle: subtitle)
@@ -953,17 +941,15 @@ private struct VocabularyEditor: View {
                 }
             }
             Section("Automatic Replacements") {
-                Text("Changes a consistently misheard phrase to the text you want. Replacements run before any AI rewrite."
-                    + (rules.count > 1 ? " Applied from top to bottom. Drag to reorder." : ""))
+                Text("Changes a consistently misheard phrase to the text you want. Replacements happen before any AI rewrite, which may still adjust the result. When two rules could match, the longer phrase wins."
+                    + (rules.count > 1 ? " If two match the same words, the higher one wins — drag to reorder." : ""))
                     .font(.caption).foregroundStyle(.secondary)
                 ReplacementRows(
                     rules: rules,
-                    advisories: advisories,
                     ids: ReplacementRowAccessibilityIDs(
                         list: AccessibilityID.Settings.Vocabulary.replacementsList,
                         edit: AccessibilityID.Settings.Vocabulary.replacementEdit,
                         remove: AccessibilityID.Settings.Vocabulary.replacementRemove,
-                        advisory: AccessibilityID.Settings.Vocabulary.replacementAdvisory,
                         deleteConfirmConfirm: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmConfirm,
                         deleteConfirmCancel: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmCancel,
                         editor: ReplacementEditorAccessibilityIDs(

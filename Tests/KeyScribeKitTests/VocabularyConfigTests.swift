@@ -188,10 +188,10 @@ struct VocabularyConfigTests {
         #expect(VocabularyMerge.words(global: ["a", "b"], local: [], includeGlobal: false) == [])
     }
 
-    @Test func mergeRulesGlobalRunBeforeLocal() {
+    @Test func mergeRulesLocalRunBeforeGlobal() {
         let g = [ReplacementRule(heard: "a", replace: "1", isRegex: false)]
         let l = [ReplacementRule(heard: "b", replace: "2", isRegex: false)]
-        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == g + l)
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == l + g)
         #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: false) == l)
     }
 
@@ -214,20 +214,20 @@ struct VocabularyConfigTests {
         ]
         let l = [ReplacementRule(heard: "B", replace: "two", isRegex: false)]
         #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true)
-            == [ReplacementRule(heard: "a", replace: "1", isRegex: false),
-                ReplacementRule(heard: "B", replace: "two", isRegex: false)])
+            == [ReplacementRule(heard: "B", replace: "two", isRegex: false),
+                ReplacementRule(heard: "a", replace: "1", isRegex: false)])
     }
 
     @Test func mergeRulesLiteralAndRegexSameHeardAreDistinctKeys() {
         let g = [ReplacementRule(heard: "foo", replace: "global", isRegex: false)]
         let l = [ReplacementRule(heard: "foo", replace: "local", isRegex: true)]
-        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == g + l)
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == l + g)
     }
 
     @Test func mergeRulesRegexOverrideIsCaseSensitive() {
         let g = [ReplacementRule(heard: "Foo(.*)", replace: "global", isRegex: true)]
         let l = [ReplacementRule(heard: "foo(.*)", replace: "local", isRegex: true)]
-        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == g + l)
+        #expect(VocabularyMerge.rules(global: g, local: l, includeGlobal: true) == l + g)
     }
 
     @Test func replacingRulePreservesItsPosition() {

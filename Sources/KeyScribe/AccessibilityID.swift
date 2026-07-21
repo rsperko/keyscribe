@@ -83,7 +83,6 @@ enum AccessibilityID {
             static let replacementEditorUpdate = "settings.vocabulary.replacements.editor.update"
             static func replacementEdit(_ index: Int) -> String { "settings.vocabulary.replacements.edit.\(index)" }
             static func replacementRemove(_ index: Int) -> String { "settings.vocabulary.replacements.remove.\(index)" }
-            static func replacementAdvisory(_ index: Int) -> String { "settings.vocabulary.replacements.advisory.\(index)" }
             static let replacementDeleteConfirmConfirm = "settings.vocabulary.replacements.deleteConfirm.confirm"
             static let replacementDeleteConfirmCancel = "settings.vocabulary.replacements.deleteConfirm.cancel"
         }

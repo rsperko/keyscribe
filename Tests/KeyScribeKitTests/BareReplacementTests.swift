@@ -133,14 +133,12 @@ struct BareReplacementTests {
         #expect(detect([ReplacementRule(heard: "x", replace: "y", isRegex: false)], on: "hello") == nil)
     }
 
-    // If a second rule mutates the owner's generated output, it no longer equals the produced text, so
-    // this conservatively does NOT clamp (the normal, non-bare path still handles it correctly).
-    @Test func chainedMutationDoesNotClamp() {
+    @Test func replacementOutputIsNotReprocessedWhenClamping() {
         let rules = [
             ReplacementRule(heard: #"slash (\w+)"#, replace: "/$1", isRegex: true),
             ReplacementRule(heard: "dog", replace: "canine", isRegex: false),
         ]
-        #expect(detect(rules, on: "slash dog") == nil)
+        #expect(detect(rules, on: "slash dog") == "/dog")
     }
 
     // A LiveEdits control char (\n from "insert new line", \t from "insert tab") is the command's
@@ -256,12 +254,11 @@ struct BareReplacementTests {
         #expect(bare?.submit == nil)
     }
 
-    // The chained-mutation guard (see chainedMutationDoesNotClamp) also blocks the Return request.
-    @Test func chainedMutationBlocksCRReturn() {
+    @Test func laterRuleDoesNotChangeBareReplacementOrSubmit() {
         let rules = [
             ReplacementRule(heard: #"slash (\w+)"#, replace: "/$1<CR>", isRegex: true),
             ReplacementRule(heard: "dog", replace: "canine", isRegex: false),
         ]
-        #expect(detectBare(rules, on: "slash dog") == nil)
+        #expect(detectBare(rules, on: "slash dog") == BareReplacement(text: "/dog", submit: .return))
     }
 }

@@ -24,7 +24,19 @@ public struct ReplacementsStage: PipelineStage {
 
     // Regex + template resolved once at construction, so the per-dictation path is just matching. Invalid or
     // unsafe rules are dropped here.
-    private let prepared: [(regex: NSRegularExpression, template: String, submit: Mode.Submit?)]
+    private struct PreparedRule {
+        let regex: NSRegularExpression
+        let template: String
+        let submit: Mode.Submit?
+    }
+
+    private struct PreparedMatch {
+        let rule: PreparedRule
+        let result: NSTextCheckingResult
+        let range: Range<String.Index>
+    }
+
+    private let preparedRulesHighestTiePriorityFirst: [PreparedRule]
 
     // When the transform leaves text unchanged, the only possible whole-utterance owner is an *identity*
     // replacement (output == matched span); absent any such rule we skip the whole-utterance scan. A literal
@@ -74,19 +86,19 @@ public struct ReplacementsStage: PipelineStage {
 
     public init(rules: [ReplacementRule]) {
         self.rules = rules
-        var prepared: [(regex: NSRegularExpression, template: String, submit: Mode.Submit?)] = []
+        var prepared: [PreparedRule] = []
         var droppedForReturnMarker: [ReplacementRule] = []
         for rule in rules {
             switch Self.prepare(rule) {
             case .ready(let regex, let template, let submit):
-                prepared.append((regex, template, submit))
+                prepared.append(PreparedRule(regex: regex, template: template, submit: submit))
             case .droppedForReturnMarker:
                 droppedForReturnMarker.append(rule)
             case .dropped:
                 continue
             }
         }
-        self.prepared = prepared
+        self.preparedRulesHighestTiePriorityFirst = prepared
         self.droppedForReturnMarker = droppedForReturnMarker
         self.mayHaveIdentityReplacement = rules.contains { rule in
             guard !rule.heard.isEmpty else { return false }
@@ -102,7 +114,7 @@ public struct ReplacementsStage: PipelineStage {
         // and no pause punctuation to bridge.
         let mayOwnUtterance = transformed != input || mayHaveIdentityReplacement || Self.containsPauseMark(input)
         context.bareReplacement = mayOwnUtterance
-            ? bareReplacement(for: input, transformedInput: transformed)
+            ? bareReplacement(for: input)
             : nil
     }
 
@@ -110,53 +122,66 @@ public struct ReplacementsStage: PipelineStage {
     // token body minted upstream (design.md §4.2).
     private func transform(_ text: String) -> String {
         SentinelText.mappingOutsideSentinels(text) { run in
-            var result = run
-            for rule in prepared {
-                let range = NSRange(result.startIndex..., in: result)
-                guard rule.regex.firstMatch(in: result, range: range) != nil else { continue }
-                result = rule.regex.stringByReplacingMatches(in: result, range: range, withTemplate: rule.template)
+            var result = ""
+            var cursor = run.startIndex
+            while cursor < run.endIndex {
+                if let winner = winningMatch(in: run, at: cursor) {
+                    result += winner.rule.regex.replacementString(
+                        for: winner.result, in: run, offset: 0, template: winner.rule.template)
+                    cursor = winner.range.upperBound
+                } else {
+                    let next = run.index(after: cursor)
+                    result.append(contentsOf: run[cursor..<next])
+                    cursor = next
+                }
             }
             return SentinelText.neutralizeOpen(result)
         }
     }
 
-    // The verbatim value to insert when one rule owns the WHOLE utterance, else nil. A rule "owns" it when its
-    // single match spans the entire core — input minus surrounding whitespace and trailing sentence
-    // punctuation/space (so a stray STT "slash dog." still clamps). The clamped value is the rule's generated
-    // output; we clamp only when running every rule over the core reproduces exactly that value, so a second
-    // rule mutating the owner's output falls through to the normal path.
-    public func bareReplacement(for input: String, transformedInput: String? = nil) -> BareReplacement? {
+    private func winningMatch(in text: String, at cursor: String.Index) -> PreparedMatch? {
+        let searchRange = NSRange(cursor..<text.endIndex, in: text)
+        let options: NSRegularExpression.MatchingOptions = [
+            .anchored, .withTransparentBounds, .withoutAnchoringBounds,
+        ]
+        var winner: PreparedMatch?
+        for rule in preparedRulesHighestTiePriorityFirst {
+            guard let result = rule.regex.firstMatch(in: text, options: options, range: searchRange),
+                  result.range.length > 0,
+                  let range = Range(result.range, in: text)
+            else { continue }
+            if winner == nil || result.range.length > winner!.result.range.length {
+                winner = PreparedMatch(rule: rule, result: result, range: range)
+            }
+        }
+        return winner
+    }
+
+    public func bareReplacement(for input: String) -> BareReplacement? {
         let (core, leading, trailing) = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
         // A protected token (verbatim/clipboard) means no single rule cleanly owns the utterance — fall
         // through rather than let a rule match across the opaque token.
         guard !SentinelText.containsSentinel(core) else { return nil }
-        // core == input ⇒ reuse the transform we already ran.
-        let reusable = (transformedInput != nil && core == input) ? transformedInput : nil
-        if let owned = wholeUtteranceOutput(of: core, transformedInput: reusable) {
+        if let owned = wholeUtteranceOutput(of: core) {
             return BareReplacement(text: leading + owned.text + trailing, submit: owned.submit)
         }
         // A mid-utterance pause is sentence punctuation the contiguous match can't cross; retry across a
         // de-paused core (whole-utterance only — still requires an end-to-end match).
         let dePaused = Self.dePause(core)
-        if dePaused != core, let owned = wholeUtteranceOutput(of: dePaused, transformedInput: nil) {
+        if dePaused != core, let owned = wholeUtteranceOutput(of: dePaused) {
             return BareReplacement(text: leading + owned.text + trailing, submit: owned.submit)
         }
         return nil
     }
 
-    // One rule matches `core` end-to-end AND every rule over `core` reproduces that output, else nil. The
-    // owning rule's `<CR>` submit (if any) rides along so a whole-utterance command can press Return.
-    private func wholeUtteranceOutput(of core: String, transformedInput: String?) -> (text: String, submit: Mode.Submit?)? {
+    private func wholeUtteranceOutput(of core: String) -> (text: String, submit: Mode.Submit?)? {
         let coreRange = NSRange(core.startIndex..., in: core)
-        for rule in prepared {
-            guard let match = rule.regex.firstMatch(in: core, range: coreRange), match.range == coreRange else { continue }
-            let generated = SentinelText.neutralizeOpen(
-                rule.regex.replacementString(for: match, in: core, offset: 0, template: rule.template))
-            let coreTransformed = transformedInput ?? transform(core)
-            return coreTransformed == generated ? (generated, rule.submit) : nil
-        }
-        return nil
+        guard let winner = winningMatch(in: core, at: core.startIndex), winner.result.range == coreRange else { return nil }
+        let generated = SentinelText.neutralizeOpen(
+            winner.rule.regex.replacementString(
+                for: winner.result, in: core, offset: 0, template: winner.rule.template))
+        return (generated, winner.rule.submit)
     }
 
     // Sentence punctuation STT inserts at a boundary — one set for both trailing-trim and pause-bridging.

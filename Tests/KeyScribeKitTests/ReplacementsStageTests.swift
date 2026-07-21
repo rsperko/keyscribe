@@ -105,12 +105,60 @@ struct ReplacementsStageTests {
             == #"```\n"#)
     }
 
-    @Test func rulesApplyInOrder() {
+    @Test func replacementOutputIsNotReprocessed() {
         let rules = [
             ReplacementRule(heard: "cat", replace: "dog", isRegex: false),
             ReplacementRule(heard: "dog", replace: "fish", isRegex: false),
         ]
-        #expect(run(rules, on: "cat") == "fish")
+        #expect(run(rules, on: "cat") == "dog")
+        #expect(run(rules, on: "dog") == "fish")
+    }
+
+    @Test func longestMatchWins() {
+        let rules = [
+            ReplacementRule(heard: "code fence", replace: "GLOBAL", isRegex: false),
+            ReplacementRule(heard: "insert code fence", replace: "MODE", isRegex: false),
+        ]
+        #expect(run(rules, on: "insert code fence") == "MODE")
+        #expect(run(rules, on: "code fence") == "GLOBAL")
+    }
+
+    @Test func modeRuleWinsEqualLengthTie() {
+        let global = [ReplacementRule(heard: #"code\s+fence"#, replace: "GLOBAL", isRegex: true)]
+        let local = [ReplacementRule(heard: "code fence", replace: "MODE", isRegex: false)]
+        let rules = VocabularyMerge.rules(global: global, local: local, includeGlobal: true)
+        #expect(run(rules, on: "code fence") == "MODE")
+    }
+
+    @Test func longerModeRuleWinsOverGlobalSubstring() {
+        let global = [ReplacementRule(
+            heard: #"\s*code fence[\s.,]*"#, replace: "GLOBAL", isRegex: true)]
+        let local = [ReplacementRule(
+            heard: #"\s*insert code fence[\s.,]*"#, replace: "MODE", isRegex: true)]
+        let rules = VocabularyMerge.rules(global: global, local: local, includeGlobal: true)
+        #expect(run(rules, on: "insert code fence") == "MODE")
+    }
+
+    @Test func firstRuleWinsEqualLengthTie() {
+        let rules = [
+            ReplacementRule(heard: #"code\s+fence"#, replace: "FIRST", isRegex: true),
+            ReplacementRule(heard: "code fence", replace: "SECOND", isRegex: false),
+        ]
+        #expect(run(rules, on: "code fence") == "FIRST")
+    }
+
+    @Test func anchorsUseTheRunBounds() {
+        let rules = [
+            ReplacementRule(heard: #"^code"#, replace: "START", isRegex: true),
+            ReplacementRule(heard: #"fence$"#, replace: "END", isRegex: true),
+        ]
+        #expect(run(rules, on: "code then fence") == "START then END")
+        #expect(run(rules, on: "not code then fence later") == "not code then fence later")
+    }
+
+    @Test func scannerPreservesUnicodeCharacters() {
+        let rules = [ReplacementRule(heard: "code fence", replace: "```", isRegex: false)]
+        #expect(run(rules, on: "🧑🏽‍💻 code fence café") == "🧑🏽‍💻 ``` café")
     }
 
     @Test func invalidRegexIsSkippedNotCrashing() {
@@ -128,6 +176,10 @@ struct ReplacementsStageTests {
     // replacement between every character.
     @Test func emptyHeardIsIgnored() {
         #expect(run([ReplacementRule(heard: "", replace: "X", isRegex: false)], on: "abc") == "abc")
+    }
+
+    @Test func zeroLengthRegexIsIgnored() {
+        #expect(run([ReplacementRule(heard: #"(?=abc)"#, replace: "X", isRegex: true)], on: "abc") == "abc")
     }
 
     // A regex rule with a mid-template (non-terminal) <CR> is invalid config: it is dropped from matching
