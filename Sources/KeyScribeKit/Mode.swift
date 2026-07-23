@@ -21,6 +21,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var trailing: Trailing
     public var submit: Submit
     public var clipboardModifier: ClipboardModifier
+    public var pasteSettleMs: Int
     public var trimTrailingPunctuation: Bool
     public var excludeFromHistory: Bool
 
@@ -200,6 +201,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case aiRewrite = "ai_rewrite"
         case insertion, trailing, submit
         case clipboardModifier = "clipboard_modifier"
+        case pasteSettleMs = "paste_settle_ms"
         case trimTrailingPunctuation = "trim_trailing_punctuation"
         case excludeFromHistory = "exclude_from_history"
     }
@@ -224,6 +226,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         trailing = .space
         submit = .none
         clipboardModifier = .command
+        pasteSettleMs = 0
         trimTrailingPunctuation = false
         excludeFromHistory = false
     }
@@ -249,6 +252,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         trailing = try c.decodeIfPresent(Trailing.self, forKey: .trailing) ?? .none
         submit = try c.decodeIfPresent(Submit.self, forKey: .submit) ?? .none
         clipboardModifier = try c.decodeIfPresent(ClipboardModifier.self, forKey: .clipboardModifier) ?? .command
+        pasteSettleMs = try c.decodeIfPresent(Int.self, forKey: .pasteSettleMs) ?? 0
         trimTrailingPunctuation = try c.decodeIfPresent(Bool.self, forKey: .trimTrailingPunctuation) ?? false
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
     }
@@ -273,6 +277,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         if trailing != .none { try c.encode(trailing, forKey: .trailing) }
         if submit != .none { try c.encode(submit, forKey: .submit) }
         if clipboardModifier != .command { try c.encode(clipboardModifier, forKey: .clipboardModifier) }
+        if pasteSettleMs != 0 { try c.encode(pasteSettleMs, forKey: .pasteSettleMs) }
         if trimTrailingPunctuation { try c.encode(trimTrailingPunctuation, forKey: .trimTrailingPunctuation) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
@@ -298,6 +303,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         mode.trailing = trailing
         mode.submit = submit
         mode.clipboardModifier = clipboardModifier
+        mode.pasteSettleMs = pasteSettleMs
         mode.commands.liveEdits = commands.liveEdits
         mode.excludeFromHistory = excludeFromHistory
         return mode

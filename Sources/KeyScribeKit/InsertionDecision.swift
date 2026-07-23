@@ -70,6 +70,15 @@ public enum InsertionAction: Equatable, Sendable {
     case clipboard
 }
 
+public struct ClipboardPaste: Equatable, Sendable {
+    public var modifier: Mode.ClipboardModifier
+    public var settleMs: Int
+    public init(modifier: Mode.ClipboardModifier = .command, settleMs: Int = 0) {
+        self.modifier = modifier
+        self.settleMs = settleMs
+    }
+}
+
 public func insertionAction(decision: InsertionDecision, method: Mode.Insertion) -> InsertionAction {
     guard decision == .insert else { return .clipboard }
     switch method {

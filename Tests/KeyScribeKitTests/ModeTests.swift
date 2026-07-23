@@ -307,6 +307,22 @@ struct ModeTests {
         #expect(again.clipboardModifier == .control)
     }
 
+    @Test func pasteSettleMsDefaultsToZeroAndIsOmittedFromToml() throws {
+        let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
+        #expect(mode.pasteSettleMs == 0)
+        #expect(Mode(id: "new", name: "New").pasteSettleMs == 0)
+        #expect(try !ModeStore.encode(mode).contains("paste_settle_ms"))
+    }
+
+    @Test func pasteSettleMsDecodesAndRoundTrips() throws {
+        let toml = "schema_version = 1\nname = \"VM\"\npaste_settle_ms = 700"
+        let mode = try ModeStore.decode(from: toml, id: "vm")
+        #expect(mode.pasteSettleMs == 700)
+        #expect(try ModeStore.encode(mode).contains("paste_settle_ms = 700"))
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "vm")
+        #expect(again.pasteSettleMs == 700)
+    }
+
     @Test func shellStarterTrimsTrailingPunctuation() {
         let shell = ModeStore.starterModes().first { $0.id == "shell" }
         #expect(shell?.trimTrailingPunctuation == true)

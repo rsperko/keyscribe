@@ -127,10 +127,10 @@ enum TextInserter {
     // Returns whether the insertion path actually acted. False ⇒ nothing inserted, so the caller must not
     // report success or fire a submit keystroke.
     @discardableResult
-    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, modifier: Mode.ClipboardModifier, text: String, awaitSettle: Bool = true) async -> Bool {
+    static func perform(_ decision: InsertionDecision, method: Mode.Insertion, paste: ClipboardPaste, text: String, awaitSettle: Bool = true) async -> Bool {
         switch insertionAction(decision: decision, method: method) {
-        case .paste: return await insertViaPaste(text, modifier: modifier, awaitSettle: awaitSettle)
-        case .ax: return await insertViaAX(text, modifier: modifier, awaitSettle: awaitSettle)
+        case .paste: return await insertViaPaste(text, modifier: paste.modifier, settleMs: paste.settleMs, awaitSettle: awaitSettle)
+        case .ax: return await insertViaAX(text, modifier: paste.modifier, settleMs: paste.settleMs, awaitSettle: awaitSettle)
         case .type: return await insertViaTyping(text)
         case .clipboard:
             // A secure-field divert conceals the copy so clipboard managers do not retain the password;
@@ -143,13 +143,19 @@ enum TextInserter {
     }
 
     @discardableResult
-    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command, awaitSettle: Bool = true) async -> Bool {
+    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command, settleMs: Int = 0, awaitSettle: Bool = true) async -> Bool {
         guard !text.isEmpty else { return true }
-        guard let scratch = await beginScratchPaste(text, on: .general) else {
+        guard let scratch = await beginScratchPaste(text, on: .general, concealed: modifier != .control) else {
             Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
             return false
         }
+        if settleMs > 0 {
+            try? await Task.sleep(for: .milliseconds(settleMs))
+        }
         postKey(vKeyCode, flags: eventFlags(modifier))
+        if modifier == .control {
+            return true
+        }
         await settleScratch(scratch, awaitSettle: awaitSettle)
         return true
     }
@@ -163,7 +169,7 @@ enum TextInserter {
     // Snapshots the clipboard and writes the scratch value ⌘V will paste. Drains any in-flight detached
     // restore first so the snapshot is the user's real clipboard, not a prior paste's scratch text
     // (restoring that would leak dictated content). nil ⇒ scratch write unverified, caller must not ⌘V.
-    static func beginScratchPaste(_ text: String, on pb: NSPasteboard, afterCapture: (() -> Void)? = nil) async -> ScratchPaste? {
+    static func beginScratchPaste(_ text: String, on pb: NSPasteboard, concealed: Bool = true, afterCapture: (() -> Void)? = nil) async -> ScratchPaste? {
         await drainPendingRestore()
         // ONE deadline across every capture below: each renders on the main thread, so a per-capture budget
         // would let a promised-flavor clipboard stall main for up to 4x the bound. A retry that finds it spent
@@ -183,7 +189,7 @@ enum TextInserter {
         // A still-unstable clipboard means a copy is landing right now; skip the paste (recoverable via Paste
         // Last) rather than write scratch over that copy and later restore a stale snapshot.
         guard pb.changeCount == snapshot.changeCount else { return nil }
-        guard writeScratchVerified(text, to: pb) else {
+        guard writeScratchVerified(text, to: pb, concealed: concealed) else {
             snapshot.restore(to: pb)
             return nil
         }
@@ -238,12 +244,14 @@ enum TextInserter {
     // Temporary clipboard write for the paste, read-back verified. Transient + concealed so clipboard
     // managers don't capture the dictated text (may contain just-restored sensitive spans). Returns false
     // if after a few attempts the string isn't the dictated text, so the caller refuses to ⌘V stale content.
-    private static func writeScratchVerified(_ text: String, to pb: NSPasteboard = .general, attempts: Int = 3) -> Bool {
+    private static func writeScratchVerified(_ text: String, to pb: NSPasteboard = .general, concealed: Bool = true, attempts: Int = 3) -> Bool {
         for _ in 0..<attempts {
             let item = NSPasteboardItem()
             item.setString(text, forType: .string)
-            item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
-            item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            if concealed {
+                item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+                item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            }
             pb.clearContents()
             if pb.writeObjects([item]) && pb.string(forType: .string) == text { return true }
         }
@@ -289,13 +297,13 @@ enum TextInserter {
 
     // AX can report success while doing nothing, so trust it only when a read-back proves the value changed.
     @discardableResult
-    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command, awaitSettle: Bool = true) async -> Bool {
+    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command, settleMs: Int = 0, awaitSettle: Bool = true) async -> Bool {
         if axInsertVerified(text) {
             Log.insertion.notice("ax-insert: succeeded")
             return true
         }
         Log.insertion.notice("ax-insert: unverified here, falling back to paste")
-        return await insertViaPaste(text, modifier: modifier, awaitSettle: awaitSettle)
+        return await insertViaPaste(text, modifier: modifier, settleMs: settleMs, awaitSettle: awaitSettle)
     }
 
     private static func axInsertVerified(_ text: String) -> Bool {
@@ -473,8 +481,24 @@ enum TextInserter {
         }
     }
 
+    private static let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
+        (.maskCommand, 55),
+        (.maskShift, 56),
+        (.maskAlternate, 58),
+        (.maskControl, 59),
+    ]
+
     private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
         let src = CGEventSource(stateID: .combinedSessionState)
+        let held = flags.contains(.maskControl) ? modifierKeys.filter { flags.contains($0.0) } : []
+        var active: CGEventFlags = []
+        for (mask, code) in held {
+            active.insert(mask)
+            if let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true) {
+                down.flags = active
+                down.post(tap: .cghidEventTap)
+            }
+        }
         if let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true) {
             down.flags = flags
             down.post(tap: .cghidEventTap)
@@ -482,6 +506,13 @@ enum TextInserter {
         if let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
             up.flags = flags
             up.post(tap: .cghidEventTap)
+        }
+        for (mask, code) in held.reversed() {
+            active.remove(mask)
+            if let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) {
+                up.flags = active
+                up.post(tap: .cghidEventTap)
+            }
         }
     }
 }

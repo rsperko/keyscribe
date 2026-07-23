@@ -243,7 +243,7 @@ struct DictationPipelineWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hudSpy,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, method, modifier, text, _ in await insertSpy.record(method, modifier, text); return insertSucceeds },
+            insert: { _, method, modifier, text, _ in await insertSpy.record(method, modifier.modifier, text); return insertSucceeds },
             submitKey: { await submitSpy.record($0) },
             captureSelection: captureSelection,
             clipboard: { clipboardReads.count += 1; return clipboard },
@@ -526,7 +526,7 @@ struct DictationPipelineWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: HUDSpy(),
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, method, modifier, text, _ in await insertSpy.record(method, modifier, text); return true },
+            insert: { _, method, modifier, text, _ in await insertSpy.record(method, modifier.modifier, text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true },
             llmClient: HangingLLM(started: started, release: release))
