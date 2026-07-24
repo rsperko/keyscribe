@@ -58,6 +58,9 @@ Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs
 - **Best accuracy:** Qwen3-ASR 1.7B.
 - **Best default for English:** Parakeet TDT-CTC 110M — compact, fast, and accurate.
 - **Best multilingual balance:** Qwen3-ASR 0.6B.
+- **Best in noisy places:** Whisper Large v3 Turbo or Qwen3-ASR 1.7B. Both barely lose accuracy
+  with real background noise; the smaller models lose noticeably more, and Apple Speech degrades
+  the most. If you often dictate in cafés, open offices, or transit, pick one of these two.
 - **Smaller / faster footprint:** Whisper Small (English), Moonshine Base.
 - Apple Speech, Whisper Large v3 Turbo, and Parakeet TDT v3 are also available. Apple Speech appears
   only on macOS 26+.

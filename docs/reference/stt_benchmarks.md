@@ -50,6 +50,41 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
   `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 
+## Noisy environments
+
+The same 107 sentences were re-recorded with real background noise (`corpus/stt-noisy` — varied
+sources and distances, not one steady hum) and benchmarked identically on the same day as a fresh
+clean-corpus run, so the Δ column is an apples-to-apples noise penalty. Same single-speaker caveats
+as above, plus one more: noise robustness depends on *which* noise, and this session's mix is one
+sample of it.
+
+| Model | WER — quiet | WER — noisy | Noise penalty | Recall — with dictionary (noisy) |
+|---|---|---|---|---|
+| Qwen3-ASR 1.7B | 5.7% | 7.9% | +2.2 pts | 0.97 |
+| Whisper Large v3 Turbo | 5.7% | 8.1% | +2.4 pts | 0.96 |
+| Parakeet TDT v3 | 7.1% | 10.8% | +3.7 pts | 0.87 |
+| Whisper Small (English) | 6.0% | 11.9% | +5.9 pts | 0.99 |
+| Qwen3-ASR 0.6B | 8.3% | 13.2% | +4.9 pts | 0.92 |
+| Parakeet TDT-CTC 110M | 9.8% | 18.1% | +8.3 pts | 0.72 |
+| Moonshine Base (English) | 14.9% | 26.7% | +11.9 pts | 0.66 |
+| Apple Speech | 12.6% | 29.6% | +17.0 pts | 0.47 |
+
+- **The two large models are the noisy-environment picks.** Qwen3-ASR 1.7B and Whisper Large v3
+  Turbo lose ~2 points and keep dictionary recall at 96–97%; every smaller model pays 2–7× that
+  penalty, and Apple Speech more than doubles its error rate.
+- **Noise-suppression preprocessing was tested and rejected.** Running the noisy clips through
+  three denoisers (DeepFilterNet3, RNNoise, a Demucs-based enhancer) before transcription made
+  accuracy *worse* on every model worth using — modern speech models are trained on noisy audio,
+  and enhancement artifacts cost more than the noise they remove. KeyScribe therefore does not
+  denoise your microphone, on purpose. You can re-test this yourself: denoise the `stt-noisy`
+  WAVs into a copy of the folder, benchmark it, and compare with `compare-conditions.sh` below.
+- **The dictionary keeps working in noise.** After-transcription recovery lifted recall at least as
+  much on the noisy takes as on quiet ones (e.g. Parakeet TDT v3 71% → 87%).
+
+Reproduce with your own noise: record the twin corpus (`bash corpus/record.sh --dir stt-noisy`),
+benchmark both dirs, then `bash corpus/compare-conditions.sh corpus/stt corpus/stt-noisy` for the
+paired per-engine ΔWER, worst-degrading clips, and dictionary-term flips.
+
 ## Reproduce on your own voice
 
 ```bash

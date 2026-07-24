@@ -27,6 +27,9 @@ passer-by stomped on it.
 
 ```bash
 KeyScribe --benchmark corpus/stt-noisy        # WER / term recall / RTF over the noisy takes
+bash corpus/compare-conditions.sh corpus/stt corpus/stt-noisy   # paired noise-penalty report
 ```
 
-Compare the per-engine numbers against a `corpus/stt` run to read off the noise penalty.
+`compare-conditions.sh` pairs both runs' results.json by clip id and prints the per-engine ΔWER,
+the worst-degrading clips, and dictionary terms that noise flipped from recovered to missed. It
+also works for any other same-sentences pair, e.g. a denoised copy of this folder vs the original.

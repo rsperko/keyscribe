@@ -41,8 +41,10 @@ enum BenchmarkRunner {
         print("Benchmark: \(manifest.entries.count) clips × \(engines.count) engines\n")
 
         var results: [String: EngineResult] = [:]
+        var clipRows: [String: [String: [String: Double]]] = [:]
         for engine in engines {
             var r = EngineResult()
+            var rows: [String: [String: Double]] = [:]
             do {
                 try await engine.loadIfNeeded()
             } catch {
@@ -81,14 +83,20 @@ enum BenchmarkRunner {
                 }
 
                 r.clips += 1
-                r.werBiased += BenchmarkScoring.wer(reference: entry.text, hypothesis: biasedH)
-                r.werUnbiased += BenchmarkScoring.wer(reference: entry.text, hypothesis: unbiasedH)
+                let clipWerB = BenchmarkScoring.wer(reference: entry.text, hypothesis: biasedH)
+                let clipWerU = BenchmarkScoring.wer(reference: entry.text, hypothesis: unbiasedH)
+                r.werBiased += clipWerB
+                r.werUnbiased += clipWerU
+                var row = ["werBiased": clipWerB, "werUnbiased": clipWerU]
                 if dur > 0 { r.rtfSum += elapsed / dur }
                 if !entry.biasTerms.isEmpty {
                     r.termClips += 1
                     let recB = BenchmarkScoring.termRecall(terms: entry.biasTerms, in: biasedH)
+                    let recU = BenchmarkScoring.termRecall(terms: entry.biasTerms, in: unbiasedH)
+                    row["recallBiased"] = recB
+                    row["recallUnbiased"] = recU
                     r.recallBiased += recB
-                    r.recallUnbiased += BenchmarkScoring.termRecall(terms: entry.biasTerms, in: unbiasedH)
+                    r.recallUnbiased += recU
                     // The breakdown's two classes sum to the total false fires, so derive ff from it
                     // rather than scoring termFalseFires a second time.
                     let breakdownB = BenchmarkScoring.termFalseFireBreakdown(
@@ -109,13 +117,17 @@ enum BenchmarkRunner {
                         print("    plain: \(unbiasedH)")
                     }
                 }
+                rows[entry.id] = row
             }
             await engine.evict()
             results[engine.id] = r
+            clipRows[engine.id] = rows
         }
         printTable(results, engineOrder: engines.map(\.id))
         let jsonName = fuzzy ? "results-fuzzy.json" : "results.json"
-        writeJSON(results, to: dir.appendingPathComponent(jsonName), fuzzy: fuzzy, replace: only == nil)
+        writeJSON(
+            results, clips: clipRows, to: dir.appendingPathComponent(jsonName),
+            fuzzy: fuzzy, replace: only == nil)
     }
 
     private static func runRaw(dir: URL, manifest: BenchmarkManifest, engines: [any SpeechEngine]) async {
@@ -309,7 +321,10 @@ enum BenchmarkRunner {
         print(" words the dictionary put in; the disqualifying class. ff − sub = orthographic snaps, tolerated.)")
     }
 
-    private static func writeJSON(_ results: [String: EngineResult], to url: URL, fuzzy: Bool, replace: Bool) {
+    private static func writeJSON(
+        _ results: [String: EngineResult], clips: [String: [String: [String: Double]]],
+        to url: URL, fuzzy: Bool, replace: Bool
+    ) {
         var fresh: [String: [String: Double]] = [:]
         for (id, r) in results where r.clips > 0 {
             let n = Double(r.clips)
@@ -330,19 +345,27 @@ enum BenchmarkRunner {
                 "rtf": r.rtfSum / n,
             ]
         }
+        let existing = readResults(from: url)
         let engineObj = BenchmarkResultsMerge.merged(
-            existing: readEnginesMap(from: url), fresh: fresh, replace: replace)
-        let obj: [String: Any] = ["fuzzy": fuzzy, "engines": engineObj]
+            existing: existing.engines, fresh: fresh, replace: replace)
+        let freshClips = clips.filter { !$0.value.isEmpty }
+        let clipsObj = BenchmarkResultsMerge.merged(
+            existing: existing.clips, fresh: freshClips, replace: replace)
+        let obj: [String: Any] = ["fuzzy": fuzzy, "engines": engineObj, "clips": clipsObj]
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url)
             print("\nwrote \(url.path)")
         }
     }
 
-    private static func readEnginesMap(from url: URL) -> [String: [String: Double]] {
+    private static func readResults(
+        from url: URL
+    ) -> (engines: [String: [String: Double]], clips: [String: [String: [String: Double]]]) {
         guard let data = try? Data(contentsOf: url),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let engines = obj["engines"] as? [String: [String: Double]] else { return [:] }
-        return engines
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([:], [:]) }
+        return (
+            obj["engines"] as? [String: [String: Double]] ?? [:],
+            obj["clips"] as? [String: [String: [String: Double]]] ?? [:]
+        )
     }
 }

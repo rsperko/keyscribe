@@ -26,4 +26,25 @@ struct BenchmarkResultsMergeTests {
         let merged = BenchmarkResultsMerge.merged(existing: [:], fresh: ["b": bNew], replace: false)
         #expect(merged == ["b": bNew])
     }
+
+    @Test func filteredRunPreservesUntouchedEnginesPerClipMaps() {
+        let existing: [String: [String: [String: Double]]] = [
+            "a": ["01": ["werBiased": 0.1]],
+            "b": ["01": ["werBiased": 0.2]],
+        ]
+        let fresh: [String: [String: [String: Double]]] = [
+            "b": ["01": ["werBiased": 0.15], "02": ["werBiased": 0.3]]
+        ]
+        let merged = BenchmarkResultsMerge.merged(existing: existing, fresh: fresh, replace: false)
+        #expect(merged["a"]?["01"]?["werBiased"] == 0.1)
+        #expect(merged["b"]?["01"]?["werBiased"] == 0.15)
+        #expect(merged["b"]?["02"]?["werBiased"] == 0.3)
+    }
+
+    @Test func fullFleetRunReplacesPerClipMaps() {
+        let existing: [String: [String: [String: Double]]] = ["stale": ["01": ["werBiased": 0.9]]]
+        let fresh: [String: [String: [String: Double]]] = ["a": ["01": ["werBiased": 0.1]]]
+        let merged = BenchmarkResultsMerge.merged(existing: existing, fresh: fresh, replace: true)
+        #expect(merged == fresh)
+    }
 }
