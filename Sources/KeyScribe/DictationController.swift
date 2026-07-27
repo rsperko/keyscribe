@@ -30,6 +30,7 @@ final class DictationController {
     private let pressSnapshot: @MainActor () -> TargetSnapshot
     private let shouldAdoptFullSnapshot: Bool
     private let snapshotAsync: @MainActor () async -> TargetSnapshot
+    private let adoptionSnapshotAsync: @MainActor () async -> TargetSnapshot
     private let micStatus: @MainActor () -> PermissionStatus
     private let accessibilityGranted: @MainActor () -> Bool
     private let frontmostBundleId: @MainActor () -> String?
@@ -92,8 +93,14 @@ final class DictationController {
         // cloud rewrite, no context, no history — exactly like a confirmed secure field (KS-01).
         var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
+        // Filled by the probe task when it lands. Read SYNCHRONOUSLY by the local screen-term
+        // harvest so no dictation path ever awaits the field read — see screenTermsForRecovery.
+        var precedingText: String?
     }
     private var session: DictationSession?
+    // Guards the probe task's write-back: a read that lands after its dictation ended must not
+    // publish into the successor's session.
+    private var sessionGeneration = 0
     private var activeStartTrigger: String?
 
     private var building: DictationRecord {
@@ -211,6 +218,9 @@ final class DictationController {
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         snapshot: @escaping @MainActor () -> TargetSnapshot = { ContextProbe.snapshot() },
         snapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil,
+        // Adoption-only variant: the ONLY snapshot that pays for the AX role read, since the role
+        // feeds the rewrite prompt's field facts and nothing on the commit/insert/Return paths.
+        adoptionSnapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
         frontmostBundleId: @escaping @MainActor () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
@@ -240,6 +250,7 @@ final class DictationController {
         self.pressSnapshot = pressSnapshot ?? snapshot
         self.shouldAdoptFullSnapshot = pressSnapshot != nil
         self.snapshotAsync = snapshotAsync ?? { snapshot() }
+        self.adoptionSnapshotAsync = adoptionSnapshotAsync ?? self.snapshotAsync
         self.micStatus = micStatus
         self.accessibilityGranted = accessibilityGranted
         self.frontmostBundleId = frontmostBundleId
@@ -466,6 +477,7 @@ final class DictationController {
         captureRefreshTask?.cancel()
         // Every captured*/activeMode/task/building field below writes through this session; it is
         // dropped as a unit at the terminal (releaseCapturedPlan).
+        sessionGeneration &+= 1
         session = DictationSession(building: DictationRecord(modeName: currentModeName))
         // A denied mic does NOT throw — it captures silence, surfacing as a misleading "No speech
         // detected". Catch the real cause up front and point the user at the fix.
@@ -537,7 +549,7 @@ final class DictationController {
             guard let self, !Task.isCancelled,
                   self.capturedSnapshot?.bundleId == capturedBundle,
                   self.capturedSnapshot?.pid == capturedPid else { return }
-            let full = await self.snapshotAsync()
+            let full = await self.adoptionSnapshotAsync()
             guard !Task.isCancelled,
                   self.capturedSnapshot?.bundleId == capturedBundle,
                   self.capturedSnapshot?.pid == capturedPid else { return }
@@ -1014,15 +1026,46 @@ final class DictationController {
         preconnectTask = Task { [llmClient] in await llmClient.preconnect(connection: connection) }
     }
 
+    // Ephemeral per-dictation recovery terms from the already-captured preceding text, for the LOCAL
+    // pipeline stage only — the rewrite prompt's term channels are harvested independently, inside
+    // RewriteRequestBuilder, from the text IT awaits in full. Rides the mode's preceding-text opt-in
+    // with no separate flag, mirroring dictionary recovery (which runs whenever a dictionary exists):
+    // the mode already chose to capture this text, and the recovery is strictly local.
+    // Privacy/secure fail closed upstream: privacy empties effectiveContext and a secure field forces
+    // privacy, so the probe never started and this returns nothing. Term text is never logged, only
+    // the count.
+    // NON-BLOCKING by construction: it reads the value the probe task already published, and never
+    // awaits. An earlier version bounded the await to 250 ms, which still charged that much to a
+    // whole-utterance replacement — a terminal that owns its output outright and that the screen-terms
+    // stage provably cannot change (ReplacementsStage sorts at 10, screen terms at 40). A deadline also
+    // cannot be trusted as an upper bound: its own timer must be scheduled, so executor contention
+    // stretches it. Reading a published value has no such failure mode, so NO dictation path pays for
+    // the field read. The cost is that a probe still in flight at commit yields no local snap — which
+    // the 250 ms bound already did in that case, and which the prompt channel does not share: the
+    // rewrite path harvests independently in RewriteRequestBuilder from the text it awaits in full.
+    private func screenTermsForRecovery(mode: Mode?) -> [String] {
+        guard mode?.effectiveContext.precedingText == true,
+              let text = session?.precedingText else { return [] }
+        let terms = ScreenTermExtractor.terms(in: text, excluding: plan.mergedDictionary(for: mode))
+        if !terms.isEmpty { Log.context.notice("screen-terms: \(terms.count, privacy: .public) harvested") }
+        return terms
+    }
+
     // Overlap the preceding-text AX walk with drain+transcribe. A secure field has neutered the mode by here,
-    // so effectiveContext.precedingText is off and the field is never read.
+    // so effectiveContext.precedingText is off and the field is never read. A nil read is final: apps that
+    // expose no caret range simply go without context (agent_notes/web_editor_context).
     private func maybeStartPrecedingProbe() {
         guard let session, session.modeReady, session.snapshotReady, session.precedingTextTask == nil,
               activeMode?.effectiveContext.precedingText == true,
               let pid = capturedSnapshot?.pid else { return }
         let probe = precedingTextProbe
         let windowId = capturedSnapshot?.focusedWindowId
-        self.session?.precedingTextTask = Task { await probe(pid, windowId) }
+        let generation = sessionGeneration
+        self.session?.precedingTextTask = Task { [weak self] in
+            let text = await probe(pid, windowId)
+            if let self, self.sessionGeneration == generation { self.session?.precedingText = text }
+            return text
+        }
     }
 
     // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no
@@ -1687,7 +1730,8 @@ final class DictationController {
     // except STT. On no/failed rewrite we still insert the locally-processed text — you want your words.
     private func produceDictationText(transcript: String, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
         let resolved = mode.flatMap { m in connection(for: m).map { (mode: m, connection: $0) } }
-        let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil)
+        let screenTerms = screenTermsForRecovery(mode: mode)
+        let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil, screenTerms: screenTerms)
 
         let localStart = DispatchTime.now()
         let payload = pipeline.forward(transcript)
@@ -1811,6 +1855,7 @@ final class DictationController {
             mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
             capturedBundleId: capturedSnapshot?.bundleId, capturedPid: capturedSnapshot?.pid,
             capturedWindowId: capturedSnapshot?.focusedWindowId,
+            capturedFieldRole: capturedSnapshot?.focusedRole,
             plan: plan, connection: connection,
             precedingTextTask: session?.precedingTextTask, precedingTextProbe: precedingTextProbe).build()
 
@@ -1878,9 +1923,15 @@ final class DictationController {
     // tokenizing the fully-transformed text just before the LLM. Pipeline sorts by position/order, so
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
-    private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
+    private func dictationPipeline(for mode: Mode?, willRewrite: Bool, screenTerms: [String] = []) -> Pipeline {
         var stages = plan.postSTTTextStages(for: mode)
         logDroppedReturnMarkerRules(in: stages, mode: mode)
+        // Screen-harvested terms run exact-normalized only and AFTER the curated dictionary's fuzzy
+        // stage (StageOrder.screenTerms > .fuzzy), so a user's term always wins; the extractor has
+        // already dropped normalized collisions with the dictionary.
+        if !screenTerms.isEmpty {
+            stages.append(FuzzyStage(terms: screenTerms, matching: .exactNormalized, order: StageOrder.screenTerms))
+        }
         if mode?.commands.liveEdits ?? true {
             stages.append(TokenizingStage.verbatim())
             // Read the clipboard ONLY when the command actually survives to the clipboard stage — an

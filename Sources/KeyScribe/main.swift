@@ -45,6 +45,11 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
         --variants <a,b,...>    Limit to these prompt variants (default: all, including baseline).
         --repeat <n>            Attempts per case × variant (default 1).
         --raw                   Emit each model output as RAW <variant> <case> <verdict> <text>.
+      --context-probe [secs]  Answer "will text-before-the-cursor sharing work in this app?" — after a
+                              countdown (default 5s) so you can focus the target field, run the real
+                              probe on the frontmost app and print a verdict, plus the focused role and
+                              the field facts derived from it. Reports counts and roles, never field
+                              text. Needs Accessibility.
       --vad-probe <dir>       Run the no-speech VAD gate over the recordings in <dir> (manifest.json)
                               and exit: per clip verdict (speech/noSpeech), max probability, and gate
                               latency, plus the minimum take-level max probability over speech clips
@@ -215,6 +220,21 @@ if let i = CommandLine.arguments.firstIndex(of: "--rewrite-eval"), i + 1 < Comma
     }
     done.wait()
     exit(ok.load(ordering: .relaxed) ? 0 : 1)
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--context-probe") {
+    let countdown = (i + 1 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 1]) : nil) ?? 5
+    // The probe is @MainActor (AX + NSWorkspace reads), so the usual semaphore-blocked main thread
+    // would deadlock it — spin the run loop instead so the main actor stays serviceable.
+    let finished = ContextProbeTool.Completion()
+    Task { @MainActor in
+        await ContextProbeTool.run(countdown: countdown)
+        finished.isDone = true
+    }
+    while !MainActor.assumeIsolated({ finished.isDone }) {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(0)
 }
 
 if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {

@@ -15,10 +15,20 @@ public enum FuzzyCorrector {
         fileprivate let terms: [Term]
         fileprivate let byNorm: [String: Term]            // O(1) casing/spacing match
         fileprivate let byLength: [Int: [Int]]            // normalized length → term indices, ascending
+        fileprivate let matching: Matching
         public var isEmpty: Bool { terms.isEmpty }
     }
 
-    public static func prepare(_ terms: [String]) -> Prepared {
+    // Un-curated term sources (screen-harvested identifiers) run .exactNormalized, which is BOTH
+    // exact-only AND single-token-only. Exact-only: never substitute a phonetically-close different
+    // word. Single-token-only: never join words across a boundary — with `useState` on screen, a
+    // dictated "we should use state funds" must not become "we should useState funds"; a curated
+    // dictionary term earns that join because the user chose it, a harvested term does not. Harvested
+    // multi-word joins are surfaced only as candidates() pairs for the LLM to adjudicate. The user's
+    // curated dictionary keeps .full.
+    public enum Matching: Sendable { case full, exactNormalized }
+
+    public static func prepare(_ terms: [String], matching: Matching = .full) -> Prepared {
         let canonical = canonicalize(terms)
         var byNorm: [String: Term] = [:]
         var byLength: [Int: [Int]] = [:]
@@ -26,7 +36,7 @@ public enum FuzzyCorrector {
             byNorm[term.norm] = term
             byLength[term.norm.count, default: []].append(i)
         }
-        return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength)
+        return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength, matching: matching)
     }
 
     public struct Candidate: Sendable, Equatable {
@@ -120,8 +130,9 @@ public enum FuzzyCorrector {
     }
 
     private static func bestMatch(_ norm: String, in prepared: Prepared, allowFuzzy: Bool) -> Term? {
-        if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
-        guard allowFuzzy else { return nil }
+        // allowFuzzy is span == 1, so it doubles as the single-token gate for .exactNormalized.
+        if let exact = prepared.byNorm[norm], allowFuzzy || prepared.matching == .full { return exact }
+        guard allowFuzzy, prepared.matching == .full else { return nil }
         let normKey = phoneticKey(norm)
         let allowed = norm.count >= 6 ? 2 : 1
         var candidateIndices: [Int] = []
@@ -226,9 +237,12 @@ public enum FuzzyCorrector {
 
 public struct FuzzyStage: PipelineStage {
     public let position = StagePosition.postSTTText
-    public let order = StageOrder.fuzzy
+    public let order: Int
     private let prepared: FuzzyCorrector.Prepared
-    public init(terms: [String]) { self.prepared = FuzzyCorrector.prepare(terms) }
+    public init(terms: [String], matching: FuzzyCorrector.Matching = .full, order: Int = StageOrder.fuzzy) {
+        self.prepared = FuzzyCorrector.prepare(terms, matching: matching)
+        self.order = order
+    }
     public func apply(_ context: inout PipelineContext) {
         context.text = FuzzyCorrector.apply(context.text, prepared: prepared)
     }

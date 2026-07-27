@@ -7,12 +7,26 @@ public struct TargetSnapshot: Equatable, Sendable {
     public var focusedWindowId: String?
     // Best-effort secure-field signal; secure dictation is diverted to concealed clipboard delivery.
     public var isSecureField: Bool
+    // AX role of the focused element from the same walk that read the secure flag — the source for
+    // content-free field facts (FieldFacts.derive). Best-effort; nil claims nothing.
+    // SNAPSHOT-TIME QUALITY HINT, and weaker than `isSecureField` beside it: the secure flag is
+    // re-probed at commit (DictationController's commitSecureProbe) and OR-ed into the adopted
+    // snapshot, because getting it wrong leaks a password. The role is read once at dictation start
+    // and never revalidated, so a focus move to a different field in the same window can leave it
+    // stale — a single-line rule could then be applied to a text area, or missed on one. Accepted:
+    // the worst case is a formatting hint that does not match the destination, which the user sees
+    // and can undo atomically. Do not reuse this field for anything where staleness is unsafe.
+    public var focusedRole: String?
 
-    public init(bundleId: String?, pid: Int32? = nil, focusedWindowId: String? = nil, isSecureField: Bool = false) {
+    public init(
+        bundleId: String?, pid: Int32? = nil, focusedWindowId: String? = nil,
+        isSecureField: Bool = false, focusedRole: String? = nil
+    ) {
         self.bundleId = bundleId
         self.pid = pid
         self.focusedWindowId = focusedWindowId
         self.isSecureField = isSecureField
+        self.focusedRole = focusedRole
     }
 }
 

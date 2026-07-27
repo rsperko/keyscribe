@@ -98,6 +98,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pressSnapshot: ContextProbe.initialSnapshot,
             snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) },
             snapshotAsync: { [hud] in await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID) },
+            adoptionSnapshotAsync: { [hud] in
+                await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID, includeRole: true)
+            },
             activeEngineUsable: { [weak self] engine in
                 InstalledEngineFilter.shouldRun(engineId: engine.id)
                     && (self?.speechModels?.isEngineUsable(engine.id) ?? true)

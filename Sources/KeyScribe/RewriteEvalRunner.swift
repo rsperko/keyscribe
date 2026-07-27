@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KeyScribeKit
 
@@ -43,14 +44,17 @@ enum RewriteEvalRunner {
 
         let client = HTTPLLMClient()
         var records: [AttemptRecord] = []
+        var variantPromptDigests: [String: String] = [:]
         for variant in variantIds {
             var conn = connection
             if let t = RewriteEvalVariants.temperatureOverride(variant: variant) {
                 conn.params.temperature = t
             }
+            var variantPrompts = ""
             for c in manifest.cases {
                 guard let built = RewriteEvalVariants.build(c, variant: variant) else { continue }
                 let prompt = PromptAssembler.assemble(built.inputs, options: built.options)
+                variantPrompts += c.id + "\u{0}" + prompt.system + "\u{0}" + prompt.user + "\u{0}"
                 for _ in 0..<repeats {
                     do {
                         let output = try await client.complete(
@@ -74,13 +78,15 @@ enum RewriteEvalRunner {
                     }
                 }
             }
+            variantPromptDigests[variant] = sha256Hex(Data(variantPrompts.utf8))
             let done = records.filter { $0.variant == variant }
             let passed = done.filter(\.passed).count
             print("· \(variant): \(passed)/\(done.count) attempts passed")
         }
 
         printReport(records: records, manifest: manifest, variantIds: variantIds)
-        writeResults(records: records, dir: dir, connection: connection, repeats: repeats)
+        writeResults(records: records, dir: dir, connection: connection, repeats: repeats,
+                     variantPromptDigests: variantPromptDigests)
         return !records.contains { $0.error != nil }
     }
 
@@ -162,7 +168,8 @@ enum RewriteEvalRunner {
     }
 
     private static func writeResults(
-        records: [AttemptRecord], dir: URL, connection: Connection, repeats: Int
+        records: [AttemptRecord], dir: URL, connection: Connection, repeats: Int,
+        variantPromptDigests: [String: String]
     ) {
         let stamp: String = {
             let f = DateFormatter()
@@ -181,11 +188,22 @@ enum RewriteEvalRunner {
             if let e = r.error { attempt["error"] = e }
             variants[r.variant, default: []].append(attempt)
         }
+        // Reproducibility anchors: without these a results file cannot be tied to what was actually
+        // measured (variants get deleted on graduation). variantPromptSHA256 hashes, PER VARIANT, the
+        // concatenation of every case's ACTUAL assembled system+user prompt — so a change anywhere in
+        // the pipeline that shapes prompts (PromptAssembler, variant transforms, screen-term
+        // extraction, local correction, fuzzy candidates) shifts the affected variants' hashes, not
+        // just assembler-level changes. Assembly is deterministic per (case, variant), so this also
+        // covers every attempt.
+        let corpusSHA = (try? Data(contentsOf: dir.appendingPathComponent("cases.json")))
+            .map { sha256Hex($0) } ?? "unreadable"
         let obj: [String: Any] = [
             "connection": connection.id,
             "model": connection.model,
             "temperature": connection.params.temperature,
             "repeats": repeats,
+            "corpusSHA256": corpusSHA,
+            "variantPromptSHA256": variantPromptDigests,
             "attempts": variants,
         ]
         do {
@@ -196,5 +214,9 @@ enum RewriteEvalRunner {
         } catch {
             print("\nerror: could not write \(url.path): \(error)")
         }
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

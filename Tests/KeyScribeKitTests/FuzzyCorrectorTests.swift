@@ -5,6 +5,10 @@ private func fix(_ s: String, _ terms: [String]) -> String {
     FuzzyCorrector.apply(s, prepared: FuzzyCorrector.prepare(terms))
 }
 
+private func exactFix(_ s: String, _ terms: [String]) -> String {
+    FuzzyCorrector.apply(s, prepared: FuzzyCorrector.prepare(terms, matching: .exactNormalized))
+}
+
 private func candidates(_ s: String, _ terms: [String]) -> [FuzzyCorrector.Candidate] {
     FuzzyCorrector.candidates(s, prepared: FuzzyCorrector.prepare(terms))
 }
@@ -165,5 +169,38 @@ struct FuzzyCorrectorTests {
     // near-miss glued to a token is not surfaced as a candidate.
     @Test func candidatesSkipsWindowTouchingANonce() {
         #expect(candidates("in spring \(SentinelText.open)V:1⟧ camp", ["Spring Boot"]).isEmpty)
+    }
+
+    // Screen-harvested terms are un-curated (dozens per 600-char window), so their stage runs
+    // exact-normalized AND single-token only: a snap can re-case one token the user already said,
+    // never substitute a different word and never join words across a boundary.
+    @Test func exactPolicySnapsSingleTokenCasing() {
+        #expect(exactFix("call usestate now", ["useState"]) == "call useState now")
+        #expect(exactFix("the chargebee invoice", ["ChargeBee"]) == "the ChargeBee invoice")
+    }
+
+    // The adversarial class from review: an ordinary phrase whose words happen to join into an
+    // on-screen identifier must never be rewritten locally — no LLM is present to adjudicate on the
+    // local path. The joins remain available as candidates() hints only.
+    @Test func exactPolicyNeverJoinsOrdinaryPhrases() {
+        #expect(exactFix("we should use state funds", ["useState"]) == "we should use state funds")
+        #expect(exactFix("put the file name here", ["fileName"]) == "put the file name here")
+        #expect(exactFix("an error code appeared", ["errorCode"]) == "an error code appeared")
+    }
+
+    @Test func exactPolicyNeverFuzzyFires() {
+        #expect(exactFix("run the sellery worker", ["Celery"]) == "run the sellery worker")
+        #expect(exactFix("install postgress now", ["Postgres"]) == "install postgress now")
+    }
+
+    @Test func exactPolicyKeepsSharedWalkGuards() {
+        #expect(exactFix("a use\(SentinelText.open)V:1⟧state span", ["useState"])
+            == "a use\(SentinelText.open)V:1⟧state span")
+        #expect(exactFix("use-state", ["useState"]) == "use-state")
+    }
+
+    @Test func fullPolicyStillJoinsAndFuzzes() {
+        #expect(fix("install postgress now", ["Postgres"]) == "install Postgres now")
+        #expect(fix("we use charge bee for billing", ["ChargeBee"]) == "we use ChargeBee for billing")
     }
 }

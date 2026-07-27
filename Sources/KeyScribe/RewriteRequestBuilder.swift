@@ -16,6 +16,8 @@ struct RewriteRequestBuilder {
     // switched to during recording (KS-02).
     let capturedPid: pid_t?
     var capturedWindowId: String? = nil
+    // AX role of the captured focused element — source for the content-free field-affordance rules.
+    var capturedFieldRole: String? = nil
     let plan: ResolvedConfig
     let connection: Connection
     var precedingTextTask: Task<String?, Never>? = nil
@@ -45,6 +47,8 @@ struct RewriteRequestBuilder {
         let styleRules = plan.fragmentBodies(ids: mode.aiRewrite?.fragments ?? [])
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
+        // ONLY the user's curated dictionary feeds this channel. Automatically harvested screen terms
+        // were tried here and REJECTED — see the block below the context resolution.
         let dictionary = plan.mergedDictionary(for: mode)
         let lowerContent = content.lowercased()
         let validTerms = dictionary.filter { lowerContent.contains($0.lowercased()) }
@@ -65,6 +69,22 @@ struct RewriteRequestBuilder {
             Log.context.notice("preceding-text: \(precedingText?.count ?? 0, privacy: .public) chars")
         }
 
+        // REJECTED: automatically harvesting screen terms into the term channels.
+        // Measured on the paired corpus at --repeat 3, it was net-positive but NOT regression-free, and
+        // the failure is structural rather than a wording bug. FuzzyCorrector.candidates emits 2-token
+        // exact-normalized joins that are indistinguishable from each other:
+        //   "parse config" → parseConfig  in "rename the parse config function"   — the win
+        //   "use state"    → useState     in "we should use state funds"          — prose corruption
+        // Only the model can separate them, so the rule is hedged; gemini then adjudicates toward
+        // applying (+4 recalls, but it writes "useState funds") while qwen adjudicates toward preserving
+        // (prose intact, but it leaves "parse config"). Making the rule directive wins one and loses the
+        // other on EVERY model. The collision class is structural, not exotic — camelCase identifiers are
+        // ordinary words concatenated (userName/"user name", fileName/"file name", dataSource/"data
+        // source") — and the harm is asymmetric: a missed identifier is invisible, corrupted prose is
+        // visible, wrong, and inside the atomic insert. The Dictionary already expresses this intent
+        // deliberately, which is the safe form of the same feature. Evidence kept as the `screen-terms`
+        // eval variant plus the `code-identifiers` / `distractor-usestate-prose` regression cases;
+        // full write-up in evals/rewrite/README.md.
         // Report a context channel only when it actually contributed content — history must not claim
         // "preceding text" was shared when the probe returned nothing (KS-02).
         var contextCategories: [String] = []
@@ -74,6 +94,12 @@ struct RewriteRequestBuilder {
         let language = "English"
         let localeIdentifier = language == "English" ? locale.identifier(.bcp47) : nil
 
+        // Content-free affordances, not a context channel — they render as system RULES, and the raw
+        // role string stays out of <context>. Suppressed under privacy to keep its story one
+        // sentence: only the redacted transcript leaves.
+        let fieldFacts = mode.commands.privacy ? FieldFacts(singleLine: nil, plainText: nil)
+            : FieldFacts.derive(role: capturedFieldRole)
+
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
             tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: [],
@@ -81,7 +107,8 @@ struct RewriteRequestBuilder {
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText,
-            locale: localeIdentifier, currentDateTime: Self.formattedDateTime(now(), locale: locale, timeZone: timeZone))
+            locale: localeIdentifier, fieldSingleLine: fieldFacts.singleLine, fieldPlainText: fieldFacts.plainText,
+            currentDateTime: Self.formattedDateTime(now(), locale: locale, timeZone: timeZone))
 
         // The exact prompt stored in history (design.md §4.7) — tokens, not their originals. Assembled once
         // and handed to RewriteService so the inputs aren't assembled twice.

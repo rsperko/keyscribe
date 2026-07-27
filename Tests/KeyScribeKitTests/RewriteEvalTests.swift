@@ -184,13 +184,29 @@ struct RewriteEvalVariantsTests {
         #expect(built.inputs.modePrompt == c.modePrompt)
     }
 
-    @Test func screenTermsFeedExistingChannels() throws {
-        let c = makeCase(transcript: "we use charge bee and OpenClaw daily",
-                         screenTerms: ["ChargeBee", "OpenClaw", "Kubernetes"])
+    // Production-faithful: the harvest source is precedingText — the only source production has —
+    // and terms the extractor would never harvest (plain capitalized words like "Kubernetes") are
+    // dropped before any channel sees them, with the exact/single-token local stage running on the
+    // transcript first. So the variant can only claim wins production reaches.
+    @Test func screenTermsAreHarvestedFromPrecedingTextThroughTheProductionPath() throws {
+        let c = makeCase(transcript: "we use charge bee and openclaw daily",
+                         precedingText: "Billing runs on ChargeBee and OpenClaw, deployed to Kubernetes.")
         let built = try #require(RewriteEvalVariants.build(c, variant: "screen-terms"))
+        #expect(built.inputs.content == "we use charge bee and OpenClaw daily")
         #expect(built.inputs.validTerms == ["OpenClaw"])
         #expect(built.inputs.fuzzyCandidates.contains(.init(heard: "charge bee", canonical: "ChargeBee")))
+        #expect(!built.inputs.validTerms.contains("Kubernetes"))
         #expect(built.options == .baseline)
+    }
+
+    // The confound the paired corpus exists to remove: with no screen text there is nothing to
+    // harvest, so the variant is byte-identical to baseline rather than an idealized hint injection.
+    @Test func withoutPrecedingTextTheScreenTermVariantMatchesBaseline() throws {
+        let c = makeCase(transcript: "we use charge bee for billing", screenTerms: ["ChargeBee"])
+        let built = try #require(RewriteEvalVariants.build(c, variant: "screen-terms"))
+        #expect(built.inputs.validTerms.isEmpty)
+        #expect(built.inputs.fuzzyCandidates.isEmpty)
+        #expect(built.inputs.content == c.transcript)
     }
 
     @Test func userNameBecomesValidTerm() throws {
@@ -203,8 +219,6 @@ struct RewriteEvalVariantsTests {
         let c = makeCase(locale: "en-US", fieldSingleLine: true, fieldPlainText: true)
         let reAnchor = try #require(RewriteEvalVariants.build(c, variant: "re-anchor"))
         #expect(reAnchor.options == PromptAssembler.Options(appendFinalReminder: true))
-        let field = try #require(RewriteEvalVariants.build(c, variant: "field-hint"))
-        #expect(field.options == PromptAssembler.Options(fieldAffordanceRule: true))
     }
 
     @Test func caseDateTimeReachesInputsInEveryVariant() throws {

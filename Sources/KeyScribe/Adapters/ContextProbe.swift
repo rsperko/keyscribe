@@ -31,7 +31,7 @@ enum ContextProbe {
     }
 
     // Exclude our HUD when dictating into KeyScribe itself, where the HUD can become the key window.
-    static func snapshot(excludingWindow excluded: CGWindowID? = nil) -> TargetSnapshot {
+    static func snapshot(excludingWindow excluded: CGWindowID? = nil, includeRole: Bool = false) -> TargetSnapshot {
         // Read the frontmost app once and use its own pid, so every AX probe queries the exact process that
         // supplied the bundle id — not an arbitrary same-bundle instance a bundle-id lookup might resolve to,
         // and not whichever process happens to own system-wide focus at read time.
@@ -39,24 +39,25 @@ enum ContextProbe {
         guard let pid = front?.processIdentifier else {
             return TargetSnapshot(bundleId: front?.bundleIdentifier, pid: nil)
         }
-        let state = focusedState(pid: pid, excluding: excluded)
+        let state = focusedState(pid: pid, excluding: excluded, includeRole: includeRole)
         return TargetSnapshot(
             bundleId: front?.bundleIdentifier, pid: pid,
-            focusedWindowId: state.windowId, isSecureField: state.isSecure)
+            focusedWindowId: state.windowId, isSecureField: state.isSecure, focusedRole: state.role)
     }
 
     // Off-main variant of `snapshot`: the frontmost-app identity is read on the main actor, then the AX
     // round trips (each bounded by a 0.1s messaging timeout, but able to stall on an unresponsive target)
     // run on a detached task so an arming or insert never blocks the main actor. Mirrors `precedingText`.
-    static func snapshotAsync(excludingWindow excluded: CGWindowID? = nil) async -> TargetSnapshot {
+    static func snapshotAsync(excludingWindow excluded: CGWindowID? = nil, includeRole: Bool = false) async -> TargetSnapshot {
         let front = NSWorkspace.shared.frontmostApplication
         let bundleId = front?.bundleIdentifier
         let pid = front?.processIdentifier
         let snapshot: TargetSnapshot = await Task.detached {
             guard let pid else { return TargetSnapshot(bundleId: bundleId, pid: nil) }
-            let state = focusedState(pid: pid, excluding: excluded)
+            let state = focusedState(pid: pid, excluding: excluded, includeRole: includeRole)
             return TargetSnapshot(bundleId: bundleId, pid: pid,
-                                  focusedWindowId: state.windowId, isSecureField: state.isSecure)
+                                  focusedWindowId: state.windowId, isSecureField: state.isSecure,
+                                  focusedRole: state.role)
         }.value
         // Focus can move during the (potentially stalling) detached AX walk. If the frontmost process is no
         // longer the one we walked, the window/secure fields describe a stale target — report the CURRENT
@@ -72,14 +73,22 @@ enum ContextProbe {
     // the SAME focused element — a field/window switch between two independent reads can't pair one window
     // with another field's secure status (KS-01). AX failures degrade to a best-effort window id and
     // non-secure; a nil window never blocks insertion.
-    nonisolated static func focusedState(pid: pid_t, excluding excluded: CGWindowID? = nil) -> (windowId: String?, isSecure: Bool) {
+    // `includeRole` is OFF by default and set ONLY by the adoption snapshot. The role exists solely to
+    // derive content-free field facts for the rewrite prompt, which reads it from the ADOPTED snapshot —
+    // while snapshotAsync is also awaited at commit, insertion, and the Return check, which need just the
+    // window and secure flag. Reading the role there would put an extra AX round trip on latency those
+    // paths await (being detached keeps main unblocked, but the dictation still waits).
+    nonisolated static func focusedState(
+        pid: pid_t, excluding excluded: CGWindowID? = nil, includeRole: Bool = false
+    ) -> (windowId: String?, isSecure: Bool, role: String?) {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
         guard let focused = axChild(app, attribute: kAXFocusedUIElementAttribute) else {
-            return (appFocusedWindowId(app: app, excluding: excluded), false)
+            return (appFocusedWindowId(app: app, excluding: excluded), false, nil)
         }
         let isSecure = subrole(of: focused) == (kAXSecureTextFieldSubrole as String)
-        return (windowId(ofElement: focused, app: app, excluding: excluded), isSecure)
+        return (windowId(ofElement: focused, app: app, excluding: excluded), isSecure,
+                includeRole ? role(of: focused) : nil)
     }
 
     // The window id string for a given element's containing window, honoring the HUD exclusion. Falls back to
@@ -109,6 +118,13 @@ enum ContextProbe {
         guard AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &ref) == .success,
               let subrole = ref as? String else { return nil }
         return subrole
+    }
+
+    nonisolated private static func role(of element: AXUIElement) -> String? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &ref) == .success,
+              let role = ref as? String else { return nil }
+        return role
     }
 
     // Generic AX child-element fetch with a bounded messaging timeout; nil when the attribute is absent or
@@ -174,9 +190,12 @@ enum ContextProbe {
     }
 
     // Bounded text immediately before the caret in the focused field. Chromium/Electron expose no caret
-    // range through AX, so this returns nil there. Bound to both the captured pid and window: the caller
-    // passes the window id frozen at dictation start, and a same-app switch to a different document before or
-    // during the read discards the context rather than sourcing it from the wrong window (KS-02).
+    // range while their accessibility tree is asleep, so this returns nil there; once something else has
+    // woken the renderer, textareas and contenteditables answer this path fully. Stock VS Code (Monaco)
+    // never exposes editor text to a passive reader in any state (agent_notes/web_editor_context). Bound to
+    // both the captured pid and window: the caller passes the window id frozen at dictation start, and a
+    // same-app switch to a different document before or during the read discards the context rather than
+    // sourcing it from the wrong window (KS-02).
     static func precedingText(pid: pid_t, windowId: String? = nil, maxChars: Int = 600) async -> String? {
         // Read only while the exact captured process is still frontmost — context is optional, so an
         // identity mismatch discards it silently rather than reading another process's field.

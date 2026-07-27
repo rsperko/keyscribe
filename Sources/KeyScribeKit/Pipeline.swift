@@ -19,6 +19,7 @@ public enum StageOrder {
     public static let replacements = 10
     public static let numbers = 20
     public static let fuzzy = 30
+    public static let screenTerms = 40
 }
 
 // A whole-utterance replacement: one rule owned the entire utterance, so its generated value is inserted
