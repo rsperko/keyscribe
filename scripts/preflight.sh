@@ -129,7 +129,7 @@ only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-swift-test b-coverage b-commands b-benchmark b-capture-probe "
+PRE_CHECKS=" a-swift-test b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -178,7 +178,7 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-swift-test a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-benchmark"
+REQ_CORE="a-swift-test a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -390,6 +390,49 @@ chk_b_commands() {
   fi
 }
 guard b-commands "$(corpus_sig)" chk_b_commands
+
+# The no-speech admission rule (SpeechPresenceGate.minSpeechChunks) is gated by TWO corpora and needs
+# both: blips/ owns the suppression side and carries the entire margin (its shortest real take sits
+# exactly on the minimum), commands/ is the false-negative floor. --vad-probe fails CLOSED on a missing
+# wav so a fresh checkout cannot report a vacuous pass — and the wavs are gitignored. Hence the
+# completeness check below: an unrecorded or partially-recorded corpus SKIPS rather than failing the
+# release, which is the difference between "we cannot verify this here" and "this regressed".
+# Completeness is scoped to the clips that CARRY an expectation — exactly what --vad-probe fails closed
+# on. A clip with no `checks.vad` contributes nothing to the gate, so its absence must not downgrade a
+# runnable corpus to SKIP; that is how a manifest can declare a not-yet-recorded population (see
+# corpus/blips/README.md) without silently costing coverage here.
+vad_corpus_complete() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+d = sys.argv[1]
+try:
+    clips = json.load(open(os.path.join(d, "manifest.json")))["clips"]
+except Exception:
+    sys.exit(1)
+expected = [c for c in clips if (c.get("checks") or {}).get("vad")]
+if not expected:
+    sys.exit(1)
+sys.exit(any(not os.path.exists(os.path.join(d, c.get("file") or c["id"] + ".wav")) for c in expected))
+PY
+}
+
+chk_b_vad_gate() {
+  local RAN="" DIR LOG
+  for DIR in blips commands; do
+    vad_corpus_complete "$REPO_ROOT/corpus/$DIR" || continue
+    LOG="/tmp/preflight-vad-$DIR.log"
+    if timeout --foreground 300 "$EXE" --config-dir "$PF_CFG" --vad-probe "$REPO_ROOT/corpus/$DIR" >"$LOG" 2>&1; then
+      RAN="$RAN $DIR"
+    else
+      grep -E "^FAIL|MISSING|FAIL — expected" "$LOG" | head -20 | sed 's/^/             /'
+      result fail "--vad-probe corpus/$DIR: the no-speech admission rule regressed — see $LOG"
+      return
+    fi
+  done
+  [ -n "$RAN" ] || { result skip "--vad-probe: no complete VAD corpus recorded (wavs are gitignored — see corpus/blips/README.md)"; return; }
+  result pass "--vad-probe: admission rule held on$RAN"
+}
+guard b-vad-gate "$(sig_artifact)" chk_b_vad_gate
 
 chk_b_benchmark() {
   [ -f "$REPO_ROOT/corpus/stt/manifest.json" ] || { result skip "--benchmark: corpus/stt not present"; return; }

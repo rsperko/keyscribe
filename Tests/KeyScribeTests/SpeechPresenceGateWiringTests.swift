@@ -28,8 +28,7 @@ struct SpeechPresenceGateWiringTests {
         var peak: Float = 0.5
         func read(samples: [Float]?, url: URL, sampleRate: Int) async -> SpeechPresenceReading {
             SpeechPresenceReading(
-                presence: presence, maxProbability: presence == .speech ? 0.9 : 0, peak: peak,
-                latencyMs: 1, modelUsed: true)
+                presence: presence, peak: peak, latencyMs: 1, modelUsed: true)
         }
     }
 
@@ -42,7 +41,7 @@ struct SpeechPresenceGateWiringTests {
         func read(samples: [Float]?, url: URL, sampleRate: Int) async -> SpeechPresenceReading {
             await MainActor.run { cancel.run?() }
             return SpeechPresenceReading(
-                presence: .noSpeech, maxProbability: 0, peak: 0.5, latencyMs: 1, modelUsed: true)
+                presence: .noSpeech, peak: 0.5, latencyMs: 1, modelUsed: true)
         }
     }
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "corpus": "commands",
-  "description": "Recorded utterances that contain a spoken command, replayed through the real no-LLM dictation pipeline by `KeyScribe --commands-check corpus/commands`. Each case asserts declaratively: `contains` = substrings that must survive (a control char \\n/\\t, the clipboard value, or a literal proving a command did NOT fire); `absent` = substrings that must be gone (a consumed trigger phrase, or text 'scratch that' removed); `equals` = the whole output (whole-utterance replacement, case-exact); `noLeadingPunct` = value with no clause punctuation before it (the clipboard fold). Matching is case-insensitive except `equals`. Record <id>.wav for each case in your own voice — real voice reproduces the spurious punctuation/casing engines emit far better than TTS; `say` is a quick synthetic smoke that will NOT reproduce fold/empty-segment punctuation. The clipboard VALUE below is inserted by the pipeline, never spoken.",
+  "description": "Recorded utterances that contain a spoken command, replayed through the real no-LLM dictation pipeline by `KeyScribe --commands-check corpus/commands`. Each case asserts declaratively: `contains` = substrings that must survive (a control char \\n/\\t, the clipboard value, or a literal proving a command did NOT fire); `absent` = substrings that must be gone (a consumed trigger phrase, or text 'scratch that' removed); `equals` = the whole output (whole-utterance replacement, case-exact); `noLeadingPunct` = value with no clause punctuation before it (the clipboard fold). Matching is case-insensitive except `equals`. Record <id>.wav for each case in your own voice — real voice reproduces the spurious punctuation/casing engines emit far better than TTS; `say` is a quick synthetic smoke that will NOT reproduce fold/empty-segment punctuation. The clipboard VALUE below is inserted by the pipeline, never spoken. Every clip also carries `checks.vad.presence: \"speech\"`, asserted by `KeyScribe --vad-probe corpus/commands`: these are the shortest real utterances in the corpus, so they are the false-negative floor for SpeechPresenceGate's admission minimum. Note 23 of the 35 are `say` TTS (clean, unclipped), which makes them an easier case for VAD than a real fast-release take — this floor catches a gross threshold regression, not a marginal one.",
   "context": {
     "clipboard": "agent_notes/foo/",
     "replacements": [
@@ -38,6 +38,9 @@
           "absent": [
             "insert new line"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -54,6 +57,9 @@
           "absent": [
             "insert new line"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -70,6 +76,9 @@
           "absent": [
             "insert new paragraph"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -87,6 +96,9 @@
           "absent": [
             "insert new paragraph"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -103,6 +115,9 @@
           "absent": [
             "insert tab character"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -119,6 +134,9 @@
           "absent": [
             "\n"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -136,6 +154,9 @@
             "went up the hill",
             "scratch that"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -153,6 +174,9 @@
             "went up the hill",
             "scratch that"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -167,6 +191,9 @@
             "meeting is on Tuesday",
             "scratch that"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -185,6 +212,9 @@
             "bread",
             "scratch that"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -198,6 +228,9 @@
           "contains": [
             "scratch that lottery ticket"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -211,6 +244,9 @@
           "contains": [
             "scratch that itch"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -229,6 +265,9 @@
             "end verbatim",
             "\n"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -247,6 +286,9 @@
             "end verbatim",
             "agent_notes/foo/"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -265,6 +307,9 @@
             "end verbatim",
             "\n"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -282,6 +327,9 @@
             "begin verbatim",
             "end verbatim"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -295,6 +343,9 @@
           "contains": [
             "start verbatim"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -317,6 +368,9 @@
             " . ",
             ".."
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -334,6 +388,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -351,6 +408,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -368,6 +428,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -385,6 +448,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -402,6 +468,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -419,6 +488,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -436,6 +508,9 @@
             "clipboard"
           ],
           "noLeadingPunct": "agent_notes/foo/"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -452,6 +527,9 @@
           "absent": [
             "clipboard"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -463,6 +541,9 @@
       "checks": {
         "command": {
           "equals": "/resume"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -474,6 +555,9 @@
       "checks": {
         "command": {
           "equals": "/dog"
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -489,6 +573,9 @@
             "/replace",
             "channel"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -509,6 +596,9 @@
             "scratch that",
             "insert tab character"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -529,6 +619,9 @@
             "scratch that",
             "insert new line"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -548,6 +641,9 @@
           "absent": [
             "insert new line"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -568,6 +664,9 @@
             "scratch that",
             "clipboard"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -586,6 +685,9 @@
             "ignore this bit",
             "scratch that"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     },
@@ -606,6 +708,9 @@
             "end verbatim",
             "scratch that"
           ]
+        },
+        "vad": {
+          "presence": "speech"
         }
       }
     }

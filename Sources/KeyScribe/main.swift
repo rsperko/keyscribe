@@ -49,7 +49,9 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
                               and exit: per clip verdict (speech/noSpeech), max probability, and gate
                               latency, plus the minimum take-level max probability over speech clips
                               (the safety margin above the gate threshold). Downloads the VAD model if
-                              missing. Headless: no mic/insertion.
+                              missing. Headless: no mic/insertion. Add --chunks to dump each clip's
+                              per-chunk probability vector plus how many chunks clear the threshold and
+                              the longest consecutive run — the inputs a duration-aware rule is tuned on.
       --samples-parity <dir>  Verify the in-memory samples transcription path matches the WAV path for
                               every installed sample-capable engine over the *.wav files in <dir> (P2-1).
                               Exits non-zero on any mismatch. Honors --engines.
@@ -219,13 +221,15 @@ if let i = CommandLine.arguments.firstIndex(of: "--rewrite-eval"), i + 1 < Comma
 
 if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {
     let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    let chunks = CommandLine.arguments.contains("--chunks")
     let done = DispatchSemaphore(value: 0)
+    let ok = Atomic<Bool>(true)
     Task.detached {
-        await VadProbeRunner.run(dir: dir)
+        ok.store(await VadProbeRunner.run(dir: dir, chunks: chunks), ordering: .relaxed)
         done.signal()
     }
     done.wait()
-    exit(0)
+    exit(ok.load(ordering: .relaxed) ? 0 : 1)
 }
 
 if let i = CommandLine.arguments.firstIndex(of: "--commands-check"), i + 1 < CommandLine.arguments.count {

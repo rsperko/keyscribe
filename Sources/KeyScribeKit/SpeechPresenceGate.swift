@@ -1,6 +1,8 @@
 import Foundation
 
-public enum SpeechPresence: Equatable, Sendable {
+// The raw values ARE the corpus vocabulary: what `--vad-probe` prints and what a manifest's
+// `checks.vad.presence` must say are the same strings by construction, not by coincidence.
+public enum SpeechPresence: String, Equatable, Sendable, CaseIterable {
     case speech
     case noSpeech
 }
@@ -14,10 +16,28 @@ public struct SpeechPresenceGate: Sendable {
     public static let chunkSampleRate = 16000
     public static let chunkSeconds = Double(chunkSamples) / Double(chunkSampleRate)
 
+    // Admission is a minimum speech duration, not a take-level max, and an empty vector suppresses
+    // rather than failing open. Both are load-bearing — see AGENTS.md "Silence / no-speech behavior"
+    // and corpus/blips/README.md for the measured evidence pinning this at 2.
+    public static let minSpeechChunks = 2
+
     public static func evaluate(chunkProbabilities: [Float], peak: Float) -> SpeechPresence {
         if peak < silenceFloor { return .noSpeech }
-        guard !chunkProbabilities.isEmpty else { return .speech }
-        return chunkProbabilities.contains { $0 >= gateThreshold } ? .speech : .noSpeech
+        return chunksClearingGate(chunkProbabilities) >= minSpeechChunks ? .speech : .noSpeech
+    }
+
+    public static func chunksClearingGate(_ chunkProbabilities: [Float]) -> Int {
+        chunkProbabilities.count { $0 >= gateThreshold }
+    }
+
+    public static func longestRunClearingGate(_ chunkProbabilities: [Float]) -> Int {
+        var longest = 0
+        var current = 0
+        for p in chunkProbabilities {
+            current = p >= gateThreshold ? current + 1 : 0
+            longest = max(longest, current)
+        }
+        return longest
     }
 
     // Start time of the first chunk that clears the same gate the take was admitted by — the proof of leading

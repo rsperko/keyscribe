@@ -1,0 +1,458 @@
+{
+  "schemaVersion": 1,
+  "corpus": "blips",
+  "description": "Empty trigger presses (no speech) vs. genuine short utterances, both captured through the real app trigger path. Replayed by `KeyScribe --vad-probe corpus/blips` to gate the no-speech VAD admission rule.",
+  "clips": [
+    {
+      "id": "blip_silent_01",
+      "file": "blip_silent_01.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "short_right_now",
+      "file": "short_right_now.wav",
+      "text": "Right now.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "blip_silent_02",
+      "file": "blip_silent_02.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "blip_breath_01",
+      "file": "blip_breath_01.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "blip_breath_02",
+      "file": "blip_breath_02.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "blip_breath_03",
+      "file": "blip_breath_03.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "blip_noise_01",
+      "file": "blip_noise_01.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "blip_noise_02",
+      "file": "blip_noise_02.wav",
+      "text": "",
+      "source": "human:capture-archive",
+      "tags": [
+        "blip"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "short_yes",
+      "file": "short_yes.wav",
+      "text": "Yes.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_no",
+      "file": "short_no.wav",
+      "text": "No.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_okay",
+      "file": "short_okay.wav",
+      "text": "Okay.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_one",
+      "file": "short_one.wav",
+      "text": "One.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_stop",
+      "file": "short_stop.wav",
+      "text": "Stop.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_delete_that",
+      "file": "short_delete_that.wav",
+      "text": "Delete that.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_next",
+      "file": "short_next.wav",
+      "text": "Next.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_done",
+      "file": "short_done.wav",
+      "text": "Done.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_sure",
+      "file": "short_sure.wav",
+      "text": "Sure.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_cancel_01",
+      "file": "short_cancel_01.wav",
+      "text": "Cancel.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "short_cancel_02",
+      "file": "short_cancel_02.wav",
+      "text": "Cancel.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance"
+      ],
+      "checks": {
+        "vad": {
+          "presence": "speech"
+        }
+      }
+    },
+    {
+      "id": "dbl_tight",
+      "file": "dbl_tight.wav",
+      "text": "",
+      "source": "human",
+      "tags": [
+        "blip",
+        "derived"
+      ],
+      "note": "two blips 0.15s apart",
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "dbl_gap03",
+      "file": "dbl_gap03.wav",
+      "text": "",
+      "source": "human",
+      "tags": [
+        "blip",
+        "derived"
+      ],
+      "note": "two blips 0.3s apart — they merge into one region; admitted by BOTH count and longest-run"
+    },
+    {
+      "id": "dbl_gap06",
+      "file": "dbl_gap06.wav",
+      "text": "",
+      "source": "human",
+      "tags": [
+        "blip",
+        "derived"
+      ],
+      "note": "two blips 0.6s apart",
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "dbl_gap10",
+      "file": "dbl_gap10.wav",
+      "text": "",
+      "source": "human",
+      "tags": [
+        "blip",
+        "derived"
+      ],
+      "note": "two blips 1.0s apart",
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "dbl_gap15",
+      "file": "dbl_gap15.wav",
+      "text": "",
+      "source": "human",
+      "tags": [
+        "blip",
+        "derived"
+      ],
+      "note": "two blips 1.5s apart",
+      "checks": {
+        "vad": {
+          "presence": "noSpeech"
+        }
+      }
+    },
+    {
+      "id": "clip_yes",
+      "file": "clip_yes.wav",
+      "text": "Yes.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_no",
+      "file": "clip_no.wav",
+      "text": "No.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_okay",
+      "file": "clip_okay.wav",
+      "text": "Okay.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_one",
+      "file": "clip_one.wav",
+      "text": "One.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_stop",
+      "file": "clip_stop.wav",
+      "text": "Stop.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_next",
+      "file": "clip_next.wav",
+      "text": "Next.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_done",
+      "file": "clip_done.wav",
+      "text": "Done.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_sure",
+      "file": "clip_sure.wav",
+      "text": "Sure.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_cancel",
+      "file": "clip_cancel.wav",
+      "text": "Cancel.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    },
+    {
+      "id": "clip_right_now",
+      "file": "clip_right_now.wav",
+      "text": "Right now.",
+      "source": "human:capture-archive",
+      "tags": [
+        "short-utterance",
+        "fast-release"
+      ],
+      "note": "fast-release twin of the same-named short_* clip: identical word, trigger released as early as possible. NOT yet recorded and deliberately carries no checks.vad — the expectation is added only after measuring (see README 'Fast-release twins')."
+    }
+  ]
+}

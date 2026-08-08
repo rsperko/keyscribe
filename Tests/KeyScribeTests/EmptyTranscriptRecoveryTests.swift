@@ -111,7 +111,7 @@ struct EmptyTranscriptRecoveryTests {
         var speechStart: TimeInterval?
         func read(samples: [Float]?, url: URL, sampleRate: Int) async -> SpeechPresenceReading {
             SpeechPresenceReading(
-                presence: presence, maxProbability: 1, peak: 0.5, latencyMs: 1,
+                presence: presence, peak: 0.5, latencyMs: 1,
                 modelUsed: modelUsed, speechStart: speechStart)
         }
     }

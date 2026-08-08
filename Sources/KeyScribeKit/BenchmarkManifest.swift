@@ -9,12 +9,15 @@ public struct BenchmarkEntry: Sendable, Equatable {
     public let file: String
     public let text: String
     public let biasTerms: [String]
+    public let expectedPresence: SpeechPresence?
 
-    public init(id: String, text: String, biasTerms: [String] = [], file: String? = nil) {
+    public init(id: String, text: String, biasTerms: [String] = [], file: String? = nil,
+                expectedPresence: SpeechPresence? = nil) {
         self.id = id
         self.text = text
         self.biasTerms = biasTerms
         self.file = file ?? "\(id).wav"
+        self.expectedPresence = expectedPresence
     }
 }
 
@@ -25,12 +28,30 @@ public struct BenchmarkManifest: Sendable, Equatable {
         self.entries = entries
     }
 
+    public struct InvalidPresence: Error, CustomStringConvertible, Equatable {
+        public let clip: String
+        public let value: String
+        public var description: String {
+            let valid = SpeechPresence.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: " or ")
+            return "clip \"\(clip)\": checks.vad.presence must be \(valid), got \"\(value)\""
+        }
+    }
+
     public static func load(from url: URL) throws -> BenchmarkManifest {
         let raw = try JSONDecoder().decode(RawManifest.self, from: Data(contentsOf: url))
-        return BenchmarkManifest(entries: raw.clips.map {
+        return BenchmarkManifest(entries: try raw.clips.map {
             BenchmarkEntry(id: $0.id, text: $0.text,
-                           biasTerms: $0.checks?.stt?.biasTerms ?? [], file: $0.file)
+                           biasTerms: $0.checks?.stt?.biasTerms ?? [], file: $0.file,
+                           expectedPresence: try Self.presence($0.checks?.vad?.presence, clip: $0.id))
         })
+    }
+
+    private static func presence(_ raw: String?, clip: String) throws -> SpeechPresence? {
+        guard let raw else { return nil }
+        guard let presence = SpeechPresence(rawValue: raw) else {
+            throw InvalidPresence(clip: clip, value: raw)
+        }
+        return presence
     }
 
     private struct RawManifest: Decodable {
@@ -41,7 +62,8 @@ public struct BenchmarkManifest: Sendable, Equatable {
         let file: String?
         let text: String
         let checks: RawChecks?
-        struct RawChecks: Decodable { let stt: RawSTT? }
+        struct RawChecks: Decodable { let stt: RawSTT?; let vad: RawVAD? }
         struct RawSTT: Decodable { let biasTerms: [String]? }
+        struct RawVAD: Decodable { let presence: String? }
     }
 }

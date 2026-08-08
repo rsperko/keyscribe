@@ -835,7 +835,10 @@ final class DictationController {
     private func presenceReading(samples: [Float]?, url: URL) async -> SpeechPresenceReading {
         let reading = await presenceDetector.read(
             samples: samples, url: url, sampleRate: activeEngine.captureSampleRate)
-        Log.audio.debug("vad \(reading.presence == .noSpeech ? "noSpeech" : "speech", privacy: .public) maxP=\(reading.maxProbability, privacy: .public) peak=\(reading.peak, privacy: .public) model=\(reading.modelUsed, privacy: .public) speechStart=\(reading.speechStart ?? -1, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
+        // clearing/chunks is the axis admission actually keys on — maxP alone cannot explain a suppression
+        // (a stray press scores as high as 0.92 on its one hot chunk).
+        let clearing = SpeechPresenceGate.chunksClearingGate(reading.chunkProbabilities)
+        Log.audio.debug("vad \(reading.presence.rawValue, privacy: .public) clearing=\(clearing, privacy: .public)/\(reading.chunkProbabilities.count, privacy: .public) need=\(SpeechPresenceGate.minSpeechChunks, privacy: .public) maxP=\(reading.maxProbability, privacy: .public) peak=\(reading.peak, privacy: .public) model=\(reading.modelUsed, privacy: .public) speechStart=\(reading.speechStart ?? -1, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
         return reading
     }
 

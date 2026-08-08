@@ -456,11 +456,21 @@ benchmark rank — a single-voice ranking can't carry that authority and would f
 
 **First line of defense: the audio-side no-speech gate.** A finished take runs once through Silero VAD
 (`SpeechPresenceDetector` adapter over FluidAudio's `VadManager`; verdict logic in the pure
-`SpeechPresenceGate`, KeyScribeKit) BEFORE transcription — `DictationController.gateSuppressesNoSpeech`,
-at the commit call site after `finishDraining()` and before `finalizeStreamingIfActive`. If no chunk's
-speech probability clears `0.30` (take-level max; a digital-silence peak short-circuits without even
-invoking the model), the dictation is suppressed with the same `.noSpeech` UX as an empty transcript —
-nothing is transcribed or pasted. This closes the whole engine-silence-artifact class in one move
+`SpeechPresenceGate`, KeyScribeKit) BEFORE transcription — `DictationController.presenceReading`, at the
+commit call site after `finishDraining()` and before `finalizeStreamingIfActive`. Admission is a minimum
+speech **duration**, not a take-level max: fewer than `minSpeechChunks` (2) of the 256 ms chunks clearing
+probability `0.30` is `.noSpeech` (a digital-silence peak short-circuits without even invoking the model),
+and the dictation is suppressed with the same `.noSpeech` UX as an empty transcript — nothing is
+transcribed or pasted. **The two-chunk minimum is load-bearing and confidence cannot replace it**: a stray
+trigger press puts exactly ONE hot chunk in front of the model (a breath, a lip smack, the key itself) and
+those score as high as **0.92** — higher than the weakest chunk of many real takes — so any single-chunk
+admission rule, at any confidence, readmits the whole bug. See `corpus/blips` for the measured
+populations and the shortest real take that pins the minimum at 2. An empty probability vector is
+`.noSpeech`, NOT fail-open: the detector returns early with `modelUsed: false` whenever the model could
+not run, so reaching `evaluate` means it ran and the take was too short to fill one chunk. Note
+`speechStart` is deliberately NOT coupled to `minSpeechChunks` — it stays "first chunk clearing the
+threshold" because it is the trim boundary for the leading-silence recovery below. This closes the whole
+engine-silence-artifact class in one move
 (Qwen3's biased-dictionary echo on silence, Whisper's `Thank you.`, Apple's `No`), which a string
 denylist provably cannot (see below). The gate **fails open**: a missing VAD model, an error, or a
 timeout proceeds to transcription unchanged, so the transcript-level checks below remain the mandatory
@@ -484,7 +494,28 @@ ffmpeg -f lavfi -i "anoisesrc=r=16000:a=0.02:d=3:seed=33" -c:a pcm_s16le hiss.wa
 ./KeyScribeDev.app/Contents/MacOS/KeyScribe --benchmark <dir> --engines <new-id> --raw   # RAW\t<engine>\t<clip>\t<literal output>
 # And exercise the gate itself over the same clips (verdict + max probability + latency per clip):
 ./KeyScribeDev.app/Contents/MacOS/KeyScribe --vad-probe <dir>   # silences/hiss → suppressed; real speech → 100% speech
+# --chunks adds the per-clip probability vector + how many chunks clear the threshold (the admission axis).
+# A clip may state `checks.vad.presence` ("speech"/"noSpeech"); the probe then PASS/FAILs and exits 1 on a
+# miss. It fails CLOSED: an expectation whose wav is missing is a failure (corpus wavs are gitignored, so a
+# fresh checkout must not report a vacuous pass), and any presence value other than those two fails decoding
+# rather than silently dropping the assertion.
+./KeyScribeDev.app/Contents/MacOS/KeyScribe --vad-probe corpus/blips           # the admission-rule gate
+./KeyScribeDev.app/Contents/MacOS/KeyScribe --vad-probe corpus/commands        # the false-negative floor
 ```
+
+**Two gates, and a change to `minSpeechChunks` must clear both.** `corpus/blips` is the
+suppression side (empty presses that must not be admitted) and carries the whole margin — its
+`short_right_now` is the only clip anywhere sitting exactly on the minimum. `corpus/commands` is the
+false-negative side: all 35 clips assert `presence: "speech"`, and they are the shortest real
+utterances in the corpus. It is a **coarse** floor, not a fine one — 23 of the 35 are `say` TTS
+(clean and unclipped, an easier case for VAD than a real fast-release take), and measured today every
+clip clears 4+ chunks against a minimum of 2. It catches a gross regression; only `blips` measures the
+margin. The population that would actually expose a too-high minimum — a real one-word take clipped by
+a fast trigger release — is **declared but not yet recorded**: `corpus/blips`' ten `clip_*` entries are
+fast-release twins of the `short_*` clips, carrying no `checks.vad` until measured (procedure and
+decision rule in `corpus/blips/README.md`, "Fast-release twins"). Record those before raising the
+minimum — and note that until they exist, no evidence in this repo bounds the false-negative side for a
+clipped take.
 
 Empirically observed no-speech output (2026-07-01, one machine — deterministic per fixed input, but
 **content-dependent** across different silences, so treat as representative, not exhaustive):
@@ -496,8 +527,12 @@ Empirically observed no-speech output (2026-07-01, one machine — deterministic
 | Moonshine Base (en) | `""` (but upstream can loop-repeat on short audio) |
 | Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
 | Whisper Large v3 Turbo | lexical hallucinations: `Thank you.`, `.`, `...` |
-| Qwen3-ASR 1.7B | rare lexical, e.g. `嗯。` (CJK) |
+| Qwen3-ASR 1.7B | lexical, e.g. `嗯。` / `哦。` (CJK), and on a biased mode an echoed dictionary term |
 | Apple SpeechAnalyzer | rare lexical, e.g. `No` |
+
+Qwen3's CJK output is its **language head auto-detecting** on ambiguous noise (`Qwen3DecodingOptions.language`
+is deliberately left `nil`; KeyScribe has no language setting and the engine ships multilingual). The fix
+is the audio-side gate, not a language pin — do not hardcode `"en"` there.
 
 **Load-bearing conclusion: a string denylist cannot solve this.** The only *safe* strings to strip are
 non-lexical annotations no user dictates — bracketed/parenthetical tags like `[BLANK_AUDIO]`,
@@ -509,10 +544,33 @@ above (was there speech in the audio?) upstream of the transcript, not string ma
 (`SpeechPresenceGate` / `SpeechPresenceDetector`). This annotation collapse remains for the safe
 bracketed/parenthetical strings and as the gate's fail-open backstop. Re-run this the moment a model is
 added or an STT dep is bumped — the marker set is engine- and version-specific, and the gate being
-fail-open means a new engine's artifacts must still be swept. Validated separation (2026-07-09, one
-voice): over `corpus/stt` (107 clips) every clip read `speech` with a minimum take-level max probability
-of 0.397 (margin 0.097 above the 0.30 threshold); generated silence/hiss all read `noSpeech` (hiss max
-probability 0.198) — a clean gap around 0.30.
+fail-open means a new engine's artifacts must still be swept. Validated separation (2026-07-27, one
+voice), measured in **chunks clearing 0.30** — the axis admission actually keys on:
+
+| Set | Duration | Chunks clearing 0.30 |
+|---|---|---|
+| `corpus/blips` empty trigger presses (7) | 0.20–0.51 s | **1** every time (maxP 0.42–0.92) |
+| `corpus/blips` shortest real utterance | 0.40 s | **2** |
+| `corpus/blips` other short utterances (11) | 0.70–2.85 s | 3–9 |
+| `corpus/stt` sentences (106 valid) | — | 6+ |
+| generated silence / hiss | — | 0 (hiss maxP 0.198; pure silence never reaches the model) |
+
+Nothing real lands below 2 and nothing empty lands above 1, so `minSpeechChunks = 2` separates them with
+the whole gap to itself — but the margin on the speech side is exactly one clip, so **re-measure before
+raising it**. `corpus/stt`'s `c69` reads `noSpeech` and that is correct, not a regression: its WAV is 1.1 s
+of near-silence that scores WER 1.0 on all eight engines while its manifest claims an 88-character
+sentence — a broken recording worth re-recording, unrelated to this gate. Excluding it, the minimum
+take-level max probability over `corpus/stt` is 0.555.
+
+**Admission counts TOTAL clearing chunks, not the longest consecutive run — that is deliberate and
+measured.** The intuition that a total count would admit two unrelated noises (press click + release
+click) does not survive contact with Silero: it is contextual, so two blips separated by a real gap
+score ONE clearing chunk between them, not two (`corpus/blips`' derived `dbl_gap06/10/15/tight` — count
+1, run 1, suppressed by either rule). The only derived clip reaching two is `dbl_gap03` (0.3 s gap, the
+blips merge), and its run is 2 as well, so a run rule admits it identically. Meanwhile a run rule costs
+real margin: `corpus/stt/c72` is genuine speech with **count 6 but longest run 2**, one dropout away
+from suppression. `longestRunClearingGate` is kept for diagnostics (`--vad-probe --chunks`), not
+admission. `dbl_gap03` is a documented residual gap, not a regression — the old rule admitted it too.
 
 **The inverse failure — VAD heard speech but the engine returned nothing — is recovered, once, generically.**
 Parakeet TDT v3 collapses to an all-blank decode on a short take with substantial leading silence

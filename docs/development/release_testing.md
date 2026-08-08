@@ -100,6 +100,16 @@ actually catches the list above.
   own voice); later runs exit non-zero only when an engine cleans **fewer** clips than its baseline (a
   command-pipeline regression) or the clip count changed (re-baseline: delete the file, re-run). A
   newly-installed engine is added, not treated as a regression.
+- **`--vad-probe corpus/blips` + `--vad-probe corpus/commands`** — the no-speech admission rule
+  (`SpeechPresenceGate.minSpeechChunks`) still separates empty trigger presses from real speech. Two
+  corpora, both required: `blips/` is the suppression side and carries the **entire** margin (its
+  shortest real take sits exactly on the two-chunk minimum), `commands/` is the false-negative floor —
+  coarse, since 23 of its 35 clips are `say` TTS and every clip clears 4+ chunks today. A regression
+  here is user-visible either way: too low and a stray press pastes an engine hallucination, too high
+  and short dictations are silently swallowed. Unlike the checks above, this one needs **no** models or
+  quiet room beyond the ~1 MB VAD model — it replays recorded wavs. The wavs are gitignored, so a
+  corpus that is missing or only **partly** recorded SKIPs; only a complete corpus that misses an
+  expectation fails.
 - **`--benchmark corpus/stt`** — biased WER stays under a **coarse** ceiling (`KEYSCRIBE_MAX_WER`,
   default 0.20). This is a *catastrophic-regression* backstop (bias wiring broke → WER doubles), not a
   rank check — the default is set so no shipped engine false-fails (Moonshine ships ~15% with no

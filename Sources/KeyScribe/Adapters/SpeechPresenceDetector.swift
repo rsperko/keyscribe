@@ -6,7 +6,6 @@ import KeyScribeKit
 
 struct SpeechPresenceReading: Sendable {
     let presence: SpeechPresence
-    let maxProbability: Float
     let peak: Float
     let latencyMs: Double
     let modelUsed: Bool
@@ -15,6 +14,10 @@ struct SpeechPresenceReading: Sendable {
     // started in chunk zero. Wall-clock: FluidAudio resamples to 16 kHz before chunking, so a 24 kHz capture
     // (Qwen3) still reads back in take time.
     var speechStart: TimeInterval? = nil
+    var chunkProbabilities: [Float] = []
+
+    // Derived, never stored: a reading that carries the vector cannot disagree with itself about its max.
+    var maxProbability: Float { chunkProbabilities.max() ?? 0 }
 }
 
 protocol SpeechPresenceDetecting: Sendable {
@@ -158,7 +161,7 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
         if let peak, peak < SpeechPresenceGate.silenceFloor {
             return SpeechPresenceReading(
-                presence: .noSpeech, maxProbability: 0, peak: peak,
+                presence: .noSpeech, peak: peak,
                 latencyMs: Self.elapsedMs(since: start), modelUsed: false)
         }
 
@@ -174,16 +177,17 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
         guard let probabilities else {
             return SpeechPresenceReading(
-                presence: .speech, maxProbability: 0, peak: peak ?? 1,
+                presence: .speech, peak: peak ?? 1,
                 latencyMs: Self.elapsedMs(since: start), modelUsed: false)
         }
 
         let verdict = SpeechPresenceGate.evaluate(
             chunkProbabilities: probabilities, peak: peak ?? 1)
         return SpeechPresenceReading(
-            presence: verdict, maxProbability: probabilities.max() ?? 0, peak: peak ?? 1,
+            presence: verdict, peak: peak ?? 1,
             latencyMs: Self.elapsedMs(since: start), modelUsed: true,
-            speechStart: SpeechPresenceGate.speechStart(chunkProbabilities: probabilities))
+            speechStart: SpeechPresenceGate.speechStart(chunkProbabilities: probabilities),
+            chunkProbabilities: probabilities)
     }
 
     private static func peakMagnitude(_ samples: [Float]) -> Float {

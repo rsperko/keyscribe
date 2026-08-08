@@ -21,6 +21,7 @@ flat and are organized by **semantic id prefix**, not subfolders. A clip needed 
 | `commands/` | Spoken-command regression on real transcripts | `manifest.json` | `KeyScribe --commands-check corpus/commands` |
 | `voices/` | Multi-voice TTS/human studies of command phrasing | `manifest.json` | `KeyScribe --benchmark corpus/voices --raw` |
 | `silence-lead/` | Leading-silence empty-transcript regression (derived clips via `silence-lead/gen.sh` + real repro takes) | `manifest.json` | `KeyScribe --benchmark corpus/silence-lead --raw` |
+| `blips/` | No-speech admission gate: empty trigger presses vs. genuine short utterances, pulled from the app capture archive | `manifest.json` | `KeyScribe --vad-probe corpus/blips [--chunks]` |
 
 ## Manifest schema (unified, `schemaVersion: 1`)
 
@@ -52,16 +53,18 @@ contains a phrase.
       "checks": {                       // task expectations; a clip may carry several blocks
         "stt":     { "biasTerms": ["Kubernetes"], "tier": "T2" },
         "command": { "contains": ["…"], "absent": ["…"], "equals": "…",
-                     "noLeadingPunct": "…", "kind": "command", "expectTerminator": "yes" }
+                     "noLeadingPunct": "…", "kind": "command", "expectTerminator": "yes" },
+        "vad":     { "presence": "speech" }   // "speech" | "noSpeech" — asserted by --vad-probe
       }
     }
   ]
 }
 ```
 
-`source` is authoritative provenance: only clips proven to be real recordings are `human` (verified by
+`source` is authoritative provenance: only clips proven to be real recordings are `human*` (verified by
 content hash against known human takes and by the ffmpeg encoder signature); everything synthetic is
-`tts:<engine>[:voice]`.
+`tts:<engine>[:voice]`. `human:capture-archive` is a real recording taken from the app's own capture
+archive rather than `record.sh` — no ffmpeg tag, identified by the CoreAudio writer's header instead.
 
 `stt/` and `voices/` have their own READMEs; `commands/` is documented alongside its manifest.
 
