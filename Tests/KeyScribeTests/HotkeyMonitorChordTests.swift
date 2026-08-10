@@ -25,6 +25,22 @@ final class FakeMouseTap: MouseTapping {
     func stop() { stopped = true; consumedButtons = [] }
 }
 
+// Runs the chord grace on demand instead of on a real timer, so a grace test never sleeps.
+@MainActor
+final class ManualScheduler {
+    private var pending: [@MainActor () -> Void] = []
+
+    var schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void {
+        { [weak self] _, work in self?.pending.append(work) }
+    }
+
+    func fireAll() {
+        let due = pending
+        pending = []
+        for work in due { work() }
+    }
+}
+
 @MainActor
 struct HotkeyMonitorChordTests {
     private func chordBinding(_ key: String, style: PressStyle = .holdOnly) -> HotkeyMonitor.Binding {
@@ -161,7 +177,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            carbon: FakeChordRegistrar())
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightOption)])
 
         m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | 0x40))
@@ -178,7 +194,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            carbon: FakeChordRegistrar())
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightCommand)])
 
         m.handle(type: .flagsChanged, keyCode: 54, flags: CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x10))
@@ -198,7 +214,8 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionSuppressedWhenAChordModifierIsAlreadyHeld() async {
         var starts = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in }, carbon: FakeChordRegistrar())
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightOption)])
 
         // ⌃ held, then the right Option engages (e.g. building ⌃⌥⇧⌘D with the right Option) → not a bare hold.
@@ -212,7 +229,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar())
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightOption)])
 
         // Bare right Option first → dictation starts.
@@ -233,7 +250,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar())
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightOption)])
 
         m.handle(type: .flagsChanged, keyCode: 61,
@@ -255,7 +272,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar())
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightOption)])
 
         // Bare right Option → start.
@@ -286,11 +303,100 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 2)
     }
 
+    // "Chord wins" for Fn: fn+delete / fn+arrow are the user's own key mappings, not a dictation hold. The
+    // keystroke must reach the focused app, so the just-started dictation is discarded and the Fn release
+    // commits nothing (without this the HUD takes key focus mid-chord and swallows the keystroke).
+    @Test func fnAbortsWhenAChordKeyFollows() async {
+        var starts = 0, commits = 0, cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
+        m.update(bindings: [namedBinding(.fn)])
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        await drainMain()
+        #expect(starts == 1)
+
+        m.handle(type: .keyDown, keyCode: 117, flags: .maskSecondaryFn)   // forward delete
+        await drainMain()
+        #expect(cancels == 1)
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: CGEventFlags(rawValue: 0))
+        await drainMain()
+        #expect(commits == 0)
+    }
+
+    @Test func fnReArmsAfterAChordAbortOnceReleased() async {
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
+        m.update(bindings: [namedBinding(.fn)])
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        m.handle(type: .keyDown, keyCode: 117, flags: .maskSecondaryFn)
+        m.handle(type: .flagsChanged, keyCode: 63, flags: CGEventFlags(rawValue: 0))
+        await drainMain()
+        #expect(starts == 1)
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        await drainMain()
+        #expect(starts == 2)
+    }
+
+    private let hyperFlags: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+
+    @Test func hyperAbortsWhenAChordKeyFollows() async {
+        var starts = 0, commits = 0, cancels = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
+        m.update(bindings: [namedBinding(.hyper)])
+
+        m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
+        await drainMain()
+        #expect(starts == 1)
+
+        m.handle(type: .keyDown, keyCode: 2, flags: hyperFlags)
+        await drainMain()
+        #expect(cancels == 1)
+        #expect(commits == 0)
+    }
+
+    // Hyper's abort clears `hyperEngaged`, so with all four modifiers still held the NEXT flagsChanged is
+    // once again a fresh "engaged" transition — it must not re-arm. Suppression persists until the modifier
+    // set drops below Hyper.
+    @Test func hyperDoesNotReArmWhileEngagedAfterAChordAbort() async {
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
+        m.update(bindings: [namedBinding(.hyper)])
+
+        m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
+        m.handle(type: .keyDown, keyCode: 2, flags: hyperFlags)
+        await drainMain()
+        #expect(starts == 1)
+
+        // Still every modifier held (e.g. a second chord key goes down) → no fresh arm, no stray commit.
+        m.handle(type: .flagsChanged, keyCode: 56, flags: hyperFlags)
+        await drainMain()
+        #expect(starts == 1)
+        #expect(commits == 0)
+
+        // Modifiers fully released → suppression lifts; a genuine Hyper hold arms again.
+        m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: 0))
+        await drainMain()
+        m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
+        await drainMain()
+        #expect(starts == 2)
+    }
+
     @Test func rightControlStartsAndCommitsAsABareModifier() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
-            carbon: FakeChordRegistrar())
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding(.rightControl)])
 
         m.handle(type: .flagsChanged, keyCode: 62,
@@ -355,6 +461,137 @@ struct HotkeyMonitorChordTests {
         #expect(m.start() == false)
         #expect(m.isTapActive == false)
         #expect(fake.lastRegistrations.count == 1)
+    }
+
+    // --- Chord grace. Arming eagerly makes every chord built on a modifier-only trigger start a dictation
+    // and then cancel it — audibly, since the start cue plays as soon as a prewarmed mic is ready and the
+    // cancel cue follows. Holding the .down for the grace lets the chord's key land first, so nothing starts
+    // at all: no onStart, and therefore no onCancel either.
+
+    @Test func aChordKeyInsideTheGraceStartsNothingAtAll() async {
+        var starts = 0, commits = 0, cancels = 0
+        let clock = ManualScheduler()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(),
+            chordGraceSeconds: 0.15, schedule: clock.schedule)
+        m.update(bindings: [namedBinding(.fn)])
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        m.handle(type: .keyDown, keyCode: 117, flags: .maskSecondaryFn)
+        clock.fireAll()
+        m.handle(type: .flagsChanged, keyCode: 63, flags: CGEventFlags(rawValue: 0))
+        await drainMain()
+
+        #expect(starts == 0)
+        #expect(cancels == 0)
+        #expect(commits == 0)
+    }
+
+    @Test func aHeldTriggerArmsOnceTheGraceElapses() async {
+        var starts = 0
+        let clock = ManualScheduler()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0.15, schedule: clock.schedule)
+        m.update(bindings: [namedBinding(.fn)])
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        await drainMain()
+        #expect(starts == 0)
+
+        clock.fireAll()
+        await drainMain()
+        #expect(starts == 1)
+    }
+
+    // A tap shorter than the grace is a real tap, not a chord: the held-back .down must still fire on release
+    // so the gesture sees a down/up pair. Dropping it would swallow every fast tap.
+    @Test func aTapReleasedInsideTheGraceStillDrivesTheGesture() async {
+        var starts = 0, commits = 0
+        let clock = ManualScheduler()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0.15, schedule: clock.schedule)
+        m.update(bindings: [namedBinding(.fn, style: .holdOnly)])
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        m.handle(type: .flagsChanged, keyCode: 63, flags: CGEventFlags(rawValue: 0))
+        clock.fireAll()
+        await drainMain()
+
+        #expect(starts == 1)
+        #expect(commits == 1)
+    }
+
+    @Test func aHyperChordKeyInsideTheGraceStartsNothingAtAll() async {
+        var starts = 0, cancels = 0
+        let clock = ManualScheduler()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(),
+            chordGraceSeconds: 0.15, schedule: clock.schedule)
+        m.update(bindings: [namedBinding(.hyper)])
+
+        m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
+        m.handle(type: .keyDown, keyCode: 2, flags: hyperFlags)
+        clock.fireAll()
+        await drainMain()
+        #expect(starts == 0)
+        #expect(cancels == 0)
+
+        // A second key in the same chord press must not arm either, and releasing Hyper re-enables the trigger.
+        m.handle(type: .keyDown, keyCode: 3, flags: hyperFlags)
+        clock.fireAll()
+        await drainMain()
+        #expect(starts == 0)
+
+        m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: 0))
+        m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
+        clock.fireAll()
+        await drainMain()
+        #expect(starts == 1)
+    }
+
+    // The idle resync (AppDelegate.onBecameIdle) calls cancelGestures() whenever nothing is held. A press
+    // still inside its grace IS held, so it must report as such or the resync silently eats it.
+    @Test func aPressInsideTheGraceCountsAsHeld() async {
+        var starts = 0
+        let clock = ManualScheduler()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            carbon: FakeChordRegistrar(), chordGraceSeconds: 0.15, schedule: clock.schedule)
+        m.update(bindings: [namedBinding(.fn)])
+
+        m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
+        #expect(m.hasPhysicallyDownGesture)
+
+        clock.fireAll()
+        await drainMain()
+        #expect(starts == 1)
+        #expect(m.hasPhysicallyDownGesture)
+    }
+
+    // The right-side keys reach the same silent outcome by the other route: a foreign modifier joining inside
+    // the grace is resolved by flags, not by a keyDown.
+    @Test func aForeignModifierInsideTheGraceStartsNothingAtAll() async {
+        var starts = 0, cancels = 0
+        let clock = ManualScheduler()
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(),
+            chordGraceSeconds: 0.15, schedule: clock.schedule)
+        m.update(bindings: [namedBinding(.rightOption)])
+
+        m.handle(type: .flagsChanged, keyCode: 61,
+                 flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
+        let joined = CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt) | CGEventFlags.maskControl.rawValue
+        m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: joined))
+        clock.fireAll()
+        await drainMain()
+
+        #expect(starts == 0)
+        #expect(cancels == 0)
     }
 
     // Only the VISIBLE cancellable states: arming is cancellable but shows no HUD, so there is no panel to

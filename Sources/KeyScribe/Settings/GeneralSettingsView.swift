@@ -9,7 +9,6 @@ struct GeneralSettingsView: View {
     // as when this is changed in Modes.
     var directMode: Mode?
     var allModes: [Mode] = []
-    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     var onUpdatePlainDictation: (Mode) -> Void = { _ in }
 
     var body: some View {
@@ -17,8 +16,7 @@ struct GeneralSettingsView: View {
             Section("Dictation") {
                 if let directMode {
                     let trigger = ModeTrigger(
-                        mode: directMode, allModes: allModes,
-                        actionShortcuts: actionShortcuts, onUpdate: onUpdatePlainDictation)
+                        mode: directMode, allModes: allModes, onUpdate: onUpdatePlainDictation)
                     ModeTriggerRow(
                         mode: directMode, onUpdate: onUpdatePlainDictation, label: "Dictation key",
                         accessibilityID: AccessibilityID.Settings.General.dictationTrigger)
@@ -26,7 +24,6 @@ struct GeneralSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TriggerConflictLabel(conflict: trigger.conflict)
-                    TriggerOverlapLabel(overlap: trigger.overlap)
                 }
             }
 

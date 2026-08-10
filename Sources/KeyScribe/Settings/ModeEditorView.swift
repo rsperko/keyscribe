@@ -5,7 +5,6 @@ import KeyScribeKit
 struct ModeEditorView: View {
     let mode: Mode
     let allModes: [Mode]
-    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     let connections: [Connection]
     let fragmentIds: [String]
     let fragmentNames: [String: String]
@@ -23,7 +22,7 @@ struct ModeEditorView: View {
 
     private var bind: ModeBinding { ModeBinding(mode: mode, onUpdate: onUpdate) }
     private var trigger: ModeTrigger {
-        ModeTrigger(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
+        ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate)
     }
 
     var body: some View {
@@ -36,7 +35,6 @@ struct ModeEditorView: View {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 TriggerConflictLabel(conflict: trigger.conflict)
-                TriggerOverlapLabel(overlap: trigger.overlap)
                 if usesMouseShortcut {
                     Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -82,7 +80,7 @@ struct ModeEditorView: View {
                     .accessibilityIdentifier(AccessibilityID.Mode.Editor.enabled)
             }
 
-            ModeRoutingSection(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
+            ModeRoutingSection(mode: mode, allModes: allModes, onUpdate: onUpdate)
             Section("What it does") {
                 SettingRow(
                     title: "Rewrite selected text",

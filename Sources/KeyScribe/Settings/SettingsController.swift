@@ -324,18 +324,6 @@ struct SettingsRootView: View {
     // which runs outside the update pass.
     @State private var destination: SettingsDestination?
 
-    // Filtered through the SAME shadow/chord gate as runtime registration (a chord like ⌃⌥⇧V subsumes a
-    // right-Option trigger) so the overlap warning never names a shortcut that won't actually fire — a
-    // shadowed one is re-attributed to the mode that shadows it.
-    private var actionShortcutRivals: [TriggerKeyConflicts.RivalBinding] {
-        TriggerKeyConflicts.liveActionRivals([
-            .init(id: GlobalHotkey.vocabularyId, key: general.addVocabularyShortcut,
-                  label: "the Add to Vocabulary shortcut"),
-            .init(id: GlobalHotkey.pasteLastId, key: general.pasteLastShortcut,
-                  label: "the Paste Last Dictation shortcut"),
-        ], shadowed: shadowedHotkeys())
-    }
-
     private func shadowedHotkeys() -> Set<String> {
         var ordered = modes.modes.map {
             HotkeyConflicts.Registrant(
@@ -377,7 +365,6 @@ struct SettingsRootView: View {
                     pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId),
                     directMode: modes.modes.first(where: { $0.id == Mode.directId }),
                     allModes: modes.modes,
-                    actionShortcuts: actionShortcutRivals,
                     onUpdatePlainDictation: { modes.update($0) })
             case .speechModels:
                 SpeechModelsView(model: speechModels, settings: general)
@@ -388,8 +375,7 @@ struct SettingsRootView: View {
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:
-                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds,
-                                  actionShortcuts: actionShortcutRivals) { modeID in
+                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds) { modeID in
                     navigation.openVocabulary(for: modeID)
                 }
             case .history:

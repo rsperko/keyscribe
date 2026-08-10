@@ -16,11 +16,19 @@ final class HotkeyMonitor {
         let descriptor: KeyDescriptor
         var gesture: PressGesture
         var hyperEngaged = false
-        // Set when a right-side modifier's gesture aborts as part of a chord. While set, the key is barred
-        // from re-arming a fresh dictation even if it goes momentarily sole again on the way up — the
-        // suppression persists until the key is fully released (see resolveSoleModifier). Without it, releasing
-        // a chord like ⌃⌥⇧⌘D built with the right Option re-fires .down on the transiently-sole ⌥ and tap-latches.
+        // Set when a modifier-only gesture aborts as part of a chord. While set, the key is barred from
+        // re-arming a fresh dictation even if it momentarily looks like a new press while still held — the
+        // suppression persists until the key is fully released (see resolveSoleModifier and edge). Without it,
+        // releasing a chord like ⌃⌥⇧⌘D built with the right Option re-fires .down on the transiently-sole ⌥
+        // and tap-latches; on Hyper, whose abort clears `hyperEngaged`, every later flagsChanged while the
+        // four modifiers stay held reads as a fresh engage and re-arms.
         var suppressedUntilRelease = false
+        // A modifier-only .down held back for the chord grace: the modifiers are engaged but nothing has
+        // started yet, so a key arriving inside the window discards the arm SILENTLY — no mic, no cue, no
+        // HUD. `armGeneration` is bumped on every arm and every cancel so a scheduled arm that lost its
+        // race (cancelled, released, or rebuilt onto a different binding) recognises itself as stale.
+        var pendingArm = false
+        var armGeneration = 0
 
         init(triggerKey: String?, descriptor: KeyDescriptor, style: PressStyle, tapThreshold: Double) {
             self.triggerKey = triggerKey
@@ -44,12 +52,19 @@ final class HotkeyMonitor {
     private let carbon: ChordRegistering
     private let mouseTap: MouseTapping
     private let isProcessTrusted: () -> Bool
+    // How long a modifier-only trigger waits before arming, so the key of a chord built on it lands first.
+    // Arming is not cheap — it runs the synchronous secure-field probe, opens the mic, and (once ready)
+    // plays the start cue — so an eager arm makes every fn+delete or ⌃⌥⇧⌘X audibly start-then-cancel a
+    // dictation. Only latency is traded: nothing is recorded until admission opens at cue end regardless.
+    // A chord slower than the grace still falls through to the keyDown abort, cues and all.
+    private let chordGraceSeconds: TimeInterval
+    private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
 
     let onStart: (String?, PressStyle) -> Void
     let onCommit: (String?) -> Void
     let onAction: (String) -> Void
-    // Fired when a bare modifier-only start turns out to be part of a chord (a foreign modifier joined
-    // the held trigger key) — the "chord wins" rule discards the just-started dictation. Carries the
+    // Fired when a bare modifier-only start turns out to be part of a chord (a foreign modifier or a key
+    // joined the held trigger key) — the "chord wins" rule discards the just-started dictation. Carries the
     // aborting binding's triggerKey so the controller cancels only a dictation THIS key started, never an
     // unrelated in-flight one another trigger committed.
     let onCancel: (String?) -> Void
@@ -61,8 +76,14 @@ final class HotkeyMonitor {
         onCancel: @escaping (String?) -> Void = { _ in },
         carbon: ChordRegistering = CarbonHotKeys(),
         mouseTap: MouseTapping = MouseEventTap(),
-        isProcessTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }
+        isProcessTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
+        chordGraceSeconds: TimeInterval = 0.15,
+        schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated(work) }
+        }
     ) {
+        self.chordGraceSeconds = chordGraceSeconds
+        self.schedule = schedule
         self.bindings = bindings
         self.actionBindings = actionBindings
         self.onStart = onStart
@@ -90,6 +111,8 @@ final class HotkeyMonitor {
             carried.gesture = match.gesture
             carried.hyperEngaged = match.hyperEngaged
             carried.suppressedUntilRelease = match.suppressedUntilRelease
+            carried.pendingArm = match.pendingArm
+            carried.armGeneration = match.armGeneration
             return carried
         }
         self.actionBindings = actionBindings
@@ -102,11 +125,16 @@ final class HotkeyMonitor {
             bindings[i].gesture.cancel()
             bindings[i].hyperEngaged = false
             bindings[i].suppressedUntilRelease = false
+            bindings[i].pendingArm = false
+            bindings[i].armGeneration &+= 1
         }
     }
 
+    // A pending arm counts: the key IS physically down, its gesture just has not been told yet. Without it the
+    // idle resync (AppDelegate.onBecameIdle) would see "nothing held" and cancelGestures() a press that is
+    // still inside its grace, silently dropping a dictation the user had already begun.
     var hasPhysicallyDownGesture: Bool {
-        bindings.contains { $0.gesture.isPhysicallyDown }
+        bindings.contains { $0.gesture.isPhysicallyDown || $0.pendingArm }
     }
 
     // The tap watches modifier-only triggers (Fn/right-Option/right-Command/right-Control/Hyper) via `.flagsChanged`; once
@@ -186,17 +214,24 @@ final class HotkeyMonitor {
     }
 
     // Modifier-only triggers only. Chord triggers and action chords are handled by `CarbonHotKeys`.
-    // Never consumes — a bare modifier types nothing, so there is nothing to swallow. The right-side
-    // modifier keys route through `resolveSoleModifier` (the "chord wins" rule); Fn/Hyper stay on `edge`.
+    // Never consumes — a bare modifier types nothing, so there is nothing to swallow. "Chord wins" applies to
+    // EVERY modifier-only trigger: a keyDown while one is held aborts it, so the user's own mapping (fn+delete,
+    // ⌃⌥⇧⌘D) reaches the focused app instead of being swallowed by the recording HUD's key focus. The right-side
+    // keys additionally resolve soleness from the flags (`resolveSoleModifier`); Fn/Hyper edge off `edge`.
     func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags) {
         guard !isSuspended else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if type == .keyDown {
             for i in bindings.indices {
                 switch bindings[i].descriptor {
-                case .named(.rightOption), .named(.rightCommand), .named(.rightControl):
-                    if bindings[i].gesture.isPhysicallyDown { abort(index: i) }
-                case .named(.fn), .named(.hyper), .chord, .mouseButton:
+                case .named(.rightOption), .named(.rightCommand), .named(.rightControl),
+                     .named(.fn), .named(.hyper):
+                    if bindings[i].pendingArm {
+                        cancelPendingArm(index: i)
+                    } else if bindings[i].gesture.isPhysicallyDown {
+                        abort(index: i)
+                    }
+                case .chord, .mouseButton:
                     break
                 }
             }
@@ -208,8 +243,12 @@ final class HotkeyMonitor {
             case .named(.rightOption), .named(.rightCommand), .named(.rightControl):
                 resolveSoleModifier(binding: i, flags: flags, now: now)
             case .named(.fn), .named(.hyper):
-                if let edge = edge(binding: i, type: type, keyCode: keyCode, flags: flags) {
-                    fire(index: i, edge: edge, now: now)
+                switch edge(binding: i, type: type, keyCode: keyCode, flags: flags) {
+                case .down: beginArm(index: i, now: now)
+                case .up:
+                    flushPendingArm(index: i, now: now)
+                    fire(index: i, edge: .up, now: now)
+                case nil: break
                 }
             case .chord, .mouseButton:
                 break
@@ -301,15 +340,53 @@ final class HotkeyMonitor {
             // Don't re-arm off a momentarily-sole key that is still down after a chord abort — the chord's
             // release drops its modifiers one at a time, and this key is transiently sole on the way up.
             guard !bindings[i].suppressedUntilRelease else { return }
-            if !bindings[i].gesture.isPhysicallyDown { fire(index: i, edge: .down, now: now) }
+            if !bindings[i].gesture.isPhysicallyDown, !bindings[i].pendingArm { beginArm(index: i, now: now) }
             return
         }
-        guard bindings[i].gesture.isPhysicallyDown else { return }
         if keyHeld {
-            abort(index: i)                     // key still down, a foreign modifier joined → it's a chord
+            // Key still down, a foreign modifier joined → it's a chord. Inside the grace nothing started, so
+            // drop the arm silently rather than starting and cancelling a dictation the user never asked for.
+            if bindings[i].pendingArm { cancelPendingArm(index: i); return }
+            guard bindings[i].gesture.isPhysicallyDown else { return }
+            abort(index: i)
         } else {
+            flushPendingArm(index: i, now: now) // released inside the grace → still a tap
+            guard bindings[i].gesture.isPhysicallyDown else { return }
             fire(index: i, edge: .up, now: now) // key physically released → normal commit/latch path
         }
+    }
+
+    // Hold the .down for the grace instead of firing it. A grace of 0 arms inline, which is the pre-grace
+    // behaviour and what the edge-semantics tests pin.
+    private func beginArm(index i: Int, now: TimeInterval) {
+        guard chordGraceSeconds > 0 else { fire(index: i, edge: .down, now: now); return }
+        bindings[i].armGeneration &+= 1
+        bindings[i].pendingArm = true
+        let generation = bindings[i].armGeneration
+        schedule(chordGraceSeconds) { [weak self] in
+            guard let self, self.bindings.indices.contains(i),
+                  self.bindings[i].pendingArm, self.bindings[i].armGeneration == generation else { return }
+            self.bindings[i].pendingArm = false
+            self.fire(index: i, edge: .down, now: ProcessInfo.processInfo.systemUptime)
+        }
+    }
+
+    // The chord won inside the grace: drop the arm with no onStart, so there is nothing to cancel and the
+    // user hears nothing. Barred from re-arming until the key is fully released, exactly like a real abort.
+    private func cancelPendingArm(index i: Int) {
+        guard bindings[i].pendingArm else { return }
+        bindings[i].pendingArm = false
+        bindings[i].armGeneration &+= 1
+        bindings[i].suppressedUntilRelease = true
+    }
+
+    // Released inside the grace — a genuine fast tap, not a chord. Fire the held-back .down now so the
+    // caller's .up still reads as a tap; dropping it instead would swallow short taps entirely.
+    private func flushPendingArm(index i: Int, now: TimeInterval) {
+        guard bindings[i].pendingArm else { return }
+        bindings[i].pendingArm = false
+        bindings[i].armGeneration &+= 1
+        fire(index: i, edge: .down, now: now)
     }
 
     private func abort(index i: Int) {
@@ -335,13 +412,24 @@ final class HotkeyMonitor {
         case .named(.hyper):
             let all: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
             let engaged = flags.isSuperset(of: all)
-            if engaged, !bindings[i].hyperEngaged { bindings[i].hyperEngaged = true; return .down }
+            // Dropping below Hyper is the full physical release that lifts a post-abort suppression. The guard
+            // below is load-bearing, not defensive: `abort` clears `hyperEngaged`, so while all four modifiers
+            // stay held every later flagsChanged reads as a fresh engage and would re-arm the aborted chord.
+            if !engaged { bindings[i].suppressedUntilRelease = false }
+            if engaged, !bindings[i].hyperEngaged, !bindings[i].suppressedUntilRelease {
+                bindings[i].hyperEngaged = true
+                return .down
+            }
             if !engaged, bindings[i].hyperEngaged { bindings[i].hyperEngaged = false; return .up }
             return nil
 
         case .named(.fn):
             guard type == .flagsChanged, keyCode == Int64(descriptor.triggerKeyCode) else { return nil }
-            return flags.contains(.maskSecondaryFn) ? .down : .up
+            guard flags.contains(.maskSecondaryFn) else {
+                bindings[i].suppressedUntilRelease = false
+                return .up
+            }
+            return bindings[i].suppressedUntilRelease ? nil : .down
 
         // The right-side modifier keys are resolved by `resolveSoleModifier`, not here.
         case .named(.rightOption), .named(.rightCommand), .named(.rightControl), .chord, .mouseButton:

@@ -5,7 +5,6 @@ import KeyScribeKit
 struct ModeRoutingSection: View {
     let mode: Mode
     let allModes: [Mode]
-    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     let onUpdate: (Mode) -> Void
     @State private var advancedMatchingExpanded = false
     @State private var enteringPhrase = false
@@ -19,7 +18,7 @@ struct ModeRoutingSection: View {
     @State private var runningApps: [InstalledApps.Info] = []
 
     private var trigger: ModeTrigger {
-        ModeTrigger(mode: mode, allModes: allModes, actionShortcuts: actionShortcuts, onUpdate: onUpdate)
+        ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate)
     }
 
     var body: some View {
@@ -27,7 +26,6 @@ struct ModeRoutingSection: View {
             ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
             PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
             TriggerConflictLabel(conflict: trigger.conflict)
-            TriggerOverlapLabel(overlap: trigger.overlap)
             if usesMouseShortcut {
                 Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                     .font(.caption)

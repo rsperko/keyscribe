@@ -366,8 +366,21 @@ keyscribe/
   - **The hotkey mechanism is split by trigger type, and no path needs Input Monitoring**
     (`HotkeyMonitor` + `CarbonHotKeys`):
     - **Modifier-only triggers** (Fn / right-Option / right-Command / right-Control / Hyper) → a
-      `.listenOnly` `CGEventTap` watching `.flagsChanged` **and `.keyDown`** (keyDown drives the
-      right-side "chord wins" abort — see `resolveSoleModifier`/`handle`). Once Accessibility is granted,
+      `.listenOnly` `CGEventTap` watching `.flagsChanged` **and `.keyDown`**. **"Chord wins" applies to every
+      modifier-only trigger, Fn and Hyper included**, in two layers, because the user's own mappings (fn+delete,
+      fn+←, a ⌃⌥⇧⌘ chord) must reach the focused app rather than being swallowed by the recording HUD's key
+      focus. (1) **The chord grace** (`HotkeyMonitor.chordGraceSeconds`, 150 ms): a modifier-only `.down` is
+      held back, and a keyDown (or a foreign modifier) arriving inside the window discards the pending arm
+      **silently** — `onStart` never fires, so there is no mic, no cue, and nothing to cancel. This is the
+      layer that matters: arming is *not* cheap (synchronous secure-field AX probe, mic open, and the start
+      cue as soon as a prewarmed unit is ready), so an eager arm made every chord audibly start-then-cancel a
+      dictation. It trades only latency — nothing is recorded until admission opens at cue end regardless — and
+      a release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed.
+      (2) **The keyDown abort** (`handle`): the fallback for a chord slower than the grace, which really has
+      armed — it cancels via `onCancel`, cues and all. `suppressedUntilRelease` bars a re-arm until the key is
+      fully released on both paths; on Hyper that guard is load-bearing rather than defensive, since the abort
+      clears `hyperEngaged` and every later flagsChanged would otherwise read as a fresh engage. Right-side
+      keys additionally resolve soleness from the flags (`resolveSoleModifier`). Once Accessibility is granted,
       that session tap runs on **Accessibility alone** (we never request Input Monitoring) and never
       consumes a keystroke. `.listenOnly` (not `.defaultTap`) because we never modify/consume the event:
       a listen-only tap is delivered async, so the window server does NOT block the system input stream on
@@ -385,7 +398,7 @@ keyscribe/
       `.listenOnly` session tap DOES receive `.keyDown` with only Accessibility granted and **no**
       Input Monitoring grant (`CGPreflightListenEventAccess()` reads `true` from the Accessibility grant
       alone; 65 physical keyDowns delivered to the tap while KeyScribe was absent from the Input
-      Monitoring list). That is what makes the right-side "chord wins" abort real on every install — it
+      Monitoring list). That is what makes the "chord wins" abort real on every install — it
       is NOT dead code. (An earlier note here claimed the tap was "deaf to keyDown without Input
       Monitoring"; that was stale — it conflated the *untrusted*-`tapCreate` poisoning above, which is
       still real and still gated, with steady-state delivery.) Chords still ride `CarbonHotKeys` and ESC

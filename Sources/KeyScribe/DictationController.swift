@@ -1973,7 +1973,7 @@ final class DictationController {
         finish(machine: .cancel, cue: .cancel, state: .hidden)
     }
 
-    // The "chord wins" abort from a right-side modifier trigger: the key turned out to be part of a chord, so
+    // The "chord wins" abort from a modifier-only trigger: the key turned out to be part of a chord, so
     // discard the dictation IT started — never an unrelated one another trigger committed. Two guards, both
     // required: (1) the active session was started by this same trigger key; (2) it is still pre-commit
     // (arming/recording). A dictation that already reached transcribing was committed by a prior deliberate

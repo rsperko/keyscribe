@@ -71,45 +71,14 @@ struct TriggerConflictLabel: View {
     }
 }
 
-// A Hyper trigger fires the instant all four modifiers are held, so a ⌃⌥⇧⌘ chord or action shortcut starts
-// this mode too. Right-side modifier triggers are disambiguated at runtime ("chord wins"), so only Hyper
-// still surfaces this warning.
-struct TriggerOverlapLabel: View {
-    let overlap: TriggerOverlap?
-
-    @ViewBuilder var body: some View {
-        if let overlap {
-            IssueText("Pressing \(overlap.rivalLabel) also starts this mode — its keys include this shortcut’s modifiers. Give one of them different keys so a single press doesn’t fire both.",
-                      severity: .advisory)
-        }
-    }
-}
-
 @MainActor
 struct ModeTrigger {
     let mode: Mode
     let allModes: [Mode]
-    var actionShortcuts: [TriggerKeyConflicts.RivalBinding] = []
     let onUpdate: (Mode) -> Void
 
     var conflict: TriggerKeyConflict? {
         TriggerKeyConflicts.conflict(for: mode, in: allModes)
-    }
-
-    // Rival bindings whose modifiers could subsume one of this mode's modifier-only triggers: other
-    // enabled modes' trigger keys plus the global action shortcuts.
-    var overlap: TriggerOverlap? {
-        let rivals = allModes
-            .filter { $0.id != mode.id && $0.enabled }
-            .flatMap { other in other.triggerKeys.map {
-                TriggerKeyConflicts.RivalBinding(key: $0.key, label: "the \(other.name) mode’s shortcut") } }
-            + actionShortcuts
-        for trigger in mode.triggerKeys {
-            if let overlap = TriggerKeyConflicts.modifierOverlap(triggerKey: trigger.key, with: rivals) {
-                return overlap
-            }
-        }
-        return nil
     }
 
     var pressStyle: Binding<String> {
