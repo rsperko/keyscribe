@@ -5,8 +5,6 @@ import KeyScribeKit
 
 @MainActor
 enum TextInserter {
-    private static let vKeyCode: CGKeyCode = 9
-    private static let cKeyCode: CGKeyCode = 8
     private static let returnKeyCode: CGKeyCode = 36
 
     private static var pendingRestore: ScratchPaste?
@@ -18,7 +16,7 @@ enum TextInserter {
     // a muted ⌘C, the universal selection capture (design.md §4.3), trusted per `copyIsTrustworthySelection`.
     // Drains any in-flight detached restore first so the snapshot is the user's real clipboard, not a prior
     // paste's scratch text.
-    static func captureSelection(modifier: Mode.ClipboardModifier = .command, requirePerfectRestore: Bool = false) async -> String? {
+    static func captureSelection(keystroke: ClipboardKeystroke = .copy, requirePerfectRestore: Bool = false) async -> String? {
         if case .text(let selection) = axSelectedText() {
             return selection.isEmpty ? nil : selection
         }
@@ -31,7 +29,7 @@ enum TextInserter {
         if requirePerfectRestore, !clipboardRestoresPerfectly(pb) { return nil }
         return await withMutedAlertVolume {
             let snapshot = PasteboardSnapshot.capture(from: pb)
-            postKey(cKeyCode, flags: eventFlags(modifier))
+            postKey(keystroke)
             guard await waitForChange(since: snapshot.changeCount) else { return nil }
             let copied = pb.string(forType: .string)
             let editorData = pb.pasteboardItems?.first?.data(forType: webCustomDataType)
@@ -129,8 +127,8 @@ enum TextInserter {
     @discardableResult
     static func perform(_ decision: InsertionDecision, method: Mode.Insertion, paste: ClipboardPaste, text: String, awaitSettle: Bool = true) async -> Bool {
         switch insertionAction(decision: decision, method: method) {
-        case .paste: return await insertViaPaste(text, modifier: paste.modifier, settleMs: paste.settleMs, awaitSettle: awaitSettle)
-        case .ax: return await insertViaAX(text, modifier: paste.modifier, settleMs: paste.settleMs, awaitSettle: awaitSettle)
+        case .paste: return await insertViaPaste(text, paste: paste, awaitSettle: awaitSettle)
+        case .ax: return await insertViaAX(text, paste: paste, awaitSettle: awaitSettle)
         case .type: return await insertViaTyping(text)
         case .clipboard:
             // A secure-field divert conceals the copy so clipboard managers do not retain the password;
@@ -142,18 +140,22 @@ enum TextInserter {
         }
     }
 
+    // A syncing target (VM guest, remote session) reads the clipboard through its own agent, so the scratch
+    // is left un-concealed for that agent to pick up and is never restored: a remote paste can fetch the
+    // clipboard back across the wire AFTER the keystroke, and a restore racing that fetch would hand it the
+    // user's previous clipboard. The dictated text staying on the clipboard is the accepted cost.
     @discardableResult
-    static func insertViaPaste(_ text: String, modifier: Mode.ClipboardModifier = .command, settleMs: Int = 0, awaitSettle: Bool = true) async -> Bool {
+    static func insertViaPaste(_ text: String, paste: ClipboardPaste = .init(), awaitSettle: Bool = true) async -> Bool {
         guard !text.isEmpty else { return true }
-        guard let scratch = await beginScratchPaste(text, on: .general, concealed: modifier != .control) else {
+        guard let scratch = await beginScratchPaste(text, on: .general, concealed: !paste.syncsClipboard) else {
             Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
             return false
         }
-        if settleMs > 0 {
-            try? await Task.sleep(for: .milliseconds(settleMs))
+        if paste.settleMs > 0 {
+            try? await Task.sleep(for: .milliseconds(paste.settleMs))
         }
-        postKey(vKeyCode, flags: eventFlags(modifier))
-        if modifier == .control {
+        postKey(paste.keystroke)
+        if paste.syncsClipboard {
             return true
         }
         await settleScratch(scratch, awaitSettle: awaitSettle)
@@ -297,13 +299,13 @@ enum TextInserter {
 
     // AX can report success while doing nothing, so trust it only when a read-back proves the value changed.
     @discardableResult
-    static func insertViaAX(_ text: String, modifier: Mode.ClipboardModifier = .command, settleMs: Int = 0, awaitSettle: Bool = true) async -> Bool {
+    static func insertViaAX(_ text: String, paste: ClipboardPaste = .init(), awaitSettle: Bool = true) async -> Bool {
         if axInsertVerified(text) {
             Log.insertion.notice("ax-insert: succeeded")
             return true
         }
         Log.insertion.notice("ax-insert: unverified here, falling back to paste")
-        return await insertViaPaste(text, modifier: modifier, settleMs: settleMs, awaitSettle: awaitSettle)
+        return await insertViaPaste(text, paste: paste, awaitSettle: awaitSettle)
     }
 
     private static func axInsertVerified(_ text: String) -> Bool {
@@ -340,16 +342,29 @@ enum TextInserter {
         return value as? String
     }
 
-    // Best-effort Unicode key events; there is no acceptance signal to drive fallback.
+    // Best-effort typed keystrokes; there is no acceptance signal to drive fallback. The targets this path
+    // exists for (a VM hypervisor, a remote client) translate the event's VIRTUAL KEY and drop the unicode
+    // payload entirely — VMware Fusion delivers keycode 0, a literal "a", even with a one-character payload —
+    // so every character the active layout can produce posts as a real keycode with its modifiers as
+    // physical key events. Off-layout characters (é, emoji) fall back to payload events, which land in
+    // native apps only; that loss is inherent to a translating target. The cost is a long insert holding
+    // .inserting for the whole run, so a trigger pressed mid-insert is dropped by beginArming
+    // (DictationController.noteBusyPress).
     @discardableResult
     static func insertViaTyping(_ text: String) async -> Bool {
         let src = CGEventSource(stateID: .combinedSessionState)
+        let layout = KeyboardLayout.currentIndex()
         for character in text {
-            let units = Array(String(character).utf16)
-            for keyDown in [true, false] {
-                guard let event = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: keyDown) else { continue }
-                event.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-                event.post(tap: .cghidEventTap)
+            if let stroke = layout?.stroke(for: character) {
+                postKey(CGKeyCode(stroke.keyCode), flags: eventFlags(stroke.modifiers), physicalModifiers: true)
+            } else {
+                for chunk in TypedText.keyEventChunks(String(character)) {
+                    for keyDown in [true, false] {
+                        guard let event = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: keyDown) else { continue }
+                        event.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
+                        event.post(tap: .cghidEventTap)
+                    }
+                }
             }
             try? await Task.sleep(for: .milliseconds(2))
         }
@@ -474,11 +489,24 @@ enum TextInserter {
         }
     }
 
-    private static func eventFlags(_ modifier: Mode.ClipboardModifier) -> CGEventFlags {
-        switch modifier {
-        case .command: return .maskCommand
-        case .control: return .maskControl
+    private static func eventFlags(_ modifiers: Set<Modifier>) -> CGEventFlags {
+        var flags: CGEventFlags = []
+        for modifier in modifiers {
+            switch modifier {
+            case .command: flags.insert(.maskCommand)
+            case .shift: flags.insert(.maskShift)
+            case .option: flags.insert(.maskAlternate)
+            case .control: flags.insert(.maskControl)
+            }
         }
+        return flags
+    }
+
+    // A foreign target (VM guest, remote session) reads key codes off the wire rather than the CGEvent
+    // flags a macOS app reads, so its modifiers must be posted as real key events around the chord.
+    private static func postKey(_ keystroke: ClipboardKeystroke) {
+        postKey(CGKeyCode(keystroke.keyCode), flags: eventFlags(keystroke.modifiers),
+                physicalModifiers: keystroke.isForeignTarget)
     }
 
     private static let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
@@ -488,9 +516,9 @@ enum TextInserter {
         (.maskControl, 59),
     ]
 
-    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
+    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags, physicalModifiers: Bool = false) {
         let src = CGEventSource(stateID: .combinedSessionState)
-        let held = flags.contains(.maskControl) ? modifierKeys.filter { flags.contains($0.0) } : []
+        let held = physicalModifiers ? modifierKeys.filter { flags.contains($0.0) } : []
         var active: CGEventFlags = []
         for (mask, code) in held {
             active.insert(mask)

@@ -42,15 +42,57 @@ For command-like modes, strip a final period before adding any trailing space or
 trim_trailing_punctuation = true
 ```
 
-## Target a guest VM clipboard
+## Target a guest VM or remote desktop
 
-If a target uses `Control-C` and `Control-V` instead of Mac command shortcuts, set:
+Two kinds of foreign target take dictation, and they need different treatment.
+
+### A hypervisor window wants typing, not paste
+
+A VM running locally (VMware Fusion, Parallels) translates each host key event into a guest
+keystroke, and its clipboard sharing syncs on its own schedule — typically on a window-focus
+change, which never happens mid-dictation. KeyScribe cannot wait for a sync it can't observe, so
+no `paste_settle_ms` makes paste reliable there: it fires before the guest has the new text and
+lands empty or one dictation behind. Use typing:
 
 ```toml
-clipboard_modifier = "control"
+insertion = "type"
 ```
 
-This is best-effort because host clipboard sync timing is outside KeyScribe's control.
+Dictation then goes out as real keystrokes mapped through your keyboard layout. The limits are
+inherent to keystrokes: characters your layout cannot produce (emoji, composed accents) do not
+reach the guest, and a dictated newline presses a real Return.
+
+### A remote session can paste
+
+A remote-desktop client (RDP, Citrix, VNC, Screen Sharing) syncs its clipboard channel eagerly, so
+paste works and is much faster than typing. If the client translates `Command-V` for the remote
+side, keep the native chord and ask only for the clipboard treatment:
+
+```toml
+clipboard_sync = true
+paste_settle_ms = 300
+```
+
+If the client forwards raw keystrokes instead, name the chord the remote target wants — the
+grammar is the same one trigger keys use:
+
+```toml
+paste_key = "control+v"          # a remote GUI app
+copy_key = "control+c"
+```
+
+```toml
+paste_key = "control+shift+v"    # a terminal in that session
+copy_key = "control+shift+c"
+```
+
+A chord without `command` is assumed to be aimed at a foreign target, so KeyScribe also leaves the
+dictated text on the clipboard for the session's clipboard channel to pick up, and does not restore
+what was there before.
+
+Clipboard sync timing belongs to the client, not to KeyScribe. If paste lands empty or stale, raise
+`paste_settle_ms`; if no value makes it reliable, the target syncs on events rather than on time —
+switch to `insertion = "type"`.
 
 ## Use an extra mouse button as a trigger
 

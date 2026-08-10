@@ -9,7 +9,7 @@ model weights at runtime. Each remains under its own license.
 | Component | Project | License |
 |---|---|---|
 | FluidAudio (Parakeet engine) | github.com/FluidInference/FluidAudio | Apache-2.0 |
-| WhisperKit (Whisper engine) | github.com/argmaxinc/WhisperKit (KeyScribe fork of argmax-oss-swift) | MIT |
+| WhisperKit (Whisper engine) | github.com/argmaxinc/argmax-oss-swift | MIT |
 | speech-swift / Qwen3ASR (Qwen3-ASR engine) | github.com/soniqo/speech-swift (KeyScribe fork) | Apache-2.0 |
 | moonshine-swift (Swift wrapper) | github.com/moonshine-ai/moonshine-swift | MIT |
 | Moonshine engine (prebuilt Moonshine.xcframework) | github.com/moonshine-ai/moonshine | MIT, plus the upstream third-party terms |

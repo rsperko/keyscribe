@@ -25,7 +25,7 @@ final class DictationController {
     private let presenceDetector: SpeechPresenceDetecting
     private let insert: (InsertionDecision, Mode.Insertion, ClipboardPaste, String, Bool) async -> Bool
     private let submitKey: (Mode.Submit) async -> Void
-    private let captureSelection: (Mode.ClipboardModifier) async -> String?
+    private let captureSelection: (ClipboardKeystroke) async -> String?
     private let clipboard: @MainActor () -> String?
     private let pressSnapshot: @MainActor () -> TargetSnapshot
     private let shouldAdoptFullSnapshot: Bool
@@ -206,7 +206,7 @@ final class DictationController {
         effects: DuringDictationEffects? = nil,
         insert: @escaping (InsertionDecision, Mode.Insertion, ClipboardPaste, String, Bool) async -> Bool = TextInserter.perform,
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
-        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { await TextInserter.captureSelection(modifier: $0) },
+        captureSelection: @escaping (ClipboardKeystroke) async -> String? = { await TextInserter.captureSelection(keystroke: $0) },
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         snapshot: @escaping @MainActor () -> TargetSnapshot = { ContextProbe.snapshot() },
@@ -457,7 +457,7 @@ final class DictationController {
         // the mic while the screen is locked — no audio may be captured while locked, ever. Silent
         // return, same shape as the beginArming guard.
         guard !isSessionLocked() else { return }
-        guard machine.beginArming() else { return }
+        guard machine.beginArming() else { noteBusyPress(); return }
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
@@ -523,6 +523,18 @@ final class DictationController {
         prewarmPresenceDetector()
 
         beginCapture()
+    }
+
+    // A trigger pressed while the previous dictation is still transcribing or inserting is refused by
+    // beginArming and records nothing. Announced, that is "too early"; silent, it reads as a malfunction —
+    // the previous dictation's text can still be landing (a typed insert posts over several events), so it
+    // appears while the user is speaking and looks like the app inserted the wrong dictation. Sound only: the
+    // HUD belongs to the dictation still running, and rendering over it would drop the key focus ESC needs.
+    // Nothing is played while the mic is live, where the cue would land in the take.
+    private func noteBusyPress() {
+        guard !machine.isCapturingAudio else { return }
+        log.notice("trigger ignored — \(String(describing: self.machine.state), privacy: .public) still in flight")
+        effects.alert(settings.duringDictation, cue: .error)
     }
 
     private func adoptFullSnapshot() {
@@ -1467,7 +1479,12 @@ final class DictationController {
             // Await the paste's clipboard settle inline only when a submit Return must land after ⌘V.
             let submitFollows = initialOutcome == .inserted && submit != .none
             let insertStart = DispatchTime.now()
-            let actuated = await insert(decision, activeMode?.insertion ?? .paste, ClipboardPaste(modifier: activeMode?.clipboardModifier ?? .command, settleMs: activeMode?.pasteSettleMs ?? 0), transcript + trailing.suffix(after: transcript), submitFollows)
+            let paste = activeMode.map(ClipboardPaste.init(mode:)) ?? ClipboardPaste()
+            let modeId = activeMode?.id ?? ""
+            for (key, value) in activeMode?.invalidClipboardChords ?? [:] {
+                log.error("mode \(modeId, privacy: .public): \(key, privacy: .public) = \"\(value, privacy: .public)\" is not a chord; falling back to the default")
+            }
+            let actuated = await insert(decision, activeMode?.insertion ?? .paste, paste, transcript + trailing.suffix(after: transcript), submitFollows)
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
             if !actuated {
                 // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"
@@ -1739,7 +1756,7 @@ final class DictationController {
         // The selection-capture ⌘C must reach the target, so drop key focus held for ESC-cancel; the
         // subsequent .rewriting render re-takes it so ESC still cancels the rewrite.
         hud?.relinquishKeyFocus()
-        guard let selection = await captureSelection(mode.clipboardModifier), !selection.isEmpty else {
+        guard let selection = await captureSelection(mode.copyKeystroke), !selection.isEmpty else {
             return (.abort("Select some text first", nil), nil)
         }
         guard let connection = connection(for: mode) else {

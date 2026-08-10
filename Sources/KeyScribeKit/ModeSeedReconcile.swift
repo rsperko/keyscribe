@@ -156,11 +156,16 @@ extension ModeStore {
     }
 
     // Normalize out the two fields onboarding sets (`connection`, `enabled`) so a hand-edited seed can be
-    // told from one the user merely connected/enabled. Everything else is the seed's template identity.
+    // told from one the user merely connected/enabled. Everything else is the seed's template identity —
+    // except `schema_version`, which is the file format, not the template: it is pinned to 1 here forever
+    // because every fingerprint already in the wild (user seed ledgers, the frozen pre-rename pins) was
+    // computed on v1 encodings, and letting a version bump shift fingerprints would make every unedited
+    // seed look hand-edited and freeze it out of future updates.
     private static func templateNormalized(_ mode: Mode) -> Mode {
         var m = mode
         m.enabled = true
         m.aiRewrite?.connection = ""
+        m.schemaVersion = 1
         return m
     }
 

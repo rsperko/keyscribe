@@ -179,9 +179,10 @@ final class WhisperEngine: SpeechEngine, @unchecked Sendable {
     }
 
     // Whisper bias = conditioning prompt: dictionary terms tokenized and prepended as `promptTokens`,
-    // nudging the decoder toward those spellings — a soft hint, not a guarantee. Requires our fork's
-    // prefill-completion fix (Package.swift): stock WhisperKit 1.0.0 aborts to an empty transcript
-    // whenever `promptTokens` are set.
+    // nudging the decoder toward those spellings — a soft hint, not a guarantee. Requires WhisperKit
+    // >= 1.1.0 (Package.swift): through 1.0.0 a prediction sampled while prompt tokens were still
+    // being force-fed could complete the segment, aborting to an empty transcript whenever
+    // `promptTokens` were set (argmax-oss-swift #372).
     private func decodeOptions(biasTerms: [String], pipe: WhisperKit) -> DecodingOptions {
         Self.batchDecodingOptions(promptTokens: promptTokens(biasTerms: biasTerms, pipe: pipe))
     }

@@ -117,6 +117,13 @@ final class DuringDictationEffects {
         restoreOutput()
     }
 
+    // Sound only, for a trigger rejected while a dictation is still running: end(_:cue:) would release that
+    // dictation's display assertion, unduck its output, and bump the generation out from under it.
+    func alert(_ config: Settings.DuringDictation, cue: EndCue) {
+        guard config.sounds else { return }
+        sound(named: cue.soundName)?.play()
+    }
+
     func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
         generation &+= 1
         pendingDuckGeneration = nil

@@ -105,7 +105,7 @@ struct ModeTests {
     }
 
     @Test func newerSchemaVersionThrows() {
-        #expect(throws: ConfigError.newerSchemaVersion(found: 5, supported: 1)) {
+        #expect(throws: ConfigError.newerSchemaVersion(found: 5, supported: 2)) {
             try ModeStore.decode(from: "schema_version = 5\nname = \"X\"", id: "x")
         }
     }
@@ -288,23 +288,120 @@ struct ModeTests {
         #expect(again.trimTrailingPunctuation)
     }
 
-    @Test func clipboardModifierDefaultsToCommandAndIsOmittedFromToml() throws {
+    @Test func clipboardChordsDefaultToTheNativeKeysAndAreOmittedFromToml() throws {
         let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
-        #expect(mode.clipboardModifier == .command)
-        #expect(try !ModeStore.encode(mode).contains("clipboard_modifier"))
+        #expect(mode.pasteKeystroke == .paste)
+        #expect(mode.copyKeystroke == .copy)
+        #expect(try !ModeStore.encode(mode).contains("paste_key"))
+        #expect(try !ModeStore.encode(mode).contains("copy_key"))
     }
 
-    @Test func newModesDefaultToCommandClipboardModifier() {
-        #expect(Mode(id: "new", name: "New").clipboardModifier == .command)
+    @Test func newModesDefaultToTheNativeClipboardChords() {
+        let mode = Mode(id: "new", name: "New")
+        #expect(mode.pasteKeystroke == .paste)
+        #expect(mode.copyKeystroke == .copy)
     }
 
-    @Test func clipboardModifierControlDecodesAndRoundTrips() throws {
+    @Test func clipboardChordsDecodeAndRoundTrip() throws {
+        let toml = """
+        schema_version = 1
+        name = "VM"
+        paste_key = "control+shift+v"
+        copy_key = "control+shift+c"
+        """
+        let mode = try ModeStore.decode(from: toml, id: "vm")
+        #expect(mode.pasteKeystroke.modifiers == [.control, .shift])
+        #expect(mode.copyKeystroke.modifiers == [.control, .shift])
+        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "vm")
+        #expect(again.pasteKeystroke == mode.pasteKeystroke)
+        #expect(again.copyKeystroke == mode.copyKeystroke)
+    }
+
+    // A typo must not be silently erased on the next save. The raw string round-trips (as trigger_keys does)
+    // so the user can still see and fix it, while the runtime falls back to ⌘V rather than posting nothing.
+    @Test func anUnparsableChordFallsBackToTheDefaultAndStillRoundTrips() throws {
+        let toml = "schema_version = 1\nname = \"Typo\"\npaste_key = \"cotnrol+v\""
+        let mode = try ModeStore.decode(from: toml, id: "t")
+        #expect(mode.pasteKeystroke == .paste)
+        #expect(try ModeStore.encode(mode).contains("cotnrol+v"))
+    }
+
+    // The fallback keeps dictation working, but ⌘V into a guest that wanted ⌃V just does nothing — so the
+    // bad chord has to be reportable rather than inferred from a paste that silently went nowhere.
+    @Test func unparsableClipboardChordsAreReportable() throws {
+        let ok = try ModeStore.decode(from: "schema_version = 1\nname = \"OK\"\npaste_key = \"control+v\"", id: "ok")
+        #expect(ok.invalidClipboardChords.isEmpty)
+
+        let bad = try ModeStore.decode(
+            from: "schema_version = 1\nname = \"Bad\"\npaste_key = \"cotnrol+v\"\ncopy_key = \"fn\"", id: "bad")
+        #expect(bad.invalidClipboardChords == ["paste_key": "cotnrol+v", "copy_key": "fn"])
+    }
+
+    // clipboard_modifier shipped through 0.3.3, so a v1 file carrying it must migrate — silently ignoring
+    // the key would revert a "control" user to ⌘V on upgrade.
+    @Test func legacyControlClipboardModifierMigratesToChords() throws {
         let toml = "schema_version = 1\nname = \"VM\"\nclipboard_modifier = \"control\""
         let mode = try ModeStore.decode(from: toml, id: "vm")
-        #expect(mode.clipboardModifier == .control)
-        #expect(try ModeStore.encode(mode).contains("clipboard_modifier"))
-        let again = try ModeStore.decode(from: ModeStore.encode(mode), id: "vm")
-        #expect(again.clipboardModifier == .control)
+        #expect(mode.pasteKey == "control+v")
+        #expect(mode.copyKey == "control+c")
+        #expect(mode.schemaVersion == 2)
+        #expect(mode.syncsClipboard)
+    }
+
+    @Test func legacyCommandClipboardModifierMigratesToTheDefaults() throws {
+        let toml = "schema_version = 1\nname = \"Plain\"\nclipboard_modifier = \"command\""
+        let mode = try ModeStore.decode(from: toml, id: "plain")
+        #expect(mode.pasteKeystroke == .paste)
+        #expect(mode.copyKeystroke == .copy)
+        #expect(!mode.syncsClipboard)
+    }
+
+    @Test func theLegacyKeyIsDroppedOnTheNextSave() throws {
+        let toml = "schema_version = 1\nname = \"VM\"\nclipboard_modifier = \"control\""
+        let saved = try ModeStore.encode(ModeStore.decode(from: toml, id: "vm"))
+        #expect(!saved.contains("clipboard_modifier"))
+        #expect(saved.contains("schema_version = 2"))
+        #expect(saved.contains("paste_key"))
+    }
+
+    @Test func anExplicitChordWinsOverTheLegacyKey() throws {
+        let toml = "schema_version = 1\nname = \"VM\"\nclipboard_modifier = \"control\"\npaste_key = \"control+shift+v\""
+        let mode = try ModeStore.decode(from: toml, id: "vm")
+        #expect(mode.pasteKey == "control+shift+v")
+        #expect(mode.copyKey == "control+c")
+    }
+
+    @Test func aV1FileWithoutTheLegacyKeyMigratesCleanly() throws {
+        let mode = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
+        #expect(mode.schemaVersion == 2)
+        #expect(mode.pasteKeystroke == .paste)
+    }
+
+    // clipboard_sync is decoupled from the chord: an RDP client wants ⌘V (it translates the keystroke for
+    // the remote session) but foreign clipboard semantics, because its delayed-rendering fetch of the
+    // clipboard can arrive after our restore would have run.
+    @Test func clipboardSyncFollowsTheChordUnlessSetExplicitly() throws {
+        #expect(!Mode(id: "n", name: "N").syncsClipboard)
+
+        let vm = try ModeStore.decode(from: "schema_version = 1\nname = \"VM\"\npaste_key = \"control+v\"", id: "vm")
+        #expect(vm.syncsClipboard)
+
+        let rdp = try ModeStore.decode(from: "schema_version = 1\nname = \"RDP\"\nclipboard_sync = true", id: "rdp")
+        #expect(rdp.syncsClipboard)
+        #expect(rdp.pasteKeystroke == .paste)
+
+        let off = try ModeStore.decode(
+            from: "schema_version = 1\nname = \"X\"\npaste_key = \"control+v\"\nclipboard_sync = false", id: "x")
+        #expect(!off.syncsClipboard)
+    }
+
+    @Test func clipboardSyncIsOmittedFromTomlUnlessSetExplicitly() throws {
+        let plain = try ModeStore.decode(from: "schema_version = 1\nname = \"Plain\"", id: "plain")
+        #expect(try !ModeStore.encode(plain).contains("clipboard_sync"))
+
+        let rdp = try ModeStore.decode(from: "schema_version = 1\nname = \"RDP\"\nclipboard_sync = true", id: "rdp")
+        #expect(try ModeStore.encode(rdp).contains("clipboard_sync"))
+        #expect(try ModeStore.decode(from: ModeStore.encode(rdp), id: "rdp").syncsClipboard)
     }
 
     @Test func pasteSettleMsDefaultsToZeroAndIsOmittedFromToml() throws {

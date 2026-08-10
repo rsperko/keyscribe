@@ -644,12 +644,19 @@ removed spotter lives in git history only.
 
 ### Forked / pinned STT deps
 
-Two forks + two upstream deps (one a pinned binary); the forks work live and cost nothing day-to-day:
-- **WhisperKit** → `rsperko/argmax-oss-swift` (upstream v1.0.0): a one-line `!isPrefill` fix for the
-  empty-output-with-`promptTokens` bug (#372) that breaks Whisper bias in every stock release.
-  Depending on just the `WhisperKit` product keeps Vapor/openapi out of resolution (gated behind
-  `BUILD_ALL`). Still essential: upstream added `!isPrefill` guards elsewhere but NOT on the
-  `isSegmentCompleted` break our patch guards, so #372 is live for bias (verified 2026-07-08).
+One fork + three upstream deps (one a pinned binary); the fork works live and costs nothing day-to-day:
+- **WhisperKit** → `argmaxinc/argmax-oss-swift` (upstream, **no fork**), pinned `exact: "1.1.0"`.
+  **1.1.0 is a hard floor, not a preference** — through 1.0.0, a prediction sampled while prompt
+  tokens were still being force-fed could complete the segment, so *every* stock release emptied the
+  transcript whenever `promptTokens` were set (#372), which is exactly how Whisper bias is
+  implemented (`WhisperEngine.promptTokens`). KeyScribe carried a one-commit fork (`!isPrefill` on
+  the `isSegmentCompleted` break) until upstream fixed it in 1.1.0 — `TextDecoder.swift` now guards
+  `(sampleResult.completed && !isPrefill)` and derives `isFirstToken` from
+  `max(0, initialPromptIndex - 1)`. The fork is retired (2026-08-09); **never bump this dependency
+  below 1.1.0**, and re-run the bias benchmark on any bump, since the failure is silent (empty
+  transcripts, not an error). The pin is `exact:` deliberately: this dep carries decoder behavior and
+  a silent minor bump can change transcription. Depending on just the `WhisperKit` product keeps
+  Vapor/openapi out of resolution (gated behind `BUILD_ALL`).
 - **FluidAudio** → `FluidInference/FluidAudio` (upstream, **no fork**): provides Parakeet TDT
   transcription. Historical: KeyScribe once paired it with FluidAudio's **CTC-WS** keyword spotter
   (NeMo constrained-CTC) for Parakeet recognition bias, gated by `spotterRescueEnabled`. That spotter

@@ -73,7 +73,7 @@ system-managed** when available and has no entry here.
 > that table, not the mode. So: all the mode's scalars first, then the table sections.
 
 ```toml
-schema_version = 1
+schema_version = 2
 name = "Email"
 enabled = true
 
@@ -95,7 +95,11 @@ trigger_phrases = ['as (a |an )?(draft|note)']
 insertion = "paste"          # "paste" (default) | "insert" | "type"
 trailing = "space"           # "none" | "space" (new-mode default) | "newline" — appended INSIDE the atomic insert
 submit = "none"              # "none" (default) | "return" | "shift_return" | "cmd_return" — keystroke AFTER a verified insert
-clipboard_modifier = "command"  # "command" (default) | "control" — modifier for the synthesized ⌘C capture + ⌘V paste; "control" targets a guest VM
+paste_key = "command+v"      # chord posted to paste an insert (same grammar as trigger_keys[].key); e.g. "control+shift+v" for a Linux guest terminal
+copy_key = "command+c"       # chord posted to capture a selection (source = "selection" modes)
+# clipboard_sync = true      # leave the scratch clipboard readable + unrestored for a guest/remote clipboard agent.
+                             # Defaults to true when paste_key has no ⌘; set it explicitly for a target that
+                             # translates ⌘V remotely (RDP) but still syncs the clipboard across the wire.
 paste_settle_ms = 0             # 0 (default) | ms to wait after writing the clipboard, before the paste keystroke; for a synced guest/remote clipboard whose host→guest propagation lags
 trim_trailing_punctuation = false  # strip a final . ! ? (and trailing whitespace) from the result, BEFORE `trailing` is appended
 exclude_from_history = false
@@ -169,7 +173,7 @@ context = { app = true, preceding_text = false }
 
 | Field | Type | Notes |
 |---|---|---|
-| `schema_version` | int | Required. Older versions are normalized on read. |
+| `schema_version` | int | Required. Current: `2`. Older versions are normalized on read; v1→v2 migrates the retired `clipboard_modifier` key (`"control"` → `paste_key = "control+v"` + `copy_key = "control+c"`; `"command"` was the default and just drops). |
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
 | `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
@@ -184,12 +188,14 @@ context = { app = true, preceding_text = false }
 | `replacements` | table | `include_global` + `rules[]` of `{heard, replace, regex}`. |
 | `[ai_rewrite]` | table | Absent ⇒ no rewrite. `connection`, `prompt`, `fragments[]`, `context`. |
 | `ai_rewrite.context` | inline table | `{ app, preceding_text }` booleans. `preceding_text` sends bounded text before the caret (native-only, best-effort via AX). (URL is a routing key only — `constraints[].url_pattern` — never sent to the LLM.) |
-| `insertion` | enum | `paste` \| `insert` \| `type`. |
+| `insertion` | enum | `paste` (default) \| `insert` \| `type`. `type` synthesizes real keystrokes for a target that ignores a synthesized paste (a VM guest): each character is mapped to a virtual key through the active keyboard layout, with shift/option posted as physical key events — the only form a hypervisor can deliver, since it translates the event's key code and drops its Unicode payload entirely (verified in VMware Fusion: payload events arrive as keycode 0, a literal `a`, even one character per event). Characters the layout cannot produce (emoji, composed accents) fall back to Unicode-payload events, which land in native apps but never in a guest. `type` touches the clipboard not at all — so `paste_key`, `copy_key`, `clipboard_sync`, and `paste_settle_ms` are **all ignored** under it; setting them alongside it does nothing. The insert holds the dictation in its inserting state for the whole run; a trigger pressed during that window is refused with the error sound. |
 | `trailing` | enum | `none` \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). New modes created in Settings default to `space`; omitted TOML decodes as `none` for compatibility with existing config files. |
 | `submit` | enum | `none` (default) \| `return` \| `shift_return` \| `cmd_return`. A keystroke synthesized after a **verified** insert (outside the undo atom). Never fires on a clipboard fallback — the text never reached the target. |
 | `trim_trailing_punctuation` | bool | `false` (default). Strip a final `.` `!` `?` (and trailing whitespace) from the result, applied to the restored final string **before** `trailing` appends its suffix. Deterministic enforcement for command/identifier/subject-line modes (e.g. seeded **Shell** ships `true`) that should not end in sentence punctuation — the rewrite prompt can request this but cannot guarantee it. Closing quotes/parens/backticks/fences are left untouched. |
-| `clipboard_modifier` | enum | `command` (default) \| `control`. The modifier used for the synthesized clipboard keystrokes — ⌘C to capture a selection and ⌘V to paste an insert. `control` targets a guest where ⌃C/⌃V are the paste mechanism (e.g. a Linux/Windows VM with host-clipboard sharing on). Governs both keystrokes, never `submit`. TOML-only; no Settings UI. Selection capture in a guest is **best-effort** — the host-pasteboard bump it waits on is driven by the guest's clipboard-sync, not the OS, so its timing is not guaranteed. On the `control` path the paste is delivered as a real modifier-key chord (not a flag-only event) so keycode-level capturers register it, the clipboard write is left un-concealed so the guest's sync picks it up, and the prior clipboard is **not** restored (the dictation stays, like a manual copy). |
-| `paste_settle_ms` | int | `0` (default). Milliseconds to pause after writing the clipboard and before the paste keystroke. `0` = paste immediately (native apps — no delay). A positive value covers a **synced guest/remote clipboard** (VMware/Parallels/RDP) whose host→guest propagation lags the paste, which otherwise pastes stale content; tune it up until paste is reliable (e.g. ~700 for a VM). Independent of `clipboard_modifier` — a pure timing knob, applied to any paste. TOML-only; no Settings UI. |
+| `paste_key` | string | `command+v` (default). The chord posted to paste an insert, in the **same grammar as `trigger_keys[].key`** (`control+shift+v`, `ctrl+y`, aliases `cmd`/`ctrl`/`alt` accepted). Must be a chord — the trigger-only descriptors (`fn`, `hyper`, `mouse3`) are rejected. An unparsable value falls back to `command+v` at runtime but is **kept verbatim in the file** so a typo stays visible instead of being erased on the next save. Governs the paste keystroke only, never `submit`; ignored under `insertion = "type"`, which never touches the clipboard. TOML-only; no Settings UI. |
+| `copy_key` | string | `command+c` (default). Same grammar and rules as `paste_key`, for the synthesized copy that captures a selection (`source = "selection"` modes). Selection capture in a guest or remote session is **best-effort** — the host-pasteboard bump it waits on is driven by that session's clipboard-sync, not the OS, so its timing is not guaranteed. |
+| `clipboard_sync` | bool | Defaults to **on when `paste_key` has no ⌘**, off otherwise. When on, the scratch clipboard is written **un-concealed** (so a guest's or remote session's clipboard agent will pick it up) and is **never restored** — the dictated text stays on the clipboard, like a manual copy. Set it explicitly for a target whose client translates ⌘V for the remote side but still syncs the clipboard across the wire (RDP/Citrix/VNC): those clients fetch the clipboard back **at paste time**, so a restore racing that fetch would hand the remote app your previous clipboard. Setting it `false` alongside a non-⌘ chord restores the native behavior. Independent of the chord in both directions. |
+| `paste_settle_ms` | int | `0` (default). Milliseconds to pause after writing the clipboard and before the paste keystroke. `0` = paste immediately (native apps — no delay). A positive value covers a **remote-session clipboard** (RDP/Citrix/VNC) whose eager cross-wire sync merely lags the paste, which otherwise pastes stale content; tune it up until paste is reliable. It cannot cover a target whose sync is **event-driven rather than lagging** — a local hypervisor (verified in VMware Fusion) syncs host→guest on window-focus changes, which never happen mid-dictation, so every settle value still pastes empty or one dictation behind; those targets need `insertion = "type"`. Independent of `paste_key` and `clipboard_sync` — a pure timing knob, applied to any paste, and ignored under `insertion = "type"`, which never touches the clipboard. TOML-only; no Settings UI. |
 | `exclude_from_history` | bool | Skip writing this mode's dictations to history. |
 
 There is **no "default mode"** setting. The **Direct** system mode (`_direct`, §"System modes" above)

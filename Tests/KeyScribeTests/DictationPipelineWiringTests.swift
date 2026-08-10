@@ -121,9 +121,9 @@ struct DictationPipelineWiringTests {
     // Captures the real insertion call (method + the exact string, which includes the trailing suffix).
     private actor InsertSpy {
         private(set) var method: Mode.Insertion?
-        private(set) var modifier: Mode.ClipboardModifier?
+        private(set) var paste: ClipboardPaste?
         private(set) var text: String?
-        func record(_ m: Mode.Insertion, _ mod: Mode.ClipboardModifier, _ t: String) { method = m; modifier = mod; text = t }
+        func record(_ m: Mode.Insertion, _ p: ClipboardPaste, _ t: String) { method = m; paste = p; text = t }
     }
 
     // Captures every post-insert submit keystroke the controller fires.
@@ -132,9 +132,9 @@ struct DictationPipelineWiringTests {
         func record(_ s: Mode.Submit) { keys.append(s) }
     }
 
-    private actor ModifierSpy {
-        private(set) var value: Mode.ClipboardModifier?
-        func set(_ m: Mode.ClipboardModifier) { value = m }
+    private actor KeystrokeSpy {
+        private(set) var value: ClipboardKeystroke?
+        func set(_ k: ClipboardKeystroke) { value = k }
     }
 
     @MainActor
@@ -178,7 +178,7 @@ struct DictationPipelineWiringTests {
         let outcome: HistoryEntry.Outcome?
         let insertedText: String?
         let insertionMethod: Mode.Insertion?
-        let insertedModifier: Mode.ClipboardModifier?
+        let insertedPaste: ClipboardPaste?
         let submits: [Mode.Submit]
         let llm: any LLMClient
         let historyEntry: HistoryEntry?
@@ -189,7 +189,7 @@ struct DictationPipelineWiringTests {
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
-        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
+        captureSelection: @escaping (ClipboardKeystroke) async -> String? = { _ in nil },
         clipboard: String? = nil,
         recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
@@ -206,7 +206,7 @@ struct DictationPipelineWiringTests {
     private func run(
         transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
         llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
-        captureSelection: @escaping (Mode.ClipboardModifier) async -> String? = { _ in nil },
+        captureSelection: @escaping (ClipboardKeystroke) async -> String? = { _ in nil },
         clipboard: String? = nil,
         recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
@@ -243,7 +243,7 @@ struct DictationPipelineWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hudSpy,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, method, modifier, text, _ in await insertSpy.record(method, modifier.modifier, text); return insertSucceeds },
+            insert: { _, method, paste, text, _ in await insertSpy.record(method, paste, text); return insertSucceeds },
             submitKey: { await submitSpy.record($0) },
             captureSelection: captureSelection,
             clipboard: { clipboardReads.count += 1; return clipboard },
@@ -265,7 +265,7 @@ struct DictationPipelineWiringTests {
         return Result(
             lastResult: controller.lastResult, clipboardReadCount: clipboardReads.count, outcome: entry?.outcome,
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
-            insertedModifier: await insertSpy.modifier,
+            insertedPaste: await insertSpy.paste,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
             lastHUD: hudSpy.states.last, recordedBiasTerms: engine.lastBiasTerms)
     }
@@ -526,7 +526,7 @@ struct DictationPipelineWiringTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: HUDSpy(),
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
-            insert: { _, method, modifier, text, _ in await insertSpy.record(method, modifier.modifier, text); return true },
+            insert: { _, method, paste, text, _ in await insertSpy.record(method, paste, text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true },
             llmClient: HangingLLM(started: started, release: release))
@@ -716,29 +716,48 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "Dear jane@example.com,")
     }
 
-    // ── clipboard_modifier: the mode's modifier must reach BOTH clipboard keystrokes ───────────────
+    // ── paste_key / copy_key / clipboard_sync: the mode's chords must reach BOTH clipboard keystrokes ──
 
-    @Test func defaultModeInsertsWithCommandModifier() async {
+    @Test func defaultModeInsertsWithTheNativeCommandChord() async {
         let out = await run(transcript: "hello", mode: mode(id: "plain"))
-        #expect(out.insertedModifier == .command)
+        #expect(out.insertedPaste?.keystroke == .paste)
+        #expect(out.insertedPaste?.syncsClipboard == false)
     }
 
-    @Test func clipboardModifierReachesTheInsertKeystroke() async {
+    @Test func thePasteChordReachesTheInsertKeystroke() async {
         var m = mode(id: "vm")
-        m.clipboardModifier = .control
+        m.pasteKey = "control+shift+v"
         let out = await run(transcript: "hello", mode: m)
-        #expect(out.insertedModifier == .control)
+        #expect(out.insertedPaste?.keystroke == (try? ClipboardKeystroke(parsing: "control+shift+v")))
+        #expect(out.insertedPaste?.syncsClipboard == true)
     }
 
-    @Test func clipboardModifierReachesTheSelectionCaptureKeystroke() async {
+    @Test func theCopyChordReachesTheSelectionCaptureKeystroke() async {
         var m = mode(id: "vm-edit", connectionId: "c", source: .selection)
-        m.clipboardModifier = .control
+        m.copyKey = "control+shift+c"
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
-        let seen = ModifierSpy()
+        let seen = KeystrokeSpy()
         _ = await run(
             transcript: "make it formal", mode: m, connection: conn, llm: EchoLLM(),
-            captureSelection: { mod in await seen.set(mod); return "the original text" })
-        #expect(await seen.value == .control)
+            captureSelection: { key in await seen.set(key); return "the original text" })
+        #expect(await seen.value == (try? ClipboardKeystroke(parsing: "control+shift+c")))
+    }
+
+    // An RDP client translates ⌘V for the remote session, so the chord stays native while the clipboard
+    // needs foreign semantics — the two must be settable independently.
+    @Test func clipboardSyncReachesTheInsertPathWithoutChangingTheChord() async {
+        var m = mode(id: "rdp")
+        m.clipboardSync = true
+        let out = await run(transcript: "hello", mode: m)
+        #expect(out.insertedPaste?.keystroke == .paste)
+        #expect(out.insertedPaste?.syncsClipboard == true)
+    }
+
+    @Test func thePasteSettleReachesTheInsertPath() async {
+        var m = mode(id: "slow")
+        m.pasteSettleMs = 250
+        let out = await run(transcript: "hello", mode: m)
+        #expect(out.insertedPaste?.settleMs == 250)
     }
 
     // ── Insertion-end features: trailing + submit (the just-added work) ────────────────────────────

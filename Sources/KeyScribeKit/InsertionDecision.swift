@@ -71,11 +71,19 @@ public enum InsertionAction: Equatable, Sendable {
 }
 
 public struct ClipboardPaste: Equatable, Sendable {
-    public var modifier: Mode.ClipboardModifier
+    public var keystroke: ClipboardKeystroke
     public var settleMs: Int
-    public init(modifier: Mode.ClipboardModifier = .command, settleMs: Int = 0) {
-        self.modifier = modifier
+    // Leave the scratch clipboard readable and unrestored for a guest or remote clipboard agent to fetch.
+    public var syncsClipboard: Bool
+    public init(keystroke: ClipboardKeystroke = .paste, settleMs: Int = 0, syncsClipboard: Bool = false) {
+        self.keystroke = keystroke
         self.settleMs = settleMs
+        self.syncsClipboard = syncsClipboard
+    }
+
+    public init(mode: Mode) {
+        self.init(keystroke: mode.pasteKeystroke, settleMs: mode.pasteSettleMs,
+                  syncsClipboard: mode.syncsClipboard)
     }
 }
 

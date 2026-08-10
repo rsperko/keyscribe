@@ -20,7 +20,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var insertion: Insertion
     public var trailing: Trailing
     public var submit: Submit
-    public var clipboardModifier: ClipboardModifier
+    public var pasteKey: String
+    public var copyKey: String
+    public var clipboardSync: Bool?
     public var pasteSettleMs: Int
     public var trimTrailingPunctuation: Bool
     public var excludeFromHistory: Bool
@@ -50,9 +52,25 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case cmdReturn = "cmd_return"
     }
 
-    public enum ClipboardModifier: String, Codable, Sendable {
-        case command, control
+    /// Stored as written, resolved at use — an unparsable chord round-trips so a typo stays visible in the
+    /// user's file instead of being erased on the next save, and falls back to the native chord at runtime.
+    public var pasteKeystroke: ClipboardKeystroke { (try? ClipboardKeystroke(parsing: pasteKey)) ?? .paste }
+    public var copyKeystroke: ClipboardKeystroke { (try? ClipboardKeystroke(parsing: copyKey)) ?? .copy }
+
+    /// The clipboard chords that failed to parse, keyed by their TOML key. A fallback keeps dictation
+    /// working, but ⌘V into a target that wanted ⌃V lands nowhere — so the bad value is reported rather
+    /// than left to look like a broken paste.
+    public var invalidClipboardChords: [String: String] {
+        var invalid: [String: String] = [:]
+        if (try? ClipboardKeystroke(parsing: pasteKey)) == nil { invalid["paste_key"] = pasteKey }
+        if (try? ClipboardKeystroke(parsing: copyKey)) == nil { invalid["copy_key"] = copyKey }
+        return invalid
     }
+
+    /// Whether the paste leaves the scratch clipboard readable and unrestored so a guest's or remote
+    /// session's clipboard agent can fetch it — including after the paste keystroke, which a remote
+    /// delayed-rendering fetch may do. Follows the chord unless the mode says otherwise.
+    public var syncsClipboard: Bool { clipboardSync ?? pasteKeystroke.isForeignTarget }
 
     public struct TriggerKey: Codable, Equatable, Sendable {
         public var key: String
@@ -200,13 +218,15 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case constraints, source, output, commands, dictionary, replacements
         case aiRewrite = "ai_rewrite"
         case insertion, trailing, submit
-        case clipboardModifier = "clipboard_modifier"
+        case pasteKey = "paste_key"
+        case copyKey = "copy_key"
+        case clipboardSync = "clipboard_sync"
         case pasteSettleMs = "paste_settle_ms"
         case trimTrailingPunctuation = "trim_trailing_punctuation"
         case excludeFromHistory = "exclude_from_history"
     }
 
-    public init(id: String, name: String, schemaVersion: Int = 1) {
+    public init(id: String, name: String, schemaVersion: Int = ModeStore.currentSchemaVersion) {
         self.id = id
         self.schemaVersion = schemaVersion
         seedId = nil
@@ -225,7 +245,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         insertion = .paste
         trailing = .space
         submit = .none
-        clipboardModifier = .command
+        pasteKey = ClipboardKeystroke.paste.canonical
+        copyKey = ClipboardKeystroke.copy.canonical
+        clipboardSync = nil
         pasteSettleMs = 0
         trimTrailingPunctuation = false
         excludeFromHistory = false
@@ -251,7 +273,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? .paste
         trailing = try c.decodeIfPresent(Trailing.self, forKey: .trailing) ?? .none
         submit = try c.decodeIfPresent(Submit.self, forKey: .submit) ?? .none
-        clipboardModifier = try c.decodeIfPresent(ClipboardModifier.self, forKey: .clipboardModifier) ?? .command
+        pasteKey = try c.decodeIfPresent(String.self, forKey: .pasteKey) ?? ClipboardKeystroke.paste.canonical
+        copyKey = try c.decodeIfPresent(String.self, forKey: .copyKey) ?? ClipboardKeystroke.copy.canonical
+        clipboardSync = try c.decodeIfPresent(Bool.self, forKey: .clipboardSync)
         pasteSettleMs = try c.decodeIfPresent(Int.self, forKey: .pasteSettleMs) ?? 0
         trimTrailingPunctuation = try c.decodeIfPresent(Bool.self, forKey: .trimTrailingPunctuation) ?? false
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
@@ -276,7 +300,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(insertion, forKey: .insertion)
         if trailing != .none { try c.encode(trailing, forKey: .trailing) }
         if submit != .none { try c.encode(submit, forKey: .submit) }
-        if clipboardModifier != .command { try c.encode(clipboardModifier, forKey: .clipboardModifier) }
+        if pasteKey != ClipboardKeystroke.paste.canonical { try c.encode(pasteKey, forKey: .pasteKey) }
+        if copyKey != ClipboardKeystroke.copy.canonical { try c.encode(copyKey, forKey: .copyKey) }
+        try c.encodeIfPresent(clipboardSync, forKey: .clipboardSync)
         if pasteSettleMs != 0 { try c.encode(pasteSettleMs, forKey: .pasteSettleMs) }
         if trimTrailingPunctuation { try c.encode(trimTrailingPunctuation, forKey: .trimTrailingPunctuation) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
@@ -302,7 +328,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         mode.insertion = insertion
         mode.trailing = trailing
         mode.submit = submit
-        mode.clipboardModifier = clipboardModifier
+        mode.pasteKey = pasteKey
+        mode.copyKey = copyKey
+        mode.clipboardSync = clipboardSync
         mode.pasteSettleMs = pasteSettleMs
         mode.commands.liveEdits = commands.liveEdits
         mode.excludeFromHistory = excludeFromHistory
@@ -355,10 +383,22 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 }
 
 public enum ModeStore {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
+
+    // v1→v2: clipboard_modifier ("command"|"control", shipped through 0.3.3) became the paste_key/copy_key
+    // chords. "control" maps to its chords (which also carry the foreign clipboard-sync default); "command"
+    // was the default and just drops. An explicit chord in the same file wins — the legacy key only fills
+    // absences. Idempotent read transform, re-run every load until a save rewrites the file at v2.
+    static var migrations: [MigrationStep] { [
+        MigrationStep(from: 1) { table in
+            guard let legacy = table.remove(at: "clipboard_modifier")?.string, legacy == "control" else { return }
+            if table["paste_key"] == nil { table["paste_key"] = "control+v" }
+            if table["copy_key"] == nil { table["copy_key"] = "control+c" }
+        },
+    ] }
 
     public static func decode(from toml: String, id: String) throws -> Mode {
-        var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion) {
+        var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion, migrations: migrations) {
             try TOMLDecoder().decode(Mode.self, from: $0)
         }
         mode.id = id

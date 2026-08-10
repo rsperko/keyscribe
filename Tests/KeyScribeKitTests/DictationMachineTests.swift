@@ -94,6 +94,26 @@ struct DictationMachineTests {
         #expect(m.isCancellable == false)
     }
 
+    @Test func micLivenessTracksTheState() {
+        var m = DictationMachine()
+        #expect(m.isCapturingAudio == false)
+        _ = m.beginArming()
+        #expect(m.isCapturingAudio == true)
+        _ = m.markRecording()
+        #expect(m.isCapturingAudio == true)
+        _ = m.beginTranscribing()
+        #expect(m.isCapturingAudio == false)
+        _ = m.beginInserting()
+        #expect(m.isCapturingAudio == false)
+    }
+
+    @Test func micIsNotLiveWhileBringUpIsBeingCancelled() {
+        var m = DictationMachine()
+        _ = m.beginArming()
+        _ = m.beginCancellingBringUp()
+        #expect(m.isCapturingAudio == false)
+    }
+
     @Test func finishIsReachableFromAnyLiveState() {
         var m = DictationMachine()
         _ = m.beginArming()
