@@ -17,6 +17,16 @@ struct AIServiceCatalogTests {
         #expect(AIServiceCatalog.all.contains(AIServiceCatalog.custom))
     }
 
+    // The public build offers every service it lists and restricts nothing; a downstream catalog narrows
+    // this to its own endpoints and replaces this expectation.
+    @Test func publicCatalogPermitsEveryConnection() {
+        #expect(AIServiceCatalog.permits(Connection(
+            id: "c", name: "c", provider: .openaiCompatible, model: "m", keyRef: "k",
+            baseUrl: "https://anywhere.example/v1")))
+        #expect(AIServiceCatalog.permits(Connection(
+            id: "c", name: "c", provider: .gemini, model: "m", keyRef: "k")))
+    }
+
     @Test func entryIdsAreUnique() {
         let ids = AIServiceCatalog.all.map(\.id)
         #expect(Set(ids).count == ids.count)

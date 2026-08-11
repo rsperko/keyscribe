@@ -1023,7 +1023,8 @@ final class DictationController {
     // ultimately runs.
     private func maybePreconnect() {
         guard let session, session.modeReady, session.snapshotReady, !session.preconnectFired,
-              let mode = activeMode, let connection = connection(for: mode) else { return }
+              let mode = activeMode, let connection = connection(for: mode),
+              connection.configIssue(permits: AIServiceCatalog.permits) == nil else { return }
         self.session?.preconnectFired = true
         preconnectTask?.cancel()
         preconnectTask = Task { [llmClient] in await llmClient.preconnect(connection: connection) }
@@ -1864,7 +1865,7 @@ final class DictationController {
         }
 
         let rewriteStart = DispatchTime.now()
-        let outcome = await RewriteService(client: llmClient).rewrite(
+        let outcome = await RewriteService(client: llmClient, permits: AIServiceCatalog.permits).rewrite(
             payload: payload, inputs: request.inputs, connection: request.sized,
             allowedTokens: instructionTokens, prompt: request.prompt)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)

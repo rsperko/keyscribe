@@ -70,7 +70,8 @@ struct AIConnectionDraft: Equatable {
         provider: Connection.Provider, baseURL: String, authMethod: Connection.AuthMethod,
         in presets: [ConnectionPreset] = AIServiceCatalog.all
     ) -> String {
-        let match = ConnectionPreset.matching(provider: provider, baseURL: baseURL, in: presets)
+        let match = ConnectionPreset.matching(
+            provider: provider, baseURL: baseURL, authMethod: authMethod, in: presets)
         if match.isManaged, !match.allowedAuthMethods.contains(authMethod) { return ConnectionPreset.custom.id }
         return match.id
     }
@@ -116,6 +117,12 @@ struct AIConnectionDraft: Equatable {
     var modelDiscoveryError: String? {
         guard case .failed(let message) = modelDiscoveryState else { return nil }
         return message
+    }
+
+    // What the editor reports and enables: the draft's own fields plus whether this build offers the service
+    // at all, since a refused endpoint must not look testable.
+    private var draftIssue: Connection.ConfigIssue? {
+        connection(id: "draft", keyRef: "draft").configIssue(permits: AIServiceCatalog.permits)
     }
 
     var canConnectForSetup: Bool {
@@ -177,6 +184,7 @@ struct AIConnectionDraft: Equatable {
 
     func canFetchModelsInSettings(hasStoredKey: Bool) -> Bool {
         if hasUnsavedAPIKey { return false }
+        if draftIssue == .notPermitted { return false }
         switch provider {
         case .openaiCompatible:
             guard baseURLIssue == nil else { return false }
@@ -194,7 +202,7 @@ struct AIConnectionDraft: Equatable {
     }
 
     func canTestInSettings(hasStoredKey: Bool) -> Bool {
-        if hasUnsavedAPIKey || nameIssue != nil || modelIssue != nil || baseURLIssue != nil || tokenCommandIssue != nil || apiKeyIssue != nil || connection(id: "draft", keyRef: "draft").configIssue != nil { return false }
+        if hasUnsavedAPIKey || nameIssue != nil || modelIssue != nil || baseURLIssue != nil || tokenCommandIssue != nil || apiKeyIssue != nil || draftIssue != nil { return false }
         switch provider {
         case .openaiCompatible:
             switch effectiveAuthMethod {
@@ -213,7 +221,9 @@ struct AIConnectionDraft: Equatable {
     func modelFetchDisabledReasonInSettings(hasStoredKey: Bool) -> String? {
         guard !isFetchingModels, !canFetchModelsInSettings(hasStoredKey: hasStoredKey) else { return nil }
         if hasUnsavedAPIKey { return "Save the typed key before fetching models." }
-        switch connection(id: "draft", keyRef: "draft").configIssue {
+        switch draftIssue {
+        case .notPermitted:
+            return "This AI service isn't available in this app."
         case .missingBaseURL:
             return "Base URL is required before fetching models."
         case .invalidBaseURL:
@@ -238,7 +248,9 @@ struct AIConnectionDraft: Equatable {
 
     func testDisabledReasonInSettings(hasStoredKey: Bool) -> String? {
         if hasUnsavedAPIKey { return "Typed key is not saved yet." }
-        switch connection(id: "draft", keyRef: "draft").configIssue {
+        switch draftIssue {
+        case .notPermitted:
+            return "This AI service isn't available in this app."
         case .missingModel:
             return "Model ID is required."
         case .missingBaseURL:

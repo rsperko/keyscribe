@@ -43,10 +43,19 @@ public protocol RewriteFailureReporting: Error {
 // partially-restored text.
 public actor RewriteService {
     private let client: LLMClient
+    // Whether the build will talk to this connection at all. A connection the catalog refuses never reaches
+    // the client, so a hand-edited connections.toml naming an endpoint the build does not offer cannot send
+    // content anywhere. The default talks to anything: the build's policy is ambient state, so reaching for
+    // it here would make every caller — including tests with their own fixtures — inherit whatever lineup
+    // the catalog happens to hold. The app passes AIServiceCatalog.permits at its one construction site.
+    private let permits: @Sendable (Connection) -> Bool
     private static let strictReminder =
         "IMPORTANT: Return ONLY the transformed text and reproduce every ⟦SN:…⟧ token verbatim, exactly once."
 
-    public init(client: LLMClient) { self.client = client }
+    public init(client: LLMClient, permits: @escaping @Sendable (Connection) -> Bool = { _ in true }) {
+        self.client = client
+        self.permits = permits
+    }
 
     static let genericFailureReason = "The AI service could not be reached."
 
@@ -62,6 +71,12 @@ public actor RewriteService {
         // text; the caller's restore pass unwinds it. `allowedTokens` are minted outside payload.text
         // (selection-mode instruction redaction) — never required.
         let localText = payload.text
+        guard permits(connection) else {
+            return .localFallback(
+                localText: localText,
+                reason: "This AI service isn't available in this app, so your local version was kept.",
+                received: nil)
+        }
         let base = prompt ?? PromptAssembler.assemble(inputs)
         let required = payload.issuedTokens.filter { payload.text.contains($0) }
         var attempt = 0

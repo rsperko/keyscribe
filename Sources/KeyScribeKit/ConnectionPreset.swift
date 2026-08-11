@@ -67,18 +67,22 @@ extension ConnectionPreset {
 
     // Recover the preset a stored/edited connection represents. An OpenAI-compatible connection whose base
     // URL matches a hosted preset resolves to that preset; anything else OpenAI-compatible is Custom. The
-    // first-party providers resolve by provider kind.
+    // first-party providers resolve by provider kind. A lineup may offer one endpoint under several presets
+    // differing only in sign-in, so `authMethod` picks the one that accepts the connection's method — without
+    // it the first entry at that URL would claim every connection there.
     public static func matching(
         provider: Connection.Provider, baseURL: String?,
+        authMethod: Connection.AuthMethod? = nil,
         in presets: [ConnectionPreset] = AIServiceCatalog.all
     ) -> ConnectionPreset {
         if provider == .openaiCompatible {
             let normalized = normalize(baseURL)
-            if !normalized.isEmpty,
-               let match = presets.first(where: { $0.baseURL.map(normalize) == normalized }) {
-                return match
+            guard !normalized.isEmpty else { return custom }
+            let atEndpoint = presets.filter { $0.baseURL.map(normalize) == normalized }
+            if let authMethod, let accepting = atEndpoint.first(where: { $0.allowedAuthMethods.contains(authMethod) }) {
+                return accepting
             }
-            return custom
+            return atEndpoint.first ?? custom
         }
         return presets.first { $0.provider == provider && $0.baseURL == nil } ?? custom
     }

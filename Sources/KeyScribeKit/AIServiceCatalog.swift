@@ -4,9 +4,19 @@ import Foundation
 // sign-in methods, onboarding default). A rebranded downstream build swaps only this file plus its
 // test-side mirror (AIServiceCatalogTests) — everything else derives from the catalog untouched.
 //
-// Swap contract: `all`, `defaultPreset`, and `custom` must stay defined; `defaultPreset` must be a
-// member of `all`; `custom` must remain defined even if a lineup omits it from the picker — `matching`
-// and the managed-preset demotion fall back to it.
+// Swap contract: `all`, `defaultPreset`, `custom`, and `permits` must stay defined; `defaultPreset` must
+// be a member of `all`; `custom` must remain defined even if a lineup omits it from the picker — `matching`
+// and the managed-preset demotion fall back to it. Several presets may share one base URL when they differ
+// in sign-in; `matching` tells them apart by the connection's auth method.
+//
+// `permits` decides which connections the build will talk to at all. It answers `true` here, so the public
+// build restricts nothing; a lineup that exists to pin one endpoint narrows it (e.g. the base URL must
+// normalize to the proxy's), which makes a hand-edited connections.toml naming another provider inert
+// rather than merely absent from the picker. Nothing reads it ambiently: the app hands it to the few places
+// that represent the build to the user or reach the network (status badges, Test/Find models, the rewrite
+// and preconnect paths, the connect sequence), while `Connection.configIssue` and every default seam stay
+// permissive — so narrowing the lineup never changes what "are these fields valid?" means, and the test
+// suite keeps its own fixtures instead of inheriting a downstream's policy.
 public enum AIServiceCatalog {
     public static let openAI = ConnectionPreset(
         id: "openai", name: "OpenAI", provider: .openai,
@@ -47,4 +57,6 @@ public enum AIServiceCatalog {
     public static let all: [ConnectionPreset] = [openAI, anthropic, gemini, openRouter, groq, mistral, custom]
 
     public static let defaultPreset = openAI
+
+    public static func permits(_ connection: Connection) -> Bool { true }
 }

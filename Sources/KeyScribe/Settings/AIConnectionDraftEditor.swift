@@ -126,7 +126,7 @@ struct AIConnectionDraftEditor: View {
             Text("Service type")
             Spacer()
             Picker("Service", selection: presetBinding) {
-                ForEach(ConnectionPreset.all) { preset in
+                ForEach(presetOptions) { preset in
                     Text(preset.pickerLabel).tag(preset.id)
                 }
             }
@@ -134,6 +134,15 @@ struct AIConnectionDraftEditor: View {
             .frame(maxWidth: 230, alignment: .trailing)
             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.provider)
         }
+    }
+
+    // Lineup plus the draft's current preset — a connection that resolved to a preset this build's catalog
+    // omits (Custom in a restricted lineup) must stay selectable, not leave the picker without its selection.
+    private var presetOptions: [ConnectionPreset] {
+        var presets = ConnectionPreset.all
+        let current = draft.selectedPreset
+        if !presets.contains(where: { $0.id == current.id }) { presets.append(current) }
+        return presets
     }
 
     @ViewBuilder private var usedByRow: some View {
@@ -407,7 +416,7 @@ struct AIConnectionDraftEditor: View {
         Binding(
             get: { draft.selectedPreset.id },
             set: { id in
-                guard let preset = ConnectionPreset.preset(id: id) else { return }
+                guard let preset = presetOptions.first(where: { $0.id == id }) else { return }
                 draft.applyPreset(preset, updateDefaultName: presentation == .onboarding)
                 commit(nil)
             })

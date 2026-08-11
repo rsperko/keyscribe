@@ -12,6 +12,9 @@ struct AIServiceConnector {
     var deleteAPIKey: (String) -> Void = { KeychainStore.delete($0) }
     var readAPIKey: (String) -> String? = { KeychainStore.get($0) }
     var testConnection: (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) }
+    // Defaults to permitting anything for the same reason RewriteService does — the app passes
+    // AIServiceCatalog.permits so only the real build carries its lineup's policy.
+    var permits: (Connection) -> Bool = { _ in true }
 
     enum Outcome: Equatable {
         case connected(Connection)
@@ -36,6 +39,11 @@ struct AIServiceConnector {
         let connection = draft.connection(id: id, keyRef: keyRef)
         let key = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         func result(_ outcome: Outcome) -> Result { Result(outcome: outcome, allocatedId: id) }
+        // A service the build does not offer is refused before the key is stored or the endpoint is
+        // reached — no field the user could fix would change the answer.
+        guard permits(connection) else {
+            return result(.failed("This AI service isn't available in this app."))
+        }
         if connection.authMethod == .apiKey, key.isEmpty {
             return result(.failed("API key is required."))
         }

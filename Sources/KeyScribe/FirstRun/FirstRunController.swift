@@ -590,7 +590,7 @@ final class FirstRunModel: ObservableObject {
         // playground) stays here.
         let connector = AIServiceConnector(
             repository: repository, saveAPIKey: saveAPIKey, deleteAPIKey: deleteAPIKey,
-            readAPIKey: readAPIKey, testConnection: testConnection)
+            readAPIKey: readAPIKey, testConnection: testConnection, permits: AIServiceCatalog.permits)
         aiTesting = true
         let result = await connector.connect(draft: aiDraft, reusingId: pendingConnectionId)
         aiTesting = false

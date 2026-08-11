@@ -140,7 +140,13 @@ public extension Connection {
 extension Connection {
     // Structural misconfiguration detectable without a network call (unlike a wrong key, which only Test
     // Connection reveals). A missing key is NOT here — it's legitimate for a local/no-auth endpoint.
+    // `notPermitted` is the one issue that isn't about the fields: the build's catalog does not offer this
+    // service, so nothing typed here can resolve it. It is reported ONLY by `configIssue(permits:)` — the
+    // bare `configIssue` stays purely structural so that asking "are these fields valid?" never depends on
+    // which lineup the build ships. Surfaces that represent the build to the user (status badges, the
+    // enablement of Test/Find models, the rewrite and preconnect paths) pass AIServiceCatalog.permits.
     public enum ConfigIssue: Equatable, Sendable {
+        case notPermitted
         case missingModel
         case invalidModel
         case missingBaseURL
@@ -149,7 +155,10 @@ extension Connection {
         case invalidTokenCommand
     }
 
-    public var configIssue: ConfigIssue? {
+    public var configIssue: ConfigIssue? { configIssue(permits: { _ in true }) }
+
+    public func configIssue(permits: (Connection) -> Bool) -> ConfigIssue? {
+        guard permits(self) else { return .notPermitted }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if model.isEmpty { return .missingModel }
         if UserInputValidation.identifierIssue(model, required: true) != nil { return .invalidModel }

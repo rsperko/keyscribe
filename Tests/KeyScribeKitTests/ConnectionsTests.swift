@@ -89,6 +89,19 @@ struct ConnectionsTests {
         #expect(connection(provider: .anthropic, model: "claude-x", baseUrl: nil).configIssue == nil)
     }
 
+    @Test func aConnectionTheCatalogRefusesIsAnIssue() {
+        let c = connection(provider: .openai, model: "gpt-4.1-mini")
+        #expect(c.configIssue(permits: { _ in false }) == .notPermitted)
+        #expect(c.configIssue(permits: { _ in true }) == nil)
+    }
+
+    // A service the build does not offer can't be fixed by editing its fields, so saying so outranks
+    // reporting whatever else is unset.
+    @Test func notPermittedOutranksTheOtherConfigurationIssues() {
+        #expect(connection(provider: .openaiCompatible, model: "   ", baseUrl: nil)
+            .configIssue(permits: { _ in false }) == .notPermitted)
+    }
+
     @Test func decodesConnection() throws {
         let set = try ConnectionStore.decode(from: toml)
         let c = try #require(set.connection(id: "gemini-flash"))

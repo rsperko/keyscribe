@@ -59,6 +59,30 @@ struct AIConnectionDraftTests {
             authMethod: .apiKey, in: lineup) == "custom")
     }
 
+    // A lineup that offers one endpoint twice — open and credentialed — must reopen each stored connection
+    // under the entry that accepts its sign-in, not demote the credentialed one to Custom.
+    @Test func derivePresetIdPicksTheEntryAcceptingTheAuthWhenPresetsShareAnEndpoint() {
+        let openProxy = ConnectionPreset(
+            id: "proxy-open", name: "Proxy", provider: .openaiCompatible,
+            baseURL: "https://proxy.example.com/v1", defaultModel: "standard-model",
+            allowedAuthMethods: [.none], defaultAuthMethod: Connection.AuthMethod.none)
+        let authedProxy = ConnectionPreset(
+            id: "proxy-authed", name: "Proxy (Authenticated)", provider: .openaiCompatible,
+            baseURL: "https://proxy.example.com/v1", defaultModel: "standard-model",
+            allowedAuthMethods: [.apiKey, .tokenCommand], defaultAuthMethod: .tokenCommand)
+        let lineup = [openProxy, authedProxy]
+
+        #expect(AIConnectionDraft.derivePresetId(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: Connection.AuthMethod.none, in: lineup) == "proxy-open")
+        #expect(AIConnectionDraft.derivePresetId(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: .tokenCommand, in: lineup) == "proxy-authed")
+        #expect(AIConnectionDraft.derivePresetId(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: .apiKey, in: lineup) == "proxy-authed")
+    }
+
     @Test func draftOpensAStoredConnectionAtItsCatalogPreset() {
         let preset = AIServiceCatalog.defaultPreset
         let connection = Connection(

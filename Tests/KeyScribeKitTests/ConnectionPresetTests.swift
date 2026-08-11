@@ -22,6 +22,20 @@ struct ConnectionPresetTests {
 
     private var lineup: [ConnectionPreset] { [firstParty, openGateway, hosted, ConnectionPreset.custom] }
 
+    // One endpoint offered twice, differing only in how the caller signs in — the shape a single-proxy
+    // lineup takes when the proxy accepts both unauthenticated and credentialed callers.
+    private let proxyOpen = ConnectionPreset(
+        id: "proxy-open", name: "Proxy", provider: .openaiCompatible,
+        baseURL: "https://proxy.example.com/v1", defaultModel: "standard-model",
+        allowedAuthMethods: [.none], defaultAuthMethod: Connection.AuthMethod.none)
+
+    private let proxyAuthed = ConnectionPreset(
+        id: "proxy-authed", name: "Proxy (Authenticated)", provider: .openaiCompatible,
+        baseURL: "https://proxy.example.com/v1", defaultModel: "standard-model",
+        allowedAuthMethods: [.apiKey, .tokenCommand], defaultAuthMethod: .tokenCommand)
+
+    private var sharedEndpointLineup: [ConnectionPreset] { [proxyOpen, proxyAuthed, ConnectionPreset.custom] }
+
     @Test func managedPresetHasAFixedEndpointAndIsNotCustom() {
         #expect(hosted.isManaged)
         #expect(!hosted.isCustom)
@@ -67,6 +81,27 @@ struct ConnectionPresetTests {
             provider: .openaiCompatible, baseURL: "https://gateway.example.com/open/v1", in: lineup).id == "gateway-open")
         #expect(ConnectionPreset.matching(
             provider: .openaiCompatible, baseURL: "https://gateway.example.com/keyed/v1", in: lineup).id == "gateway-keyed")
+    }
+
+    @Test func matchingPrefersThePresetAllowingTheStoredAuthWhenPresetsShareAnEndpoint() {
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: Connection.AuthMethod.none, in: sharedEndpointLineup).id == "proxy-open")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: .apiKey, in: sharedEndpointLineup).id == "proxy-authed")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: .tokenCommand, in: sharedEndpointLineup).id == "proxy-authed")
+    }
+
+    @Test func matchingKeepsTheFirstEndpointMatchWithoutAnAuthPreferenceOrWhenNoPresetAllowsIt() {
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            in: sharedEndpointLineup).id == "proxy-open")
+        #expect(ConnectionPreset.matching(
+            provider: .openaiCompatible, baseURL: "https://proxy.example.com/v1",
+            authMethod: .apiKey, in: [proxyOpen, ConnectionPreset.custom]).id == "proxy-open")
     }
 
     @Test func matchingFallsBackToCustomForUnknownOpenAICompatibleEndpoint() {

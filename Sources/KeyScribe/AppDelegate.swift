@@ -685,7 +685,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activeEngineUsable: speechModels?.activeEngineUsable ?? true,
             modelSelfTestFailed: speechModels?.hasFailedModel ?? false,
             aiConnectionTestFailed: failedConnectionIds.isEmpty == false,
-            aiConnectionMisconfigured: config.connections.connections.contains { $0.configIssue != nil },
+            aiConnectionMisconfigured: config.connections.connections.contains {
+                $0.configIssue(permits: AIServiceCatalog.permits) != nil
+            },
             modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
             modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
             hotkeyConflict: Self.hotkeyConflictDetected(shadowed: shadowedHotkeyIds()))

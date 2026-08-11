@@ -112,7 +112,8 @@ final class AIServiceSettingsModel: ObservableObject {
             guard testGeneration[id] == generation else { return }
             testStates[id] = result
             if case .passed = result, pendingOfferConnectionId == id,
-               let current = connections.first(where: { $0.id == id }), current.configIssue == nil {
+               let current = connections.first(where: { $0.id == id }),
+               current.configIssue(permits: AIServiceCatalog.permits) == nil {
                 let pending = modesNeedingConnection()
                 if !pending.isEmpty {
                     pendingConnectOffer = ConnectModesOffer(
@@ -509,7 +510,9 @@ struct AIServiceStatus {
         if case .failed = testState {
             return .init(text: "Connection test failed", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.red))
         }
-        switch connection.configIssue {
+        switch connection.configIssue(permits: AIServiceCatalog.permits) {
+        case .notPermitted:
+            return .init(text: "Not available in this app", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .missingModel:
             return .init(text: "No model set", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .invalidModel:

@@ -100,6 +100,29 @@ struct AIServiceConnectorTests {
         #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
     }
 
+    // A catalog that refuses the service must stop the connect before the key is stored and before the
+    // endpoint is contacted — onboarding and Settings both come through here, so neither can persist one.
+    @Test func aServiceTheCatalogRefusesIsNeverStoredTestedOrPersisted() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var keychainTouched = false
+        var tested = false
+        let connector = AIServiceConnector(
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            saveAPIKey: { _, _ in keychainTouched = true; return true },
+            deleteAPIKey: { _ in keychainTouched = true },
+            readAPIKey: { _ in keychainTouched = true; return nil },
+            testConnection: { _ in tested = true; return .passed },
+            permits: { _ in false })
+
+        let result = await connector.connect(draft: draft(), reusingId: nil)
+
+        #expect(result.outcome == .failed("This AI service isn't available in this app."))
+        #expect(!keychainTouched)
+        #expect(!tested)
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+    }
+
     @Test func failedTestRollsBackTheKeyAndPersistsNothing() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }

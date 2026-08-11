@@ -44,6 +44,20 @@ struct RewriteServiceTests {
         #expect(received == nil)
     }
 
+    // A build whose catalog refuses this connection must not reach the endpoint at all — the fallback
+    // stands in for the rewrite and the reason lands in history like any other abandoned rewrite.
+    @Test func keepsLocalTextWithoutCallingAServiceTheCatalogRefuses() async {
+        let client = FakeClient([.success("Hello.")])
+        let svc = RewriteService(client: client, permits: { _ in false })
+        let out = await svc.rewrite(
+            payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
+        guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
+        #expect(text == "hello")
+        #expect(reason != nil)
+        #expect(received == nil)
+        #expect(await client.calls == 0)
+    }
+
     @Test func retriesOnceThenSucceeds() async {
         // content carries the token (as the tokenized transcript does in production), so the gate
         // requires it back and retries once when the first reply drops it.
