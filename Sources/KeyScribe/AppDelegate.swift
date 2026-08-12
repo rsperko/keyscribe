@@ -622,9 +622,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.arguments = [resumeOnboarding ? "--resume-onboarding" : "--setup-permissions"]
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
-        }
+        relaunch(
+            configuration,
+            guidance: "Quit \(Branding.appName) from the menu bar and open it again to apply the new permission.")
     }
 
     // Erase all on-disk data + BYOK Keychain keys, then relaunch into a clean first run. The fresh
@@ -634,8 +634,37 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         ResetTool(supportDir: KeyScribePaths.supportDir, defaults: .standard).run(.eraseAll)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
+        relaunch(
+            configuration,
+            guidance: "Your \(Branding.appName) data was erased. Quit \(Branding.appName) from the menu bar and open it again to finish the reset.")
+    }
+
+    // Terminate only once the replacement instance is actually running: a discarded launch error made every
+    // failure (a translocated or moved bundle, a rejected launch) look like the app silently vanishing.
+    private func relaunch(_ configuration: NSWorkspace.OpenConfiguration, guidance: String) {
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
+            Task { @MainActor [weak self] in
+                if app != nil { NSApp.terminate(nil); return }
+                self?.reportRelaunchFailure(error, guidance: guidance)
+            }
+        }
+    }
+
+    private func reportRelaunchFailure(_ error: Error?, guidance: String) {
+        let reason = error?.localizedDescription ?? "the new instance did not start"
+        Log.config.error("relaunch failed: \(reason, privacy: .public)")
+        if let firstRun {
+            firstRun.noteRelaunchFailed()
+        } else {
+            AppActivationPolicy.pushRegular()
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "\(Branding.appName) could not relaunch itself"
+            alert.informativeText = "\(guidance)\n\n\(reason)"
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            AppActivationPolicy.popRegular()
         }
     }
 

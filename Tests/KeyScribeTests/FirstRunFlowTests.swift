@@ -73,6 +73,38 @@ struct FirstRunFlowTests {
         #expect(model.step == .intro)
     }
 
+    @Test func aFailedRelaunchSurfacesInTheWizardAndResumesPolling() {
+        let supportDir = tempSupportDir()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let model = makeModel(supportDir: supportDir)
+        defer { model.stopPolling() }
+        model.tapActive = { false }
+        model.onRelaunch = {}
+
+        model.continueFromPermissions()
+        model.relaunch()
+        #expect(model.relaunchFailed == false)
+
+        model.noteRelaunchFailed()
+
+        #expect(model.relaunchFailed == true)
+        #expect(model.needsRelaunch == true)
+        #expect(model.pollTask != nil)
+    }
+
+    @Test func retryingTheRelaunchClearsTheFailureNotice() {
+        let supportDir = tempSupportDir()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let model = makeModel(supportDir: supportDir)
+        defer { model.stopPolling() }
+        model.onRelaunch = {}
+        model.noteRelaunchFailed()
+
+        model.relaunch()
+
+        #expect(model.relaunchFailed == false)
+    }
+
     @Test func trialContinueRoutesToTheAIOffer() {
         let supportDir = tempSupportDir()
         defer { try? FileManager.default.removeItem(at: supportDir) }

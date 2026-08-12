@@ -182,7 +182,11 @@ struct FirstRunView: View {
             permissionStep
 
             Spacer()
-            if model.needsRelaunch {
+            if model.relaunchFailed {
+                Text("\(Branding.appName) could not relaunch itself. Quit it from the menu bar and open it again to finish setup.")
+                    .font(.caption).foregroundStyle(.orange)
+                    .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.relaunchFailed)
+            } else if model.needsRelaunch {
                 Text("Accessibility is granted, but it only takes effect after a relaunch. Quit & Relaunch to finish setup.")
                     .font(.caption).foregroundStyle(.orange)
             } else if !model.allPermissionsGranted {

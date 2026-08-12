@@ -48,6 +48,8 @@ final class FirstRunController: NSObject, NSWindowDelegate {
 
     func noteDictation(_ completion: DictationCompletion) { model.noteDictation(completion) }
 
+    func noteRelaunchFailed() { model.noteRelaunchFailed() }
+
     func present() {
         let hosting = NSHostingController(
             rootView: FirstRunView(model: model).environmentObject(recordingState))
@@ -179,7 +181,8 @@ final class FirstRunModel: ObservableObject {
     var onRelaunch: () -> Void = {}
     var tapActive: () -> Bool = { true }
     @Published var needsRelaunch = false
-    private var pollTask: Task<Void, Never>?
+    @Published private(set) var relaunchFailed = false
+    private(set) var pollTask: Task<Void, Never>?
     private(set) var setupTask: Task<Void, Never>?
     private(set) var downloadTask: Task<Void, Never>?
 
@@ -271,8 +274,17 @@ final class FirstRunModel: ObservableObject {
     // Accessibility verdicts are cached for the process lifetime, so a fresh grant takes effect only on
     // relaunch — this ends the setup flow by relaunching into itself.
     func relaunch() {
+        relaunchFailed = false
         stopPolling()
         onRelaunch()
+    }
+
+    // The spawn failed, so this process is staying: resume the permission poll `relaunch` stopped, otherwise
+    // the wizard sits on stale statuses in a window the user can still act in.
+    func noteRelaunchFailed() {
+        relaunchFailed = true
+        refreshStatuses()
+        startPolling()
     }
 
     var selectedInfo: SpeechModelInfo? { SpeechModelCatalog.entry(for: selectedEngineId) }

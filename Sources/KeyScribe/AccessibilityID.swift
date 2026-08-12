@@ -237,6 +237,7 @@ enum AccessibilityID {
             static let skip = "firstrun.permissions.skip"
             static let done = "firstrun.permissions.done"
             static let relaunch = "firstrun.permissions.relaunch"
+            static let relaunchFailed = "firstrun.permissions.relaunchFailed"
             static let `continue` = "firstrun.permissions.continue"
             static func row(_ permID: String) -> String { "firstrun.permissions.row.\(permID)" }
             static func grant(_ permID: String) -> String { "firstrun.permissions.row.\(permID).grant" }
@@ -376,7 +377,7 @@ enum AccessibilityID {
         FirstRun.Model.advancedDisclosure, FirstRun.Model.enginePicker, FirstRun.Model.progress,
         FirstRun.Model.useAppleSpeech, FirstRun.Model.download,
         FirstRun.Permissions.skip, FirstRun.Permissions.done, FirstRun.Permissions.relaunch,
-        FirstRun.Permissions.continue,
+        FirstRun.Permissions.relaunchFailed, FirstRun.Permissions.continue,
         FirstRun.TryIt.field, FirstRun.TryIt.skip, FirstRun.TryIt.done,
         FirstRun.TryIt.changeTrigger, FirstRun.TryIt.shortcutWell,
         FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip, FirstRun.AI.offerConnect,
