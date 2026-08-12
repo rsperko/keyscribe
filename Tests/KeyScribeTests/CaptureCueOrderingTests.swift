@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // THE CONTRACT: if the recording HUD is visible, admission is open and the user's next word will be

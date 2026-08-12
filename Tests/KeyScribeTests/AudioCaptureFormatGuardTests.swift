@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // A degenerate input format (0 ch / 0 Hz, an output-only device) must be rejected before installTap,

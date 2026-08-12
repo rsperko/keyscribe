@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 private actor VADTestCounter {
     private(set) var value = 0

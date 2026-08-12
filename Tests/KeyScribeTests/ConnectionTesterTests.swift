@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 private struct FakeClient: LLMClient {

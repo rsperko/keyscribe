@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 private func pad(_ s: String, _ w: Int) -> String {

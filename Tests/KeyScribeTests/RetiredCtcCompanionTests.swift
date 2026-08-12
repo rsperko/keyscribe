@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 struct RetiredCtcCompanionTests {
     // Must target only the orphaned 0.6B spotter model, never the 110M CTC head — FluidAudio's

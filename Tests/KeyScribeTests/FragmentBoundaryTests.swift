@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // FragmentStore.url(forID:in:) is the filesystem boundary for fragment ids (KS-03). Decoded modes are

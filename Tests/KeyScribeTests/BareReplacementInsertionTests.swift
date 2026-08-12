@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // A whole-utterance replacement is inserted verbatim and BARE — the mode's trailing space /

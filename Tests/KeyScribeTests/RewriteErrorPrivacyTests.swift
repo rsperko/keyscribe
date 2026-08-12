@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // The reason a rewrite fell back is persisted to history JSONL and logged publicly. Provider error bodies

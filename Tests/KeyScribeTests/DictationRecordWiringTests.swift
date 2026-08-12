@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Proves DictationRecord is fed real data through the real DictationController, not stubbed: (1)

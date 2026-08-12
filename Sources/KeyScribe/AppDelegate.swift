@@ -3,7 +3,9 @@ import ServiceManagement
 import KeyScribeKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate {
+    public override init() { super.init() }
+
     private var settings = Settings.defaults
     private var configError: String?
     private var provider: SpeechEngineProvider!
@@ -31,8 +33,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
     // launch. With neither set, lifecycle and bootstrap behave exactly as without them.
-    var updater: AppUpdater?
+    public var updater: AppUpdater?
     var legacyImporter: LegacyConfigImporter?
+
+    // The Sparkle guard lives here, not at the entry point: the conditional Sparkle dependency is attached
+    // to this library target, so `canImport(Sparkle)` is only true inside it — a host target that links this
+    // library would evaluate it as false and silently skip the updater.
+    public func attachBundledUpdater() {
+        #if canImport(Sparkle)
+        if AppVariant(bundleID: Bundle.main.bundleIdentifier).injectsBundledUpdater {
+            updater = SparkleUpdater()
+        }
+        #endif
+    }
 
     private let firstRunKey = ResetTool.firstRunKey
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
@@ -41,11 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let openSettingsOnLaunch = CommandLine.arguments.contains("--open-settings")
     private let hudPreview = HUDPreview.state(from: CommandLine.arguments)
 
-    func applicationWillTerminate(_: Notification) {
+    public func applicationWillTerminate(_: Notification) {
         controller?.cancel()
     }
 
-    func applicationDidFinishLaunching(_: Notification) {
+    public func applicationDidFinishLaunching(_: Notification) {
         if let hudPreview {
             hud.render(hudPreview)
             return

@@ -1,7 +1,7 @@
 import AppKit
 import KeyScribeKit
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 @MainActor
 struct MenuBarIconTests {

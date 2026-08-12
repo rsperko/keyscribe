@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // KS-05: the realtime handler must not resolve its ring through mutable shared state.

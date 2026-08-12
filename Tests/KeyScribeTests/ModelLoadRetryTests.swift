@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Models a transient cold CoreML/MLX compile failure right after launch: loadIfNeeded() throws for

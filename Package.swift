@@ -35,6 +35,13 @@ if sparkleEnabled {
 let package = Package(
     name: "KeyScribe",
     platforms: [.macOS("15.0")],
+    // The app's code is a library so a downstream host that builds through a standard Xcode project can
+    // link one product and inherit every dependency — and its pins — transitively, instead of re-declaring
+    // them in a second place that silently drifts. The executable is a thin entry point over it.
+    products: [
+        .library(name: "KeyScribeKit", targets: ["KeyScribeKit"]),
+        .library(name: "KeyScribeApp", targets: ["KeyScribeApp"]),
+    ],
     dependencies: packageDependencies,
     targets: [
         .target(
@@ -42,9 +49,15 @@ let package = Package(
             dependencies: [.product(name: "TOMLKit", package: "TOMLKit")]
         ),
         .target(name: "ObjCSupport"),
+        .target(
+            name: "KeyScribeApp",
+            dependencies: keyScribeDependencies,
+            path: "Sources/KeyScribe"
+        ),
         .executableTarget(
             name: "KeyScribe",
-            dependencies: keyScribeDependencies
+            dependencies: ["KeyScribeApp"],
+            path: "Sources/KeyScribeMain"
         ),
         .testTarget(
             name: "KeyScribeKitTests",
@@ -52,7 +65,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KeyScribeTests",
-            dependencies: ["KeyScribe", "KeyScribeKit"]
+            dependencies: ["KeyScribeApp", "KeyScribeKit"]
         ),
     ]
 )

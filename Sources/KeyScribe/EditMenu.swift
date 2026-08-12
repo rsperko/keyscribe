@@ -1,7 +1,7 @@
 import AppKit
 
-enum EditMenu {
-    static func make() -> NSMenu {
+public enum EditMenu {
+    public static func make() -> NSMenu {
         let mainMenu = NSMenu()
 
         let editItem = NSMenuItem()

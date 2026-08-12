@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 struct TokenCommandParseTests {
     @Test func rawTokenIsFirstLine() throws {

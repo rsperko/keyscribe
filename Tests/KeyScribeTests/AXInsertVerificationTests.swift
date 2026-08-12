@@ -1,5 +1,5 @@
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 @MainActor
 struct AXInsertVerificationTests {

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 struct RewriteRequestBuilderTests {

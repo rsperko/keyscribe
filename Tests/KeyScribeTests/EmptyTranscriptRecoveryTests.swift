@@ -2,7 +2,7 @@ import FluidAudio
 import Foundation
 import Testing
 
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // The recovery for an engine that returns no text on a take the VAD heard speech in — the Parakeet TDT v3

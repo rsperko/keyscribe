@@ -1,7 +1,7 @@
 import CoreAudio
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 private final class MarkerBox: @unchecked Sendable {

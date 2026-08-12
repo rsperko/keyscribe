@@ -1,5 +1,5 @@
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Lineup-agnostic by design: reference the catalog only through its contract members (defaultPreset,

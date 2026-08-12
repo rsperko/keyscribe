@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // A `<CR>` on a whole-utterance regex replacement presses a real Return after the verified insert,

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // The retention sweep runs on the first dictation of a day, then is skipped for same-day dictations —

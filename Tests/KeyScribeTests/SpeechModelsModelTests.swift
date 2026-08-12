@@ -1,5 +1,5 @@
 import XCTest
-@testable import KeyScribe
+@testable import KeyScribeApp
 import KeyScribeKit
 
 @MainActor

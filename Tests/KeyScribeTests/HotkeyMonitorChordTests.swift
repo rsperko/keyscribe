@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import KeyScribeKit
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 @MainActor
 final class FakeChordRegistrar: ChordRegistering {

@@ -1,6 +1,6 @@
 import XCTest
 import AudioCommon
-@testable import KeyScribe
+@testable import KeyScribeApp
 import KeyScribeKit
 
 // Guards the on-disk install detection that reconcile (adopt a completed-but-unmarked model instead

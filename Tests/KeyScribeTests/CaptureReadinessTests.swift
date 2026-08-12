@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Phase 1 of agent_notes/mic_issue: capture is READY only once a valid input buffer has crossed off the

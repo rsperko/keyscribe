@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // A password field can steal focus AFTER the press/adoption snapshots settled (autofill, a manager

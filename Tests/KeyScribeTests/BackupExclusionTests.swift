@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 struct BackupExclusionTests {
     private func makeTempDir() throws -> URL {

@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 // A paste that detaches its clipboard-restore (awaitSettle: false, the fast dictation path) must not let
 // the next paste snapshot its still-present scratch text as the user's clipboard — otherwise that scratch

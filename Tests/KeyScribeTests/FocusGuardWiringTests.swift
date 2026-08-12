@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Proves the focus guard is fed real data end-to-end, not just unit-tested: the snapshot seam

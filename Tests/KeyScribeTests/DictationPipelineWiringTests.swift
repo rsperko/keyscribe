@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // End-to-end wiring of the post-STT pipeline + insertion through the REAL DictationController

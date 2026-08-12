@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // A mode wired to a BYOK connection warms that endpoint during recording so the post-commit rewrite

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Drives ConnectionTester to a fixed verdict: a passing test returns "OK", a failure throws so the tester

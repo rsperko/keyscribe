@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 struct AccessibilityIDTests {
     // Catalog ids are a lowercase dot-path, e.g. "settings.sidebar.speechModels".

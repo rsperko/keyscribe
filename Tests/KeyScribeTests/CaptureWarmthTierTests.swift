@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Idle mic warm-up rides the Eviction tier: Fastest/Balanced prewarm the input unit, Frugal never

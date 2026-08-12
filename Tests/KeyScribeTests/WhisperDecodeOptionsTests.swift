@@ -1,6 +1,6 @@
 import Testing
 import WhisperKit
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 // WhisperKit's default DecodingOptions carry firstTokenLogProbThreshold = -1.5: a first predicted
 // token below it EARLY-STOPS the window with zero word tokens, and the temperature fallbacks that

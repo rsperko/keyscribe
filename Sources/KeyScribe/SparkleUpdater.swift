@@ -4,7 +4,7 @@ import KeyScribeKit
 import Sparkle
 
 // Production-only auto-updater. Compiled only when Sparkle is linked (KEYSCRIBE_SPARKLE=1) and
-// constructed only for the .production variant (main.swift). The feed URL is set programmatically here,
+// constructed only for the .production variant (AppDelegate.attachBundledUpdater). The feed URL is set programmatically here,
 // never as SUFeedURL in Info.plist, so a copied plist cannot point a downstream build at KeyScribe's feed.
 @MainActor
 final class SparkleUpdater: NSObject, AppUpdater {

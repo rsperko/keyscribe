@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // `trailing` is literal text appended to the transcript INSIDE the atomic insert; `submit` is a

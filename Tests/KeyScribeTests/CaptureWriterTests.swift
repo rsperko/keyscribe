@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 // Exercises the writer half of the RT-thread ring split end-to-end WITHOUT a microphone: synthetic planar

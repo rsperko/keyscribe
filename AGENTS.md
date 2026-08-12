@@ -301,12 +301,13 @@ This file is the entry point. Read the design docs before writing code — they 
 ```
 keyscribe/
   AGENTS.md            # this file (CLAUDE.md is just `@AGENTS.md`)
-  Package.swift        # SwiftPM: KeyScribeKit (pure logic) + KeyScribe (app) + tests
+  Package.swift        # SwiftPM: KeyScribeKit + KeyScribeApp library products + KeyScribe exe + tests
   Sources/
     KeyScribeKit/        # pure, OS-free logic (TDD red→green)
-    KeyScribe/           # the menu-bar app: adapters + SwiftUI/AppKit + main
+    KeyScribe/           # the menu-bar app: adapters + SwiftUI/AppKit — target/module KeyScribeApp
+    KeyScribeMain/       # main.swift only: the thin executable over KeyScribeApp
   Tests/KeyScribeKitTests/ # pure-logic unit tests
-  Tests/KeyScribeTests/    # app-target tests (@testable import KeyScribe) — OS-edge orchestration via DI seams
+  Tests/KeyScribeTests/    # app-target tests (@testable import KeyScribeApp) — OS-edge orchestration via DI seams
   Makefile             # task front door — `make help` lists build/run/release/test/setup/…
   make-app.sh          # → KeyScribeDev.app (dev variant, default; self-signed — see BUILD.md)
   release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major)
@@ -696,7 +697,18 @@ speech-swift checkout's kernels and bundles+signs it into the `.app`; the **Meta
 
 Top-level SwiftPM (`Package.swift`): `Sources/KeyScribeKit` (pure) + `Sources/KeyScribe` (app) +
 `Tests/KeyScribeKitTests` (pure-logic) + `Tests/KeyScribeTests` (app-target via
-`@testable import KeyScribe`, for OS-edge regression through DI seams). Bundled into an LSUIElement
+`@testable import KeyScribeApp`, for OS-edge regression through DI seams). **The app's code is the
+`KeyScribeApp` library target** (module `KeyScribeApp`, path `Sources/KeyScribe`), exported alongside
+`KeyScribeKit` as a **library product** so a downstream build through a standard Xcode project links
+one product and inherits every dependency — and its pins — transitively, instead of re-declaring them
+in a second place that silently drifts. `Sources/KeyScribeMain/main.swift` is the only file in the
+`KeyScribe` **executable** target; keep that target's name (`make-app.sh` builds
+`--product KeyScribe` and copies `.build/release/KeyScribe`). The public surface is deliberately tiny
+— `DevCLI.handleFlags()`, `AppDelegate` (+`init`, `updater`, `attachBundledUpdater()`), and
+`EditMenu.make()`; everything else stays `internal`. **The Sparkle guard lives in
+`AppDelegate.attachBundledUpdater()`, not at the entry point**: the conditional Sparkle dependency
+attaches to the library target, so `#if canImport(Sparkle)` is only true inside it — evaluating it in
+the executable (or in a downstream host target) silently yields false and no updater. Bundled into an LSUIElement
 `.app` by `./make-app.sh` — the **dev** variant signs with a stable self-signed cert (**`KeyScribe
 Local`**) for persistent TCC, else ad-hoc; it **ignores** `KEYSCRIBE_SIGN_ID` /
 `CODESIGN_IDENTITY` (those are the release Developer ID identity, so an `.envrc` for `release.sh`

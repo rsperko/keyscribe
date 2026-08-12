@@ -1,6 +1,6 @@
 import CoreAudio
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 @testable import KeyScribeKit
 
 @MainActor

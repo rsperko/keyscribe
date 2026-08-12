@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import KeyScribe
+@testable import KeyScribeApp
 
 // Stands in for a cross-process image the source app re-renders on demand: a promised/lazy pasteboard
 // flavor whose data materializes slowly. The provider is invoked synchronously on the requesting thread.
