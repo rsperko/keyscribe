@@ -458,6 +458,18 @@ private struct MaintenanceSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Diagnostics") {
+                HStack(spacing: 8) {
+                    Button("Copy Diagnostics") { model.copyDiagnostics() }
+                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.copyDiagnostics)
+                    if let message = model.diagnosticsStatus {
+                        Text(message).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Copies a summary of this install — version, permissions, speech model, mode settings, and how your recent dictations ended — for pasting into a bug report. It contains no transcript text, clipboard contents, or API keys.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Interface repair") {
                 Button("Reset HUD Position") { model.resetHUDPosition() }
                     .accessibilityIdentifier(AccessibilityID.Settings.Advanced.resetHUDPosition)
@@ -519,6 +531,8 @@ final class SettingsModel: ObservableObject {
     @Published var pasteLastShortcut: String { didSet { persist() } }
     // Feature-flag enabled state, keyed by Feature.id, populated for every Feature.allCases. One toggle each.
     @Published var featureStates: [String: Bool] { didSet { persist() } }
+    @Published private(set) var diagnosticsStatus: String?
+    private var diagnosticsStatusTask: Task<Void, Never>?
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
     @Published var inputDeviceUID: String { didSet { persist() } }
     // Name last seen for `inputDeviceUID`, so a disconnected preferred device still reads as itself in the
@@ -670,6 +684,21 @@ final class SettingsModel: ObservableObject {
 
     func revealConfig() {
         NSWorkspace.shared.activateFileViewerSelecting([KeyScribePaths.supportDir])
+    }
+
+    func copyDiagnostics() {
+        let report = DiagnosticsCollector.collect().render()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        diagnosticsStatus = pasteboard.setString(report, forType: .string)
+            ? "Copied to the clipboard."
+            : "Could not copy to the clipboard."
+        diagnosticsStatusTask?.cancel()
+        diagnosticsStatusTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, !Task.isCancelled else { return }
+            self.diagnosticsStatus = nil
+        }
     }
 
     func reload() { onReload() }

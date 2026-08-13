@@ -9,6 +9,8 @@ Start with the shortest path that matches what you are trying to do.
 - [Privacy](../PRIVACY.md) — what stays on your Mac, what can leave it, and the limits of
   best-effort redaction.
 - [FAQ](../FAQ.md) — first-run blockers, permissions, model choice, and troubleshooting.
+- [Troubleshooting](troubleshooting.md) — collect a diagnostic snapshot with `--diagnose`, and work
+  out why dictated text did not appear where you expected.
 
 ## Configure KeyScribe
 

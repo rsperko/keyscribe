@@ -138,6 +138,19 @@ build signature. Remove KeyScribe from that permission's list and re-add it, or 
 
 ## Troubleshooting
 
+### How do I collect information for a bug report?
+
+Open **Settings ▸ Maintenance ▸ Diagnostics** and click **Copy Diagnostics**. It copies your version,
+granted permissions, speech model, mode settings, and recent dictation outcomes — with no transcript
+text, clipboard contents, or API keys. The same report is available from a terminal as
+`/Applications/KeyScribe.app/Contents/MacOS/KeyScribe --diagnose`. See
+[Troubleshooting](docs/troubleshooting.md) for how to read it.
+
+### My dictation said it worked, but the text never appeared.
+
+`inserted` means KeyScribe posted the paste keystroke, not that the app accepted it. See
+[Troubleshooting](docs/troubleshooting.md) for how to tell the cases apart and what to change.
+
 ### Background audio cuts out while I dictate.
 
 With **Settings ▸ General ▸ Mute system audio while dictating** on, playback is muted for the

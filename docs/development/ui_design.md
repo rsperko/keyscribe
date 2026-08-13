@@ -414,7 +414,7 @@ capabilities. The sidebar order is fixed:
 6. **History** — audit/correction/diagnostics of past dictations, with the history enable and
    retention controls inline (see §8).
 7. **Permissions** — review and repair macOS access.
-8. **Maintenance** — configuration, interface repair, experimental features, and reset.
+8. **Maintenance** — configuration, diagnostics, interface repair, experimental features, and reset.
 
 General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
@@ -663,8 +663,8 @@ first-launch wall.
 
 ### Maintenance
 
-Separates configuration, interface repair, experimental features, and the destructive reset. (Notices
-live in the separate **About & Notices** window, not here.)
+Separates configuration, diagnostics, interface repair, experimental features, and the destructive
+reset. (Notices live in the separate **About & Notices** window, not here.)
 
 - **Reveal Config in Finder** opens the support folder (`~/Library/Application Support/KeyScribe/`,
   `config_schema.md`) so a user can read, edit, back up, or version the plain-TOML config
@@ -672,6 +672,12 @@ live in the separate **About & Notices** window, not here.)
   purpose, and revealing the folder removes any need to know the hidden `~/Library` path.
 - **Reload Configuration** re-reads the config from disk on demand (edits are also picked up
   automatically; a malformed file surfaces an error rather than being silently dropped).
+- **Copy Diagnostics** puts a redaction-safe summary of the install on the clipboard for a bug
+  report: version and revision, granted permissions, speech model, each mode's delivery settings,
+  and the most recent dictation outcomes. It carries **no transcript text, clipboard contents, or
+  API keys** — the projection from history drops every content field by construction, not by
+  filtering. The same report is available headless as `KeyScribe --diagnose` (see
+  `docs/troubleshooting.md`). A transient caption confirms the copy; there is no separate window.
 - *(Parked, not v1:)* a dedicated diagnostics/migration-error surface and a separate `models/`
   weights-folder reveal (the folder is reachable via Reveal Config today); plus an optional
   `KEYSCRIBE_CONFIG_DIR` override for users who keep config in a dotfiles directory — added only if

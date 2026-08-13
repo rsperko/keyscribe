@@ -132,6 +132,7 @@ enum AccessibilityID {
             static let revealConfig = "settings.advanced.revealConfig"
             static let reloadConfig = "settings.advanced.reloadConfig"
             static let resetHUDPosition = "settings.advanced.resetHUDPosition"
+            static let copyDiagnostics = "settings.advanced.copyDiagnostics"
             static let eraseAllData = "settings.advanced.eraseAllData"
             static let eraseConfirmConfirm = "settings.advanced.eraseConfirm.confirm"
             static let eraseConfirmCancel = "settings.advanced.eraseConfirm.cancel"

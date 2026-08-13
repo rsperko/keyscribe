@@ -60,6 +60,11 @@ public enum DevCLI {
               --samples-parity <dir>  Verify the in-memory samples transcription path matches the WAV path for
                                       every installed sample-capable engine over the *.wav files in <dir> (P2-1).
                                       Exits non-zero on any mismatch. Honors --engines.
+              --diagnose              Print a redaction-safe snapshot of this install (version, permissions,
+                                      speech engine, each mode's delivery settings, and the most recent
+                                      dictation outcomes) and exit. Paste it into a bug report. Contains no
+                                      transcript text, clipboard contents, or API keys.
+                --dictations <n>        How many recent dictation outcomes to include (default 10, 0 for none).
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
               --capture-probe         Drive the real capture path (record → drain → teardown) and score the
@@ -166,6 +171,16 @@ public enum DevCLI {
 
         // Lets a release gate confirm which shipped catalog engines it will actually exercise vs. which are
         // missing (untested).
+        if CommandLine.arguments.contains("--diagnose") {
+            var limit = DiagnosticsCollector.defaultDictationLimit
+            if let i = CommandLine.arguments.firstIndex(of: "--dictations"), i + 1 < CommandLine.arguments.count,
+                let parsed = Int(CommandLine.arguments[i + 1]), parsed >= 0 {
+                limit = parsed
+            }
+            print(DiagnosticsCollector.collect(dictationLimit: limit).render(), terminator: "")
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--list-engines") {
             let installed = ModelInstallStore.installedIds()
             for e in SpeechModelCatalog.all {

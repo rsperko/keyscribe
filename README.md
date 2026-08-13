@@ -151,6 +151,8 @@ prerequisites, signing options, release builds, and permission persistence are i
   modes, privacy controls, and history.
 - [PRIVACY.md](PRIVACY.md) — exact local/cloud boundary and redaction limits.
 - [FAQ.md](FAQ.md) — first-run issues, permissions, model choice, and troubleshooting.
+- [docs/troubleshooting.md](docs/troubleshooting.md) — `--diagnose` snapshots and why dictated text
+  did not land where you expected.
 - [BUILD.md](BUILD.md) — building, signing, packaging, and release notes.
 - [docs/reference/stt_benchmarks.md](docs/reference/stt_benchmarks.md) — reference model numbers and
   how to benchmark on your own voice.
