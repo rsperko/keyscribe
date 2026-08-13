@@ -11,11 +11,16 @@ import Foundation
 let sparkleEnabled = ProcessInfo.processInfo.environment["KEYSCRIBE_SPARKLE"] == "1"
 
 var packageDependencies: [Package.Dependency] = [
+    // Engine deps are pinned `exact:`/`revision:` for the same reason argmax-oss-swift is: they carry
+    // recognition behavior, and a bump can change transcripts with no build error to warn you. Bumping
+    // one is a deliberate act that must re-run the STT benchmark and the VAD gate (--vad-probe over
+    // corpus/blips AND corpus/commands) — see AGENTS.md "Silence / no-speech behavior".
+    // HELD at this revision: 0.15.5 FAILS the blips gate — see AGENTS.md "FluidAudio is held".
     .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"),
     .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),
     .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.0"),
     .package(url: "https://github.com/rsperko/speech-swift.git", revision: "96273cd375783531129e5bb97a7ec25a7e717994"),
-    .package(url: "https://github.com/moonshine-ai/moonshine-swift.git", revision: "0fb16ccb64252b23b17f87c2a8a61228df9e7ebd"),
+    .package(url: "https://github.com/moonshine-ai/moonshine-swift.git", exact: "0.1.2"),
 ]
 
 var keyScribeDependencies: [Target.Dependency] = [
@@ -28,7 +33,12 @@ var keyScribeDependencies: [Target.Dependency] = [
 ]
 
 if sparkleEnabled {
-    packageDependencies.append(.package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"))
+    // `exact:` for the same reason argmax-oss-swift is pinned exactly, and one more: because Sparkle
+    // is attached CONDITIONALLY, it never lands in Package.resolved (every non-release build resolves
+    // without it), so a range here is a floating dependency that nothing records — the notarized
+    // artifact could silently ship a different updater than the one that was smoke-tested. A version
+    // range would be reproducible for any other dep; for this one only an exact pin is.
+    packageDependencies.append(.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.5"))
     keyScribeDependencies.append(.product(name: "Sparkle", package: "Sparkle"))
 }
 

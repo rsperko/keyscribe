@@ -81,18 +81,13 @@ swift build -c "$CONFIG" --product KeyScribe
 [ "$CONFIG" = "debug" ] && BIN=".build/debug/KeyScribe"
 
 # Qwen3-ASR runs on MLX, which hard-fails ("Failed to load the default metallib") without
-# mlx.metallib next to the executable. Build it from the speech-swift checkout's kernels and bundle
-# it into the .app below. Non-fatal: the other engines (Parakeet/Whisper/Apple) don't need it, so a
-# missing Metal Toolchain warns instead of blocking the build. Install it with:
+# mlx.metallib next to the executable, and `swift build` does not compile Metal shaders. Build it
+# and bundle it into the .app below. Non-fatal: the other engines (Parakeet/Whisper/Apple) don't
+# need it, so a missing Metal Toolchain warns instead of blocking the build. Install it with:
 #   xcodebuild -downloadComponent MetalToolchain
 echo "== building mlx.metallib (required by Qwen3-ASR) =="
-METALLIB_SCRIPT=".build/checkouts/speech-swift/scripts/build_mlx_metallib.sh"
-if [ -f "$METALLIB_SCRIPT" ]; then
-  BUILD_DIR="$(pwd)/.build" bash "$METALLIB_SCRIPT" "$CONFIG" \
-    || echo "warning: metallib build failed — Qwen3-ASR will crash at runtime (other engines unaffected)" >&2
-else
-  echo "warning: $METALLIB_SCRIPT not found — run swift build first; Qwen3-ASR needs mlx.metallib" >&2
-fi
+BUILD_DIR="$(pwd)/.build" ./scripts/build-mlx-metallib.sh "$CONFIG" \
+  || echo "warning: metallib build failed — Qwen3-ASR will crash at runtime (other engines unaffected)" >&2
 
 echo "== assembling $APP =="
 rm -rf "$APP"

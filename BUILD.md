@@ -47,6 +47,12 @@ Same name, different identity per machine; that is expected and fine.
   engine will crash at runtime with `Failed to load the default metallib`. `make-app.sh` prints a
   warning rather than failing when the toolchain is missing.
 
+  This step exists because SwiftPM's native build system does not compile Metal shaders, so
+  `swift build` leaves MLX without one; `scripts/build-mlx-metallib.sh` compiles it (~3 s, 3.0 MB)
+  and caches on a source hash. **Building KeyScribe through an Xcode project instead needs none of
+  this** — Xcode compiles those shaders itself and MLX picks them up from the package's resource
+  bundle.
+
 ## Build & run
 
 ```bash

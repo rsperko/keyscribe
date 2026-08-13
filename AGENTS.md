@@ -677,19 +677,54 @@ One fork + three upstream deps (one a pinned binary); the fork works live and co
   was **removed** (2026-07-09) — it false-fired a dictionary term into a majority of ordinary
   sentences (`agent_notes/fable_bias_test/`); Parakeet now transcribes **TDT-only** and ignores
   `biasTerms` (`supportsRecognitionBias = false`), with the companion CTC download and disk footprint
-  gone.
+  gone. **FluidAudio is HELD at revision `a95ec26` (v0.15.4+17) — do not bump it casually.** It is the
+  only dep that supplies BOTH Parakeet and the Silero VAD behind the no-speech gate, so a bump moves
+  the gate. **0.15.5 was measured and rejected (2026-08-13):** `--vad-probe corpus/blips` went
+  **PASS 23/23 → FAIL 2/23** (`blip_breath_03` and `dbl_gap15` flipped noSpeech→speech; `dbl_gap15`'s
+  take-level maxP rose **0.510 → 0.859**), i.e. a breath or a stray press would be admitted and
+  transcribed. Everything else about that bump was clean — 2196 tests green, and STT output
+  byte-identical over 107 clips × 3 engines — which is exactly why this is dangerous: **nothing but
+  the blips gate catches it.** 0.15.5 also renames the download API (`DownloadUtils` → `ModelHub`,
+  `refactor(download)!` #779); the migration is mechanical (`DownloadUtils.ProgressHandler` →
+  `ProgressHandler`, `DownloadUtils.loadModels` → `ModelHub.loadModels`) and is NOT the blocker. A
+  future bump must re-tune the gate against `corpus/blips` — and per that corpus's README the
+  fast-release twins should be recorded FIRST, since raising `minSpeechChunks` to compensate is the
+  one move no evidence in this repo currently bounds.
 - **speech-swift (Qwen3-ASR)** → `rsperko/speech-swift` (upstream `soniqo/speech-swift`, package
-  `Qwen3Speech`): the fork only gates the `AsrBenchmark`/`AudioServer` targets behind `BUILD_ALL`
-  so stock `speech-swift`'s `argmaxinc/WhisperKit` doesn't collide with our WhisperKit fork.
-  Qwen3-ASR bias is **native** (`Qwen3DecodingOptions.context`), so no source patch is needed.
+  `Qwen3Speech`): the fork is **one commit** — it gates the `AsrBenchmark`/`AudioServer` targets behind
+  `BUILD_ALL` so stock speech-swift's unconditional `argmaxinc/WhisperKit` dependency stays out of our
+  graph. Qwen3-ASR bias is **native** (`Qwen3DecodingOptions.context`), so no source patch is needed.
+  **Still required — re-verified 2026-08-13.** The commit message blames a collision with "our
+  WhisperKit fork", which is stale (that fork was retired 2026-08-09) and reads like the fork is now
+  droppable. It is not: `argmaxinc/WhisperKit` and `argmaxinc/argmax-oss-swift` are different package
+  *identities* that still share target *names*, so stock speech-swift + argmax-oss-swift RESOLVES fine
+  (37 packages, no conflict) and then fails graph loading with `multiple similar targets 'ArgmaxCLI',
+  'ArgmaxCore', 'ArgmaxOSS' and 3 others appear in package 'whisperkit' and 'argmax-oss-swift'`. Prove
+  it in ~2 min with a throwaway package depending on both, then `swift package show-dependencies` —
+  `swift package resolve` alone will NOT show the failure. Upstream has not adopted the gating in 265
+  commits. **Do not chase upstream speech-swift casually either:** current upstream adds
+  `mlx-swift-lm` as `branch: "main"`, a floating dependency inside a notarized app. Retiring the fork
+  means upstreaming the patch (it no longer cherry-picks — upstream restructured the manifest).
 - **Moonshine** → `moonshine-ai/moonshine-swift` (no fork): ONNX Runtime ships as a prebuilt
   `Moonshine.xcframework` binaryTarget. No on-device bias path, so `supportsRecognitionBias = false`
   and dictionary recovery handles close matches after transcription.
 
-**MLX metallib is a hard runtime requirement.** Qwen3-ASR (MLX) crashes ("Failed to load the default
-metallib") without `mlx.metallib` beside the executable. `make-app.sh` builds it from the
-speech-swift checkout's kernels and bundles+signs it into the `.app`; the **Metal Toolchain**
-(`xcodebuild -downloadComponent MetalToolchain`) is a build-time prereq.
+**MLX metallib is a hard runtime requirement — and the kernel set is load-bearing.** Qwen3-ASR (MLX)
+crashes ("Failed to load the default metallib") without `mlx.metallib` beside the executable, because
+SwiftPM's **native** build system does not compile `.metal` sources. `scripts/build-mlx-metallib.sh`
+builds it and `make-app.sh` bundles+signs it into the `.app`; the **Metal Toolchain**
+(`xcodebuild -downloadComponent MetalToolchain`) is a build-time prereq. **A downstream build through
+an Xcode project needs none of this** — Xcode's build engine compiles those shaders itself into
+`mlx-swift_Cmlx.bundle/default.metallib`, which MLX finds via its SwiftPM-bundle lookup
+(`swift build --build-system swiftbuild` does the same, and is the eventual replacement for the script).
+**Compile ONLY `Source/Cmlx/mlx-generated/metal` (mlx-swift's ahead-of-time set — exactly what its own
+Xcode build ships) plus `kernels/fence.metal`.** Every other kernel is JIT-generated at runtime — the
+SwiftPM build enables MLX's JIT (`Package.swift` excludes `nojit_kernels.cpp`) and all 23 have matching
+generators under `mlx-generated/*.cpp`. Globbing the whole `backend/metal/kernels` tree instead (what
+the script did until 2026-08-13) yielded **107 MB / 15,005 shader functions** against the **3.0 MB /
+385** actually needed — half the shipped `.app` — for byte-identical transcription over 142 corpus
+clips on both Qwen engines. The built library is verified a strict **superset** of what
+`--build-system swiftbuild` produces. Never "fix" this back to a glob.
 
 ---
 

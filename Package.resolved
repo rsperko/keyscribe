@@ -1,5 +1,5 @@
 {
-  "originHash" : "e6a5b7fcfc9c83c9a1a773869b47091c8f68a21e932bea39a4bde7c42ed6f17c",
+  "originHash" : "fed2eaeb1933fee7cfff7ae5891deb002baf2641341eab7740c0f23306629c47",
   "pins" : [
     {
       "identity" : "argmax-oss-swift",
@@ -41,7 +41,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/moonshine-ai/moonshine-swift.git",
       "state" : {
-        "revision" : "0fb16ccb64252b23b17f87c2a8a61228df9e7ebd"
+        "revision" : "26e0335aa3ef82109796beffda385a64bb9b47b5",
+        "version" : "0.1.2"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "79bc9e872948e47877e76f194cb0c8e0412b0b90",
+        "version" : "2.9.5"
       }
     },
     {
