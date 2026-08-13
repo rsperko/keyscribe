@@ -5,26 +5,38 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsModel
     var vocabularyShadowed = false
     var pasteLastShadowed = false
-    // Edits route through onUpdatePlainDictation so the same _direct.toml and live HotkeyMonitor refresh
-    // as when this is changed in Modes.
     var directMode: Mode?
-    var allModes: [Mode] = []
-    var onUpdatePlainDictation: (Mode) -> Void = { _ in }
+    var onEditPlainDictation: () -> Void = {}
+
+    private var directTrigger: Mode.TriggerKey? { directMode?.triggerKeys.first }
+    private var directPressStyle: PressStyle {
+        PressStyle(rawValue: directTrigger?.pressStyle ?? "") ?? .holdOrTap
+    }
 
     var body: some View {
         Form {
-            Section("Dictation") {
-                if let directMode {
-                    let trigger = ModeTrigger(
-                        mode: directMode, allModes: allModes, onUpdate: onUpdatePlainDictation)
-                    ModeTriggerRow(
-                        mode: directMode, onUpdate: onUpdatePlainDictation, label: "Dictation key",
-                        accessibilityID: AccessibilityID.Settings.General.dictationTrigger)
-                    Text("Hold it to dictate in any app.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TriggerConflictLabel(conflict: trigger.conflict)
+            Section {
+                LabeledContent("Shortcut") {
+                    HStack(spacing: 10) {
+                        if let directTrigger {
+                            shortcutDisplay(directTrigger.key)
+                            Text(directPressStyle.title)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("None")
+                                .foregroundStyle(.secondary)
+                        }
+                        Button("Edit in Modes", action: onEditPlainDictation)
+                            .accessibilityLabel("Edit Plain Dictation in Modes")
+                            .accessibilityIdentifier(AccessibilityID.Settings.General.editPlainDictation)
+                    }
                 }
+            } header: {
+                Text("Plain Dictation")
+            } footer: {
+                Text(directTrigger == nil
+                    ? "Choose a shortcut and how it starts in Modes. Plain Dictation is used whenever no other mode matches."
+                    : "Plain Dictation is used whenever no other mode matches.")
             }
 
             Section("Shortcuts") {
@@ -87,6 +99,14 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder private func shortcutDisplay(_ key: String) -> some View {
+        if let descriptor = try? KeyDescriptor(parsing: key) {
+            KeycapView(descriptor: descriptor)
+        } else {
+            Text(key)
+        }
     }
 }
 

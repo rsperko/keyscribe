@@ -2,9 +2,9 @@ import XCTest
 
 @MainActor
 final class SidebarNavigationTests: XCTestCase {
-    private func launchIntoSettings() -> (XCUIApplication, XCUIElement) {
+    private func launchIntoSettings(additionalArguments: [String] = []) -> (XCUIApplication, XCUIElement) {
         let app = XCUIApplication(bundleIdentifier: "com.keyscribe.app.dev")
-        app.launchArguments = ["--open-settings"]
+        app.launchArguments = ["--open-settings"] + additionalArguments
         app.launch()
         let window = app.windows["KeyScribeDev Settings"]
         XCTAssertTrue(window.waitForExistence(timeout: 20),
@@ -23,7 +23,7 @@ final class SidebarNavigationTests: XCTestCase {
         let (_, window) = launchIntoSettings()
 
         let panes: [(sidebar: String, detailProbe: String)] = [
-            ("settings.sidebar.general", "settings.general.dictationTrigger"),
+            ("settings.sidebar.general", "settings.general.editPlainDictation"),
             ("settings.sidebar.speechModels", "settings.speech.list"),
             ("settings.sidebar.vocabulary", "settings.vocabulary.composer.term"),
             ("settings.sidebar.aiServices", "settings.ai.list"),
@@ -45,11 +45,10 @@ final class SidebarNavigationTests: XCTestCase {
         }
     }
 
-    func testGeneralShowsAllShortcutsWithoutExpandingAnything() {
+    func testGeneralShowsGlobalShortcutsWithoutExpandingAnything() {
         let (_, window) = launchIntoSettings()
 
         for id in [
-            "settings.general.dictationTrigger",
             "settings.general.addVocabularyShortcut",
             "settings.general.pasteLastShortcut",
         ] {
@@ -60,6 +59,32 @@ final class SidebarNavigationTests: XCTestCase {
 
         XCTAssertFalse(window.staticTexts["Both are also available from the KeyScribeDev menu."].exists,
                        "the Shortcuts section should not repeat menu availability")
+    }
+
+    func testGeneralPlainDictationSummaryOpensItsModeEditor() throws {
+        let config = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-general-ui-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        let (app, window) = launchIntoSettings(additionalArguments: ["--config-dir", config.path])
+        defer {
+            app.terminate()
+            try? FileManager.default.removeItem(at: config)
+        }
+
+        XCTAssertTrue(window.staticTexts["Hold to talk; tap to toggle"].waitForExistence(timeout: 8),
+                      "General should show the configured Plain Dictation press behavior")
+
+        let edit = element("settings.general.editPlainDictation", in: window)
+        XCTAssertTrue(edit.waitForExistence(timeout: 8))
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertEqual(edit.label, "Edit Plain Dictation in Modes")
+        edit.click()
+
+        let pressBehavior = element("mode.editor.pressStyle", in: window)
+        XCTAssertTrue(pressBehavior.waitForExistence(timeout: 8),
+                      "editing Plain Dictation from General should open its mode editor")
+        XCTAssertTrue(window.staticTexts["Plain Dictation is also used whenever no other mode matches."].exists,
+                      "the Plain Dictation system mode should be selected")
     }
 
     func testGeneralMakesDuringDictationScopeVisible() {

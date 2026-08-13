@@ -69,7 +69,7 @@ Recommended setup:
 1. Open KeyScribe > Settings > Modes > Plain Dictation.
 2. Choose the trigger you can use without thinking: `Fn (Globe)`, `Right-⌥`, `Right-⌘`, a
    custom shortcut, or an extra mouse button.
-3. Choose how the shortcut works: hold-or-tap, hold only, or tap to toggle.
+3. Choose how the shortcut works: **Hold to talk; tap to toggle**, **Hold to talk**, or **Tap to toggle**.
 4. Open KeyScribe > Settings > General and optionally assign a shortcut for `Paste Last Dictation`.
 
 Checkpoint: dictate into three apps you use every day. If one app behaves strangely, keep using

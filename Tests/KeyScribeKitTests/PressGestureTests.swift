@@ -3,6 +3,9 @@ import Testing
 
 struct PressGestureTests {
     @Test func instructionExplainsEveryPressStyle() {
+        #expect(PressStyle.holdOnly.title == "Hold to talk")
+        #expect(PressStyle.tapToToggle.title == "Tap to toggle")
+        #expect(PressStyle.holdOrTap.title == "Hold to talk; tap to toggle")
         #expect(PressStyle.holdOnly.instruction == "Hold the trigger while speaking, then release it to stop.")
         #expect(PressStyle.tapToToggle.instruction == "Tap once to start, then tap again to stop.")
         #expect(PressStyle.holdOrTap.instruction == "Hold and release, or tap to start and tap again to stop.")

@@ -364,8 +364,10 @@ struct SettingsRootView: View {
                     vocabularyShadowed: shadowed.contains(GlobalHotkey.vocabularyId),
                     pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId),
                     directMode: modes.modes.first(where: { $0.id == Mode.directId }),
-                    allModes: modes.modes,
-                    onUpdatePlainDictation: { modes.update($0) })
+                    onEditPlainDictation: {
+                        modes.selectedID = Mode.directId
+                        navigation.destination = .modes
+                    })
             case .speechModels:
                 SpeechModelsView(model: speechModels, settings: general)
             case .vocabulary:

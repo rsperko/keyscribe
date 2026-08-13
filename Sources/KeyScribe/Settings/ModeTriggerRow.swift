@@ -47,9 +47,9 @@ struct PressStyleRow: View {
 
     var body: some View {
         Picker("Press behavior", selection: selection) {
-            Text("Hold or tap").tag("hold-or-tap")
-            Text("Hold only").tag("hold-only")
-            Text("Tap to toggle").tag("tap-to-toggle")
+            Text(PressStyle.holdOrTap.title).tag(PressStyle.holdOrTap.rawValue)
+            Text(PressStyle.holdOnly.title).tag(PressStyle.holdOnly.rawValue)
+            Text(PressStyle.tapToToggle.title).tag(PressStyle.tapToToggle.rawValue)
         }
         .disabled(disabled)
         .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)

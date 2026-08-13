@@ -435,8 +435,10 @@ model name.
 
 Show the few choices a new user is most likely to need:
 
-- The dictation key, with a clearly exposed **Change key…** button. The key remains owned by Plain
-  Dictation (Direct mode), so the button routes to that editor instead of creating a second setting.
+- A **Plain Dictation** summary showing its current shortcut and press behavior, with a clearly exposed
+  **Edit in Modes** button. The shortcut remains owned by Plain Dictation (Direct mode), so the button
+  routes to that selected editor instead of creating a second setting. The compact row shows the key and
+  its press behavior; its footer explains that Plain Dictation is used whenever no other mode matches.
 - **During dictation** groups start/stop sounds, keeping the Mac awake, and muting other audio. Its
   footer makes clear that all three apply only while the user dictates.
 - Microphone choice, with a short explanation of following the Mac’s current input
@@ -620,10 +622,11 @@ sections:
 1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
-2. **Ways to use this mode** — keeps the shortcut and **Press behavior** together, followed by an
-   optional **Spoken phrase**. The phrase explanation says what the feature does and that the phrase
-   is removed from the result. Add controls precede saved phrases. Plain Dictation uses the same
-   shortcut structure and adds one concise explanation of its special fallback role.
+2. **How to start this mode** — keeps the shortcut and **Press behavior** together, followed by an
+   optional **Spoken phrase**. The combined press behavior is titled **Hold to talk; tap to toggle**,
+   presenting the two supported actions in parallel. The phrase explanation says what the feature does
+   and that the phrase is removed from the result. Add controls precede saved phrases. Plain Dictation
+   uses the same shortcut structure and adds one concise explanation of its special fallback role.
 3. **Where it works** — states whether the mode is available everywhere or only in listed places.
    **Add app or website…** precedes saved places and offers running apps, Choose from Applications…,
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
@@ -643,7 +646,7 @@ sections:
 7. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
    notes when TOML-only insertion or submit behavior is active.
 
-Plain Dictation stays deliberately small: **Ways to use this mode**, **Spoken editing**, and **Result handling**.
+Plain Dictation stays deliberately small: **How to start Plain Dictation**, **Spoken editing**, and **Result handling**.
 Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it
 does not imply an AI rewrite or a separate expert mode.
 

@@ -22,7 +22,7 @@ struct ModeRoutingSection: View {
     }
 
     var body: some View {
-        Section("Ways to use this mode") {
+        Section("How to start this mode") {
             ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
             PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
             TriggerConflictLabel(conflict: trigger.conflict)

@@ -31,7 +31,7 @@ struct ModeEditorView: View {
 
     private var systemBody: some View {
         Form {
-            Section("Ways to use this mode") {
+            Section("How to start Plain Dictation") {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 TriggerConflictLabel(conflict: trigger.conflict)

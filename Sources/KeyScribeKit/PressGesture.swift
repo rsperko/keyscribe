@@ -3,6 +3,14 @@ public enum PressStyle: String, Sendable {
     case holdOnly = "hold-only"
     case tapToToggle = "tap-to-toggle"
 
+    public var title: String {
+        switch self {
+        case .holdOnly: "Hold to talk"
+        case .tapToToggle: "Tap to toggle"
+        case .holdOrTap: "Hold to talk; tap to toggle"
+        }
+    }
+
     public var instruction: String {
         switch self {
         case .holdOnly: "Hold the trigger while speaking, then release it to stop."

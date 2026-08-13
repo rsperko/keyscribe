@@ -20,7 +20,7 @@ final class InventoryDumpTests: XCTestCase {
     }
 
     private let panes: [(pane: String, sidebar: String, probe: String)] = [
-        ("general", "settings.sidebar.general", "settings.general.dictationTrigger"),
+        ("general", "settings.sidebar.general", "settings.general.editPlainDictation"),
         ("speechModels", "settings.sidebar.speechModels", "settings.speech.list"),
         ("vocabulary", "settings.sidebar.vocabulary", "settings.vocabulary.composer.term"),
         ("aiServices", "settings.sidebar.aiServices", "settings.ai.list"),

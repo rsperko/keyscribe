@@ -36,7 +36,7 @@ enum AccessibilityID {
             static let pasteLastShortcut = "settings.general.pasteLastShortcut"
             static let historyEnabled = "settings.general.historyEnabled"
             static let retentionDays = "settings.general.retentionDays"
-            static let dictationTrigger = "settings.general.dictationTrigger"
+            static let editPlainDictation = "settings.general.editPlainDictation"
         }
 
         enum Speech {
@@ -327,7 +327,7 @@ enum AccessibilityID {
         Settings.General.sounds, Settings.General.keepDisplayAwake, Settings.General.muteSystemAudio,
         Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.addVocabularyShortcut,
         Settings.General.pasteLastShortcut, Settings.General.historyEnabled, Settings.General.retentionDays,
-        Settings.General.dictationTrigger,
+        Settings.General.editPlainDictation,
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.scopeList, Settings.Vocabulary.global,
