@@ -58,6 +58,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         controller?.cancel()
     }
 
+    private var launched = false
+
+    enum ReopenAction: Equatable {
+        case ignore
+        case firstRun
+        case settings
+    }
+
+    static func reopenAction(launched: Bool, firstRunActive: Bool) -> ReopenAction {
+        guard launched else { return .ignore }
+        return firstRunActive ? .firstRun : .settings
+    }
+
+    // An LSUIElement app has no Dock icon, so the status item is its only other entry point. When that
+    // item is gone -- hidden, dragged out of the menu bar, tucked away by a menu-bar manager, or pushed
+    // off a full/notched bar -- double-clicking the app is the user's remaining way in.
+    public func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
+        switch Self.reopenAction(launched: launched, firstRunActive: firstRun != nil) {
+        case .ignore: break
+        case .firstRun: firstRun?.surface()
+        case .settings: settingsController.present()
+        }
+        return true
+    }
+
     public func applicationDidFinishLaunching(_: Notification) {
         if let hudPreview {
             hud.render(hudPreview)
@@ -290,6 +315,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         lockMonitor = SessionLockMonitor { [weak self] in self?.controller.handleScreenLocked() }
+        launched = true
     }
 
     // First-run only: before KeyScribe seeds or loads any config, let an injected importer populate the

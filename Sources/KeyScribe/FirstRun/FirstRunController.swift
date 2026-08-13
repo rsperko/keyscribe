@@ -78,6 +78,15 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         }
     }
 
+    // Re-fronts the wizard for a reopen, without a matching pushRegular: `present` already took the
+    // activation-policy hold that `complete` releases, so pushing again here would strand it.
+    func surface() {
+        guard let window else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
     // Single teardown for both finish and manual close. Stopping the permission poll matters: its task
     // strongly retains the model, so without this a window closed on the permissions step keeps the
     // onboarding graph alive doing 1 Hz work forever. Idempotent — finish closes the window, re-entering

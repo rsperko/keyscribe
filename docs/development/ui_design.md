@@ -267,6 +267,18 @@ The menu bar is the app’s control center while keeping the normal interaction 
 Opening it must answer: Is KeyScribe ready? What will the next dictation do? Where can I change
 that?
 
+### Reopening when the icon is unreachable
+
+The status item is the control center, but it must never be the *only* way in. KeyScribe has no Dock
+icon, so a user whose icon is not reachable — hidden behind the notch, pushed off a full menu bar,
+tucked away by a menu-bar manager, or dragged out of the bar — would otherwise have no way to open
+Settings at all. Reopening the app (double-clicking it in Finder, which macOS delivers to the running
+instance rather than launching a second copy) therefore opens Settings. If onboarding is still open,
+reopening re-fronts that window instead, so the wizard is never buried under Settings.
+
+This is a reachability guarantee, not a repair: it does not un-hide the status item, and KeyScribe
+never overrides a deliberate hide by forcing the item visible.
+
 ### Menu structure
 
 ```

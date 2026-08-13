@@ -7,6 +7,19 @@
 KeyScribe is a menu-bar app. Look for the waveform glyph in the macOS menu bar. Open the menu from
 there to reach Settings, History, speech models, and mode choices.
 
+### I cannot find the KeyScribe icon in my menu bar.
+
+**Double-click KeyScribe in Applications.** It is already running, so this opens Settings rather
+than starting a second copy — that works no matter why the icon is missing.
+
+The usual cause is that the menu bar has run out of room. On a Mac with a notch, icons that do not
+fit disappear behind it — and because the frontmost app's own menus take the space on the left,
+switching to an app with a lot of menus can push icons under the notch that were visible a moment
+earlier. Quitting another menu-bar app, or switching to an app with fewer menus, brings it back. A
+menu-bar manager such as Bartender, Ice, or Vanilla may also be hiding it — check that app's own
+settings. Dictation keeps working the whole time; the trigger key does not depend on the icon being
+visible.
+
 ### The Globe (Fn) key triggers Emoji or Apple Dictation.
 
 The Globe key is mapped to a system action. Either set it to **"Do Nothing"** in **System Settings >
