@@ -129,7 +129,7 @@ only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-swift-test b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+PRE_CHECKS=" a-deps a-swift-test b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -178,7 +178,7 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-swift-test a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
+REQ_CORE="a-deps a-swift-test a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -210,6 +210,20 @@ chk_a_swift_test() {
   fi
 }
 guard a-swift-test "$(sig_source)" chk_a_swift_test
+
+chk_a_deps() {
+  # An upstream dep can re-upload a binaryTarget asset in place (moonshine-ai did on 2026-08-13),
+  # which leaves OUR pin declaring a checksum the live bytes no longer match. A warm .build hides
+  # it completely — it only bites a fresh checkout, i.e. downstream. Download-free: compares the
+  # GitHub release API's per-asset digest against the pinned manifest's declared checksum.
+  if timeout --foreground 300 ./scripts/check-binary-artifacts.py --quiet >/tmp/preflight-deps.log 2>&1; then
+    result pass "binary deps — pinned checksums match live upstream assets"
+  else
+    cat /tmp/preflight-deps.log
+    result fail "binary deps mutated upstream — a fresh checkout cannot resolve; see /tmp/preflight-deps.log"
+  fi
+}
+guard a-deps "$(sig_source)" chk_a_deps
 
 chk_a_artifact() {
   if [ -d "$APP_PATH" ]; then result pass "artifact present: $APP"

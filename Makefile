@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test preflight preflight-pre setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test check-deps fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -35,6 +35,12 @@ cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then c
 
 test: ## Run the full test suite
 	swift test
+
+check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
+	./scripts/check-binary-artifacts.py
+
+fix-deps: ## Clear SwiftPM's stale binary-artifact caches after an upstream asset changed
+	./scripts/clear-binary-artifact-cache.sh
 
 preflight: ## Release gate: automated build/packaging + functional checks, then human smoke (writes the publish stamp)
 	./scripts/preflight.sh

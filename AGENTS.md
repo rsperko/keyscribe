@@ -707,7 +707,40 @@ One fork + three upstream deps (one a pinned binary); the fork works live and co
   means upstreaming the patch (it no longer cherry-picks — upstream restructured the manifest).
 - **Moonshine** → `moonshine-ai/moonshine-swift` (no fork): ONNX Runtime ships as a prebuilt
   `Moonshine.xcframework` binaryTarget. No on-device bias path, so `supportsRecognitionBias = false`
-  and dictionary recovery handles close matches after transcription.
+  and dictionary recovery handles close matches after transcription. **Pinned by `revision:`, not by
+  version — upstream MOVES its tags** (see "Upstream dependency mutation" below).
+
+**Upstream dependency mutation — a green local build proves nothing about a fresh checkout.** On
+2026-08-13 moonshine-ai **re-uploaded the `v0.1.2` release asset in place** (`Moonshine.xcframework.zip`,
+`ae9074b2…` → `42311465…`) and then **moved the `v0.1.2` tag** (`26e0335a` → `2ff906a3`) so their
+`binaryTarget` checksum matched the new bytes. Our `Package.resolved` still pinned the pre-move commit,
+whose manifest declares the old checksum — so **every fresh checkout died at `swift package resolve`**
+while every warm `.build` on a dev machine kept building happily. That asymmetry is the whole hazard:
+this class of breakage is invisible locally and only ever reported by downstream.
+
+- **Detect:** `make check-deps` (`scripts/check-binary-artifacts.py`) — for every pinned dep it compares
+  the GitHub release API's per-asset `digest` against the checksum declared in that dep's **pinned**
+  manifest, and separately flags a version tag that has moved off the pinned revision. **Download-free**
+  (no ~1 GB xcframework fetch), so it is cheap enough to gate on: it runs as preflight's `a-deps`, in the
+  fail-fast `--pre` set and in `REQ_CORE`. A mutated asset is a hard fail; a moved tag is a warning
+  (the pin still builds — re-pin deliberately).
+- **Prevent:** pin engine deps by **`revision:`**, never by version, when upstream has shown it will move
+  a tag. A version pin resolves *through* a mutable tag; a revision names the commit outright.
+- **Recover — and this is the step that surprises everyone:** pulling the corrected pin is **not enough**
+  on any machine that already built. SwiftPM refuses to re-download while it holds a record of the old
+  checksum, and its **global download cache is keyed by URL — which did not change — so it still serves
+  the OLD bytes**:
+  `error: artifact of binary target 'Moonshine' has changed checksum; this is a potential security risk
+  so the new artifact won't be downloaded`. Three places must be cleared —
+  `.build/artifacts/<identity>`, that identity's entry in `.build/workspace-state.json`, and
+  `~/Library/Caches/org.swift.swiftpm/artifacts/<url-with-non-alphanumerics-underscored>`. Run
+  **`make fix-deps`** (`scripts/clear-binary-artifact-cache.sh`; dry run by default, `--apply` to delete),
+  then `swift package resolve`. **CI runners that cache `~/Library/Caches/org.swift.swiftpm` stay broken
+  until that key is evicted** — clearing the repo checkout alone does nothing.
+- **Footgun:** `swift package update <dep>` does **not** fix a stale pin whose version constraint is still
+  satisfied — it left `26e0335a` in place — and it **drops the conditional Sparkle pin** from
+  `Package.resolved`, since Sparkle only joins the graph under `KEYSCRIBE_SPARKLE=1`. Edit the revision
+  directly and re-resolve; check `git diff Package.resolved` for a vanished Sparkle block before committing.
 
 **MLX metallib is a hard runtime requirement — and the kernel set is load-bearing.** Qwen3-ASR (MLX)
 crashes ("Failed to load the default metallib") without `mlx.metallib` beside the executable, because
