@@ -249,6 +249,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
+            onPreviewSound: { [weak self] volume in
+                self?.controller.previewStartCue(volumePercent: volume)
+            },
             detectProblems: { [weak self] in self?.currentProblems() ?? [] },
             accessibilityTapActive: { [weak self] in self?.hotkey?.isTapActive ?? false },
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },

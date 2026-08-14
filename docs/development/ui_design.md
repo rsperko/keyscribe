@@ -439,8 +439,18 @@ Show the few choices a new user is most likely to need:
   **Edit in Modes** button. The shortcut remains owned by Plain Dictation (Direct mode), so the button
   routes to that selected editor instead of creating a second setting. The compact row shows the key and
   its press behavior; its footer explains that Plain Dictation is used whenever no other mode matches.
-- **During dictation** groups start/stop sounds, keeping the Mac awake, and muting other audio. Its
-  footer makes clear that all three apply only while the user dictates.
+- **Sound feedback** controls all dictation sounds: starting, completing, canceling, and needing
+  attention. Its **Play dictation sounds** switch reveals a continuous **Dictation sounds volume**
+  slider with quiet/loud speaker endpoints; turning sounds off hides the slider without resetting its
+  value. Maximum plays the sounds at full level and the Mac's output volume still applies. The slider
+  defaults to maximum, uses a perceptual attenuation taper, and plays one start-sound preview at the
+  selected volume when released — releasing the slider is the only preview, deliberately: hearing the
+  level is a consequence of setting it, not a separate button to press. The quiet endpoint reads as a
+  crossed-out speaker at zero, where sounds are on but silent; at zero the start cue is skipped outright,
+  so recording begins as immediately as it does with sounds switched off (the cue hold exists to fence an
+  audible cue out of the take, and there is nothing to fence).
+- **During dictation** groups keeping the Mac awake and muting other audio. Its footer makes clear that
+  both apply only while the user dictates.
 - Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
 - (History enable and retention live in the **History** pane, not here.)

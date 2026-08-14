@@ -28,6 +28,7 @@ enum AccessibilityID {
 
         enum General {
             static let sounds = "settings.general.sounds"
+            static let soundVolume = "settings.general.soundVolume"
             static let keepDisplayAwake = "settings.general.keepDisplayAwake"
             static let muteSystemAudio = "settings.general.muteSystemAudio"
             static let inputDevice = "settings.general.inputDevice"
@@ -325,7 +326,8 @@ enum AccessibilityID {
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
         Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.history, Settings.Sidebar.permissions,
         Settings.Sidebar.advanced,
-        Settings.General.sounds, Settings.General.keepDisplayAwake, Settings.General.muteSystemAudio,
+        Settings.General.sounds, Settings.General.soundVolume,
+        Settings.General.keepDisplayAwake, Settings.General.muteSystemAudio,
         Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.addVocabularyShortcut,
         Settings.General.pasteLastShortcut, Settings.General.historyEnabled, Settings.General.retentionDays,
         Settings.General.editPlainDictation,

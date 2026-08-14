@@ -541,6 +541,8 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 mute_system_audio = true        # ducks other audio (FaceTime-style, cannot strand); lands after the start sound, instant when sounds = false
 keep_display_awake = true
 sounds = true                   # start/end sounds
+sound_volume = 100             # relative dictation-sound level; 100 = full cue level, 0 = silent (0 also
+                                #   skips the start cue, so capture admits with no cue hold)
 
 [history]
 enabled = true

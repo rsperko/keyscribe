@@ -43,6 +43,10 @@ final class DuringDictationEffects {
     // Test seam: forces `begin`'s reported cue length without the bundled asset, so the cue-overlap hold
     // path is exercisable under `swift test`. nil in production → real cue duration.
     private let startCueDurationOverride: TimeInterval?
+    // Test seam: supplies the cue instance. `swift test` runs against the xctest bundle, which carries no
+    // start-cue.wav, so without this the start cue never reaches `play` and its volume goes unverified.
+    private let loadStartCueSound: () -> NSSound?
+    private let playSound: (NSSound, Float) -> Void
 
     init(
         defaultOutputDeviceID: @escaping () -> AudioDeviceID? = SystemOutputAudio.defaultOutputDeviceID,
@@ -53,13 +57,23 @@ final class DuringDictationEffects {
         // While recording, re-check the default output this often and duck it if the route moved to a
         // not-yet-ducked device (the Bluetooth A2DP<->HFP shift).
         duckFollowInterval: Double = 0.3,
-        startCueDurationOverride: TimeInterval? = nil
+        startCueDurationOverride: TimeInterval? = nil,
+        loadStartCueSound: @escaping () -> NSSound? = {
+            guard let url = Bundle.main.url(forResource: "start-cue", withExtension: "wav") else { return nil }
+            return NSSound(contentsOf: url, byReference: false)
+        },
+        playSound: @escaping (NSSound, Float) -> Void = { sound, volume in
+            sound.volume = volume
+            sound.play()
+        }
     ) {
         self.defaultOutputDeviceID = defaultOutputDeviceID
         self.setDuck = setDuck
         self.reapplyDelays = reapplyDelays
         self.duckFollowInterval = duckFollowInterval
         self.startCueDurationOverride = startCueDurationOverride
+        self.loadStartCueSound = loadStartCueSound
+        self.playSound = playSound
     }
     // NSSound(named:) re-resolves on each call; cache one instance per cue so begin/end don't re-resolve
     // every dictation.
@@ -72,18 +86,29 @@ final class DuringDictationEffects {
         return sound
     }
 
-    // First-party ~110ms cue in Resources/ (NOT a system sound): short so gating capture on it costs
-    // little, and original so the GPLv3 bundle ships no redistributed Apple audio. Loaded eagerly
-    // (byReference: false) and cached so play() never touches disk. Absent (unbundled dev run) → no cue.
+    // First-party ~62ms cue in Resources/ (NOT a system sound): short so gating capture on it costs
+    // little, and original so the GPLv3 bundle ships no redistributed Apple audio. Its length IS the
+    // admission hold `begin` returns, so trimming inaudible tail off the asset is a latency fix — see
+    // make-start-cue.py. Loaded eagerly (byReference: false) and cached so play() never touches disk.
+    // Absent (unbundled dev run) → no cue.
     private func startCueSound() -> NSSound? {
         if let cached = soundCache[Self.startCueKey] { return cached }
-        guard let url = Bundle.main.url(forResource: "start-cue", withExtension: "wav"),
-              let sound = NSSound(contentsOf: url, byReference: false) else { return nil }
+        guard let sound = loadStartCueSound() else { return nil }
         soundCache[Self.startCueKey] = sound
         return sound
     }
 
     private static let startCueKey = "__start-cue"
+
+    private func play(_ sound: NSSound?, volumePercent: Int) {
+        guard let sound else { return }
+        let position = Float(min(max(volumePercent, 0), 100)) / 100
+        playSound(sound, position * position)
+    }
+
+    func previewStartCue(volumePercent: Int) {
+        play(startCueSound(), volumePercent: volumePercent)
+    }
 
     // Returns how long the caller should defer capture so the start cue stays out of the recording: the
     // cue's duration when one plays, else 0 (sounds off / cue absent). The duck follows the same deferral.
@@ -96,9 +121,14 @@ final class DuringDictationEffects {
         // A2DP->HFP switch until capture comes up. Cancelled-before-capture bumps generation → duck dropped.
         pendingDuckGeneration = config.muteSystemAudio ? generation : nil
         guard config.sounds else { return 0 }
+        // A cue at zero volume is silent, so there is nothing to keep out of the recording: skip it and let
+        // capture admit immediately rather than holding the mic shut for inaudible audio. The hold exists to
+        // fence the cue out of the take, not as a fixed ceremony. Exact zero only — a threshold would need a
+        // magic "inaudible enough" constant, and the slider already reaches 0 for anyone who wants silence.
+        guard config.soundVolumePercent > 0 else { return 0 }
         if let startCueDurationOverride { return startCueDurationOverride }
         let startCue = startCueSound()
-        startCue?.play()
+        play(startCue, volumePercent: config.soundVolumePercent)
         return startCue?.duration ?? 0
     }
 
@@ -121,7 +151,7 @@ final class DuringDictationEffects {
     // dictation's display assertion, unduck its output, and bump the generation out from under it.
     func alert(_ config: Settings.DuringDictation, cue: EndCue) {
         guard config.sounds else { return }
-        sound(named: cue.soundName)?.play()
+        play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent)
     }
 
     func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
@@ -129,7 +159,7 @@ final class DuringDictationEffects {
         pendingDuckGeneration = nil
         releaseDisplayAssertion()
         restoreOutput()
-        if config.sounds { sound(named: cue.soundName)?.play() }
+        if config.sounds { play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent) }
     }
 
     private func acquireDisplayAssertion() {

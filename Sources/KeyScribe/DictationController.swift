@@ -278,6 +278,11 @@ final class DictationController {
         if settings.stt.eviction != previousEviction { reconcileCaptureWarmth() }
     }
 
+    func previewStartCue(volumePercent: Int) {
+        guard !isBusy else { return }
+        effects.previewStartCue(volumePercent: volumePercent)
+    }
+
     private func reconcileCaptureWarmth() {
         guard !isBusy else { return }
         if EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) {

@@ -96,6 +96,49 @@ final class SidebarNavigationTests: XCTestCase {
                       "the audio and system options should explain their scope")
     }
 
+    func testCueVolumeAppearsOnlyWhileSoundsAreEnabled() throws {
+        let config = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-sound-volume-ui-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        let (app, window) = launchIntoSettings(additionalArguments: ["--config-dir", config.path])
+        defer {
+            app.terminate()
+            try? FileManager.default.removeItem(at: config)
+        }
+
+        let sounds = element("settings.general.sounds", in: window)
+        let volume = element("settings.general.soundVolume", in: window)
+        XCTAssertTrue(sounds.waitForExistence(timeout: 8))
+        XCTAssertTrue(window.staticTexts["Sound feedback"].exists)
+        XCTAssertTrue(window.staticTexts["Play dictation sounds"].exists)
+        XCTAssertTrue(window.staticTexts["Dictation sounds volume"].exists)
+        // A fragment, not the whole sentence: the footer's exact wording is copy, and pinning it verbatim
+        // (curly apostrophe included) makes every copy edit a test failure.
+        XCTAssertTrue(window.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Maximum plays them at full level")).firstMatch.exists)
+        XCTAssertTrue(volume.waitForExistence(timeout: 8), "sound volume should appear when sounds are on")
+
+        volume.adjust(toNormalizedSliderPosition: 0.25)
+        let afterDrag = try sliderValue(volume)
+        XCTAssertLessThan(afterDrag, 1, "the drag should have moved the slider off its maximum")
+
+        sounds.click()
+        XCTAssertFalse(volume.waitForExistence(timeout: 1), "sound volume should disappear when sounds are off")
+
+        sounds.click()
+        XCTAssertTrue(volume.waitForExistence(timeout: 3), "sound volume should come back when sounds return")
+        XCTAssertEqual(try sliderValue(volume), afterDrag, accuracy: 0.001,
+                       "hiding the slider must not reset the volume the user chose")
+    }
+
+    // A slider's AXValue is a CFNumber (verified live), so `value as? String` is ALWAYS nil and comparing
+    // two of them is nil == nil — an assertion that cannot fail. Unwrap the number instead, so a value that
+    // stops being readable fails the test rather than passing it vacuously.
+    private func sliderValue(_ element: XCUIElement) throws -> Double {
+        try XCTUnwrap(element.value as? NSNumber, "the volume slider must expose a numeric AX value")
+            .doubleValue
+    }
+
     func testAddAIServiceChooserHasVisibleCancelAction() {
         let (_, window) = launchIntoSettings()
 

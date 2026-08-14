@@ -34,7 +34,7 @@ struct ShortcutWell: View {
                 RecorderButton(
                     key: $key, hint: $hint, recording: $recording,
                     profile: profile, recordToken: recordToken, recordingState: recordingState)
-                    .frame(width: 240, height: 24)
+                    .frame(width: SettingsMetrics.valueControlWidth, height: 24)
                     .accessibilityIdentifier(accessibilityID)
                 Menu {
                     Picker(selection: namedSelection, label: EmptyView()) {

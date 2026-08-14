@@ -1,6 +1,15 @@
 import SwiftUI
 import KeyScribeKit
 
+enum SettingsMetrics {
+    // The trailing value column's control width, shared so controls line up as one column instead of
+    // agreeing by coincidence.
+    static let valueControlWidth: CGFloat = 240
+    // A slider's min/max value labels sit INSIDE its frame, so matching valueControlWidth exactly leaves a
+    // visibly shorter track than the wells beside it. The extra 20% buys the track back and then some.
+    static let volumeSliderWidth: CGFloat = valueControlWidth * 1.2
+}
+
 struct DisclosureSection<Label: View, Content: View>: View {
     @Binding var isExpanded: Bool
     // A child needing attention must never sit hidden behind a collapsed header, so the section

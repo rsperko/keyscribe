@@ -121,17 +121,23 @@ public struct Settings: Codable, Equatable, Sendable {
         public var muteSystemAudio: Bool
         public var keepDisplayAwake: Bool
         public var sounds: Bool
+        public var soundVolumePercent: Int
 
         enum CodingKeys: String, CodingKey {
             case muteSystemAudio = "mute_system_audio"
             case keepDisplayAwake = "keep_display_awake"
             case sounds
+            case soundVolumePercent = "sound_volume"
         }
 
-        public init(muteSystemAudio: Bool, keepDisplayAwake: Bool, sounds: Bool) {
+        public init(
+            muteSystemAudio: Bool, keepDisplayAwake: Bool, sounds: Bool,
+            soundVolumePercent: Int = 100
+        ) {
             self.muteSystemAudio = muteSystemAudio
             self.keepDisplayAwake = keepDisplayAwake
             self.sounds = sounds
+            self.soundVolumePercent = soundVolumePercent
         }
 
         public init(from decoder: Decoder) throws {
@@ -140,6 +146,8 @@ public struct Settings: Codable, Equatable, Sendable {
             muteSystemAudio = try c.decodeIfPresent(Bool.self, forKey: .muteSystemAudio) ?? d.muteSystemAudio
             keepDisplayAwake = try c.decodeIfPresent(Bool.self, forKey: .keepDisplayAwake) ?? d.keepDisplayAwake
             sounds = try c.decodeIfPresent(Bool.self, forKey: .sounds) ?? d.sounds
+            soundVolumePercent = try c.decodeIfPresent(Int.self, forKey: .soundVolumePercent)
+                ?? d.soundVolumePercent
         }
     }
 
@@ -300,7 +308,8 @@ public struct Settings: Codable, Equatable, Sendable {
         schemaVersion: 1,
         loadOnLogin: false,
         stt: STT(engine: "parakeet", eviction: .fastest),
-        duringDictation: DuringDictation(muteSystemAudio: true, keepDisplayAwake: true, sounds: true),
+        duringDictation: DuringDictation(
+            muteSystemAudio: true, keepDisplayAwake: true, sounds: true, soundVolumePercent: 100),
         history: History(enabled: true, retentionDays: 7),
         shortcuts: Shortcuts(),
         audio: Audio(),
@@ -310,6 +319,9 @@ public struct Settings: Codable, Equatable, Sendable {
     func validate() throws {
         guard history.retentionDays >= 0 else {
             throw ConfigError.invalid("history.retention_days must be >= 0")
+        }
+        guard (0...100).contains(duringDictation.soundVolumePercent) else {
+            throw ConfigError.invalid("during_dictation.sound_volume must be 0...100")
         }
         // The upper bound is not cosmetic: keepCapturesMaxBytes multiplies by a MiB, and Swift traps on Int64
         // overflow — so an absurd-but-positive value would crash the app at launch, when publish() reads it.

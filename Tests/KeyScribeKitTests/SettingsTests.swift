@@ -57,13 +57,34 @@ struct SettingsTests {
         #expect(try SettingsStore.decode(from: encoded) == Settings.defaults)
     }
 
+    @Test func soundVolumeUsesUnattenuatedDefaultAndRoundTrips() throws {
+        let existing = try SettingsStore.decode(from: "schema_version = 1\n[during_dictation]\nsounds = true")
+        #expect(existing.duringDictation.soundVolumePercent == 100)
+        #expect(Settings.defaults.duringDictation.soundVolumePercent == 100)
+        #expect(Settings.DuringDictation(
+            muteSystemAudio: false, keepDisplayAwake: false, sounds: true
+        ).soundVolumePercent == 100)
+
+        var changed = existing
+        changed.duringDictation.soundVolumePercent = 35
+        let encoded = try SettingsStore.encode(changed)
+        #expect(try SettingsStore.decode(from: encoded).duringDictation.soundVolumePercent == 35)
+    }
+
+    @Test(arguments: [-1, 101])
+    func soundVolumeOutsidePercentageRangeIsRejected(_ volume: Int) {
+        let toml = "schema_version = 1\n[during_dictation]\nsound_volume = \(volume)"
+        #expect(throws: ConfigError.self) { try SettingsStore.decode(from: toml) }
+    }
+
     // Every field differs from defaults, catching a snake_case encode-key regression the
     // defaults-only round-trip would miss.
     @Test func nonDefaultSettingsRoundTrip() throws {
         let s = Settings(
             schemaVersion: 1, loadOnLogin: true,
             stt: .init(engine: "whisper", eviction: .fastest, evictionIdleSeconds: 45),
-            duringDictation: .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false),
+            duringDictation: .init(
+                muteSystemAudio: false, keepDisplayAwake: false, sounds: false, soundVolumePercent: 25),
             history: .init(enabled: false, retentionDays: 30),
             audio: .init(inputDeviceUID: "BuiltInMicrophoneDevice", inputDeviceName: "Built-in Microphone"))
         #expect(try SettingsStore.decode(from: SettingsStore.encode(s)) == s)

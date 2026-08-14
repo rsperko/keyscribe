@@ -61,7 +61,7 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Picker("Use this microphone", selection: $model.inputDeviceUID) {
+                Picker("Prefer this microphone", selection: $model.inputDeviceUID) {
                     ForEach(model.inputDeviceOptions) { option in
                         Text(option.label).tag(option.id)
                     }
@@ -78,8 +78,29 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle("Play start and stop sounds", isOn: $model.sounds)
+                Toggle("Play dictation sounds", isOn: $model.sounds)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.sounds)
+                if model.sounds {
+                    LabeledContent("Dictation sounds volume") {
+                        Slider(
+                            value: $model.soundVolume, in: 0...1,
+                            onEditingChanged: model.soundVolumeEditingChanged,
+                            minimumValueLabel:
+                                Image(systemName: model.soundVolume > 0 ? "speaker.fill" : "speaker.slash.fill"),
+                            maximumValueLabel: Image(systemName: "speaker.wave.3.fill"),
+                            label: { Text("Dictation sounds volume") })
+                            .labelsHidden()
+                            .frame(width: SettingsMetrics.volumeSliderWidth)
+                            .accessibilityIdentifier(AccessibilityID.Settings.General.soundVolume)
+                    }
+                }
+            } header: {
+                Text("Sound feedback")
+            } footer: {
+                Text("Sounds mark when dictation starts, completes, is canceled, or needs attention. Maximum plays them at full level; your Mac’s output volume still applies.")
+            }
+
+            Section {
                 Toggle("Keep your Mac awake", isOn: $model.keepDisplayAwake)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.keepDisplayAwake)
                 Toggle("Mute all other audio", isOn: $model.muteSystemAudio)

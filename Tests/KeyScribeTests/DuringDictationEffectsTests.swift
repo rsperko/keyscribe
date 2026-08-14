@@ -1,4 +1,6 @@
+import AppKit
 import CoreAudio
+import Foundation
 import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
@@ -110,5 +112,113 @@ struct DuringDictationEffectsTests {
         try? await Task.sleep(for: .seconds(0.12))
 
         #expect(level == 0)
+    }
+
+    // Every sound the app plays — the start cue, the three end cues, and the settings preview — carries the
+    // configured volume. The start cue needs the injected asset: the xctest bundle has no start-cue.wav, so
+    // `play` would otherwise return early on a nil sound and this path would go unmeasured.
+    @Test func configuredVolumeIsAppliedToEveryDictationSound() {
+        var volumes: [Float] = []
+        let effects = DuringDictationEffects(
+            reapplyDelays: [], duckFollowInterval: 100,
+            loadStartCueSound: { NSSound(data: Self.silentWAV(seconds: 0.05)) },
+            playSound: { _, volume in volumes.append(volume) })
+        let config = Settings.DuringDictation(
+            muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 35)
+
+        effects.begin(config)
+        effects.alert(config, cue: .error)
+        effects.end(config, cue: .success)
+        effects.end(config, cue: .cancel)
+        effects.end(config, cue: .error)
+        effects.previewStartCue(volumePercent: 35)
+
+        #expect(volumes.count == 6)
+        #expect(volumes.allSatisfy { abs($0 - 0.1225) < 0.0001 })
+    }
+
+    // 0 and 100 are the ends users can actually reach on the slider, and the taper must hit them exactly:
+    // a max that is not 1.0 quietly attenuates the shipped cue level, and a 0 that is not silent is not off.
+    @Test(arguments: [(0, Float(0)), (50, 0.25), (100, 1)])
+    func volumeTaperIsExactAtTheSliderEnds(percent: Int, expected: Float) {
+        var volumes: [Float] = []
+        let effects = DuringDictationEffects(
+            reapplyDelays: [], duckFollowInterval: 100,
+            playSound: { _, volume in volumes.append(volume) })
+
+        effects.end(
+            Settings.DuringDictation(
+                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: percent),
+            cue: .success)
+
+        #expect(volumes == [expected])
+    }
+
+    // Zero volume means no audible cue, so there is nothing to fence out of the take: recording must admit
+    // immediately instead of paying the cue hold for silence. Same timing as sounds-off.
+    @Test func aSilentCueIsSkippedSoCaptureAdmitsImmediately() {
+        var played = 0
+        let effects = DuringDictationEffects(
+            reapplyDelays: [], duckFollowInterval: 100,
+            loadStartCueSound: { NSSound(data: Self.silentWAV(seconds: 0.05)) },
+            playSound: { _, _ in played += 1 })
+
+        let hold = effects.begin(
+            Settings.DuringDictation(
+                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 0))
+
+        #expect(hold == 0)
+        #expect(played == 0)
+    }
+
+    // One percent is still audible policy-wise, so it keeps the hold — the skip is exact-zero only, never a
+    // fuzzy "quiet enough" threshold that would let a real cue leak into the head of the recording.
+    @Test func theQuietestAudibleVolumeStillHoldsAdmission() {
+        let effects = DuringDictationEffects(
+            reapplyDelays: [], duckFollowInterval: 100,
+            loadStartCueSound: { NSSound(data: Self.silentWAV(seconds: 0.05)) },
+            playSound: { _, _ in })
+
+        let hold = effects.begin(
+            Settings.DuringDictation(
+                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 1))
+
+        #expect(hold > 0)
+    }
+
+    // The start cue's length is the capture-admission hold, so `begin` must report the asset's own duration.
+    @Test func beginReportsTheCueAssetDurationAsTheAdmissionHold() {
+        let effects = DuringDictationEffects(
+            reapplyDelays: [], duckFollowInterval: 100,
+            loadStartCueSound: { NSSound(data: Self.silentWAV(seconds: 0.05)) },
+            playSound: { _, _ in })
+
+        let hold = effects.begin(
+            Settings.DuringDictation(
+                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 100))
+
+        #expect(abs(hold - 0.05) < 0.005)
+    }
+
+    // Minimal 16-bit mono PCM WAV. NSSound rejects malformed data, so this must be a real container.
+    private static func silentWAV(seconds: Double, sampleRate: Int = 44_100) -> Data {
+        let frames = Int(Double(sampleRate) * seconds)
+        let dataBytes = frames * 2
+        var wav = Data()
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        wav.append(contentsOf: Array("RIFF".utf8))
+        append(UInt32(36 + dataBytes))
+        wav.append(contentsOf: Array("WAVEfmt ".utf8))
+        append(UInt32(16))                          // PCM header size
+        append(UInt16(1))                           // PCM
+        append(UInt16(1))                           // mono
+        append(UInt32(sampleRate))
+        append(UInt32(sampleRate * 2))              // byte rate
+        append(UInt16(2))                           // block align
+        append(UInt16(16))                          // bits per sample
+        wav.append(contentsOf: Array("data".utf8))
+        append(UInt32(dataBytes))
+        wav.append(Data(count: dataBytes))
+        return wav
     }
 }

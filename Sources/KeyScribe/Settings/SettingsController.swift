@@ -117,6 +117,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         historyStore: HistoryStore,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
+        onPreviewSound: @escaping (Int) -> Void,
         detectProblems: @escaping () -> [SettingsProblem],
         accessibilityTapActive: @escaping () -> Bool = { true },
         onRelaunch: @escaping () -> Void = {},
@@ -127,7 +128,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
         self.onRelaunch = onRelaunch
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
-            onResetHUDPosition: onResetHUDPosition, onEraseAllData: onEraseAllData)
+            onResetHUDPosition: onResetHUDPosition, onPreviewSound: onPreviewSound,
+            onEraseAllData: onEraseAllData)
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
@@ -521,6 +523,7 @@ private struct MaintenanceSettingsView: View {
 @MainActor
 final class SettingsModel: ObservableObject {
     @Published var sounds: Bool { didSet { persist() } }
+    @Published var soundVolume: Double { didSet { if !draggingSoundVolume { persist() } } }
     @Published var keepDisplayAwake: Bool { didSet { persist() } }
     @Published var muteSystemAudio: Bool { didSet { persist() } }
     @Published var loadOnLogin: Bool { didSet { persist() } }
@@ -625,22 +628,33 @@ final class SettingsModel: ObservableObject {
     private let onChange: (Settings) -> Void
     private let onReload: () -> Void
     private let onResetHUDPosition: () -> Void
+    private let onPreviewSound: (Int) -> Void
     private let onEraseAllData: () -> Void
     private var audioSnapshot: (loadedAt: Date, devices: [AudioInputDevices.Device], systemDefault: AudioInputDevices.Device?)?
     private static let audioSnapshotTTL: TimeInterval = 1
     private var loading = false
+    // A continuous Slider writes its binding on every drag tick, and each persist() rewrites settings.toml
+    // AND runs applySettingsEffects — which re-registers the Carbon hotkeys and the mouse tap. Hold the
+    // writes until the drag ends, the way CommittedTextField commits on end-of-edit. The guard sits on
+    // soundVolume's own didSet, NOT inside persist(): a drag whose end never arrives (the window closed
+    // mid-gesture) would otherwise strand the flag and silently block every other setting from saving.
+    // Narrowed like this, the worst case is that the in-flight volume rides along on the next edit.
+    private var draggingSoundVolume = false
 
     init(
         settings: Settings, onChange: @escaping (Settings) -> Void,
         onReload: @escaping () -> Void, onResetHUDPosition: @escaping () -> Void,
+        onPreviewSound: @escaping (Int) -> Void = { _ in },
         onEraseAllData: @escaping () -> Void = {}
     ) {
         self.settings = settings
         self.onChange = onChange
         self.onReload = onReload
         self.onResetHUDPosition = onResetHUDPosition
+        self.onPreviewSound = onPreviewSound
         self.onEraseAllData = onEraseAllData
         sounds = settings.duringDictation.sounds
+        soundVolume = Double(settings.duringDictation.soundVolumePercent) / 100
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
         muteSystemAudio = settings.duringDictation.muteSystemAudio
         loadOnLogin = settings.loadOnLogin
@@ -668,6 +682,7 @@ final class SettingsModel: ObservableObject {
         loading = true
         self.settings = settings
         sounds = settings.duringDictation.sounds
+        soundVolume = Double(settings.duringDictation.soundVolumePercent) / 100
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
         muteSystemAudio = settings.duringDictation.muteSystemAudio
         loadOnLogin = settings.loadOnLogin
@@ -705,6 +720,17 @@ final class SettingsModel: ObservableObject {
 
     func resetHUDPosition() { onResetHUDPosition() }
 
+    func soundVolumeEditingChanged(_ editing: Bool) {
+        draggingSoundVolume = editing
+        guard !editing else { return }
+        persist()
+        previewSound()
+    }
+
+    func previewSound() { onPreviewSound(soundVolumePercent) }
+
+    private var soundVolumePercent: Int { Int((soundVolume * 100).rounded()) }
+
     func eraseAllData() { onEraseAllData() }
 
     private func currentAudioSnapshot() -> (devices: [AudioInputDevices.Device], systemDefault: AudioInputDevices.Device?) {
@@ -719,7 +745,9 @@ final class SettingsModel: ObservableObject {
 
     private func persist() {
         guard !loading else { return }
-        settings.duringDictation = .init(muteSystemAudio: muteSystemAudio, keepDisplayAwake: keepDisplayAwake, sounds: sounds)
+        settings.duringDictation = .init(
+            muteSystemAudio: muteSystemAudio, keepDisplayAwake: keepDisplayAwake,
+            sounds: sounds, soundVolumePercent: soundVolumePercent)
         settings.loadOnLogin = loadOnLogin
         settings.history = .init(enabled: historyEnabled, retentionDays: retentionDays)
         settings.stt.eviction = Eviction(rawValue: eviction) ?? .fastest
