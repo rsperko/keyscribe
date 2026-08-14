@@ -113,9 +113,12 @@ final class SidebarNavigationTests: XCTestCase {
         XCTAssertTrue(window.staticTexts["Play dictation sounds"].exists)
         XCTAssertTrue(window.staticTexts["Dictation sounds volume"].exists)
         // A fragment, not the whole sentence: the footer's exact wording is copy, and pinning it verbatim
-        // (curly apostrophe included) makes every copy edit a test failure.
+        // (curly apostrophe included) makes every copy edit a test failure. Matched on `value`, NOT `label`:
+        // a SwiftUI Text carries its string in the AX value here and its label is empty, so a label
+        // predicate silently matches nothing.
         XCTAssertTrue(window.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "Maximum plays them at full level")).firstMatch.exists)
+            NSPredicate(format: "value CONTAINS %@", "Maximum plays them at full level")).firstMatch.exists,
+                      "the Sound feedback footer should explain what maximum means")
         XCTAssertTrue(volume.waitForExistence(timeout: 8), "sound volume should appear when sounds are on")
 
         volume.adjust(toNormalizedSliderPosition: 0.25)
