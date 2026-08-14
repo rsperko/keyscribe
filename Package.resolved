@@ -41,7 +41,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/moonshine-ai/moonshine-swift.git",
       "state" : {
-        "revision" : "26e0335aa3ef82109796beffda385a64bb9b47b5",
+        "revision" : "2ff906a30ae17b7f263d55d8465dd5e2501cfefc",
         "version" : "0.1.2"
       }
     },
