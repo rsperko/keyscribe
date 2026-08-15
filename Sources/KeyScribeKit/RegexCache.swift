@@ -28,10 +28,21 @@ public enum RegexCache {
         return compiled
     }
 
+    // Memoized like the compiled regexes above, and for the same reason: routing asks the same handful of
+    // config patterns repeatedly within one dictation (ModeResolver.requiresURLContext walks every mode's
+    // constraints), and re-deriving the verdict each time re-scanned the whole pattern on the main actor.
+    nonisolated(unsafe) private static var safetyVerdicts: [String: Bool] = [:]
+
     public static func routingRegex(
         _ pattern: String, options: NSRegularExpression.Options = []
     ) -> NSRegularExpression? {
-        guard ReplacementSafety.isSafe(pattern) else { return nil }
+        let safe = lock.withLock { safetyVerdicts[pattern] }
+            ?? {
+                let verdict = ReplacementSafety.isSafe(pattern)
+                lock.withLock { safetyVerdicts[pattern] = verdict }
+                return verdict
+            }()
+        guard safe else { return nil }
         return regex(pattern, options: options)
     }
 

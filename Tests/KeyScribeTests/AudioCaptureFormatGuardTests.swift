@@ -51,6 +51,46 @@ struct CaptureReplacementUnitStartTests {
             generation: 4, currentGeneration: 4, captureActive: false))
     }
 
+    // A device that has momentarily gone away mid-route-change is the NORMAL case this restart exists for,
+    // so it must retry inside the same bounded budget rather than declaring the take lost on the first
+    // empty read. Only running out of attempts is fatal.
+    @Test func aMomentarilyAbsentDeviceRetriesRatherThanLosingTheTake() {
+        #expect(AudioCapture.midRecordingRestartDecision(
+            attempts: 1, maxAttempts: 5, hasDevice: false) == .retryLater)
+        #expect(AudioCapture.midRecordingRestartDecision(
+            attempts: 5, maxAttempts: 5, hasDevice: false) == .retryLater)
+    }
+
+    @Test func anAvailableDeviceRestartsImmediately() {
+        #expect(AudioCapture.midRecordingRestartDecision(
+            attempts: 1, maxAttempts: 5, hasDevice: true) == .restart)
+    }
+
+    // Past the cap the route is genuinely gone: no more buffers will arrive, so the recording must be
+    // reported lost instead of silently finalizing whatever prefix reached the file.
+    @Test func exhaustedRestartsReportTheCaptureLost() {
+        #expect(AudioCapture.midRecordingRestartDecision(
+            attempts: 6, maxAttempts: 5, hasDevice: true) == .captureLost)
+        #expect(AudioCapture.midRecordingRestartDecision(
+            attempts: 6, maxAttempts: 5, hasDevice: false) == .captureLost)
+    }
+
+    // The meter is PULLED at ~30 Hz, so nothing repaints it when buffers stop — it holds the last real
+    // level and reads as a live mic on a route that has died.
+    @Test func theMeterGoesStaleOnceBuffersStopArriving() {
+        let timebase = mach_timebase_info(numer: 1, denom: 1)   // 1 tick == 1 ns
+        let start: UInt64 = 1_000_000_000
+        #expect(AudioCapture.meterIsFresh(
+            nowTicks: start + 100_000_000, lastBufferTicks: start, timebase: timebase))
+        #expect(!AudioCapture.meterIsFresh(
+            nowTicks: start + 900_000_000, lastBufferTicks: start, timebase: timebase))
+    }
+
+    @Test func aClockThatDoesNotAdvanceIsTreatedAsFresh() {
+        let timebase = mach_timebase_info(numer: 1, denom: 1)
+        #expect(AudioCapture.meterIsFresh(nowTicks: 500, lastBufferTicks: 1_000, timebase: timebase))
+    }
+
     @Test func staleRestartRetryDoesNotEnterNextCapture() {
         #expect(!AudioCapture.shouldRetryRestart(
             generation: 4, currentGeneration: 5, sameSession: false))

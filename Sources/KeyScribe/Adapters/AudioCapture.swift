@@ -24,6 +24,10 @@ protocol AudioCapturing: AnyObject, Sendable {
     func refreshBinding()
     func releaseWarm()
     func setPreferredInputUID(_ uid: String?)
+    // Fires when a recording's route is gone for good (restart budget spent). The take is truncated: audio
+    // stops arriving while the controller still believes it is recording, so without this the prefix is
+    // finalized and inserted as an ordinary success.
+    func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void)
 }
 
 extension AudioCapturing {
@@ -34,6 +38,7 @@ extension AudioCapturing {
     func finishDraining() async -> URL? { stop() }
     func takeDrainedSamples() -> [Float]? { nil }
     func setPreferredInputUID(_ uid: String?) {}
+    func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void) {}
     var currentLevel: Float { 0 }
     var currentInputName: String? { nil }
     func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
@@ -92,6 +97,11 @@ private final class CaptureSession: @unchecked Sendable {
     // exactly one arm, so a stray realtime write from an abandoned capture cannot reach a live one's audio.
     let ring: AudioSampleRing
     var configRestartCount = 0
+    // One capture reports its loss at most once, however many restart paths converge on it.
+    var captureLostReported = false
+    // Snapshotted at arm so the report reaches the dictation that owned THIS capture. Reading the live
+    // handler at fire time would hand a stale capture's loss to whichever dictation is current by then.
+    var lostHandler: (@Sendable () -> Void)?
 
     init(url: URL, file: AVAudioFile, writer: CaptureWriter, ring: AudioSampleRing) {
         self.url = url
@@ -129,6 +139,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var preferredInputUID: String?
     private var boundInputName: String?
     private var session: CaptureSession?
+    // Rebound per capture by the controller, so it is lock-guarded and snapshotted into the session at arm.
+    private var captureLostHandler: (@Sendable () -> Void)?
     // Per-start, seeded from the start's own target: `lastEffectiveDeviceID` is a long-lived idle cursor and
     // would report a transition from some earlier dictation.
     private final class ArmingContext {
@@ -145,6 +157,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
+    // Mach absolute time of the last buffer the WRITER observed — stamped off the realtime thread, which
+    // must stay free of anything beyond its ring copy. Without it the meter keeps displaying the last real
+    // level after a route dies, which reads as "still hearing you".
+    private let lastBufferTicks = Atomic<UInt64>(0)
     private let overloadCount = Atomic<Int>(0)
     private var lastRingDroppedCount = 0
     private var lastWriterDroppedCount = 0
@@ -220,7 +236,35 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         if !captureIsActive { prewarm() }
     }
 
-    var currentLevel: Float { Float(bitPattern: levelBits.load(ordering: .relaxed)) }
+    // Decays to silence when buffers stop arriving, so a dead route reads as a dead meter rather than
+    // freezing at the last level it saw.
+    var currentLevel: Float {
+        let stamped = lastBufferTicks.load(ordering: .relaxed)
+        guard stamped != 0, Self.meterIsFresh(nowTicks: mach_absolute_time(), lastBufferTicks: stamped) else {
+            return 0
+        }
+        return Float(bitPattern: levelBits.load(ordering: .relaxed))
+    }
+
+    // Generous next to a hardware period (a few ms) yet far below the restart budget, so an ordinary
+    // route change dips the meter rather than a device that is actually gone holding it up.
+    static let meterStaleAfterSeconds = 0.5
+
+    static func meterIsFresh(nowTicks: UInt64, lastBufferTicks: UInt64, timebase: mach_timebase_info = cachedTimebase) -> Bool {
+        guard nowTicks >= lastBufferTicks else { return true }
+        let elapsedNanos = Double(nowTicks - lastBufferTicks) * Double(timebase.numer) / Double(timebase.denom)
+        return elapsedNanos / 1_000_000_000 < meterStaleAfterSeconds
+    }
+
+    static let cachedTimebase: mach_timebase_info = {
+        var info = mach_timebase_info()
+        mach_timebase_info(&info)
+        return info
+    }()
+
+    func noteBufferObserved() {
+        lastBufferTicks.store(mach_absolute_time(), ordering: .relaxed)
+    }
 
     var currentInputName: String? { lock.withLock { boundInputName } }
 
@@ -537,6 +581,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         overloadCount.store(0, ordering: .relaxed)
         lock.withLock { unit?.resetOversizeDropCount(); oversizeDropsAccumulated = 0 }
         levelBits.store(Float(0).bitPattern, ordering: .relaxed)
+        // 0 reads as "no buffer yet", so the meter stays silent until this capture delivers one rather than
+        // inheriting the previous capture's freshness.
+        lastBufferTicks.store(0, ordering: .relaxed)
         // The previous capture's samples are consumed by the controller right after finishDraining; clear any
         // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
         lock.withLock { lastDrainedSamples = nil }
@@ -550,8 +597,15 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 record.noteFirstBuffer()
                 ready.signal()
             },
-            observeHostTime: { [weak self] hostTime in self?.feedDrainGate(hostTime: hostTime) ?? false })
+            // Already the writer thread's per-buffer hook, so meter freshness rides it rather than adding a
+            // second callback — and stays off the realtime thread entirely.
+            observeHostTime: { [weak self] hostTime in
+                guard let self else { return false }
+                noteBufferObserved()
+                return feedDrainGate(hostTime: hostTime)
+            })
         let mySession = CaptureSession(url: url, file: file, writer: writer, ring: ring)
+        mySession.lostHandler = lock.withLock { captureLostHandler }
         // Started before publishing session/lastWriter: a teardown that observed a published-but-unstarted
         // writer would return from finish() without joining its thread, and finishWriterAndCloseFile relies on
         // that join before it closes the file. The writer just polls the empty ring until the IOProc starts.
@@ -1284,11 +1338,23 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 session.configRestartCount += 1
                 return (session.configRestartCount, self.generation, session)
             }) else { return }
-            guard attempts <= Self.maxConfigRestarts else {
-                Log.audio.error("mid-recording restart gave up after \(Self.maxConfigRestarts, privacy: .public) attempts — capture may be truncated")
+            let device = effectiveDeviceID()
+            switch Self.midRecordingRestartDecision(
+                attempts: attempts, maxAttempts: Self.maxConfigRestarts, hasDevice: device != nil) {
+            case .captureLost:
+                Log.audio.error("mid-recording restart gave up after \(Self.maxConfigRestarts, privacy: .public) attempts — capture truncated")
+                reportCaptureLost(session: sessionForRetry, generation: generation)
                 return
+            case .retryLater:
+                Log.audio.debug("mid-recording restart found no input device → retry attempt \(attempts, privacy: .public)")
+                queue.asyncAfter(deadline: .now() + 0.25) { [self] in
+                    requestMidRecordingRestart(expectedSession: sessionForRetry, expectedGeneration: generation)
+                }
+                return
+            case .restart:
+                break
             }
-            guard let deviceID = effectiveDeviceID() else { return }
+            guard let deviceID = device else { return }
             // The session is published before readiness, so this can fire mid-ARM onto a route the budget was
             // never sized for. Buy its deadline HERE — the fresh.configure/start below is what blocks on a
             // Bluetooth route, so raising after they succeed would come after the wait had already expired.
@@ -1343,6 +1409,40 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void) {
+        lock.withLock { captureLostHandler = handler }
+    }
+
+    // Claims the report under the lock (generation-checked, once per capture) but CALLS OUT of it: the
+    // handler runs on the main actor and can stop/drain capture, so invoking it while holding this lock
+    // invites a reentrant deadlock.
+    private func reportCaptureLost(session expected: CaptureSession, generation: Int) {
+        let handler = lock.withLock { () -> (@Sendable () -> Void)? in
+            guard let session, session === expected, self.generation == generation else { return nil }
+            guard !session.captureLostReported else { return nil }
+            session.captureLostReported = true
+            // This capture's OWN handler, not whatever is currently installed.
+            return session.lostHandler
+        }
+        handler?()
+    }
+
+    enum MidRecordingRestartDecision: Equatable {
+        case restart
+        case retryLater
+        case captureLost
+    }
+
+    // A missing device is transient — it is exactly what a route change looks like for a moment — so it
+    // retries on the same bounded budget instead of ending the take. Only exhausting that budget means no
+    // further buffers are coming, which the caller must report rather than silently finalize a prefix.
+    static func midRecordingRestartDecision(
+        attempts: Int, maxAttempts: Int, hasDevice: Bool
+    ) -> MidRecordingRestartDecision {
+        guard attempts <= maxAttempts else { return .captureLost }
+        return hasDevice ? .restart : .retryLater
     }
 
     static func shouldStartReplacementUnit(generation: Int, currentGeneration: Int, captureActive: Bool) -> Bool {

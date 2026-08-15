@@ -22,6 +22,11 @@ final class SpeechModelsModel: ObservableObject {
         let errorText: String?
         let installedBytes: Int64?
         let recognitionBiasOn: Bool
+        // A memory-heavy model operation is in flight somewhere — this row's own or another's. Only one
+        // runs at a time, and the model refuses the rest; this lets the row show that up front instead of
+        // accepting a click and answering with an error. Covers the owner too: its Test/Reinstall/Delete
+        // must not stay clickable while its own verification is running.
+        let operationInFlight: Bool
     }
 
     @Published private(set) var rows: [Row] = []
@@ -52,6 +57,23 @@ final class SpeechModelsModel: ObservableObject {
     private var errors: [String: String] = [:]
     private var installedSizes: [String: Int64] = [:]
     private var sizeRefreshGeneration = 0
+    // Download-and-verify loads a whole engine into RAM (up to 3.7 GB in the catalog), so only one such
+    // operation runs at a time. Holds the model id rather than a flag so `reinstall` can keep ownership
+    // across its internal handoff into `startDownload` instead of blocking its own follow-up.
+    private var modelOperationOwner: String?
+
+    // Strictly non-reentrant. Admitting a second claim for the SAME id would let a reinstall or delete run
+    // against a model whose verification is still in flight, evicting or removing files underneath it —
+    // `reinstall`'s handoff into `startDownload` passes ownership explicitly instead.
+    private func claimModelOperation(_ id: String) -> Bool {
+        guard modelOperationOwner == nil else { return false }
+        modelOperationOwner = id
+        return true
+    }
+
+    private func releaseModelOperation(_ id: String) {
+        if modelOperationOwner == id { modelOperationOwner = nil }
+    }
 
     private var stt: Settings.STT
 
@@ -176,9 +198,18 @@ final class SpeechModelsModel: ObservableObject {
         rebuild()
     }
 
-    func startDownload(_ id: String) {
+    func startDownload(_ id: String) { startDownload(id, alreadyOwnsOperation: false) }
+
+    // `alreadyOwnsOperation` is the reinstall handoff: that flow claimed the guard before deleting and keeps
+    // it through the redownload, so it must not try to claim it a second time against itself.
+    private func startDownload(_ id: String, alreadyOwnsOperation: Bool) {
         guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id),
             SpeechModelCatalog.entry(for: id)?.systemManaged == false else { return }
+        guard alreadyOwnsOperation || claimModelOperation(id) else {
+            errors[id] = "Another model is still installing. Try again when it finishes."
+            rebuild()
+            return
+        }
         downloading[id] = ModelLoadProgress(phase: "Starting…", fraction: 0)
         errors[id] = nil
         rebuild()
@@ -207,12 +238,14 @@ final class SpeechModelsModel: ObservableObject {
                     } catch {
                         errors[id] = "Download failed, and partial model files couldn’t be removed. Try again."
                         downloading[id] = nil
+                        releaseModelOperation(id)
                         rebuild()
                         return
                     }
                 }
                 errors[id] = "\(error)"
                 downloading[id] = nil
+                releaseModelOperation(id)
                 rebuild()
                 return
             }
@@ -225,13 +258,23 @@ final class SpeechModelsModel: ObservableObject {
 
     func test(_ id: String) {
         guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id) else { return }
+        guard claimModelOperation(id) else {
+            errors[id] = "Another model is still installing. Try again when it finishes."
+            rebuild()
+            return
+        }
         Task { await runVerification(id, markInstalledOnPass: false) }
     }
 
     // Wipes the bad install; the redownload re-verifies.
     func reinstall(_ id: String) {
         guard SpeechModelCatalog.entry(for: id)?.systemManaged == false,
-              !deleting.contains(id) else { return }
+              !deleting.contains(id), !verifying.contains(id), downloading[id] == nil else { return }
+        guard claimModelOperation(id) else {
+            errors[id] = "Another model is still installing. Try again when it finishes."
+            rebuild()
+            return
+        }
         deleting.insert(id)
         errors[id] = nil
         rebuild()
@@ -252,6 +295,7 @@ final class SpeechModelsModel: ObservableObject {
                 }
                 deleting.remove(id)
                 errors[id] = "Couldn’t remove this model. Try again."
+                releaseModelOperation(id)
                 if wasActive && set.activeId != id { onActiveChange(set.activeId) }
                 rebuild()
                 return
@@ -262,7 +306,7 @@ final class SpeechModelsModel: ObservableObject {
             deleting.remove(id)
             if wasActive { onActiveChange(set.activeId) }
             rebuild()
-            startDownload(id)
+            startDownload(id, alreadyOwnsOperation: true)
         }
     }
 
@@ -283,6 +327,7 @@ final class SpeechModelsModel: ObservableObject {
                 } catch {
                     errors[id] = "The model test failed, and its install state couldn’t be saved. Try again."
                     await evictEngine(id)
+                    releaseModelOperation(id)
                     refreshSizes()
                     rebuild()
                     return
@@ -304,6 +349,7 @@ final class SpeechModelsModel: ObservableObject {
             } catch {
                 errors[id] = "The model passed its test, but its install state couldn’t be saved. Try again."
                 await evictEngine(id)
+                releaseModelOperation(id)
                 refreshSizes()
                 rebuild()
                 return
@@ -321,12 +367,15 @@ final class SpeechModelsModel: ObservableObject {
                 scheduleClearVerified(id)
             }
         case .skipped:
-            if markInstalledOnPass {
-                markFailed(id)
-                set.markFailed(id)
-            }
+            // The gate was busy — that is not a verdict on the model, so it must NOT be quarantined:
+            // marking it failed blamed a working model for losing a race and persisted that across
+            // relaunch. Release the engine the load just brought in unless it is the one actually in
+            // use; `activeId` alone is not proof of that, since it can still name a quarantined model
+            // when no usable replacement exists.
+            if !(id == set.activeId && set.isUsable(id)) { await evictEngine(id) }
             errors[id] = "The model test couldn’t run. Try again when dictation is idle."
         }
+        releaseModelOperation(id)
         refreshSizes()
         rebuild()
     }
@@ -368,6 +417,14 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     private func performDelete(_ id: String) {
+        // Claims the same guard as install/test: deleting evicts the engine and removes its files, so
+        // running it against a model whose verification is still in flight pulls the weights out from
+        // under that verification.
+        guard !verifying.contains(id), downloading[id] == nil, claimModelOperation(id) else {
+            errors[id] = "This model is busy. Try again when its current operation finishes."
+            rebuild()
+            return
+        }
         deleting.insert(id)
         errors[id] = nil
         rebuild()
@@ -388,6 +445,7 @@ final class SpeechModelsModel: ObservableObject {
                 }
                 deleting.remove(id)
                 errors[id] = "Couldn’t remove this model. Try again."
+                releaseModelOperation(id)
                 if wasActive && set.activeId != id { onActiveChange(set.activeId) }
                 rebuild()
                 return
@@ -395,6 +453,7 @@ final class SpeechModelsModel: ObservableObject {
             clearFailed(id)
             set.delete(id)
             deleting.remove(id)
+            releaseModelOperation(id)
             if wasActive { onActiveChange(set.activeId) }
             refreshSizes()
             rebuild()
@@ -441,6 +500,7 @@ final class SpeechModelsModel: ObservableObject {
             testPassed: verifiedOk.contains(info.id),
             errorText: errors[info.id] ?? (failed ? Self.failedMessage(systemManaged: info.systemManaged) : nil),
             installedBytes: onDisk ? installedSizes[info.id] : nil,
-            recognitionBiasOn: stt.recognitionBiasEnabled(for: info))
+            recognitionBiasOn: stt.recognitionBiasEnabled(for: info),
+            operationInFlight: modelOperationOwner != nil)
     }
 }

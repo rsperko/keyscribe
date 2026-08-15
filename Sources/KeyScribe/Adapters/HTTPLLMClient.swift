@@ -28,7 +28,7 @@ struct HTTPLLMClient: LLMClient {
         guard let url = preconnectURL(for: connection) else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "HEAD"
-        _ = try? await session.data(for: req)
+        _ = try? await session.data(for: req, delegate: OriginPinnedRedirects(req.url))
     }
 
     private func preconnectURL(for connection: Connection) -> URL? {

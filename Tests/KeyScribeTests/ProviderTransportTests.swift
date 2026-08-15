@@ -39,6 +39,92 @@ private final class ErrorStubProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+// Serves one redirect to `target`, then 200s. Records every URL it is asked to load, so a test can assert
+// the redirect target was never CONTACTED — not merely that the call surfaced an error.
+private final class RedirectStubProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var status = 307
+    nonisolated(unsafe) static var origin = "http://origin.test/v1/chat"
+    nonisolated(unsafe) static var target = "http://elsewhere.test/v1/chat"
+    nonisolated(unsafe) static var loaded: [String] = []
+
+    static func reset(status: Int, target: String) {
+        self.status = status
+        self.target = target
+        loaded = []
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        Self.loaded.append(url.absoluteString)
+        if url.absoluteString == Self.origin {
+            let resp = HTTPURLResponse(
+                url: url, statusCode: Self.status, httpVersion: nil,
+                headerFields: ["Location": Self.target])!
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: URL(string: Self.target)!), redirectResponse: resp)
+            client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private func redirectSession() -> URLSession {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [RedirectStubProtocol.self]
+    return URLSession(configuration: config)
+}
+
+// Serialized: the stub's routing table is static, so parallel cases would rewrite each other's status.
+@Suite(.serialized)
+struct RewriteRedirectPinningTests {
+    private func post() -> URLRequest {
+        var req = URLRequest(url: URL(string: RedirectStubProtocol.origin)!)
+        req.httpMethod = "POST"
+        req.httpBody = Data(#"{"messages":[{"role":"user","content":"secret transcript"}]}"#.utf8)
+        return req
+    }
+
+    // 307/308 preserve the method AND the body, so an unpinned redirect replays the prompt and the
+    // tokenized transcript to another host. The assertion that matters is that the other host is never
+    // contacted at all.
+    @Test(arguments: [301, 302, 303, 307, 308])
+    func crossOriginRedirectsNeverReachTheTarget(status: Int) async {
+        RedirectStubProtocol.reset(status: status, target: "http://elsewhere.test/v1/chat")
+        let t = lookupTransport(keyProvider: { _ in .absent }, session: redirectSession())
+
+        _ = try? await t.send(post())
+
+        #expect(!RedirectStubProtocol.loaded.contains("http://elsewhere.test/v1/chat"))
+    }
+
+    @Test func aDifferentPortOnTheSameHostIsStillCrossOrigin() async {
+        RedirectStubProtocol.reset(status: 307, target: "http://origin.test:8443/v1/chat")
+        let t = lookupTransport(keyProvider: { _ in .absent }, session: redirectSession())
+
+        _ = try? await t.send(post())
+
+        #expect(!RedirectStubProtocol.loaded.contains("http://origin.test:8443/v1/chat"))
+    }
+
+    @Test func sameOriginRedirectsAreStillFollowed() async throws {
+        RedirectStubProtocol.reset(status: 307, target: "http://origin.test/v2/chat")
+        let t = lookupTransport(keyProvider: { _ in .absent }, session: redirectSession())
+
+        _ = try await t.send(post())
+
+        #expect(RedirectStubProtocol.loaded.contains("http://origin.test/v2/chat"))
+    }
+}
+
 struct ProviderTransportTests {
     private let connection = Connection(
         id: "c", name: "C", provider: .openaiCompatible,

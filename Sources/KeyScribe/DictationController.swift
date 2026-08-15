@@ -55,8 +55,21 @@ final class DictationController {
 
     private final class DictationIdentity: Sendable {}
 
+    // Loss recorded synchronously on the reporting thread: the main-actor hop is queued behind the
+    // executor, which gives mutual exclusion, not FIFO (SE-0306), so a main-actor-only flag can read false
+    // while a loss is already known. One flag per dictation, never keyed by identity — ObjectIdentifier is
+    // unique only for an object's lifetime, and 49 of 50 sequential identities measured the same address.
+    final class CaptureLossFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lost = false
+        func markLost() { lock.withLock { lost = true } }
+        var isLost: Bool { lock.withLock { lost } }
+    }
+
     private struct DictationSession {
         let identity = DictationIdentity()
+        // This dictation's own loss flag; see CaptureLossFlag on why it is per-session and not keyed.
+        let captureLoss = CaptureLossFlag()
         var building: DictationRecord
         var pressedAt = DispatchTime.now()
         var capturedSnapshot: TargetSnapshot?
@@ -130,6 +143,16 @@ final class DictationController {
     private var lastUsedAt: Double = 0
     private var lastRetentionSweepDay: String?
     private(set) var lastResult: String?
+    // Set when capture reports its route gone for good. Deliberately NOT gated on `.recording`: the user can
+    // release before the loss lands, so the flag has to survive into transcription and is read where
+    // insertion begins. Cleared at each capture start.
+    private var captureTruncated = false
+
+    // The authoritative "this dictation's microphone died" read. Prefers the synchronous flag so a queued
+    // main-actor hop cannot hide a loss from a check that runs before it lands.
+    private var captureWasLost: Bool {
+        captureTruncated || (session?.captureLoss.isLost ?? false)
+    }
     private(set) var lastRecord: DictationRecord?
     private(set) var nextModeOverrideID: String?
 
@@ -251,6 +274,30 @@ final class DictationController {
         self.maxRecordingSeconds = maxRecordingSeconds
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
+    }
+
+    // Records the loss rather than acting on it: the take may already be transcribing, and a half-finished
+    // pipeline is torn down at the insertion boundary where every terminal converges. Ignored when no
+    // dictation is in flight so a late report cannot touch the next one.
+    private func handleCaptureLost(identity: DictationIdentity?) {
+        // Identity, not just "some dictation is running": the hop can land after this take ended and a
+        // successor began, and marking THAT one truncated would discard a perfectly good recording.
+        guard let identity, let current = session?.identity, current === identity else { return }
+        captureTruncated = true
+        switch machine.state {
+        case .recording:
+            // No further audio can arrive, so don't sit in `.recording` waiting for a release a
+            // tap-to-toggle user may never give. Commit now: the prefix still transcribes, and every
+            // terminal downstream honours `captureTruncated`.
+            handleCommit()
+        case .arming:
+            // handleCommit treats `.arming` as an early release and cancels bring-up silently, which would
+            // hide the failure entirely. Nothing was recorded, so report the microphone directly.
+            cancelBeforeCaptureStarted()
+            finishTruncatedCapture(transcript: "")
+        default:
+            break
+        }
     }
 
     private func installMemoryPressureHandler() {
@@ -636,6 +683,18 @@ final class DictationController {
 
     private func beginCapture() {
         lastRenderedLevel = 0
+        captureTruncated = false
+        // Bound to THIS dictation's identity and installed before arming, so AudioCapture snapshots it into
+        // the session it belongs to. Without that, the main-actor hop below could deliver a dead capture's
+        // loss to whichever dictation happens to be running when it lands.
+        let identity = session?.identity
+        let lossFlag = session?.captureLoss
+        audio.setCaptureLostHandler { [weak self] in
+            // Record synchronously FIRST, into THIS dictation's own flag: the hop below is what updates HUD
+            // and state, but actuation may run before it lands and must still see the loss.
+            lossFlag?.markLost()
+            Task { @MainActor in self?.handleCaptureLost(identity: identity) }
+        }
         let sampleRate = activeEngine.captureSampleRate
         let wantsSamples = activeEngine.supportsSampleInput
         let onSamples = setUpStreamingIfEnabled(sampleRate: sampleRate)
@@ -807,6 +866,12 @@ final class DictationController {
             if reading.presence == .noSpeech {
                 try? FileManager.default.removeItem(at: url)
                 if Task.isCancelled { return }
+                // A take whose mic died before any speech landed reads as silence here. "No speech detected"
+                // would blame the user for a hardware failure, so the real cause wins.
+                if self.captureWasLost {
+                    self.finishTruncatedCapture(transcript: "")
+                    return
+                }
                 // Two-state no-speech: nothing-heard (peak never cleared the silence floor — a muted/dead
                 // mic) gets the error+repair render; real audio with no speech keeps the neutral "No speech
                 // detected". Both record the .noSpeech outcome identically.
@@ -885,6 +950,12 @@ final class DictationController {
     // there is no user repair for an engine failure, so no action button. Records .noSpeech like the other
     // no-text terminals (the finishNothingHeard pattern): honest HUD copy, untouched history semantics.
     private func finishHeardButNoText(engine: any SpeechEngine) {
+        // A take cut short by its microphone can also transcribe to nothing. Blaming the speech model would
+        // point the user at the one thing that did not fail.
+        if captureWasLost {
+            finishTruncatedCapture(transcript: "")
+            return
+        }
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
         let completion = DictationCompletion(
@@ -1434,6 +1505,14 @@ final class DictationController {
         bare: Bool = false, submitOverride: Mode.Submit? = nil
     ) async {
         clearRewriteEscapeHatch()
+        // The route died mid-take, so everything said after it went is simply not in the audio. Inserting
+        // the prefix would read as an ordinary success while silently changing what the user said — losing
+        // the end of a sentence can invert its meaning — so nothing is inserted and no submit fires. The
+        // prefix stays recoverable through "Paste last dictation" instead.
+        if captureWasLost {
+            finishTruncatedCapture(transcript: transcript)
+            return
+        }
         // Guarded transition: another terminal path may already have won the race.
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
@@ -1459,7 +1538,9 @@ final class DictationController {
             // trims to empty text, so there is nothing to insert — but the requested keystroke must still
             // land. Fire the submit under the same guards as the insert path (real target, focus unmoved).
             if let submitOverride, transcript.isEmpty {
-                if decision == .insert, await submitTargetStillFocused() {
+                // `!captureTruncated` is re-read AFTER the focus check's suspension, exactly as the paste
+                // path's submit does: a Return is the one thing here that cannot be undone.
+                if decision == .insert, await submitTargetStillFocused(), !captureWasLost {
                     await submitKey(submitOverride)
                     outcome = .inserted
                     machine.finish(.inserted)
@@ -1490,14 +1571,36 @@ final class DictationController {
             for (key, value) in activeMode?.invalidClipboardChords ?? [:] {
                 log.error("mode \(modeId, privacy: .public): \(key, privacy: .public) = \"\(value, privacy: .public)\" is not a chord; falling back to the default")
             }
-            let actuated = await insert(decision, activeMode?.insertion ?? .paste, paste, transcript + trailing.suffix(after: transcript), submitFollows)
+            // Last gate before the irreversible act. The check at the top of this function ran before
+            // `snapshotAsync`, and a loss landing during that suspension would otherwise be seen only
+            // after the text was already in the user's document.
+            if captureWasLost {
+                finishTruncatedCapture(transcript: transcript)
+                return
+            }
+            // The gate above is the last check the CALLER can make; actuation suspends again inside (the
+            // clipboard settle, and a suspension between every typed character), so the loss signal has to
+            // reach those points too. Task-local, so it is visible to this insertion's call tree and to
+            // nothing else — a plain property would be shared with Paste Last and the correction panel.
+            let actuated = await TextInserter.$shouldAbortInsertion.withValue(
+                { [lossFlag = session?.captureLoss] in lossFlag?.isLost ?? false }
+            ) {
+                await insert(decision, activeMode?.insertion ?? .paste, paste, transcript + trailing.suffix(after: transcript), submitFollows)
+            }
             building.stageMillis[.insert] = elapsedMs(since: insertStart)
+            // Aborting mid-actuation surfaces as `actuated == false`; report the microphone rather than a
+            // generic insertion failure.
+            if captureWasLost {
+                finishTruncatedCapture(transcript: transcript)
+                return
+            }
             if !actuated {
                 // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"
                 // (lastResult is set). Never fire submit against a paste that did not happen.
                 outcome = .failed
             } else if initialOutcome == .inserted, submit != .none,
-                      await submitTargetStillFocused() {
+                      await submitTargetStillFocused(), !captureWasLost {
+                // Re-read after the focus check's own suspension: a Return is not undoable with the paste.
                 await submitKey(submit)
             }
             machine.finish(outcome)
@@ -2014,11 +2117,15 @@ final class DictationController {
         }
     }
 
-    private static let loadingModelHUDDelay: Duration = .seconds(1)
+    static let loadingModelHUDDelay: Duration = .seconds(1)
+    // Test seam. A test that wants to observe the loading HUD would otherwise have to make its fake load
+    // outlast this delay, racing two timers — which flakes under CPU contention rather than failing for a
+    // real reason. Overriding it lets the delay be ~0 so the state is reached deterministically.
+    var loadingModelHUDDelayOverride: Duration?
 
     private func scheduleLoadingModelHUD() -> Task<Void, Never> {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: Self.loadingModelHUDDelay)
+        Task { @MainActor [weak self, delay = loadingModelHUDDelayOverride ?? Self.loadingModelHUDDelay] in
+            try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled, self.machine.state == .transcribing else { return }
             self.hud?.render(.loadingModel(mode: self.currentModeName))
         }
@@ -2111,7 +2218,26 @@ final class DictationController {
         if let completion { onDictationCompleted?(completion) }
     }
 
+    // Terminal for a take whose microphone went away mid-recording. Keeps whatever was transcribed as
+    // `lastResult` so the user can still paste it deliberately, and reports the loss rather than dressing a
+    // partial take up as a completed dictation.
+    private func finishTruncatedCapture(transcript: String) {
+        if !transcript.isEmpty { lastResult = transcript }
+        let message = transcript.isEmpty
+            ? "The microphone stopped. Nothing was recorded."
+            : "The microphone stopped, so this dictation is incomplete. Use “Paste last dictation” to insert what was captured."
+        log.error("capture lost mid-recording — dictation truncated, nothing inserted")
+        finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: nil),
+               hideAfter: 8, record: (.failed, "capture lost mid-recording"), evict: true)
+    }
+
     private func finishError(_ message: String, action: HUDErrorAction? = nil) {
+        // A take whose microphone died can also fail downstream — empty transcript, timeout, engine error.
+        // The mic is the cause the user can act on, so it wins over the symptom.
+        if captureWasLost {
+            finishTruncatedCapture(transcript: lastResult ?? "")
+            return
+        }
         // Eviction awaits any abandoned transcribe's settlement via SerializedEngine, so releasing the
         // press-time-warmed model here can't race the in-flight call; without it a transcribe failure/
         // timeout would pin the model resident until quit (no other terminal re-arms the idle check).

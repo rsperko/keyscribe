@@ -56,6 +56,29 @@ extension URLError: RewriteFailureReporting {
     public var rewriteFailureReason: String { localizedDescription }
 }
 
+// Refuses any redirect that leaves the origin the request was aimed at. Attached PER TASK, not to the
+// session: one session is shared across connections with different base URLs, so a session-wide delegate
+// would have no single origin to pin. Returning nil from the redirect callback declines the redirect and
+// surfaces the 3xx response instead of following it.
+final class OriginPinnedRedirects: NSObject, URLSessionTaskDelegate {
+    private let pinned: RequestOrigin?
+
+    init(_ url: URL?) { pinned = RequestOrigin(url) }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard RequestOrigin.redirectIsPermitted(from: pinned, to: request.url) else {
+            Log.models.error("refused cross-origin redirect from a provider endpoint")
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
+    }
+}
+
 struct ProviderTransport: Sendable {
     var session: URLSession
     var keyProvider: @Sendable (String) -> SecretLookup
@@ -122,7 +145,7 @@ struct ProviderTransport: Sendable {
     static let quickRetryDelay: Duration = .milliseconds(250)
 
     private func attempt(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: OriginPinnedRedirects(request.url))
         guard let http = response as? HTTPURLResponse else { throw ProviderTransportError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw ProviderTransportError.http(http.statusCode, body: Self.errorBody(from: data))

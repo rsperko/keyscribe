@@ -55,8 +55,40 @@ final class SpeechModelsModelTests: XCTestCase {
             clearFailed: { recorder.clearedFailed.append($0) })
     }
 
+    // Holds a download open without a wall-clock sleep, and fails it on release. A 60 s sleep outlived the
+    // test, kept the model alive, and on completion would reach VADModel.ensureInBackground — a real
+    // download firing during unrelated tests. Releasing with an error takes the failure path instead, which
+    // never touches VAD.
+    private final class DownloadGate: @unchecked Sendable {
+        struct Released: Error {}
+        private let held = DispatchSemaphore(value: 0)
+        func hold() async throws {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                Thread.detachNewThread { [held] in
+                    held.wait()
+                    c.resume()
+                }
+            }
+            throw Released()
+        }
+        func release() { held.signal() }
+    }
+
     private func settleTasks() async {
         for _ in 0..<5 { await Task.yield() }
+    }
+
+    // Yielding a fixed number of times does not guarantee a native waiter resumed and its task unwound.
+    // Bounded so a regression FAILS here instead of hanging the suite.
+    private func waitUntil(
+        _ condition: () -> Bool, _ message: String, file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if condition() { return }
+            await Task.yield()
+        }
+        XCTFail("timed out waiting for \(message)", file: file, line: line)
     }
 
     private func row(_ id: String, in model: SpeechModelsModel) throws -> SpeechModelsModel.Row {
@@ -247,7 +279,10 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertNotNil(try row("parakeet", in: model).errorText)
     }
 
-    func testSkippedPostDownloadVerificationDoesNotInstallModel() async throws {
+    // A skipped self-test means "the gate was busy", not "this model is broken". Quarantining it here
+    // blamed a working model for losing a race with a dictation, and the row then stayed failed across
+    // relaunch. It must stay retryable, and the engine the download just loaded must not stay resident.
+    func testSkippedPostDownloadVerificationLeavesTheModelRetryableAndEvictsIt() async throws {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder, verifyResult: .skipped)
 
@@ -255,10 +290,137 @@ final class SpeechModelsModelTests: XCTestCase {
         await settleTasks()
 
         XCTAssertEqual(recorder.markedInstalled, [])
-        XCTAssertEqual(recorder.markedFailed, ["whisper"])
-        XCTAssertFalse(try row("whisper", in: model).isUsable)
-        XCTAssertTrue(try row("whisper", in: model).verificationFailed)
+        XCTAssertEqual(recorder.markedFailed, [])
+        XCTAssertFalse(try row("whisper", in: model).verificationFailed)
+        XCTAssertEqual(recorder.evicted, ["whisper"])
         XCTAssertNotNil(try row("whisper", in: model).errorText)
+    }
+
+    // Eviction keys off usable STATE, not identity: activeId can still point at a quarantined model when
+    // no replacement exists, and retaining that engine strands multiple GB.
+    func testSkippedSelfTestKeepsTheActiveUsableEngineResident() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: .skipped, activeId: "parakeet")
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.evicted, [])
+    }
+
+    func testSkippedSelfTestEvictsAnActiveButQuarantinedEngine() async throws {
+        let recorder = Recorder()
+        let model = makeModel(
+            recorder: recorder, verifyResult: .skipped,
+            activeId: "parakeet", initialFailedIds: ["parakeet"])
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.evicted, ["parakeet"])
+    }
+
+    // Two large engines loading at once is several GB of avoidable concurrent residency, so only one
+    // memory-heavy model operation runs at a time. Enforced in the model, not just by disabling buttons.
+    func testASecondInstallIsRefusedWhileOneIsStillLoading() async throws {
+        let recorder = Recorder()
+        let gate = DownloadGate()
+        // defer: an assertion throwing below would otherwise strand the waiting thread forever.
+        defer { gate.release() }
+        let model = makeModel(recorder: recorder, download: { _, _ in try await gate.hold() })
+
+        model.startDownload("whisper")
+        await settleTasks()
+        model.startDownload("qwen3-asr-1.7b")
+        await settleTasks()
+
+        XCTAssertNotNil(try row("whisper", in: model).downloadFraction)
+        XCTAssertNil(try row("qwen3-asr-1.7b", in: model).downloadFraction)
+        XCTAssertNotNil(try row("qwen3-asr-1.7b", in: model).errorText)
+
+        gate.release()
+        await waitUntil({ (try? self.row("whisper", in: model).downloadFraction) == nil },
+                        "the held download to unwind")
+    }
+
+    func testTheInstallGuardIsReleasedAfterAFailedDownload() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, download: { _, _ in throw Recorder.Failure() })
+
+        model.startDownload("whisper")
+        await settleTasks()
+        model.startDownload("qwen3-asr-1.7b")
+        await settleTasks()
+
+        // Both attempts reached their partial-file cleanup, so the second one really started.
+        XCTAssertEqual(recorder.removed, ["whisper", "qwen3-asr-1.7b"])
+    }
+
+    func testTheInstallGuardIsReleasedAfterVerification() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: .passed)
+
+        model.startDownload("whisper")
+        await settleTasks()
+        model.startDownload("qwen3-asr-1.7b")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.markedInstalled, ["whisper", "qwen3-asr-1.7b"])
+    }
+
+    // The marker write can fail after a PASS. That path returns early, so it has to hand the guard back or
+    // every other model's install stays blocked until relaunch.
+    func testTheInstallGuardIsReleasedWhenTheMarkerWriteFailsAfterAPass() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: .passed)
+        recorder.markInstalledShouldFail = true
+
+        model.startDownload("whisper")
+        await settleTasks()
+        recorder.markInstalledShouldFail = false
+        model.startDownload("qwen3-asr-1.7b")
+        await settleTasks()
+
+        XCTAssertTrue(recorder.markedInstalled.contains("qwen3-asr-1.7b"))
+    }
+
+    // Delete evicts the engine and removes its weights, so it must not run against a model that is still
+    // being verified — nor while another model holds the operation guard.
+    func testDeleteIsRefusedWhileAnotherModelOperationHoldsTheGuard() async throws {
+        let recorder = Recorder()
+        let gate = DownloadGate()
+        defer { gate.release() }
+        let model = makeModel(recorder: recorder, download: { _, _ in try await gate.hold() })
+
+        model.startDownload("whisper")
+        await settleTasks()
+        model.requestDelete("parakeet")
+        model.confirmDelete()
+        await settleTasks()
+
+        XCTAssertEqual(recorder.removed, [])
+        // Pins the "before" state so the wait below observes a real transition rather than passing vacuously.
+        XCTAssertNotNil(try row("whisper", in: model).downloadFraction)
+
+        gate.release()
+        // Not `recorder.removed`: removeFiles completes BEFORE the task clears `downloading` and releases
+        // the operation guard, so that condition can be true while the task is still unwinding.
+        await waitUntil({ (try? self.row("whisper", in: model).downloadFraction) == nil },
+                        "the held download to unwind")
+    }
+
+    // reinstall() deletes and then hands off to startDownload. It must carry the guard across that
+    // internal transition, or it blocks its own follow-up download.
+    func testReinstallRetainsTheGuardAcrossItsOwnDownloadHandoff() async throws {
+        let recorder = Recorder()
+        let model = makeModel(recorder: recorder, verifyResult: .passed)
+
+        model.reinstall("parakeet")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.removed, ["parakeet"])
+        XCTAssertEqual(recorder.markedInstalled, ["parakeet"])
+        XCTAssertNil(try row("parakeet", in: model).errorText)
     }
 
     func testFailedPostDownloadVerificationKeepsQuarantinedInstallRecoverable() async throws {

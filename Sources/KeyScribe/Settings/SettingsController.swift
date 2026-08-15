@@ -759,9 +759,10 @@ final class SettingsModel: ObservableObject {
         } else if let live = currentAudioSnapshot().devices.first(where: { $0.uid == inputDeviceUID }) {
             storedInputDeviceName = live.name
         }
-        settings.audio = .init(
-            inputDeviceUID: inputDeviceUID.isEmpty ? nil : inputDeviceUID,
-            inputDeviceName: inputDeviceUID.isEmpty ? nil : storedInputDeviceName)
+        // Mutate in place: `keepCaptures`/`keepCapturesMaxMB` live in this table but have no UI, so
+        // rebuilding it would reset a hand-edited capture archive on every unrelated settings change.
+        settings.audio.inputDeviceUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
+        settings.audio.inputDeviceName = inputDeviceUID.isEmpty ? nil : storedInputDeviceName
         var features = Settings.Features()
         for feature in Feature.allCases {
             features.setEnabled(featureStates[feature.id] ?? false, for: feature)

@@ -3,8 +3,19 @@ import Testing
 @testable import KeyScribeKit
 
 // Stands in for a CoreML/MLX SDK call that ignores cancellation and runs to completion regardless.
-// Thread.sleep is banned directly in async contexts, so it's wrapped in a plain sync function.
-private func nonCooperativeBlock(seconds: TimeInterval) { Thread.sleep(forTimeInterval: seconds) }
+// Blocks on a DEDICATED thread, never a cooperative-pool one: `Thread.sleep` inside a Task parks a pool
+// thread, and enough of these running in parallel starve the very deadline timer under test — the test then
+// fails for lack of a scheduler, not because the deadline misbehaved. Suspending on a continuation the
+// detached thread resumes preserves what is being modelled (cancellation does not shorten it) without
+// consuming the pool.
+private func nonCooperativeBlock(seconds: TimeInterval) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: seconds)
+            continuation.resume()
+        }
+    }
+}
 
 struct DeadlineTests {
     @Test func returnsResultWhenOperationFinishesInTime() async throws {
@@ -12,15 +23,20 @@ struct DeadlineTests {
         #expect(value == "done")
     }
 
+    // The invariant is ORDERING — the deadline throws while the operation is still outstanding — not a
+    // wall-clock budget. A `< 1.0 s` bound against a 0.1 s deadline was a proxy for that and flaked under
+    // CPU contention: a late-but-correct throw failed the test. The operation blocks a real 2 s on its own
+    // thread, so `finished` staying false proves the throw beat it however loaded the machine is.
     @Test func throwsAtDeadlineEvenWhenOperationIgnoresCancellation() async {
-        let start = Date()
+        let finished = Latch()
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.1) {
-                nonCooperativeBlock(seconds: 2)
+                await nonCooperativeBlock(seconds: 2)
+                finished.set()
                 return "late"
             }
         }
-        #expect(Date().timeIntervalSince(start) < 1.0)
+        #expect(!finished.isSet)
     }
 
     // The same late-landing operation a tight deadline discards is adopted under a widened one.
@@ -29,12 +45,12 @@ struct DeadlineTests {
     @Test func adoptsALateResultWithinTheGraceWindowButNotPastIt() async throws {
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.15) {
-                nonCooperativeBlock(seconds: 0.3)
+                await nonCooperativeBlock(seconds: 0.3)
                 return "adopted"
             }
         }
         let value = try await runWithDeadline(seconds: 0.6) {
-            nonCooperativeBlock(seconds: 0.3)
+            await nonCooperativeBlock(seconds: 0.3)
             return "adopted"
         }
         #expect(value == "adopted")
@@ -53,7 +69,7 @@ struct DeadlineTests {
     @Test func cancelledTimerNeverResumesFailureAfterFastSuccess() async throws {
         for _ in 0..<200 {
             let value = try await runWithDeadline(seconds: 0.05) {
-                nonCooperativeBlock(seconds: 0.02)
+                await nonCooperativeBlock(seconds: 0.02)
                 return "in-time"
             }
             #expect(value == "in-time")
@@ -66,7 +82,7 @@ struct DeadlineTests {
         let settled = Counter()
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.1) {
-                nonCooperativeBlock(seconds: 0.5)
+                await nonCooperativeBlock(seconds: 0.5)
                 return "late"
             } onSettled: {
                 Task { await settled.bump() }
@@ -76,6 +92,13 @@ struct DeadlineTests {
         try? await Task.sleep(for: .seconds(1))
         #expect(await settled.value == 1)
     }
+}
+
+private final class Latch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }
 
 private actor Counter {
@@ -98,7 +121,7 @@ struct SingleFlightDeadlineTests {
         async let first: Void = {
             try? await gate.run(seconds: 0.1) {
                 await concurrent.bump()
-                nonCooperativeBlock(seconds: 0.6)
+                await nonCooperativeBlock(seconds: 0.6)
             }
         }()
         try? await Task.sleep(for: .seconds(0.2))
@@ -115,7 +138,7 @@ struct SingleFlightDeadlineTests {
     @Test func gateReopensAfterOperationSettles() async throws {
         let gate = SingleFlightDeadline()
         await #expect(throws: DeadlineExceeded.self) {
-            try await gate.run(seconds: 0.1) { nonCooperativeBlock(seconds: 0.4) }
+            try await gate.run(seconds: 0.1) { await nonCooperativeBlock(seconds: 0.4) }
         }
         try await Task.sleep(for: .seconds(0.6))
         let value = try await gate.run(seconds: 5) { "ok" }

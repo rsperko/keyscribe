@@ -49,8 +49,12 @@ private final class TimeoutLoadEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
-// Models a cold CoreML/MLX compile slow enough for the HUD to name the wait: loadIfNeeded() sleeps
-// past the loading-HUD delay on its first call, then succeeds.
+// Models a cold CoreML/MLX compile slow enough for the HUD to name the wait.
+// With `blocksUntilReleased`, the first load BLOCKS until the test releases it rather than sleeping for a
+// duration chosen to outlast
+// the loading-HUD delay. Betting one timer against another is what made this flake under CPU contention:
+// too short and the load finished before the HUD appeared, too short a HUD delay and it fired before the
+// machine even reached `.transcribing`. A load that never completes on its own cannot lose either race.
 private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
     let id = "slow"
     let displayName = "Slow"
@@ -58,11 +62,25 @@ private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var loaded = false
     private let text: String
-    init(text: String = "hello world") { self.text = text }
+    private let held = DispatchSemaphore(value: 0)
+    private let blocksUntilReleased: Bool
+    init(text: String = "hello world", blocksUntilReleased: Bool = false) {
+        self.text = text
+        self.blocksUntilReleased = blocksUntilReleased
+    }
+    func release() { held.signal() }
     func loadIfNeeded() async throws {
         let already = lock.withLock { let a = loaded; loaded = true; return a }
-        // 2500ms comfortably clears the 1s loading-HUD delay under full-suite CPU contention; 1.3s flaked.
-        if !already { try await Task.sleep(for: .milliseconds(2500)) }
+        guard !already else { return }
+        guard blocksUntilReleased else { try await Task.sleep(for: .milliseconds(200)); return }
+        // Off the cooperative pool: waiting on the semaphore inside a Task would park a pool thread that
+        // the main actor needs to reach the state this test is waiting for.
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            Thread.detachNewThread { [held] in
+                held.wait()
+                c.resume()
+            }
+        }
     }
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
     func evict() async {}
@@ -185,7 +203,7 @@ struct ModelLoadRetryTests {
         defer { try? FileManager.default.removeItem(at: supportDir) }
         ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
 
-        let engine = SlowLoadEngine()
+        let engine = SlowLoadEngine(blocksUntilReleased: true)
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "slow")
         let insertSpy = InsertSpy()
         let hud = HUDSpy()
@@ -202,9 +220,26 @@ struct ModelLoadRetryTests {
             micStatus: { .granted }, accessibilityGranted: { true },
             recordModelLoadFailure: { recorder.record($0, $1, $2) })
 
+        // Short enough to keep the test quick, long enough that the machine has reached `.transcribing`
+        // (the HUD task's own guard) before it fires.
+        controller.loadingModelHUDDelayOverride = .milliseconds(20)
         controller.handleStart()
         await controller.captureBringUpTask?.value
         controller.handleCommit()
+        // The load is parked until released, so this waits for the HUD instead of hoping it beat a sleep.
+        // Bounded: if the HUD stops appearing this must FAIL, not hang the suite waiting forever. The bound
+        // is a backstop for a regression, not a timing margin the passing path depends on.
+        let deadline = Date().addingTimeInterval(10)
+        var sawLoadingHUD = false
+        while Date() < deadline {
+            if hud.states.contains(where: { if case .loadingModel = $0 { return true }; return false }) {
+                sawLoadingHUD = true
+                break
+            }
+            await Task.yield()
+        }
+        #expect(sawLoadingHUD)
+        engine.release()
         await controller.dictationTask?.value
 
         #expect(await insertSpy.calls == 1)

@@ -179,6 +179,7 @@ struct SpeechModelsView: View {
         case .download:
             Button("Download") { model.startDownload(row.id) }
                 .buttonStyle(.borderedProminent)
+                .disabled(row.operationInFlight)
                 .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
         case .downloading:
             HStack(spacing: 8) {
@@ -207,6 +208,8 @@ struct SpeechModelsView: View {
             }
             if canTest || canReinstall || canDelete {
                 HStack(spacing: 10) {
+                    // Only one model may load/verify/delete at a time; show that rather than accepting the
+                    // click and answering with a "busy" error.
                     if canTest {
                         Button {
                             model.test(row.id)
@@ -233,6 +236,7 @@ struct SpeechModelsView: View {
                             .accessibilityIdentifier(AccessibilityID.Settings.Speech.delete(row.id))
                     }
                 }
+                .disabled(row.operationInFlight)
             }
         }
         .padding(.top, 4)

@@ -122,10 +122,27 @@ enum TextInserter {
         return nil
     }
 
+    // Consulted immediately before each irreversible event — the ⌘V post and every typed character — since
+    // both suspend after the caller's own gate. TaskLocal, not a stored property: a static would be shared
+    // with Paste Last and the correction panel, and reentrancy lets one task clobber another's closure.
+    @TaskLocal static var shouldAbortInsertion: (@Sendable () -> Bool)?
+
+    private static var insertionAborted: Bool { shouldAbortInsertion?() ?? false }
+
+    // Test seam. Typed insertion posts to `.cghidEventTap`, which is system-wide input — a test driving it
+    // types into whatever app the user has focused. When this is set the characters are recorded instead.
+    @TaskLocal static var typedCharacterSink: (@Sendable (Character) -> Void)?
+
     // Returns whether the insertion path actually acted. False ⇒ nothing inserted, so the caller must not
     // report success or fire a submit keystroke.
     @discardableResult
     static func perform(_ decision: InsertionDecision, method: Mode.Insertion, paste: ClipboardPaste, text: String, awaitSettle: Bool = true) async -> Bool {
+        // Covers the paths with no suspension of their own to check at — AX insertion and the clipboard
+        // fallback both act synchronously once entered. Paste and typing keep their deeper checks.
+        if insertionAborted {
+            Log.insertion.notice("insertion skipped — the capture this text came from was lost")
+            return false
+        }
         switch insertionAction(decision: decision, method: method) {
         case .paste: return await insertViaPaste(text, paste: paste, awaitSettle: awaitSettle)
         case .ax: return await insertViaAX(text, paste: paste, awaitSettle: awaitSettle)
@@ -145,14 +162,26 @@ enum TextInserter {
     // clipboard back across the wire AFTER the keystroke, and a restore racing that fetch would hand it the
     // user's previous clipboard. The dictated text staying on the clipboard is the accepted cost.
     @discardableResult
-    static func insertViaPaste(_ text: String, paste: ClipboardPaste = .init(), awaitSettle: Bool = true) async -> Bool {
+    static func insertViaPaste(
+        _ text: String, paste: ClipboardPaste = .init(), awaitSettle: Bool = true,
+        on pb: NSPasteboard = .general
+    ) async -> Bool {
         guard !text.isEmpty else { return true }
-        guard let scratch = await beginScratchPaste(text, on: .general, concealed: !paste.syncsClipboard) else {
+        guard let scratch = await beginScratchPaste(text, on: pb, concealed: !paste.syncsClipboard) else {
             Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
             return false
         }
         if paste.settleMs > 0 {
             try? await Task.sleep(for: .milliseconds(paste.settleMs))
+        }
+        // Last point before the text lands: the scratch write and the settle above are both suspensions.
+        if insertionAborted {
+            // Restore NOW, not through settleScratch's 1.5 s post-paste backstop: that window exists to let
+            // a lagging target consume a ⌘V that, here, never happened. Leaving the dictated text on the
+            // clipboard meanwhile would be a needless exposure.
+            Log.insertion.notice("paste: aborted before ⌘V — the capture this text came from was lost")
+            restoreIfScratchIntact(scratch)
+            return false
         }
         postKey(paste.keystroke)
         if paste.syncsClipboard {
@@ -354,8 +383,21 @@ enum TextInserter {
     static func insertViaTyping(_ text: String) async -> Bool {
         let src = CGEventSource(stateID: .combinedSessionState)
         let layout = KeyboardLayout.currentIndex()
+        var typedAny = false
         for character in text {
-            if let stroke = layout?.stroke(for: character) {
+            // Checked per character, not once up front: this loop suspends between every keystroke, so a
+            // capture loss can land mid-word. Unlike a paste this is not one undo, and stopping leaves less
+            // wrong text behind than typing the rest of a take the microphone never finished recording.
+            if insertionAborted {
+                Log.insertion.notice("typing: stopped mid-insert — the capture this text came from was lost")
+                return typedAny
+            }
+            typedAny = true
+            // The seam replaces only the event post; the per-character suspension below still runs, since
+            // that is the window the abort check exists for and what a test driving this must reproduce.
+            if let sink = typedCharacterSink {
+                sink(character)
+            } else if let stroke = layout?.stroke(for: character) {
                 postKey(CGKeyCode(stroke.keyCode), flags: eventFlags(stroke.modifiers), physicalModifiers: true)
             } else {
                 for chunk in TypedText.keyEventChunks(String(character)) {
