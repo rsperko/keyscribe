@@ -381,7 +381,9 @@ glance and can show simultaneously:
   *Wired to:* a malformed config, any missing required permission, an **unusable active STT model**
   (deleted out from under us), and the AI checks — a **dangling connection** (a mode names a deleted
   connection), a **structurally misconfigured connection** (no model, or OpenAI-compatible with no
-  base URL, or token-command auth with no command), and a **failed Test Connection**. Opening
+  base URL, or token-command auth with no command), and a **failed Test Connection**. The
+  **`Settings…` menu item carries a matching red dot** while any of these hold, so opening the menu
+  points at where the problem is fixed instead of dead-ending at the glyph. Opening
   Settings **flags the offending sidebar pane with a matching red dot** — Maintenance (config) ·
   Permissions · Speech Models (model) · AI Services (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. The sidebar polls

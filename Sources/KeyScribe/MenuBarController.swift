@@ -52,17 +52,21 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return image
     }
 
-    static let statusIcon: NSImage = glyph(color: nil)
-    static let updateTint = NSColor.systemOrange
-    static let updateIndicatorImage: NSImage = {
+    static func indicatorImage(_ color: NSColor) -> NSImage {
         let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
-            updateTint.setFill()
+            color.setFill()
             NSBezierPath(ovalIn: rect).fill()
             return true
         }
         image.isTemplate = false
         return image
-    }()
+    }
+
+    static let statusIcon: NSImage = glyph(color: nil)
+    static let updateTint = NSColor.systemOrange
+    static let updateIndicatorImage: NSImage = indicatorImage(updateTint)
+    static let errorTint = NSColor.systemRed
+    static let errorIndicatorImage: NSImage = indicatorImage(errorTint)
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLine = NSMenuItem(title: "starting…", action: nil, keyEquivalent: "")
@@ -74,7 +78,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let badgeDot: NSView = {
         let dot = NSView()
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.backgroundColor = errorTint.cgColor
         dot.layer?.cornerRadius = 3
         dot.translatesAutoresizingMaskIntoConstraints = false
         dot.isHidden = true
@@ -97,6 +101,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         item.image = updateIndicatorImage
         return item
     }()
+    // Stored so the error badge can mark it: the menu is the one step between the glyph badge and the
+    // Settings sidebar's pane dot, and a navigation element that hides a problem must surface it.
+    let settingsItem = NSMenuItem(title: "Settings…", action: nil, keyEquivalent: ",")
     // Always-present on-demand check, shown only when an updater is injected (production). The passive
     // `updateItem` + amber dot above remain the "an update is waiting" affordance; this is the "look now".
     private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: nil, keyEquivalent: "")
@@ -181,9 +188,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(history)
 
         menu.addItem(.separator())
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
+        settingsItem.target = self
+        settingsItem.action = #selector(openSettings)
+        menu.addItem(settingsItem)
 
         if showsUpdateCheck {
             checkForUpdatesItem.target = self
@@ -277,6 +284,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func setErrorBadge(_ visible: Bool) {
         badgeDot.isHidden = !visible
         hasErrorBadge = visible
+        settingsItem.image = visible ? Self.errorIndicatorImage : nil
+        settingsItem.setAccessibilityLabel(visible ? "Settings…, needs attention" : nil)
         refreshStatusAccessibility()
     }
 

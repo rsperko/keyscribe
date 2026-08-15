@@ -132,6 +132,48 @@ struct MenuBarIconTests {
         #expect(controller.updateItem.image === MenuBarController.updateIndicatorImage)
     }
 
+    @Test func errorAffordanceUsesRedIndicator() {
+        #expect(MenuBarController.errorTint.matches(.systemRed))
+        #expect(MenuBarController.errorIndicatorImage.isTemplate == false)
+        #expect(MenuBarController.errorIndicatorImage.size == NSSize(width: 8, height: 8))
+    }
+
+    // The menu is the only step between the glyph badge and the Settings sidebar's pane dot, so a
+    // navigation element that hides the problem carries the same marker (ui_design.md §6).
+    @Test func settingsMenuItemCarriesIndicatorWhileAProblemExists() {
+        let controller = MenuBarController()
+        controller.install()
+
+        controller.setErrorBadge(true)
+
+        #expect(controller.settingsItem.title == "Settings…")
+        #expect(controller.settingsItem.image === MenuBarController.errorIndicatorImage)
+    }
+
+    @Test func settingsMenuItemDropsIndicatorWhenTheProblemClears() {
+        let controller = MenuBarController()
+        controller.install()
+        controller.setErrorBadge(true)
+
+        controller.setErrorBadge(false)
+
+        #expect(controller.settingsItem.title == "Settings…")
+        #expect(controller.settingsItem.image == nil)
+    }
+
+    // Color-only state needs a text mirror for VoiceOver (ui_design.md §9); menu items ignore custom
+    // accessibility identifiers, so the label is the seam.
+    @Test func settingsMenuItemMirrorsTheProblemToVoiceOver() {
+        let controller = MenuBarController()
+        controller.install()
+
+        controller.setErrorBadge(true)
+        #expect(controller.settingsItem.accessibilityLabel() == "Settings…, needs attention")
+
+        controller.setErrorBadge(false)
+        #expect(controller.settingsItem.accessibilityLabel() == nil)
+    }
+
     @Test func checkForUpdatesItemAbsentWithoutAnUpdater() {
         let controller = MenuBarController()
         controller.install()
