@@ -538,7 +538,14 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 #  dictionary_recovery_engines keys are obsolete: ignored on read and dropped on the next write.)
 
 [during_dictation]
-mute_system_audio = true        # ducks other audio (FaceTime-style, cannot strand); lands after the start sound, instant when sounds = false
+other_audio = "quiet"           # what happens to other audio while you dictate: "quiet" (default, turned
+                                #   down but still audible), "mute" (silenced), "unchanged" (left alone).
+                                #   Ducks (FaceTime-style, cannot strand); lands after the start sound,
+                                #   instant when sounds = false
+# (The former mute_system_audio key is obsolete: still read when other_audio is absent, and dropped on
+#  the next write. true maps to "quiet" — deliberately NOT "mute": mute was the shipped default, so
+#  upgrading users adopt the new default rather than keeping full silence. Pick "mute" to keep it.
+#  false maps to "unchanged".)
 keep_display_awake = true
 sounds = true                   # start/end sounds
 sound_volume = 100             # relative dictation-sound level; 100 = full cue level, 0 = silent (0 also

@@ -83,7 +83,7 @@ struct RewriteCancelRenderTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let probeEntered = Signal(), releaseProbe = Signal()
         let hud = HUDSpy()

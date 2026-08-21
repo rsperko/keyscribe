@@ -41,7 +41,7 @@ struct SessionLockGateTests {
         let provider = try! SpeechEngineProvider(engines: [InstantEngine()], activeId: "instant")
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,

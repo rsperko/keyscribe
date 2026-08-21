@@ -248,7 +248,7 @@ struct DictationCancellationTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "gated", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let history = HistoryStore(supportDir: supportDir)
         let hud = HUDSpy()
@@ -285,7 +285,7 @@ struct DictationCancellationTests {
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
         var settings = Settings.defaults
         settings.stt = .init(engine: "missing", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
@@ -317,7 +317,7 @@ struct DictationCancellationTests {
         let audio = DrainTrackingAudio(url: supportDir.appendingPathComponent("capture.wav"))
         var settings = Settings.defaults
         settings.stt = .init(engine: "gated", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), audio: audio,
@@ -353,7 +353,7 @@ struct DictationCancellationTests {
             drainStarted: drainStarted, drainRelease: drainRelease)
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
@@ -392,7 +392,7 @@ struct DictationCancellationTests {
         let audio = NilDrainAudio(url: supportDir.appendingPathComponent("capture.wav"))
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
@@ -434,7 +434,7 @@ struct DictationCancellationTests {
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
@@ -475,7 +475,7 @@ struct DictationCancellationTests {
         let audio = SlowStartAudio(url: supportDir.appendingPathComponent("capture.wav"), delay: .milliseconds(300))
         var settings = Settings.defaults
         settings.stt = .init(engine: "gated", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud, audio: audio,
@@ -584,7 +584,7 @@ struct DictationCancellationTests {
         let history = HistoryStore(supportDir: supportDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "throwing", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud,
@@ -622,7 +622,7 @@ struct DictationCancellationTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "evicting")
         var settings = Settings.defaults
         settings.stt = .init(engine: "evicting", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
@@ -660,7 +660,7 @@ struct DictationCancellationTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "evicting")
         var settings = Settings.defaults
         settings.stt = .init(engine: "evicting", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
@@ -705,7 +705,7 @@ struct DictationCancellationTests {
         let insertSpy = InsertSpy()
         var settings = Settings.defaults
         settings.stt = .init(engine: "gated", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
@@ -757,7 +757,7 @@ struct DictationCancellationTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "gated")
         var settings = Settings.defaults
         settings.stt = .init(engine: "gated", eviction: .fastest)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
@@ -988,7 +988,7 @@ struct DictationCaptureStartTests {
             engines: [InstantEngine(id: "instant", text: "hello world")], activeId: "instant")
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         configureSettings(&settings)
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
@@ -1087,7 +1087,7 @@ struct DictationCaptureStartTests {
             defaultOutputDeviceID: { nil }, setDuck: { _, _ in true }, startCueDurationOverride: 0.5)
         let controller = makeController(
             audio: audio, hud: HUDSpy(), insertSpy: InsertSpy(), supportDir: supportDir, effects: effects
-        ) { $0.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: true) }
+        ) { $0.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: true) }
 
         controller.handleStart()
         let bringUpTask = controller.captureBringUpTask

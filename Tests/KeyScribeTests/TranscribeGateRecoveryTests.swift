@@ -86,7 +86,7 @@ struct TranscribeGateRecoveryTests {
         let insertSpy = InsertSpy()
         var settings = Settings.defaults
         settings.stt = .init(engine: "wedge", eviction: .fastest)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,
@@ -137,7 +137,7 @@ struct TranscribeGateRecoveryTests {
         let insertSpy = InsertSpy()
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .fastest)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,
@@ -184,7 +184,7 @@ struct TranscribeGateRecoveryTests {
         let insertSpy = InsertSpy()
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .fastest)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,

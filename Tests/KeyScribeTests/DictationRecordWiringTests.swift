@@ -62,7 +62,7 @@ struct DictationRecordWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         settings.history = .init(enabled: historyEnabled, retentionDays: 7)
 
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
@@ -149,7 +149,7 @@ struct DictationRecordWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
@@ -183,7 +183,7 @@ struct DictationRecordWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "throwing", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let provider = try! SpeechEngineProvider(engines: [ThrowingEngine()], activeId: "throwing")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),

@@ -180,12 +180,16 @@ the only signal.
   the fixed-geometry intensity-only dot.
 - Completion, fallback, and errors settle quickly; no celebratory animation.
 - Start/end sounds are optional and must have equivalent visual feedback.
-- When "mute system audio" is on, other audio is silenced by *ducking* the output (the same call FaceTime
-  uses), not by toggling the device's mute flag — so it cannot strand the device quiet (a crash mid-dictation
-  releases the duck automatically). The duck lands *after* the start sound finishes (ducking first would
-  swallow the cue, which routes through the same output). So with the start sound **off** the silence is
-  instant — pick that for a dictation that feels immediate. The output device that was ducked is the one
-  restored on completion, even if the default output changed mid-dictation.
+- "Other audio" chooses what happens to everything else playing while you dictate: **Quiet** (the default)
+  turns it down but leaves it audible, **Mute** silences it, **Unchanged** leaves it alone. Quiet is the
+  default because going fully deaf mid-dictation costs you a meeting you are half-listening to, and because
+  audio still playing is the ambient cue that a latched recording is still running.
+- Both Quiet and Mute work by *ducking* the output (the same call FaceTime uses), not by toggling the
+  device's mute flag — so neither can strand the device quiet (a crash mid-dictation releases the duck
+  automatically). The duck lands *after* the start sound finishes (ducking first would swallow the cue,
+  which routes through the same output). So with the start sound **off** the change is instant — pick that
+  for a dictation that feels immediate. The output device that was ducked is the one restored on
+  completion, even if the default output changed mid-dictation.
 
 ---
 

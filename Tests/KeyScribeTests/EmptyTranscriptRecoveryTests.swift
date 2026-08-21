@@ -159,7 +159,7 @@ struct EmptyTranscriptRecoveryTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "scripted", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "scripted")
         let controller = DictationController(
@@ -510,7 +510,7 @@ struct EmptyTranscriptRecoveryTests {
         try? ModeStore.write(mode, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "streamer", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         settings.features.setEnabled(true, for: .streamingTranscription)
         let hud = HUDSpy()
         let engine = EmptyStreamEngine()

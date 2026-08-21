@@ -43,7 +43,7 @@ struct FocusGuardWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let result = Captured()
         // snapshot() fires once at press and once at insertion; return captured, then current.

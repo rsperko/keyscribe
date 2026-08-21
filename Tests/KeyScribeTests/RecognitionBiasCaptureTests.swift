@@ -57,7 +57,7 @@ struct RecognitionBiasCaptureTests {
         let capture = BiasCapture()
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .fastest)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let (controller, _) = makeController(supportDir: supportDir, capture: capture, settings: settings)
 
         controller.handleStart()
@@ -83,7 +83,7 @@ struct RecognitionBiasCaptureTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "instant", eviction: .fastest)
         settings.stt.recognitionBiasDisabledEngines = ["instant"]
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let (controller, _) = makeController(supportDir: supportDir, capture: capture, settings: settings)
 
         controller.handleStart()

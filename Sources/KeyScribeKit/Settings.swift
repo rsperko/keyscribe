@@ -5,6 +5,10 @@ public enum Eviction: String, Codable, Sendable, Equatable {
     case fastest, balanced, frugal
 }
 
+public enum OtherAudio: String, Codable, Sendable, Equatable {
+    case unchanged, quiet, mute
+}
+
 public struct Settings: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var loadOnLogin: Bool
@@ -118,23 +122,27 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 
     public struct DuringDictation: Codable, Equatable, Sendable {
-        public var muteSystemAudio: Bool
+        public var otherAudio: OtherAudio
         public var keepDisplayAwake: Bool
         public var sounds: Bool
         public var soundVolumePercent: Int
 
         enum CodingKeys: String, CodingKey {
-            case muteSystemAudio = "mute_system_audio"
+            case otherAudio = "other_audio"
             case keepDisplayAwake = "keep_display_awake"
             case sounds
             case soundVolumePercent = "sound_volume"
         }
 
+        private enum LegacyCodingKeys: String, CodingKey {
+            case muteSystemAudio = "mute_system_audio"
+        }
+
         public init(
-            muteSystemAudio: Bool, keepDisplayAwake: Bool, sounds: Bool,
+            otherAudio: OtherAudio, keepDisplayAwake: Bool, sounds: Bool,
             soundVolumePercent: Int = 100
         ) {
-            self.muteSystemAudio = muteSystemAudio
+            self.otherAudio = otherAudio
             self.keepDisplayAwake = keepDisplayAwake
             self.sounds = sounds
             self.soundVolumePercent = soundVolumePercent
@@ -143,11 +151,24 @@ public struct Settings: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = Settings.defaults.duringDictation
-            muteSystemAudio = try c.decodeIfPresent(Bool.self, forKey: .muteSystemAudio) ?? d.muteSystemAudio
+            otherAudio = try Self.decodeOtherAudio(from: decoder, container: c) ?? d.otherAudio
             keepDisplayAwake = try c.decodeIfPresent(Bool.self, forKey: .keepDisplayAwake) ?? d.keepDisplayAwake
             sounds = try c.decodeIfPresent(Bool.self, forKey: .sounds) ?? d.sounds
             soundVolumePercent = try c.decodeIfPresent(Int.self, forKey: .soundVolumePercent)
                 ?? d.soundVolumePercent
+        }
+
+        private static func decodeOtherAudio(
+            from decoder: Decoder, container: KeyedDecodingContainer<CodingKeys>
+        ) throws -> OtherAudio? {
+            if let value = try container.decodeIfPresent(OtherAudio.self, forKey: .otherAudio) {
+                return value
+            }
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            guard let muted = try legacy.decodeIfPresent(Bool.self, forKey: .muteSystemAudio) else {
+                return nil
+            }
+            return muted ? .quiet : .unchanged
         }
     }
 
@@ -309,7 +330,7 @@ public struct Settings: Codable, Equatable, Sendable {
         loadOnLogin: false,
         stt: STT(engine: "parakeet", eviction: .fastest),
         duringDictation: DuringDictation(
-            muteSystemAudio: true, keepDisplayAwake: true, sounds: true, soundVolumePercent: 100),
+            otherAudio: .quiet, keepDisplayAwake: true, sounds: true, soundVolumePercent: 100),
         history: History(enabled: true, retentionDays: 7),
         shortcuts: Shortcuts(),
         audio: Audio(),

@@ -8,7 +8,11 @@ import Testing
 @MainActor
 struct DuringDictationEffectsTests {
     private let duckConfig = Settings.DuringDictation(
-        muteSystemAudio: true, keepDisplayAwake: false, sounds: false)
+        otherAudio: .mute, keepDisplayAwake: false, sounds: false)
+    private let quietConfig = Settings.DuringDictation(
+        otherAudio: .quiet, keepDisplayAwake: false, sounds: false)
+    private let unchangedConfig = Settings.DuringDictation(
+        otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
     @Test func duckIsAppliedOnlyWhenCaptureGoesLive() {
         var writes: [Float32] = []
@@ -23,6 +27,53 @@ struct DuringDictationEffectsTests {
         #expect(writes == [0])    // 0 = ducked to silence
         effects.end(duckConfig)
         #expect(writes == [0, 1]) // 1 = restored to full volume
+    }
+
+    @Test func quietDucksToAPartialLevelAndRestoresFullVolume() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.begin(quietConfig)
+        effects.activateDuck()
+        #expect(writes == [0.25])
+        effects.end(quietConfig)
+        #expect(writes == [0.25, 1])
+    }
+
+    @Test func unchangedNeverTouchesTheOutput() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.begin(unchangedConfig)
+        effects.activateDuck()
+        effects.end(unchangedConfig)
+        #expect(writes.isEmpty)
+    }
+
+    @Test func quietFollowsTheOutputAtTheSameLevelWhenTheRouteMoves() async {
+        var defaultDev: AudioDeviceID = 1
+        var levels: [AudioDeviceID: Float32] = [:]
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { defaultDev },
+            setDuck: { value, dev in levels[dev] = value; return true },
+            reapplyDelays: [], duckFollowInterval: 0.02)
+
+        effects.begin(quietConfig)
+        effects.activateDuck()
+        #expect(levels[1] == 0.25)
+        defaultDev = 2
+        for _ in 0..<200 { if levels[2] == 0.25 { break }; try? await Task.sleep(for: .seconds(0.02)) }
+        #expect(levels[2] == 0.25)
+
+        effects.end(quietConfig)
+        #expect(levels[1] == 1)
+        #expect(levels[2] == 1)
     }
 
     // If ducking is unavailable (the private API is absent on a future macOS), every duck fails — the
@@ -124,7 +175,7 @@ struct DuringDictationEffectsTests {
             loadStartCueSound: { NSSound(data: Self.silentWAV(seconds: 0.05)) },
             playSound: { _, volume in volumes.append(volume) })
         let config = Settings.DuringDictation(
-            muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 35)
+            otherAudio: .unchanged, keepDisplayAwake: false, sounds: true, soundVolumePercent: 35)
 
         effects.begin(config)
         effects.alert(config, cue: .error)
@@ -148,7 +199,7 @@ struct DuringDictationEffectsTests {
 
         effects.end(
             Settings.DuringDictation(
-                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: percent),
+                otherAudio: .unchanged, keepDisplayAwake: false, sounds: true, soundVolumePercent: percent),
             cue: .success)
 
         #expect(volumes == [expected])
@@ -165,7 +216,7 @@ struct DuringDictationEffectsTests {
 
         let hold = effects.begin(
             Settings.DuringDictation(
-                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 0))
+                otherAudio: .unchanged, keepDisplayAwake: false, sounds: true, soundVolumePercent: 0))
 
         #expect(hold == 0)
         #expect(played == 0)
@@ -181,7 +232,7 @@ struct DuringDictationEffectsTests {
 
         let hold = effects.begin(
             Settings.DuringDictation(
-                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 1))
+                otherAudio: .unchanged, keepDisplayAwake: false, sounds: true, soundVolumePercent: 1))
 
         #expect(hold > 0)
     }
@@ -195,7 +246,7 @@ struct DuringDictationEffectsTests {
 
         let hold = effects.begin(
             Settings.DuringDictation(
-                muteSystemAudio: false, keepDisplayAwake: false, sounds: true, soundVolumePercent: 100))
+                otherAudio: .unchanged, keepDisplayAwake: false, sounds: true, soundVolumePercent: 100))
 
         #expect(abs(hold - 0.05) < 0.005)
     }

@@ -166,7 +166,7 @@ struct DictationStreamingWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "streamer", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         if streamingEnabled { settings.features.setEnabled(true, for: .streamingTranscription) }
 
         let engine = StreamEngine(batchText: "BATCH_TEXT", streamText: streamText,

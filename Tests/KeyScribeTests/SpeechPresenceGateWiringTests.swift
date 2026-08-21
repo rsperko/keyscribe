@@ -61,7 +61,7 @@ struct SpeechPresenceGateWiringTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
         let controller = DictationController(
@@ -116,7 +116,7 @@ struct SpeechPresenceGateWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
         let controller = DictationController(
@@ -154,7 +154,7 @@ struct SpeechPresenceGateWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let wav = supportDir.appendingPathComponent("capture.wav")
         FileManager.default.createFile(atPath: wav.path, contents: Data([0]))

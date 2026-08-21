@@ -35,7 +35,7 @@ struct FrugalCaptureReleaseTests {
         let provider = try! SpeechEngineProvider(engines: [TextEngine()], activeId: "text")
         var settings = Settings.defaults
         settings.stt = .init(engine: "text", eviction: eviction, evictionIdleSeconds: nil)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: support),
             history: HistoryStore(supportDir: support), hud: nil, audio: audio,
@@ -73,7 +73,7 @@ struct FrugalCaptureReleaseTests {
         await controller.captureBringUpTask?.value
         var frugal = Settings.defaults
         frugal.stt = .init(engine: "text", eviction: .frugal, evictionIdleSeconds: nil)
-        frugal.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        frugal.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         controller.updateSettings(frugal)
         controller.handleCommit()
         await controller.dictationTask?.value

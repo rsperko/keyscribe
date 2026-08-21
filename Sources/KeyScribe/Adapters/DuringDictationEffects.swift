@@ -35,7 +35,8 @@ final class DuringDictationEffects {
     private var duckEpoch = 0
     // Set when a dictation arms ducking; applied only once capture is live (activateDuck) so on a Bluetooth
     // output it lands after the A2DP->HFP route switch settles. Cleared on apply or cancel.
-    private var pendingDuckGeneration: Int?
+    private var pendingDuck: (generation: Int, level: Float32)?
+    private var activeDuckLevel: Float32 = 0
     private let defaultOutputDeviceID: () -> AudioDeviceID?
     private let setDuck: (Float32, AudioDeviceID) -> Bool
     private let reapplyDelays: [Double]
@@ -119,7 +120,7 @@ final class DuringDictationEffects {
         // Arm ducking now, apply only once capture is live (activateDuck). It must wait because the start
         // cue routes through the same output (ducking first swallows it) and a Bluetooth output is mid
         // A2DP->HFP switch until capture comes up. Cancelled-before-capture bumps generation → duck dropped.
-        pendingDuckGeneration = config.muteSystemAudio ? generation : nil
+        pendingDuck = Self.duckLevel(for: config.otherAudio).map { (generation, $0) }
         guard config.sounds else { return 0 }
         // A cue at zero volume is silent, so there is nothing to keep out of the recording: skip it and let
         // capture admit immediately rather than holding the mic shut for inaudible audio. The hold exists to
@@ -134,9 +135,17 @@ final class DuringDictationEffects {
 
     // Apply the armed duck. Called when capture goes live (route settled) — never from begin.
     func activateDuck() {
-        guard let armed = pendingDuckGeneration, armed == generation else { return }
-        pendingDuckGeneration = nil
-        startDucking()
+        guard let armed = pendingDuck, armed.generation == generation else { return }
+        pendingDuck = nil
+        startDucking(level: armed.level)
+    }
+
+    private static func duckLevel(for behavior: OtherAudio) -> Float32? {
+        switch behavior {
+        case .unchanged: return nil
+        case .quiet: return 0.25
+        case .mute: return 0
+        }
     }
 
     // Restore the ducked output as soon as capture is done, not waiting for transcription + LLM rewrite.
@@ -156,7 +165,7 @@ final class DuringDictationEffects {
 
     func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
         generation &+= 1
-        pendingDuckGeneration = nil
+        pendingDuck = nil
         releaseDisplayAssertion()
         restoreOutput()
         if config.sounds { play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent) }
@@ -178,9 +187,10 @@ final class DuringDictationEffects {
         hadDisplayAssertion = false
     }
 
-    private func startDucking() {
+    private func startDucking(level: Float32) {
         guard !ducking else { return }
         ducking = true
+        activeDuckLevel = level
         duckEpoch &+= 1
         duckCurrentDefault()
         // Follow the active output: the Bluetooth A2DP<->HFP shift moves the audible device a beat after
@@ -200,7 +210,7 @@ final class DuringDictationEffects {
     // fails, so the set stays empty and restore is a clean no-op instead of unducking a duck that never was.
     private func duckCurrentDefault() {
         guard let device = defaultOutputDeviceID() else { return }
-        if setDuck(0, device) { duckedDevices.insert(device) }
+        if setDuck(activeDuckLevel, device) { duckedDevices.insert(device) }
     }
 
     private func restoreOutput() {

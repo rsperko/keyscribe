@@ -230,7 +230,7 @@ struct DictationPipelineWiringTests {
         if let recognitionBiasEnabled {
             settings.stt.recognitionBiasDisabledEngines = recognitionBiasEnabled ? [] : ["fixed"]
         }
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let engine = FixedEngine(text: transcript, supportsRecognitionBias: engineSupportsRecognitionBias)
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "fixed")
@@ -515,7 +515,7 @@ struct DictationPipelineWiringTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let engine = FixedEngine(text: "draft the memo")
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "fixed")

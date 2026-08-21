@@ -137,7 +137,7 @@ struct ModelLoadRetryTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "flaky", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
@@ -210,7 +210,7 @@ struct ModelLoadRetryTests {
         let recorder = LoadFailureRecorder()
         var settings = Settings.defaults
         settings.stt = .init(engine: "slow", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud,
@@ -268,7 +268,7 @@ struct ModelLoadRetryTests {
         let recorder = LoadFailureRecorder()
         var settings = Settings.defaults
         settings.stt = .init(engine: "timeout", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud,

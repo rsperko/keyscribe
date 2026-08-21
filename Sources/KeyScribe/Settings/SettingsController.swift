@@ -525,7 +525,7 @@ final class SettingsModel: ObservableObject {
     @Published var sounds: Bool { didSet { persist() } }
     @Published var soundVolume: Double { didSet { if !draggingSoundVolume { persist() } } }
     @Published var keepDisplayAwake: Bool { didSet { persist() } }
-    @Published var muteSystemAudio: Bool { didSet { persist() } }
+    @Published var otherAudio: OtherAudio { didSet { persist() } }
     @Published var loadOnLogin: Bool { didSet { persist() } }
     @Published var historyEnabled: Bool { didSet { persist() } }
     @Published var retentionDays: Int { didSet { persist() } }
@@ -656,7 +656,7 @@ final class SettingsModel: ObservableObject {
         sounds = settings.duringDictation.sounds
         soundVolume = Double(settings.duringDictation.soundVolumePercent) / 100
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
-        muteSystemAudio = settings.duringDictation.muteSystemAudio
+        otherAudio = settings.duringDictation.otherAudio
         loadOnLogin = settings.loadOnLogin
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
@@ -684,7 +684,7 @@ final class SettingsModel: ObservableObject {
         sounds = settings.duringDictation.sounds
         soundVolume = Double(settings.duringDictation.soundVolumePercent) / 100
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
-        muteSystemAudio = settings.duringDictation.muteSystemAudio
+        otherAudio = settings.duringDictation.otherAudio
         loadOnLogin = settings.loadOnLogin
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
@@ -746,7 +746,7 @@ final class SettingsModel: ObservableObject {
     private func persist() {
         guard !loading else { return }
         settings.duringDictation = .init(
-            muteSystemAudio: muteSystemAudio, keepDisplayAwake: keepDisplayAwake,
+            otherAudio: otherAudio, keepDisplayAwake: keepDisplayAwake,
             sounds: sounds, soundVolumePercent: soundVolumePercent)
         settings.loadOnLogin = loadOnLogin
         settings.history = .init(enabled: historyEnabled, retentionDays: retentionDays)

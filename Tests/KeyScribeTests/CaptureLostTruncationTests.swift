@@ -78,7 +78,7 @@ struct CaptureLostTruncationTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "stub", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let inserted = InsertSpy()
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
@@ -143,7 +143,7 @@ struct CaptureLostTruncationTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "stub", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let inserted = InsertSpy()
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
@@ -189,7 +189,7 @@ struct CaptureLostTruncationTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "stub", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let inserted = InsertSpy()
         let submits = InsertSpy()
@@ -235,7 +235,7 @@ struct CaptureLostTruncationTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "stub", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let inserted = InsertSpy()
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
@@ -279,7 +279,7 @@ struct CaptureLostTruncationTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "stub", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let inserted = InsertSpy()
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
@@ -342,7 +342,7 @@ struct CaptureLostTruncationTests {
         try? ModeStore.write(m, to: modesDir)
         var settings = Settings.defaults
         settings.stt = .init(engine: "stub", eviction: .frugal)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let hud = HUDSpy()
         let inserted = InsertSpy()
         let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))

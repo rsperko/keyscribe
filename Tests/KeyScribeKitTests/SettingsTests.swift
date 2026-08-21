@@ -62,7 +62,7 @@ struct SettingsTests {
         #expect(existing.duringDictation.soundVolumePercent == 100)
         #expect(Settings.defaults.duringDictation.soundVolumePercent == 100)
         #expect(Settings.DuringDictation(
-            muteSystemAudio: false, keepDisplayAwake: false, sounds: true
+            otherAudio: .unchanged, keepDisplayAwake: false, sounds: true
         ).soundVolumePercent == 100)
 
         var changed = existing
@@ -84,10 +84,53 @@ struct SettingsTests {
             schemaVersion: 1, loadOnLogin: true,
             stt: .init(engine: "whisper", eviction: .fastest, evictionIdleSeconds: 45),
             duringDictation: .init(
-                muteSystemAudio: false, keepDisplayAwake: false, sounds: false, soundVolumePercent: 25),
+                otherAudio: .unchanged, keepDisplayAwake: false, sounds: false, soundVolumePercent: 25),
             history: .init(enabled: false, retentionDays: 30),
             audio: .init(inputDeviceUID: "BuiltInMicrophoneDevice", inputDeviceName: "Built-in Microphone"))
         #expect(try SettingsStore.decode(from: SettingsStore.encode(s)) == s)
+    }
+
+    @Test func legacyMuteSystemAudioTrueMigratesToQuiet() throws {
+        let s = try SettingsStore.decode(from: full)
+        #expect(s.duringDictation.otherAudio == .quiet)
+    }
+
+    @Test func legacyMuteSystemAudioFalseMigratesToUnchanged() throws {
+        let toml = "schema_version = 1\n[during_dictation]\nmute_system_audio = false"
+        #expect(try SettingsStore.decode(from: toml).duringDictation.otherAudio == .unchanged)
+    }
+
+    @Test(arguments: [OtherAudio.unchanged, .quiet, .mute])
+    func otherAudioRoundTrips(_ behavior: OtherAudio) throws {
+        var s = Settings.defaults
+        s.duringDictation.otherAudio = behavior
+        #expect(try SettingsStore.decode(from: SettingsStore.encode(s)).duringDictation.otherAudio == behavior)
+    }
+
+    @Test func otherAudioDefaultsToQuietWhenAbsent() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(s.duringDictation.otherAudio == .quiet)
+    }
+
+    @Test func otherAudioWinsOverTheLegacyKeyWhenBothArePresent() throws {
+        let toml = """
+        schema_version = 1
+        [during_dictation]
+        mute_system_audio = true
+        other_audio = "unchanged"
+        """
+        #expect(try SettingsStore.decode(from: toml).duringDictation.otherAudio == .unchanged)
+    }
+
+    @Test func invalidOtherAudioIsRejected() {
+        let toml = "schema_version = 1\n[during_dictation]\nother_audio = \"low\""
+        #expect(throws: ConfigError.self) { try SettingsStore.decode(from: toml) }
+    }
+
+    @Test func writingDropsTheLegacyMuteKey() throws {
+        let encoded = try SettingsStore.encode(try SettingsStore.decode(from: full))
+        #expect(!encoded.contains("mute_system_audio"))
+        #expect(encoded.contains("other_audio"))
     }
 
     @Test func evictionIdleSecondsRoundTrips() throws {

@@ -103,12 +103,16 @@ struct GeneralSettingsView: View {
             Section {
                 Toggle("Keep your Mac awake", isOn: $model.keepDisplayAwake)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.keepDisplayAwake)
-                Toggle("Mute all other audio", isOn: $model.muteSystemAudio)
-                    .accessibilityIdentifier(AccessibilityID.Settings.General.muteSystemAudio)
+                Picker("Other audio", selection: $model.otherAudio) {
+                    Text("Mute").tag(OtherAudio.mute)
+                    Text("Quiet").tag(OtherAudio.quiet)
+                    Text("Unchanged").tag(OtherAudio.unchanged)
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.General.otherAudio)
             } header: {
                 Text("During dictation")
             } footer: {
-                Text("These settings apply only while you dictate.")
+                Text("These settings apply only while you dictate. Quiet turns other audio down instead of silencing it, so you can still hear a call or a video.")
             }
 
             Section("Startup") {

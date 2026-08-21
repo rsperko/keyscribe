@@ -63,7 +63,7 @@ struct IdleEvictionRescheduleTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "balanced-engine")
         var settings = Settings.defaults
         settings.stt = .init(engine: "balanced-engine", eviction: .balanced, evictionIdleSeconds: 3600)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,
@@ -103,7 +103,7 @@ struct IdleEvictionRescheduleTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "balanced-engine")
         var settings = Settings.defaults
         settings.stt = .init(engine: "balanced-engine", eviction: .balanced, evictionIdleSeconds: 3600)
-        settings.duringDictation = .init(muteSystemAudio: false, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: nil,
