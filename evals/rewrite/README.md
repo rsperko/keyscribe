@@ -65,6 +65,40 @@ never pair to ClaudeCode and a 3-word split can never pair at all — `recall-cl
 exists to keep that limit visible in results. When adding term-recall cases, pick mishearings the
 channel can actually deliver, or you are measuring nothing.
 
+## Authoring gotcha: `maxWer` is meaningless for CJK
+
+`BenchmarkScoring.tokens` maps every non-alphanumeric scalar to a space and splits — but CJK
+ideographs and kana **are** alphanumeric, so a space-free Japanese sentence collapses to a single
+token and WER degenerates to 0-or-1. Score CJK cases with `mustContain` (a kana/kanji fragment that
+must survive) and `regexAbsent` (English function words that must not appear); keep
+`reference`/`maxWer` for space-delimited languages. `RewriteEvalCorpusTests.cjkCasesDoNotRelyOnWordErrorRate`
+enforces this.
+
+A mode prompt that **quotes English literals** beats the language rule, by design. The seeded Email
+prompt spells out its scaffolding (`"Hi Sarah,"`, `"Hi,"`, `"Thanks,"`, `"Best,"` — `Mode.swift`), and
+on Japanese dictation the floor model returns a correct Japanese body wrapped in `Hi 田中さん,` /
+`Best,`. That is the deference clause working as written: `<instructions>` wins. Adding a
+"quoted examples are a pattern, not text to copy" sentence to the shared rule was tried and measured —
+output was byte-identical, so it was reverted rather than shipped as dead prompt weight. The fix
+belongs in the mode: a user who writes in Japanese edits that mode's writing instruction, which is
+exactly the per-mode override the design relies on. `language-japanese-email` therefore uses an inline
+email prompt that describes the greeting and closing instead of quoting them, so it measures the
+shared rule rather than the seeded prompt's literals.
+
+The `language`-tagged cases are **authored, not seeded from engine output** — unlike the English
+corpus, nobody here recorded Japanese through a real STT engine, so their transcripts carry realistic
+filler (えーと / その) but no engine-specific mishearings. They test language selection, not recognition.
+
+## Running gotcha: a rate-limited provider fakes a catastrophic regression
+
+Variants run **sequentially against one connection**, so a provider with a per-period quota spends it
+on the first variant and returns 429 for the rest of the run. The report counts those as `errors` and
+the variant reads as `-19` / `-21` broken cases. Check the `errors` column before believing any
+regression: if one variant has ~0 errors and the other has dozens, reverse `--variants` and confirm
+the errors follow the *position*, not the variant. Observed 2026-08 on Groq (free tier, 151× 429) and
+Mistral (30× 429 on whichever variant ran second). Lower `--repeat`, or use a local endpoint, which has
+no quota.
+
 ## Known corpus gaps (fix these before trusting the affected verdicts)
 
 - **Field-format cases are too easy.** Every `field-format` case passes at baseline on every model

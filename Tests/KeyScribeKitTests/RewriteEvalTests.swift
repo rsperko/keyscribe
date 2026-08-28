@@ -20,7 +20,7 @@ private func makeCase(
 ) -> RewriteEvalCase {
     RewriteEvalCase(
         id: id, tags: tags, modePrompt: prompt, transcript: transcript,
-        screenTerms: screenTerms, tokens: tokens, language: "English", locale: locale,
+        screenTerms: screenTerms, tokens: tokens, locale: locale,
         fieldSingleLine: fieldSingleLine, fieldPlainText: fieldPlainText,
         appName: appName, precedingText: precedingText, selectedText: selectedText,
         userName: userName, checks: checks)
@@ -47,7 +47,6 @@ struct RewriteEvalManifestTests {
         let c = try #require(m.cases.first)
         #expect(c.modePrompt == "Clean up.")
         #expect(c.tags.isEmpty)
-        #expect(c.language == "English")
         #expect(c.screenTerms.isEmpty && c.tokens.isEmpty)
         #expect(c.checks.mustContain == ["hi"])
         #expect(c.checks.mustNotContain.isEmpty && c.checks.regexAbsent.isEmpty)
@@ -211,7 +210,7 @@ struct RewriteEvalVariantsTests {
         var c = makeCase()
         c = RewriteEvalCase(
             id: c.id, tags: c.tags, modePrompt: c.modePrompt, transcript: c.transcript,
-            screenTerms: c.screenTerms, tokens: c.tokens, language: c.language, locale: c.locale,
+            screenTerms: c.screenTerms, tokens: c.tokens, locale: c.locale,
             fieldSingleLine: c.fieldSingleLine, fieldPlainText: c.fieldPlainText,
             appName: c.appName, precedingText: c.precedingText, selectedText: c.selectedText,
             userName: c.userName, currentDateTime: "Friday, July 10, 2026, 9:00 AM", checks: c.checks)

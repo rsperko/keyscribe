@@ -11,7 +11,6 @@ public struct RewriteEvalCase: Sendable, Equatable {
     public let transcript: String
     public let screenTerms: [String]
     public let tokens: [String]
-    public let language: String
     public let locale: String?
     public let fieldSingleLine: Bool?
     public let fieldPlainText: Bool?
@@ -43,7 +42,7 @@ public struct RewriteEvalCase: Sendable, Equatable {
 
     public init(
         id: String, tags: [String], modePrompt: String, transcript: String,
-        screenTerms: [String], tokens: [String], language: String, locale: String?,
+        screenTerms: [String], tokens: [String], locale: String?,
         fieldSingleLine: Bool?, fieldPlainText: Bool?,
         appName: String?, precedingText: String?, selectedText: String?, userName: String?,
         currentDateTime: String? = nil, checks: Checks
@@ -54,7 +53,6 @@ public struct RewriteEvalCase: Sendable, Equatable {
         self.transcript = transcript
         self.screenTerms = screenTerms
         self.tokens = tokens
-        self.language = language
         self.locale = locale
         self.fieldSingleLine = fieldSingleLine
         self.fieldPlainText = fieldPlainText
@@ -109,7 +107,7 @@ public struct RewriteEvalManifest: Sendable, Equatable {
             return RewriteEvalCase(
                 id: c.id, tags: c.tags ?? [], modePrompt: prompt, transcript: c.transcript,
                 screenTerms: c.screenTerms ?? [], tokens: c.tokens ?? [],
-                language: c.language ?? "English", locale: c.locale,
+                locale: c.locale,
                 fieldSingleLine: c.field?.singleLine, fieldPlainText: c.field?.plainText,
                 appName: c.appName, precedingText: c.precedingText,
                 selectedText: c.selectedText, userName: c.userName,
@@ -137,7 +135,6 @@ public struct RewriteEvalManifest: Sendable, Equatable {
         let transcript: String
         let screenTerms: [String]?
         let tokens: [String]?
-        let language: String?
         let locale: String?
         let field: RawField?
         let appName: String?

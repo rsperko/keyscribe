@@ -53,7 +53,7 @@ public enum RewriteEvalVariants {
         let inputs = PromptInputs(
             modePrompt: c.modePrompt, dictatedInstructions: "", content: c.transcript,
             tokens: c.tokens, validTerms: validTerms, fuzzyCandidates: fuzzy,
-            styleRules: [], language: c.language,
+            styleRules: [],
             modeSystemInstructions: "",
             appName: c.appName, bundleId: nil, fieldRole: nil,
             selectedText: c.selectedText, precedingText: c.precedingText,

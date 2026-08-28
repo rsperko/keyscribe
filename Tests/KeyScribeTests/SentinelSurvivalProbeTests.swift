@@ -165,7 +165,7 @@ struct SentinelSurvivalProbeTests {
             let content = s.content(tokenStrings)
             let inputs = PromptInputs(
                 modePrompt: s.modePrompt, dictatedInstructions: s.dictated, content: content,
-                tokens: issued, validTerms: [], language: "English", modeSystemInstructions: "",
+                tokens: issued, validTerms: [], modeSystemInstructions: "",
                 appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
             let prompt = PromptAssembler.assemble(inputs)
             var system = prompt.system

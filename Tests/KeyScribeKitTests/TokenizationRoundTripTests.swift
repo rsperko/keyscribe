@@ -20,7 +20,7 @@ private let conn = Connection(id: "x", name: "X", provider: .gemini, model: "m",
 private func inputs(_ content: String, tokens: [String]) -> PromptInputs {
     PromptInputs(
         modePrompt: "Polish this.", dictatedInstructions: "", content: content,
-        tokens: tokens, validTerms: [], language: "English", modeSystemInstructions: "",
+        tokens: tokens, validTerms: [], modeSystemInstructions: "",
         appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
 }
 

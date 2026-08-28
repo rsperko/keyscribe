@@ -39,4 +39,23 @@ struct RewriteEvalCorpusTests {
             }
         }
     }
+
+    // BenchmarkScoring.tokens maps every non-alphanumeric scalar to a space and splits — but CJK
+    // ideographs and kana ARE alphanumeric, so a space-free Japanese sentence collapses to ONE token
+    // and WER degenerates to 0-or-1. A CJK case carrying maxWer measures nothing; use mustContain /
+    // regexAbsent there instead (evals/rewrite/README.md).
+    @Test func cjkCasesDoNotRelyOnWordErrorRate() throws {
+        let manifest = try RewriteEvalManifest.load(from: Self.corpusURL)
+        for c in manifest.cases where Self.containsCJK(c.transcript) {
+            #expect(c.checks.maxWer == nil,
+                    "\(c.id): maxWer is meaningless for CJK — BenchmarkScoring.tokens sees one token")
+        }
+    }
+
+    private static func containsCJK(_ s: String) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            (0x3040...0x30FF).contains(scalar.value)      // hiragana + katakana
+                || (0x4E00...0x9FFF).contains(scalar.value)   // CJK unified ideographs
+        }
+    }
 }

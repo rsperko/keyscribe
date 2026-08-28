@@ -97,6 +97,37 @@ struct RewriteRequestBuilderTests {
         #expect(assembled.inputs.locale == "en-US")
         #expect(asciiSpaces(assembled.prompt.system).contains(
             "- Current date and time: Friday, July 10, 2026 at 9:00 AM (America/Chicago)."))
-        #expect(assembled.prompt.system.contains("- Write in English (en-US spelling conventions)."))
+        #expect(assembled.prompt.system.contains("- When producing English text, use en-US spelling conventions."))
+    }
+
+    // The spelling clause is gated on an ENGLISH LOCALE, not on the old always-true `language ==
+    // "English"` guard, which made a ja-JP Mac render "Write in English (ja-JP spelling conventions)."
+    @MainActor
+    @Test func nonEnglishLocaleGetsNoSpellingClause() async {
+        let assembled = await Self.assembled(localeIdentifier: "ja_JP")
+        #expect(assembled.inputs.locale == nil)
+        #expect(!assembled.prompt.system.contains("spelling conventions"))
+    }
+
+    @MainActor
+    @Test func britishLocaleStillGetsItsSpellingClause() async {
+        let assembled = await Self.assembled(localeIdentifier: "en_GB")
+        #expect(assembled.inputs.locale == "en-GB")
+        #expect(assembled.prompt.system.contains("- When producing English text, use en-GB spelling conventions."))
+    }
+
+    @MainActor
+    static func assembled(localeIdentifier: String) async -> RewriteRequestBuilder.Assembled {
+        var mode = Mode(id: "ai", name: "AI")
+        mode.aiRewrite = .init(connection: "c", prompt: "Clean up.")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let plan = ResolvedConfig(
+            modes: [mode], dictionary: DictionarySet(), replacements: ReplacementsSet(),
+            connections: ConnectionSet(), fragments: [:])
+        var builder = RewriteRequestBuilder(
+            mode: mode, content: "hello", instruction: "", issuedTokens: [],
+            capturedBundleId: nil, capturedPid: nil, plan: plan, connection: conn)
+        builder.locale = Locale(identifier: localeIdentifier)
+        return await builder.build()
     }
 }

@@ -191,10 +191,17 @@ term" hint — so a dictionary entry is never a complete no-op, on any engine.
 KeyScribe ships a **small curated list** of the best STT models, not arbitrary model selection.
 Custom/other STTs are a later option; the seam stays clean (YAGNI).
 
-**Language follows the active engine.** With one engine active globally, supported languages are
-whatever that engine supports (Parakeet 25 / Whisper 99 / Apple 20 / Qwen3 52 / Moonshine 1). A user
-who needs a language their engine lacks switches engines. No auto-detection or per-mode language
-override.
+**Transcription language follows the active engine.** With one engine active globally, supported
+languages are whatever that engine supports (Parakeet 25 / Whisper 99 / Apple 20 / Qwen3 52 /
+Moonshine 1). A user who needs a language their engine lacks switches engines. There is no STT
+language setting and no per-mode language override.
+
+**Rewrite output language follows the content**, which is a separate question from the above and is
+not derived from the engine (`SpeechEngine.transcribe` returns a bare `String` — there is no language
+label, and one label could not represent code-switching anyway). The rewrite writes in whatever
+language `<content>` is already in, per dictation, with **no setting** — see `prompt_design.md`. A
+mode that must pin or translate says so in its own `ai_rewrite.prompt`; there is still no `language`
+field anywhere.
 
 Model lifecycle: **download → prepare (with progress) → select → delete**.
 

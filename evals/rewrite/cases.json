@@ -372,6 +372,65 @@
         "mustContain": ["parseConfig", "loadConfig"],
         "regexAbsent": ["(?i)\\bum\\b", "```"]
       }
+    },
+    {
+      "id": "language-japanese-polish",
+      "tags": ["language"],
+      "promptId": "polish",
+      "transcript": "えーと、明日の会議なんですけど、その、三時からに変更してもいいですか",
+      "checks": {
+        "mustContain": ["会議"],
+        "regexAbsent": ["\\b(the|and|is|are|to|for|with|please|meeting|next|week)\\b"]
+      }
+    },
+    {
+      "id": "language-japanese-codeswitch",
+      "tags": ["language"],
+      "promptId": "polish",
+      "transcript": "えーと、このAPIをKubernetesにデプロイする手順を、その、まとめておいてください",
+      "checks": {
+        "mustContain": ["API", "Kubernetes"],
+        "regexAbsent": ["\\b(the|and|is|are|to|for|with|please|meeting|next|week)\\b"]
+      }
+    },
+    {
+      "id": "language-japanese-email",
+      "tags": ["language"],
+      "prompt": "Rewrite the dictated text as a polished, professional email. Remove filler words and organize it into clear sentences. Begin with a brief greeting addressed to the recipient if one is named in the text, and end with a short closing line. Never invent names, recipients, or facts not in the text. Keep my meaning.",
+      "transcript": "えーと、田中さんに来週の打ち合わせの件で連絡したいんですけど、水曜日の午後は空いてますか",
+      "checks": {
+        "mustContain": ["田中"],
+        "mustNotContain": ["Hi,", "Hi ", "Thanks,", "Best,", "Dear "],
+        "regexAbsent": ["\\b(the|and|is|are|to|for|with|please|meeting|next|week)\\b"]
+      }
+    },
+    {
+      "id": "language-japanese-under-english-instruction",
+      "tags": ["language"],
+      "prompt": "Lightly clean up the dictated text: remove filler words and false starts, then fix grammar and punctuation. Keep my original wording, meaning, and tone.",
+      "transcript": "えーと、この機能は来週リリースする予定です",
+      "checks": {
+        "mustContain": ["来週"],
+        "regexAbsent": ["\\b(the|and|is|are|to|for|with|please|meeting|next|week)\\b"]
+      }
+    },
+    {
+      "id": "language-translate-to-english",
+      "tags": ["language"],
+      "prompt": "Translate the dictated text into English. Return only the translation.",
+      "transcript": "明日の会議は三時からです",
+      "checks": {
+        "mustNotContain": ["会議", "明日"]
+      }
+    },
+    {
+      "id": "language-translate-to-japanese",
+      "tags": ["language"],
+      "prompt": "Translate the dictated text into Japanese. Return only the translation.",
+      "transcript": "the meeting is at three tomorrow afternoon",
+      "checks": {
+        "regexAbsent": ["\\b(the|and|is|are|to|for|with|please|meeting|next|week)\\b"]
+      }
     }
   ]
 }

@@ -52,7 +52,10 @@ Rules:
 - {{#if currentDateTime}}Current date and time: {{currentDateTime}}. Use it only when the
   instructions or the dictated text call for a date or time; never insert dates, times, or the
   timezone otherwise.{{/if}}
-- Write in {{language}}{{#if locale}} ({{locale}} spelling conventions){{/if}}.
+- Write all natural-language output in the same language or languages as <content>, preserving
+  intentional code-switching. Do not translate <content> unless <instructions> explicitly requests
+  a different language.
+- {{#if locale}}When producing English text, use {{locale}} spelling conventions.{{/if}}
 {{modeSystemInstructions}}
 ```
 
@@ -95,10 +98,28 @@ Rules:
   the guard, the line itself leaks a date/time into output that never asked for one. The formatted
   string is produced with the **user's own locale/timezone** (never a hardcoded `en_US`), so a
   non-US user sees their own date formatting.
-- The **locale spelling clause** extends the language line to `Write in {{language}} ({{locale}}
-  spelling conventions)` when a BCP-47 locale is present (e.g. `en-US`), nudging colour/color-class
-  spelling toward the user's variant. Absent a locale it degrades to the plain `Write in
-  {{language}}.` line.
+- The **language rule** is anchored on `<content>`, never on the dictated text or a configured
+  language. That is load-bearing, not stylistic: for a `source=selection` mode the **selection is the
+  content** and the speech is only the instruction, so a rule keyed on what was *spoken* translates a
+  Japanese selection the moment the user speaks an English instruction over it. It says "all
+  natural-language output" rather than merely "preserve `<content>`" because a mode can **add** text —
+  the seeded Email prompt hardcodes English scaffolding (`"Hi,"`, `"Thanks,"`, `"Best,"`), which a
+  preserve-only rule would leave wrapped around Japanese prose. "Preserving intentional
+  code-switching" keeps English identifiers in a Japanese sentence from being transliterated. The
+  deference to `<instructions>` is the **only** per-mode language override: there is no `language`
+  setting and no per-mode `language` field, so a mode that must pin or translate says so in its own
+  `ai_rewrite.prompt`. This does not widen prompt injection — `<instructions>` carries only the mode
+  prompt and the user's own dictated instructions, both trusted, and the `<context>` fence is
+  unchanged.
+- The **locale spelling clause** is its own rule, deliberately decoupled from *which* language so the
+  two questions ("which language" vs "which regional variant") cannot fuse. It renders only when a
+  BCP-47 locale is present and only for an **English** user locale (`en-*`), nudging
+  colour/color-class spelling toward the user's variant; it self-describes as conditional ("when
+  producing English text") so it is inert under non-English output. The earlier fused form gated on a
+  hardcoded output language, a guard that was always true — so a `ja-JP` Mac rendered `Write in
+  English (ja-JP spelling conventions).`, nonsense on both halves. Generalizing the clause to
+  pt-BR/pt-PT or zh-Hans/zh-Hant needs a locale-code → language-noun map that does not exist yet;
+  that is a future eval-gated candidate, deliberately not built.
 - `modeSystemInstructions` is the mode's own system-level guidance (optional).
 
 ## User message (template)

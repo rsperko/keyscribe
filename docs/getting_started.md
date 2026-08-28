@@ -199,6 +199,12 @@ What rewrite is good for:
 - Turning a rough thought into a chat message, email, Markdown note, shell command, or prompt.
 - Rewriting selected text in place.
 
+Rewrite replies in whatever language you dictated, per dictation — nothing to set, and you can switch
+languages between dictations. English product and technical terms stay in English inside an otherwise
+non-English sentence. If you want a mode to always produce one language, or to translate, say so in
+that mode's writing instruction. Speech recognition is separate: pick a model that covers your
+language in Settings > Speech Models.
+
 What it is not:
 
 - Cloud speech recognition. Audio still stays local.

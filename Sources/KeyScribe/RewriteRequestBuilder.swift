@@ -71,13 +71,16 @@ struct RewriteRequestBuilder {
         if ctx.app { contextCategories.append("app") }
         if ctx.precedingText, precedingText != nil { contextCategories.append("preceding text") }
 
-        let language = "English"
-        let localeIdentifier = language == "English" ? locale.identifier(.bcp47) : nil
+        // The spelling clause only ever meant en-GB vs en-US, so it is gated on an ENGLISH LOCALE, not
+        // on a hardcoded output language. The old guard (`language == "English"`) was always true, so a
+        // ja-JP Mac rendered "Write in English (ja-JP spelling conventions)." — nonsense on both halves.
+        let localeIdentifier = locale.language.languageCode?.identifier == "en"
+            ? locale.identifier(.bcp47) : nil
 
         let inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
             tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: [],
-            styleRules: styleRules, language: language,
+            styleRules: styleRules,
             modeSystemInstructions: "",
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText,

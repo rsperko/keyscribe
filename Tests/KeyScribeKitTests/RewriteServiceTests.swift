@@ -23,7 +23,7 @@ private let conn = Connection(id: "x", name: "X", provider: .gemini, model: "m",
 private func inputs(content: String = "hello") -> PromptInputs {
     PromptInputs(
         modePrompt: "Rewrite.", dictatedInstructions: "", content: content,
-        tokens: [], validTerms: [], language: "English", modeSystemInstructions: "",
+        tokens: [], validTerms: [], modeSystemInstructions: "",
         appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
 }
 
@@ -104,7 +104,7 @@ struct RewriteServiceTests {
             payload: TokenizedPayload(text: "clean content", issuedTokens: [contextToken]),
             inputs: PromptInputs(
                 modePrompt: "Rewrite.", dictatedInstructions: "", content: "clean content",
-                tokens: [], validTerms: [], language: "English", modeSystemInstructions: "",
+                tokens: [], validTerms: [], modeSystemInstructions: "",
                 appName: nil, bundleId: nil, fieldRole: nil,
                 selectedText: "context mentions \(contextToken) only"),
             connection: conn)

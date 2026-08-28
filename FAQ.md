@@ -84,6 +84,20 @@ that runs on-device to tell whether a recording actually contains speech — so 
 no talking inserts nothing instead of pasting stray text. Like every speech model, it never sends audio
 off your machine.
 
+### Can I dictate in a language other than English?
+
+Yes, with one setup step. Pick a speech model that covers your language in **Settings ▸ Speech
+Models** — Whisper Large v3 Turbo (99 languages), Qwen3-ASR 0.6B/1.7B (52), and Apple Speech (20) are
+the broad ones. The English-only models (Whisper Small, Moonshine Base, Parakeet TDT-CTC 110M) and
+Parakeet TDT v3, whose 25 languages are all European, will not transcribe outside their coverage.
+
+If you also use AI rewrite, it writes back in whatever language you dictated — there is no language
+setting to find, and you can switch languages between dictations without changing anything. Mixing
+languages in one sentence works too: English product and technical terms stay in English inside an
+otherwise non-English sentence. If you want a mode to always produce one language, or to translate,
+say so in that mode's writing instruction (Settings ▸ Modes ▸ AI rewrite) — for example "Always write
+the result in English."
+
 ### How do I make KeyScribe spell my names and jargon correctly?
 
 Add them to the **Dictionary** (Settings ▸ Vocabulary, or the on-the-spot correction shortcut). When

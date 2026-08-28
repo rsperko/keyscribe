@@ -630,5 +630,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   triggers. **Recommended default for new modes: `fn`/Globe with `hold-or-tap`** (most familiar —
   Wispr and Apple both center on it), with **`right_option`** offered as the conflict-free
   alternative (Apple Dictation also double-taps Fn).
-- **Per-mode language** — out of scope (language follows the active engine, `design.md` §4.1);
-  no `language` field.
+- **Per-mode language** — out of scope; no `language` field, and no global language setting either.
+  Transcription language follows the active engine (`design.md` §4.1), and the **rewrite** writes in
+  whatever language `<content>` is already in (`prompt_design.md`). A mode that must pin a language
+  or translate says so in its own `ai_rewrite.prompt`, which the language rule explicitly defers to —
+  that instruction *is* the per-mode override, so a structured field would only duplicate it.

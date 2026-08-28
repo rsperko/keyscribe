@@ -10,7 +10,6 @@ public struct PromptInputs: Sendable {
     // Shared fragment bodies, in order. Rendered as labeled style rules inside <instructions> rather than
     // flattened into modePrompt, so the model treats them as overlays, not part of the cleanup instruction.
     public var styleRules: [String]
-    public var language: String
     public var modeSystemInstructions: String
     public var appName: String?
     public var bundleId: String?
@@ -28,7 +27,7 @@ public struct PromptInputs: Sendable {
     public init(
         modePrompt: String, dictatedInstructions: String, content: String,
         tokens: [String], validTerms: [String], fuzzyCandidates: [FuzzyCorrector.Candidate] = [],
-        styleRules: [String] = [], language: String,
+        styleRules: [String] = [],
         modeSystemInstructions: String,
         appName: String?, bundleId: String?, fieldRole: String?,
         selectedText: String?, precedingText: String? = nil,
@@ -42,7 +41,6 @@ public struct PromptInputs: Sendable {
         self.validTerms = validTerms
         self.fuzzyCandidates = fuzzyCandidates
         self.styleRules = styleRules
-        self.language = language
         self.modeSystemInstructions = modeSystemInstructions
         self.appName = appName
         self.bundleId = bundleId
@@ -115,10 +113,16 @@ public enum PromptAssembler {
         if let now = nonEmpty(i.currentDateTime) {
             rules.append("- Current date and time: \(now). Use it only when the instructions or the dictated text call for a date or time; never insert dates, times, or the timezone otherwise.")
         }
+        // The language rule is anchored on <content>, NOT on the dictated text: for a source=selection
+        // mode the selection IS the content and the speech is only the instruction, so a rule keyed on
+        // what was spoken translates a Japanese selection whenever the instruction is spoken in English.
+        // "all natural-language output" (not merely "preserve <content>") is load-bearing too — a mode
+        // can ADD text, and the seeded Email prompt hardcodes English scaffolding ("Hi,", "Thanks,"),
+        // which a preserve-only rule would leave wrapped around Japanese prose. The spelling clause is
+        // its own rule so "which language" and "which regional variant" cannot fuse.
+        rules.append("- Write all natural-language output in the same language or languages as <content>, preserving intentional code-switching. Do not translate <content> unless <instructions> explicitly requests a different language.")
         if let locale = nonEmpty(i.locale) {
-            rules.append("- Write in \(i.language) (\(locale) spelling conventions).")
-        } else {
-            rules.append("- Write in \(i.language).")
+            rules.append("- When producing English text, use \(locale) spelling conventions.")
         }
 
         var msg = """
