@@ -70,3 +70,140 @@ struct KeyboardLayoutIndexTests {
         #expect(index.stroke(for: "y") == nil)
     }
 }
+
+struct AnsiUSLayoutTests {
+    @Test func lettersAndDigitsSitAtTheirAnsiPositions() {
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "a") == LayoutKeystroke(keyCode: 0))
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "v") == LayoutKeystroke(keyCode: 9))
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "z") == LayoutKeystroke(keyCode: 6))
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "0") == LayoutKeystroke(keyCode: 29))
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "7") == LayoutKeystroke(keyCode: 26))
+    }
+
+    @Test(arguments: [
+        ("`", 50), ("-", 27), ("=", 24), ("[", 33), ("]", 30), ("\\", 42),
+        (";", 41), ("'", 39), (",", 43), (".", 47), ("/", 44), ("\u{a7}", 10),
+    ])
+    func punctuationSitsAtItsAnsiPosition(_ character: String, _ keyCode: Int) {
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: Character(character)) == LayoutKeystroke(keyCode: keyCode))
+    }
+
+    @Test func shiftedAndOffLayoutCharactersAreAbsent() {
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "A") == nil)
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "~") == nil)
+        #expect(KeyboardLayoutIndex.ansiUS.stroke(for: "é") == nil)
+    }
+
+    @Test func everyPositionIsClaimedByOneCharacter() {
+        let all = "abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;',./\u{a7}"
+        let codes = all.compactMap { KeyboardLayoutIndex.ansiUS.stroke(for: $0)?.keyCode }
+        #expect(codes.count == all.count)
+        #expect(Set(codes).count == codes.count)
+    }
+}
+
+struct ShortcutIdentityTests {
+    private let russianish = KeyboardLayoutIndex { keyCode, modifiers in
+        switch (keyCode, modifiers) {
+        case (9, []): return "м"
+        case (9, [.command]): return "v"
+        case (8, []): return "с"
+        case (8, [.command]): return "c"
+        case (50, []): return "]"
+        case (50, [.command]): return "`"
+        default: return nil
+        }
+    }
+
+    @Test func aLatinShortcutResolvesThroughTheCommandLayer() {
+        #expect(russianish.shortcutKeyCode(for: "v") == 9)
+        #expect(russianish.shortcutKeyCode(for: "c") == 8)
+        #expect(russianish.shortcutKeyCode(for: "`") == 50)
+    }
+
+    @Test func theCommandLayerCharacterIsNotReachableUnmodified() {
+        #expect(russianish.stroke(for: "v") == nil)
+    }
+
+    @Test func theTypingIndexNeverSeesACommandOnlyProduction() {
+        #expect(russianish.stroke(for: "v") == nil)
+        #expect(russianish.stroke(for: "c") == nil)
+        #expect(russianish.stroke(for: "м") == LayoutKeystroke(keyCode: 9))
+    }
+
+    @Test func theCommandLayerAlsoNamesThePosition() {
+        #expect(russianish.shortcutCharacter(forKeyCode: 9) == "v")
+        #expect(russianish.shortcutCharacter(forKeyCode: 50) == "`")
+        #expect(russianish.shortcutCharacter(forKeyCode: 99) == nil)
+    }
+
+    @Test func shortcutsAndTypingCanDisagreeOnTheSameLayout() {
+        let dvorakQwertyCmd = KeyboardLayoutIndex { keyCode, modifiers in
+            switch (keyCode, modifiers) {
+            case (9, []): return "k"
+            case (9, [.command]): return "v"
+            case (47, []): return "v"
+            case (47, [.command]): return "."
+            default: return nil
+            }
+        }
+        #expect(dvorakQwertyCmd.shortcutKeyCode(for: "v") == 9)
+        #expect(dvorakQwertyCmd.stroke(for: "v") == LayoutKeystroke(keyCode: 47))
+    }
+
+    @Test func aLayoutWithoutACommandLayerFallsBackToTheUnmodifiedKey() {
+        #expect(KeyboardLayoutIndex.ansiUS.shortcutKeyCode(for: "a") == 0)
+        #expect(KeyboardLayoutIndex.ansiUS.shortcutKeyCode(for: "`") == 50)
+        #expect(KeyboardLayoutIndex.ansiUS.shortcutCharacter(forKeyCode: 9) == "v")
+    }
+
+    @Test func aShiftedCharacterIsNeverAShortcutIdentity() {
+        let us = KeyboardLayoutIndex { keyCode, modifiers in
+            switch (keyCode, modifiers) {
+            case (50, []): return "`"
+            case (50, [.shift]): return "~"
+            default: return nil
+            }
+        }
+        #expect(us.shortcutKeyCode(for: "`") == 50)
+        #expect(us.shortcutKeyCode(for: "~") == nil)
+    }
+
+    @Test func whitespaceAndControlProductionsAreExcluded() {
+        let index = KeyboardLayoutIndex { keyCode, modifiers in
+            guard modifiers.isEmpty else { return nil }
+            switch keyCode {
+            case 49: return " "
+            case 36: return "\r"
+            case 48: return "\t"
+            default: return nil
+            }
+        }
+        #expect(index.shortcutKeyCode(for: " ") == nil)
+        #expect(index.shortcutCharacter(forKeyCode: 49) == nil)
+        #expect(index.shortcutCharacter(forKeyCode: 36) == nil)
+    }
+
+    @Test func theKeypadNeverClaimsACharactersShortcutIdentity() {
+        let azerty = KeyboardLayoutIndex { keyCode, modifiers in
+            switch (keyCode, modifiers) {
+            case (23, []), (23, [.command]): return "("
+            case (23, [.shift]): return "5"
+            case (87, []), (87, [.command]): return "5"
+            default: return nil
+            }
+        }
+        #expect(azerty.shortcutKeyCode(for: "5") == nil)
+        #expect(azerty.shortcutCharacter(forKeyCode: 87) == nil)
+        #expect(azerty.shortcutKeyCode(for: "(") == 23)
+    }
+
+    @Test func theTypingIndexStillReachesReturnAndTab() {
+        let index = KeyboardLayoutIndex { keyCode, modifiers in
+            guard modifiers.isEmpty else { return nil }
+            return [36: "\r", 48: "\t"][keyCode]
+        }
+        #expect(index.stroke(for: "\n") == LayoutKeystroke(keyCode: 36))
+        #expect(index.stroke(for: "\t") == LayoutKeystroke(keyCode: 48))
+    }
+}

@@ -29,7 +29,7 @@ enum TextInserter {
         if requirePerfectRestore, !clipboardRestoresPerfectly(pb) { return nil }
         return await withMutedAlertVolume {
             let snapshot = PasteboardSnapshot.capture(from: pb)
-            postKey(keystroke)
+            guard postKey(keystroke) else { return nil }
             guard await waitForChange(since: snapshot.changeCount) else { return nil }
             let copied = pb.string(forType: .string)
             let editorData = pb.pasteboardItems?.first?.data(forType: webCustomDataType)
@@ -183,7 +183,10 @@ enum TextInserter {
             restoreIfScratchIntact(scratch)
             return false
         }
-        postKey(paste.keystroke)
+        guard postKey(paste.keystroke) else {
+            restoreIfScratchIntact(scratch)
+            return false
+        }
         if paste.syncsClipboard {
             return true
         }
@@ -546,9 +549,15 @@ enum TextInserter {
 
     // A foreign target (VM guest, remote session) reads key codes off the wire rather than the CGEvent
     // flags a macOS app reads, so its modifiers must be posted as real key events around the chord.
-    private static func postKey(_ keystroke: ClipboardKeystroke) {
-        postKey(CGKeyCode(keystroke.keyCode), flags: eventFlags(keystroke.modifiers),
+    private static func postKey(_ keystroke: ClipboardKeystroke) -> Bool {
+        guard let keyCode = keystroke.keyCode(in: KeyboardLayout.current()) else {
+            Log.insertion.error(
+                "clipboard chord \(keystroke.canonical, privacy: .public) is absent from the active keyboard layout")
+            return false
+        }
+        postKey(CGKeyCode(keyCode), flags: eventFlags(keystroke.modifiers),
                 physicalModifiers: keystroke.isForeignTarget)
+        return true
     }
 
     private static let modifierKeys: [(CGEventFlags, CGKeyCode)] = [

@@ -44,10 +44,13 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
         hint = nil
     }
 
-    public mutating func keyEvent(keyCode: Int, modifiers: Set<Modifier>) -> KeyDescriptor? {
+    public mutating func keyEvent(
+        keyCode: Int, shortcutCharacter: Character?, modifiers: Set<Modifier>
+    ) -> KeyDescriptor? {
         guard phase == .recording else { return nil }
         pendingModifierOnly = nil
-        if let descriptor = KeyDescriptor(eventKeyCode: keyCode, modifiers: modifiers) {
+        if let descriptor = KeyDescriptor(
+            eventKeyCode: keyCode, shortcutCharacter: shortcutCharacter, modifiers: modifiers) {
             commit(descriptor)
             return descriptor
         }

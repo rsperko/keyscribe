@@ -466,6 +466,10 @@ Show the few choices a new user is most likely to need:
   with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste Last Dictation defaults off. A chord
   that collides with a higher-precedence hotkey, such as a Mode trigger, shows an inline **shadowed**
   breadcrumb and will not fire — mode triggers win.
+- Every shortcut well records the **character a key types**, not its position, so a saved chord may
+  not exist on another keyboard layout. A chord the active layout cannot produce is never registered,
+  and the well says so with a **Not on your current keyboard layout** caption rather than looking
+  bound and silently doing nothing.
 
 The warm-up tier lives behind a `Keep speech recognition ready` disclosure pinned above the model
 list in Speech Models (collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,

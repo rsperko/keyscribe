@@ -11,7 +11,7 @@ struct ClipboardKeystrokeTests {
     @Test func parsesTheTriggerKeyGrammar() throws {
         let stroke = try ClipboardKeystroke(parsing: "control+shift+v")
         #expect(stroke.modifiers == [.control, .shift])
-        #expect(stroke.keyCode == 9)
+        #expect(stroke.keyCode(in: .ansiUS) == 9)
         #expect(stroke.canonical == "control+shift+v")
     }
 
@@ -43,5 +43,49 @@ struct ClipboardKeystrokeTests {
     @Test(arguments: ["v", "cotnrol+v", "command+", ""])
     func rejectsAKeyTheGrammarCannotParse(_ key: String) {
         #expect(throws: (any Error).self) { try ClipboardKeystroke(parsing: key) }
+    }
+
+    @Test func theChordResolvesThroughTheActiveLayout() {
+        let dvorakish = KeyboardLayoutIndex { keyCode, modifiers in
+            guard modifiers.isEmpty else { return nil }
+            return keyCode == 46 ? "v" : nil
+        }
+        #expect(ClipboardKeystroke.paste.keyCode(in: .ansiUS) == 9)
+        #expect(ClipboardKeystroke.paste.keyCode(in: dvorakish) == 46)
+    }
+
+    @Test func aLayoutWithoutTheCharacterDoesNotResolve() {
+        let cyrillicOnly = KeyboardLayoutIndex { keyCode, _ in
+            switch keyCode {
+            case 9: return "м"
+            case 8: return "с"
+            case 46: return "ь"
+            default: return nil
+            }
+        }
+        #expect(ClipboardKeystroke.paste.keyCode(in: cyrillicOnly) == nil)
+        #expect(ClipboardKeystroke.copy.keyCode(in: cyrillicOnly) == nil)
+    }
+
+    @Test func aChordAbsentFromTheLayoutDoesNotResolve() throws {
+        #expect(try ClipboardKeystroke(parsing: "control+é").keyCode(in: .ansiUS) == nil)
+    }
+
+    @Test func pasteAndCopyResolveOnANonLatinLayout() {
+        let russianish = KeyboardLayoutIndex { keyCode, modifiers in
+            switch (keyCode, modifiers) {
+            case (9, []): return "м"
+            case (9, [.command]): return "v"
+            case (8, []): return "с"
+            case (8, [.command]): return "c"
+            default: return nil
+            }
+        }
+        #expect(ClipboardKeystroke.paste.keyCode(in: russianish) == 9)
+        #expect(ClipboardKeystroke.copy.keyCode(in: russianish) == 8)
+    }
+
+    @Test func aSpecialKeyChordResolvesWithoutTheLayout() throws {
+        #expect(try ClipboardKeystroke(parsing: "shift+forward_delete").keyCode(in: .ansiUS) == 117)
     }
 }

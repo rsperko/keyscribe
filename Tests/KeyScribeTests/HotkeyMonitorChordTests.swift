@@ -606,3 +606,106 @@ struct HotkeyMonitorChordTests {
         #expect(!HUDState.hidden.holdsKeyFocus)
     }
 }
+
+@MainActor
+struct HotkeyMonitorLayoutTests {
+    private func binding(_ key: String) -> HotkeyMonitor.Binding {
+        .init(triggerKey: key, descriptor: try! KeyDescriptor(parsing: key), style: .holdOnly, tapThreshold: 0.25)
+    }
+
+    private func monitor(_ fake: FakeChordRegistrar, layout: @escaping () -> KeyboardLayoutIndex)
+        -> HotkeyMonitor {
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
+            carbon: fake, mouseTap: FakeMouseTap())
+        m.layout = layout
+        return m
+    }
+
+    @Test func registersAPunctuationChordAtItsLayoutPosition() {
+        let fake = FakeChordRegistrar()
+        let m = monitor(fake, layout: { .ansiUS })
+        m.update(bindings: [binding("control+`")])
+        #expect(fake.lastRegistrations.count == 1)
+        #expect(fake.lastRegistrations[0].keyCode == 50)
+        #expect(fake.lastRegistrations[0].modifiers == .control)
+    }
+
+    @Test func theSameChordRegistersElsewhereOnAnotherLayout() {
+        let fake = FakeChordRegistrar()
+        var index = KeyboardLayoutIndex.ansiUS
+        let m = monitor(fake, layout: { index })
+        m.update(bindings: [binding("control+`")])
+        #expect(fake.lastRegistrations[0].keyCode == 50)
+
+        index = KeyboardLayoutIndex { keyCode, modifiers in
+            guard modifiers.isEmpty else { return nil }
+            return keyCode == 10 ? "`" : nil
+        }
+        m.update(bindings: [binding("control+`")])
+        #expect(fake.lastRegistrations.count == 1)
+        #expect(fake.lastRegistrations[0].keyCode == 10)
+    }
+
+    @Test func aChordAbsentFromTheLayoutIsNotRegistered() {
+        let fake = FakeChordRegistrar()
+        let m = monitor(fake, layout: { .ansiUS })
+        m.update(bindings: [binding("control+é"), binding("control+option+e")])
+        #expect(fake.lastRegistrations.count == 1)
+        #expect(fake.lastRegistrations[0].keyCode == 14)
+    }
+
+    @Test func aSpecialKeyChordRegistersWithoutTheLayout() {
+        let fake = FakeChordRegistrar()
+        let m = monitor(fake, layout: { KeyboardLayoutIndex { _, _ in nil } })
+        m.update(bindings: [binding("option+space")])
+        #expect(fake.lastRegistrations.count == 1)
+        #expect(fake.lastRegistrations[0].keyCode == 49)
+    }
+
+    @Test func aChordStillDrivesItsGestureAfterAReregistration() async {
+        let fake = FakeChordRegistrar()
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            carbon: fake, mouseTap: FakeMouseTap())
+        m.layout = { .ansiUS }
+        m.update(bindings: [binding("control+`")])
+        m.update(bindings: [binding("control+`")])
+
+        fake.lastRegistrations[0].onPressed()
+        await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
+        #expect(starts == 1)
+        fake.lastRegistrations[0].onReleased?()
+        await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
+        #expect(commits == 1)
+    }
+
+    @Test func anActionShortcutAbsentFromTheLayoutIsNotRegistered() {
+        let fake = FakeChordRegistrar()
+        let m = monitor(fake, layout: { .ansiUS })
+        m.update(bindings: [], actionBindings: [
+            .init(id: "offLayout", descriptor: try! KeyDescriptor(parsing: "control+é")),
+            .init(id: "onLayout", descriptor: try! KeyDescriptor(parsing: "control+option+e")),
+        ])
+        #expect(fake.lastRegistrations.count == 1)
+        #expect(fake.lastRegistrations[0].keyCode == 14)
+    }
+
+    @Test func aLayoutChangeWhileSuspendedIsRegisteredOnResume() {
+        let fake = FakeChordRegistrar()
+        var index = KeyboardLayoutIndex.ansiUS
+        let m = monitor(fake, layout: { index })
+        m.update(bindings: [binding("control+`")])
+
+        m.isSuspended = true
+        index = KeyboardLayoutIndex { keyCode, modifiers in
+            guard modifiers.isEmpty else { return nil }
+            return keyCode == 10 ? "`" : nil
+        }
+        m.isSuspended = false
+
+        #expect(fake.lastRegistrations.count == 1)
+        #expect(fake.lastRegistrations[0].keyCode == 10)
+    }
+}

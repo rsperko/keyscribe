@@ -51,6 +51,7 @@ final class HotkeyMonitor {
     private var runLoopSource: CFRunLoopSource?
     private let carbon: ChordRegistering
     private let mouseTap: MouseTapping
+    var layout: () -> KeyboardLayoutIndex = { KeyboardLayout.current() }
     private let isProcessTrusted: () -> Bool
     // How long a modifier-only trigger waits before arming, so the key of a chord built on it lands first.
     // Arming is not cheap — it runs the synchronous secure-field probe, opens the mic, and (once ready)
@@ -258,24 +259,38 @@ final class HotkeyMonitor {
 
     private func rebuildCarbon() {
         guard !isSuspended else { carbon.update([]); return }
+        let index = layout()
         var registrations: [CarbonHotKeys.Registration] = []
         for i in bindings.indices {
             guard case .chord = bindings[i].descriptor else { continue }
+            guard let keyCode = bindings[i].descriptor.chordKeyCode(in: index) else {
+                logOffLayout(bindings[i].descriptor)
+                continue
+            }
             registrations.append(.init(
-                keyCode: bindings[i].descriptor.triggerKeyCode,
+                keyCode: keyCode,
                 modifiers: bindings[i].descriptor.requiredModifierMask,
                 onPressed: { [weak self] in self?.carbonEdge(index: i, edge: .down) },
                 onReleased: { [weak self] in self?.carbonEdge(index: i, edge: .up) }))
         }
         for action in actionBindings {
             let id = action.id
+            guard let keyCode = action.descriptor.chordKeyCode(in: index) else {
+                logOffLayout(action.descriptor)
+                continue
+            }
             registrations.append(.init(
-                keyCode: action.descriptor.triggerKeyCode,
+                keyCode: keyCode,
                 modifiers: action.descriptor.requiredModifierMask,
                 onPressed: { [weak self] in self?.dispatchSideEffect { self?.onAction(id) } },
                 onReleased: nil))
         }
         carbon.update(registrations)
+    }
+
+    private func logOffLayout(_ descriptor: KeyDescriptor) {
+        hotkeyLog.notice(
+            "not registering \(descriptor.canonical, privacy: .public) — absent from the active keyboard layout")
     }
 
     private func carbonEdge(index: Int, edge: TriggerEdge) {
@@ -424,7 +439,7 @@ final class HotkeyMonitor {
             return nil
 
         case .named(.fn):
-            guard type == .flagsChanged, keyCode == Int64(descriptor.triggerKeyCode) else { return nil }
+            guard type == .flagsChanged, keyCode == Int64(NamedKey.fn.keyCode) else { return nil }
             guard flags.contains(.maskSecondaryFn) else {
                 bindings[i].suppressedUntilRelease = false
                 return .up

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import ServiceManagement
 import KeyScribeKit
 
@@ -262,6 +263,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshPreferredDeviceName()
 
         buildHotkeyMonitor()
+        observeKeyboardLayoutChanges()
         applyLoginItem(settings.loadOnLogin)
 
         // Start the tap now if permissions allow (idempotent); first-run retries via onReadyToDictate
@@ -377,7 +379,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let actionBindings = self.actionBindings(shadowed: shadowed)
 
-        let actionDescriptors = Dictionary(uniqueKeysWithValues: actionBindings.map { ($0.id, $0.descriptor) })
+        let layout = KeyboardLayout.current()
+        let actionDescriptors = Dictionary(uniqueKeysWithValues: actionBindings
+            .filter { $0.descriptor.chordKeyCode(in: layout) != nil }
+            .map { ($0.id, $0.descriptor) })
         menu.setActionShortcuts(
             addVocabulary: actionDescriptors[HotkeyAction.addVocabulary.rawValue],
             pasteLast: actionDescriptors[HotkeyAction.pasteLast.rawValue])
@@ -394,6 +399,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 onCancel: { [weak self] key in self?.controller.cancelStartedByModifier(triggerKey: key) })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
+        }
+    }
+
+    private func observeKeyboardLayoutChanges() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rebuildHotkeyMonitor() }
         }
     }
 

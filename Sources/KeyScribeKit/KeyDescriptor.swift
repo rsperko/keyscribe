@@ -35,10 +35,152 @@ public enum NamedKey: String, Sendable {
     case fn, hyper, rightOption, rightCommand, rightControl
 }
 
-public enum BaseKey: Equatable, Sendable {
-    case letter(Character)
-    case digit(Character)
-    case function(Int)
+public enum SpecialKey: String, Sendable, Hashable, CaseIterable {
+    case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10
+    case f11, f12, f13, f14, f15, f16, f17, f18, f19, f20
+    case space, tab, `return`, delete, escape
+    case forwardDelete = "forward_delete"
+    case home, end
+    case pageUp = "page_up"
+    case pageDown = "page_down"
+    case up, down, left, right
+    case keypad0 = "keypad_0"
+    case keypad1 = "keypad_1"
+    case keypad2 = "keypad_2"
+    case keypad3 = "keypad_3"
+    case keypad4 = "keypad_4"
+    case keypad5 = "keypad_5"
+    case keypad6 = "keypad_6"
+    case keypad7 = "keypad_7"
+    case keypad8 = "keypad_8"
+    case keypad9 = "keypad_9"
+    case keypadDecimal = "keypad_decimal"
+    case keypadMultiply = "keypad_multiply"
+    case keypadPlus = "keypad_plus"
+    case keypadMinus = "keypad_minus"
+    case keypadDivide = "keypad_divide"
+    case keypadEquals = "keypad_equals"
+    case keypadEnter = "keypad_enter"
+    case keypadClear = "keypad_clear"
+
+    public var keyCode: Int {
+        switch self {
+        case .f1: return 122
+        case .f2: return 120
+        case .f3: return 99
+        case .f4: return 118
+        case .f5: return 96
+        case .f6: return 97
+        case .f7: return 98
+        case .f8: return 100
+        case .f9: return 101
+        case .f10: return 109
+        case .f11: return 103
+        case .f12: return 111
+        case .f13: return 105
+        case .f14: return 107
+        case .f15: return 113
+        case .f16: return 106
+        case .f17: return 64
+        case .f18: return 79
+        case .f19: return 80
+        case .f20: return 90
+        case .space: return 49
+        case .tab: return 48
+        case .return: return 36
+        case .delete: return 51
+        case .escape: return 53
+        case .forwardDelete: return 117
+        case .home: return 115
+        case .end: return 119
+        case .pageUp: return 116
+        case .pageDown: return 121
+        case .up: return 126
+        case .down: return 125
+        case .left: return 123
+        case .right: return 124
+        case .keypad0: return 82
+        case .keypad1: return 83
+        case .keypad2: return 84
+        case .keypad3: return 85
+        case .keypad4: return 86
+        case .keypad5: return 87
+        case .keypad6: return 88
+        case .keypad7: return 89
+        case .keypad8: return 91
+        case .keypad9: return 92
+        case .keypadDecimal: return 65
+        case .keypadMultiply: return 67
+        case .keypadPlus: return 69
+        case .keypadMinus: return 78
+        case .keypadDivide: return 75
+        case .keypadEquals: return 81
+        case .keypadEnter: return 76
+        case .keypadClear: return 71
+        }
+    }
+
+    public init?(keyCode: Int) {
+        guard let match = SpecialKey.byKeyCode[keyCode] else { return nil }
+        self = match
+    }
+
+    public var isFunctionKey: Bool {
+        SpecialKey.functionRow.contains(self)
+    }
+
+    public var displayString: String {
+        switch self {
+        case .space: return "␣"
+        case .tab: return "⇥"
+        case .return: return "↩"
+        case .delete: return "⌫"
+        case .forwardDelete: return "⌦"
+        case .escape: return "⎋"
+        case .home: return "↖"
+        case .end: return "↘"
+        case .pageUp: return "⇞"
+        case .pageDown: return "⇟"
+        case .up: return "↑"
+        case .down: return "↓"
+        case .left: return "←"
+        case .right: return "→"
+        case .keypadEnter: return "Keypad ⌤"
+        case .keypadClear: return "Keypad Clear"
+        case .keypadDecimal: return "Keypad ."
+        case .keypadMultiply: return "Keypad *"
+        case .keypadPlus: return "Keypad +"
+        case .keypadMinus: return "Keypad -"
+        case .keypadDivide: return "Keypad /"
+        case .keypadEquals: return "Keypad ="
+        case .keypad0: return "Keypad 0"
+        case .keypad1: return "Keypad 1"
+        case .keypad2: return "Keypad 2"
+        case .keypad3: return "Keypad 3"
+        case .keypad4: return "Keypad 4"
+        case .keypad5: return "Keypad 5"
+        case .keypad6: return "Keypad 6"
+        case .keypad7: return "Keypad 7"
+        case .keypad8: return "Keypad 8"
+        case .keypad9: return "Keypad 9"
+        case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10,
+             .f11, .f12, .f13, .f14, .f15, .f16, .f17, .f18, .f19, .f20:
+            return rawValue.uppercased()
+        }
+    }
+
+    private static let functionRow: Set<SpecialKey> = [
+        .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10,
+        .f11, .f12, .f13, .f14, .f15, .f16, .f17, .f18, .f19, .f20,
+    ]
+
+    private static let byKeyCode: [Int: SpecialKey] =
+        Dictionary(uniqueKeysWithValues: SpecialKey.allCases.map { ($0.keyCode, $0) })
+}
+
+public enum BaseKey: Equatable, Sendable, Hashable {
+    case character(Character)
+    case key(SpecialKey)
 }
 
 public enum KeyDescriptor: Equatable, Sendable {
@@ -90,9 +232,7 @@ extension KeyDescriptor {
         }
 
         guard let base else { throw TriggerKeyError.noBaseKey }
-        if modifiers.isEmpty, case .function = base {} else if modifiers.isEmpty {
-            throw TriggerKeyError.bareNonFunctionKey
-        }
+        if modifiers.isEmpty, !base.isBareable { throw TriggerKeyError.bareNonFunctionKey }
         self = .chord(modifiers: modifiers, key: base)
     }
 
@@ -135,23 +275,24 @@ extension KeyDescriptor {
         }
     }
 
-    public var triggerKeyCode: Int {
-        switch self {
-        case .named(.fn): return 63
-        case .named(.rightOption): return 61
-        case .named(.rightCommand): return 54
-        case .named(.rightControl): return 62
-        case .named(.hyper): return 55
-        case .chord(_, let key): return key.keyCode
-        case .mouseButton(let n): return n
+    public func chordKeyCode(in layout: KeyboardLayoutIndex) -> Int? {
+        guard case .chord(_, let base) = self else { return nil }
+        switch base {
+        case .key(let special): return special.keyCode
+        case .character(let c): return layout.shortcutKeyCode(for: c)
         }
     }
 
-    /// Build a chord from a live-captured key event. Returns nil for an unrecognized key code
-    /// or a bare non-function key (no modifier) — the cases a recorder must reject.
-    public init?(eventKeyCode: Int, modifiers: Set<Modifier>) {
-        guard let base = BaseKey(keyCode: eventKeyCode) else { return nil }
-        if modifiers.isEmpty, case .function = base {} else if modifiers.isEmpty { return nil }
+    public init?(eventKeyCode: Int, shortcutCharacter: Character?, modifiers: Set<Modifier>) {
+        let base: BaseKey
+        if let special = SpecialKey(keyCode: eventKeyCode) {
+            base = .key(special)
+        } else if let character = shortcutCharacter, let normalized = BaseKey.normalized(character) {
+            base = .character(normalized)
+        } else {
+            return nil
+        }
+        if modifiers.isEmpty, !base.isBareable { return nil }
         self = .chord(modifiers: modifiers, key: base)
     }
 
@@ -162,13 +303,12 @@ extension KeyDescriptor {
         self = .mouseButton(eventButtonNumber)
     }
 
-    /// Two descriptors collide when they would fire on the same physical event. Mouse buttons live in
-    /// a separate input space from keys, so they only ever collide with the same mouse button.
     public func collides(with other: KeyDescriptor) -> Bool {
         switch (self, other) {
         case let (.mouseButton(a), .mouseButton(b)): return a == b
-        case (.mouseButton, _), (_, .mouseButton): return false
-        default: return triggerKeyCode == other.triggerKeyCode && requiredModifiers == other.requiredModifiers
+        case let (.named(a), .named(b)): return a == b
+        case let (.chord(m1, k1), .chord(m2, k2)): return m1 == m2 && k1 == k2
+        default: return false
         }
     }
 
@@ -233,6 +373,16 @@ extension NamedKey {
         case .rightControl: return "right_control"
         }
     }
+
+    public var keyCode: Int {
+        switch self {
+        case .fn: return 63
+        case .rightOption: return 61
+        case .rightCommand: return 54
+        case .rightControl: return 62
+        case .hyper: return 55
+        }
+    }
 }
 
 extension Modifier {
@@ -258,58 +408,43 @@ extension Modifier {
 
 extension BaseKey {
     init?(token: String) {
-        if token.count == 1, let c = token.first {
-            if BaseKey.letterKeyCodes[c] != nil { self = .letter(c); return }
-            if BaseKey.digitKeyCodes[c] != nil { self = .digit(c); return }
-        }
-        if token.first == "f", let n = Int(token.dropFirst()), (1...20).contains(n) {
-            self = .function(n)
+        if let special = SpecialKey(rawValue: token) { self = .key(special); return }
+        if let aliased = BaseKey.punctuationAliases[token] { self = .character(aliased); return }
+        if token.count == 1, let c = token.first, let normalized = BaseKey.normalized(c) {
+            self = .character(normalized)
             return
         }
         return nil
     }
 
-    init?(keyCode: Int) {
-        if let c = BaseKey.letterKeyCodes.first(where: { $0.value == keyCode })?.key { self = .letter(c); return }
-        if let c = BaseKey.digitKeyCodes.first(where: { $0.value == keyCode })?.key { self = .digit(c); return }
-        if let n = BaseKey.functionKeyCodes.first(where: { $0.value == keyCode })?.key { self = .function(n); return }
-        return nil
-    }
-
     var canonicalToken: String {
         switch self {
-        case .letter(let c): return String(c)
-        case .digit(let c): return String(c)
-        case .function(let n): return "f\(n)"
+        case .character(let c):
+            return c == "+" ? "plus" : String(c)
+        case .key(let special): return special.rawValue
         }
     }
 
     var displayString: String {
         switch self {
-        case .letter(let c): return String(c).uppercased()
-        case .digit(let c): return String(c)
-        case .function(let n): return "F\(n)"
+        case .character(let c): return String(c).uppercased()
+        case .key(let special): return special.displayString
         }
     }
 
-    var keyCode: Int {
-        switch self {
-        case .letter(let c): return BaseKey.letterKeyCodes[c] ?? -1
-        case .digit(let c): return BaseKey.digitKeyCodes[c] ?? -1
-        case .function(let n): return BaseKey.functionKeyCodes[n] ?? -1
-        }
+    var isBareable: Bool {
+        guard case .key(let special) = self else { return false }
+        return special.isFunctionKey
     }
 
-    static let letterKeyCodes: [Character: Int] = [
-        "a": 0, "b": 11, "c": 8, "d": 2, "e": 14, "f": 3, "g": 5, "h": 4, "i": 34,
-        "j": 38, "k": 40, "l": 37, "m": 46, "n": 45, "o": 31, "p": 35, "q": 12, "r": 15,
-        "s": 1, "t": 17, "u": 32, "v": 9, "w": 13, "x": 7, "y": 16, "z": 6,
-    ]
-    static let digitKeyCodes: [Character: Int] = [
-        "0": 29, "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25,
-    ]
-    static let functionKeyCodes: [Int: Int] = [
-        1: 122, 2: 120, 3: 99, 4: 118, 5: 96, 6: 97, 7: 98, 8: 100, 9: 101, 10: 109,
-        11: 103, 12: 111, 13: 105, 14: 107, 15: 113, 16: 106, 17: 64, 18: 79, 19: 80, 20: 90,
-    ]
+    static func normalized(_ character: Character) -> Character? {
+        guard !character.isWhitespace,
+              !character.unicodeScalars.contains(where: { $0.properties.generalCategory == .control })
+        else { return nil }
+        let lowered = String(character).lowercased()
+        guard lowered.count == 1, let first = lowered.first else { return character }
+        return first
+    }
+
+    static let punctuationAliases: [String: Character] = ["plus": "+"]
 }

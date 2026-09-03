@@ -410,6 +410,57 @@ keyscribe/
       dispatches the chord and suppresses it from the focused app. Delivers
       `kEventHotKeyPressed`/`Released`, so hold/tap gestures work. Cannot register a bare
       modifier-less key (needs ≥1 modifier).
+      **A chord's base key is a CHARACTER resolved through the active keyboard layout's SHORTCUT
+      table — never a hardcoded printable-key table, and never the plain-typing layer alone.**
+      `RegisterEventHotKey` takes a key code, but a key code is a *position*: letters move under
+      Dvorak, the whole number row shifts under AZERTY, and a non-Latin layout puts a Latin letter
+      nowhere a plain keypress can reach it. So `BaseKey` stores
+      `.character(Character)` for a printing key and resolves it per-registration via
+      `KeyDescriptor.chordKeyCode(in:)` → `KeyboardLayoutIndex.shortcutKeyCode(for:)` against
+      `KeyboardLayout.current()` (`.ansiUS` is the no-OS-layout fallback). Only **non-printing** keys
+      — `SpecialKey`: F-row, arrows, editing block, keypad — carry a fixed `kVK_` code, because their
+      position genuinely never moves.
+      **Shortcut identity is the ⌘ layer, falling back to the plain key** (`UCKeyTranslate` with
+      `cmdKey`), which is how macOS places a shortcut. This is not a refinement, it is load-bearing:
+      measured against the real system layouts, **Russian / Ukrainian / Bulgarian / Greek / Hebrew /
+      Thai reach no Latin letter on ANY unmodified or shifted key** — resolving `command+v` against
+      the plain layer returns nothing, which silently broke paste, copy and every letter trigger on
+      those layouts. The ⌘ table maps each position back to its Latin legend (physical V → `v`), and
+      it is also what makes **Dvorak — QWERTY ⌘** put shortcuts on QWERTY positions while typing
+      stays Dvorak — the only layout of 251 where both layers reach Latin letters and still disagree,
+      so a chord WITHOUT ⌘ also lands on the QWERTY position there. **Keep the ⌘ layer OUT of `KeyboardLayoutIndex.strokes`** (it is scanned into a
+      separate map): `stroke(for:)` drives `insertViaTyping`, which posts a stroke's modifiers as
+      REAL keys, so a ⌘-layer entry there would type "v" as ⌘V and fire paste in the target. Tests
+      pin both halves. **The shortcut scan also skips every position `SpecialKey` owns**, or the
+      numeric keypad — which answers on BOTH layers — becomes the only bare source of a character
+      the main row shifts, and wins: measured, that put all ten digits plus `/`, `*`, `+` on the
+      keypad under French and Italian (`=` under German/Swedish, `*`/`+` even under US), so
+      `control+5` bound to a key a laptop does not have while `control+keypad_5` silently claimed
+      the same Carbon registration that `collides` reports as free. **Do not extend that skip to the
+      typing scan**: `strokes` must keep return (36) and tab (48), which are how a transcript's
+      `"\n"`/`"\t"` reach a VM guest under `insertion = "type"`.
+      Other load-bearing consequences: the base key is a key's **plain** production, never a shifted
+      one (⌃~ is `` control+shift+` ``); an unresolvable chord is **skipped, not registered at a
+      sentinel code** (`HotkeyMonitor.rebuildCarbon` logs it; the Settings well says *Not on your
+      current keyboard layout*), and `TextInserter.postKey` likewise **returns false rather than
+      claiming success**, so a chord that cannot be posted surfaces as a failed insert instead of
+      silent data loss; an input-source change re-registers everything through
+      **`AppDelegate.rebuildHotkeyMonitor`** — never straight at the monitor, because re-registering
+      tears down every Carbon hot key and would drop the release edge of a chord being held, so it
+      must inherit the same busy deferral (`pendingHotkeyRebuild`) as every other rebuild. That rebuild
+      is **unconditional** — a rebuild is ~90 µs and already carries live gesture state across itself,
+      so there is deliberately no staleness check to get wrong; an earlier build gated it on a recorded
+      layout key, which bought nothing and could only fail closed if TIS reported the outgoing source at
+      notification time. `collides` compares descriptors, **not** resolved key codes, so conflict
+      detection stays pure and layout-free, and the layout cache is keyed on the input source id alone
+      (`LMGetKbdType()` is passed to `UCKeyTranslate` but is NOT part of the key — measured, keyboard
+      type changes no translation on any installed layout except the JIS ¥ key). The
+      recorder stores `KeyboardLayout.shortcutCharacter(keyCode:)`, so a shifted capture saves the
+      plain key and a Cyrillic keycap still saves its Latin legend. `ClipboardKeystroke`
+      (`paste_key`/`copy_key`) shares all of this with no fallback of its own: a chord the live layout
+      cannot produce is logged and not posted, exactly like a trigger. Grammar:
+      `docs/reference/config_schema.md` "Key descriptor format"; the full per-layout survey behind these
+      claims is `agent_notes/keyboard_layout_survey.md`.
     - **Mouse-button triggers** (`mouseN`, button ≥ 2 — middle / thumb buttons) → a **`.defaultTap`**
       `CGEventTap` watching `.otherMouseDown`/`.otherMouseUp` (`MouseEventTap`). Mouse-button events,
       unlike `keyDown`, are delivered under **Accessibility alone** — no Input Monitoring (verified

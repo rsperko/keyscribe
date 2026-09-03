@@ -108,7 +108,8 @@ exclude_from_history = false
 # Trigger keys. Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle".
 # "hold-or-tap" = push-to-talk while held, OR fires on a quick tap.
 [[trigger_keys]]
-key = "right_option"        # canonical key descriptor; also e.g. "fn", "hyper", "control+option+e"
+key = "right_option"        # canonical key descriptor; also e.g. "fn", "hyper", "control+option+e",
+                            # "control+`" (see "Key descriptor format" below)
 press_style = "hold-or-tap"
 tap_threshold_ms = 250      # release under this = a tap (latches on); over = push-to-talk hold
 
@@ -192,7 +193,7 @@ context = { app = true, preceding_text = false }
 | `trailing` | enum | `none` \| `space` \| `newline`. Literal text appended to the transcript, inside the atomic insert (one ⌘Z still undoes it all). New modes created in Settings default to `space`; omitted TOML decodes as `none` for compatibility with existing config files. |
 | `submit` | enum | `none` (default) \| `return` \| `shift_return` \| `cmd_return`. A keystroke synthesized after a **verified** insert (outside the undo atom). Never fires on a clipboard fallback — the text never reached the target. |
 | `trim_trailing_punctuation` | bool | `false` (default). Strip a final `.` `!` `?` (and trailing whitespace) from the result, applied to the restored final string **before** `trailing` appends its suffix. Deterministic enforcement for command/identifier/subject-line modes (e.g. seeded **Shell** ships `true`) that should not end in sentence punctuation — the rewrite prompt can request this but cannot guarantee it. Closing quotes/parens/backticks/fences are left untouched. |
-| `paste_key` | string | `command+v` (default). The chord posted to paste an insert, in the **same grammar as `trigger_keys[].key`** (`control+shift+v`, `ctrl+y`, aliases `cmd`/`ctrl`/`alt` accepted). Must be a chord — the trigger-only descriptors (`fn`, `hyper`, `mouse3`) are rejected. An unparsable value falls back to `command+v` at runtime but is **kept verbatim in the file** so a typo stays visible instead of being erased on the next save. Governs the paste keystroke only, never `submit`; ignored under `insertion = "type"`, which never touches the clipboard. TOML-only; no Settings UI. |
+| `paste_key` | string | `command+v` (default). The chord posted to paste an insert, in the **same grammar as `trigger_keys[].key`** (`control+shift+v`, `ctrl+y`, aliases `cmd`/`ctrl`/`alt` accepted) — including its layout resolution, so a printing key is posted at whatever position types that character on the **host's** active layout; a chord the active layout cannot produce is logged and not posted, so the insert fails visibly rather than landing on the wrong key. A guest or remote session reads that position with its own layout, so it must match the host's (a Dvorak host driving a QWERTY guest posts the Dvorak position). Must be a chord — the trigger-only descriptors (`fn`, `hyper`, `mouse3`) are rejected. An unparsable value falls back to `command+v` at runtime but is **kept verbatim in the file** so a typo stays visible instead of being erased on the next save. Governs the paste keystroke only, never `submit`; ignored under `insertion = "type"`, which never touches the clipboard. TOML-only; no Settings UI. |
 | `copy_key` | string | `command+c` (default). Same grammar and rules as `paste_key`, for the synthesized copy that captures a selection (`source = "selection"` modes). Selection capture in a guest or remote session is **best-effort** — the host-pasteboard bump it waits on is driven by that session's clipboard-sync, not the OS, so its timing is not guaranteed. |
 | `clipboard_sync` | bool | Defaults to **on when `paste_key` has no ⌘**, off otherwise. When on, the scratch clipboard is written **un-concealed** (so a guest's or remote session's clipboard agent will pick it up) and is **never restored** — the dictated text stays on the clipboard, like a manual copy. Set it explicitly for a target whose client translates ⌘V for the remote side but still syncs the clipboard across the wire (RDP/Citrix/VNC): those clients fetch the clipboard back **at paste time**, so a restore racing that fetch would hand the remote app your previous clipboard. Setting it `false` alongside a non-⌘ chord restores the native behavior. Independent of the chord in both directions. |
 | `paste_settle_ms` | int | `0` (default). Milliseconds to pause after writing the clipboard and before the paste keystroke. `0` = paste immediately (native apps — no delay). A positive value covers a **remote-session clipboard** (RDP/Citrix/VNC) whose eager cross-wire sync merely lags the paste, which otherwise pastes stale content; tune it up until paste is reliable. It cannot cover a target whose sync is **event-driven rather than lagging** — a local hypervisor (verified in VMware Fusion) syncs host→guest on window-focus changes, which never happen mid-dictation, so every settle value still pastes empty or one dictation behind; those targets need `insertion = "type"`. Independent of `paste_key` and `clipboard_sync` — a pure timing knob, applied to any paste, and ignored under `insertion = "type"`, which never touches the clipboard. TOML-only; no Settings UI. |
@@ -619,17 +620,50 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   the LLM. Dictation only (not edit-in-place). Empty/absent clipboard leaves the phrase as text.
 - **`include_global` is per-set** — dictionary and replacements each carry their own flag.
 - **Key descriptor format** — lowercase tokens joined by `+`: modifiers (`control` `option`
-  `command` `shift`) plus a key, or a named single key (`fn`/`globe`, `right_option`,
-  `right_command`, `hyper`, `f5`), or a non-primary mouse button `mouseN` where `N` is the
-  macOS button number ≥ 2 (`mouse2` = middle, `mouse3`/`mouse4` = the back/forward thumb
-  buttons; left = 0 and right = 1 are rejected so a trigger can never hijack a normal click).
-  Examples: `"fn"`, `"right_option"`, `"control+option+a"`, `"mouse4"`. A bound mouse button is
+  `command` `shift`, with `ctrl`/`alt`/`cmd` accepted as aliases) plus one base key, or a named
+  single key (`fn`/`globe`, `right_option`, `right_command`, `right_control`, `hyper`), or a
+  non-primary mouse button `mouseN` where `N` is the macOS button number ≥ 2 (`mouse2` = middle,
+  `mouse3`/`mouse4` = the back/forward thumb buttons; left = 0 and right = 1 are rejected so a
+  trigger can never hijack a normal click).
+  Examples: `"fn"`, `"right_option"`, `"control+option+a"`, `` "control+`" ``, `"option+space"`,
+  `"command+up"`, `"f5"`, `"mouse4"`. A bound mouse button is
   **consumed globally** while KeyScribe runs — it no longer performs its normal action (e.g.
   browser back) — which is the same trade other dictation apps (Wispr, Superwhisper) make.
   Mouse buttons are observed under Accessibility alone (no Input Monitoring), like the modifier
   triggers. **Recommended default for new modes: `fn`/Globe with `hold-or-tap`** (most familiar —
   Wispr and Apple both center on it), with **`right_option`** offered as the conflict-free
   alternative (Apple Dictation also double-taps Fn).
+- **A base key is a character, not a position** — and that is what makes the descriptor portable.
+  A **printing** key is written as the character the key means **as a shortcut**: `a`, `7`,
+  `` ` ``, `[`, `/`, and any non-ASCII key a layout actually has (`é` on AZERTY). It is resolved
+  through the **active keyboard layout** each time triggers are registered, using the same rule
+  macOS itself uses — the layout's **Command-modifier table**, falling back to the plain key when a
+  layout has none. That matters in both directions: on a non-Latin layout (Russian, Greek, Hebrew,
+  Thai) no Latin letter is reachable by typing at all, and the Command table is what puts `⌘V` on
+  the physical V key; under **Dvorak** a chord follows the Dvorak positions, while under
+  **Dvorak — QWERTY ⌘** it follows the QWERTY ones, which is that layout's entire purpose for a ⌘
+  shortcut — note that a chord *without* ⌘ (`control+option+e`) lands on the QWERTY position there
+  too, where that layout would otherwise keep you on Dvorak. Two
+  consequences: a chord the current layout cannot mean anywhere is **not registered at all** (the
+  Settings shortcut well says *Not on your current keyboard layout*), and switching input source
+  **re-registers** every chord without a relaunch. Because the base key is a key's *plain*
+  production, a character that needs Shift is not a base key — write `` control+shift+` ``, never
+  `control+~`. The same rule makes a character that a *given layout* only reaches with Shift
+  off-layout there: `+` and `*` on US, and every digit on AZERTY, where the row types `&é"'(§è!çà`
+  unshifted. Name the key's unshifted character instead (`control+(` is the AZERTY spelling of the
+  key labelled 5) or record the shortcut and let the recorder store the right one. The numeric
+  keypad is never a substitute: it has its own names, so `control+5` and `control+keypad_5` always
+  mean different keys.
+  The one exception is `+` itself, which is written `plus` (`control+plus`) because the grammar
+  splits on `+`. It stays a word in the file too, since the character cannot survive a round trip.
+- **A non-printing key is written by name**, since its position is fixed by the hardware and never
+  moves with the layout: `f1`…`f20`, `space`, `tab`, `return`, `delete`, `forward_delete`, `escape`,
+  `home`, `end`, `page_up`, `page_down`, `up`, `down`, `left`, `right`, and the keypad
+  (`keypad_0`…`keypad_9`, `keypad_decimal`, `keypad_plus`, `keypad_minus`, `keypad_multiply`,
+  `keypad_divide`, `keypad_equals`, `keypad_enter`, `keypad_clear`). **The function row is the only
+  key that may be bound bare** — every other key needs at least one modifier, so a trigger can never
+  swallow ordinary typing or navigation. `escape` chords are **TOML-only**: Escape cancels the
+  Settings shortcut recorder, so it cannot be captured there.
 - **Per-mode language** — out of scope; no `language` field, and no global language setting either.
   Transcription language follows the active engine (`design.md` §4.1), and the **rewrite** writes in
   whatever language `<content>` is already in (`prompt_design.md`). A mode that must pin a language

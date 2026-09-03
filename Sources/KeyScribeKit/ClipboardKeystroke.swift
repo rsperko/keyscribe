@@ -17,8 +17,11 @@ public struct ClipboardKeystroke: Equatable, Sendable {
     }
 
     public var modifiers: Set<Modifier> { descriptor.requiredModifiers }
-    public var keyCode: Int { descriptor.triggerKeyCode }
     public var canonical: String { descriptor.canonical }
+
+    public func keyCode(in layout: KeyboardLayoutIndex) -> Int? {
+        descriptor.chordKeyCode(in: layout)
+    }
 
     /// A chord without ⌘ is aimed at a target that forwards raw keystrokes instead of handling them as
     /// macOS events — a VM guest, a remote session. That drives two things: the modifiers must go out as
@@ -27,6 +30,6 @@ public struct ClipboardKeystroke: Equatable, Sendable {
     /// session while still needing the foreign clipboard handling.
     public var isForeignTarget: Bool { !modifiers.contains(.command) }
 
-    public static let paste = ClipboardKeystroke(descriptor: .chord(modifiers: [.command], key: .letter("v")))
-    public static let copy = ClipboardKeystroke(descriptor: .chord(modifiers: [.command], key: .letter("c")))
+    public static let paste = ClipboardKeystroke(descriptor: .chord(modifiers: [.command], key: .character("v")))
+    public static let copy = ClipboardKeystroke(descriptor: .chord(modifiers: [.command], key: .character("c")))
 }

@@ -35,9 +35,9 @@ import Testing
     @Test func validKeyCaptureCommitsAndClearsHint() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
-        let committed = model.keyEvent(keyCode: 9, modifiers: [.control, .option])
-        #expect(committed == chord([.control, .option], .letter("v")))
-        #expect(model.value == chord([.control, .option], .letter("v")))
+        let committed = model.keyEvent(keyCode: 9, shortcutCharacter: "v", modifiers: [.control, .option])
+        #expect(committed == chord([.control, .option], .character("v")))
+        #expect(model.value == chord([.control, .option], .character("v")))
         #expect(model.phase == .idle)
         #expect(model.hint == nil)
     }
@@ -64,15 +64,15 @@ import Testing
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
         #expect(model.modifierEvent(keyCode: 54, modifiers: [.command]) == nil)
-        #expect(model.keyEvent(keyCode: 7, modifiers: [.command]) == chord([.command], .letter("x")))
-        #expect(model.value == chord([.command], .letter("x")))
+        #expect(model.keyEvent(keyCode: 7, shortcutCharacter: "x", modifiers: [.command]) == chord([.command], .character("x")))
+        #expect(model.value == chord([.command], .character("x")))
         #expect(model.phase == .idle)
     }
 
     @Test func bareLetterStaysRecordingWithHint() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
-        let committed = model.keyEvent(keyCode: 9, modifiers: [])
+        let committed = model.keyEvent(keyCode: 9, shortcutCharacter: "v", modifiers: [])
         #expect(committed == nil)
         #expect(model.phase == .recording)
         #expect(model.hint == "Hold a modifier (⌃⌥⇧⌘) with the key")
@@ -82,15 +82,39 @@ import Testing
     @Test func bareFunctionKeyIsValidChord() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
-        let committed = model.keyEvent(keyCode: 122, modifiers: [])
-        #expect(committed == chord([], .function(1)))
+        let committed = model.keyEvent(keyCode: 122, shortcutCharacter: nil, modifiers: [])
+        #expect(committed == chord([], .key(.f1)))
         #expect(model.phase == .idle)
+    }
+
+    @Test func punctuationKeyRecordsAsItsCharacter() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
+        model.beginRecording()
+        #expect(model.keyEvent(keyCode: 50, shortcutCharacter: "`", modifiers: [.control])
+            == chord([.control], .character("`")))
+        #expect(model.phase == .idle)
+        #expect(model.hint == nil)
+    }
+
+    @Test func specialKeyRecordsByPositionNotByTheCharacterItTypes() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
+        model.beginRecording()
+        #expect(model.keyEvent(keyCode: 49, shortcutCharacter: " ", modifiers: [.option])
+            == chord([.option], .key(.space)))
+    }
+
+    @Test func aKeyTheLayoutCannotNameHints() {
+        var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
+        model.beginRecording()
+        #expect(model.keyEvent(keyCode: 10, shortcutCharacter: nil, modifiers: [.command]) == nil)
+        #expect(model.phase == .recording)
+        #expect(model.hint == "That key can't be recorded")
     }
 
     @Test func unknownKeyCodeWithModifierHints() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
-        let committed = model.keyEvent(keyCode: 9999, modifiers: [.command])
+        let committed = model.keyEvent(keyCode: 9999, shortcutCharacter: nil, modifiers: [.command])
         #expect(committed == nil)
         #expect(model.phase == .recording)
         #expect(model.hint == "That key can't be recorded")
@@ -135,9 +159,9 @@ import Testing
     @Test func cancelRevertsFromChord() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "control+option+v")
         model.beginRecording()
-        _ = model.keyEvent(keyCode: 9999, modifiers: [.command])
+        _ = model.keyEvent(keyCode: 9999, shortcutCharacter: nil, modifiers: [.command])
         model.cancel()
-        #expect(model.value == chord([.control, .option], .letter("v")))
+        #expect(model.value == chord([.control, .option], .character("v")))
         #expect(model.hint == nil)
     }
 
@@ -190,8 +214,8 @@ import Testing
     @Test func recordFromRawFallbackCommitsAndClearsFallback() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "wat+nonsense")
         model.beginRecording()
-        let committed = model.keyEvent(keyCode: 9, modifiers: [.control, .option, .shift])
-        #expect(committed == chord([.control, .option, .shift], .letter("v")))
+        let committed = model.keyEvent(keyCode: 9, shortcutCharacter: "v", modifiers: [.control, .option, .shift])
+        #expect(committed == chord([.control, .option, .shift], .character("v")))
         #expect(model.rawFallback == nil)
     }
 
@@ -223,7 +247,7 @@ import Testing
         model.beginRecording()
         model.noKeyOnModifierRelease()
         #expect(model.hint != nil)
-        _ = model.keyEvent(keyCode: 9, modifiers: [.control, .option])
+        _ = model.keyEvent(keyCode: 9, shortcutCharacter: "v", modifiers: [.control, .option])
         #expect(model.hint == nil)
     }
 

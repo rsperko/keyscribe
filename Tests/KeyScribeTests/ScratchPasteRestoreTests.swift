@@ -1,4 +1,5 @@
 import AppKit
+import KeyScribeKit
 import Foundation
 import Testing
 @testable import KeyScribeApp
@@ -115,5 +116,36 @@ struct ScratchPasteRestoreTests {
         })
         #expect(scratch == nil)
         #expect(pb.string(forType: .string)?.hasPrefix("CHURN_") == true)
+    }
+}
+
+@MainActor
+@Suite(.serialized)
+struct UnpostableChordTests {
+    private func makePasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("keyscribe-test-\(UUID().uuidString)"))
+    }
+
+    private func unpostable() throws -> ClipboardPaste {
+        ClipboardPaste(keystroke: try ClipboardKeystroke(parsing: "control+☃"))
+    }
+
+    @Test func aPasteChordThatCannotBePostedReportsFailure() async throws {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        let landed = await TextInserter.insertViaPaste("dictated", paste: try unpostable(), on: pb)
+        #expect(!landed)
+    }
+
+    @Test func aFailedPasteRestoresTheUserClipboard() async throws {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        _ = await TextInserter.insertViaPaste("dictated", paste: try unpostable(), on: pb)
+        await TextInserter.drainPendingRestore()
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 }

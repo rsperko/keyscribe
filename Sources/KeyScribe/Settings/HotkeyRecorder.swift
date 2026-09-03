@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import KeyScribeKit
 import SwiftUI
 
@@ -27,9 +28,11 @@ struct ShortcutWell: View {
     @State private var hint: String?
     @State private var recording = false
     @State private var recordToken = 0
+    @State private var layout = KeyboardLayout.current()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let descriptor = self.descriptor
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 RecorderButton(
                     key: $key, hint: $hint, recording: $recording,
@@ -42,7 +45,7 @@ struct ShortcutWell: View {
                         ForEach(profile.namedKeyOptions, id: \.self) { named in
                             Text(namedMenuLabel(named)).tag(KeyDescriptor.named(named).canonical)
                         }
-                        if isUnlisted { Text("Custom").tag(unlistedMenuTag) }
+                        if isUnlisted(descriptor) { Text("Custom").tag(unlistedMenuTag) }
                     }
                     .pickerStyle(.inline)
                     Divider()
@@ -57,12 +60,15 @@ struct ShortcutWell: View {
                 .disabled(recording)
             }
 
-            if let caption {
+            if let caption = caption(for: descriptor) {
                 Text(caption)
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: 288, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: inputSourceChanged)) { _ in
+            layout = KeyboardLayout.current()
         }
         .onDisappear {
             guard recordingState.isRecording else { return }
@@ -70,17 +76,25 @@ struct ShortcutWell: View {
         }
     }
 
-    private var caption: String? {
+    private var inputSourceChanged: Notification.Name {
+        Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
+    }
+
+    private func caption(for descriptor: KeyDescriptor?) -> String? {
         if let hint { return hint }
-        if isUnparseable { return "Not a recognized shortcut" }
+        if !key.isEmpty, descriptor == nil { return "Not a recognized shortcut" }
+        if isOffLayout(descriptor) { return "Not on your current keyboard layout" }
         return nil
+    }
+
+    private func isOffLayout(_ descriptor: KeyDescriptor?) -> Bool {
+        guard let descriptor, case .chord = descriptor else { return false }
+        return descriptor.chordKeyCode(in: layout) == nil
     }
 
     private var descriptor: KeyDescriptor? { try? KeyDescriptor(parsing: key) }
 
-    private var isUnparseable: Bool { !key.isEmpty && descriptor == nil }
-
-    private var isUnlisted: Bool {
+    private func isUnlisted(_ descriptor: KeyDescriptor?) -> Bool {
         guard !key.isEmpty else { return false }
         if case .named = descriptor { return false }
         return true
@@ -276,7 +290,9 @@ final class RecorderButtonView: NSButton {
             return
         }
         let modifiers = RecorderButtonView.modifierSet(event.modifierFlags)
-        if let descriptor = model.keyEvent(keyCode: Int(event.keyCode), modifiers: modifiers) {
+        let character = KeyboardLayout.shortcutCharacter(keyCode: Int(event.keyCode))
+        if let descriptor = model.keyEvent(
+            keyCode: Int(event.keyCode), shortcutCharacter: character, modifiers: modifiers) {
             commit(descriptor)
         } else {
             onHint?(model.hint)

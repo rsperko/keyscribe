@@ -10,6 +10,12 @@ enum KeyboardLayout {
     private static var cachedIndex: KeyboardLayoutIndex?
     private static var cachedSourceId: String?
 
+    static func current() -> KeyboardLayoutIndex { currentIndex() ?? .ansiUS }
+
+    static func shortcutCharacter(keyCode: Int) -> Character? {
+        current().shortcutCharacter(forKeyCode: keyCode)
+    }
+
     static func currentIndex() -> KeyboardLayoutIndex? {
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else { return nil }
         let sourceId = TISGetInputSourceProperty(source, kTISPropertyInputSourceID)
@@ -34,6 +40,7 @@ enum KeyboardLayout {
         var modifierState: UInt32 = 0
         if modifiers.contains(.shift) { modifierState |= UInt32(shiftKey) }
         if modifiers.contains(.option) { modifierState |= UInt32(optionKey) }
+        if modifiers.contains(.command) { modifierState |= UInt32(cmdKey) }
         modifierState = (modifierState >> 8) & 0xFF
         var deadKeyState: UInt32 = 0
         var length = 0
