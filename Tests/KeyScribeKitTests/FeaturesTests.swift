@@ -62,6 +62,27 @@ struct FeaturesTests {
         #expect(decoded.features.isEnabled(.streamingTranscription))
     }
 
+    @Test func consumptionDrivenRestoreDefaultsOff() {
+        #expect(!Settings.defaults.features.isEnabled(.consumptionDrivenRestore))
+    }
+
+    @Test func consumptionDrivenRestoreOverridePersists() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .consumptionDrivenRestore)
+        let toml = try SettingsStore.encode(s)
+        #expect(toml.contains("consumption_driven_restore = true"))
+        let decoded = try SettingsStore.decode(from: toml)
+        #expect(decoded.features.isEnabled(.consumptionDrivenRestore))
+    }
+
+    @Test func consumptionDrivenRestoreOffIsElided() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .consumptionDrivenRestore)
+        s.features.setEnabled(false, for: .consumptionDrivenRestore)
+        #expect(s.features == Settings.Features())
+        #expect(try !SettingsStore.encode(s).contains("consumption_driven_restore"))
+    }
+
     // Absence already means off, so turning the flag back off carries no information and is elided.
     @Test func streamingTranscriptionOffIsElided() throws {
         var s = Settings.defaults

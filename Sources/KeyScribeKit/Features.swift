@@ -25,5 +25,16 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         summary: "On supported speech models, begin transcribing while you talk, so longer dictations can be ready sooner after you finish. Short dictations are unaffected."
     )
 
-    public static let allCases: [Feature] = [streamingTranscription]
+    // Consumption-driven clipboard restore: instead of holding the dictation on the clipboard for a fixed
+    // delay, publish it as a lazy pasteboard flavor and restore as soon as the target has actually read it.
+    // Flagged until verified live: target-side paste latency (the read is fulfilled through this app's main
+    // run loop, so the target's ⌘V waits on it), a clipboard manager that ignores the concealed marker (its
+    // read is indistinguishable from the target's), and the 100 ms grace against a real Chromium paste.
+    public static let consumptionDrivenRestore = Feature(
+        id: "consumption_driven_restore",
+        title: "Restore clipboard on paste",
+        summary: "Put your clipboard back as soon as the app has taken the dictation, instead of after a fixed delay. Shortens the window where pressing ⌘V pastes the dictation again."
+    )
+
+    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore]
 }

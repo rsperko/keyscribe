@@ -98,6 +98,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
+    private let clipboardPaste: () -> ClipboardPaste
     // Captured in `present()` BEFORE we activate our own window (once NSApp.activate runs the frontmost
     // app is KeyScribe itself), refreshed by the activation observer while the History pane shows, and
     // cleared when the window closes. Stable across in-window pane navigation.
@@ -121,11 +122,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         detectProblems: @escaping () -> [SettingsProblem],
         accessibilityTapActive: @escaping () -> Bool = { true },
         onRelaunch: @escaping () -> Void = {},
-        onEraseAllData: @escaping () -> Void = {}
+        onEraseAllData: @escaping () -> Void = {},
+        clipboardPaste: @escaping () -> ClipboardPaste = { ClipboardPaste() }
     ) {
         self.detectProblems = detectProblems
         self.accessibilityTapActive = accessibilityTapActive
         self.onRelaunch = onRelaunch
+        self.clipboardPaste = clipboardPaste
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
             onResetHUDPosition: onResetHUDPosition, onPreviewSound: onPreviewSound,
@@ -283,7 +286,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
         window?.orderOut(nil)
         Task { @MainActor in
-            guard await TextInserter.pasteReturning(to: target, text: text) else {
+            guard await TextInserter.pasteReturning(to: target, text: text, paste: clipboardPaste()) else {
                 TextInserter.copyToClipboard(text)
                 NSApp.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)

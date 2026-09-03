@@ -177,7 +177,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .mode(let id):
                     return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, toMode: id) ?? false
                 }
-            })
+            },
+            clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
 
         menu.showsUpdateCheck = updater != nil
         menu.install()
@@ -256,7 +257,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             detectProblems: { [weak self] in self?.currentProblems() ?? [] },
             accessibilityTapActive: { [weak self] in self?.hotkey?.isTapActive ?? false },
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
-            onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() })
+            onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
+            clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }

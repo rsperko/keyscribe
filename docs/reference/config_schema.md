@@ -560,6 +560,10 @@ retention_days = 7              # default; delete day-files older than this
 add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
 paste_last_dictation = ""                        # canonical chord; "" = off (default)
 
+[insertion]                                 # how a paste hands the clipboard back; TOML-only, no Settings UI
+# clipboard_restore_ms = 250                     # ms the dictation stays on the clipboard after the paste
+                                                 #   keystroke, before your clipboard is put back (must be >= 1)
+
 [audio]                                     # written by the Settings mic picker; no UI for the debug keys
 # input_device_uid = "BuiltInMicrophoneDevice"   # preferred capture device; absent = follow the system default
 # input_device_name = "MacBook Pro Microphone"   # possibly-stale label, so a disconnected device still reads as itself
@@ -585,6 +589,17 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > `KEYSCRIBE_KEEP_CAPTURE=<dir>` (or `--keep-capture <dir>`) overrides the directory, wins when both are
 > set, and is **never pruned** — retention only ever deletes inside the app-owned archive. Both keys are
 > omitted from the file while `keep_captures` is off, and **Erase All Data** removes the archive.
+
+> `clipboard_restore_ms` is **global, not per-mode**: the delay depends on how the target app reads the
+> pasteboard and how fast the machine is, neither of which varies by mode, so one value serves every mode
+> (Plain Dictation included) and Paste Last. The window exists because a target may read the pasteboard
+> **asynchronously, and possibly more than once** after ⌘V (reported of Chromium and Electron apps), so
+> restoring instantly can hand that read your old clipboard instead of the dictation. It is also the
+> window in which pressing ⌘V yourself pastes the dictation a **second** time instead of your clipboard,
+> so it is kept as short as an asynchronous reader tolerates; raise it only for a target where the paste
+> comes out empty or stale. A value below 1 is refused (the file fails to load). Elided from the file at
+> the default. Ignored under a mode's `clipboard_sync = true` (which never restores) and
+> `insertion = "type"` (which never touches the clipboard).
 
 > **`[shortcuts]`** drive the standalone **Add to Vocabulary…** panel and
 > the **Paste Last Dictation** action (both also always available in the menu bar). Add to Vocabulary

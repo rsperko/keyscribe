@@ -1566,7 +1566,7 @@ final class DictationController {
             // Await the paste's clipboard settle inline only when a submit Return must land after ⌘V.
             let submitFollows = initialOutcome == .inserted && submit != .none
             let insertStart = DispatchTime.now()
-            let paste = activeMode.map(ClipboardPaste.init(mode:)) ?? ClipboardPaste()
+            let paste = clipboardPaste(for: activeMode)
             let modeId = activeMode?.id ?? ""
             for (key, value) in activeMode?.invalidClipboardChords ?? [:] {
                 log.error("mode \(modeId, privacy: .public): \(key, privacy: .public) = \"\(value, privacy: .public)\" is not a chord; falling back to the default")
@@ -2047,6 +2047,15 @@ final class DictationController {
         return Pipeline(stages)
     }
 
+    // Every clipboard paste in the app is assembled here — the single gate for the consumption-driven
+    // restore; nothing downstream branches on flag identity.
+    func clipboardPaste(for mode: Mode?) -> ClipboardPaste {
+        let restoreMs = settings.insertion.clipboardRestoreMs
+        let restoreOnRead = settings.features.isEnabled(.consumptionDrivenRestore)
+        return mode.map { ClipboardPaste(mode: $0, restoreMs: restoreMs, restoreOnRead: restoreOnRead) }
+            ?? ClipboardPaste(restoreMs: restoreMs, restoreOnRead: restoreOnRead)
+    }
+
     func pasteLast() {
         guard let lastResult else { return }
         guard !pasteLastDivertsToClipboard(
@@ -2055,7 +2064,8 @@ final class DictationController {
             accessibilityGranted: accessibilityGranted()
         ) else { _ = TextInserter.copyToClipboard(lastResult); return }
         hud?.relinquishKeyFocus()
-        Task { await TextInserter.insertViaPaste(lastResult) }
+        let paste = clipboardPaste(for: nil)
+        Task { await TextInserter.insertViaPaste(lastResult, paste: paste) }
     }
 
     // Cancellable while arming, recording, or transcribing/rewriting — never mid-insert, where the text is

@@ -17,6 +17,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var history: History
     public var shortcuts: Shortcuts
     public var audio: Audio
+    public var insertion: Insertion
     public var features: Features
 
     enum CodingKeys: String, CodingKey {
@@ -27,6 +28,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case history
         case shortcuts
         case audio
+        case insertion
         case features
     }
 
@@ -39,13 +41,15 @@ public struct Settings: Codable, Equatable, Sendable {
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? Settings.defaults.history
         shortcuts = try c.decodeIfPresent(Shortcuts.self, forKey: .shortcuts) ?? Settings.defaults.shortcuts
         audio = try c.decodeIfPresent(Audio.self, forKey: .audio) ?? Settings.defaults.audio
+        insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? Settings.defaults.insertion
         features = try c.decodeIfPresent(Features.self, forKey: .features) ?? Settings.defaults.features
     }
 
     public init(
         schemaVersion: Int, loadOnLogin: Bool,
         stt: STT, duringDictation: DuringDictation, history: History,
-        shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio(), features: Features = Features()
+        shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio(), insertion: Insertion = Insertion(),
+        features: Features = Features()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -54,6 +58,7 @@ public struct Settings: Codable, Equatable, Sendable {
         self.history = history
         self.shortcuts = shortcuts
         self.audio = audio
+        self.insertion = insertion
         self.features = features
     }
 
@@ -287,6 +292,36 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
+    // Global, not per-mode: the restore delay depends on the target app and the machine, not the mode.
+    public struct Insertion: Codable, Equatable, Sendable {
+        // Long enough for a target that reads the pasteboard asynchronously after ⌘V; short enough that the
+        // user's own ⌘V right after a dictation gets their clipboard back, not the dictation again.
+        public static let defaultClipboardRestoreMs = 250
+
+        public var clipboardRestoreMs: Int
+
+        enum CodingKeys: String, CodingKey {
+            case clipboardRestoreMs = "clipboard_restore_ms"
+        }
+
+        public init(clipboardRestoreMs: Int = defaultClipboardRestoreMs) {
+            self.clipboardRestoreMs = clipboardRestoreMs
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            clipboardRestoreMs = try c.decodeIfPresent(Int.self, forKey: .clipboardRestoreMs)
+                ?? Self.defaultClipboardRestoreMs
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            if clipboardRestoreMs != Self.defaultClipboardRestoreMs {
+                try c.encode(clipboardRestoreMs, forKey: .clipboardRestoreMs)
+            }
+        }
+    }
+
     // Opt-in flags for in-development features. Stores only enabled ids; retired ids are pruned on decode.
     public struct Features: Codable, Equatable, Sendable {
         private var overrides: [String: Bool]
@@ -334,6 +369,7 @@ public struct Settings: Codable, Equatable, Sendable {
         history: History(enabled: true, retentionDays: 7),
         shortcuts: Shortcuts(),
         audio: Audio(),
+        insertion: Insertion(),
         features: Features()
     )
 
@@ -343,6 +379,11 @@ public struct Settings: Codable, Equatable, Sendable {
         }
         guard (0...100).contains(duringDictation.soundVolumePercent) else {
             throw ConfigError.invalid("during_dictation.sound_volume must be 0...100")
+        }
+        // Zero restores before any target can read the scratch, so every paste would land as the user's
+        // old clipboard.
+        guard insertion.clipboardRestoreMs >= 1 else {
+            throw ConfigError.invalid("insertion.clipboard_restore_ms must be >= 1")
         }
         // The upper bound is not cosmetic: keepCapturesMaxBytes multiplies by a MiB, and Swift traps on Int64
         // overflow — so an absurd-but-positive value would crash the app at launch, when publish() reads it.

@@ -19,6 +19,7 @@ final class CorrectionPanelController {
     private let addDictionaryWord: (String, CorrectionDestination) -> Bool
     private let addReplacement: (String, String, Bool, CorrectionDestination) -> Bool
     private let captureSelection: () async -> String?
+    private let clipboardPaste: () -> ClipboardPaste
     private var previousApp: NSRunningApplication?
     private let status = CorrectionPanelStatus()
 
@@ -27,13 +28,15 @@ final class CorrectionPanelController {
         analyze: @escaping (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis,
         addDictionaryWord: @escaping (String, CorrectionDestination) -> Bool,
         addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Bool,
-        captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) }
+        captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) },
+        clipboardPaste: @escaping () -> ClipboardPaste = { ClipboardPaste() }
     ) {
         self.destinations = destinations
         self.analyze = analyze
         self.addDictionaryWord = addDictionaryWord
         self.addReplacement = addReplacement
         self.captureSelection = captureSelection
+        self.clipboardPaste = clipboardPaste
     }
 
     func present() {
@@ -135,7 +138,7 @@ final class CorrectionPanelController {
         }
         window?.orderOut(nil)
         Task { @MainActor in
-            guard await TextInserter.pasteReturning(to: target, text: pasteText) else {
+            guard await TextInserter.pasteReturning(to: target, text: pasteText, paste: clipboardPaste()) else {
                 status.message = "Saved to your vocabulary. \(Branding.appName) could not return to the app, so the selected text was not changed."
                 NSApp.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)

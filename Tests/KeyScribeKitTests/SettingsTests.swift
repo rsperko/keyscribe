@@ -291,6 +291,33 @@ struct SettingsTests {
         #expect(decoded.audio == s.audio)
     }
 
+    @Test func clipboardRestoreMsDefaultsAndIsOmittedFromToml() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(s.insertion.clipboardRestoreMs == Settings.Insertion.defaultClipboardRestoreMs)
+        #expect(Settings.defaults.insertion.clipboardRestoreMs == 250)
+        #expect(try !SettingsStore.encode(s).contains("clipboard_restore_ms"))
+    }
+
+    @Test func clipboardRestoreMsDecodesAndRoundTrips() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[insertion]\nclipboard_restore_ms = 1500")
+        #expect(s.insertion.clipboardRestoreMs == 1500)
+        let encoded = try SettingsStore.encode(s)
+        #expect(encoded.contains("clipboard_restore_ms = 1500"))
+        #expect(try SettingsStore.decode(from: encoded).insertion.clipboardRestoreMs == 1500)
+    }
+
+    // Zero restores before any target can read, so every paste would land as the user's old clipboard;
+    // the file is refused rather than silently doing that.
+    @Test func clipboardRestoreMsBelowOneIsRejected() throws {
+        for value in [0, -250] {
+            #expect(throws: ConfigError.invalid("insertion.clipboard_restore_ms must be >= 1")) {
+                try SettingsStore.decode(from: "schema_version = 1\n[insertion]\nclipboard_restore_ms = \(value)")
+            }
+        }
+        #expect(try SettingsStore.decode(from: "schema_version = 1\n[insertion]\nclipboard_restore_ms = 1")
+            .insertion.clipboardRestoreMs == 1)
+    }
+
     // Off carries no information (absent already means off), so a normal user's settings.toml never grows
     // the debug keys — same deviations-only rule as [features].
     @Test func encodeOmitsKeepCapturesWhenOff() throws {

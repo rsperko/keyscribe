@@ -760,6 +760,32 @@ struct DictationPipelineWiringTests {
         #expect(out.insertedPaste?.settleMs == 250)
     }
 
+    // The delay is global settings, not mode config: it reaches every mode's paste unchanged.
+    @Test func theClipboardRestoreDelayReachesTheInsertPath() async {
+        let out = await run(transcript: "hello", mode: mode(id: "plain"),
+                            updateSettingsAfterStart: { $0.insertion.clipboardRestoreMs = 1200 })
+        #expect(out.insertedPaste?.restoreMs == 1200)
+    }
+
+    // The default has to reach the insert path too — settings that say nothing must not land on 0 ms and
+    // restore out from under the target's read.
+    @Test func unconfiguredSettingsCarryTheDefaultRestoreDelay() async {
+        let out = await run(transcript: "hello", mode: mode(id: "plain"))
+        #expect(out.insertedPaste?.restoreMs == Settings.Insertion.defaultClipboardRestoreMs)
+    }
+
+    // The consumption-driven restore is opt-in; nothing downstream may see it on by default.
+    @Test func consumptionDrivenRestoreIsOffUnlessTheFlagIsSet() async {
+        let out = await run(transcript: "hello", mode: mode(id: "plain"))
+        #expect(out.insertedPaste?.restoreOnRead == false)
+    }
+
+    @Test func theFlagTurnsOnTheConsumptionDrivenRestore() async {
+        let out = await run(transcript: "hello", mode: mode(id: "plain"),
+                            updateSettingsAfterStart: { $0.features.setEnabled(true, for: .consumptionDrivenRestore) })
+        #expect(out.insertedPaste?.restoreOnRead == true)
+    }
+
     // ── Insertion-end features: trailing + submit (the just-added work) ────────────────────────────
 
     @Test func trailingSpaceRidesInsideTheInsert() async {

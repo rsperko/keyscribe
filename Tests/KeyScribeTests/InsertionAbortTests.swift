@@ -58,8 +58,8 @@ struct InsertionAbortTests {
         #expect(recorder.text == "xy")
     }
 
-    // Asserted WITHOUT draining: the restore must already have happened, not be deferred behind the 1.5 s
-    // post-paste backstop, which exists to let a target consume a ⌘V that here never happened.
+    // Asserted WITHOUT draining: the restore must already have happened, not be deferred behind the
+    // post-paste restore window, which exists to let a target consume a ⌘V that here never happened.
     @Test func anAbortedPasteRestoresTheClipboardImmediately() async {
         let pb = NSPasteboard(name: NSPasteboard.Name("keyscribe-abort-\(UUID().uuidString)"))
         pb.clearContents()

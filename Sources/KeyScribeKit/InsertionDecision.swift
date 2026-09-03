@@ -75,15 +75,23 @@ public struct ClipboardPaste: Equatable, Sendable {
     public var settleMs: Int
     // Leave the scratch clipboard readable and unrestored for a guest or remote clipboard agent to fetch.
     public var syncsClipboard: Bool
-    public init(keystroke: ClipboardKeystroke = .paste, settleMs: Int = 0, syncsClipboard: Bool = false) {
+    // How long the scratch survives after the paste keystroke before the user's clipboard comes back.
+    public var restoreMs: Int
+    // Restore on the target's first read of the scratch (plus a grace), with `restoreMs` as the backstop.
+    public var restoreOnRead: Bool
+    public init(keystroke: ClipboardKeystroke = .paste, settleMs: Int = 0, syncsClipboard: Bool = false,
+                restoreMs: Int = Settings.Insertion.defaultClipboardRestoreMs, restoreOnRead: Bool = false) {
         self.keystroke = keystroke
         self.settleMs = settleMs
         self.syncsClipboard = syncsClipboard
+        self.restoreMs = restoreMs
+        self.restoreOnRead = restoreOnRead
     }
 
-    public init(mode: Mode) {
+    public init(mode: Mode, restoreMs: Int = Settings.Insertion.defaultClipboardRestoreMs,
+                restoreOnRead: Bool = false) {
         self.init(keystroke: mode.pasteKeystroke, settleMs: mode.pasteSettleMs,
-                  syncsClipboard: mode.syncsClipboard)
+                  syncsClipboard: mode.syncsClipboard, restoreMs: restoreMs, restoreOnRead: restoreOnRead)
     }
 }
 

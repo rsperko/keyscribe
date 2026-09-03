@@ -94,6 +94,29 @@ Clipboard sync timing belongs to the client, not to KeyScribe. If paste lands em
 `paste_settle_ms`; if no value makes it reliable, the target syncs on events rather than on time —
 switch to `insertion = "type"`.
 
+## Tune how long a dictation stays on the clipboard
+
+A paste puts the dictation on the clipboard, presses the paste keystroke, and then puts your own
+clipboard back. The gap between those last two steps is `clipboard_restore_ms` (default 250 ms). It
+lives in `settings.toml`, not in a mode: how quickly an app reads the clipboard is a property of the
+app and your Mac, so one value applies to every mode, Plain Dictation included, and to Paste Last.
+
+It cannot be zero (a value below 1 is refused): many apps read the clipboard a moment after the
+keystroke rather than during it, and some read it more than once, so restoring immediately can
+leave the paste empty or paste your old clipboard instead. It should not be long either — inside
+that window, pressing `Command-V` yourself pastes the dictation a second time instead of what you
+had copied.
+
+```toml
+# settings.toml
+[insertion]
+clipboard_restore_ms = 600       # an app that pastes empty at the default
+```
+
+Raise it if a dictation sometimes pastes as your old clipboard; lower it if your own paste right
+after a dictation repeats the dictation. It has no effect on a mode with `clipboard_sync = true`
+(which deliberately never restores) or `insertion = "type"` (which never touches the clipboard).
+
 ## Use an extra mouse button as a trigger
 
 Mouse button descriptors are TOML key descriptors:
