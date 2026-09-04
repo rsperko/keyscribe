@@ -308,13 +308,47 @@ final class HistoryPaneModel: ObservableObject {
     }
 }
 
-// History is a Settings pane, not a window: the Modes-style HStack list/detail, with the
-// enable/retention controls (moved out of General) inline above the list and the storage-truth statement
-// pinned at the bottom. Reload/release lifecycle is driven by SettingsRootView on pane selection.
+struct HistoryRetentionChoice: Identifiable, Equatable {
+    let days: Int
+    let label: String
+
+    var id: Int { days }
+
+    static let presets = [
+        HistoryRetentionChoice(days: 1, label: "1 day"),
+        HistoryRetentionChoice(days: 3, label: "3 days"),
+        HistoryRetentionChoice(days: 7, label: "1 week"),
+        HistoryRetentionChoice(days: 14, label: "2 weeks"),
+        HistoryRetentionChoice(days: 30, label: "1 month"),
+        HistoryRetentionChoice(days: 60, label: "2 months"),
+        HistoryRetentionChoice(days: 90, label: "3 months"),
+        HistoryRetentionChoice(days: 180, label: "6 months"),
+        HistoryRetentionChoice(days: 365, label: "1 year"),
+    ]
+
+    static func options(including currentDays: Int) -> [HistoryRetentionChoice] {
+        guard !presets.contains(where: { $0.days == currentDays }) else { return presets }
+        return (presets + [HistoryRetentionChoice(
+            days: currentDays,
+            label: displayLabel(for: currentDays)
+        )]).sorted { $0.days < $1.days }
+    }
+
+    static func displayLabel(for days: Int) -> String {
+        presets.first(where: { $0.days == days })?.label
+            ?? "\(days) \(days == 1 ? "day" : "days")"
+    }
+
+    static func needsConfirmation(
+        from currentDays: Int, to newDays: Int, wouldRemoveHistory: Bool
+    ) -> Bool {
+        newDays < currentDays && wouldRemoveHistory
+    }
+}
+
 struct HistoryPaneView: View {
     @ObservedObject var model: HistoryPaneModel
     @ObservedObject var settings: SettingsModel
-    @State private var retentionDays: Int?
     @State private var pendingRetentionDays: Int?
     // The List selection is mirrored through local @State so SwiftUI's selection write never mutates the
     // ObservableObject during a view update (which logs "Publishing changes from within view updates" and
@@ -331,23 +365,23 @@ struct HistoryPaneView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .confirmationDialog(
-            "Remove older dictation history?",
+            "Keep only \(pendingRetentionLabel) of history?",
             isPresented: Binding(
                 get: { pendingRetentionDays != nil },
                 set: { if !$0 { pendingRetentionDays = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Remove Entries", role: .destructive) {
+            Button("Remove Older Entries", role: .destructive) {
                 if let pendingRetentionDays {
-                    settings.retentionDays = pendingRetentionDays
-                    model.applyRetention(days: pendingRetentionDays)
+                    commitRetention(pendingRetentionDays)
                 }
                 pendingRetentionDays = nil
-                retentionDays = nil
             }
+            .accessibilityIdentifier(AccessibilityID.History.retentionConfirm)
             Button("Cancel", role: .cancel) { pendingRetentionDays = nil }
+                .accessibilityIdentifier(AccessibilityID.History.retentionCancel)
         } message: {
-            Text("Entries older than the new retention period will be removed. This cannot be undone.")
+            Text("Dictations older than \(pendingRetentionLabel) will be removed from this Mac. This cannot be undone.")
         }
         .onAppear { selection = model.selection }
         .onChange(of: selection) { _, id in if model.selection != id { model.selection = id } }
@@ -365,43 +399,57 @@ struct HistoryPaneView: View {
     }
 
     private var controls: some View {
-        SettingRow(
-            title: "History",
-            result: settings.historyEnabled
-                ? "On this Mac · keep for \(settings.retentionDays) days"
-                : "Off",
-            help: "Stores transcripts and final text locally so you can search and correct them. Audio and password-field dictations are never saved. For other sensitive work, lower retention or exclude a mode in its Result handling.")
-        {
-            HStack(spacing: 8) {
-                if settings.historyEnabled {
-                    Stepper("\(retentionDays ?? settings.retentionDays) days", value: retentionDraft, in: 1...365)
-                        .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
-                    if retentionDays != nil {
-                        Button("Apply", action: applyRetention)
-                    }
-                }
-                Toggle("Keep history", isOn: $settings.historyEnabled).labelsHidden()
+        VStack(alignment: .leading, spacing: 8) {
+            PaneListSectionHeader("History")
+            SettingRow(
+                title: "Keep history on this Mac",
+                help: "Stores transcripts and final text locally so you can search and correct them. Audio and password-field dictations are never saved. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
+                combinesAccessibilityChildren: false)
+            {
+                Toggle("Keep history on this Mac", isOn: $settings.historyEnabled).labelsHidden()
                     .accessibilityIdentifier(AccessibilityID.Settings.General.historyEnabled)
+            }
+            if settings.historyEnabled {
+                LabeledContent("Keep for") {
+                    Picker("Keep for", selection: retentionSelection) {
+                        ForEach(HistoryRetentionChoice.options(including: settings.retentionDays)) { choice in
+                            Text(choice.label).tag(choice.days)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
+                }
             }
         }
         .padding(10)
     }
 
-    private var retentionDraft: Binding<Int> {
+    private var retentionSelection: Binding<Int> {
         Binding(
-            get: { retentionDays ?? settings.retentionDays },
-            set: { retentionDays = $0 })
+            get: { settings.retentionDays },
+            set: { selectRetention($0) })
     }
 
-    private func applyRetention() {
-        guard let retentionDays else { return }
-        if retentionDays < settings.retentionDays, model.wouldRemoveHistory(retainingDays: retentionDays) {
-            pendingRetentionDays = retentionDays
+    private func selectRetention(_ days: Int) {
+        guard days != settings.retentionDays else { return }
+        let wouldRemoveHistory = model.wouldRemoveHistory(retainingDays: days)
+        if HistoryRetentionChoice.needsConfirmation(
+            from: settings.retentionDays, to: days, wouldRemoveHistory: wouldRemoveHistory
+        ) {
+            pendingRetentionDays = days
         } else {
-            settings.retentionDays = retentionDays
-            model.applyRetention(days: retentionDays)
-            self.retentionDays = nil
+            commitRetention(days)
         }
+    }
+
+    private func commitRetention(_ days: Int) {
+        settings.retentionDays = days
+        model.applyRetention(days: days)
+    }
+
+    private var pendingRetentionLabel: String {
+        pendingRetentionDays.map(HistoryRetentionChoice.displayLabel(for:)) ?? "the selected period"
     }
 
     private var searchField: some View {

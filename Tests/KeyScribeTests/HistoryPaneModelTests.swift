@@ -102,4 +102,30 @@ struct HistoryPaneModelTests {
         try store.append(entry("old"), today: "2000-01-01")
         #expect(model.wouldRemoveHistory(retainingDays: 7))
     }
+
+    @Test func retentionChoicesOfferReadableLongPeriods() {
+        let choices = HistoryRetentionChoice.options(including: 7)
+
+        #expect(choices.contains(.init(days: 7, label: "1 week")))
+        #expect(choices.contains(.init(days: 60, label: "2 months")))
+        #expect(choices.contains(.init(days: 365, label: "1 year")))
+    }
+
+    @Test func retentionChoicesPreserveAnExistingCustomDuration() {
+        let choices = HistoryRetentionChoice.options(including: 45)
+
+        #expect(choices.contains(.init(days: 45, label: "45 days")))
+        #expect(choices.map(\.days) == choices.map(\.days).sorted())
+        #expect(HistoryRetentionChoice.displayLabel(for: 60) == "2 months")
+        #expect(HistoryRetentionChoice.displayLabel(for: 45) == "45 days")
+    }
+
+    @Test func reducingRetentionConfirmsOnlyWhenItWouldDeleteHistory() {
+        #expect(HistoryRetentionChoice.needsConfirmation(
+            from: 60, to: 30, wouldRemoveHistory: true))
+        #expect(!HistoryRetentionChoice.needsConfirmation(
+            from: 60, to: 30, wouldRemoveHistory: false))
+        #expect(!HistoryRetentionChoice.needsConfirmation(
+            from: 30, to: 60, wouldRemoveHistory: true))
+    }
 }

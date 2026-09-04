@@ -293,6 +293,8 @@ enum AccessibilityID {
         static let manageVocabulary = "history.action.manageVocabulary"
         static let createReplacement = "history.action.createReplacement"
         static let addToDictionary = "history.action.addToDictionary"
+        static let retentionConfirm = "history.retention.confirm"
+        static let retentionCancel = "history.retention.cancel"
 
         enum ReplacementSheet {
             static let source = "history.replacementSheet.source"
@@ -389,6 +391,7 @@ enum AccessibilityID {
         History.list, History.search, History.export, History.stagePicker, History.comparisonPicker,
         History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
+        History.retentionConfirm, History.retentionCancel,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
         History.DictionarySheet.term, History.DictionarySheet.status, History.DictionarySheet.save,
         Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination, Correction.status,

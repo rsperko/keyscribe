@@ -710,17 +710,20 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
 History is a **Settings pane**, not a separate window — it is the audit,
 correction, and diagnostics surface, reached via the menu "History…" / ⌘Y (which opens Settings
 on the History pane) and the sidebar. It uses the same list/detail pane layout as Modes: a
-left column with one compact History header for enablement and retention (moved out of General), a search field,
+left column with one compact History section for enablement and retention (moved out of General), a search field,
 the day-grouped list, and the storage-truth statement pinned at the bottom; the right column is
-the entry detail. The enable toggle and retention stepper live only here now — General has no
+the entry detail. The section uses the shared uppercase **History** header, followed by **Keep history
+on this Mac** and the subordinate **Keep for** menu. These controls live only here — General has no
 History section. **"Navigated away" equals "closed"**: leaving the pane (or closing Settings)
 releases all parsed transcripts and the search cache, and re-entering reloads (signature-gated,
 so it is free when nothing changed). "Paste Result" hides Settings, pastes into the previously
 focused app, and closes Settings on success (re-presents + copies on failure).
 
-Retention changes are staged until **Apply** is pressed in that header. A lower value confirms once only
-when it would remove existing day files; an empty history or a value that removes nothing applies
-without confirmation.
+History uses the standard immediate-apply Settings model. Retention is a menu of readable periods from
+days through one year, so common choices such as two weeks or two months do not require repeated stepper
+clicks. A shorter period confirms once only when it would remove existing day files; canceling keeps the
+previous period selected. A longer period, an empty history, or a change that removes nothing applies
+immediately without confirmation.
 
 ### List view
 
