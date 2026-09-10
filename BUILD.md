@@ -217,7 +217,10 @@ Dock icon or window.
   against the Command Line Tools SDK, which ships no SwiftUI macro plugins. Run
   `sudo xcode-select -s /Applications/Xcode.app` and rebuild. Reported on the macOS 27 CLT SDK; the
   macOS 26 CLT SDK compiles plain SwiftUI, so a CLT build that used to work can start failing this
-  way after an OS/CLT upgrade.
+  way after an OS/CLT upgrade. `xcode-select` pointing at Xcode does not rule this out: an exported
+  `SDKROOT` overrides it (SwiftPM honors `SDKROOT` first), so `make-app.sh` typechecks a SwiftUI
+  macro against the SDK the build will actually use and stops before building if that fails,
+  printing the SDK path. If `SDKROOT` is set, unset it.
 - **`unable to spawn process 'metal'` during `swift build`** — the build ran under the `swiftbuild`
   build system, which compiles MLX's Metal shaders as part of the build. Swift 6.4 makes that the
   default for a bare `swift build`; build through `./make-app.sh` (or `make build` / `make test`),

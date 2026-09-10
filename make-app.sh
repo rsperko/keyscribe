@@ -26,10 +26,11 @@ CONFIG="${1:-release}"
 
 # Preflight: catch the failure modes a fresh clone hits — wrong arch, missing or Command-Line-Tools-
 # only Xcode, absent Metal Toolchain — up front with an actionable message, instead of a cryptic
-# error minutes into the build. A non-arm64 / non-macOS host and a Command-Line-Tools-only toolchain
-# are fatal (BUILD.md's prerequisites already require full Xcode, and the CLT failures surface
-# minutes in as a wall of compile errors); a missing Metal Toolchain only costs the optional
-# MLX-based Qwen3-ASR engine, so it warns and continues. Full guide: BUILD.md.
+# error minutes into the build. A non-arm64 / non-macOS host, a Command-Line-Tools-only toolchain, and
+# a toolchain that cannot compile SwiftUI are fatal (BUILD.md's prerequisites already require full
+# Xcode, and those failures surface minutes in as a wall of compile errors); a missing Metal
+# Toolchain only costs the optional MLX-based Qwen3-ASR engine, so it warns and continues. Full
+# guide: BUILD.md.
 echo "== preflight =="
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "!! KeyScribe builds only on Apple-silicon macOS (arm64). Host is $(uname -s)/$(uname -m)." >&2
@@ -55,6 +56,30 @@ case "$DEVDIR" in
     exit 1
     ;;
 esac
+# xcode-select is not what the compiler uses. SDKROOT (which SwiftPM honors ahead of xcrun), a
+# DEVELOPER_DIR at another Xcode, or an unaccepted license all change or break the SDK the build
+# resolves while xcode-select still points at Xcode. So typecheck the capability a Command Line Tools
+# SDK lacks — a SwiftUI macro, whose plugin is located through the resolved SDK — with the same
+# swiftc and environment `swift build` inherits. ~1 s; a CLT SDK fails it with the exact
+# "plugin for module 'SwiftUIMacros' not found" the build would hit minutes in.
+SDK_PATH="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)}"
+PROBE_DIR="$(mktemp -d)"
+printf 'import SwiftUI\nextension EnvironmentValues { @Entry var toolchainProbe = 0 }\n' > "$PROBE_DIR/probe.swift"
+if ! swiftc -typecheck "$PROBE_DIR/probe.swift" >"$PROBE_DIR/out.txt" 2>&1; then
+  echo "!! This toolchain cannot compile SwiftUI, so the build would fail partway through." >&2
+  echo "!! SDK: ${SDK_PATH:-unresolved}" >&2
+  { grep -m1 -E 'error:|license' "$PROBE_DIR/out.txt" || head -3 "$PROBE_DIR/out.txt"; } | sed 's/^/!!   /' >&2
+  if [ -n "${SDKROOT:-}" ]; then
+    echo "!! SDKROOT is set and overrides xcode-select. Fix: unset SDKROOT" >&2
+  elif [ -n "${DEVELOPER_DIR:-}" ]; then
+    echo "!! DEVELOPER_DIR is set and overrides xcode-select. Fix: unset DEVELOPER_DIR" >&2
+  else
+    echo "!! Fix: sudo xcode-select -s /Applications/Xcode.app (and sudo xcodebuild -license accept if asked)" >&2
+  fi
+  rm -rf "$PROBE_DIR"
+  exit 1
+fi
+rm -rf "$PROBE_DIR"
 if ! xcrun -f metal >/dev/null 2>&1; then
   echo "warning: Metal Toolchain not installed — Qwen3-ASR will be unavailable (other engines work)." >&2
   echo "         Install it once with: xcodebuild -downloadComponent MetalToolchain" >&2
