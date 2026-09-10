@@ -5,8 +5,9 @@ struct SpeechModelCatalogTests {
     @Test func curatedListIsTheKnownEngines() {
         #expect(
             Set(SpeechModelCatalog.all.map(\.id))
-                == ["parakeet", "parakeet-tdt-ctc-110m", "whisper", "whisper-small-en", "apple",
-                    "qwen3-asr-0.6b", "qwen3-asr-1.7b", "moonshine-base-en"])
+                == ["parakeet", "parakeet-unified-en", "parakeet-tdt-ctc-110m", "whisper",
+                    "whisper-small-en", "apple", "qwen3-asr-0.6b", "qwen3-asr-1.7b",
+                    "moonshine-base-en"])
     }
 
     @Test func exactlyOneDefaultEnglishEngine() {
@@ -38,6 +39,29 @@ struct SpeechModelCatalogTests {
         // Meaningfully smaller than the Large v3 Turbo it sits beside.
         let turbo = SpeechModelCatalog.entry(for: "whisper")
         #expect((small?.approxDownloadBytes ?? .max) < (turbo?.approxDownloadBytes ?? 0))
+    }
+
+    @Test func parakeetUnifiedIsEnglishOnlyAndNotTheDefault() {
+        let u = SpeechModelCatalog.entry(for: "parakeet-unified-en")
+        #expect(u?.kind == .parakeet)
+        #expect(u?.languageCount == 1)
+        #expect(u?.isDefaultEnglish == false)
+        #expect(u?.supportsRecognitionBias == false)
+        #expect((u?.approxDownloadBytes ?? 0) > 0)
+        // SpeechModelChoiceCopy.memoryUse maps 0 to "Almost no memory", so an unmeasured 0 would make
+        // the picker lie about the largest Parakeet in the list.
+        #expect((u?.approxMemoryBytes ?? 0) > 0)
+    }
+
+    // Catalog order IS the UI order and is hand-curated, with no other guard. Keep the Parakeet family
+    // contiguous so a later insert can't scatter it.
+    @Test func parakeetUnifiedSitsInsideTheParakeetFamilyBlock() {
+        let ids = SpeechModelCatalog.all.map(\.id)
+        let v3 = ids.firstIndex(of: "parakeet")
+        let unified = ids.firstIndex(of: "parakeet-unified-en")
+        let ctc = ids.firstIndex(of: "parakeet-tdt-ctc-110m")
+        #expect(unified == v3.map { $0 + 1 })
+        #expect(unified.map { u in ctc.map { u < $0 } } == true)
     }
 
     @Test func languageCountsAreSane() {

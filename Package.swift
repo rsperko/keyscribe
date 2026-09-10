@@ -15,8 +15,10 @@ var packageDependencies: [Package.Dependency] = [
     // recognition behavior, and a bump can change transcripts with no build error to warn you. Bumping
     // one is a deliberate act that must re-run the STT benchmark and the VAD gate (--vad-probe over
     // corpus/blips AND corpus/commands) — see AGENTS.md "Silence / no-speech behavior".
-    // HELD at this revision: 0.15.5 FAILS the blips gate — see AGENTS.md "FluidAudio is held".
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"),
+    // v0.15.6. The VAD artifact is pinned separately in SpeechPresenceDetector: 0.15.5 moved the SDK's
+    // default Silero model to v6.2.1 (PR #734, a one-line artifact swap), which FAILS the blips gate —
+    // so KeyScribe names the v6.0.0 artifact itself. See AGENTS.md "FluidAudio".
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "4dbf4f9f9a5ff3a53ade848d7ba4e3df13db859b"),
     .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),
     .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.0"),
     .package(url: "https://github.com/rsperko/speech-swift.git", revision: "96273cd375783531129e5bb97a7ec25a7e717994"),

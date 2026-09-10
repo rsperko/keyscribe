@@ -40,10 +40,20 @@ struct SpeechPresenceManager: Sendable {
 enum VADModel {
     static let dirName = Repo.vad.folderName
 
+    // PINNED, deliberately not ModelNames.VAD.sileroVadFile. FluidAudio PR #734 swapped the SDK's default
+    // Silero artifact v6.0.0 -> v6.2.1 (one line, no logic change). v6.2.1 is tuned recall-first at
+    // upstream's ~0.85 threshold; KeyScribe's no-speech gate reads raw probabilities at 0.30, deep in a
+    // tail upstream never optimizes, and there v6.2.1 scores breaths and stray clicks as speech —
+    // measured, it flipped blip_breath_03 and dbl_gap15 and failed the corpus/blips gate 2/23.
+    // ModelHub.loadModels unions caller-supplied names beyond the repo's required set, so naming the
+    // older artifact keeps gate behavior byte-identical across SDK bumps. Changing this string is a
+    // gate change: re-run `--vad-probe corpus/blips` AND `corpus/commands` before touching it.
+    static let pinnedArtifact = "silero-vad-unified-256ms-v6.0.0.mlmodelc"
+
     static func modelURL(in modelsDir: URL) -> URL {
         modelsDir
             .appendingPathComponent(dirName, isDirectory: true)
-            .appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
+            .appendingPathComponent(pinnedArtifact, isDirectory: true)
     }
 
     static func isPresent(in modelsDir: URL) -> Bool {
@@ -52,12 +62,12 @@ enum VADModel {
 
     static func load(
         in modelsDir: URL,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> MLModel {
-        let models = try await DownloadUtils.loadModels(
-            .vad, modelNames: [ModelNames.VAD.sileroVadFile],
+        let models = try await ModelHub.loadModels(
+            .vad, modelNames: [pinnedArtifact],
             directory: modelsDir, progressHandler: progressHandler)
-        guard let model = models[ModelNames.VAD.sileroVadFile] else {
+        guard let model = models[pinnedArtifact] else {
             throw VadError.modelLoadingFailed
         }
         return model

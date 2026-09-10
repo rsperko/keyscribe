@@ -46,6 +46,13 @@ public enum SpeechModelCatalog {
             isDefaultEnglish: true, supportsRecognitionBias: false,
             approxMemoryBytes: 515_000_000),
         SpeechModelInfo(
+            id: "parakeet-unified-en", kind: .parakeet,
+            displayName: "Parakeet Unified 0.6B (English)",
+            summary: "English only — writes punctuation and capitalization for you.",
+            languageCount: 1, approxDownloadBytes: 614_000_000, systemManaged: false,
+            isDefaultEnglish: false, supportsRecognitionBias: false,
+            approxMemoryBytes: 685_000_000),
+        SpeechModelInfo(
             id: "parakeet-tdt-ctc-110m", kind: .parakeet, displayName: "Parakeet TDT-CTC 110M",
             summary: "Compact English model — fast, accurate, and small.",
             languageCount: 1, approxDownloadBytes: 330_000_000, systemManaged: false,

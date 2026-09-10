@@ -28,6 +28,7 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
 | Whisper Large v3 Turbo | 5.7% | 0.96 | 0.81 | 0.119 | 632 MB |
 | Qwen3-ASR 1.7B | 5.8% | 0.96 | 0.84 | 0.040 | 2.0 GB |
 | Whisper Small (English) | 6.0% | 0.97 | 0.78 | 0.063 | 217 MB |
+| Parakeet Unified 0.6B (English) | 6.5% | 0.91 | 0.80 | 0.010 | 614 MB |
 | Parakeet TDT v3 (default) | 7.1% | 0.89 | 0.77 | 0.014 | 480 MB |
 | Qwen3-ASR 0.6B | 8.3% | 0.96 | 0.78 | 0.014 | 1.5 GB |
 | Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 330 MB |
@@ -44,9 +45,13 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
   no-op — the mechanism just differs by model.
 - **Everything is faster than real time.** Every RTF is well under 1.0, so on this corpus speed is
   rarely the deciding factor — footprint and accuracy are.
-- **The default isn't the most accurate, by design.** Parakeet TDT-CTC 110M is the recommended
-  English default because it is compact, fast, and low-memory — not because it tops this table.
+- **The default isn't the most accurate, by design.** Parakeet TDT v3 is the recommended English
+  default because it is multilingual, fast, and low-memory — not because it tops this table.
   "Recommended" means *sensible starting point*, not *highest score*.
+- **Parakeet Unified is the strongest Parakeet on English, and the only one that punctuates.** It
+  beats TDT v3 here on accuracy, recall, and speed, and it writes punctuation and capitalization —
+  which matters most in modes with no LLM rewrite. It is **English-only**, where TDT v3 covers 25
+  languages, which is why the multilingual model remains the default.
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
   `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 

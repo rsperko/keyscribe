@@ -37,6 +37,7 @@ enum EngineRegistry {
     private static func construct(_ id: String, _ modelsDir: URL) -> any SpeechEngine {
         switch id {
         case "parakeet": return ParakeetEngine(profile: .tdtV3, modelsDir: modelsDir)
+        case "parakeet-unified-en": return ParakeetUnifiedEngine(modelsDir: modelsDir)
         case "parakeet-tdt-ctc-110m": return ParakeetEngine(profile: .tdtCtc110m, modelsDir: modelsDir)
         case "whisper": return WhisperEngine(profile: .largeV3Turbo, modelsDir: modelsDir)
         case "whisper-small-en": return WhisperEngine(profile: .smallEnglish, modelsDir: modelsDir)

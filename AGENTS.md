@@ -621,22 +621,58 @@ keyscribe/
   remove+re-add or `tccutil reset <service> com.keyscribe.app` rebinds it to the current signature.
 - **Token-fencing:** `⟦SN:…⟧` nonce tokens survive LLM rewrite (verified against the Gemini 2.5
   Flash floor, 24/24 across hard rewrite shapes).
+- **macOS 27 may require an entitlement for BACKGROUND Neural Engine use — UNMEASURED, do not "fix"
+  it blind.** Apple ships `com.apple.developer.background-tasks.continued-processing.inference`
+  ("Background Inference"), listed **iOS/macOS 27.0+ (Beta)**. Its Discussion says the system requires
+  it for **any** Neural Engine access while the app is in the background, *regardless of* a continued
+  background task — and that second sentence is the only part that can apply to macOS, since
+  `BGContinuedProcessingTask` does not exist there (the sibling `…continued-processing.gpu`
+  entitlement is iOS-only, which is why this is easy to dismiss as inapplicable).
+  **Why KeyScribe is exposed:** it is `LSUIElement` and by construction dictates into *another* app,
+  so it is essentially never frontmost; Parakeet (both TDT and Unified) and the Silero VAD run
+  `.cpuAndNeuralEngine` by FluidAudio default, and Qwen3's CoreML encoder is `.all`. (Whisper is
+  already `.cpuAndGPU`, but for load-time reasons — `WhisperEngine.swift` — not entitlements.)
+  **What is NOT known** (searched 2026-09-09, no evidence either way — do not invent an answer):
+  whether an actively hotkey-driven menu-bar agent counts as "background" at all; whether the
+  capability is approval-gated; whether a Developer ID (non-App-Store) app can carry it. Adding the
+  key speculatively is NOT free: a `com.apple.developer.*` entitlement can require an embedded
+  provisioning profile, which `release.sh` does not produce — that risks AMFI killing the app at
+  launch, which is the same class of failure `make-app.sh` already documents for dev signing.
+  **How to actually measure it** (cannot be done on macOS 26, and CANNOT be done with the dev build —
+  the teamless self-signed "KeyScribe Local" cert cannot authorize such an entitlement):
+  1. macOS 27 beta on a spare volume; build via `release.sh` (Developer ID).
+  2. Dictate while KeyScribe is NOT frontmost (its normal state) and sample
+     `sudo powermetrics --samplers ane_power`.
+  3. `.build/checkouts/FluidAudio/Scripts/ane_profile.swift` reports the compute-unit **plan** only —
+     it will still say ANE even if the runtime is denied, so the power trace is the ground truth.
+  4. Silent-fallback signature: ANE power at zero **plus** a latency regression at unchanged WER.
+  **Two gaps this exposes regardless of macOS 27:** `preflight.sh`'s `a-entitlements` greps only for
+  the literal `com.apple.security`, so it cannot see a missing or malformed `com.apple.developer.*`
+  key; and **no preflight gate measures latency/RTF** — `b-benchmark` gates WER only, and an ANE→CPU
+  fallback moves latency, not accuracy, so it would ship unnoticed.
 
 ---
 
 ## STT engines
 
-KeyScribe ships **8 curated models across 5 engine kinds**, all with in-app download/install:
-Parakeet TDT v3 (English default), Parakeet TDT-CTC 110M, Whisper Large v3 Turbo,
-Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, and
-Moonshine Base (English). **Four are bias-capable** — both Qwen3 models (native context) and both
+KeyScribe ships **9 curated models across 5 engine kinds**, all with in-app download/install:
+Parakeet TDT v3 (English default), Parakeet Unified 0.6B (English), Parakeet TDT-CTC 110M,
+Whisper Large v3 Turbo, Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B,
+Qwen3-ASR 1.7B, and Moonshine Base (English). **Four are bias-capable** — both Qwen3 models (native context) and both
 Whisper models (prompt tokens); **Parakeet, Apple, and Moonshine have no recognition bias**
 (`supportsRecognitionBias = false`). The dictionary still prefers a user's spellings on **every**
 engine via after-transcription recovery (`FuzzyStage`), which now runs whenever the mode's merged
 dictionary is non-empty — no per-engine toggle. Engines are
 wired through a single **`EngineRegistry`** descriptor list (catalog ↔ constructor) that the
 provider, download path, install reconcile/delete, and the benchmark all derive from — adding an
-engine is one descriptor + one catalog entry. `load(progress:)` is on the `SpeechEngine` protocol;
+engine is one descriptor + one catalog entry. **Parakeet Unified is the one exception to "one
+descriptor + one construct case" being the whole story**: `AsrModelVersion` has no Unified case, so it
+is reached through a separate `UnifiedAsrManager` and therefore a separate adapter
+(`ParakeetUnifiedEngine`) under the same `.parakeet` kind. Two traps live there — its `loadModels(to:)`
+takes the **base** models dir (the SDK appends the bundle name itself, the opposite of
+`AsrModels.downloadAndLoad(to:)`), and it is the **only Parakeet that emits punctuation and
+capitalization**, which is net-neutral on `--commands-check` (measured: it fixes `np_period`, which TDT
+v3 fails for lack of a period, and breaks `sc_cb`; both engines land 30/35). `load(progress:)` is on the `SpeechEngine` protocol;
 each engine owns its install footprint (`installDirNames` / `installState`); audio decode is shared
 (`AudioDecoder`).
 
@@ -721,6 +757,7 @@ Empirically observed no-speech output (2026-07-01, one machine — deterministic
 | Engine | Output on silence/near-silence |
 |---|---|
 | Parakeet TDT v3 / TDT-CTC 110M | `""` (clean empty — greedy TDT discards blanks) |
+| Parakeet Unified 0.6B (en) | `""` (clean empty; swept 2026-09-09 over 1/2/3/5 s silence + 3 s and 6 s hiss) |
 | Qwen3-ASR 0.6B | `""` |
 | Moonshine Base (en) | `""` (but upstream can loop-repeat on short audio) |
 | Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
@@ -861,19 +898,34 @@ One fork + three upstream deps (one a pinned binary); the fork works live and co
   was **removed** (2026-07-09) — it false-fired a dictionary term into a majority of ordinary
   sentences (`agent_notes/fable_bias_test/`); Parakeet now transcribes **TDT-only** and ignores
   `biasTerms` (`supportsRecognitionBias = false`), with the companion CTC download and disk footprint
-  gone. **FluidAudio is HELD at revision `a95ec26` (v0.15.4+17) — do not bump it casually.** It is the
-  only dep that supplies BOTH Parakeet and the Silero VAD behind the no-speech gate, so a bump moves
-  the gate. **0.15.5 was measured and rejected (2026-08-13):** `--vad-probe corpus/blips` went
-  **PASS 23/23 → FAIL 2/23** (`blip_breath_03` and `dbl_gap15` flipped noSpeech→speech; `dbl_gap15`'s
-  take-level maxP rose **0.510 → 0.859**), i.e. a breath or a stray press would be admitted and
-  transcribed. Everything else about that bump was clean — 2196 tests green, and STT output
-  byte-identical over 107 clips × 3 engines — which is exactly why this is dangerous: **nothing but
-  the blips gate catches it.** 0.15.5 also renames the download API (`DownloadUtils` → `ModelHub`,
-  `refactor(download)!` #779); the migration is mechanical (`DownloadUtils.ProgressHandler` →
-  `ProgressHandler`, `DownloadUtils.loadModels` → `ModelHub.loadModels`) and is NOT the blocker. A
-  future bump must re-tune the gate against `corpus/blips` — and per that corpus's README the
-  fast-release twins should be recorded FIRST, since raising `minSpeechChunks` to compensate is the
-  one move no evidence in this repo currently bounds.
+  gone. It also supplies Parakeet Unified through a DIFFERENT manager (`UnifiedAsrManager`, not
+  `AsrModels`) — see the STT engines section. FluidAudio is the only dep that supplies BOTH Parakeet
+  and the Silero VAD behind the no-speech gate, so **a bump moves the gate unless the VAD artifact is
+  pinned separately — which it now is.**
+  **The root cause is known and confirmed, so this is no longer a mystery to re-litigate.** 0.15.5's
+  blips regression (2026-08-13: `--vad-probe corpus/blips` PASS 23/23 → FAIL 2/23, `blip_breath_03`
+  and `dbl_gap15` flipping noSpeech→speech) was **not** an SDK logic change: it was
+  [PR #734](https://github.com/FluidInference/FluidAudio/pull/734), a **one-line swap of the Silero
+  CoreML artifact** v6.0.0 → v6.2.1, with no threshold or config change anywhere. Upstream tuned
+  v6.2.1 recall-first at their ~0.85 threshold (+2pp accuracy, recall pinned at 100%); KeyScribe reads
+  raw probabilities at **0.30**, deep in a tail upstream never optimizes, where "more eager to call
+  marginal audio speech" is precisely wrong for a suppression gate.
+  **Resolution (2026-09-09): the SDK is bumped to `4dbf4f9` (v0.15.6) and the ARTIFACT is pinned
+  instead** — `VADModel.pinnedArtifact` in `SpeechPresenceDetector.swift` names
+  `silero-vad-unified-256ms-v6.0.0.mlmodelc` explicitly. `ModelHub.loadModels` unions caller-supplied
+  names beyond the repo's required set, so naming the older artifact works even though the SDK now
+  defaults to v6.2.1; both files coexist in `models/silero-vad/` at ~1 MB each. Verified: blips and
+  commands both PASS unchanged (identical 13/11 split, identical 0.675 margin), STT byte-identical,
+  2461 tests green. Verified the pin is LOAD-BEARING, not coincidental: flipping only that string to
+  v6.2.1 on the same SDK reproduces **FAIL 2/23 on exactly `blip_breath_03` and `dbl_gap15`**.
+  Consequence: KeyScribe now depends on a file upstream no longer advertises. If it were deleted the
+  VAD model would fail to download and the gate **fails open** — silently. `make check-deps` now
+  watches for that (a hard failure); nothing else would notice.
+  0.15.5 also renamed the download API (`DownloadUtils` → `ModelHub`, `refactor(download)!` #779);
+  that migration is done (`ProgressHandler` is now top-level; `ModelHub.loadModels`).
+  **Still true and still unbounded:** raising `minSpeechChunks` remains the one move no evidence here
+  supports — per `corpus/blips/README.md` the fast-release twins must be recorded FIRST. The artifact
+  pin exists precisely so that a future SDK bump does not force that question.
 - **speech-swift (Qwen3-ASR)** → `rsperko/speech-swift` (upstream `soniqo/speech-swift`, package
   `Qwen3Speech`): the fork is **one commit** — it gates the `AsrBenchmark`/`AudioServer` targets behind
   `BUILD_ALL` so stock speech-swift's unconditional `argmaxinc/WhisperKit` dependency stays out of our

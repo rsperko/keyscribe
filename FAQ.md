@@ -69,7 +69,11 @@ you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
 Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint:
 
 - **Best accuracy:** Qwen3-ASR 1.7B.
-- **Best default for English:** Parakeet TDT-CTC 110M — compact, fast, and accurate.
+- **Best default for English:** Parakeet TDT v3 — the shipped default: fast, low-memory, and it
+  also covers 25 languages if you switch languages.
+- **Best punctuation without AI rewrite:** Parakeet Unified 0.6B (English) — the only Parakeet
+  that writes punctuation and capitalization for you, and the most accurate one on English.
+  English only.
 - **Best multilingual balance:** Qwen3-ASR 0.6B.
 - **Best in noisy places:** Whisper Large v3 Turbo or Qwen3-ASR 1.7B. Both barely lose accuracy
   with real background noise; the smaller models lose noticeably more, and Apple Speech degrades
@@ -88,8 +92,9 @@ off your machine.
 
 Yes, with one setup step. Pick a speech model that covers your language in **Settings ▸ Speech
 Models** — Whisper Large v3 Turbo (99 languages), Qwen3-ASR 0.6B/1.7B (52), and Apple Speech (20) are
-the broad ones. The English-only models (Whisper Small, Moonshine Base, Parakeet TDT-CTC 110M) and
-Parakeet TDT v3, whose 25 languages are all European, will not transcribe outside their coverage.
+the broad ones. The English-only models (Whisper Small, Moonshine Base, Parakeet TDT-CTC 110M,
+Parakeet Unified) and Parakeet TDT v3, whose 25 languages are all European, will not transcribe
+outside their coverage.
 
 If you also use AI rewrite, it writes back in whatever language you dictated — there is no language
 setting to find, and you can switch languages between dictations without changing anything. Mixing

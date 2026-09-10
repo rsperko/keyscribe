@@ -60,7 +60,7 @@ actor ParakeetEngine: SpeechEngine {
 
     private func ensureManager(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         guard manager == nil else { return }
-        var handler: DownloadUtils.ProgressHandler?
+        var handler: ProgressHandler?
         if let progress {
             handler = { snapshot in
                 progress(.init(phase: "Downloading speech model…", fraction: snapshot.fractionCompleted * 0.9))

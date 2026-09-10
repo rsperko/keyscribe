@@ -99,8 +99,9 @@ pipeline stages cannot stay purely theoretical until late in the build (cf. `roa
 
 ## B. Underlying STT model families (our pluggable engines)
 
-KeyScribe ships **up to 8 curated models across 5 engine families** (Parakeet TDT v3,
-Parakeet TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech on macOS 26+,
+KeyScribe ships **up to 9 curated models across 5 engine families** (Parakeet TDT v3,
+Parakeet Unified 0.6B (English), Parakeet TDT-CTC 110M, Whisper Large v3 Turbo,
+Whisper Small (English), Apple Speech on macOS 26+,
 Qwen3-ASR 0.6B, Qwen3-ASR 1.7B, Moonshine Base (English)). Here is the state of each family as of
 2026. A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on the
 current KeyScribe 107-clip single-speaker benchmark, Whisper Large v3 Turbo, Qwen3-ASR 1.7B, and
@@ -109,14 +110,15 @@ treating this table as a personal ranking.
 
 | Engine | Speed (Apple Silicon) | Accuracy (English WER) | Languages | Notes |
 |---|---|---|---|---|
-| **NVIDIA Parakeet** (TDT 0.6B v3 + TDT-CTC 110M) | ~3,333x realtime; ~10x faster than Whisper Large v3 Turbo; latency can hit ~80ms | ~12.0% WER — slightly **better** than Whisper; wins on disfluent speech (tuned to drop fillers, reconstruct sentences) | **25** (v3) / **1** (110M) | Fastest by a wide margin. Built-in diarization (v3). The compact **110M tier is KeyScribe's English default**; v3 is the larger multilingual tier. |
+| **NVIDIA Parakeet** (TDT 0.6B v3 + TDT-CTC 110M) | ~3,333x realtime; ~10x faster than Whisper Large v3 Turbo; latency can hit ~80ms | ~12.0% WER — slightly **better** than Whisper; wins on disfluent speech (tuned to drop fillers, reconstruct sentences) | **25** (v3) / **1** (110M) | Fastest by a wide margin. Built-in diarization (v3). **v3 is KeyScribe's English default** (multilingual, fast, low-memory); the 110M tier is the compact English option, and **Parakeet Unified 0.6B** is the most accurate English Parakeet and the only one that punctuates. |
 | **OpenAI Whisper** (Large v3 Turbo + Small English) | ~146x realtime for Large v3 Turbo | ~12.6% WER for Large v3 Turbo | **99** / **1** | The multilingual workhorse plus a compact English tier. Best when language coverage matters. WhisperKit makes on-device easy. |
 | **Apple Speech** (SpeechAnalyzer, macOS 26+) | ~150–400ms latency; ~55% faster than Whisper | Most accurate on clean read-aloud FR/ES/DE/IT; weaker than Parakeet in English; ~Whisper for supported langs | **20** | Zero-install, OS-native, free, on-device, system-managed. Great latency/accuracy for European languages; session/robustness limits. |
 | **Qwen3-ASR** (0.6B + 1.7B) | 0.6B is the speed/accuracy sweet spot in our benchmarks | Near the top accuracy cluster on the current KeyScribe real-voice corpus; 1.7B is the stronger Qwen tier | **52** | Two shipping tiers. Native on-device bias (`Qwen3DecodingOptions.context`). |
 | **Moonshine** (Base, English) | Lightweight, fast | competitive English | **1** | Small (~141MB) English model. No recognition bias; dictionary recovery is available in Settings. |
 
 **Implications for KeyScribe's pluggable-STT design (as shipped):**
-- **Parakeet TDT-CTC 110M = English default** (compact + fast + accurate); **Qwen3-ASR / Whisper = multilingual** (52 / 99 langs); **Apple = zero-footprint on macOS 26+** (no download, good EU-language accuracy); **Moonshine = lightweight English** (dictionary recovery).
+- **Parakeet TDT v3 = English default** (fast + low-memory + 25 languages); **Parakeet Unified
+  0.6B = most accurate English Parakeet, and the only one that punctuates**; **Qwen3-ASR / Whisper = multilingual** (52 / 99 langs); **Apple = zero-footprint on macOS 26+** (no download, good EU-language accuracy); **Moonshine = lightweight English** (dictionary recovery).
 - Model **download/compile-with-progress + select + delete** is the shipped UX — every serious local app does this; engines are wired through a single `EngineRegistry` descriptor.
 - Diarization is a Parakeet-v3 capability we get largely "for free" and could expose.
 - **Bias is decisive for dictionary-term recall** and often improves WER, so recognition bias is a

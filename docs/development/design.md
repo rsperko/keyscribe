@@ -152,12 +152,14 @@ measured (`principles.md` §1):
   user is never stuck waiting on the cloud.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
-**Up to 8 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
+**Up to 9 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
 download/install except the system-managed Apple engine:
-- **FluidAudio / Parakeet TDT-CTC 110M** — **default for English.** Compact (~330MB), fast and
-  accurate. English only.
-- **FluidAudio / Parakeet TDT v3** — larger multilingual Parakeet (25 languages), slightly
-  stronger raw accuracy; **pyannote speaker diarization bundled** in the same SDK.
+- **FluidAudio / Parakeet TDT v3** — **default for English** (`isDefaultEnglish`). Larger
+  multilingual Parakeet (25 languages); **pyannote speaker diarization bundled** in the same SDK.
+- **FluidAudio / Parakeet Unified 0.6B (English)** — the strongest Parakeet on English and the only
+  one that emits punctuation and capitalization. English only, so it is not the default. Reached
+  through `UnifiedAsrManager`, not `AsrModels`, so it is a separate adapter under the same kind.
+- **FluidAudio / Parakeet TDT-CTC 110M** — compact (~330MB), fast. English only.
 - **Whisper** (Large v3 Turbo via WhisperKit) — broad multilingual coverage, 99 languages.
 - **Whisper Small (English)** — compact English Whisper, smaller and faster than Turbo.
 - **Apple Speech** (SpeechAnalyzer, macOS 26+) — zero-install, system-managed, 20 languages. It is

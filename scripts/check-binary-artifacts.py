@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -204,6 +205,40 @@ def live_digest(url: str, token: str | None) -> tuple[str | None, str | None]:
     return None, "asset not found in release"
 
 
+# KeyScribe pins the Silero VAD artifact by NAME rather than taking the SDK's default (see
+# SpeechPresenceDetector.VADModel.pinnedArtifact): FluidAudio PR #734 swapped its default to v6.2.1,
+# which fails the corpus/blips gate. That pin buys gate stability at the cost of depending on a file
+# upstream no longer advertises — and if it were deleted, the VAD model would simply fail to download
+# and the fail-open gate would stop suppressing silence with nothing to show for it. Nothing else in
+# the tree watches that file, so this does.
+VAD_REPO = "FluidInference/silero-vad-coreml"
+VAD_PIN_SOURCE = "Sources/KeyScribe/Adapters/SpeechPresenceDetector.swift"
+
+
+def pinned_vad_artifact() -> str | None:
+    """The artifact name KeyScribe pins, read from the source of truth rather than duplicated here."""
+    try:
+        source = pathlib.Path(VAD_PIN_SOURCE).read_text()
+    except OSError:
+        return None
+    match = re.search(r'pinnedArtifact\s*=\s*"([^"]+)"', source)
+    return match.group(1) if match else None
+
+
+def vad_artifact_present(name: str) -> tuple[bool | None, str | None]:
+    """Whether the pinned .mlmodelc still exists in the HuggingFace repo."""
+    url = f"https://huggingface.co/api/models/{VAD_REPO}"
+    request = urllib.request.Request(url, headers={"User-Agent": "keyscribe-check-deps"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except Exception as exc:  # noqa: BLE001 - network/parse failures are "unverifiable", not "missing"
+        return None, str(exc)
+    files = {entry.get("rfilename", "") for entry in payload.get("siblings") or []}
+    # .mlmodelc is a directory, so match any file inside it.
+    return any(f == name or f.startswith(name + "/") for f in files), None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--resolved", default="Package.resolved")
@@ -247,6 +282,25 @@ def main() -> int:
                 )
             elif not args.quiet:
                 print(f"  {GREEN}✓{RESET} {label} {DIM}{declared[:16]}…{RESET}")
+
+    pinned_vad = pinned_vad_artifact()
+    if pinned_vad is None:
+        warnings.append(
+            f"VAD artifact pin not found in {VAD_PIN_SOURCE} "
+            "(pinnedArtifact removed? the blips gate now follows the SDK default)"
+        )
+    else:
+        present, error = vad_artifact_present(pinned_vad)
+        if present is None:
+            warnings.append(f"{VAD_REPO} {pinned_vad}: unverifiable ({error})")
+        elif not present:
+            failures.append(
+                f"{VAD_REPO} {pinned_vad}: PINNED VAD ARTIFACT GONE upstream — "
+                "the no-speech gate's model would fail to download and the gate fails OPEN; "
+                "re-pin and re-run `--vad-probe corpus/blips` before shipping"
+            )
+        elif not args.quiet:
+            print(f"  {GREEN}\u2713{RESET} {VAD_REPO} {pinned_vad} {DIM}pinned{RESET}")
 
     for warning in warnings:
         print(f"  {YELLOW}! WARN{RESET} {warning}")

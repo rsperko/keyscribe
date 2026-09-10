@@ -9,6 +9,7 @@ model weights at runtime. Each remains under its own license.
 | Component | Project | License |
 |---|---|---|
 | FluidAudio (Parakeet engine) | github.com/FluidInference/FluidAudio | Apache-2.0 |
+| NemoTextProcessing (prebuilt Rust xcframework, statically linked via FluidAudio) | github.com/FluidInference/text-processing-rs | Apache-2.0 |
 | WhisperKit (Whisper engine) | github.com/argmaxinc/argmax-oss-swift | MIT |
 | speech-swift / Qwen3ASR (Qwen3-ASR engine) | github.com/soniqo/speech-swift (KeyScribe fork) | Apache-2.0 |
 | moonshine-swift (Swift wrapper) | github.com/moonshine-ai/moonshine-swift | MIT |
@@ -32,12 +33,18 @@ the property of its publisher and is used under its own license.
 | Model | Publisher | License |
 |---|---|---|
 | Parakeet TDT v3 / Parakeet TDT-CTC 110M | NVIDIA | CC-BY-4.0 |
+| Parakeet Unified 0.6B (English) | NVIDIA | NVIDIA Open Model License |
 | pyannote segmentation/speaker models (via FluidAudio) | pyannote | CC-BY-4.0 |
 | Silero VAD Core ML (speech-presence detection) | Silero Team; Core ML conversion by Fluid Inference | MIT |
 | Whisper Large v3 Turbo / Whisper Small (English) | OpenAI | MIT |
 | Qwen3-ASR 0.6B / 1.7B | Alibaba Cloud (Qwen) | Apache-2.0 |
 | Moonshine Base (English) | Moonshine AI | MIT |
 | Apple on-device speech (`DictationTranscriber`) | Apple | macOS system framework — no separate distribution |
+
+> Parakeet Unified is licensed separately from the other Parakeet models: the Core ML conversion's
+> model card states CC-BY-4.0 and names `parakeet-tdt-0.6b-v2` as its base, but the weights' own
+> `metadata.json` declares `model_id: nvidia/parakeet-unified-en-0.6b`, whose upstream card is the
+> NVIDIA Open Model License. The shipped bundle is the unified checkpoint, so its own license governs.
 
 > The Moonshine **English** models are MIT-licensed; Moonshine's non-English models carry the
 > separate non-commercial Moonshine Community License. KeyScribe offers only the English model.
