@@ -366,23 +366,103 @@ keyscribe/
   Microphone is capture.
   - **The hotkey mechanism is split by trigger type, and no path needs Input Monitoring**
     (`HotkeyMonitor` + `CarbonHotKeys`):
-    - **Modifier-only triggers** (Fn / right-Option / right-Command / right-Control / Hyper) → a
-      `.listenOnly` `CGEventTap` watching `.flagsChanged` **and `.keyDown`**. **"Chord wins" applies to every
-      modifier-only trigger, Fn and Hyper included**, in two layers, because the user's own mappings (fn+delete,
-      fn+←, a ⌃⌥⇧⌘ chord) must reach the focused app rather than being swallowed by the recording HUD's key
-      focus. (1) **The chord grace** (`HotkeyMonitor.chordGraceSeconds`, 150 ms): a modifier-only `.down` is
+    - **Modifier-only triggers** (any 1–4 modifiers, each optionally sided: `fn`, `right_option`,
+      `left_command`, `left_command+left_control`, `control+option+shift+command`) → a `.listenOnly`
+      `CGEventTap` watching `.flagsChanged`, `.keyDown`, the three `*MouseDown`s and `.scrollWheel`.
+      **There is ONE matcher, not a case per named key** (`ModifierMatcher` + `resolveModifierSet`): `hyper`
+      and the five old spellings are parse aliases in the grammar, never code paths, and `NamedKey` is gone.
+      Three rules carry it, and each is load-bearing:
+      (a) **Engaged = an EXACT match of the NORMALIZED flags** — the four generic bits compared bit for bit,
+      Fn matched on presence, and every sided member's `NX_DEVICE{L,R}…KEYMASK` bit set **with the opposite
+      side's bit CLEAR**. Normalizing is not tidiness: `CGEventFlags` also carries Caps Lock
+      (`maskAlphaShift`), numeric-pad and non-coalesced bits, so comparing raw flags kills every trigger for
+      as long as the Caps Lock light is on. Exactness is what makes "chord wins" fall out for free — any
+      foreign modifier disengages the set. The opposite-side-clear half is what makes `left_command` and
+      `right_command` two usable triggers instead of two dictations whenever both ⌘ keys are held.
+      The recorder's counterpart rule: **it records the keys actually pressed, sides and all**
+      (`ShortcutCaptureModel.modifierEvent`) — a recorded trigger binds those keys. Two costs were weighed
+      and ACCEPTED (product call, 2026-09-09), so do not "fix" them by dropping sides: an all-left ⌃⌥⇧⌘
+      stops firing the moment the user reaches for the right ⇧, and it reads as "Custom" in the well
+      instead of matching the sideless Hyper the menu offers. The sideless spelling stays reachable by
+      hand-editing the mode's file.
+      **This must stay in lockstep with `ModifierKeySet.canEngageTogether`, which `collides` uses** — and
+      `collides` is not cosmetic: `AppDelegate.shadowedHotkeyIds` SUPPRESSES the loser at bind time, so a
+      pair the conflict check calls distinct while the matcher engages both is a live double-fire.
+      Masking (`isMasked(by:)`) shares the same side-compatibility rule.
+      **Shadowing is context-BLIND, and that is a real gap, not a nit.** It drops a whole binding, and
+      `ModeResolver.resolvePhaseA` then routes by the surviving binding's trigger STRING — so a mode whose
+      trigger merely *overlaps* the winner's is unreachable even where context would have chosen it.
+      Two mitigations covering different halves: `normalizeKey` compares `descriptor.canonical`, so two
+      SPELLINGS of one descriptor (`hyper` vs the expanded form) route identically and shadowing is
+      harmless; and `TriggerKeyConflicts` reports `.unreachable` for descriptors that collide with a
+      DIFFERENT canonical form (`command` vs `right_command`), **ignoring `canContend`**, because context
+      cannot rescue a binding that was never registered. **`.unreachable` is ORDERED, like the shadowing it
+      predicts**: `shadowed` keeps the FIRST registrant, so only a mode with an EARLIER colliding trigger is
+      reported (`claimedEarlier`). Asking symmetrically put "Shortcut never fires" on the mode that fires.
+      **Collision is NOT transitive** — `right_command` ~ `command` ~ `left_command`, yet the two sided
+      ones can never both engage — so `shadowed` appends to `claimed` ONLY on a successful claim, and
+      `claimedEarlier` replays that same rule. Treat a losing binding as a claimant and it suppresses a
+      later one that would have worked fine (measured: right/either/left ⌘ left only Right-⌘ registered).
+      **`.unreachable` answers "can this MODE fire", not "is every binding live"** — it holds only when
+      EVERY trigger the mode has was claimed earlier, because the Modes list says "Shortcut never fires" and
+      the badge lights. A mode keeping one live trigger beside a shadowed one still fires, so it is not
+      flagged; that also covers a mode whose own second trigger claims the same press (TOML-only — the
+      Settings well reads and rewrites `triggerKeys.first`). The residual gap, deliberately unreported:
+      a redundant trigger inside one mode is dropped at runtime with nothing said.
+      This makes mode ORDER load-bearing for the warning, so whatever list is handed to
+      `TriggerKeyConflicts` must be in registration order — `config.modes` in `AppDelegate`, and
+      `ModesSettingsModel.modes`, which is the store's order unsorted. Never sort a list on its way in.
+      That `.unreachable` verdict is a red FAILURE, not
+      an advisory, so it propagates the whole way — `TriggerKeyConflicts.hasUnreachableTrigger` feeds
+      `SettingsProblem.modeTriggerUnreachable` → the Modes pane dot and the menu-bar error badge, plus a
+      `ModeSummaryIssue` row in the Modes list; the trigger row alone hides it behind a selection.
+      The real fix is single-event arbitration keeping
+      every candidate trigger key for Phase A instead of deleting a binding — NOT built; do that before
+      adding any feature that makes overlapping sets easy to create from the UI.
+      (b) **Arming keys off the TRANSITION into engagement** (`Binding.engaged`), never off "currently
+      engaged". `abort` deliberately does NOT clear `engaged` (it mirrors the flags); `suppressedUntilRelease`
+      is what bars a re-arm, and it lifts only when NO member is down. **It is also set straight from the
+      flags** whenever a member is down, the set is not engaged, and a foreign modifier is present — a member
+      pressed BESIDE a foreign modifier is spent until fully released. Without that, the foreign modifier's
+      *release* leaves the set alone and reads as a fresh engage: ⇧⌘4 then lifting ⇧ starts a dictation on a
+      `left_command` trigger, and on hold-or-tap the ⌘ release latches a mic the user never saw open. Nothing
+      armed in that sequence, so no abort ran — the abort path alone cannot cover it. A pair is unaffected
+      because ⌘-then-⌃ has no foreign modifier at any point. **"Foreign" includes the OPPOSITE key of a
+      sided member** — right ⌘ held beside a `left_command` binding — or releasing it leaves the left ⌘
+      looking freshly pressed and arms a dictation nobody triggered.
+      (c) **Disengaging splits on whether the set is still WHOLLY held** (`allMembersDown`): every member
+      still down ⇒ something foreign joined ⇒ abort; a member lifted ⇒ the user let go ⇒ commit. Get this
+      backwards and a pair trigger aborts on its own staggered release instead of committing.
+      **"Chord wins" then applies to every modifier-only trigger** in two layers, because the user's own
+      mappings (fn+delete, fn+←, a ⌃⌥⇧⌘ chord, ⌘-click) must reach the focused app rather than being swallowed
+      by the recording HUD's key focus. (1) **The chord grace** (`HotkeyMonitor.chordGraceSeconds`, 150 ms): a
+      modifier-only `.down` is
       held back, and a keyDown (or a foreign modifier) arriving inside the window discards the pending arm
       **silently** — `onStart` never fires, so there is no mic, no cue, and nothing to cancel. This is the
       layer that matters: arming is *not* cheap (synchronous secure-field AX probe, mic open, and the start
       cue as soon as a prewarmed unit is ready), so an eager arm made every chord audibly start-then-cancel a
       dictation. It trades only latency — nothing is recorded until admission opens at cue end regardless — and
-      a release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed.
+      a release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed. It is also
+      what makes a subset trigger coexist with its superset (`left_command` alongside
+      `left_command+left_control`): the smaller set's arm is still pending when the second modifier lands.
       (2) **The keyDown abort** (`handle`): the fallback for a chord slower than the grace, which really has
-      armed — it cancels via `onCancel`, cues and all. `suppressedUntilRelease` bars a re-arm until the key is
-      fully released on both paths; on Hyper that guard is load-bearing rather than defensive, since the abort
-      clears `hyperEngaged` and every later flagsChanged would otherwise read as a fresh engage. Right-side
-      keys additionally resolve soleness from the flags (`resolveSoleModifier`). Once Accessibility is granted,
-      that session tap runs on **Accessibility alone** (we never request Input Monitoring) and never
+      armed — it cancels via `onCancel`, cues and all.
+      **Mouse and scroll are in the tap mask for the same reason and are NOT symmetric.** A held modifier
+      followed by a click emits no keyDown at all, so without `leftMouseDown`/`rightMouseDown`/`otherMouseDown`
+      a `left_command` trigger fires on every ⌘-click, ⌥-drag and ⇧-click. **A click aborts only a set that
+      carries a chord modifier** (`isModifierOnly`): a click carries the generic modifier flags and nothing
+      else, so an Fn-only set can never be part of one, and throwing away an Fn user's running dictation
+      because they clicked to move the caret is pure loss. A *key* still aborts every set — fn+delete is the
+      whole point. A pending arm is always dropped, click or key, since that costs nothing.
+      `scrollWheel` **only cancels a pending arm, never aborts a started dictation, and ignores momentum
+      phase** (`scrollWheelEventMomentumPhase`). Both halves are load-bearing: aborting on scroll would kill
+      every hold dictation on a stray trackpad flick, and honouring momentum would silently eat a trigger
+      pressed in the second after a flick — `cancelPendingArm` suppresses until release, so that press is
+      lost outright, not merely delayed. The tap stays `.listenOnly`. **Unverified:** `otherMouseDown`
+      delivery to a listen-only tap under Accessibility alone is measured (see `MouseEventTap`), but
+      `leftMouseDown`/`rightMouseDown` are only inferred from it — confirm on a machine with no Input
+      Monitoring grant before relying on it. The failure mode is "clicks never abort", not a crash. Once Accessibility is granted, that session tap runs on **Accessibility alone**
+      (we never request Input Monitoring) and never
       consumes a keystroke. `.listenOnly` (not `.defaultTap`) because we never modify/consume the event:
       a listen-only tap is delivered async, so the window server does NOT block the system input stream on
       our callback — a busy/wedged main thread can never hold global input hostage, it only delays our own

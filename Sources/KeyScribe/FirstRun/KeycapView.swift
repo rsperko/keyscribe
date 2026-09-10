@@ -44,8 +44,7 @@ struct KeycapView: View {
                 })
     }
 
-    private func isFn(_ token: String) -> Bool {
-        if case .named(.fn) = descriptor { return token == "fn" }
-        return false
-    }
+    // "fn" is emitted by exactly one thing — an Fn member of a modifier-only trigger — so the token is
+    // enough; no descriptor shape to re-check.
+    private func isFn(_ token: String) -> Bool { token == "fn" }
 }

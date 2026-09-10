@@ -65,8 +65,17 @@ struct TriggerConflictLabel: View {
 
     @ViewBuilder var body: some View {
         if let conflict {
-            IssueText("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
-                      severity: .advisory)
+            switch conflict.kind {
+            case .collision:
+                IssueText("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
+                          severity: .advisory)
+            case .unreachable:
+                IssueText("This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. Give this mode a different shortcut, or write both the same way.",
+                          severity: .failure)
+            case .masking:
+                IssueText("Pressed on the way into \(conflict.modeName)'s shortcut. Press that one as a single motion, or this mode starts first.",
+                          severity: .advisory)
+            }
         }
     }
 }

@@ -15,13 +15,13 @@ final class HotkeyMonitor {
         let triggerKey: String?
         let descriptor: KeyDescriptor
         var gesture: PressGesture
-        var hyperEngaged = false
+        // Whether the binding's modifier set was engaged as of the last flagsChanged. Arming keys off the
+        // TRANSITION into engagement, so a second modifier joining an already-engaged set is not a fresh press.
+        var engaged = false
         // Set when a modifier-only gesture aborts as part of a chord. While set, the key is barred from
         // re-arming a fresh dictation even if it momentarily looks like a new press while still held — the
-        // suppression persists until the key is fully released (see resolveSoleModifier and edge). Without it,
-        // releasing a chord like ⌃⌥⇧⌘D built with the right Option re-fires .down on the transiently-sole ⌥
-        // and tap-latches; on Hyper, whose abort clears `hyperEngaged`, every later flagsChanged while the
-        // four modifiers stay held reads as a fresh engage and re-arms.
+        // suppression persists until every member is released (see resolveModifierSet). Without it, releasing
+        // a chord like ⌃⌥⇧⌘D built with the right Option re-engages the bare ⌥ on the way up and tap-latches.
         var suppressedUntilRelease = false
         // A modifier-only .down held back for the chord grace: the modifiers are engaged but nothing has
         // started yet, so a key arriving inside the window discards the arm SILENTLY — no mic, no cue, no
@@ -110,7 +110,7 @@ final class HotkeyMonitor {
             }) else { return incoming }
             var carried = incoming
             carried.gesture = match.gesture
-            carried.hyperEngaged = match.hyperEngaged
+            carried.engaged = match.engaged
             carried.suppressedUntilRelease = match.suppressedUntilRelease
             carried.pendingArm = match.pendingArm
             carried.armGeneration = match.armGeneration
@@ -124,7 +124,7 @@ final class HotkeyMonitor {
     func cancelGestures() {
         for i in bindings.indices {
             bindings[i].gesture.cancel()
-            bindings[i].hyperEngaged = false
+            bindings[i].engaged = false
             bindings[i].suppressedUntilRelease = false
             bindings[i].pendingArm = false
             bindings[i].armGeneration &+= 1
@@ -138,7 +138,7 @@ final class HotkeyMonitor {
         bindings.contains { $0.gesture.isPhysicallyDown || $0.pendingArm }
     }
 
-    // The tap watches modifier-only triggers (Fn/right-Option/right-Command/right-Control/Hyper) via `.flagsChanged`; once
+    // The tap watches modifier-only triggers (any set of sided/sideless modifiers) via `.flagsChanged`; once
     // Accessibility is granted a `.listenOnly` modifier-only tap runs on Accessibility alone — KeyScribe never
     // requests Input Monitoring. Footgun: `tapCreate` *before* the grant fails AND makes tccd write a *denied*
     // ListenEvent record that then suppresses the tap permanently, even after Accessibility is later granted,
@@ -162,8 +162,10 @@ final class HotkeyMonitor {
             hotkeyLog.info("modifier-key event tap deferred until Accessibility is granted")
             return false
         }
-        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
-            | CGEventMask(1 << CGEventType.keyDown.rawValue)
+        // Mouse and scroll join keyDown as "this press is a gesture, not a dictation": a held modifier
+        // followed by a click sends no keyDown at all, so without them a `left_command` trigger would fire
+        // on every ⌘-click, ⌥-drag and ⇧-click.
+        let mask = HotkeyMonitor.watchedEventTypes.reduce(CGEventMask(0)) { $0 | CGEventMask(1 << $1.rawValue) }
         guard let tap = makeTap(mask: mask, options: .listenOnly) else {
             hotkeyLog.error("modifier-key event tap not created despite Accessibility granted; a denied ListenEvent record may be suppressing it — relaunch to repair")
             return false
@@ -214,46 +216,65 @@ final class HotkeyMonitor {
         }
     }
 
+    static let watchedEventTypes: [CGEventType] = [
+        .flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel,
+    ]
+
     // Modifier-only triggers only. Chord triggers and action chords are handled by `CarbonHotKeys`.
     // Never consumes — a bare modifier types nothing, so there is nothing to swallow. "Chord wins" applies to
-    // EVERY modifier-only trigger: a keyDown while one is held aborts it, so the user's own mapping (fn+delete,
-    // ⌃⌥⇧⌘D) reaches the focused app instead of being swallowed by the recording HUD's key focus. The right-side
-    // keys additionally resolve soleness from the flags (`resolveSoleModifier`); Fn/Hyper edge off `edge`.
-    func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags) {
+    // EVERY modifier-only trigger: a keyDown or a click while one is held aborts it, so the user's own mapping
+    // (fn+delete, ⌃⌥⇧⌘D, ⌘-click) reaches the focused app instead of being swallowed by the recording HUD's
+    // key focus. Scroll only discards an arm that has not started anything yet — a stray trackpad or momentum
+    // scroll must never kill a dictation already running.
+    // A trackpad emits scrollWheel events for things that are not scrolling: `mayBegin` when two fingers
+    // merely touch it, `ended`/`cancelled` when they lift, all with zero deltas. Only a phase the user is
+    // driving counts; a legacy wheel carries no phase at all, so it is judged by its delta.
+    nonisolated static func scrollIsUserDriven(
+        momentumPhase: Int64, scrollPhase: Int64, deltaAxis1: Int64, deltaAxis2: Int64
+    ) -> Bool {
+        guard momentumPhase == 0 else { return false }
+        if scrollPhase != 0 {
+            return scrollPhase == Int64(CGScrollPhase.began.rawValue)
+                || scrollPhase == Int64(CGScrollPhase.changed.rawValue)
+        }
+        return deltaAxis1 != 0 || deltaAxis2 != 0
+    }
+
+    func handle(
+        type: CGEventType, keyCode: Int64, flags: CGEventFlags, scrollIsUserDriven: Bool = true
+    ) {
         guard !isSuspended else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        if type == .keyDown {
+        switch type {
+        case .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            // A click carries the generic modifier flags and nothing else, so a set of only Fn can never be
+            // part of one — throwing away an Fn user's running dictation because they clicked to move the
+            // caret is pure loss. A key still aborts any set: fn+delete is the whole point of "chord wins".
+            let click = type != .keyDown
+            for i in bindings.indices where bindings[i].descriptor.isModifierSet {
+                if bindings[i].pendingArm {
+                    cancelPendingArm(index: i)
+                } else if bindings[i].gesture.isPhysicallyDown,
+                          !click || bindings[i].descriptor.carriesChordModifier {
+                    abort(index: i)
+                }
+            }
+        case .scrollWheel:
+            // Only a scroll the user is actually driving counts. Momentum keeps arriving for a second after
+            // the fingers lift, and a resting hand emits `mayBegin` with zero deltas; either one would eat a
+            // trigger pressed nearby — and `cancelPendingArm` suppresses until release, so it is lost
+            // outright, not merely delayed.
+            guard scrollIsUserDriven else { return }
+            for i in bindings.indices where bindings[i].descriptor.isModifierSet {
+                if bindings[i].pendingArm { cancelPendingArm(index: i) }
+            }
+        case .flagsChanged:
             for i in bindings.indices {
-                switch bindings[i].descriptor {
-                case .named(.rightOption), .named(.rightCommand), .named(.rightControl),
-                     .named(.fn), .named(.hyper):
-                    if bindings[i].pendingArm {
-                        cancelPendingArm(index: i)
-                    } else if bindings[i].gesture.isPhysicallyDown {
-                        abort(index: i)
-                    }
-                case .chord, .mouseButton:
-                    break
-                }
+                guard case .modifiers(let set) = bindings[i].descriptor else { continue }
+                resolveModifierSet(binding: i, set: set, flags: flags, now: now)
             }
-            return
-        }
-        guard type == .flagsChanged else { return }
-        for i in bindings.indices {
-            switch bindings[i].descriptor {
-            case .named(.rightOption), .named(.rightCommand), .named(.rightControl):
-                resolveSoleModifier(binding: i, flags: flags, now: now)
-            case .named(.fn), .named(.hyper):
-                switch edge(binding: i, type: type, keyCode: keyCode, flags: flags) {
-                case .down: beginArm(index: i, now: now)
-                case .up:
-                    flushPendingArm(index: i, now: now)
-                    fire(index: i, edge: .up, now: now)
-                case nil: break
-                }
-            case .chord, .mouseButton:
-                break
-            }
+        default:
+            break
         }
     }
 
@@ -328,38 +349,44 @@ final class HotkeyMonitor {
         }
     }
 
-    // "Chord wins": a right-side modifier-only trigger (right ⌥ / ⌘ / ⌃) drives dictation only while it is
-    // the SOLE modifier engaged. Suppress it the instant a foreign chord modifier is also held, and abort a
-    // bare start if one joins afterward (the option-pressed-first ordering) — so forming a chord that merely
-    // includes this key (e.g. ⌃⌥⇧⌘D with the right Option) fires the chord's action, not dictation. Runs on
-    // every flagsChanged so a foreign modifier's arrival is seen even though it isn't this key's own keyCode.
-    private func resolveSoleModifier(binding i: Int, flags: CGEventFlags, now: TimeInterval) {
-        let deviceBit: UInt64
-        let own: CGEventFlags
-        switch bindings[i].descriptor {
-        case .named(.rightOption):  deviceBit = UInt64(NX_DEVICERALTKEYMASK); own = .maskAlternate
-        case .named(.rightCommand): deviceBit = UInt64(NX_DEVICERCMDKEYMASK); own = .maskCommand
-        case .named(.rightControl): deviceBit = UInt64(NX_DEVICERCTLKEYMASK); own = .maskControl
-        default: return
+    // The one matching rule for every modifier-only trigger. `engaged` is an EXACT match of the normalized
+    // modifier state against the binding's set, so any foreign modifier disengages it — that is "chord wins",
+    // applied uniformly instead of per-named-key. What separates the two ways to disengage is whether the
+    // set is still WHOLLY held: every member still down means something foreign joined (a chord is forming
+    // → abort); a member having lifted means the user let go (→ commit).
+    private func resolveModifierSet(
+        binding i: Int, set: ModifierKeySet, flags: CGEventFlags, now: TimeInterval
+    ) {
+        let engaged = ModifierMatcher.engaged(set, in: flags)
+        let wholeSetHeld = ModifierMatcher.allMembersDown(set, in: flags)
+
+        if !ModifierMatcher.anyMemberDown(set, in: flags) {
+            // A full physical release lifts the suppression: nothing is down, so the next press may arm.
+            bindings[i].suppressedUntilRelease = false
+        } else if !engaged, ModifierMatcher.foreignModifierHeld(set, in: flags) {
+            // A member that went down BESIDE a foreign modifier is spent until fully released. Without this
+            // the foreign modifier's release leaves the set alone and reads as a fresh engage — ⇧⌘4 then
+            // lifting ⇧ starts a dictation, and on hold-or-tap the ⌘ release latches an unseen open mic.
+            // Nothing armed in that sequence, so no abort ever ran; the suppression has to come from the
+            // flags. A pair is unaffected: ⌘ then ⌃ has no foreign modifier at any point.
+            bindings[i].suppressedUntilRelease = true
         }
-        var foreign: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
-        foreign.subtract(own)
-        let keyHeld = flags.rawValue & deviceBit != 0
-        let sole = keyHeld && flags.intersection(foreign).isEmpty
 
-        // A full physical release lifts the post-abort suppression: the key is up, so the next genuine bare
-        // press may arm again.
-        if !keyHeld { bindings[i].suppressedUntilRelease = false }
+        let wasEngaged = bindings[i].engaged
+        bindings[i].engaged = engaged
 
-        if sole {
-            // Don't re-arm off a momentarily-sole key that is still down after a chord abort — the chord's
-            // release drops its modifiers one at a time, and this key is transiently sole on the way up.
-            guard !bindings[i].suppressedUntilRelease else { return }
-            if !bindings[i].gesture.isPhysicallyDown, !bindings[i].pendingArm { beginArm(index: i, now: now) }
+        if engaged {
+            // Arm on the TRANSITION only. Re-arming off an already-engaged set is how an aborted chord
+            // re-fired on every later flagsChanged while its modifiers stayed held.
+            guard !wasEngaged, !bindings[i].suppressedUntilRelease else { return }
+            guard !bindings[i].gesture.isPhysicallyDown, !bindings[i].pendingArm else { return }
+            beginArm(index: i, now: now)
             return
         }
-        if keyHeld {
-            // Key still down, a foreign modifier joined → it's a chord. Inside the grace nothing started, so
+
+        guard wasEngaged else { return }
+        if wholeSetHeld {
+            // Still down, but a foreign modifier joined → it's a chord. Inside the grace nothing started, so
             // drop the arm silently rather than starting and cancelling a dictation the user never asked for.
             if bindings[i].pendingArm { cancelPendingArm(index: i); return }
             guard bindings[i].gesture.isPhysicallyDown else { return }
@@ -367,7 +394,7 @@ final class HotkeyMonitor {
         } else {
             flushPendingArm(index: i, now: now) // released inside the grace → still a tap
             guard bindings[i].gesture.isPhysicallyDown else { return }
-            fire(index: i, edge: .up, now: now) // key physically released → normal commit/latch path
+            fire(index: i, edge: .up, now: now) // physically released → normal commit/latch path
         }
     }
 
@@ -404,9 +431,10 @@ final class HotkeyMonitor {
         fire(index: i, edge: .down, now: now)
     }
 
+    // `engaged` is deliberately NOT cleared here: it mirrors the flags, and clearing it would make the very
+    // next flagsChanged read as a fresh engage. Suppression is what bars the re-arm until a full release.
     private func abort(index i: Int) {
         bindings[i].gesture.cancel()
-        bindings[i].hyperEngaged = false
         bindings[i].suppressedUntilRelease = true
         let key = bindings[i].triggerKey
         dispatchSideEffect { self.onCancel(key) }
@@ -421,35 +449,94 @@ final class HotkeyMonitor {
         }
     }
 
-    private func edge(binding i: Int, type: CGEventType, keyCode: Int64, flags: CGEventFlags) -> TriggerEdge? {
-        let descriptor = bindings[i].descriptor
-        switch descriptor {
-        case .named(.hyper):
-            let all: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
-            let engaged = flags.isSuperset(of: all)
-            // Dropping below Hyper is the full physical release that lifts a post-abort suppression. The guard
-            // below is load-bearing, not defensive: `abort` clears `hyperEngaged`, so while all four modifiers
-            // stay held every later flagsChanged reads as a fresh engage and would re-arm the aborted chord.
-            if !engaged { bindings[i].suppressedUntilRelease = false }
-            if engaged, !bindings[i].hyperEngaged, !bindings[i].suppressedUntilRelease {
-                bindings[i].hyperEngaged = true
-                return .down
-            }
-            if !engaged, bindings[i].hyperEngaged { bindings[i].hyperEngaged = false; return .up }
-            return nil
+}
 
-        case .named(.fn):
-            guard type == .flagsChanged, keyCode == Int64(NamedKey.fn.keyCode) else { return nil }
-            guard flags.contains(.maskSecondaryFn) else {
-                bindings[i].suppressedUntilRelease = false
-                return .up
-            }
-            return bindings[i].suppressedUntilRelease ? nil : .down
+// Matching a modifier-only trigger against live event flags. Normalization is load-bearing: `CGEventFlags`
+// also carries Caps Lock (`maskAlphaShift`), the numeric-pad and non-coalesced bits and the device-dependent
+// left/right bits, so comparing raw flags would make every trigger silently dead while Caps Lock is lit.
+private enum ModifierMatcher {
+    static let genericMask: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
 
-        // The right-side modifier keys are resolved by `resolveSoleModifier`, not here.
-        case .named(.rightOption), .named(.rightCommand), .named(.rightControl), .chord, .mouseButton:
-            return nil
+    /// Exactly this set is held: the four chord modifiers match bit for bit, Fn matches presence, and every
+    /// sided member's key is down with the OPPOSITE side up. Requiring the opposite side up is what makes
+    /// `left_command` and `right_command` mutually exclusive in fact as well as in `canEngageTogether` —
+    /// without it, holding both ⌘ keys engages both bindings and runs two dictations.
+    static func engaged(_ set: ModifierKeySet, in flags: CGEventFlags) -> Bool {
+        guard flags.intersection(genericMask) == genericFlags(set) else { return false }
+        guard flags.contains(.maskSecondaryFn) == set.contains(.fn) else { return false }
+        return set.members.allSatisfy { member in
+            guard let bit = deviceBit(member), let opposite = deviceBit(member.flipped) else { return true }
+            return flags.rawValue & bit != 0 && flags.rawValue & opposite == 0
         }
+    }
+
+    /// Every member still physically down. A disengaged-but-whole set means a foreign modifier joined.
+    static func allMembersDown(_ set: ModifierKeySet, in flags: CGEventFlags) -> Bool {
+        set.members.allSatisfy { isDown($0, in: flags) }
+    }
+
+    /// A modifier key the set does not name is held — either a modifier it lacks entirely, or the OPPOSITE
+    /// key of one of its sided members. The second half matters as much as the first: right ⌘ held while a
+    /// `left_command` trigger is bound is foreign participation, so releasing it must not leave the left ⌘
+    /// looking freshly pressed and arm a dictation nobody triggered.
+    static func foreignModifierHeld(_ set: ModifierKeySet, in flags: CGEventFlags) -> Bool {
+        ModifierKey.allCases.contains { modifier in
+            guard let member = set.member(for: modifier) else {
+                guard let flag = genericFlag(modifier) else { return flags.contains(.maskSecondaryFn) }
+                return flags.contains(flag)
+            }
+            guard let opposite = deviceBit(member.flipped) else { return false }
+            return flags.rawValue & opposite != 0
+        }
+    }
+
+    /// Any member still physically down. Lifts the suppression only on a full release.
+    static func anyMemberDown(_ set: ModifierKeySet, in flags: CGEventFlags) -> Bool {
+        set.members.contains { isDown($0, in: flags) }
+    }
+
+    private static func isDown(_ member: SidedModifier, in flags: CGEventFlags) -> Bool {
+        if let bit = deviceBit(member) { return flags.rawValue & bit != 0 }
+        guard let flag = genericFlag(member.modifier) else { return flags.contains(.maskSecondaryFn) }
+        return flags.contains(flag)
+    }
+
+    private static func genericFlags(_ set: ModifierKeySet) -> CGEventFlags {
+        set.members.reduce(into: CGEventFlags()) { result, member in
+            if let flag = genericFlag(member.modifier) { result.insert(flag) }
+        }
+    }
+
+    private static func genericFlag(_ modifier: ModifierKey) -> CGEventFlags? {
+        switch modifier {
+        case .control: return .maskControl
+        case .option: return .maskAlternate
+        case .shift: return .maskShift
+        case .command: return .maskCommand
+        case .fn: return nil
+        }
+    }
+
+    private static func deviceBit(_ member: SidedModifier) -> UInt64? {
+        guard let side = member.side else { return nil }
+        switch (member.modifier, side) {
+        case (.control, .left): return UInt64(NX_DEVICELCTLKEYMASK)
+        case (.control, .right): return UInt64(NX_DEVICERCTLKEYMASK)
+        case (.option, .left): return UInt64(NX_DEVICELALTKEYMASK)
+        case (.option, .right): return UInt64(NX_DEVICERALTKEYMASK)
+        case (.shift, .left): return UInt64(NX_DEVICELSHIFTKEYMASK)
+        case (.shift, .right): return UInt64(NX_DEVICERSHIFTKEYMASK)
+        case (.command, .left): return UInt64(NX_DEVICELCMDKEYMASK)
+        case (.command, .right): return UInt64(NX_DEVICERCMDKEYMASK)
+        case (.fn, _): return nil
+        }
+    }
+}
+
+extension KeyDescriptor {
+    var isModifierSet: Bool {
+        if case .modifiers = self { return true }
+        return false
     }
 }
 
@@ -464,8 +551,15 @@ private func hotkeyTapCallback(
     }
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let rawFlags = event.flags.rawValue
+    let scrollIsUserDriven = type != .scrollWheel || HotkeyMonitor.scrollIsUserDriven(
+        momentumPhase: event.getIntegerValueField(.scrollWheelEventMomentumPhase),
+        scrollPhase: event.getIntegerValueField(.scrollWheelEventScrollPhase),
+        deltaAxis1: event.getIntegerValueField(.scrollWheelEventDeltaAxis1),
+        deltaAxis2: event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
     MainActor.assumeIsolated {
-        activeHotkeyMonitor?.handle(type: type, keyCode: keyCode, flags: CGEventFlags(rawValue: rawFlags))
+        activeHotkeyMonitor?.handle(
+            type: type, keyCode: keyCode, flags: CGEventFlags(rawValue: rawFlags),
+            scrollIsUserDriven: scrollIsUserDriven)
     }
     return Unmanaged.passUnretained(event)
 }

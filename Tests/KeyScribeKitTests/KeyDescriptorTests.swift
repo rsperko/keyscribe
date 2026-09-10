@@ -2,29 +2,124 @@ import Testing
 @testable import KeyScribeKit
 
 struct KeyDescriptorTests {
-    @Test func parsesNamedTriggers() throws {
-        #expect(try KeyDescriptor(parsing: "fn") == .named(.fn))
-        #expect(try KeyDescriptor(parsing: "globe") == .named(.fn))
-        #expect(try KeyDescriptor(parsing: "hyper") == .named(.hyper))
-        #expect(try KeyDescriptor(parsing: "right_option") == .named(.rightOption))
-        #expect(try KeyDescriptor(parsing: "right_command") == .named(.rightCommand))
-        #expect(try KeyDescriptor(parsing: "right_control") == .named(.rightControl))
+    private func mods(_ members: SidedModifier...) -> KeyDescriptor {
+        .modifiers(try! ModifierKeySet(Set(members)))
     }
 
-    @Test func keycapTokensForNamedKeys() {
-        #expect(KeyDescriptor.named(.fn).keycapTokens == ["fn"])
-        #expect(KeyDescriptor.named(.hyper).keycapTokens == ["⌃", "⌥", "⇧", "⌘"])
-        #expect(KeyDescriptor.named(.rightOption).keycapTokens == ["right ⌥"])
-        #expect(KeyDescriptor.named(.rightCommand).keycapTokens == ["right ⌘"])
-        #expect(KeyDescriptor.named(.rightControl).keycapTokens == ["right ⌃"])
+    @Test func parsesModifierOnlyTriggers() throws {
+        #expect(try KeyDescriptor(parsing: "fn") == mods(.init(.fn)))
+        #expect(try KeyDescriptor(parsing: "globe") == mods(.init(.fn)))
+        #expect(try KeyDescriptor(parsing: "right_option") == mods(.init(.option, .right)))
+        #expect(try KeyDescriptor(parsing: "right_command") == mods(.init(.command, .right)))
+        #expect(try KeyDescriptor(parsing: "right_control") == mods(.init(.control, .right)))
     }
 
-    @Test func rightControlDescriptorProperties() {
-        #expect(KeyDescriptor.named(.rightControl).displayString == "Right-⌃")
-        #expect(NamedKey.rightControl.keyCode == 62)
-        #expect(KeyDescriptor.named(.rightControl).requiredModifiers == [.control])
-        #expect(KeyDescriptor.named(.rightControl).isModifierOnly)
-        #expect(KeyDescriptor.named(.rightControl).canonical == "right_control")
+    @Test func parsesSidedAndSidelessModifierSets() throws {
+        #expect(try KeyDescriptor(parsing: "left_command") == mods(.init(.command, .left)))
+        #expect(try KeyDescriptor(parsing: "left_command+left_control")
+            == mods(.init(.command, .left), .init(.control, .left)))
+        #expect(try KeyDescriptor(parsing: "command+control") == mods(.init(.command), .init(.control)))
+        #expect(try KeyDescriptor(parsing: "fn+left_command") == mods(.init(.fn), .init(.command, .left)))
+        #expect(try KeyDescriptor(parsing: "left_ctrl") == mods(.init(.control, .left)))
+        #expect(try KeyDescriptor(parsing: "right_alt") == mods(.init(.option, .right)))
+        #expect(try KeyDescriptor(parsing: "left_cmd") == mods(.init(.command, .left)))
+    }
+
+    @Test func hyperIsAParseAliasForTheFourModifierSet() throws {
+        let hyper = try KeyDescriptor(parsing: "hyper")
+        #expect(hyper == mods(.init(.control), .init(.option), .init(.shift), .init(.command)))
+        #expect(hyper == (try KeyDescriptor(parsing: "control+option+shift+command")))
+        #expect(hyper.canonical == "control+option+shift+command")
+        #expect(hyper.collides(with: try KeyDescriptor(parsing: "shift+command+control+option")))
+    }
+
+    @Test func modifierSetTokenOrderIsIrrelevantAndCanonicalizes() throws {
+        #expect(try KeyDescriptor(parsing: "left_control+left_command").canonical
+            == "left_control+left_command")
+        #expect(try KeyDescriptor(parsing: "left_command+left_control").canonical
+            == "left_control+left_command")
+        #expect(try KeyDescriptor(parsing: "left_command+fn").canonical == "left_command+fn")
+    }
+
+    @Test func modifierSetsCanonicalRoundTrip() throws {
+        for s in ["fn", "right_option", "right_command", "right_control", "left_command",
+                  "left_control+left_command", "control+option+shift+command", "left_command+fn"] {
+            #expect(try KeyDescriptor(parsing: s).canonical == s)
+        }
+    }
+
+    @Test func bothSidesOfOneModifierAreRejected() {
+        #expect(throws: TriggerKeyError.duplicateModifier("command")) {
+            try KeyDescriptor(parsing: "left_command+right_command")
+        }
+        #expect(throws: TriggerKeyError.duplicateModifier("command")) {
+            try KeyDescriptor(parsing: "command+left_command")
+        }
+    }
+
+    @Test func moreThanFourModifiersAreRejected() {
+        #expect(throws: TriggerKeyError.tooManyModifiers) {
+            try KeyDescriptor(parsing: "control+option+shift+command+fn")
+        }
+    }
+
+    // A set dedupes these into something valid-looking, so they are caught per token instead: `hyper+control`
+    // would silently BE Hyper, and `hyper+left_control` would blame the size rather than the clash.
+    @Test func aModifierRepeatedAcrossTokensIsRejected() {
+        #expect(throws: TriggerKeyError.duplicateModifier("control")) {
+            try KeyDescriptor(parsing: "hyper+control")
+        }
+        #expect(throws: TriggerKeyError.duplicateModifier("control")) {
+            try KeyDescriptor(parsing: "hyper+left_control")
+        }
+        #expect(throws: TriggerKeyError.duplicateModifier("command")) {
+            try KeyDescriptor(parsing: "command+cmd")
+        }
+    }
+
+    @Test func aSidedModifierInsideAChordIsRejected() {
+        #expect(throws: TriggerKeyError.modifierNotAllowedInChord("left_command")) {
+            try KeyDescriptor(parsing: "left_command+k")
+        }
+        #expect(throws: TriggerKeyError.modifierNotAllowedInChord("fn")) {
+            try KeyDescriptor(parsing: "fn+k")
+        }
+        #expect(throws: TriggerKeyError.modifierNotAllowedInChord("hyper")) {
+            try KeyDescriptor(parsing: "hyper+k")
+        }
+    }
+
+    @Test func fnIsNeverSided() {
+        #expect(throws: TriggerKeyError.unknownToken("left_fn")) { try KeyDescriptor(parsing: "left_fn") }
+        #expect(throws: TriggerKeyError.unknownToken("right_globe")) { try KeyDescriptor(parsing: "right_globe") }
+    }
+
+    @Test func keycapTokensForModifierSets() throws {
+        #expect(try KeyDescriptor(parsing: "fn").keycapTokens == ["fn"])
+        #expect(try KeyDescriptor(parsing: "hyper").keycapTokens == ["⌃", "⌥", "⇧", "⌘"])
+        #expect(try KeyDescriptor(parsing: "right_option").keycapTokens == ["right ⌥"])
+        #expect(try KeyDescriptor(parsing: "right_command").keycapTokens == ["right ⌘"])
+        #expect(try KeyDescriptor(parsing: "right_control").keycapTokens == ["right ⌃"])
+        #expect(try KeyDescriptor(parsing: "left_command+left_control").keycapTokens == ["left ⌃", "left ⌘"])
+        #expect(try KeyDescriptor(parsing: "fn+left_command").keycapTokens == ["left ⌘", "fn"])
+    }
+
+    @Test func rightControlDescriptorProperties() throws {
+        let d = try KeyDescriptor(parsing: "right_control")
+        #expect(d.displayString == "Right-⌃")
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 62) == SidedModifier(.control, .right))
+        #expect(d.requiredModifiers == [.control])
+        #expect(d.carriesChordModifier)
+        #expect(d.canonical == "right_control")
+    }
+
+    // An `fn`-only trigger keys off the Fn flag, which no chord carries, so nothing can shadow it.
+    @Test func onlySetsCarryingAChordModifierCanBeShadowed() throws {
+        #expect(try !KeyDescriptor(parsing: "fn").carriesChordModifier)
+        #expect(try KeyDescriptor(parsing: "fn+left_command").carriesChordModifier)
+        #expect(try KeyDescriptor(parsing: "left_command").carriesChordModifier)
+        #expect(try !KeyDescriptor(parsing: "control+option+e").carriesChordModifier)
+        #expect(try !KeyDescriptor(parsing: "mouse3").carriesChordModifier)
     }
 
     @Test func keycapTokensForChordsAreModifiersThenKeyInCanonicalOrder() {
@@ -43,6 +138,18 @@ struct KeyDescriptorTests {
     @Test func parsesChords() throws {
         let d = try KeyDescriptor(parsing: "control+option+a")
         #expect(d == .chord(modifiers: [.control, .option], key: .character("a")))
+    }
+
+    // Chords are unchanged by the sided grammar: `option+a` still means either Option key, and still
+    // resolves to the same Carbon registration it always did.
+    @Test func aChordsModifiersAreSidelessAndUnchanged() throws {
+        let chord = try KeyDescriptor(parsing: "option+a")
+        #expect(chord == .chord(modifiers: [.option], key: .character("a")))
+        #expect(chord.canonical == "option+a")
+        #expect(chord.requiredModifiers == [.option])
+        #expect(chord.requiredModifierMask == ModifierSet([.option]))
+        #expect(chord.chordKeyCode(in: .ansiUS) == 0)
+        #expect(!chord.carriesChordModifier)   // a chord is not a modifier-only trigger
     }
 
     @Test func chordTokenOrderIsIrrelevant() throws {
@@ -75,10 +182,9 @@ struct KeyDescriptorTests {
         }
     }
 
-    @Test func modifierOnlyChordIsRejected() {
-        #expect(throws: TriggerKeyError.noBaseKey) {
-            try KeyDescriptor(parsing: "control+option")
-        }
+    @Test func aModifierOnlySpellingIsASetNotAChord() throws {
+        #expect(try KeyDescriptor(parsing: "control+option")
+            == .modifiers(ModifierKeySet([SidedModifier(.control), SidedModifier(.option)])))
     }
 
     @Test func nonAsciiCharacterKeysAreAccepted() throws {
@@ -120,7 +226,7 @@ struct KeyDescriptorTests {
     }
 
     @Test func canonicalRoundTrips() throws {
-        for s in ["fn", "hyper", "right_option", "right_command", "control+option+a", "f5",
+        for s in ["fn", "right_option", "right_command", "control+option+a", "f5",
                   "control+`", "command+[", "control+space", "command+up", "control+keypad_0",
                   "option+f13", "control+option+é"] {
             #expect(try KeyDescriptor(parsing: s).canonical == s)
@@ -132,10 +238,17 @@ struct KeyDescriptorTests {
             == "control+option+shift+command+k")
     }
 
-    @Test func namedKeyCodesMatchSpikeFindings() {
-        #expect(NamedKey.fn.keyCode == 63)
-        #expect(NamedKey.rightOption.keyCode == 61)
-        #expect(NamedKey.rightCommand.keyCode == 54)
+    @Test func modifierKeyCodesMatchSpikeFindings() {
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 63) == SidedModifier(.fn))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 61) == SidedModifier(.option, .right))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 54) == SidedModifier(.command, .right))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 55) == SidedModifier(.command, .left))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 58) == SidedModifier(.option, .left))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 59) == SidedModifier(.control, .left))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 62) == SidedModifier(.control, .right))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 56) == SidedModifier(.shift, .left))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 60) == SidedModifier(.shift, .right))
+        #expect(ModifierKeyCodes.sidedModifier(forKeyCode: 0) == nil)
     }
 
     @Test func characterChordResolvesThroughTheLayout() throws {
@@ -193,13 +306,14 @@ struct KeyDescriptorTests {
         #expect(chord.chordKeyCode(in: swapped) == 10)
     }
 
-    @Test func nonChordsHaveNoChordKeyCode() {
-        #expect(KeyDescriptor.named(.fn).chordKeyCode(in: .ansiUS) == nil)
+    @Test func nonChordsHaveNoChordKeyCode() throws {
+        #expect(try KeyDescriptor(parsing: "fn").chordKeyCode(in: .ansiUS) == nil)
         #expect(KeyDescriptor.mouseButton(3).chordKeyCode(in: .ansiUS) == nil)
     }
 
-    @Test func hyperExpandsToFourModifiers() {
-        #expect(KeyDescriptor.named(.hyper).requiredModifiers == [.control, .option, .shift, .command])
+    @Test func hyperExpandsToFourModifiers() throws {
+        #expect(try KeyDescriptor(parsing: "hyper").requiredModifiers == [.control, .option, .shift, .command])
+        #expect(try KeyDescriptor(parsing: "fn").requiredModifiers.isEmpty)
     }
 
     @Test func buildsChordFromCapturedEvent() {
@@ -244,10 +358,17 @@ struct KeyDescriptorTests {
         #expect(try KeyDescriptor(parsing: "control+space").displayString == "⌃␣")
         #expect(try KeyDescriptor(parsing: "command+up").displayString == "⌘↑")
         #expect(try KeyDescriptor(parsing: "control+keypad_0").displayString == "⌃Keypad 0")
-        #expect(KeyDescriptor.named(.fn).displayString == "Fn (Globe)")
-        #expect(KeyDescriptor.named(.rightOption).displayString == "Right-⌥")
-        #expect(KeyDescriptor.named(.rightCommand).displayString == "Right-⌘")
-        #expect(KeyDescriptor.named(.hyper).displayString == "⌃⌥⇧⌘")
+        #expect(try KeyDescriptor(parsing: "fn").displayString == "Fn (Globe)")
+        #expect(try KeyDescriptor(parsing: "right_option").displayString == "Right-⌥")
+        #expect(try KeyDescriptor(parsing: "right_command").displayString == "Right-⌘")
+        #expect(try KeyDescriptor(parsing: "hyper").displayString == "⌃⌥⇧⌘")
+    }
+
+    @Test func displayStringForNewModifierSets() throws {
+        #expect(try KeyDescriptor(parsing: "left_command+left_control").displayString == "Left-⌃ + Left-⌘")
+        #expect(try KeyDescriptor(parsing: "command+control").displayString == "⌃⌘")
+        #expect(try KeyDescriptor(parsing: "left_command").displayString == "Left-⌘")
+        #expect(try KeyDescriptor(parsing: "fn+left_command").displayString == "Left-⌘ + Fn")
     }
 
     @Test func collidesWhenSamePhysicalEvent() throws {
@@ -255,8 +376,28 @@ struct KeyDescriptorTests {
         let b = try KeyDescriptor(parsing: "control+option+a")
         #expect(a.collides(with: b))
         #expect(try !a.collides(with: KeyDescriptor(parsing: "control+option+b")))
-        #expect(!KeyDescriptor.named(.fn).collides(with: .named(.rightOption)))
-        #expect(KeyDescriptor.named(.fn).collides(with: .named(.fn)))
+        #expect(try !KeyDescriptor(parsing: "fn").collides(with: KeyDescriptor(parsing: "right_option")))
+        #expect(try KeyDescriptor(parsing: "fn").collides(with: KeyDescriptor(parsing: "fn")))
+    }
+
+    // Collision is "one press engages both", not set equality: a sideless member accepts either key, so
+    // `command` and `right_command` are the same press and must not both stay registered.
+    @Test func modifierSetsCollideWhenOnePressEngagesBoth() throws {
+        #expect(try KeyDescriptor(parsing: "left_command+left_control")
+            .collides(with: KeyDescriptor(parsing: "left_control+left_command")))
+        #expect(try KeyDescriptor(parsing: "left_command")
+            .collides(with: KeyDescriptor(parsing: "command")))
+        #expect(try KeyDescriptor(parsing: "command")
+            .collides(with: KeyDescriptor(parsing: "right_command")))
+        #expect(try KeyDescriptor(parsing: "command+control")
+            .collides(with: KeyDescriptor(parsing: "left_command+left_control")))
+        // Opposite sides of the same modifier are never one press, so they are two usable triggers.
+        #expect(try !KeyDescriptor(parsing: "left_command")
+            .collides(with: KeyDescriptor(parsing: "right_command")))
+        #expect(try !KeyDescriptor(parsing: "left_command+left_control")
+            .collides(with: KeyDescriptor(parsing: "left_command+right_control")))
+        #expect(try !KeyDescriptor(parsing: "left_command")
+            .collides(with: KeyDescriptor(parsing: "left_command+left_control")))
     }
 
     @Test func aCharacterNeverCollidesWithASpecialKey() throws {
@@ -299,7 +440,7 @@ struct KeyDescriptorTests {
         let m3 = try KeyDescriptor(parsing: "mouse3")
         #expect(try m3.collides(with: KeyDescriptor(parsing: "mouse3")))
         #expect(try !m3.collides(with: KeyDescriptor(parsing: "mouse4")))
-        #expect(!m3.collides(with: .named(.fn)))
+        #expect(try !m3.collides(with: KeyDescriptor(parsing: "fn")))
         #expect(try !m3.collides(with: KeyDescriptor(parsing: "control+option+c")))
     }
 }

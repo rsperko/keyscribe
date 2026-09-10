@@ -117,6 +117,28 @@ Raise it if a dictation sometimes pastes as your old clipboard; lower it if your
 after a dictation repeats the dictation. It has no effect on a mode with `clipboard_sync = true`
 (which deliberately never restores) or `insertion = "type"` (which never touches the clipboard).
 
+## Use a modifier pair as a trigger
+
+Any one to four modifiers, held with no key, is a trigger. `left_`/`right_` names a specific physical
+key; a bare modifier matches either side:
+
+```toml
+[[trigger_keys]]
+key = "left_command+left_control"
+press_style = "hold-only"
+```
+
+`left_command` and `right_command` are two independent triggers: a sided trigger requires the opposite
+key to be up. Left and right of the same modifier cannot be combined *within* one trigger, and a side
+or `fn` inside a chord (`left_command+k`) is rejected — `RegisterEventHotKey` cannot distinguish sides.
+
+Settings records the keys you actually press, so recording Left-⌘ + Left-⌃ stores the sided form above
+and it will not fire on the right-hand keys. Writing the sideless form here is the way to make a trigger
+accept either side.
+
+`hyper` still parses as `control+option+shift+command` and stays spelled `hyper` in the file until that
+mode's shortcut is set again — by recording it, or by picking ⌃⌥⇧⌘ from the well's menu.
+
 ## Use an extra mouse button as a trigger
 
 Mouse button descriptors are TOML key descriptors:

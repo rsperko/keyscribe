@@ -42,14 +42,14 @@ struct ShortcutWell: View {
                 Menu {
                     Picker(selection: namedSelection, label: EmptyView()) {
                         Text("None").tag(noneMenuTag)
-                        ForEach(profile.namedKeyOptions, id: \.self) { named in
-                            Text(namedMenuLabel(named)).tag(KeyDescriptor.named(named).canonical)
+                        ForEach(profile.suggestedModifierTriggers, id: \.canonical) { suggestion in
+                            Text(suggestion.displayString).tag(suggestion.canonical)
                         }
                         if isUnlisted(descriptor) { Text("Custom").tag(unlistedMenuTag) }
                     }
                     .pickerStyle(.inline)
                     Divider()
-                    Button(profile.allowsNamedKeys ? "Record Custom Shortcut…" : "Record Shortcut…") {
+                    Button(profile.allowsModifierOnly ? "Record Custom Shortcut…" : "Record Shortcut…") {
                         recordToken += 1
                     }
                 } label: {
@@ -96,29 +96,27 @@ struct ShortcutWell: View {
 
     private func isUnlisted(_ descriptor: KeyDescriptor?) -> Bool {
         guard !key.isEmpty else { return false }
-        if case .named = descriptor { return false }
-        return true
+        guard let descriptor else { return true }
+        return !profile.suggestedModifierTriggers.contains(descriptor)
     }
 
     private var namedSelection: Binding<String> {
         Binding(
             get: {
-                if case .named(let n) = descriptor { return KeyDescriptor.named(n).canonical }
+                if let descriptor, profile.suggestedModifierTriggers.contains(descriptor) {
+                    return descriptor.canonical
+                }
                 return key.isEmpty ? noneMenuTag : unlistedMenuTag
             },
             set: { tag in
                 hint = nil
                 if tag == noneMenuTag {
                     key = ""
-                } else if let parsed = try? KeyDescriptor(parsing: tag), case .named = parsed {
+                } else if let parsed = try? KeyDescriptor(parsing: tag) {
                     key = parsed.canonical
                 }
             })
     }
-}
-
-private func namedMenuLabel(_ named: NamedKey) -> String {
-    KeyDescriptor.named(named).displayString
 }
 
 private struct RecorderButton: NSViewRepresentable {
@@ -170,7 +168,6 @@ final class RecorderButtonView: NSButton {
     private var didCommit = false
     private var storedKey = ""
     private var monitor: Any?
-    private var peakModifierCount = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -210,7 +207,6 @@ final class RecorderButtonView: NSButton {
     private func start() {
         recording = true
         didCommit = false
-        peakModifierCount = 0
         model = ShortcutCaptureModel(profile: profile, stored: storedKey)
         model.beginRecording()
         recordingState?.isRecording = true
@@ -235,24 +231,18 @@ final class RecorderButtonView: NSButton {
         refreshTitle()
     }
 
+    // Every flagsChanged goes to the model, which tracks the held/peak set and decides when a press was a
+    // modifier-only trigger. The keyCode is the only place the physical side is observable.
     private func handleFlags(_ event: NSEvent) {
         guard recording else { return }
-        let modifiers = RecorderButtonView.modifierSet(event.modifierFlags)
+        let modifiers = RecorderButtonView.modifierKeys(event.modifierFlags)
         if let descriptor = model.modifierEvent(keyCode: Int(event.keyCode), modifiers: modifiers) {
             commit(descriptor)
             return
         }
-        let count = modifiers.count
-        if count == 0 {
-            if peakModifierCount >= 2, !didCommit {
-                model.noKeyOnModifierRelease()
-                onHint?(model.hint)
-                refreshTitle()
-            }
-            peakModifierCount = 0
-        } else {
-            peakModifierCount = max(peakModifierCount, count)
-        }
+        guard modifiers.isEmpty else { return }
+        onHint?(model.hint)
+        refreshTitle()
     }
 
     private func stop() {
@@ -338,6 +328,14 @@ final class RecorderButtonView: NSButton {
         if flags.contains(.option) { set.insert(.option) }
         if flags.contains(.shift) { set.insert(.shift) }
         if flags.contains(.command) { set.insert(.command) }
+        return set
+    }
+
+    // Fn belongs to a modifier-only trigger and nowhere near a chord: `.function` is also set for every
+    // arrow and F-key, so it is read only on flagsChanged, never when building a chord from a keyDown.
+    static func modifierKeys(_ flags: NSEvent.ModifierFlags) -> Set<ModifierKey> {
+        var set = Set(modifierSet(flags).compactMap { ModifierKey(rawValue: $0.rawValue) })
+        if flags.contains(.function) { set.insert(.fn) }
         return set
     }
 }

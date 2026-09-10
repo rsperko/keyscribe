@@ -92,9 +92,26 @@ Check the `Permissions` section of the `--diagnose` output first. Accessibility 
 any trigger to work, and macOS caches permission state for the life of a running process, so a grant
 made while KeyScribe was running does not take effect until you quit and relaunch it.
 
-If Accessibility is granted and a modifier-only trigger (Fn, right-Option, right-Command) still does
-nothing, check whether you are pressing it as part of a chord. Holding the trigger together with
-another key is treated as your own keyboard shortcut and deliberately does not start a dictation.
+If Accessibility is granted and a modifier-only trigger (Fn, Right-⌥, Left-⌘, ⌃⌘, …) still does
+nothing, check whether you are pressing it as part of something else. Pressing the trigger together
+with another key or another modifier is treated as your own keyboard shortcut and deliberately does
+not start a dictation — including when the other modifier went down first, or when it is the opposite
+key of the one you bound (right ⌘ alongside a `left_command` trigger).
+
+A trigger that carries ⌃⌥⇧ or ⌘ is also given up when you click, since a modifier-click is its own
+gesture; an Fn trigger is not, because no click can be part of an Fn gesture. Once a dictation has
+started, only a key or a click stops it — scrolling never does.
+
+If a trigger records but never fires, check that you are pressing the side you recorded: `left_command`
+means the left ⌘ specifically. Record it again to change sides, or edit that mode's file under
+`modes/` to the sideless `command`, which matches either key.
+
+If two modes are set to shortcuts that overlap without being the same — one `command` and one
+`right_command`, say, where pressing the right ⌘ satisfies both — only one of them can fire. Settings
+flags the mode that loses, in its trigger row and in the Modes list, and the menu-bar icon carries the
+error dot. Give that mode a different shortcut, or write both the same way. Two spellings of the *same*
+shortcut (`hyper` and `control+option+shift+command`) are fine — they are recognized as one shortcut,
+and normal mode routing decides which mode gets the press.
 
 ## The speech model will not load
 

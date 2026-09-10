@@ -181,8 +181,13 @@ public enum ModeResolver {
         return true
     }
 
+    // Canonical, not merely lowercased: `AppDelegate.shadowedHotkeyIds` keeps ONE binding per physical
+    // press and Phase A routes by this string, so two spellings of the same descriptor (`hyper` and
+    // `control+option+shift+command`) would leave the shadowed mode unreachable. Unparseable strings keep
+    // the old comparison rather than dropping out of routing entirely.
     private static func normalizeKey(_ key: String) -> String {
-        key.lowercased().trimmingCharacters(in: .whitespaces)
+        if let descriptor = try? KeyDescriptor(parsing: key) { return descriptor.canonical }
+        return key.lowercased().trimmingCharacters(in: .whitespaces)
     }
 
     private static func regexFound(_ pattern: String, in text: String) -> Bool {

@@ -67,8 +67,9 @@ important safety properties:
 Recommended setup:
 
 1. Open KeyScribe > Settings > Modes > Plain Dictation.
-2. Choose the trigger you can use without thinking: `Fn (Globe)`, `Right-⌥`, `Right-⌘`, a
-   custom shortcut, or an extra mouse button.
+2. Choose the trigger you can use without thinking: `Fn (Globe)`, `Right-⌥`, `Right-⌘`, a single
+   modifier such as `Left-⌘`, a pair such as `Left-⌘ + Left-⌃`, a custom shortcut, or an extra
+   mouse button.
 3. Choose how the shortcut works: **Hold to talk; tap to toggle**, **Hold to talk**, or **Tap to toggle**.
 4. Open KeyScribe > Settings > General and optionally assign a shortcut for `Paste Last Dictation`.
 

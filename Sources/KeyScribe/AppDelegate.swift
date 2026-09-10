@@ -777,7 +777,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
             modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
-            hotkeyConflict: Self.hotkeyConflictDetected(shadowed: shadowedHotkeyIds()))
+            hotkeyConflict: Self.hotkeyConflictDetected(shadowed: shadowedHotkeyIds()),
+            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes))
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {

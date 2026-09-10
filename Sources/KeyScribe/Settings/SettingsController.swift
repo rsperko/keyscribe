@@ -18,6 +18,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     case modeNeedsAIService
     case modeUsesFailedConnection
     case hotkeyConflict
+    case modeTriggerUnreachable
 
     var pane: SettingsDestination {
         switch self {
@@ -25,7 +26,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
         case .activeEngineUnavailable, .modelSelfTestFailed: .speechModels
         case .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
-        case .modeNeedsAIService, .modeUsesFailedConnection: .modes
+        case .modeNeedsAIService, .modeUsesFailedConnection, .modeTriggerUnreachable: .modes
         case .hotkeyConflict: .general
         }
     }
@@ -42,7 +43,8 @@ enum SettingsProblem: Equatable, CaseIterable {
         aiConnectionTestFailed: Bool = false,
         aiConnectionMisconfigured: Bool = false, modeNeedsAIService: Bool = false,
         modeUsesFailedConnection: Bool = false,
-        hotkeyConflict: Bool = false
+        hotkeyConflict: Bool = false,
+        modeTriggerUnreachable: Bool = false
     ) -> [SettingsProblem] {
         var problems: [SettingsProblem] = []
         if hasConfigError { problems.append(.malformedConfig) }
@@ -56,6 +58,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         if modeNeedsAIService { problems.append(.modeNeedsAIService) }
         if modeUsesFailedConnection { problems.append(.modeUsesFailedConnection) }
         if hotkeyConflict { problems.append(.hotkeyConflict) }
+        if modeTriggerUnreachable { problems.append(.modeTriggerUnreachable) }
         return problems
     }
 }

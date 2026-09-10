@@ -1,18 +1,22 @@
 public struct ShortcutProfile: Equatable, Sendable {
-    public let allowsNamedKeys: Bool
+    public let allowsModifierOnly: Bool
     public let allowsMouseButtons: Bool
 
-    public init(allowsNamedKeys: Bool, allowsMouseButtons: Bool) {
-        self.allowsNamedKeys = allowsNamedKeys
+    public init(allowsModifierOnly: Bool, allowsMouseButtons: Bool) {
+        self.allowsModifierOnly = allowsModifierOnly
         self.allowsMouseButtons = allowsMouseButtons
     }
 
-    public static let modeTrigger = ShortcutProfile(allowsNamedKeys: true, allowsMouseButtons: true)
-    public static let actionChord = ShortcutProfile(allowsNamedKeys: false, allowsMouseButtons: false)
+    public static let modeTrigger = ShortcutProfile(allowsModifierOnly: true, allowsMouseButtons: true)
+    public static let actionChord = ShortcutProfile(allowsModifierOnly: false, allowsMouseButtons: false)
 
-    public var namedKeyOptions: [NamedKey] {
-        allowsNamedKeys ? [.fn, .rightOption, .rightCommand, .rightControl, .hyper] : []
+    public var suggestedModifierTriggers: [KeyDescriptor] {
+        allowsModifierOnly ? ShortcutProfile.modifierTriggerMenu : []
     }
+
+    private static let modifierTriggerMenu: [KeyDescriptor] =
+        ["fn", "right_option", "right_command", "right_control", "hyper"]
+            .compactMap { try? KeyDescriptor(parsing: $0) }
 }
 
 public struct ShortcutCaptureModel: Equatable, Sendable {
@@ -24,7 +28,9 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
     public private(set) var phase: Phase = .idle
     public private(set) var hint: String?
     private var priorValue: KeyDescriptor?
-    private var pendingModifierOnly: KeyDescriptor?
+    // The release of a multi-modifier press is staggered, so the set still held at the final release is a
+    // subset of what the user meant. Recording the peak is what makes ⌃⌥⇧⌘ record as ⌃⌥⇧⌘, not as ⌘.
+    private var peakModifiers: Set<SidedModifier> = []
 
     public init(profile: ShortcutProfile, stored: String) {
         self.profile = profile
@@ -39,7 +45,7 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
 
     public mutating func beginRecording() {
         priorValue = value
-        pendingModifierOnly = nil
+        clearModifiers()
         phase = .recording
         hint = nil
     }
@@ -48,7 +54,7 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
         keyCode: Int, shortcutCharacter: Character?, modifiers: Set<Modifier>
     ) -> KeyDescriptor? {
         guard phase == .recording else { return nil }
-        pendingModifierOnly = nil
+        clearModifiers()
         if let descriptor = KeyDescriptor(
             eventKeyCode: keyCode, shortcutCharacter: shortcutCharacter, modifiers: modifiers) {
             commit(descriptor)
@@ -58,29 +64,40 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
         return nil
     }
 
-    public mutating func modifierEvent(keyCode: Int, modifiers: Set<Modifier>) -> KeyDescriptor? {
+    // Records nothing until every modifier is released with no key in between — that is what separates a
+    // modifier-only trigger from a chord still being built.
+    public mutating func modifierEvent(keyCode: Int, modifiers: Set<ModifierKey>) -> KeyDescriptor? {
         guard phase == .recording else { return nil }
-        guard profile.allowsNamedKeys else { return nil }
 
-        if let descriptor = modifierOnlyDescriptor(keyCode: keyCode, modifiers: modifiers) {
-            pendingModifierOnly = descriptor
+        if let member = ModifierKeyCodes.sidedModifier(forKeyCode: keyCode),
+           modifiers.contains(member.modifier) {
+            peakModifiers.insert(member)
+        }
+
+        guard modifiers.isEmpty else { return nil }
+        let captured = peakModifiers
+        clearModifiers()
+        guard !captured.isEmpty else { return nil }
+        guard profile.allowsModifierOnly else {
+            if captured.count >= 2 { noKeyOnModifierRelease() }
             return nil
         }
-
-        if modifiers.isEmpty, let pendingModifierOnly {
-            commit(pendingModifierOnly)
-            return pendingModifierOnly
+        do {
+            // Every member keeps the physical key it was pressed on, however many there are — a recorded
+            // trigger binds the keys the user actually used. The cost is accepted: an all-left ⌃⌥⇧⌘ stops
+            // firing when they reach for the right ⇧, and reads as "Custom" rather than the menu's Hyper.
+            let descriptor = KeyDescriptor.modifiers(try ModifierKeySet(captured))
+            commit(descriptor)
+            return descriptor
+        } catch {
+            hint = ShortcutCaptureModel.hint(for: error)
+            return nil
         }
-
-        if pendingModifierOnly != .named(.hyper) {
-            pendingModifierOnly = nil
-        }
-        return nil
     }
 
     public mutating func mouseEvent(buttonNumber: Int) -> KeyDescriptor? {
         guard phase == .recording else { return nil }
-        pendingModifierOnly = nil
+        clearModifiers()
         guard profile.allowsMouseButtons else {
             hint = "Mouse buttons can't be used for this shortcut"
             return nil
@@ -93,7 +110,7 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
     public mutating func cancel() {
         guard phase == .recording else { return }
         value = priorValue
-        pendingModifierOnly = nil
+        clearModifiers()
         phase = .idle
         hint = nil
     }
@@ -113,18 +130,24 @@ public struct ShortcutCaptureModel: Equatable, Sendable {
     private mutating func commit(_ descriptor: KeyDescriptor) {
         value = descriptor
         rawFallback = nil
-        pendingModifierOnly = nil
+        clearModifiers()
         phase = .idle
         hint = nil
     }
 
-    private func modifierOnlyDescriptor(keyCode: Int, modifiers: Set<Modifier>) -> KeyDescriptor? {
-        if modifiers == Set(Modifier.allCases) { return .named(.hyper) }
-        switch (keyCode, modifiers) {
-        case (61, [.option]): return .named(.rightOption)
-        case (54, [.command]): return .named(.rightCommand)
-        case (62, [.control]): return .named(.rightControl)
-        default: return nil
+    private mutating func clearModifiers() {
+        peakModifiers = []
+    }
+
+    private static func hint(for error: Error) -> String {
+        switch error as? TriggerKeyError {
+        case .duplicateModifier(let modifier):
+            let glyph = ModifierKey(rawValue: modifier)?.glyph ?? modifier
+            return "Left and right \(glyph) can't be combined"
+        case .tooManyModifiers:
+            return "Use at most four modifiers"
+        default:
+            return "That shortcut can't be recorded"
         }
     }
 }

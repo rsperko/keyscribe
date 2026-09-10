@@ -226,7 +226,7 @@ struct FirstRunFlowTests {
         try writeDirect([.init(key: "right_option")], to: supportDir.appendingPathComponent("modes"))
         let model = makeModel(supportDir: supportDir)
 
-        #expect(model.directTrigger == .named(.rightOption))
+        #expect(model.directTrigger?.canonical == "right_option")
         #expect(model.directTriggerDisplay == "Right-⌥")
     }
 
@@ -250,7 +250,7 @@ struct FirstRunFlowTests {
 
         model.setDirectTrigger("right_command")
 
-        #expect(model.directTrigger == .named(.rightCommand))
+        #expect(model.directTrigger?.canonical == "right_command")
         #expect(model.triggerSaveError == nil)
         let reloaded = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }
         #expect(reloaded?.triggerKeys.first?.key == "right_command")
@@ -292,12 +292,12 @@ struct FirstRunFlowTests {
             try? FileManager.default.removeItem(at: supportDir)
         }
         let model = makeModel(supportDir: supportDir)
-        #expect(model.directTrigger == .named(.fn))
+        #expect(model.directTrigger?.canonical == "fn")
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: modesDir.path)
 
         model.setDirectTrigger("right_command")
 
         #expect(model.triggerSaveError == "Could not save the shortcut.")
-        #expect(model.directTrigger == .named(.fn))
+        #expect(model.directTrigger?.canonical == "fn")
     }
 }

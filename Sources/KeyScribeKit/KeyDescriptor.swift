@@ -31,8 +31,91 @@ extension Modifier {
     }
 }
 
-public enum NamedKey: String, Sendable {
-    case fn, hyper, rightOption, rightCommand, rightControl
+// Separate from `Modifier` because Fn belongs to a trigger and never to a Carbon chord.
+public enum ModifierKey: String, Sendable, Hashable, CaseIterable {
+    case control, option, shift, command, fn
+}
+
+public struct SidedModifier: Sendable, Hashable {
+    public enum Side: String, Sendable, Hashable { case left, right }
+
+    public let modifier: ModifierKey
+    public let side: Side?
+
+    public init(_ modifier: ModifierKey, _ side: Side? = nil) {
+        self.modifier = modifier
+        self.side = side
+    }
+}
+
+public struct ModifierKeySet: Sendable, Hashable {
+    // Hyper (⌃⌥⇧⌘) is the largest set anyone binds; a fifth member is a chord prefix, not a trigger.
+    public static let maxMembers = 4
+
+    public let members: Set<SidedModifier>
+
+    public init(_ members: Set<SidedModifier>) throws {
+        guard !members.isEmpty else { throw TriggerKeyError.empty }
+        // Over `members`, not `ordered` — ordering keeps one entry per modifier, which would hide exactly
+        // the case this rejects: left and right of the same key. Ahead of the count check, so a set that is
+        // both oversized and clashing names the clash, which is the actionable half.
+        var seen: Set<ModifierKey> = []
+        for member in members.sorted(by: { $0.canonicalToken < $1.canonicalToken }) {
+            guard seen.insert(member.modifier).inserted else {
+                throw TriggerKeyError.duplicateModifier(member.modifier.rawValue)
+            }
+        }
+        guard members.count <= ModifierKeySet.maxMembers else { throw TriggerKeyError.tooManyModifiers }
+        self.members = members
+    }
+
+
+    public var ordered: [SidedModifier] { ModifierKeySet.order(members) }
+
+    public func contains(_ modifier: ModifierKey) -> Bool { member(for: modifier) != nil }
+
+    public func member(for modifier: ModifierKey) -> SidedModifier? {
+        members.first { $0.modifier == modifier }
+    }
+
+    public var modifiers: Set<ModifierKey> { Set(members.map(\.modifier)) }
+
+    // The compatibility relation. `collides`, the masking warning and `ModifierMatcher.engaged` must all
+    // agree on it: `shadowedHotkeyIds` suppresses a colliding binding, so a pair called distinct here while
+    // the matcher engages both is a live double-fire.
+    public func canEngageTogether(with other: ModifierKeySet) -> Bool {
+        modifiers == other.modifiers && sidesAgree(with: other)
+    }
+
+    // `left_command` is never held on the way into `right_command+control`, so sides gate this too.
+    public func isMasked(by other: ModifierKeySet) -> Bool {
+        modifiers.isStrictSubset(of: other.modifiers) && sidesAgree(with: other)
+    }
+
+    // A sideless member accepts either key; two sided members agree only on the same key.
+    private func sidesAgree(with other: ModifierKeySet) -> Bool {
+        members.allSatisfy { member in
+            guard let counterpart = other.member(for: member.modifier) else { return true }
+            return member.side == nil || counterpart.side == nil || member.side == counterpart.side
+        }
+    }
+
+    private static func order(_ members: Set<SidedModifier>) -> [SidedModifier] {
+        ModifierKey.allCases.compactMap { key in members.first { $0.modifier == key } }
+    }
+}
+
+// A flagsChanged event's keyCode is the only place a modifier's side is observable.
+public enum ModifierKeyCodes {
+    public static func sidedModifier(forKeyCode keyCode: Int) -> SidedModifier? { byKeyCode[keyCode] }
+
+    private static let byKeyCode: [Int: SidedModifier] = [
+        55: SidedModifier(.command, .left), 54: SidedModifier(.command, .right),
+        58: SidedModifier(.option, .left), 61: SidedModifier(.option, .right),
+        59: SidedModifier(.control, .left), 62: SidedModifier(.control, .right),
+        56: SidedModifier(.shift, .left), 60: SidedModifier(.shift, .right),
+        63: SidedModifier(.fn),
+    ]
 }
 
 public enum SpecialKey: String, Sendable, Hashable, CaseIterable {
@@ -184,7 +267,7 @@ public enum BaseKey: Equatable, Sendable, Hashable {
 }
 
 public enum KeyDescriptor: Equatable, Sendable {
-    case named(NamedKey)
+    case modifiers(ModifierKeySet)
     case chord(modifiers: Set<Modifier>, key: BaseKey)
     case mouseButton(Int)
 }
@@ -192,8 +275,10 @@ public enum KeyDescriptor: Equatable, Sendable {
 public enum TriggerKeyError: Error, Equatable {
     case empty
     case unknownToken(String)
-    case noBaseKey
     case bareNonFunctionKey
+    case tooManyModifiers
+    case duplicateModifier(String)
+    case modifierNotAllowedInChord(String)
 }
 
 extension KeyDescriptor {
@@ -208,21 +293,30 @@ extension KeyDescriptor {
             throw TriggerKeyError.empty
         }
 
-        if tokens.count == 1, let named = NamedKey(token: first) {
-            self = .named(named)
-            return
-        }
-
         if tokens.count == 1, let button = KeyDescriptor.mouseButtonNumber(token: first) {
             self = .mouseButton(button)
             return
         }
 
-        var modifiers: Set<Modifier> = []
+        // Every token a modifier and no base key → a modifier-only set; a base key present → a chord. A
+        // chord's modifiers are the four Carbon ones, sideless: `RegisterEventHotKey` cannot distinguish
+        // left from right and carries no Fn, so a sided or Fn token beside a base key is an error rather
+        // than a silently-widened binding.
+        var members: Set<SidedModifier> = []
+        var seenModifiers: Set<ModifierKey> = []
+        var chordIllegalTokens: [String] = []
         var base: BaseKey?
         for token in tokens {
-            if let m = Modifier(token: token) {
-                modifiers.insert(m)
+            if let parsed = SidedModifier.parse(token: token) {
+                // Per token, not per member: a set dedupes `command+command` and `hyper+control` into
+                // something valid-looking, hiding a spelling the writer clearly did not mean.
+                for member in parsed where !seenModifiers.insert(member.modifier).inserted {
+                    throw TriggerKeyError.duplicateModifier(member.modifier.rawValue)
+                }
+                members.formUnion(parsed)
+                if parsed.count > 1 || parsed.first?.side != nil || parsed.first?.modifier == .fn {
+                    chordIllegalTokens.append(token)
+                }
             } else if let k = BaseKey(token: token) {
                 guard base == nil else { throw TriggerKeyError.unknownToken(token) }
                 base = k
@@ -231,14 +325,21 @@ extension KeyDescriptor {
             }
         }
 
-        guard let base else { throw TriggerKeyError.noBaseKey }
+        guard let base else {
+            self = .modifiers(try ModifierKeySet(members))
+            return
+        }
+        if let rejected = chordIllegalTokens.first {
+            throw TriggerKeyError.modifierNotAllowedInChord(rejected)
+        }
+        let modifiers = Set(members.compactMap(\.chordModifier))
         if modifiers.isEmpty, !base.isBareable { throw TriggerKeyError.bareNonFunctionKey }
         self = .chord(modifiers: modifiers, key: base)
     }
 
     public var canonical: String {
         switch self {
-        case .named(let n): return n.canonicalToken
+        case .modifiers(let set): return set.ordered.map(\.canonicalToken).joined(separator: "+")
         case .chord(let mods, let key):
             let ordered = Modifier.allCases.filter { mods.contains($0) }.map(\.rawValue)
             return (ordered + [key.canonicalToken]).joined(separator: "+")
@@ -253,26 +354,14 @@ extension KeyDescriptor {
 
     public var requiredModifiers: Set<Modifier> {
         switch self {
-        case .named(.hyper): return [.control, .option, .shift, .command]
-        case .named(.rightOption): return [.option]
-        case .named(.rightCommand): return [.command]
-        case .named(.rightControl): return [.control]
-        case .named(.fn): return []
+        case .modifiers(let set): return Set(set.members.compactMap(\.chordModifier))
         case .chord(let mods, _): return mods
         case .mouseButton: return []
         }
     }
 
     public var requiredModifierMask: ModifierSet {
-        switch self {
-        case .named(.hyper): return [.control, .option, .shift, .command]
-        case .named(.rightOption): return [.option]
-        case .named(.rightCommand): return [.command]
-        case .named(.rightControl): return [.control]
-        case .named(.fn): return []
-        case .chord(let mods, _): return ModifierSet(mods)
-        case .mouseButton: return []
-        }
+        ModifierSet(requiredModifiers)
     }
 
     public func chordKeyCode(in layout: KeyboardLayoutIndex) -> Int? {
@@ -306,31 +395,25 @@ extension KeyDescriptor {
     public func collides(with other: KeyDescriptor) -> Bool {
         switch (self, other) {
         case let (.mouseButton(a), .mouseButton(b)): return a == b
-        case let (.named(a), .named(b)): return a == b
+        case let (.modifiers(a), .modifiers(b)): return a.canEngageTogether(with: b)
         case let (.chord(m1, k1), .chord(m2, k2)): return m1 == m2 && k1 == k2
         default: return false
         }
     }
 
-    /// A modifier-only trigger fires the instant its modifiers are held (no key), so any chord or
-    /// shortcut whose modifier set is a superset ALSO fires it. `fn` is excluded — it keys off the Fn
-    /// flag, which no chord carries — as are chords and mouse buttons.
-    public var isModifierOnly: Bool {
-        switch self {
-        case .named(.hyper), .named(.rightOption), .named(.rightCommand), .named(.rightControl): return true
-        case .named(.fn), .chord, .mouseButton: return false
-        }
+    /// Carries at least one of ⌃⌥⇧⌘ — the modifiers a chord or a click can also carry, and therefore the
+    /// sets those gestures can be confused with. An `fn`-only trigger is still modifier-only, but no chord
+    /// or click ever sets the Fn flag, so nothing can shadow it.
+    public var carriesChordModifier: Bool {
+        guard case .modifiers(let set) = self else { return false }
+        return set.members.contains { $0.modifier != .fn }
     }
 
     // Per-cap tokens for the wizard's keycap glyphs. The view renders one rounded cap per token;
     // an empty array means "no keycap" — the caller falls back to `displayString` plain text.
     public var keycapTokens: [String] {
         switch self {
-        case .named(.fn): return ["fn"]
-        case .named(.hyper): return Modifier.allCases.map(\.glyph)
-        case .named(.rightOption): return ["right ⌥"]
-        case .named(.rightCommand): return ["right ⌘"]
-        case .named(.rightControl): return ["right ⌃"]
+        case .modifiers(let set): return set.ordered.map(\.keycapToken)
         case .chord(let mods, let key):
             return Modifier.allCases.filter { mods.contains($0) }.map(\.glyph) + [key.displayString]
         case .mouseButton: return []
@@ -339,11 +422,7 @@ extension KeyDescriptor {
 
     public var displayString: String {
         switch self {
-        case .named(.fn): return "Fn (Globe)"
-        case .named(.hyper): return "⌃⌥⇧⌘"
-        case .named(.rightOption): return "Right-⌥"
-        case .named(.rightCommand): return "Right-⌘"
-        case .named(.rightControl): return "Right-⌃"
+        case .modifiers(let set): return set.displayString
         case .chord(let mods, let key):
             let glyphs = Modifier.allCases.filter { mods.contains($0) }.map(\.glyph).joined()
             return glyphs + key.displayString
@@ -352,35 +431,76 @@ extension KeyDescriptor {
     }
 }
 
-extension NamedKey {
-    init?(token: String) {
-        switch token {
-        case "fn", "globe": self = .fn
-        case "hyper": self = .hyper
-        case "right_option": self = .rightOption
-        case "right_command": self = .rightCommand
-        case "right_control": self = .rightControl
-        default: return nil
+extension SidedModifier {
+    static func parse(token: String) -> Set<SidedModifier>? {
+        if token == "hyper" {   // the one token that expands to several members
+            return [.init(.control), .init(.option), .init(.shift), .init(.command)]
         }
+        var side: Side?
+        var name = token
+        for prefix in ["left_", "right_"] where token.hasPrefix(prefix) {
+            side = prefix == "left_" ? .left : .right
+            name = String(token.dropFirst(prefix.count))
+        }
+        guard let modifier = ModifierKey(token: name) else { return nil }
+        if modifier == .fn, side != nil { return nil }   // there is one Fn key, so `left_fn` names nothing
+        return [SidedModifier(modifier, side)]
     }
 
     var canonicalToken: String {
+        guard let side else { return modifier.rawValue }
+        return "\(side.rawValue)_\(modifier.rawValue)"
+    }
+
+    var keycapToken: String {
+        guard let side else { return modifier == .fn ? "fn" : modifier.glyph }
+        return "\(side.rawValue) \(modifier.glyph)"
+    }
+
+    var displayToken: String {
+        guard let side else { return modifier == .fn ? "Fn" : modifier.glyph }
+        return "\(side.rawValue.capitalized)-\(modifier.glyph)"
+    }
+
+    var chordModifier: Modifier? { Modifier(rawValue: modifier.rawValue) }
+
+    public var flipped: SidedModifier {
+        guard let side else { return self }
+        return SidedModifier(modifier, side == .left ? .right : .left)
+    }
+}
+
+extension ModifierKeySet {
+    // Byte-identical to the pre-set spellings for the five triggers that shipped before this grammar.
+    var displayString: String {
+        let ordered = self.ordered
+        if ordered == [SidedModifier(.fn)] { return "Fn (Globe)" }
+        if ordered.allSatisfy({ $0.side == nil && $0.modifier != .fn }) {
+            return ordered.map(\.displayToken).joined()
+        }
+        return ordered.map(\.displayToken).joined(separator: " + ")
+    }
+}
+
+extension ModifierKey {
+    var glyph: String {
         switch self {
+        case .control: return "⌃"
+        case .option: return "⌥"
+        case .shift: return "⇧"
+        case .command: return "⌘"
         case .fn: return "fn"
-        case .hyper: return "hyper"
-        case .rightOption: return "right_option"
-        case .rightCommand: return "right_command"
-        case .rightControl: return "right_control"
         }
     }
 
-    public var keyCode: Int {
-        switch self {
-        case .fn: return 63
-        case .rightOption: return 61
-        case .rightCommand: return 54
-        case .rightControl: return 62
-        case .hyper: return 55
+    init?(token: String) {
+        switch token {
+        case "control", "ctrl": self = .control
+        case "option", "alt": self = .option
+        case "shift": self = .shift
+        case "command", "cmd": self = .command
+        case "fn", "globe": self = .fn
+        default: return nil
         }
     }
 }
@@ -395,15 +515,6 @@ extension Modifier {
         }
     }
 
-    init?(token: String) {
-        switch token {
-        case "control", "ctrl": self = .control
-        case "option", "alt": self = .option
-        case "shift": self = .shift
-        case "command", "cmd": self = .command
-        default: return nil
-        }
-    }
 }
 
 extension BaseKey {

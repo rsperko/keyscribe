@@ -383,14 +383,18 @@ glance and can show simultaneously:
 
 - **Error badge — small red dot, top-left.** Shown when there is a configuration or model problem.
   *Wired to:* a malformed config, any missing required permission, an **unusable active STT model**
-  (deleted out from under us), and the AI checks — a **dangling connection** (a mode names a deleted
-  connection), a **structurally misconfigured connection** (no model, or OpenAI-compatible with no
-  base URL, or token-command auth with no command), and a **failed Test Connection**. The
+  (deleted out from under us), a **mode whose shortcut can never fire** (another mode claims the same
+  press written a different way, so shadowing drops this one), and the AI checks — a **dangling
+  connection** (a mode names a deleted connection), a **structurally misconfigured connection** (no
+  model, or OpenAI-compatible with no base URL, or token-command auth with no command), and a **failed
+  Test Connection**. The
   **`Settings…` menu item carries a matching red dot** while any of these hold, so opening the menu
   points at where the problem is fixed instead of dead-ending at the glyph. Opening
   Settings **flags the offending sidebar pane with a matching red dot** — Maintenance (config) ·
   Permissions · Speech Models (model) · AI Services (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
-  and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. The sidebar polls
+  and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. A mode whose shortcut
+  can never fire is flagged the same way, in its Modes-list row (**Shortcut never fires**) as well as in
+  its trigger row — the editor alone would hide it behind a selection. The sidebar polls
   while open and clears the flag the moment it's fixed. **A missing key is not always an error** —
   it is legitimate when an OpenAI-compatible endpoint is set to No Auth, but hosted providers and
   API Key auth require a saved Keychain key before testing or fetching models. **KeyScribe never
@@ -466,6 +470,15 @@ Show the few choices a new user is most likely to need:
   with a hint). Add to Vocabulary defaults on to **⌃⌥⇧V**; Paste Last Dictation defaults off. A chord
   that collides with a higher-precedence hotkey, such as a Mode trigger, shows an inline **shadowed**
   breadcrumb and will not fire — mode triggers win.
+- A **mode trigger well** also records a **modifier-only trigger**: hold one to four modifiers with no
+  key and release. It records the physical keys you pressed (**Left-⌘**, not "either ⌘"), however many —
+  so a trigger recorded on one side does not fire on the other, and a recorded ⌃⌥⇧⌘ shows as **Custom**
+  rather than matching the menu's sideless entry. Left and right of the same modifier cannot be combined,
+  and the well says so instead of recording. Its menu still
+  lists the familiar ones — **Fn (Globe)**, **Right-⌥**, **Right-⌘**, **Right-⌃**, **⌃⌥⇧⌘** — and
+  anything else you record shows as **Custom**. A modifier set that is a strict subset of another
+  contending mode's set is *pressed on the way into* it, and the well says so as an advisory; the
+  chord grace makes pressing the larger one as a single motion start only that mode.
 - Every shortcut well records the **character a key types**, not its position, so a saved chord may
   not exist on another keyboard layout. A chord the active layout cannot produce is never registered,
   and the well says so with a **Not on your current keyboard layout** caption rather than looking

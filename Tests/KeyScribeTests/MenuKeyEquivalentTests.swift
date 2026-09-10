@@ -56,8 +56,8 @@ struct MenuKeyEquivalentTests {
         #expect(equivalent("control+keypad_clear") == nil)
     }
 
-    @Test func nonChordDescriptorsHaveNoEquivalent() {
-        #expect(KeyDescriptor.named(.fn).menuItemKeyEquivalent == nil)
+    @Test func nonChordDescriptorsHaveNoEquivalent() throws {
+        #expect(try KeyDescriptor(parsing: "fn").menuItemKeyEquivalent == nil)
         #expect(KeyDescriptor.mouseButton(3).menuItemKeyEquivalent == nil)
     }
 }

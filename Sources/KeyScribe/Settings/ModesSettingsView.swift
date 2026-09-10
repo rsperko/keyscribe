@@ -116,7 +116,13 @@ struct ModesSettingsView: View {
     }
 
     private func issue(for mode: Mode) -> ModeSummaryIssue? {
-        guard mode.enabled, let rewrite = mode.aiRewrite else { return nil }
+        guard mode.enabled else { return nil }
+        // A trigger the shadowing pass drops means this mode can never start — worth saying in the list,
+        // since the trigger row that explains it is only visible once this mode is selected.
+        if TriggerKeyConflicts.conflict(for: mode, in: model.modes)?.kind == .unreachable {
+            return .triggerUnreachable
+        }
+        guard let rewrite = mode.aiRewrite else { return nil }
         if rewrite.connection.isEmpty {
             return .needsService
         }
@@ -287,12 +293,14 @@ private enum ModeSummaryIssue {
     case needsService
     case missingService
     case failedService
+    case triggerUnreachable
 
     var summary: String {
         switch self {
         case .needsService: "Needs AI service"
         case .missingService: "AI service missing"
         case .failedService: "AI service failed"
+        case .triggerUnreachable: "Shortcut never fires"
         }
     }
 
@@ -301,6 +309,7 @@ private enum ModeSummaryIssue {
         case .needsService: "Choose an AI service for this enabled mode."
         case .missingService: "The selected AI service no longer exists."
         case .failedService: "This mode's AI service failed its last connection test."
+        case .triggerUnreachable: "Another mode claims the same press, written a different way, so this shortcut never fires."
         }
     }
 }

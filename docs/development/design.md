@@ -485,12 +485,14 @@ best-effort with no fallback. The focus-race clipboard fallback (below) override
 the mode picks.
 - **Permissions:** **two** TCC categories — **Accessibility** (post ⌘V/⌘C and AX reads;
   `kTCCServicePostEvent` for posting, `kTCCServiceAccessibility` for AX, both shown under
-  "Accessibility") **and** the modifier-only trigger event tap (an active `.defaultTap` watching
-  `flagsChanged` is authorized by Accessibility alone) — plus **Automation/Apple Events** (browser
+  "Accessibility") **and** the modifier-only trigger event tap (a `.listenOnly` tap watching
+  `flagsChanged`, `keyDown`, the mouse-down types and `scrollWheel` — all authorized by Accessibility
+  alone) — plus **Automation/Apple Events** (browser
   URL via AppleScript, per browser). **Input Monitoring is NOT used:** key+modifier chord triggers
   register via `RegisterEventHotKey` (no permission, OS-suppressed) and ESC-to-cancel is a local
-  keystroke on the recording HUD. A CGEventTap is deaf to `keyDown` without Input Monitoring, so it
-  only ever watches modifiers.
+  keystroke on the recording HUD. The tap sees the non-modifier events only to discard a modifier-only
+  trigger that turned out to be part of a chord or a click; a user-driven scroll discards an arm that has
+  not started yet, and never stops a running dictation. It consumes none of them.
 - **Principle:** minimize the permission surface. Prefer paste; do **not** require AX-insert if it is
   the *only* reason to ask for a permission. Request **Automation** only when a mode constrains by URL
   (`url_pattern` routing, §4.3).
