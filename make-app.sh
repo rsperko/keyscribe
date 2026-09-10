@@ -26,11 +26,9 @@ CONFIG="${1:-release}"
 
 # Preflight: catch the failure modes a fresh clone hits — wrong arch, missing or Command-Line-Tools-
 # only Xcode, absent Metal Toolchain — up front with an actionable message, instead of a cryptic
-# error minutes into the build. A non-arm64 / non-macOS host, a Command-Line-Tools-only toolchain, and
-# a toolchain that cannot compile SwiftUI are fatal (BUILD.md's prerequisites already require full
-# Xcode, and those failures surface minutes in as a wall of compile errors); a missing Metal
-# Toolchain only costs the optional MLX-based Qwen3-ASR engine, so it warns and continues. Full
-# guide: BUILD.md.
+# error minutes into the build. All of them are fatal: without full Xcode the build dies minutes in as
+# a wall of compile errors, and without the Metal Toolchain it would ship Qwen3-ASR models that crash
+# the app. Full guide: BUILD.md.
 echo "== preflight =="
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "!! KeyScribe builds only on Apple-silicon macOS (arm64). Host is $(uname -s)/$(uname -m)." >&2
@@ -80,10 +78,7 @@ if ! swiftc -typecheck "$PROBE_DIR/probe.swift" >"$PROBE_DIR/out.txt" 2>&1; then
   exit 1
 fi
 rm -rf "$PROBE_DIR"
-if ! xcrun -f metal >/dev/null 2>&1; then
-  echo "warning: Metal Toolchain not installed — Qwen3-ASR will be unavailable (other engines work)." >&2
-  echo "         Install it once with: xcodebuild -downloadComponent MetalToolchain" >&2
-fi
+./scripts/build-mlx-metallib.sh --probe
 # Swift floor is enforced by Package.swift's swift-tools-version (swift build refuses an older
 # toolchain on its own) — we don't re-gate it here. This is only an informational breadcrumb: print
 # the verified-good toolchain next to what's installed, so if a toolchain-specific compiler bug ever
@@ -122,16 +117,14 @@ echo "== building KeyScribe ($CONFIG) ${BUILD_SYSTEM:+[$BUILD_SYSTEM]} =="
 swift build -c "$CONFIG" $BUILD_SYSTEM --product KeyScribe
 [ "$CONFIG" = "debug" ] && BIN=".build/debug/KeyScribe"
 
-# Qwen3-ASR runs on MLX, which hard-fails ("Failed to load the default metallib") without
+# Qwen3-ASR runs on MLX, which terminates the app ("Failed to load the default metallib") without
 # mlx.metallib next to the executable, and the native build system does not compile Metal shaders
 # (which is why the pin above matters — it keeps this step the single source of the shipped shader
-# library instead of whatever the toolchain's default build system compiles). Build it
-# and bundle it into the .app below. Non-fatal: the other engines (Parakeet/Whisper/Apple) don't
-# need it, so a missing Metal Toolchain warns instead of blocking the build. Install it with:
-#   xcodebuild -downloadComponent MetalToolchain
+# library instead of whatever the toolchain's default build system compiles). Build it, prove MLX
+# runs from it, and only then replace the app below.
 echo "== building mlx.metallib (required by Qwen3-ASR) =="
-BUILD_DIR="$(pwd)/.build" ./scripts/build-mlx-metallib.sh "$CONFIG" \
-  || echo "warning: metallib build failed — Qwen3-ASR will crash at runtime (other engines unaffected)" >&2
+BUILD_DIR="$(pwd)/.build" ./scripts/build-mlx-metallib.sh "$CONFIG"
+"$BIN" --mlx-smoke
 
 echo "== assembling $APP =="
 rm -rf "$APP"
@@ -155,12 +148,7 @@ for dependency in .build/checkouts/*; do
   done
 done
 # MLX loads mlx.metallib from next to the executable — place it in MacOS/, beside the binary.
-METALLIB=".build/$CONFIG/mlx.metallib"
-if [ -f "$METALLIB" ]; then
-  cp "$METALLIB" "$APP/Contents/MacOS/mlx.metallib"
-else
-  echo "warning: $METALLIB missing — Qwen3-ASR will crash at runtime" >&2
-fi
+cp ".build/$CONFIG/mlx.metallib" "$APP/Contents/MacOS/mlx.metallib"
 # Sparkle.framework is present in the build products ONLY for the public production build
 # (KEYSCRIBE_SPARKLE=1 adds Sparkle to the SwiftPM graph). Embed it keyed off that presence, NOT the
 # variant, so this is a clean no-op for dev/custom builds and a downstream white-label build that builds

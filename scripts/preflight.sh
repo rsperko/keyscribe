@@ -248,13 +248,13 @@ guard a-codesign "$(sig_artifact)" chk_a_codesign
 
 chk_a_metallib() {
   [ -d "$APP_PATH" ] || { result skip "mlx.metallib — artifact missing"; return; }
-  if [ -f "$APP_PATH/Contents/MacOS/mlx.metallib" ]; then
-    result pass "mlx.metallib present beside the executable"
+  if timeout --foreground 120 "$EXE" --mlx-smoke >/tmp/preflight-mlx-smoke.log 2>&1; then
+    result pass "MLX runs from the bundled mlx.metallib (--mlx-smoke)"
   else
-    result fail "mlx.metallib MISSING — Qwen3-ASR will crash at load ('Failed to load the default metallib')"
+    result fail "--mlx-smoke FAILED — Qwen3-ASR will crash at load; see /tmp/preflight-mlx-smoke.log"
   fi
 }
-guard a-metallib "$(sig_artifact)" chk_a_metallib
+guard a-metallib "$(sig_artifact).$(stat -f '%m.%z' "$APP_PATH/Contents/MacOS/mlx.metallib" 2>/dev/null || echo none).$(sw_vers -buildVersion)" chk_a_metallib
 
 chk_a_plist() {
   [ -d "$APP_PATH" ] || { result skip "Info.plist — artifact missing"; return; }

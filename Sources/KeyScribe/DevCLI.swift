@@ -67,6 +67,8 @@ public enum DevCLI {
                 --dictations <n>        How many recent dictation outcomes to include (default 10, 0 for none).
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
+              --mlx-smoke             Run a tiny MLX computation on the GPU, then exit 0. A missing or unloadable
+                                      shader library terminates the process instead — the build and release gate.
               --capture-probe         Drive the real capture path (record → drain → teardown) and score the
                                       result for dropped/corrupted audio you cannot hear. Feed a pure tone into
                                       the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,
@@ -188,6 +190,10 @@ public enum DevCLI {
                 print("\(e.id)\t\(state)")
             }
             exit(0)
+        }
+
+        if CommandLine.arguments.contains("--mlx-smoke") {
+            exit(MLXSmoke.run())
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandLine.arguments.count {

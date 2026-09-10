@@ -22,6 +22,7 @@ var packageDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),
     .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.0"),
     .package(url: "https://github.com/rsperko/speech-swift.git", revision: "96273cd375783531129e5bb97a7ec25a7e717994"),
+    .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.30.0"),
     // `revision:`, not `exact: "0.1.2"`, because upstream MOVES this tag: on 2026-08-13 they
     // re-uploaded the v0.1.2 release asset in place and repointed v0.1.2 (26e0335a -> 2ff906a3) so
     // their binaryTarget checksum matched the new bytes. A version pin resolves through that mutable
@@ -37,6 +38,7 @@ var keyScribeDependencies: [Target.Dependency] = [
     .product(name: "FluidAudio", package: "FluidAudio"),
     .product(name: "WhisperKit", package: "argmax-oss-swift"),
     .product(name: "Qwen3ASR", package: "speech-swift"),
+    .product(name: "MLX", package: "mlx-swift"),
     .product(name: "MoonshineVoice", package: "moonshine-swift"),
 ]
 

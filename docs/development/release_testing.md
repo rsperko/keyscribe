@@ -83,7 +83,7 @@ actually catches the list above.
 
 - `swift test` — full suite green.
 - Artifact present, and `codesign --verify --deep --strict` passes (nested metallib/xcframeworks too).
-- **`mlx.metallib` present** beside the executable (the silent Qwen killer).
+- **MLX runs from the bundled `mlx.metallib`** (`--mlx-smoke`) — the silent Qwen killer.
 - `Info.plist` stamped: real `CFBundleShortVersionString` / `CFBundleVersion` / bundle id (no `__PLACEHOLDER__`).
 - Release only: Gatekeeper accepts it as **Notarized Developer ID**, ticket **stapled** (app + DMG),
   hardened-runtime **entitlements present**.
