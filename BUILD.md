@@ -29,8 +29,22 @@ Same name, different identity per machine; that is expected and fine.
 - **Swift 6.0+** (declared floor — `swift build` refuses an older toolchain). Last verified on
   **Swift 6.3** with current Xcode. `make-app.sh` prints the detected vs. verified toolchain and, if
   yours is older, hints to update Xcode should a compiler error appear — it never blocks the build.
-- **Xcode installed and selected** (the Command Line Tools alone are not enough — the build needs
-  the full Xcode for Metal and signing):
+
+  **Build system.** `make-app.sh`, `make test`, and `scripts/preflight.sh` pass
+  `--build-system native` explicitly (through `scripts/swiftpm-build-system.sh`) rather than taking
+  the toolchain's default. Swift 6.4 flips SwiftPM's default from `native` to `swiftbuild`, and two
+  things this repo relies on flip with it: products move from `.build/<config>/` to
+  `.build/out/Products/<Config>/` (with no `.build/release` symlink), which breaks the `.app`
+  assembly step on *any* machine; and MLX's `.metal` sources become part of `swift build`, which
+  turns the Metal Toolchain into a hard build requirement and hands MLX a shader library other than
+  the curated one described below. The pin keeps a build identical whichever toolchain produced it.
+  Swift 6.4 marks `native` deprecated, so moving to `swiftbuild` is real future work — product
+  paths, bundling + signing MLX's resource bundle, `release.sh`, and preflight all move with it.
+- **Xcode installed and selected.** The Command Line Tools alone are **not** enough and
+  `make-app.sh` refuses to build against them. The CLT ship no Metal compiler and no SwiftUI macro
+  plugins (`libSwiftUIMacros.dylib` / `libPreviewsMacros.dylib` live under Xcode's
+  `Platforms/MacOSX.platform`), so a CLT build fails partway through with a wall of compile errors
+  rather than up front.
 
   ```bash
   sudo xcode-select -s /Applications/Xcode.app
@@ -49,9 +63,11 @@ Same name, different identity per machine; that is expected and fine.
 
   This step exists because SwiftPM's native build system does not compile Metal shaders, so
   `swift build` leaves MLX without one; `scripts/build-mlx-metallib.sh` compiles it (~3 s, 3.0 MB)
-  and caches on a source hash. **Building KeyScribe through an Xcode project instead needs none of
-  this** — Xcode compiles those shaders itself and MLX picks them up from the package's resource
-  bundle.
+  and caches on a source hash. That is also why the Metal Toolchain stays *optional* here — it is
+  needed by this separate step, not by `swift build` itself, which holds only because the build
+  system is pinned to `native` (see **Swift 6.0+** above). **Building KeyScribe through an Xcode
+  project instead needs none of this** — Xcode compiles those shaders itself and MLX picks them up
+  from the package's resource bundle.
 
 ## Build & run
 
@@ -195,8 +211,18 @@ Dock icon or window.
   `./make-app.sh`.
 - **macOS re-prompts for Microphone/Accessibility after every rebuild** — you are
   building ad-hoc. Create the `KeyScribe Local` self-signed cert above so the signature is stable.
-- **`xcode-select` points at the Command Line Tools** — run
-  `sudo xcode-select -s /Applications/Xcode.app`; the build needs full Xcode.
+- **`xcode-select` points at the Command Line Tools** — `make-app.sh` stops with this before
+  building. Run `sudo xcode-select -s /Applications/Xcode.app`; the build needs full Xcode.
+- **`plugin for module 'SwiftUIMacros' not found`** (or `'PreviewsMacros'`) — you are compiling
+  against the Command Line Tools SDK, which ships no SwiftUI macro plugins. Run
+  `sudo xcode-select -s /Applications/Xcode.app` and rebuild. Reported on the macOS 27 CLT SDK; the
+  macOS 26 CLT SDK compiles plain SwiftUI, so a CLT build that used to work can start failing this
+  way after an OS/CLT upgrade.
+- **`unable to spawn process 'metal'` during `swift build`** — the build ran under the `swiftbuild`
+  build system, which compiles MLX's Metal shaders as part of the build. Swift 6.4 makes that the
+  default for a bare `swift build`; build through `./make-app.sh` (or `make build` / `make test`),
+  which pin `--build-system native`. On a Command-Line-Tools-only install there is no `metal`
+  binary at all — select full Xcode as above.
 
 ## Logs
 

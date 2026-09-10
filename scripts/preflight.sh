@@ -202,7 +202,11 @@ corpus_sig() {
 section "Tier A — build / packaging gates"
 
 chk_a_swift_test() {
-  if timeout --foreground 900 swift test >/tmp/preflight-swifttest.log 2>&1; then
+  # Pinned build system, same as make-app.sh — a toolchain whose default is `swiftbuild` would
+  # otherwise test a differently-built product than the one being released.
+  local build_system; build_system="$("$REPO_ROOT/scripts/swiftpm-build-system.sh" test)"
+  # shellcheck disable=SC2086  # deliberate split: either empty or the two flag tokens
+  if timeout --foreground 900 swift test $build_system >/tmp/preflight-swifttest.log 2>&1; then
     result pass "swift test — full suite green"
   else
     tail -20 /tmp/preflight-swifttest.log

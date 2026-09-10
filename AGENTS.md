@@ -986,6 +986,14 @@ builds it and `make-app.sh` bundles+signs it into the `.app`; the **Metal Toolch
 an Xcode project needs none of this** — Xcode's build engine compiles those shaders itself into
 `mlx-swift_Cmlx.bundle/default.metallib`, which MLX finds via its SwiftPM-bundle lookup
 (`swift build --build-system swiftbuild` does the same, and is the eventual replacement for the script).
+**Until that migration happens the build system is PINNED to `native`** — `make-app.sh`, `make test`,
+and `scripts/preflight.sh` all splice in `scripts/swiftpm-build-system.sh`'s `--build-system native`,
+because Swift 6.4 flips SwiftPM's default to `swiftbuild`, which moves products from `.build/<config>`
+to `.build/out/Products/<Config>` (no `.build/release` symlink — `make-app.sh`'s copy dies on any
+machine) and pulls `.metal` sources into `swift build` (making the Metal Toolchain a hard build
+requirement and displacing the curated kernel set below). Migrating means moving the product paths,
+bundling + signing `mlx-swift_Cmlx.bundle`, `release.sh`, and preflight together; 6.4 marks `native`
+deprecated, so it has a deadline. A bare `swift build` on 6.4+ is NOT what ships.
 **Compile ONLY `Source/Cmlx/mlx-generated/metal` (mlx-swift's ahead-of-time set — exactly what its own
 Xcode build ships) plus `kernels/fence.metal`.** Every other kernel is JIT-generated at runtime — the
 SwiftPM build enables MLX's JIT (`Package.swift` excludes `nojit_kernels.cpp`) and all 23 have matching

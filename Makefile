@@ -33,8 +33,13 @@ ship: ## Fail-fast pre-notarize gate, build+notarize, human smoke, then publish:
 cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then commit+push the tap)
 	./scripts/update-cask.sh
 
+# SwiftPM's build system is pinned rather than left to the toolchain default — Swift 6.4 flips it to
+# `swiftbuild`, which moves products and pulls MLX's Metal shaders into the build. Lazy `=` so the
+# probe only runs for targets that reference it. Why: scripts/swiftpm-build-system.sh.
+BUILD_SYSTEM = $(shell ./scripts/swiftpm-build-system.sh test)
+
 test: ## Run the full test suite
-	swift test
+	swift test $(BUILD_SYSTEM)
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py

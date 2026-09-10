@@ -26,8 +26,10 @@ CONFIG="${1:-release}"
 
 # Preflight: catch the failure modes a fresh clone hits — wrong arch, missing or Command-Line-Tools-
 # only Xcode, absent Metal Toolchain — up front with an actionable message, instead of a cryptic
-# error minutes into the build. Only a non-arm64 / non-macOS host is fatal; everything else (which
-# only affects the optional MLX-based Qwen3-ASR engine) warns and continues. Full guide: BUILD.md.
+# error minutes into the build. A non-arm64 / non-macOS host and a Command-Line-Tools-only toolchain
+# are fatal (BUILD.md's prerequisites already require full Xcode, and the CLT failures surface
+# minutes in as a wall of compile errors); a missing Metal Toolchain only costs the optional
+# MLX-based Qwen3-ASR engine, so it warns and continues. Full guide: BUILD.md.
 echo "== preflight =="
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "!! KeyScribe builds only on Apple-silicon macOS (arm64). Host is $(uname -s)/$(uname -m)." >&2
@@ -39,10 +41,18 @@ if [ -z "$DEVDIR" ]; then
   echo "!! No Xcode toolchain selected. Install Xcode, then: sudo xcode-select -s /Applications/Xcode.app" >&2
   exit 1
 fi
+# The Command Line Tools carry no Metal compiler and no SwiftUI macro plugins (no
+# libSwiftUIMacros.dylib / libPreviewsMacros.dylib — those ship under Xcode's
+# Platforms/MacOSX.platform). Against a recent SDK that is fatal: a SwiftUI file fails with
+# "plugin for module 'SwiftUIMacros' not found" (reported on the macOS 27 CLT SDK), and any Metal
+# compile fails with "unable to spawn process 'metal'". Fail here rather than minutes into the build.
 case "$DEVDIR" in
   *CommandLineTools*)
-    echo "warning: xcode-select points at the Command Line Tools ($DEVDIR), not full Xcode." >&2
-    echo "         Select Xcode for Metal/Qwen3-ASR: sudo xcode-select -s /Applications/Xcode.app" >&2
+    echo "!! xcode-select points at the Command Line Tools ($DEVDIR), not full Xcode." >&2
+    echo "!! The CLT ship no Metal compiler and no SwiftUI macro plugins, so this build fails" >&2
+    echo "!! partway through ('unable to spawn process metal' / 'plugin for module SwiftUIMacros" >&2
+    echo "!! not found'). Fix: sudo xcode-select -s /Applications/Xcode.app" >&2
+    exit 1
     ;;
 esac
 if ! xcrun -f metal >/dev/null 2>&1; then
@@ -76,12 +86,21 @@ BUILD_VERSION="$(git rev-list --count HEAD 2>/dev/null || true)"
 SCM_REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
 [ -z "$SCM_REVISION" ] && SCM_REVISION="unknown"
 
-echo "== building KeyScribe ($CONFIG) =="
-swift build -c "$CONFIG" --product KeyScribe
+# Build system is pinned, not left to the toolchain default: Swift 6.4 flips SwiftPM's default to
+# `swiftbuild`, which relocates products out of .build/<config> (breaking the copy below) and pulls
+# MLX's .metal sources into `swift build` (displacing the curated metallib built after this). Full
+# rationale + the migration this defers: scripts/swiftpm-build-system.sh. Deliberately unquoted —
+# the helper prints either nothing or the two flag tokens.
+BUILD_SYSTEM="$(./scripts/swiftpm-build-system.sh)"
+echo "== building KeyScribe ($CONFIG) ${BUILD_SYSTEM:+[$BUILD_SYSTEM]} =="
+# shellcheck disable=SC2086
+swift build -c "$CONFIG" $BUILD_SYSTEM --product KeyScribe
 [ "$CONFIG" = "debug" ] && BIN=".build/debug/KeyScribe"
 
 # Qwen3-ASR runs on MLX, which hard-fails ("Failed to load the default metallib") without
-# mlx.metallib next to the executable, and `swift build` does not compile Metal shaders. Build it
+# mlx.metallib next to the executable, and the native build system does not compile Metal shaders
+# (which is why the pin above matters — it keeps this step the single source of the shipped shader
+# library instead of whatever the toolchain's default build system compiles). Build it
 # and bundle it into the .app below. Non-fatal: the other engines (Parakeet/Whisper/Apple) don't
 # need it, so a missing Metal Toolchain warns instead of blocking the build. Install it with:
 #   xcodebuild -downloadComponent MetalToolchain

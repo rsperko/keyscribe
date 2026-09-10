@@ -54,7 +54,9 @@ on macOS 26+.
 
 - Keep changes surgical and scoped to the stated goal. If you spot unrelated issues, note them in the
   PR description rather than fixing them in the same diff.
-- Make sure `swift build` and `swift test` pass.
+- Make sure `make build` and `make test` pass. Use those rather than a bare `swift build` /
+  `swift test` — they pin SwiftPM's build system, which Swift 6.4 otherwise switches out from
+  under the build (see BUILD.md ▸ Prerequisites).
 - **No AI-tool attribution anywhere in repo content** — not in commit messages, code comments, PR
   titles, or descriptions. No "Co-Authored-By" or "Generated with" trailers.
 
