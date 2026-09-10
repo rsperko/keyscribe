@@ -27,8 +27,8 @@ struct Qwen3ModelProfile {
 // serialized by the SerializedEngine actor decorator wrapping this engine at EngineRegistry.makeAll
 // (single-flight load; load/transcribe/evict never overlap), so `nonisolated(unsafe)` storage is safe.
 //
-// Requires `mlx.metallib` next to the executable inside the .app: without it MLX hard-fails at the
-// first GPU op ("Failed to load the default metallib"). make-app.sh builds and bundles it.
+// Requires a loadable MLX shader library: MLX terminates the process without one, so every load refuses
+// first — ahead of the repair path, which deletes the install when a load throws.
 final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     nonisolated let id: String
     nonisolated let displayName: String
@@ -39,19 +39,23 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     private let modelId: String
     private let subdir: String
     private let modelsDir: URL
+    private let shadersLoadable: Bool
     nonisolated(unsafe) private var model: Qwen3ASRModel?
     // MLX inference is a synchronous, whole-clip call; running it on a Swift-concurrency pool thread
     // would park a cooperative worker for the duration. SerializedEngine still guarantees one transcribe
     // at a time on this instance.
     private let inferenceQueue = DispatchQueue(label: "com.keyscribe.audio.qwen3asr-inference", qos: .userInitiated)
 
-    init(profile: Qwen3ModelProfile, modelsDir: URL) {
+    init(profile: Qwen3ModelProfile, modelsDir: URL, shadersLoadable: Bool = MLXShaderLibrary.loadable) {
         self.id = profile.id
         self.displayName = profile.displayName
         self.modelId = profile.modelId
         self.subdir = profile.subdir
         self.modelsDir = modelsDir
+        self.shadersLoadable = shadersLoadable
     }
+
+    nonisolated var unavailability: EngineUnavailability? { shadersLoadable ? nil : .shaderLibraryUnloadable }
 
     func loadIfNeeded() async throws {
         try await load(progress: nil, allowRepair: false)
@@ -62,6 +66,7 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     }
 
     private func load(progress: (@Sendable (ModelLoadProgress) -> Void)?, allowRepair: Bool) async throws {
+        guard shadersLoadable else { throw EngineUnavailable.shaderLibraryUnloadable(displayName) }
         guard model == nil else { return }
         let downloadShare = 0.9
         let bridge: (@Sendable (Double, String) -> Void)?

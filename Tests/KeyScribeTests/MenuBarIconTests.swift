@@ -17,6 +17,28 @@ struct MenuBarIconTests {
         ])
     }
 
+    @Test func speechModelMenuKeepsASelectedModelThisBuildCannotRunVisibleAndDisabled() {
+        let controller = MenuBarController()
+        controller.install()
+        let models = SpeechModelsModel(
+            activeId: "whisper", stt: Settings.defaults.stt,
+            download: { _, _ in }, verify: { _ in .skipped }, evictEngine: { _ in },
+            onActiveChange: { _ in }, onDictionaryMatchingChange: { _ in },
+            initialInstalledIds: ["parakeet", "whisper", "moonshine-base-en"], initialFailedIds: [],
+            unavailableIds: ["whisper", "moonshine-base-en"],
+            markFailed: { _ in }, clearFailed: { _ in })
+
+        controller.setSpeechModels(models.rows)
+
+        let items = controller.speechModelMenuItems
+        let selected = items.first { $0.representedObject as? String == "whisper" }
+        #expect(selected?.isEnabled == false)
+        #expect(selected?.state == .on)
+        #expect(selected?.title.contains(SpeechModelChoiceCopy.menuUnavailableReason) == true)
+        #expect(!items.contains { $0.representedObject as? String == "moonshine-base-en" })
+        #expect(items.first { $0.representedObject as? String == "parakeet" }?.isEnabled == true)
+    }
+
     @Test func modeItemTitleShowsAModifierOnlyShortcut() {
         let title = MenuBarController.modeItemTitle(
             name: "Polish", trigger: try? KeyDescriptor(parsing: "right_option"), inertReason: nil)

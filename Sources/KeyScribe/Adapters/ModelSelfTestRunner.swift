@@ -20,6 +20,11 @@ enum ModelSelfTestRunner {
         _ engine: any SpeechEngine, clipURL: URL? = ModelSelfTestRunner.clipURL,
         transcribe: @Sendable (URL, [String]) async throws -> String
     ) async -> Bool? {
+        // A failed verdict quarantines the model in the shared models dir, so skip an engine this build can't run.
+        if let unavailability = engine.unavailability {
+            Log.models.notice("self-test \(engine.id, privacy: .public): skipped (\(String(describing: unavailability), privacy: .public))")
+            return nil
+        }
         guard let url = clipURL else {
             Log.models.notice("self-test \(engine.id, privacy: .public): skipped (no bundled clip)")
             return nil

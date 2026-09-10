@@ -23,20 +23,27 @@ make publish
 - **The STT engines you ship are installed** — Tier B only tests *installed* engines and reports the
   shipped ones that are missing (so they are untested). Install them in the app (Settings ▸ Speech
   Models) before a real release, or set `KEYSCRIBE_REQUIRE_ALL_ENGINES=1` to make a gap a hard failure.
-  Check what you have with `KeyScribe.app/Contents/MacOS/KeyScribe --list-engines`.
+  Check what you have with `KeyScribe.app/Contents/MacOS/KeyScribe --list-engines` (`installed`,
+  `system`, `missing`, or `unavailable` — an installed model this build cannot run, which is untested).
 - **The corpus is recorded** — `corpus/commands/` and `corpus/stt/` (your own voice, gitignored; record
   with `bash corpus/record.sh [--commands]`). Missing corpus ⇒ that check SKIPs, loudly.
 - **A quiet room + your mic** for Tier B (real transcription) and Tier C (real dictation).
 
 **Which models do the tests use?** None are pinned — the tests run across *whatever you have installed*,
 which is deliberate: a release should verify the exact engines you ship. The only engine named
-specifically is **Qwen3-ASR**, in the Tier C spot-check that proves `mlx.metallib` runs under the
-hardened runtime. The `--list-engines` coverage line at the top of Tier B is your record of what was
+specifically is **Qwen3-ASR**: Tier A's `a-metallib` runs the same validation `make-app.sh` runs before
+it replaces an app (both Qwen3-ASR models listed as runnable, and MLX executing a kernel from the
+bundled shader library — under the hardened runtime on the notarized artifact), and the Tier C
+spot-check dictates with it. The `--list-engines` coverage line at the top of Tier B is your record of what was
 actually exercised.
 
 Modes: `make preflight` targets the release artifact and writes the publish stamp.
 `scripts/preflight.sh --dev` targets `KeyScribeDev.app` (skips notarization checks, no stamp) for
 day-to-day sanity; `--auto` runs the automated tiers only, non-interactive, for CI.
+
+**What the stamp cannot prove.** It is keyed to the commit, not to the artifact: it records that the
+checks passed on the app that was in place when they ran, but `publish` cannot tell whether the DMG it
+uploads holds that same build. Don't rebuild between `make preflight` and `make publish`.
 
 ## Resumable — re-run one check, not the whole gate
 
@@ -68,7 +75,7 @@ release live entirely in the **notarized production artifact** and are unreachab
 |---|---|
 | **TCC grants rebind to the code signature** | A re-signed release invalidates the `csreq`-bound Mic/Accessibility grant → the app silently can't hear or paste. Only the real signed app, relaunched, exercises this. |
 | **Hardened runtime + entitlements** | `make-app.sh` omits them; only `release.sh` applies them. A missing/rejected entitlement only bites the notarized build. |
-| **`mlx.metallib` bundled + signed** | Qwen3-ASR crashes at load ("Failed to load the default metallib") without it. It is assembled and signed only on the release path. |
+| **A loadable MLX shader library, bundled + signed** | Without one, MLX terminates the app at Qwen3-ASR's first GPU call; the app now detects that and shows both Qwen3-ASR models unavailable instead, which is still a broken release. It is assembled and signed only on the build path, so only the artifact can prove it. |
 | **Gatekeeper quarantine** | A fresh download carries `com.apple.quarantine`; first launch behaves differently than a locally-built app. |
 | **First-run onboarding + model download** | Never touched by unit tests — needs a clean install. |
 | **Trigger matrix** (modifier tap / Carbon chord / mouse tap) | Permission-gated OS event paths; can't be unit-tested. |
@@ -83,7 +90,12 @@ actually catches the list above.
 
 - `swift test` — full suite green.
 - Artifact present, and `codesign --verify --deep --strict` passes (nested metallib/xcframeworks too).
-- **`mlx.metallib` present** beside the executable (the silent Qwen killer).
+- **Qwen3-ASR runtime validated** (`a-metallib`, via `scripts/validate-qwen-runtime.sh`): both Qwen3-ASR
+  ids listed as `installed` or `missing` (never `unavailable`), and `--mlx-smoke` loads the shader
+  library and executes a kernel from it. Presence alone was the old check — a truncated library is
+  present too. Its cache signature hashes the executable's and every searched shader library's
+  contents plus the macOS build, never a timestamp, so swapped bytes always re-run it. Also runs in
+  `--pre`, so a build that can't run Qwen3-ASR never reaches notarization.
 - `Info.plist` stamped: real `CFBundleShortVersionString` / `CFBundleVersion` / bundle id (no `__PLACEHOLDER__`).
 - Release only: Gatekeeper accepts it as **Notarized Developer ID**, ticket **stapled** (app + DMG),
   hardened-runtime **entitlements present**.
@@ -99,7 +111,10 @@ actually catches the list above.
   known-good baseline**: the first run establishes `baseline.json` (gitignored — the wavs are your
   own voice); later runs exit non-zero only when an engine cleans **fewer** clips than its baseline (a
   command-pipeline regression) or the clip count changed (re-baseline: delete the file, re-run). A
-  newly-installed engine is added, not treated as a regression.
+  newly-installed engine is added, not treated as a regression. An installed engine that fails to
+  load, or any clip whose audio is missing or fails to transcribe, fails the run outright (a
+  `FAIL — <engine>[ <clip>]` line each), and a baseline is only ever established from a run where
+  every engine loaded and checked every clip.
 - **`--vad-probe corpus/blips` + `--vad-probe corpus/commands`** — the no-speech admission rule
   (`SpeechPresenceGate.minSpeechChunks`) still separates empty trigger presses from real speech. Two
   corpora, both required: `blips/` is the suppression side and carries the **entire** margin (its
@@ -114,6 +129,10 @@ actually catches the list above.
   default 0.20). This is a *catastrophic-regression* backstop (bias wiring broke → WER doubles), not a
   rank check — the default is set so no shipped engine false-fails (Moonshine ships ~15% with no
   recognition bias). The commands-check baseline is the precise gate; this is the cheap safety net.
+  It SKIPs unless every clip's audio is recorded; otherwise any non-zero exit fails the gate — an
+  engine that fails to load or a clip that fails to transcribe exits 1 (its `FAIL` lines are shown,
+  and its row is dropped from `results.json` rather than left at its last good value), and a refused
+  invocation exits 2.
 - **`--capture-probe`** — opt-in (`KEYSCRIBE_CAPTURE_PROBE=1`, needs a loopback/Aggregate device
   feeding a steady tone): `ringDropped` and `overloads` must both be 0. Run it whenever the audio
   path changed.

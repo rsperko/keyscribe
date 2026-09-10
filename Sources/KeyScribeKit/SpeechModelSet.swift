@@ -19,12 +19,18 @@ public struct SpeechModelSet: Equatable, Sendable {
     // Models that failed their self-test: kept on disk (still in `installed`) but quarantined — not usable
     // and not selectable until they pass a re-test. A durable overlay on `installed`, independent of it.
     public private(set) var failed: Set<String>
+    // Models this build can't run: still installed and deletable, never usable or selectable.
+    public let unavailable: Set<String>
     public private(set) var activeId: String
 
-    public init(catalog: [SpeechModelInfo], installed: Set<String>, activeId: String, failed: Set<String> = []) {
+    public init(
+        catalog: [SpeechModelInfo], installed: Set<String>, activeId: String,
+        failed: Set<String> = [], unavailable: Set<String> = []
+    ) {
         self.catalog = catalog
         self.installed = installed
         self.failed = failed
+        self.unavailable = unavailable
         self.activeId = activeId
     }
 
@@ -32,9 +38,16 @@ public struct SpeechModelSet: Equatable, Sendable {
 
     public func isFailed(_ id: String) -> Bool { failed.contains(id) }
 
+    public func isUnavailable(_ id: String) -> Bool { unavailable.contains(id) }
+
+    public func isInstalled(_ id: String) -> Bool {
+        guard let info = info(id), !info.systemManaged else { return false }
+        return installed.contains(id)
+    }
+
     public func isUsable(_ id: String) -> Bool {
         guard let info = info(id) else { return false }
-        if failed.contains(id) { return false }
+        if failed.contains(id) || unavailable.contains(id) { return false }
         return info.systemManaged || installed.contains(id)
     }
 

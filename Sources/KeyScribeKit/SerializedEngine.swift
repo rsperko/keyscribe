@@ -40,6 +40,7 @@ public actor SerializedEngine: SpeechEngine {
     public nonisolated var benefitsFromWarmupClip: Bool { base.benefitsFromWarmupClip }
     public nonisolated var supportsSampleInput: Bool { base.supportsSampleInput }
     public nonisolated var supportsStreaming: Bool { base.supportsStreaming }
+    public nonisolated var unavailability: EngineUnavailability? { base.unavailability }
     public nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? { base.verifyInstalled(in: modelsDir) }
 
     // Forward under the exclusive lock so prepare never races a base op on the non-Sendable handle.

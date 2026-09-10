@@ -55,6 +55,14 @@ private func report(
 }
 
 @Suite struct DiagnosticsReportTests {
+    @Test func speechSectionNamesModelsThisBuildCannotRun() {
+        var built = report()
+        built.speech = .init(
+            selectedEngine: "qwen3-asr-0.6b", installed: ["qwen3-asr-0.6b"], unavailable: ["qwen3-asr-0.6b"])
+        #expect(built.render().contains("  unavailable in this build: qwen3-asr-0.6b"))
+        #expect(!report().render().contains("unavailable in this build"))
+    }
+
     @Test func dictationLineCarriesNoTranscriptContent() {
         let line = DiagnosticsReport.DictationLine(contentBearingEntry())
         let mirrored = String(describing: Mirror(reflecting: line).children.map { "\($0.value)" })

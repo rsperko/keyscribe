@@ -30,38 +30,56 @@ enum CommandCheckRunner {
         }
     }
 
-    @discardableResult
-    static func run(dir: URL, only: Set<String>? = nil) async -> CommandCheckReport {
+    enum Run {
+        case invocationError(String)
+        case ran(CommandCheckReport)
+    }
+
+    static func run(dir: URL, only: Set<String>? = nil) async -> Run {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else {
-            print("error: could not read \(manifestURL.path)")
-            return CommandCheckReport(engines: [])
+            return .invocationError("could not read \(manifestURL.path)")
         }
-        let engines = InstalledEngineFilter.filter(EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir))
-            .filter { only == nil || only!.contains($0.id) }
+        let runnable = InstalledEngineFilter.filter(EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir))
+        let engines: [any SpeechEngine]
+        switch EngineSelection.resolve(requested: only, runnable: runnable.map(\.id)) {
+        case .invalid(let ids):
+            return .invocationError(
+                "cannot select \(ids.joined(separator: ", ")) (unknown, not installed, quarantined, or not supported on this macOS)")
+        case .ok(let ids):
+            engines = ids.compactMap { id in runnable.first { $0.id == id } }
+        }
         let rules = (manifest.context?.replacements ?? []).map {
             ReplacementRule(heard: $0.heard, replace: $0.replace, isRegex: $0.isRegex ?? false)
         }
         let clipboard = manifest.context?.clipboard ?? ""
         print("Commands check: \(manifest.clips.count) clips × \(engines.count) engines\n")
 
-        var summary: [(id: String, clean: Int, total: Int, status: String)] = []
+        var summary: [(id: String, clean: Int, total: Int, status: String, failedClips: [String])] = []
         for engine in engines {
             do { try await engine.loadIfNeeded() } catch {
-                summary.append((engine.id, 0, 0, "not installed / load failed"))
-                print("· \(engine.id): not installed / load failed\n")
+                summary.append((engine.id, 0, 0, "load failed", []))
+                print("· \(engine.id): load failed (\(error))\n")
                 continue
             }
             print("── \(engine.id) " + String(repeating: "─", count: max(0, 40 - engine.id.count)))
             var clean = 0, total = 0
+            var failedClips: [String] = []
             for c in manifest.clips {
                 let wav = dir.appendingPathComponent(c.wavName)
                 guard FileManager.default.fileExists(atPath: wav.path) else {
-                    print("  \(c.id): missing \(wav.lastPathComponent)"); continue
+                    print("  ✗ \(c.id): missing \(wav.lastPathComponent)")
+                    failedClips.append(c.id)
+                    continue
                 }
-                guard let transcript = try? await engine.transcribe(wavURL: wav, biasTerms: []) else {
-                    print("  \(c.id): <transcribe error>"); continue
+                let transcript: String
+                do {
+                    transcript = try await engine.transcribe(wavURL: wav, biasTerms: [])
+                } catch {
+                    print("  ✗ \(c.id): transcription failed (\(error))")
+                    failedClips.append(c.id)
+                    continue
                 }
                 total += 1
                 let output = process(transcript: transcript, clipboard: clipboard, rules: rules)
@@ -73,13 +91,20 @@ enum CommandCheckRunner {
                 print("      out   : \(oneLine(output))")
             }
             await engine.evict()
-            summary.append((engine.id, clean, total, "ok"))
+            summary.append((engine.id, clean, total, "ok", failedClips))
             print("")
         }
-        printSummary(summary)
-        return CommandCheckReport(engines: summary.map {
-            .init(id: $0.id, clean: $0.clean, total: $0.total, loaded: $0.status == "ok")
-        })
+        printSummary(summary.map { ($0.id, $0.clean, $0.total, $0.status) })
+        return .ran(CommandCheckReport(engines: summary.map {
+            .init(id: $0.id, clean: $0.clean, total: $0.total, loaded: $0.status == "ok", failedClips: $0.failedClips)
+        }))
+    }
+
+    static func failureLines(_ report: CommandCheckReport) -> [String] {
+        report.engines.flatMap { engine -> [String] in
+            guard engine.loaded else { return ["FAIL — \(engine.id): failed to load"] }
+            return engine.failedClips.map { "FAIL — \(engine.id) \($0): audio missing or transcription failed" }
+        }
     }
 
     // Mirrors the local (no-LLM) pipeline DictationController builds for a plain live-edits mode —

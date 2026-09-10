@@ -213,6 +213,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var mainMenu: NSMenu? { appMenu }
     var pasteLastMenuItem: NSMenuItem { pasteLastItem }
     var modeMenuItems: [NSMenuItem] { modesMenu.items }
+    var speechModelMenuItems: [NSMenuItem] { speechModelsMenu.items }
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
 
@@ -221,11 +222,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func setSpeechModels(_ rows: [SpeechModelsModel.Row]) {
         speechModelsMenu.removeAllItems()
-        for row in rows where row.isUsable {
-            let item = NSMenuItem(title: row.info.displayName, action: #selector(selectSpeechModel), keyEquivalent: "")
+        for row in rows where row.isUsable || (row.isActive && row.unavailableReason != nil) {
+            let reason = row.isUsable ? nil : SpeechModelChoiceCopy.menuUnavailableReason
+            let item = NSMenuItem(
+                title: Self.modeItemTitle(name: row.info.displayName, trigger: nil, inertReason: reason),
+                action: reason == nil ? #selector(selectSpeechModel) : nil, keyEquivalent: "")
+            if reason != nil {
+                item.attributedTitle = Self.modeItemAttributedTitle(
+                    name: row.info.displayName, trigger: nil, inertReason: reason)
+            }
             item.target = self
             item.representedObject = row.id
             item.state = row.isActive ? .on : .off
+            item.isEnabled = reason == nil
             speechModelsMenu.addItem(item)
         }
         if speechModelsMenu.items.isEmpty {

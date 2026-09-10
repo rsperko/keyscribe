@@ -20,6 +20,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         initialEngineId: String,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
+        unavailableIds: Set<String> = [],
         onReadyToDictate: @escaping () -> Void,
         permissionsOnly: Bool = false,
         resumeOnboarding: Bool = false,
@@ -35,7 +36,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         self.onComplete = onComplete
         model = FirstRunModel(
             initialEngineId: initialEngineId, download: download,
-            selectEngine: selectEngine, permissionsOnly: permissionsOnly,
+            selectEngine: selectEngine, unavailableIds: unavailableIds, permissionsOnly: permissionsOnly,
             resumeOnboarding: resumeOnboarding,
             repository: repository, saveAPIKey: saveAPIKey,
             deleteAPIKey: deleteAPIKey, readAPIKey: readAPIKey,
@@ -175,6 +176,7 @@ final class FirstRunModel: ObservableObject {
     // the model not already being installed so a completed prior install is never wiped.
     private let cleanupFailedDownload: (String) async throws -> Void
     private let selectEngine: (String) -> Void
+    private let unavailableIds: Set<String>
     private let repository: ConfigRepository
     private var supportDir: URL { repository.supportDir }
     private var modesDir: URL { repository.modesDir }
@@ -236,6 +238,7 @@ final class FirstRunModel: ObservableObject {
         initialEngineId: String,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
+        unavailableIds: Set<String> = [],
         cleanupFailedDownload: @escaping (String) async throws -> Void = { id in
             guard !ModelInstallStore.installedIds().contains(id) else { return }
             try await Task.detached(priority: .utility) {
@@ -258,6 +261,7 @@ final class FirstRunModel: ObservableObject {
         self.download = download
         self.cleanupFailedDownload = cleanupFailedDownload
         self.selectEngine = selectEngine
+        self.unavailableIds = unavailableIds
         self.permissionsOnly = permissionsOnly
         self.repository = repository
         self.saveAPIKey = saveAPIKey
@@ -298,6 +302,11 @@ final class FirstRunModel: ObservableObject {
 
     var selectedInfo: SpeechModelInfo? { SpeechModelCatalog.entry(for: selectedEngineId) }
 
+    var selectedUnavailableReason: String? {
+        unavailableIds.contains(selectedEngineId)
+            ? SpeechModelChoiceCopy.unavailableReason(appName: Branding.appName, isActive: false) : nil
+    }
+
     func skipModelDownload() {
         if catalog.contains(where: { $0.id == "apple" && $0.systemManaged }) {
             selectEngine("apple")
@@ -306,6 +315,7 @@ final class FirstRunModel: ObservableObject {
     }
 
     func beginDownload() {
+        guard selectedUnavailableReason == nil else { return }
         downloading = true
         downloadError = nil
         downloadProgress = 0

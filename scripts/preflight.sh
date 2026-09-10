@@ -7,7 +7,7 @@
 #
 # The reason this exists: `swift test` is green on the DEV build, but releases break on the things
 # that ONLY exist in the notarized production artifact — TCC grants rebinding to the new signature,
-# hardened-runtime entitlements, the bundled+signed mlx.metallib (Qwen crashes without it), Gatekeeper
+# hardened-runtime entitlements, a loadable bundled+signed MLX shader library (Qwen crashes without it), Gatekeeper
 # quarantine on a fresh download, first-run onboarding, and the permission-gated trigger matrix. None
 # of that is reachable from a unit test. See docs/development/release_testing.md for the full rationale.
 #
@@ -101,6 +101,20 @@ if [ "$RESET" = 1 ]; then rm -rf "$LEDGER_DIR"; echo "cleared ledger for $RUNKEY
 
 sig_source() { echo "src"; }                                   # captured by RUNKEY (commit + dirty diff)
 sig_artifact() { [ -e "$EXE" ] && stat -f '%m.%z' "$EXE" 2>/dev/null || echo none; }
+# Content hashes (not mtime.size) of the exe, every MLX shader-library location, and the OS build.
+sig_qwen_runtime() {
+  [ -e "$EXE" ] || { echo none; return; }
+  {
+    shasum -a 256 "$EXE"
+    for f in "$APP_PATH/Contents/MacOS/mlx.metallib" "$APP_PATH/Contents/MacOS/Resources/mlx.metallib" \
+             "$APP_PATH/Contents/MacOS/Resources/default.metallib"; do
+      if [ -f "$f" ]; then shasum -a 256 "$f"; fi
+    done
+    find "$APP_PATH" -path '*mlx-swift_Cmlx.bundle*' -name default.metallib -print0 2>/dev/null \
+      | LC_ALL=C sort -z | xargs -0 shasum -a 256 2>/dev/null
+    sw_vers -buildVersion
+  } | shasum -a 256 | cut -c1-16
+}
 sig_dmg() { [ -e "$1" ] && stat -f '%m.%z' "$1" 2>/dev/null || echo none; }
 CORPUS_SIG=""   # computed lazily (needs the app binary for --list-engines)
 
@@ -127,9 +141,9 @@ led_write()  { printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$LEDGER_DIR/$1"; }
 
 only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
-# The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
-# notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-deps a-swift-test b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+# The pre-notarize phase runs only these — swift test, the Qwen3-ASR runtime check (needs only a built app),
+# and Tier B. It must NOT run the notarized-artifact Tier A checks or Tier C (human).
+PRE_CHECKS=" a-deps a-swift-test a-metallib b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -247,14 +261,15 @@ chk_a_codesign() {
 guard a-codesign "$(sig_artifact)" chk_a_codesign
 
 chk_a_metallib() {
-  [ -d "$APP_PATH" ] || { result skip "mlx.metallib — artifact missing"; return; }
-  if [ -f "$APP_PATH/Contents/MacOS/mlx.metallib" ]; then
-    result pass "mlx.metallib present beside the executable"
+  [ -d "$APP_PATH" ] || { result skip "Qwen3-ASR runtime — artifact missing"; return; }
+  if "$REPO_ROOT/scripts/validate-qwen-runtime.sh" "$EXE" >/tmp/preflight-qwen-runtime.log 2>&1; then
+    result pass "Qwen3-ASR runtime: both models runnable, MLX executes from its shader library"
   else
-    result fail "mlx.metallib MISSING — Qwen3-ASR will crash at load ('Failed to load the default metallib')"
+    tail -12 /tmp/preflight-qwen-runtime.log | sed 's/^/             /'
+    result fail "Qwen3-ASR runtime validation FAILED — see /tmp/preflight-qwen-runtime.log"
   fi
 }
-guard a-metallib "$(sig_artifact)" chk_a_metallib
+guard a-metallib "$(sig_qwen_runtime)" chk_a_metallib
 
 chk_a_plist() {
   [ -d "$APP_PATH" ] || { result skip "Info.plist — artifact missing"; return; }
@@ -379,15 +394,17 @@ section "Tier B — functional gates (automated; needs models + a quiet room)"
 chk_b_coverage() {
   local COV TESTED MISSING
   COV="$("$EXE" --config-dir "$PF_CFG" --list-engines 2>/dev/null)"
-  TESTED="$(printf '%s\n' "$COV" | awk -F'\t' '$2!="missing"{print $1}' | paste -sd, -)"
-  MISSING="$(printf '%s\n' "$COV" | awk -F'\t' '$2=="missing"{print $1}' | paste -sd, -)"
-  info "engine coverage — will test: ${TESTED:-<none installed>}"
+  [ -n "$COV" ] || { result fail "engine coverage: --list-engines printed nothing"; return; }
+  # Positive match: anything but installed/system (missing, unavailable, unrecognized) is untested.
+  TESTED="$(printf '%s\n' "$COV" | awk -F'\t' '$2=="installed"||$2=="system"{print $1}' | paste -sd, -)"
+  MISSING="$(printf '%s\n' "$COV" | awk -F'\t' '$2!="installed"&&$2!="system"{print $1" ("$2")"}' | paste -sd, -)"
+  info "engine coverage — will test: ${TESTED:-<none runnable>}"
   if [ -z "$MISSING" ]; then
-    result pass "engine coverage: every shipped engine is installed"
+    result pass "engine coverage: every shipped engine is installed and runnable"
   elif [ "${KEYSCRIBE_REQUIRE_ALL_ENGINES:-0}" = "1" ]; then
-    result fail "shipped engines NOT installed (untested): $MISSING — install them, or unset KEYSCRIBE_REQUIRE_ALL_ENGINES"
+    result fail "shipped engines NOT runnable here (untested): $MISSING — install them, or unset KEYSCRIBE_REQUIRE_ALL_ENGINES"
   else
-    result skip "shipped engines NOT installed, so UNTESTED: $MISSING (KEYSCRIBE_REQUIRE_ALL_ENGINES=1 to require full coverage)"
+    result skip "shipped engines NOT runnable here, so UNTESTED: $MISSING (KEYSCRIBE_REQUIRE_ALL_ENGINES=1 to require full coverage)"
   fi
 }
 guard b-coverage "$(corpus_sig)" chk_b_coverage
@@ -452,9 +469,28 @@ chk_b_vad_gate() {
 }
 guard b-vad-gate "$(sig_artifact)" chk_b_vad_gate
 
+# --benchmark fails on missing audio, so an incomplete corpus skips instead of failing the release.
+stt_corpus_complete() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+d = sys.argv[1]
+try:
+    clips = json.load(open(os.path.join(d, "manifest.json")))["clips"]
+except Exception:
+    sys.exit(1)
+if not clips:
+    sys.exit(1)
+sys.exit(any(not os.path.exists(os.path.join(d, c.get("file") or c["id"] + ".wav")) for c in clips))
+PY
+}
+
 chk_b_benchmark() {
   [ -f "$REPO_ROOT/corpus/stt/manifest.json" ] || { result skip "--benchmark: corpus/stt not present"; return; }
-  if timeout --foreground 2400 "$EXE" --config-dir "$PF_CFG" --benchmark "$REPO_ROOT/corpus/stt" >/tmp/preflight-bench.log 2>&1; then
+  stt_corpus_complete "$REPO_ROOT/corpus/stt" \
+    || { result skip "--benchmark: corpus/stt audio not fully recorded (wavs are gitignored) — WER NOT checked"; return; }
+  local RC=0
+  timeout --foreground 2400 "$EXE" --config-dir "$PF_CFG" --benchmark "$REPO_ROOT/corpus/stt" >/tmp/preflight-bench.log 2>&1 || RC=$?
+  if [ "$RC" = 0 ]; then
     local RES="$REPO_ROOT/corpus/stt/results.json" WORST
     [ -f "$RES" ] || { result skip "--benchmark ran but wrote no results.json"; return; }
     if ! WORST=$(python3 - "$RES" "$MAX_WER" <<'PY'
@@ -477,8 +513,8 @@ PY
       result fail "--benchmark: engines OVER the ${MAX_WER} ceiling — bias/model regression likely"
     fi
   else
-    tail -10 /tmp/preflight-bench.log
-    result fail "--benchmark errored — see /tmp/preflight-bench.log"
+    grep -E "^FAIL|^error:" /tmp/preflight-bench.log | head -20 | sed 's/^/             /'
+    result fail "--benchmark exited $RC: an engine or clip failed (1) or the run was refused (2) — see /tmp/preflight-bench.log"
   fi
 }
 guard b-benchmark "$(corpus_sig)" chk_b_benchmark

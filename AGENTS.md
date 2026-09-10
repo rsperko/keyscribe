@@ -681,7 +681,18 @@ KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorde
 107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
 Small) cluster around 5.7–6.0% biased WER; the weakest (Moonshine) is ~15%. These numbers are
 speaker/mic/room dependent — reference table + caveats in
-`docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`. The shipped list order is
+`docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`.
+
+**Corpus runner exit contract** (`--benchmark`, including `--raw` and `--streaming`, and
+`--commands-check`), one pure rule — `CorpusRunVerdict` / `EngineSelection` in KeyScribeKit: **0** every
+expected engine × clip ran; **1** an engine failed to load (including an unavailable Qwen) or a clip's
+audio was missing or failed to transcribe — a `FAIL — <engine>[ <clip>]: <reason>` line each, and that
+engine's `results.json` row is **removed**, never left showing its last good run; **2** the invocation was
+wrong — an unreadable manifest, or an `--engines` id that is unknown, not installed, quarantined, or not
+constructible on this OS — and nothing is run or written. `--commands-check` also refuses to establish a
+baseline from an incomplete run. A system-managed engine that fails to load (Apple Speech offline) now
+fails the run rather than being skipped. `--list-engines` reports `unavailable` ahead of every install
+state. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
 "Recommended" badge on the small default.
@@ -979,10 +990,38 @@ this class of breakage is invisible locally and only ever reported by downstream
   directly and re-resolve; check `git diff Package.resolved` for a vanished Sparkle block before committing.
 
 **MLX metallib is a hard runtime requirement — and the kernel set is load-bearing.** Qwen3-ASR (MLX)
-crashes ("Failed to load the default metallib") without `mlx.metallib` beside the executable, because
-SwiftPM's **native** build system does not compile `.metal` sources. `scripts/build-mlx-metallib.sh`
-builds it and `make-app.sh` bundles+signs it into the `.app`; the **Metal Toolchain**
-(`xcodebuild -downloadComponent MetalToolchain`) is a build-time prereq. **A downstream build through
+terminates the process ("Failed to load the default metallib", via mlx-c's `exit(-1)` / mlx-swift's
+`fatalError`) without a loadable shader library, because SwiftPM's **native** build system does not
+compile `.metal` sources. `scripts/build-mlx-metallib.sh` builds it and `make-app.sh` bundles+signs it
+into the `.app`. **The Metal Toolchain is required for every variant (dev, custom, release) and every
+shader failure is fatal**: `make-app.sh` probes the toolchain with `build-mlx-metallib.sh --probe`
+(compile + link a one-line kernel — never `xcrun -f metal`, which finds Xcode 26's "missing Metal
+Toolchain" stub), assembles into `.build/make-app.XXXXXX/stage`, runs `scripts/validate-qwen-runtime.sh`
+on the staged app (both Qwen ids `installed`/`missing`, `--mlx-smoke` exit 0 — the same script preflight's
+`a-metallib` runs), and only then swaps it in with two renames; a left-behind `.build/make-app.*/backup`
+makes the next run refuse, and nothing ever deletes it. A deliberately reduced build without Qwen may
+become an explicit option later — never a failure side effect.
+**The runtime guard is the second line, and both its order and its test are load-bearing.**
+`MLXShaderLibrary` walks MLX's own lookup order (`device.cpp` `load_default_library`: `exe/mlx.metallib`,
+`exe/Resources/mlx.metallib`, the main bundle's `mlx-swift_Cmlx.bundle`, the resource dir's
+`mlx-swift_Cmlx.bundle`, `exe/Resources/default.metallib`) and picks the first library
+`MTLDevice.makeLibrary(URL:)` opens — **never `fileExists`**, which a truncated library passes. It
+deliberately does not model MLX's dynamic-framework-by-identifier lookup or its CWD fallback (it assumes
+Cmlx is linked statically, so MLX's `dladdr` directory is the executable's); a build relying on either
+reads as unavailable. `Qwen3ASREngine`'s load throws `EngineUnavailable.shaderLibraryUnloadable` as its
+**first statement** — ahead of `fromPretrained` (which calls `MLX.Memory.snapshot()` before downloading
+anything) and ahead of the `allowRepair` catch, which deletes the install when a load throws. **Don't use
+`withError` to recover from this initialization failure**: continuing past it runs on invalid placeholders
+and can poison `Stream.gpu`. Availability is `SpeechEngine.unavailability`, a protocol **requirement** (so
+`SerializedEngine` forwards it — an extension default alone would mask the base) and deliberately separate
+from install state: preload, press, download, select, and self-test check it, and Speech Models shows the
+model disabled and explained with its files still sized and deletable. **Never route unavailability through
+`InstalledEngineFilter`** (every runner shares it, so the engine would silently vanish from gates), **through
+`ModelHealthStore`, or into a `.failed` self-test verdict** — `model-health.json` lives in the SHARED models
+dir, so a failed verdict from one build quarantines Qwen in every variant, production included.
+`--mlx-smoke` is subprocess-only: a probe/MLX disagreement kills the process, and that death is the signal.
+**Never use Qwen ids as generic download fixtures in tests** — whether they are available depends on the
+test process's shader library. **A downstream build through
 an Xcode project needs none of this** — Xcode's build engine compiles those shaders itself into
 `mlx-swift_Cmlx.bundle/default.metallib`, which MLX finds via its SwiftPM-bundle lookup
 (`swift build --build-system swiftbuild` does the same, and is the eventual replacement for the script).

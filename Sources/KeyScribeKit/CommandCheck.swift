@@ -87,11 +87,13 @@ public struct CommandCheckReport: Equatable, Sendable {
         public let clean: Int
         public let total: Int
         public let loaded: Bool
-        public init(id: String, clean: Int, total: Int, loaded: Bool) {
+        public let failedClips: [String]
+        public init(id: String, clean: Int, total: Int, loaded: Bool, failedClips: [String] = []) {
             self.id = id
             self.clean = clean
             self.total = total
             self.loaded = loaded
+            self.failedClips = failedClips
         }
     }
 
@@ -101,6 +103,10 @@ public struct CommandCheckReport: Equatable, Sendable {
     // Guards against a green result that only means "nothing ran": a missing corpus or uninstalled
     // models must not read as a pass.
     public var ranCount: Int { engines.filter { $0.loaded && $0.total > 0 }.count }
+
+    public var isComplete: Bool {
+        ranCount > 0 && engines.allSatisfy { $0.loaded && $0.failedClips.isEmpty }
+    }
 
     public func diff(against baseline: CommandCheckBaseline) -> CommandCheckDiff {
         var regressions: [CommandCheckDiff.Change] = []
@@ -112,7 +118,11 @@ public struct CommandCheckReport: Equatable, Sendable {
                 regressions.append(.init(id: e.id, baseline: base.clean, current: e.clean, total: e.total))
             }
         }
-        return CommandCheckDiff(regressions: regressions, stale: stale, ranCount: ranCount)
+        return CommandCheckDiff(
+            regressions: regressions, stale: stale,
+            unloadable: engines.filter { !$0.loaded }.map(\.id),
+            clipFailures: engines.filter { $0.loaded && !$0.failedClips.isEmpty }.map(\.id),
+            ranCount: ranCount)
     }
 }
 
@@ -147,7 +157,11 @@ public struct CommandCheckDiff: Equatable, Sendable {
     public var regressions: [Change]
     // Engines whose clip count no longer matches the baseline — the corpus changed, so re-baseline.
     public var stale: [String]
+    public var unloadable: [String]
+    public var clipFailures: [String]
     public var ranCount: Int
 
-    public var passed: Bool { regressions.isEmpty && stale.isEmpty && ranCount > 0 }
+    public var passed: Bool {
+        regressions.isEmpty && stale.isEmpty && unloadable.isEmpty && clipFailures.isEmpty && ranCount > 0
+    }
 }

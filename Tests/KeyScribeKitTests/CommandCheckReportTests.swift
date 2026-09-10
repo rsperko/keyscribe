@@ -59,9 +59,34 @@ struct CommandCheckReportTests {
     @Test func baselineRoundTripsFromAReport() {
         let report = CommandCheckReport(engines: [
             .init(id: "parakeet", clean: 28, total: 35, loaded: true),
-            .init(id: "notinstalled", clean: 0, total: 0, loaded: false),
+            .init(id: "whisper", clean: 24, total: 35, loaded: true),
         ])
-        let baseline = CommandCheckBaseline.from(report)
-        #expect(baseline.engines == ["parakeet": .init(clean: 28, total: 35)])
+        #expect(report.isComplete)
+        #expect(CommandCheckBaseline.from(report).engines == [
+            "parakeet": .init(clean: 28, total: 35), "whisper": .init(clean: 24, total: 35),
+        ])
+    }
+
+    @Test func anInstalledEngineThatCannotLoadFails() {
+        let report = CommandCheckReport(engines: [
+            .init(id: "parakeet", clean: 28, total: 35, loaded: true),
+            .init(id: "unloadable", clean: 0, total: 0, loaded: false),
+        ])
+        let baseline = CommandCheckBaseline(engines: ["parakeet": .init(clean: 28, total: 35)])
+        let diff = report.diff(against: baseline)
+        #expect(!diff.passed)
+        #expect(diff.unloadable == ["unloadable"])
+        #expect(!report.isComplete)
+    }
+
+    @Test func aClipThatCouldNotBeTranscribedFails() {
+        let report = CommandCheckReport(engines: [
+            .init(id: "parakeet", clean: 28, total: 35, loaded: true, failedClips: ["np_period"]),
+        ])
+        let baseline = CommandCheckBaseline(engines: ["parakeet": .init(clean: 28, total: 35)])
+        let diff = report.diff(against: baseline)
+        #expect(!diff.passed)
+        #expect(diff.clipFailures == ["parakeet"])
+        #expect(!report.isComplete)
     }
 }

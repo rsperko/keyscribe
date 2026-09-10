@@ -7,6 +7,8 @@ enum SpeechModelChoicePrimaryAction: Equatable {
     case downloading
     case testing
     case testAgain
+    case useUnavailable
+    case downloadUnavailable
 }
 
 enum SpeechModelChoiceCopy {
@@ -27,13 +29,25 @@ enum SpeechModelChoiceCopy {
         }
     }
 
+    static let menuUnavailableReason = "can’t run in this build"
+
+    static func unavailableReason(appName: String, isActive: Bool) -> String {
+        let cause = "This build of \(appName) can’t load the GPU shaders this model needs."
+        return isActive
+            ? "\(cause) Choose another model to keep dictating."
+            : "\(cause) Rebuild \(appName) with the Metal Toolchain installed to use it."
+    }
+
     static func primaryAction(
         isActive: Bool,
         isUsable: Bool,
+        isInstalled: Bool,
+        isUnavailable: Bool,
         isDownloading: Bool,
         isVerifying: Bool,
         verificationFailed: Bool
     ) -> SpeechModelChoicePrimaryAction {
+        if isUnavailable { return isInstalled ? .useUnavailable : .downloadUnavailable }
         if isDownloading { return .downloading }
         if isVerifying { return .testing }
         if verificationFailed { return .testAgain }

@@ -14,6 +14,8 @@ final class SpeechModelsModel: ObservableObject {
         var id: String { info.id }
         let isActive: Bool
         let isUsable: Bool
+        let isInstalled: Bool
+        let unavailableReason: String?
         let downloadFraction: Double?
         let downloadPhase: String?
         let verifying: Bool
@@ -27,6 +29,11 @@ final class SpeechModelsModel: ObservableObject {
         // accepting a click and answering with an error. Covers the owner too: its Test/Reinstall/Delete
         // must not stay clickable while its own verification is running.
         let operationInFlight: Bool
+
+        var isOnThisMac: Bool { isUsable || (isInstalled && unavailableReason != nil) }
+        var canTest: Bool { isUsable }
+        var canReinstall: Bool { verificationFailed && !info.systemManaged && unavailableReason == nil }
+        var canDelete: Bool { !info.systemManaged && (isUsable || verificationFailed || isInstalled) }
     }
 
     @Published private(set) var rows: [Row] = []
@@ -45,10 +52,11 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     // On This Mac holds every usable model — the system-managed Apple engine is always usable, so it
-    // lives here too. Available to Download holds the rest: pristine catalog entries, a row
-    // mid-download/verify, and a quarantined failure, until it verifies usable and promotes.
-    var onThisMacRows: [Row] { rows.filter(\.isUsable) }
-    var availableRows: [Row] { rows.filter { !$0.isUsable } }
+    // lives here too — plus an installed model this build cannot run, so its files stay visible and
+    // deletable. Available to Download holds the rest: pristine catalog entries, a row mid-download/verify,
+    // and a quarantined failure, until it verifies usable and promotes.
+    var onThisMacRows: [Row] { rows.filter(\.isOnThisMac) }
+    var availableRows: [Row] { rows.filter { !$0.isOnThisMac } }
 
     private var set: SpeechModelSet
     private var downloading: [String: ModelLoadProgress] = [:]
@@ -103,6 +111,7 @@ final class SpeechModelsModel: ObservableObject {
         deferWhileBusy: @escaping (@escaping () -> Void) -> Void = { $0() },
         initialInstalledIds: Set<String>? = nil,
         initialFailedIds: Set<String>? = nil,
+        unavailableIds: Set<String> = [],
         removeFiles: @escaping (String) async throws -> Void = { id in
             try await Task.detached(priority: .utility) {
                 try ModelInstallStore.removeFiles(for: id)
@@ -129,7 +138,8 @@ final class SpeechModelsModel: ObservableObject {
             catalog: EngineRegistry.availableCatalog,
             installed: initialInstalledIds ?? ModelInstallStore.installedIds(),
             activeId: activeId,
-            failed: initialFailedIds ?? ModelHealthStore.failedIds())
+            failed: initialFailedIds ?? ModelHealthStore.failedIds(),
+            unavailable: unavailableIds)
         refreshSizes()
         rebuild()
     }
@@ -140,7 +150,7 @@ final class SpeechModelsModel: ObservableObject {
         sizeRefreshGeneration &+= 1
         let generation = sizeRefreshGeneration
         let ids = EngineRegistry.availableCatalog
-            .filter { !$0.systemManaged && (set.isUsable($0.id) || set.isFailed($0.id)) }
+            .filter { set.isInstalled($0.id) || (!$0.systemManaged && set.isFailed($0.id)) }
             .map(\.id)
         Task.detached(priority: .utility) { [weak self] in
             var sizes: [String: Int64] = [:]
@@ -203,7 +213,7 @@ final class SpeechModelsModel: ObservableObject {
     // `alreadyOwnsOperation` is the reinstall handoff: that flow claimed the guard before deleting and keeps
     // it through the redownload, so it must not try to claim it a second time against itself.
     private func startDownload(_ id: String, alreadyOwnsOperation: Bool) {
-        guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id),
+        guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id), !set.isUnavailable(id),
             SpeechModelCatalog.entry(for: id)?.systemManaged == false else { return }
         guard alreadyOwnsOperation || claimModelOperation(id) else {
             errors[id] = "Another model is still installing. Try again when it finishes."
@@ -257,7 +267,7 @@ final class SpeechModelsModel: ObservableObject {
     }
 
     func test(_ id: String) {
-        guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id) else { return }
+        guard downloading[id] == nil, !verifying.contains(id), !deleting.contains(id), !set.isUnavailable(id) else { return }
         guard claimModelOperation(id) else {
             errors[id] = "Another model is still installing. Try again when it finishes."
             rebuild()
@@ -268,7 +278,7 @@ final class SpeechModelsModel: ObservableObject {
 
     // Wipes the bad install; the redownload re-verifies.
     func reinstall(_ id: String) {
-        guard SpeechModelCatalog.entry(for: id)?.systemManaged == false,
+        guard SpeechModelCatalog.entry(for: id)?.systemManaged == false, !set.isUnavailable(id),
               !deleting.contains(id), !verifying.contains(id), downloading[id] == nil else { return }
         guard claimModelOperation(id) else {
             errors[id] = "Another model is still installing. Try again when it finishes."
@@ -488,17 +498,21 @@ final class SpeechModelsModel: ObservableObject {
         let failed = set.isFailed(info.id)
         // Failed models are quarantined (not usable) but stay on disk — size them too so the row can show
         // what deleting would reclaim.
-        let onDisk = !info.systemManaged && (set.isUsable(info.id) || failed) && downloading[info.id] == nil
+        let onDisk = (set.isInstalled(info.id) || (!info.systemManaged && failed)) && downloading[info.id] == nil
+        let isActive = set.activeId == info.id
         return Row(
             info: info,
-            isActive: set.activeId == info.id,
+            isActive: isActive,
             isUsable: set.isUsable(info.id),
+            isInstalled: set.isInstalled(info.id),
+            unavailableReason: set.isUnavailable(info.id)
+                ? SpeechModelChoiceCopy.unavailableReason(appName: Branding.appName, isActive: isActive) : nil,
             downloadFraction: deleting.contains(info.id) ? 0 : downloading[info.id]?.fraction,
             downloadPhase: deleting.contains(info.id) ? "Removing…" : downloading[info.id]?.phase,
             verifying: verifying.contains(info.id),
             verificationFailed: failed,
             testPassed: verifiedOk.contains(info.id),
-            errorText: errors[info.id] ?? (failed ? Self.failedMessage(systemManaged: info.systemManaged) : nil),
+            errorText: errors[info.id] ?? (failed && !set.isUnavailable(info.id) ? Self.failedMessage(systemManaged: info.systemManaged) : nil),
             installedBytes: onDisk ? installedSizes[info.id] : nil,
             recognitionBiasOn: stt.recognitionBiasEnabled(for: info),
             operationInFlight: modelOperationOwner != nil)

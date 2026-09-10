@@ -109,7 +109,7 @@ struct SpeechModelsView: View {
 
     private func choiceDetail(_ row: SpeechModelsModel.Row) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            if !row.isUsable {
+            if !row.isOnThisMac {
                 Text("AVAILABLE TO DOWNLOAD")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -140,6 +140,10 @@ struct SpeechModelsView: View {
             }
             .font(.callout)
 
+            if let reason = row.unavailableReason {
+                IssueText(reason, severity: row.isActive ? .failure : .advisory, font: .callout)
+            }
+
             if let error = row.errorText {
                 IssueText(error, font: .callout)
             }
@@ -163,6 +167,8 @@ struct SpeechModelsView: View {
         switch SpeechModelChoiceCopy.primaryAction(
             isActive: row.isActive,
             isUsable: row.isUsable,
+            isInstalled: row.isInstalled,
+            isUnavailable: row.unavailableReason != nil,
             isDownloading: row.downloadFraction != nil,
             isVerifying: row.verifying,
             verificationFailed: row.verificationFailed
@@ -194,13 +200,23 @@ struct SpeechModelsView: View {
         case .testAgain:
             Button("Test Again") { model.test(row.id) }
                 .accessibilityIdentifier(AccessibilityID.Settings.Speech.testAgain(row.id))
+        case .useUnavailable:
+            Button("Use This Model") {}
+                .buttonStyle(.borderedProminent)
+                .disabled(true)
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
+        case .downloadUnavailable:
+            Button("Download") {}
+                .buttonStyle(.borderedProminent)
+                .disabled(true)
+                .accessibilityIdentifier(AccessibilityID.Settings.Speech.primaryAction(row.id))
         }
     }
 
     @ViewBuilder private func modelActions(for row: SpeechModelsModel.Row) -> some View {
-        let canTest = row.isUsable
-        let canReinstall = row.verificationFailed && !row.info.systemManaged
-        let canDelete = !row.info.systemManaged && (row.isUsable || row.verificationFailed)
+        let canTest = row.canTest
+        let canReinstall = row.canReinstall
+        let canDelete = row.canDelete
         VStack(alignment: .leading, spacing: 12) {
             if row.info.supportsRecognitionBias {
                 Toggle("Use dictionary during recognition", isOn: recognitionBiasBinding(for: row))
@@ -257,15 +273,19 @@ struct SpeechModelsView: View {
     }
 
     // Advanced (test / reinstall / delete / recognition bias) belongs only to a real local install — a
-    // usable model or a quarantined failure with files still on disk. A pristine catalog preview shows
-    // none of it, so recognition-bias alone no longer surfaces the section.
+    // usable model, or a quarantined or unrunnable one with files still on disk. A pristine catalog preview
+    // shows none of it, so recognition-bias alone no longer surfaces the section.
     private func hasModelActions(_ row: SpeechModelsModel.Row) -> Bool {
-        row.isUsable || (!row.info.systemManaged && row.verificationFailed)
+        row.isUsable || (!row.info.systemManaged && (row.verificationFailed || row.isInstalled))
     }
 
     // A row carries either a colored state line (installed/in-flight models) or a gray metadata subtitle
     // (a pristine catalog entry — "English · 466 MB", never a redundant "Download available").
     private func listStatus(_ row: SpeechModelsModel.Row) -> PaneRowStatus? {
+        if row.unavailableReason != nil {
+            return PaneRowStatus(
+                text: "Needs attention", systemImage: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
+        }
         if row.isActive {
             return PaneRowStatus(text: "Current", systemImage: "checkmark.seal.fill", style: AnyShapeStyle(.tint))
         }
@@ -300,9 +320,9 @@ struct SpeechModelsView: View {
     private func storageLabel(_ row: SpeechModelsModel.Row) -> String {
         if row.info.systemManaged { return "Built into macOS" }
         let bytes = row.installedBytes ?? row.info.approxDownloadBytes
-        // A quarantined (verificationFailed) model still has its files on disk even though it isn't
-        // usable — "download" would wrongly imply nothing is stored.
-        let label = (row.isUsable || row.verificationFailed) ? "on disk" : "download"
+        // A quarantined or unrunnable model still has its files on disk even though it isn't usable —
+        // "download" would wrongly imply nothing is stored.
+        let label = (row.isUsable || row.verificationFailed || row.isInstalled) ? "on disk" : "download"
         return "\(ByteCountFormatter.fileStyle.string(fromByteCount: bytes)) \(label)"
     }
 

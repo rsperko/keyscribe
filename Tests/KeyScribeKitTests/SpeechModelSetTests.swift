@@ -168,3 +168,30 @@ struct SpeechModelSetTests {
         #expect(!s.isFailed("whisper"))
     }
 }
+
+struct SpeechModelSetAvailabilityTests {
+    @Test func anInstalledButUnavailableModelIsInstalledNotUsableAndDeletable() {
+        var s = SpeechModelSet(
+            catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "parakeet", unavailable: ["whisper"])
+        #expect(s.isInstalled("whisper"))
+        #expect(!s.isUsable("whisper"))
+        #expect(throws: ModelSelectionError.notUsable("whisper")) { try s.select("whisper") }
+        #expect(s.deletionConsequence("whisper") == .routine)
+    }
+
+    @Test func installStateIsIndependentOfRunnability() {
+        let s = SpeechModelSet(
+            catalog: realCatalog, installed: ["parakeet"], activeId: "parakeet",
+            failed: ["parakeet"], unavailable: ["whisper"])
+        #expect(s.isInstalled("parakeet"))
+        #expect(!s.isInstalled("whisper"))
+        #expect(!s.isInstalled("apple"))
+    }
+
+    @Test func anUnavailableModelIsNeverChosenAsTheReplacement() {
+        var s = SpeechModelSet(
+            catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "parakeet", unavailable: ["whisper"])
+        s.delete("parakeet")
+        #expect(s.activeId != "whisper")
+    }
+}

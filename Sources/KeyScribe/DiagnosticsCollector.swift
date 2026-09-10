@@ -57,9 +57,12 @@ enum DiagnosticsCollector {
     private static func speechState(settings: Settings?) -> DiagnosticsReport.Speech {
         let installed = ModelInstallStore.installedIds()
         let systemManaged = SpeechModelCatalog.all.filter(\.systemManaged).map(\.id)
+        let unavailable = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
+            .filter { $0.unavailability != nil }.map(\.id)
         return .init(
             selectedEngine: settings?.stt.engine ?? Settings.defaults.stt.engine,
-            installed: (installed.union(systemManaged)).sorted())
+            installed: (installed.union(systemManaged)).sorted(),
+            unavailable: unavailable.sorted())
     }
 
     private static func modeLine(_ mode: Mode) -> DiagnosticsReport.ModeLine {

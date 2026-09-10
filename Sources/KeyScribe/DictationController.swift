@@ -443,7 +443,8 @@ final class DictationController {
     }
 
     func preloadActiveEngineIfNeeded() {
-        guard InstalledEngineFilter.shouldRun(engineId: activeEngine.id) else { return }
+        guard activeEngine.unavailability == nil,
+              InstalledEngineFilter.shouldRun(engineId: activeEngine.id) else { return }
         warmActiveEngine()
         prewarmPresenceDetector()
     }
@@ -526,6 +527,10 @@ final class DictationController {
             return
         }
         let engine = provider.active
+        guard engine.unavailability == nil else {
+            finishError("\(engine.displayName) can’t run in this build", action: .openSpeechModels)
+            return
+        }
         guard activeEngineUsable(engine) else {
             finishError("The selected speech model is not installed", action: nil)
             return

@@ -25,6 +25,8 @@ final class SpeechModelsModelTests: XCTestCase {
         verifyResult: ModelVerificationResult = .skipped,
         activeId: String = "parakeet-tdt-ctc-110m",
         initialFailedIds: Set<String>? = nil,
+        installedIds: Set<String> = ["parakeet-tdt-ctc-110m", "parakeet"],
+        unavailableIds: Set<String> = [],
         deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void = { _, _ in }
     ) -> SpeechModelsModel {
@@ -37,8 +39,9 @@ final class SpeechModelsModelTests: XCTestCase {
             onActiveChange: { recorder.activeChanges.append($0) },
             onDictionaryMatchingChange: { _ in },
             deferWhileBusy: deferWhileBusy ?? { $0() },
-            initialInstalledIds: ["parakeet-tdt-ctc-110m", "parakeet"],
+            initialInstalledIds: installedIds,
             initialFailedIds: initialFailedIds,
+            unavailableIds: unavailableIds,
             removeFiles: {
                 recorder.removed.append($0)
                 if recorder.removeShouldFail { throw Recorder.Failure() }
@@ -93,6 +96,13 @@ final class SpeechModelsModelTests: XCTestCase {
             await Task.yield()
         }
         XCTFail("timed out waiting for \(message)", file: file, line: line)
+    }
+
+    private final class DownloadCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _ids: [String] = []
+        var ids: [String] { lock.withLock { _ids } }
+        func record(_ id: String) { lock.withLock { _ids.append(id) } }
     }
 
     private func row(_ id: String, in model: SpeechModelsModel) throws -> SpeechModelsModel.Row {
@@ -324,6 +334,109 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.evicted, ["parakeet"])
     }
 
+    func testAnInstalledModelThisBuildCannotRunStaysOnThisMacAndDeletable() async throws {
+        let recorder = Recorder()
+        let model = makeModel(
+            recorder: recorder, installedIds: ["parakeet-tdt-ctc-110m", "whisper"], unavailableIds: ["whisper"])
+
+        let whisper = try row("whisper", in: model)
+        XCTAssertFalse(whisper.isUsable)
+        XCTAssertTrue(whisper.isInstalled)
+        XCTAssertNotNil(whisper.unavailableReason)
+        XCTAssertTrue(model.onThisMacRows.contains { $0.id == "whisper" })
+        XCTAssertFalse(model.availableRows.contains { $0.id == "whisper" })
+
+        model.requestDelete("whisper")
+        XCTAssertEqual(model.pendingDeleteId, "whisper")
+        model.cancelDelete()
+    }
+
+    func testAModelThisBuildCannotRunIsNeverSelectedTestedDownloadedOrReinstalled() async throws {
+        let recorder = Recorder()
+        let downloads = DownloadCounter()
+        let model = makeModel(
+            recorder: recorder, verifyResult: .failed,
+            installedIds: ["parakeet-tdt-ctc-110m", "whisper"], unavailableIds: ["whisper", "moonshine-base-en"],
+            download: { id, _ in downloads.record(id) })
+
+        model.select("whisper")
+        model.test("whisper")
+        model.startDownload("moonshine-base-en")
+        model.reinstall("whisper")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.activeChanges, [])
+        XCTAssertEqual(recorder.markedFailed, [])
+        XCTAssertEqual(recorder.markedInstalled, [])
+        XCTAssertEqual(recorder.markedRemoved, [])
+        XCTAssertEqual(recorder.removed, [])
+        XCTAssertEqual(recorder.evicted, [])
+        XCTAssertEqual(downloads.ids, [])
+        XCTAssertNotNil(try row("moonshine-base-en", in: model).unavailableReason)
+    }
+
+    func testASelectedModelThisBuildCannotRunLeavesNoUsableActiveEngine() {
+        let model = makeModel(
+            recorder: Recorder(), activeId: "whisper",
+            installedIds: ["parakeet-tdt-ctc-110m", "whisper"], unavailableIds: ["whisper"])
+        XCTAssertFalse(model.activeEngineUsable)
+        XCTAssertTrue(model.rows.first { $0.id == "whisper" }?.isActive == true)
+    }
+
+    func testAQuarantinedModelThisBuildCannotRunOffersOnlyDelete() throws {
+        let model = makeModel(
+            recorder: Recorder(), initialFailedIds: ["whisper"],
+            installedIds: ["parakeet-tdt-ctc-110m", "whisper"], unavailableIds: ["whisper"])
+
+        let whisper = try row("whisper", in: model)
+        XCTAssertFalse(whisper.canTest)
+        XCTAssertFalse(whisper.canReinstall)
+        XCTAssertTrue(whisper.canDelete)
+        XCTAssertNil(whisper.errorText)
+        XCTAssertNotNil(whisper.unavailableReason)
+    }
+
+    func testAQuarantinedModelThisBuildCanRunStillOffersReinstall() throws {
+        let model = makeModel(
+            recorder: Recorder(), initialFailedIds: ["whisper"],
+            installedIds: ["parakeet-tdt-ctc-110m", "whisper"])
+
+        let whisper = try row("whisper", in: model)
+        XCTAssertTrue(whisper.canReinstall)
+        XCTAssertTrue(whisper.canDelete)
+        XCTAssertNotNil(whisper.errorText)
+    }
+
+    func testUnavailableCopyStatesTheCauseAndOneNextAction() {
+        let selected = SpeechModelChoiceCopy.unavailableReason(appName: "KeyScribeDev", isActive: true)
+        let other = SpeechModelChoiceCopy.unavailableReason(appName: "KeyScribeDev", isActive: false)
+        XCTAssertEqual(
+            selected, "This build of KeyScribeDev can’t load the GPU shaders this model needs. Choose another model to keep dictating.")
+        XCTAssertEqual(
+            other, "This build of KeyScribeDev can’t load the GPU shaders this model needs. Rebuild KeyScribeDev with the Metal Toolchain installed to use it.")
+        for copy in [selected, other, SpeechModelChoiceCopy.menuUnavailableReason] {
+            XCTAssertFalse(copy.localizedCaseInsensitiveContains("engine"))
+        }
+    }
+
+    func testThePrimaryActionOfAModelThisBuildCannotRunIsItsDisabledLifecycleAction() {
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.primaryAction(
+                isActive: true, isUsable: false, isInstalled: true, isUnavailable: true,
+                isDownloading: false, isVerifying: false, verificationFailed: false),
+            .useUnavailable)
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.primaryAction(
+                isActive: false, isUsable: false, isInstalled: false, isUnavailable: true,
+                isDownloading: false, isVerifying: false, verificationFailed: false),
+            .downloadUnavailable)
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.primaryAction(
+                isActive: false, isUsable: true, isInstalled: true, isUnavailable: false,
+                isDownloading: false, isVerifying: false, verificationFailed: false),
+            .use)
+    }
+
     // Two large engines loading at once is several GB of avoidable concurrent residency, so only one
     // memory-heavy model operation runs at a time. Enforced in the model, not just by disabling buttons.
     func testASecondInstallIsRefusedWhileOneIsStillLoading() async throws {
@@ -335,12 +448,12 @@ final class SpeechModelsModelTests: XCTestCase {
 
         model.startDownload("whisper")
         await settleTasks()
-        model.startDownload("qwen3-asr-1.7b")
+        model.startDownload("moonshine-base-en")
         await settleTasks()
 
         XCTAssertNotNil(try row("whisper", in: model).downloadFraction)
-        XCTAssertNil(try row("qwen3-asr-1.7b", in: model).downloadFraction)
-        XCTAssertNotNil(try row("qwen3-asr-1.7b", in: model).errorText)
+        XCTAssertNil(try row("moonshine-base-en", in: model).downloadFraction)
+        XCTAssertNotNil(try row("moonshine-base-en", in: model).errorText)
 
         gate.release()
         await waitUntil({ (try? self.row("whisper", in: model).downloadFraction) == nil },
@@ -353,11 +466,11 @@ final class SpeechModelsModelTests: XCTestCase {
 
         model.startDownload("whisper")
         await settleTasks()
-        model.startDownload("qwen3-asr-1.7b")
+        model.startDownload("moonshine-base-en")
         await settleTasks()
 
         // Both attempts reached their partial-file cleanup, so the second one really started.
-        XCTAssertEqual(recorder.removed, ["whisper", "qwen3-asr-1.7b"])
+        XCTAssertEqual(recorder.removed, ["whisper", "moonshine-base-en"])
     }
 
     func testTheInstallGuardIsReleasedAfterVerification() async throws {
@@ -366,10 +479,10 @@ final class SpeechModelsModelTests: XCTestCase {
 
         model.startDownload("whisper")
         await settleTasks()
-        model.startDownload("qwen3-asr-1.7b")
+        model.startDownload("moonshine-base-en")
         await settleTasks()
 
-        XCTAssertEqual(recorder.markedInstalled, ["whisper", "qwen3-asr-1.7b"])
+        XCTAssertEqual(recorder.markedInstalled, ["whisper", "moonshine-base-en"])
     }
 
     // The marker write can fail after a PASS. That path returns early, so it has to hand the guard back or
@@ -382,10 +495,10 @@ final class SpeechModelsModelTests: XCTestCase {
         model.startDownload("whisper")
         await settleTasks()
         recorder.markInstalledShouldFail = false
-        model.startDownload("qwen3-asr-1.7b")
+        model.startDownload("moonshine-base-en")
         await settleTasks()
 
-        XCTAssertTrue(recorder.markedInstalled.contains("qwen3-asr-1.7b"))
+        XCTAssertTrue(recorder.markedInstalled.contains("moonshine-base-en"))
     }
 
     // Delete evicts the engine and removes its weights, so it must not run against a model that is still
@@ -586,17 +699,17 @@ final class SpeechModelsModelTests: XCTestCase {
     func testChoiceActionUsesOneDirectActionPerModel() {
         XCTAssertEqual(
             SpeechModelChoiceCopy.primaryAction(
-                isActive: true, isUsable: true, isDownloading: false,
+                isActive: true, isUsable: true, isInstalled: true, isUnavailable: false, isDownloading: false,
                 isVerifying: false, verificationFailed: false),
             .current)
         XCTAssertEqual(
             SpeechModelChoiceCopy.primaryAction(
-                isActive: false, isUsable: true, isDownloading: false,
+                isActive: false, isUsable: true, isInstalled: true, isUnavailable: false, isDownloading: false,
                 isVerifying: false, verificationFailed: false),
             .use)
         XCTAssertEqual(
             SpeechModelChoiceCopy.primaryAction(
-                isActive: false, isUsable: false, isDownloading: false,
+                isActive: false, isUsable: false, isInstalled: false, isUnavailable: false, isDownloading: false,
                 isVerifying: false, verificationFailed: false),
             .download)
     }

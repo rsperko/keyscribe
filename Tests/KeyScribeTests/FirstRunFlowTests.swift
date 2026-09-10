@@ -13,12 +13,14 @@ struct FirstRunFlowTests {
     private func makeModel(
         supportDir: URL,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void = { _, _ in },
+        unavailableIds: Set<String> = [],
         onComplete: @escaping () -> Void = {}
     ) -> FirstRunModel {
         FirstRunModel(
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: download,
             selectEngine: { _ in },
+            unavailableIds: unavailableIds,
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
             onComplete: onComplete)
     }
@@ -27,6 +29,30 @@ struct FirstRunFlowTests {
         var direct = Mode(id: Mode.directId, name: "Plain Dictation")
         direct.triggerKeys = triggerKeys
         try ModeStore.write(direct, to: modesDir)
+    }
+
+    private final class DownloadCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _count = 0
+        var count: Int { lock.withLock { _count } }
+        func record() { lock.withLock { _count += 1 } }
+    }
+
+    @Test func aModelThisBuildCannotRunIsExplainedAndNeverDownloaded() async {
+        let supportDir = tempSupportDir()
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let downloads = DownloadCounter()
+        let model = makeModel(supportDir: supportDir, download: { _, _ in downloads.record() }, unavailableIds: ["whisper"])
+
+        #expect(model.selectedUnavailableReason == nil)
+        model.selectedEngineId = "whisper"
+        #expect(model.selectedUnavailableReason != nil)
+
+        model.beginDownload()
+        await model.downloadTask?.value
+
+        #expect(downloads.count == 0)
+        #expect(model.downloading == false)
     }
 
     // MARK: 1a — reorder

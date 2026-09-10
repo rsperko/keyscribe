@@ -48,7 +48,9 @@ The sequence is short, and each step states its purpose in plain language:
 1. **One sentence on what KeyScribe does**, then a single primary action to begin.
 2. **Choose and download one on-device speech model.** Show its size and that it stays on the
    Mac; recommend the default English engine. Downloading is required — nothing can be
-   transcribed without it. Progress attaches to the choice, not a separate screen.
+   transcribed without it. Progress attaches to the choice, not a separate screen. A model this build
+   cannot run (Qwen3-ASR in a source build made without the Metal Toolchain) stays in the picker:
+   choosing it disables Download and explains why in place, as an orange advisory.
 3. **Grant Microphone, then Accessibility — in that order, each explained beside its request and
    asked just before it is first needed:** Microphone to hear you, Accessibility to detect a
    modifier-key trigger and place text. State what still works if one is declined. (A key+modifier
@@ -222,12 +224,16 @@ not to its label.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
-| Error | Plain-language failure | Single next action | Retry, open permissions, or dismiss as applicable |
+| Error | Plain-language failure | Single next action | Retry, open permissions, open Speech Models, or dismiss as applicable |
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap). The two no-speech outcomes both
 record `.noSpeech` in history; they differ only in the render — the microphone repair action appears
 only when the take's audio peak never cleared the digital-silence floor.
+
+A press while the selected model is one this build cannot run shows Error **“[model] can’t run in this
+build”** with **Open Speech Models**, before the microphone opens or the model loads — loading it would
+terminate the app.
 
 The local-only states — Recording, Transcribing, Complete, Target changed, and Error — are the
 whole HUD for a local dictation. The Ready state is the brief acknowledgment shown only when a
@@ -327,8 +333,10 @@ separate "Next dictation" row — selecting a one-shot mode is reflected here, i
 checkmark, and in the HUD acknowledgement.
 
 `Speech Model ▸` lists the **usable** (installed or system-managed) engines with the active one
-checkmarked; selecting one switches the active STT engine (and starts loading + warming it). `Manage
-Speech Models…` opens the full Speech Models settings pane for installs, deletes, and self-tests.
+checkmarked; selecting one switches the active STT engine (and starts loading + warming it). When the
+selected model is one this build cannot run, it stays listed and checkmarked but disabled, annotated
+`can’t run in this build`, so the checkmark never disappears without a reason. `Manage Speech Models…`
+opens the full Speech Models settings pane for installs, deletes, and self-tests.
 
 The menu leads with actions around the next or most recent dictation. Vocabulary follows as an
 in-the-moment correction tool. Speech model selection and History are occasional management tasks,
@@ -383,7 +391,7 @@ glance and can show simultaneously:
 
 - **Error badge — small red dot, top-left.** Shown when there is a configuration or model problem.
   *Wired to:* a malformed config, any missing required permission, an **unusable active STT model**
-  (deleted out from under us), a **mode whose shortcut can never fire** (another mode claims the same
+  (deleted out from under us, or one this build cannot run), a **mode whose shortcut can never fire** (another mode claims the same
   press written a different way, so shadowing drops this one), and the AI checks — a **dangling
   connection** (a mode names a deleted connection), a **structurally misconfigured connection** (no
   model, or OpenAI-compatible with no base URL, or token-command auth with no command), and a **failed
@@ -499,8 +507,9 @@ and microphone warm-up behavior), is pinned above the list — the same "global 
 list" placement History uses for its enable/retention controls.
 
 The left list has two persistent sections — **On This Mac** (usable/downloaded models, including the
-always-usable system engine) and **Available to Download** (catalog models not yet on disk; a model
-mid-download or verifying stays here until it verifies `Ready`, then promotes). Rows show only names
+always-usable system engine and a downloaded model this build cannot run) and **Available to Download**
+(catalog models not yet on disk; a model mid-download or verifying stays here until it verifies `Ready`,
+then promotes). Rows show only names
 plus status; there are no radio controls, per-row actions, or bottom download menu — acquisition is
 the selected model's own **Download** button. Selecting a model fills the right detail pane, under the
 shared detail header (icon + name + **Recommended** badge), with its best-use description, language
@@ -514,6 +523,16 @@ plus a single maintenance row: **Test model** and **Reinstall model** lead the r
 model** sits alone at the trailing edge in red — the destructive action is spatially separated from
 routine maintenance, never stacked with it. Exactly one active engine is visually enforced, and
 deleting it still requires confirmation.
+
+A model **this build cannot run** — Qwen3-ASR in a source build made without the Metal Toolchain, which
+lacks the GPU shaders it needs — is shown, disabled, and explained, never hidden. Its row reads **Needs
+attention** (ahead of Current); its detail shows the reason in place as an issue message — red when it is
+the selected model, orange otherwise — with one next action (choose another model, or rebuild with the
+Metal Toolchain), above its lifecycle action (**Use This Model** or **Download**), which is disabled.
+Unavailability is separate from install state: a downloaded one keeps its on-disk size, recognition
+tuning, and **Delete model**, while **Test model** and **Reinstall model** are unavailable, since both
+would load it. It is never quarantined as a failed self-test — the model is not at fault, and the
+self-test verdict is shared with every other build using the same models.
 
 ### Dictionary and Replacements
 

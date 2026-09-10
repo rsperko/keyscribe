@@ -27,7 +27,12 @@ public enum DevCLI {
                                         permissions  Remove TCC grants (Mic/Accessibility/Automation) so macOS re-prompts.
                                         all          Wipe the whole support dir + first-run flag (shared models kept).
                                         eraseAll     Like all, plus erase the variant's BYOK Keychain keys (TCC grants kept).
-              --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
+              --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit: 0 when every engine
+                                      transcribed every clip, 1 when an engine failed to load or a clip's audio was
+                                      missing or failed (one FAIL line each; that engine's results row is removed),
+                                      2 when the run was refused (unreadable manifest, or an --engines id that is
+                                      unknown, not installed, or quarantined) and nothing was written. --raw and
+                                      --streaming follow the same codes.
                 --engines <a,b,...>     Limit the benchmark run to these engine ids.
                 --raw                   Emit raw per-clip benchmark output.
                 --fuzzy                 Apply the post-STT fuzzy corrector (dict = clip bias terms) before scoring.
@@ -35,9 +40,10 @@ public enum DevCLI {
               --commands-check <dir>  Exercise every spoken command (scratch that, verbatim, insert new
                                       line/paragraph/tab, insert clipboard contents, whole-utterance
                                       replacements) across every installed engine on the recordings in <dir>
-                                      (manifest.json), then exit. Honors --engines. Informational by default.
+                                      (manifest.json), then exit. Honors --engines. Exits 1 when an engine fails to
+                                      load or a clip can't be checked, 2 when the run is refused (as --benchmark).
                 --baseline <file>       Gate against a per-engine known-good baseline: if <file> is absent it is
-                                        established from this run (exit 0); if present, exit non-zero when any
+                                        established from a complete run (exit 0); if present, exit non-zero when any
                                         engine cleans fewer clips than its baseline (a command-pipeline
                                         regression) or the clip count changed (re-baseline). Ground truth, not
                                         an absolute pass-rate — the clips are transcription-sensitive.
@@ -66,7 +72,11 @@ public enum DevCLI {
                                       transcript text, clipboard contents, or API keys.
                 --dictations <n>        How many recent dictation outcomes to include (default 10, 0 for none).
               --list-engines          Print each shipped catalog engine and whether it is installed
-                                      (installed / missing / system), then exit — coverage for the release gate.
+                                      (installed / missing / system / unavailable — present but unable to run in
+                                      this build), then exit — coverage for the release gate.
+              --mlx-smoke             Print the MLX shader library this build would load and run a kernel from it,
+                                      then exit: 0 ok, 1 no loadable library (every searched path is listed). A
+                                      terminated process means MLX rejected the library the check selected.
               --capture-probe         Drive the real capture path (record → drain → teardown) and score the
                                       result for dropped/corrupted audio you cannot hear. Feed a pure tone into
                                       the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,
@@ -183,11 +193,19 @@ public enum DevCLI {
 
         if CommandLine.arguments.contains("--list-engines") {
             let installed = ModelInstallStore.installedIds()
+            let unavailable = Set(EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
+                .filter { $0.unavailability != nil }.map(\.id))
             for e in SpeechModelCatalog.all {
-                let state = e.systemManaged ? "system" : (installed.contains(e.id) ? "installed" : "missing")
-                print("\(e.id)\t\(state)")
+                let state = EngineListState.of(
+                    systemManaged: e.systemManaged, installed: installed.contains(e.id),
+                    unavailable: unavailable.contains(e.id))
+                print("\(e.id)\t\(state.rawValue)")
             }
             exit(0)
+        }
+
+        if CommandLine.arguments.contains("--mlx-smoke") {
+            exit(MLXSmoke.run())
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--benchmark"), i + 1 < CommandLine.arguments.count {
@@ -200,16 +218,16 @@ public enum DevCLI {
             let fuzzy = CommandLine.arguments.contains("--fuzzy")
             let streaming = CommandLine.arguments.contains("--streaming")
             let done = DispatchSemaphore(value: 0)
+            let code = Atomic<Int32>(0)
             Task.detached {
-                if streaming {
-                    await BenchmarkRunner.runStreamingParity(dir: dir, only: only, raw: raw)
-                } else {
-                    await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
-                }
+                let outcome = streaming
+                    ? await BenchmarkRunner.runStreamingParity(dir: dir, only: only, raw: raw)
+                    : await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
+                code.store(outcome.exitCode, ordering: .relaxed)
                 done.signal()
             }
             done.wait()
-            exit(0)
+            exit(code.load(ordering: .relaxed))
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--rewrite-eval"), i + 1 < CommandLine.arguments.count {
@@ -263,12 +281,24 @@ public enum DevCLI {
                 baselineURL = URL(fileURLWithPath: CommandLine.arguments[b + 1])
             }
             let done = DispatchSemaphore(value: 0)
-            let ok = Atomic<Bool>(true)
+            let code = Atomic<Int32>(0)
             Task.detached {
-                let report = await CommandCheckRunner.run(dir: dir, only: only)
-                // No --baseline: informational (exit 0). With --baseline: gate — absent file establishes it from
-                // this run and passes; present file diffs and fails on any per-engine drop or a stale baseline.
-                if let url = baselineURL {
+                defer { done.signal() }
+                let report: CommandCheckReport
+                switch await CommandCheckRunner.run(dir: dir, only: only) {
+                case .invocationError(let message):
+                    FileHandle.standardError.write(Data("error: \(message) — nothing was run or written\n".utf8))
+                    code.store(2, ordering: .relaxed)
+                    return
+                case .ran(let ran):
+                    report = ran
+                }
+                for line in CommandCheckRunner.failureLines(report) { print(line) }
+                guard let url = baselineURL else {
+                    code.store(report.isComplete ? 0 : 1, ordering: .relaxed)
+                    return
+                }
+                do {
                     if let data = try? Data(contentsOf: url),
                        let baseline = try? JSONDecoder().decode(CommandCheckBaseline.self, from: data) {
                         let diff = report.diff(against: baseline)
@@ -284,20 +314,24 @@ public enum DevCLI {
                                 print("\nFAIL — baseline stale for \(diff.stale.joined(separator: ", ")) (clip count changed). Re-baseline: delete \(url.lastPathComponent) and re-run.")
                             }
                         }
-                        ok.store(diff.passed, ordering: .relaxed)
+                        code.store(diff.passed ? 0 : 1, ordering: .relaxed)
                     } else {
+                        guard report.isComplete else {
+                            print("\nFAIL — baseline NOT established: every engine must load and check every clip.")
+                            code.store(1, ordering: .relaxed)
+                            return
+                        }
                         let baseline = CommandCheckBaseline.from(report)
                         if let data = try? JSONEncoder().encode(baseline) {
                             try? data.write(to: url)
                             print("\nBASELINE ESTABLISHED → \(url.path) (\(baseline.engines.count) engines). Re-run to gate against it.")
                         }
-                        ok.store(!baseline.engines.isEmpty, ordering: .relaxed)
+                        code.store(baseline.engines.isEmpty ? 1 : 0, ordering: .relaxed)
                     }
                 }
-                done.signal()
             }
             done.wait()
-            exit(ok.load(ordering: .relaxed) ? 0 : 1)
+            exit(code.load(ordering: .relaxed))
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--samples-parity"), i + 1 < CommandLine.arguments.count {

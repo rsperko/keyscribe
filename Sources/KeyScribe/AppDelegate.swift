@@ -96,7 +96,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
         Task.detached(priority: .utility) { ModelInstallStore.deleteRetiredCtcCompanions() }
-        let hasUsableEngine = !ModelInstallStore.installedIds().isEmpty
+        let installedIds = ModelInstallStore.installedIds()
+        let hasUsableEngine = engines.contains { installedIds.contains($0.id) && $0.unavailability == nil }
             || (SpeechModelCatalog.entry(for: settings.stt.engine)?.systemManaged ?? false)
         if hasUsableEngine {
             VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
@@ -144,6 +145,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
+        hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
@@ -243,7 +245,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             deferWhileBusy: { [weak self] work in
                 guard let self else { work(); return }
                 self.controller.runWhenIdle(work)
-            })
+            },
+            unavailableIds: unavailableEngineIds)
 
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels, repository: configRepository,
@@ -662,6 +665,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             selectEngine: { [weak self] id in self?.setEngine(id) },
+            unavailableIds: unavailableEngineIds,
             onReadyToDictate: { [weak self] in
                 self?.startListening()
                 self?.controller.prewarmCapture()
@@ -813,6 +817,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var combinedConfigError: String? {
         let parts = [configError, config.configFileError].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var unavailableEngineIds: Set<String> {
+        Set(EngineRegistry.availableCatalog.map(\.id).filter { provider.engine($0)?.unavailability != nil })
     }
 
     private func currentProblems() -> [SettingsProblem] {

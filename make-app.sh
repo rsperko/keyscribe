@@ -2,7 +2,7 @@
 # Build KeyScribe into a signed KeyScribe.app (LSUIElement menu-bar app) so TCC permissions
 # (Microphone / Accessibility) attach to a stable signed identity and
 # survive rebuilds. Signs with a stable cert if one is found, else ad-hoc (TCC may reset).
-# Full from-source build / signing guide: BUILD.md.
+# A failed build never replaces the app: it is staged, signed, and validated first. Guide: BUILD.md.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -24,13 +24,18 @@ esac
 BIN=".build/release/KeyScribe"
 CONFIG="${1:-release}"
 
+# A leftover backup may be the only working app: refuse to build, and never delete it.
+for leftover in .build/make-app.*/backup; do
+  [ -e "$leftover" ] || continue
+  echo "!! A previous make-app.sh run left a backup of an app at: $leftover" >&2
+  echo "!! Move the app you want to keep into place, delete that directory, then rebuild." >&2
+  exit 1
+done
+
 # Preflight: catch the failure modes a fresh clone hits — wrong arch, missing or Command-Line-Tools-
-# only Xcode, absent Metal Toolchain — up front with an actionable message, instead of a cryptic
-# error minutes into the build. A non-arm64 / non-macOS host, a Command-Line-Tools-only toolchain, and
-# a toolchain that cannot compile SwiftUI are fatal (BUILD.md's prerequisites already require full
-# Xcode, and those failures surface minutes in as a wall of compile errors); a missing Metal
-# Toolchain only costs the optional MLX-based Qwen3-ASR engine, so it warns and continues. Full
-# guide: BUILD.md.
+# only Xcode, a toolchain that cannot compile SwiftUI, absent Metal Toolchain — up front with an
+# actionable message, instead of a cryptic error minutes into the build. All of them are fatal, for
+# every variant. Full guide: BUILD.md.
 echo "== preflight =="
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "!! KeyScribe builds only on Apple-silicon macOS (arm64). Host is $(uname -s)/$(uname -m)." >&2
@@ -80,10 +85,8 @@ if ! swiftc -typecheck "$PROBE_DIR/probe.swift" >"$PROBE_DIR/out.txt" 2>&1; then
   exit 1
 fi
 rm -rf "$PROBE_DIR"
-if ! xcrun -f metal >/dev/null 2>&1; then
-  echo "warning: Metal Toolchain not installed — Qwen3-ASR will be unavailable (other engines work)." >&2
-  echo "         Install it once with: xcodebuild -downloadComponent MetalToolchain" >&2
-fi
+# `xcrun -f metal` finds Xcode's stub even without the toolchain, so compile and link a real kernel.
+./scripts/build-mlx-metallib.sh --probe >/dev/null
 # Swift floor is enforced by Package.swift's swift-tools-version (swift build refuses an older
 # toolchain on its own) — we don't re-gate it here. This is only an informational breadcrumb: print
 # the verified-good toolchain next to what's installed, so if a toolchain-specific compiler bug ever
@@ -122,31 +125,46 @@ echo "== building KeyScribe ($CONFIG) ${BUILD_SYSTEM:+[$BUILD_SYSTEM]} =="
 swift build -c "$CONFIG" $BUILD_SYSTEM --product KeyScribe
 [ "$CONFIG" = "debug" ] && BIN=".build/debug/KeyScribe"
 
-# Qwen3-ASR runs on MLX, which hard-fails ("Failed to load the default metallib") without
-# mlx.metallib next to the executable, and the native build system does not compile Metal shaders
-# (which is why the pin above matters — it keeps this step the single source of the shipped shader
-# library instead of whatever the toolchain's default build system compiles). Build it
-# and bundle it into the .app below. Non-fatal: the other engines (Parakeet/Whisper/Apple) don't
-# need it, so a missing Metal Toolchain warns instead of blocking the build. Install it with:
-#   xcodebuild -downloadComponent MetalToolchain
+# Qwen3-ASR needs this library and the native build system compiles no Metal shaders (see the pin above).
+# Fatal: an app without it offers models that cannot run.
 echo "== building mlx.metallib (required by Qwen3-ASR) =="
-BUILD_DIR="$(pwd)/.build" ./scripts/build-mlx-metallib.sh "$CONFIG" \
-  || echo "warning: metallib build failed — Qwen3-ASR will crash at runtime (other engines unaffected)" >&2
+BUILD_DIR="$(pwd)/.build" ./scripts/build-mlx-metallib.sh "$CONFIG"
+METALLIB=".build/$CONFIG/mlx.metallib"
+[ -f "$METALLIB" ] || { echo "!! $METALLIB is missing after the shader build" >&2; exit 1; }
 
-echo "== assembling $APP =="
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/KeyScribe"
-cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-mkdir -p "$APP/Contents/Resources/Legal"
-cp LICENSE "$APP/Contents/Resources/Legal/LICENSE"
-cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/Legal/THIRD-PARTY-NOTICES.md"
-DEPENDENCY_LEGAL="$APP/Contents/Resources/Legal/Dependencies"
+# Same filesystem as the app (the swap is two renames) and fresh, so neither rename nests; cleanup
+# restores an interrupted swap.
+mkdir -p .build
+WORK="$(mktemp -d .build/make-app.XXXXXX)"
+STAGE="$WORK/stage/$APP"
+SWAPPED=0
+cleanup() {
+  if [ "$SWAPPED" = 0 ] && [ -e "$WORK/backup/$APP" ]; then
+    if [ ! -e "$APP" ] && mv "$WORK/backup/$APP" "$APP"; then
+      echo "!! interrupted while replacing the app — restored the previous $APP" >&2
+    else
+      echo "!! could not restore the previous app — it is kept at $WORK/backup/$APP" >&2
+      return
+    fi
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+echo "== assembling $APP (staged) =="
+mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
+cp "$BIN" "$STAGE/Contents/MacOS/KeyScribe"
+cp Resources/AppIcon.icns "$STAGE/Contents/Resources/AppIcon.icns"
+mkdir -p "$STAGE/Contents/Resources/Legal"
+cp LICENSE "$STAGE/Contents/Resources/Legal/LICENSE"
+cp THIRD-PARTY-NOTICES.md "$STAGE/Contents/Resources/Legal/THIRD-PARTY-NOTICES.md"
+DEPENDENCY_LEGAL="$STAGE/Contents/Resources/Legal/Dependencies"
 mkdir -p "$DEPENDENCY_LEGAL"
 for dependency in .build/checkouts/*; do
   [ -d "$dependency" ] || continue
   dependency_name="$(basename "$dependency")"
-  if [ "$dependency_name" = "Sparkle" ] && ! otool -L "$APP/Contents/MacOS/KeyScribe" 2>/dev/null | grep -q "Sparkle.framework"; then
+  if [ "$dependency_name" = "Sparkle" ] && ! otool -L "$STAGE/Contents/MacOS/KeyScribe" 2>/dev/null | grep -q "Sparkle.framework"; then
     continue
   fi
   for notice in "$dependency"/LICENSE* "$dependency"/NOTICE*; do
@@ -155,12 +173,7 @@ for dependency in .build/checkouts/*; do
   done
 done
 # MLX loads mlx.metallib from next to the executable — place it in MacOS/, beside the binary.
-METALLIB=".build/$CONFIG/mlx.metallib"
-if [ -f "$METALLIB" ]; then
-  cp "$METALLIB" "$APP/Contents/MacOS/mlx.metallib"
-else
-  echo "warning: $METALLIB missing — Qwen3-ASR will crash at runtime" >&2
-fi
+cp "$METALLIB" "$STAGE/Contents/MacOS/mlx.metallib"
 # Sparkle.framework is present in the build products ONLY for the public production build
 # (KEYSCRIBE_SPARKLE=1 adds Sparkle to the SwiftPM graph). Embed it keyed off that presence, NOT the
 # variant, so this is a clean no-op for dev/custom builds and a downstream white-label build that builds
@@ -170,28 +183,28 @@ SPARKLE_FW=".build/$CONFIG/Sparkle.framework"
 # KEYSCRIBE_SPARKLE=1 build can leave a stale Sparkle.framework in .build that a later flag-off build
 # would otherwise embed into an app whose binary does not link it (dead weight, and it fools a presence
 # check). The otool linkage test only passes when this build actually linked Sparkle.
-if otool -L "$APP/Contents/MacOS/KeyScribe" 2>/dev/null | grep -q "Sparkle.framework" && [ -d "$SPARKLE_FW" ]; then
+if otool -L "$STAGE/Contents/MacOS/KeyScribe" 2>/dev/null | grep -q "Sparkle.framework" && [ -d "$SPARKLE_FW" ]; then
   echo "== embedding Sparkle.framework =="
-  mkdir -p "$APP/Contents/Frameworks"
-  rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
-  cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
+  mkdir -p "$STAGE/Contents/Frameworks"
+  rm -rf "$STAGE/Contents/Frameworks/Sparkle.framework"
+  cp -R "$SPARKLE_FW" "$STAGE/Contents/Frameworks/Sparkle.framework"
   # The binary loads Sparkle as @rpath/Sparkle.framework/..., but SwiftPM only emits @loader_path
   # (= Contents/MacOS) rpaths for an executable target — it never adds the app-bundle Frameworks rpath,
   # so without this dyld cannot find the embedded framework and the app crashes at launch. Add it before
   # signing (install_name_tool invalidates the signature; we sign below). Fresh binary copy each build,
   # so no duplicate rpath accumulates.
-  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/KeyScribe"
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$STAGE/Contents/MacOS/KeyScribe"
 fi
 # Bundled model self-test clip (loaded via Bundle.main at runtime).
-cp Resources/model-selftest.wav "$APP/Contents/Resources/model-selftest.wav"
+cp Resources/model-selftest.wav "$STAGE/Contents/Resources/model-selftest.wav"
 # First-party "now listening" start cue (loaded via Bundle.main at runtime).
-cp Resources/start-cue.wav "$APP/Contents/Resources/start-cue.wav"
+cp Resources/start-cue.wav "$STAGE/Contents/Resources/start-cue.wav"
 # Info.plist is a tracked source file (Resources/Info.plist); stamp the git-derived version into it.
 echo "== Info.plist: $BUNDLE_NAME $SHORT_VERSION (build $BUILD_VERSION), id $BUNDLE_ID, scm $SCM_REVISION =="
 sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \
     -e "s/__BUNDLE_ID__/$BUNDLE_ID/" -e "s/__BUNDLE_NAME__/$BUNDLE_NAME/" \
     -e "s/__SCM_REVISION__/$SCM_REVISION/" \
-  Resources/Info.plist > "$APP/Contents/Info.plist"
+  Resources/Info.plist > "$STAGE/Contents/Info.plist"
 
 # Signing identity is variant-aware (macOS TCC only needs a *valid, stable* signature — no Apple
 # account required for dev). Sign inner Mach-O then the bundle (no --deep: the Swift linker-signs the
@@ -217,7 +230,7 @@ case "$VARIANT" in
     ;;
 esac
 [ -z "$ID" ] && ID="-"
-find "$APP" -name "*.cstemp" -delete 2>/dev/null || true
+find "$STAGE" -name "*.cstemp" -delete 2>/dev/null || true
 if [ "$ID" = "-" ]; then
   echo "!! AD-HOC signing — no stable cert found. TCC grants (Microphone /" >&2
   echo "!! Accessibility) will NOT survive this rebuild; toggling them on will not stick." >&2
@@ -239,7 +252,7 @@ fi
 # object left unsigned fails bundle signing with "code object is not signed at all". Paths go through
 # Versions/Current so they are version-letter agnostic. Dev signs plain like the rest of the bundle;
 # release.sh layers the hardened-runtime + per-XPC-entitlements re-sign on top for notarization.
-EMBEDDED_FW="$APP/Contents/Frameworks/Sparkle.framework"
+EMBEDDED_FW="$STAGE/Contents/Frameworks/Sparkle.framework"
 if [ -d "$EMBEDDED_FW" ]; then
   echo "== signing Sparkle.framework (inside-out) =="
   FWV="$EMBEDDED_FW/Versions/Current"
@@ -249,9 +262,23 @@ if [ -d "$EMBEDDED_FW" ]; then
   codesign --force --sign "$ID" "$FWV/Autoupdate"
   codesign --force --sign "$ID" "$EMBEDDED_FW"
 fi
-[ -f "$APP/Contents/MacOS/mlx.metallib" ] && codesign --force --sign "$ID" "$APP/Contents/MacOS/mlx.metallib"
-codesign --force --sign "$ID" "$APP/Contents/MacOS/KeyScribe"
-codesign --force --sign "$ID" "$APP"
+codesign --force --sign "$ID" "$STAGE/Contents/MacOS/mlx.metallib"
+codesign --force --sign "$ID" "$STAGE/Contents/MacOS/KeyScribe"
+codesign --force --sign "$ID" "$STAGE"
+
+echo "== validating $APP (staged) =="
+if ! ./scripts/validate-qwen-runtime.sh "$STAGE/Contents/MacOS/KeyScribe"; then
+  echo "!! The staged app failed validation, so $APP was left untouched." >&2
+  exit 1
+fi
+
+echo "== replacing $APP =="
+if [ -e "$APP" ]; then
+  mkdir -p "$WORK/backup"
+  mv "$APP" "$WORK/backup/$APP"
+fi
+mv "$STAGE" "$APP"
+SWAPPED=1
 
 echo
 echo "Done: $APP  (signed: ${ID/#-/ad-hoc})"

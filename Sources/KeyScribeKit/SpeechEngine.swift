@@ -14,6 +14,9 @@ public protocol SpeechEngine: Sendable {
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String
 
+    // Non-nil when this build can't run the engine; independent of install state. A requirement so wrappers forward it.
+    var unavailability: EngineUnavailability? { get }
+
     // True when the engine can transcribe already-decoded PCM directly, so the capture path hands it the
     // writer's samples instead of re-reading/decoding the WAV. Default false; Apple keeps the file (URL).
     var supportsSampleInput: Bool { get }
@@ -46,7 +49,13 @@ public protocol SpeechEngine: Sendable {
     func verifyInstalled(in modelsDir: URL) -> Bool?
 }
 
+public enum EngineUnavailability: Equatable, Sendable {
+    case shaderLibraryUnloadable
+}
+
 public extension SpeechEngine {
+    var unavailability: EngineUnavailability? { nil }
+
     // Default: no native progress, just load. Downloadable engines override to report byte/phase progress.
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         try await loadIfNeeded()

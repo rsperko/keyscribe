@@ -12,9 +12,11 @@ enum EngineError: Error {
 // The requested engine id isn't constructible in this build (no descriptor / not wired).
 enum EngineUnavailable: Error, CustomStringConvertible {
     case notWired(String)
+    case shaderLibraryUnloadable(String)
     var description: String {
         switch self {
         case .notWired(let name): return "\(name) isn't available in this build yet."
+        case .shaderLibraryUnloadable(let name): return "\(name) can’t run in this build: no loadable MLX shader library."
         }
     }
 }

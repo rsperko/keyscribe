@@ -162,4 +162,8 @@ struct HUDStateTests {
         #expect(HUDState.recording(mode: "Polish", level: 0.1, latchedTrigger: nil).voiceOverAnnouncement == "Recording")
         #expect(HUDState.recording(mode: "Polish", level: 0.9, latchedTrigger: "Right-⌥").voiceOverAnnouncement == "Recording")
     }
+
+    @Test func theSpeechModelsRepairActionNamesItsDestination() {
+        #expect(HUDErrorAction.openSpeechModels.buttonTitle == "Open Speech Models")
+    }
 }

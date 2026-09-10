@@ -35,9 +35,8 @@ Same name, different identity per machine; that is expected and fine.
   the toolchain's default. Swift 6.4 flips SwiftPM's default from `native` to `swiftbuild`, and two
   things this repo relies on flip with it: products move from `.build/<config>/` to
   `.build/out/Products/<Config>/` (with no `.build/release` symlink), which breaks the `.app`
-  assembly step on *any* machine; and MLX's `.metal` sources become part of `swift build`, which
-  turns the Metal Toolchain into a hard build requirement and hands MLX a shader library other than
-  the curated one described below. The pin keeps a build identical whichever toolchain produced it.
+  assembly step on *any* machine; and MLX's `.metal` sources become part of `swift build` itself,
+  handing MLX a shader library other than the curated one described below. The pin keeps a build identical whichever toolchain produced it.
   Swift 6.4 marks `native` deprecated, so moving to `swiftbuild` is real future work — product
   paths, bundling + signing MLX's resource bundle, `release.sh`, and preflight all move with it.
 - **Xcode installed and selected.** The Command Line Tools alone are **not** enough and
@@ -50,24 +49,27 @@ Same name, different identity per machine; that is expected and fine.
   sudo xcode-select -s /Applications/Xcode.app
   ```
 
-- **Metal Toolchain** (one-time download — required only by the MLX-based **Qwen3-ASR** engine; the
-  other speech engines build and run without it):
+- **Metal Toolchain** (one-time download), required for every build:
 
   ```bash
   xcodebuild -downloadComponent MetalToolchain
   ```
 
-  If you skip this, the build still succeeds and KeyScribe still runs — but selecting a Qwen3-ASR
-  engine will crash at runtime with `Failed to load the default metallib`. `make-app.sh` prints a
-  warning rather than failing when the toolchain is missing.
+  Two different things are involved, and only the first is a build prerequisite: **you** need the
+  Metal Toolchain to compile the MLX shaders the **Qwen3-ASR** models run on, and **the app** needs
+  the compiled shader library they become. People running a correctly packaged app never need Xcode.
+  `make-app.sh` checks the toolchain before compiling anything by compiling and linking a one-line
+  kernel — `xcrun -f metal` is no check, because Xcode ships a `metal` stub that is found even when
+  the toolchain is absent — and stops if it can't. There is no build that quietly leaves Qwen3-ASR
+  out: the app it would produce offers models that cannot run.
 
   This step exists because SwiftPM's native build system does not compile Metal shaders, so
-  `swift build` leaves MLX without one; `scripts/build-mlx-metallib.sh` compiles it (~3 s, 3.0 MB)
-  and caches on a source hash. That is also why the Metal Toolchain stays *optional* here — it is
-  needed by this separate step, not by `swift build` itself, which holds only because the build
+  `swift build` leaves MLX without a library; `scripts/build-mlx-metallib.sh` compiles it (~3 s,
+  3.0 MB) and caches it on the shader sources, the compiler flags, and the toolchain and SDK
+  versions. That it is a separate step, not part of `swift build`, holds only because the build
   system is pinned to `native` (see **Swift 6.0+** above). **Building KeyScribe through an Xcode
   project instead needs none of this** — Xcode compiles those shaders itself and MLX picks them up
-  from the package's resource bundle.
+  from the package's resource bundle (see **Shipping Qwen3-ASR's shader library** below).
 
 ## Build & run
 
@@ -98,8 +100,34 @@ build never re-downloads gigabytes. The dev-facing helpers (`scripts/reset-permi
 forces the production variant. If you only want one normal build, use `KEYSCRIBE_VARIANT=release`.
 
 `make-app.sh` compiles a release build, assembles the `.app` bundle (including `mlx.metallib` for
-Qwen3-ASR), and code-signs it. With no signing identity configured it uses an **ad-hoc** signature,
-which is enough to launch and use the app.
+Qwen3-ASR), and code-signs it — all in a staging directory under `.build/`. Before it touches your
+existing app it **validates the staged one** with `scripts/validate-qwen-runtime.sh` (both Qwen3-ASR
+models listed as runnable, and MLX loading the shader library and running a kernel from it in a
+separate process), and only then swaps it into place. A build that fails anywhere — toolchain,
+compile, shaders, signing, or validation — leaves the previous app exactly as it was. With no
+signing identity configured it uses an **ad-hoc** signature, which is enough to launch and use the
+app.
+
+### Shipping Qwen3-ASR's shader library
+
+MLX terminates the process when it can't load its shader library. So before a Qwen3-ASR model can
+load, KeyScribe looks for a library the way MLX does, in MLX's order, and uses the first one Metal can
+actually open — a truncated or corrupt file does not count:
+
+1. `Contents/MacOS/mlx.metallib`, beside the executable (what `make-app.sh` ships)
+2. `Contents/MacOS/Resources/mlx.metallib`
+3. `mlx-swift_Cmlx.bundle` directly inside the `.app` → its `default.metallib`
+4. `Contents/Resources/mlx-swift_Cmlx.bundle` → its `default.metallib` (what an Xcode project build
+   produces)
+5. `Contents/MacOS/Resources/default.metallib`
+
+When none loads, both Qwen3-ASR models show as unavailable — disabled and explained, with any
+downloaded files still deletable — instead of terminating the app. This assumes MLX is linked
+statically into the executable, as both the SwiftPM and Xcode builds do. Two lookups MLX also makes
+are not modeled (a dynamic `Cmlx` framework found by bundle identifier, and a `default.metallib` in
+the working directory), so a build relying on either shows Qwen3-ASR unavailable even though MLX
+could load it. To check any build, run its executable with `--mlx-smoke`: it prints the library it
+selected and runs a kernel from it (exit 0), or lists every path it searched (exit 1).
 
 ## Versioning & releases
 
@@ -206,9 +234,18 @@ Dock icon or window.
 
 ## Troubleshooting
 
-- **`Failed to load the default metallib` when selecting Qwen3-ASR** — the Metal Toolchain wasn't
-  installed at build time. Run `xcodebuild -downloadComponent MetalToolchain`, then rebuild with
-  `./make-app.sh`.
+- **`make-app.sh` stops with "the Metal Toolchain can't compile and link shaders"** — run
+  `xcodebuild -downloadComponent MetalToolchain`, then rebuild.
+- **Qwen3-ASR says "can't run in this build"** — the app has no shader library MLX can load (see
+  **Shipping Qwen3-ASR's shader library**). `make-app.sh` refuses to produce such an app, so this
+  comes from a build packaged another way. Run its executable with `--mlx-smoke` to see the paths it
+  searched. Downloaded Qwen3-ASR files are left alone and can still be deleted in Settings ▸ Speech
+  Models.
+- **`make-app.sh` stops with "A previous make-app.sh run left a backup of an app"** — an earlier run
+  was interrupted while swapping in the new app *and* could not put the old one back, so it kept the
+  old app at the path it prints (`.build/make-app.XXXXXX/backup/<App>.app`). Nothing is deleted
+  automatically: move the app you want to keep into place (e.g. `mv` it back to the repo root if your
+  app is missing), delete that `.build/make-app.XXXXXX` directory, and rebuild.
 - **macOS re-prompts for Microphone/Accessibility after every rebuild** — you are
   building ad-hoc. Create the `KeyScribe Local` self-signed cert above so the signature is stable.
 - **`xcode-select` points at the Command Line Tools** — `make-app.sh` stops with this before

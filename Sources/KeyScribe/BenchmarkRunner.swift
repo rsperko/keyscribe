@@ -5,8 +5,8 @@ import KeyScribeKit
 // Drives every shipping SpeechEngine adapter over recorded clips and reports WER (biased vs unbiased),
 // bias term recall, and RTF per engine — so accuracy and speed are measured on the exact code paths that
 // ship (recognition bias is Qwen3 native context and Whisper prompt tokens; other engines ignore terms),
-// not a re-implementation. Headless: reads wavs, never touches mic/insertion/TCC. Engines whose models
-// aren't installed are skipped, so you control cost by installing only what you want to compare.
+// not a re-implementation. Headless: reads wavs, never touches mic/insertion/TCC. With no --engines, every
+// installed engine runs, so you control cost by installing only what you want to compare.
 enum BenchmarkRunner {
     struct EngineResult {
         var status = "ok"
@@ -25,21 +25,70 @@ enum BenchmarkRunner {
         var orthoFiresBiased = 0.0
     }
 
-    static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false, fuzzy: Bool = false) async {
-        let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
+    private struct Invocation {
+        let manifest: BenchmarkManifest
+        let engines: [any SpeechEngine]
+    }
+
+    private static func invocation(
+        dir: URL, only: Set<String>?, streamingOnly: Bool = false
+    ) -> Result<Invocation, InvocationError> {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {
-            print("error: could not read \(manifestURL.path)")
-            return
+            return .failure(InvocationError(message: "could not read \(manifestURL.path)"))
         }
-        let engines = InstalledEngineFilter.filter(makeEngines())
-            .filter { only == nil || only!.contains($0.id) }
+        let runnable = InstalledEngineFilter.filter(makeEngines()).filter { !streamingOnly || $0.supportsStreaming }
+        switch EngineSelection.resolve(requested: only, runnable: runnable.map(\.id)) {
+        case .invalid(let ids):
+            let why = streamingOnly
+                ? "unknown, not installed, quarantined, or not streaming-capable"
+                : "unknown, not installed, quarantined, or not supported on this macOS"
+            return .failure(InvocationError(message: "cannot select \(ids.joined(separator: ", ")) (\(why))"))
+        case .ok(let ids):
+            return .success(Invocation(
+                manifest: manifest, engines: ids.compactMap { id in runnable.first { $0.id == id } }))
+        }
+    }
+
+    struct InvocationError: Error {
+        let message: String
+    }
+
+    private static func refuse(_ error: InvocationError) -> CorpusRunOutcome {
+        FileHandle.standardError.write(Data("error: \(error.message) — nothing was run or written\n".utf8))
+        return .invocationError(error.message)
+    }
+
+    private static func report(_ verdict: CorpusRunVerdict, toStandardError: Bool = false) {
+        let lines = verdict.passed
+            ? ["PASS — every engine transcribed every clip"]
+            : verdict.failures.map(\.line)
+        for line in lines {
+            if toStandardError {
+                FileHandle.standardError.write(Data("\(line)\n".utf8))
+            } else {
+                print(line)
+            }
+        }
+    }
+
+    static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false, fuzzy: Bool = false) async -> CorpusRunOutcome {
+        let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
+        let invocation: Invocation
+        switch self.invocation(dir: dir, only: only) {
+        case .failure(let error): return refuse(error)
+        case .success(let value): invocation = value
+        }
+        let manifest = invocation.manifest
+        let engines = invocation.engines
         if raw {
-            await runRaw(dir: dir, manifest: manifest, engines: engines)
-            return
+            let verdict = await runRaw(dir: dir, manifest: manifest, engines: engines)
+            report(verdict, toStandardError: true)
+            return .ran(verdict)
         }
         print("Benchmark: \(manifest.entries.count) clips × \(engines.count) engines\n")
 
+        var verdict = CorpusRunVerdict(engineIds: engines.map(\.id), clipIds: manifest.entries.map(\.id))
         var results: [String: EngineResult] = [:]
         var clipRows: [String: [String: [String: Double]]] = [:]
         for engine in engines {
@@ -48,8 +97,9 @@ enum BenchmarkRunner {
             do {
                 try await engine.loadIfNeeded()
             } catch {
-                r.status = "not installed / load failed"
+                r.status = "load failed"
                 results[engine.id] = r
+                verdict.recordLoadFailure(engine: engine.id, reason: "\(error)")
                 print("· \(engine.id): \(r.status)")
                 continue
             }
@@ -61,15 +111,23 @@ enum BenchmarkRunner {
             for entry in manifest.entries {
                 let wav = dir.appendingPathComponent(entry.file)
                 guard FileManager.default.fileExists(atPath: wav.path) else {
-                    print("  missing \(wav.lastPathComponent), skipping")
+                    print("  missing \(wav.lastPathComponent)")
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .missingAudio)
                     continue
                 }
                 let dur = audioDuration(wav)
                 let start = Date()
-                guard let biased = try? await engine.transcribe(wavURL: wav, biasTerms: entry.biasTerms)
-                else { continue }
-                let elapsed = Date().timeIntervalSince(start)
-                let unbiasedRaw = (try? await engine.transcribe(wavURL: wav, biasTerms: [])) ?? biased
+                let biased: String
+                let unbiasedRaw: String
+                let elapsed: TimeInterval
+                do {
+                    biased = try await engine.transcribe(wavURL: wav, biasTerms: entry.biasTerms)
+                    elapsed = Date().timeIntervalSince(start)
+                    unbiasedRaw = try await engine.transcribe(wavURL: wav, biasTerms: [])
+                } catch {
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .failed("\(error)"))
+                    continue
+                }
 
                 // Optionally apply the real post-STT fuzzy stage (dictionary = this clip's bias terms)
                 // so we can measure how much it recovers on top of the engine — the lever for bias-less
@@ -118,55 +176,75 @@ enum BenchmarkRunner {
                     }
                 }
                 rows[entry.id] = row
+                verdict.record(engine: engine.id, clip: entry.id, outcome: .transcribed)
             }
             await engine.evict()
             results[engine.id] = r
             clipRows[engine.id] = rows
         }
         printTable(results, engineOrder: engines.map(\.id))
+        let failed = verdict.failedEngineIds
         let jsonName = fuzzy ? "results-fuzzy.json" : "results.json"
         writeJSON(
-            results, clips: clipRows, to: dir.appendingPathComponent(jsonName),
-            fuzzy: fuzzy, replace: only == nil)
+            results.filter { !failed.contains($0.key) }, clips: clipRows.filter { !failed.contains($0.key) },
+            to: dir.appendingPathComponent(jsonName), fuzzy: fuzzy, replace: only == nil, dropping: failed)
+        print("")
+        report(verdict)
+        return .ran(verdict)
     }
 
-    private static func runRaw(dir: URL, manifest: BenchmarkManifest, engines: [any SpeechEngine]) async {
+    private static func runRaw(
+        dir: URL, manifest: BenchmarkManifest, engines: [any SpeechEngine]
+    ) async -> CorpusRunVerdict {
         FileHandle.standardError.write("raw dump: \(manifest.entries.count) clips × \(engines.count) engines\n".data(using: .utf8)!)
+        var verdict = CorpusRunVerdict(engineIds: engines.map(\.id), clipIds: manifest.entries.map(\.id))
         for engine in engines {
             do {
                 try await engine.loadIfNeeded()
             } catch {
-                FileHandle.standardError.write("· \(engine.id): not installed / load failed\n".data(using: .utf8)!)
+                FileHandle.standardError.write("· \(engine.id): load failed\n".data(using: .utf8)!)
+                verdict.recordLoadFailure(engine: engine.id, reason: "\(error)")
                 continue
             }
             for entry in manifest.entries {
                 let wav = dir.appendingPathComponent(entry.file)
-                guard FileManager.default.fileExists(atPath: wav.path) else { continue }
+                guard FileManager.default.fileExists(atPath: wav.path) else {
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .missingAudio)
+                    continue
+                }
                 // Honor the manifest's bias terms so a silence/noise sweep can be run with the dictionary
                 // active (the silence-with-bias probe). Empty biasTerms (the no-speech table's manifests)
                 // reproduce the plain sweep unchanged.
-                let hyp = (try? await engine.transcribe(wavURL: wav, biasTerms: entry.biasTerms)) ?? "<error>"
+                let hyp: String
+                do {
+                    hyp = try await engine.transcribe(wavURL: wav, biasTerms: entry.biasTerms)
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .transcribed)
+                } catch {
+                    hyp = "<error>"
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .failed("\(error)"))
+                }
                 let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
                 print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
             }
             await engine.evict()
             FileHandle.standardError.write("· \(engine.id): done\n".data(using: .utf8)!)
         }
+        return verdict
     }
 
     // Transcribes each clip BOTH ways — batch and streaming (through the real `StreamingDictationDriver`
     // at realtime cadence, the exact live path: deferred start, chunk replay, backpressure fallback) —
     // and reports WER for each so streaming↔batch accuracy parity is visible. A clip that degrades to
     // batch is scored as batch and counted `fellBack`. No bias.
-    static func runStreamingParity(dir: URL, only: Set<String>? = nil, raw: Bool = false) async {
-        let manifestURL = dir.appendingPathComponent("manifest.json")
-        guard let manifest = try? BenchmarkManifest.load(from: manifestURL) else {
-            print("error: could not read \(manifestURL.path)")
-            return
+    static func runStreamingParity(dir: URL, only: Set<String>? = nil, raw: Bool = false) async -> CorpusRunOutcome {
+        let invocation: Invocation
+        switch self.invocation(dir: dir, only: only, streamingOnly: true) {
+        case .failure(let error): return refuse(error)
+        case .success(let value): invocation = value
         }
-        let engines = InstalledEngineFilter.filter(makeEngines())
-            .filter { (only == nil || only!.contains($0.id)) && $0.supportsStreaming }
-        guard !engines.isEmpty else { print("no installed streaming-capable engines to compare"); return }
+        let manifest = invocation.manifest
+        let engines = invocation.engines
+        var verdict = CorpusRunVerdict(engineIds: engines.map(\.id), clipIds: manifest.entries.map(\.id))
         let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
         // Raw streamed output per clip (the silence sweep uses this: no reference scoring, just the literal
         // text each streaming session emits so no-speech artifacts on the streaming path are visible).
@@ -174,41 +252,60 @@ enum BenchmarkRunner {
             FileHandle.standardError.write("streaming raw dump: \(manifest.entries.count) clips × \(engines.count) engine(s)\n".data(using: .utf8)!)
             for engine in engines {
                 do { try await engine.loadIfNeeded() } catch {
-                    FileHandle.standardError.write("· \(engine.id): not installed / load failed\n".data(using: .utf8)!); continue
+                    FileHandle.standardError.write("· \(engine.id): load failed\n".data(using: .utf8)!)
+                    verdict.recordLoadFailure(engine: engine.id, reason: "\(error)")
+                    continue
                 }
                 for entry in manifest.entries {
                     let wav = dir.appendingPathComponent(entry.file)
-                    guard FileManager.default.fileExists(atPath: wav.path) else { continue }
-                    let hyp: String
-                    switch await streamingReplay(engine: engine, wav: wav) {
-                    case .streamed(let t): hyp = t
-                    case .fellBack: hyp = "<fell back to batch>"
-                    case .failed: hyp = "<error>"
+                    guard FileManager.default.fileExists(atPath: wav.path) else {
+                        verdict.record(engine: engine.id, clip: entry.id, outcome: .missingAudio)
+                        continue
                     }
+                    let (hyp, outcome) = await rawStreamingTranscript(engine: engine, wav: wav)
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: outcome)
                     let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
                     print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
                 }
                 await engine.evict()
                 FileHandle.standardError.write("· \(engine.id): done\n".data(using: .utf8)!)
             }
-            return
+            report(verdict, toStandardError: true)
+            return .ran(verdict)
         }
         print("Streaming parity: \(manifest.entries.count) clips × \(engines.count) engine(s)\n")
 
         for engine in engines {
             do { try await engine.loadIfNeeded() } catch {
-                print("· \(engine.id): not installed / load failed"); continue
+                print("· \(engine.id): load failed")
+                verdict.recordLoadFailure(engine: engine.id, reason: "\(error)")
+                continue
             }
             var batchWER = 0.0, streamWER = 0.0, clips = 0, fellBack = 0, failed = 0
             for entry in manifest.entries {
                 let wav = dir.appendingPathComponent(entry.file)
-                guard FileManager.default.fileExists(atPath: wav.path) else { continue }
-                guard let batch = try? await engine.transcribe(wavURL: wav, biasTerms: []) else { continue }
+                guard FileManager.default.fileExists(atPath: wav.path) else {
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .missingAudio)
+                    continue
+                }
+                let batch: String
+                do {
+                    batch = try await engine.transcribe(wavURL: wav, biasTerms: [])
+                } catch {
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .failed("\(error)"))
+                    continue
+                }
                 let stream: String, note: String
                 switch await streamingReplay(engine: engine, wav: wav) {
-                case .streamed(let t): stream = t; note = ""
-                case .fellBack: stream = batch; note = " (fell back to batch)"; fellBack += 1   // app runs batch
-                case .failed: stream = "<error>"; note = " (setup failed)"; failed += 1
+                case .streamed(let t):
+                    stream = t; note = ""
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .transcribed)
+                case .fellBack:
+                    stream = batch; note = " (fell back to batch)"; fellBack += 1   // app runs batch
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .transcribed)
+                case .failed:
+                    stream = "<error>"; note = " (setup failed)"; failed += 1
+                    verdict.record(engine: engine.id, clip: entry.id, outcome: .failed("streaming replay could not start"))
                 }
                 let bw = BenchmarkScoring.wer(reference: entry.text, hypothesis: batch)
                 let sw = BenchmarkScoring.wer(reference: entry.text, hypothesis: stream)
@@ -224,6 +321,26 @@ enum BenchmarkRunner {
             await engine.evict()
             let n = Double(max(clips, 1))
             print("· \(engine.id): clips=\(clips) batchWER=\(pct(batchWER / n)) streamWER=\(pct(streamWER / n)) Δ=\(pct((streamWER - batchWER) / n)) fellBack=\(fellBack) failed=\(failed)")
+        }
+        print("")
+        report(verdict)
+        return .ran(verdict)
+    }
+
+    static func rawStreamingTranscript(
+        engine: any SpeechEngine, wav: URL
+    ) async -> (text: String, outcome: CorpusRunVerdict.ClipOutcome) {
+        switch await streamingReplay(engine: engine, wav: wav) {
+        case .streamed(let text):
+            return (text, .transcribed)
+        case .fellBack:
+            do {
+                return (try await engine.transcribe(wavURL: wav, biasTerms: []), .transcribed)
+            } catch {
+                return ("<error>", .failed("fell back to batch, which failed: \(error)"))
+            }
+        case .failed:
+            return ("<error>", .failed("streaming replay could not start"))
         }
     }
 
@@ -323,7 +440,7 @@ enum BenchmarkRunner {
 
     private static func writeJSON(
         _ results: [String: EngineResult], clips: [String: [String: [String: Double]]],
-        to url: URL, fuzzy: Bool, replace: Bool
+        to url: URL, fuzzy: Bool, replace: Bool, dropping: Set<String>
     ) {
         var fresh: [String: [String: Double]] = [:]
         for (id, r) in results where r.clips > 0 {
@@ -347,10 +464,10 @@ enum BenchmarkRunner {
         }
         let existing = readResults(from: url)
         let engineObj = BenchmarkResultsMerge.merged(
-            existing: existing.engines, fresh: fresh, replace: replace)
+            existing: existing.engines, fresh: fresh, replace: replace, dropping: dropping)
         let freshClips = clips.filter { !$0.value.isEmpty }
         let clipsObj = BenchmarkResultsMerge.merged(
-            existing: existing.clips, fresh: freshClips, replace: replace)
+            existing: existing.clips, fresh: freshClips, replace: replace, dropping: dropping)
         let obj: [String: Any] = ["fuzzy": fuzzy, "engines": engineObj, "clips": clipsObj]
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url)

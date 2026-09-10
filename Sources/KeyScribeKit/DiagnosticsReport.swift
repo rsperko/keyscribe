@@ -40,10 +40,12 @@ public struct DiagnosticsReport: Sendable {
     public struct Speech: Sendable {
         public var selectedEngine: String
         public var installed: [String]
+        public var unavailable: [String]
 
-        public init(selectedEngine: String, installed: [String]) {
+        public init(selectedEngine: String, installed: [String], unavailable: [String] = []) {
             self.selectedEngine = selectedEngine
             self.installed = installed
+            self.unavailable = unavailable
         }
     }
 
@@ -160,6 +162,9 @@ public struct DiagnosticsReport: Sendable {
         out.append("Speech")
         out.append("  selected engine: \(speech.selectedEngine)")
         out.append("  installed: \(speech.installed.isEmpty ? "none" : speech.installed.joined(separator: ", "))")
+        if !speech.unavailable.isEmpty {
+            out.append("  unavailable in this build: \(speech.unavailable.joined(separator: ", "))")
+        }
         if !enabledFeatures.isEmpty {
             out.append("  experimental features: \(enabledFeatures.joined(separator: ", "))")
         }

@@ -42,8 +42,11 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     private let transcribeGate: Gate?
     private let streamFinalizeThrows: Bool
     private let makeStreamingSessionThrows: Bool
+    let unavailability: EngineUnavailability?
     init(loadGate: Gate? = nil, transcribeGate: Gate? = nil, failNextLoad: Bool = false,
-         streamFinalizeThrows: Bool = false, makeStreamingSessionThrows: Bool = false) {
+         streamFinalizeThrows: Bool = false, makeStreamingSessionThrows: Bool = false,
+         unavailability: EngineUnavailability? = nil) {
+        self.unavailability = unavailability
         self.loadGate = loadGate
         self.transcribeGate = transcribeGate
         self._failNextLoad = failNextLoad
@@ -349,6 +352,11 @@ struct SerializedEngineTests {
     @Test func supportsStreamingForwardsFromBase() {
         let engine = SerializedEngine(SpyEngine())
         #expect(engine.supportsStreaming)
+    }
+
+    @Test func unavailabilityForwardsFromBase() {
+        #expect(SerializedEngine(SpyEngine(unavailability: .shaderLibraryUnloadable)).unavailability == .shaderLibraryUnloadable)
+        #expect(SerializedEngine(SpyEngine()).unavailability == nil)
     }
 
     // The session forwards append + finalize to the base session, and the runtime model is ensured before

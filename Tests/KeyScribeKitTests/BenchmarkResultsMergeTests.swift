@@ -41,6 +41,18 @@ struct BenchmarkResultsMergeTests {
         #expect(merged["b"]?["02"]?["werBiased"] == 0.3)
     }
 
+    @Test func aFailedEnginesPreviousRowIsDropped() {
+        let existing = ["a": a, "b": b]
+        let merged = BenchmarkResultsMerge.merged(existing: existing, fresh: [:], replace: false, dropping: ["b"])
+        #expect(merged == ["a": a])
+    }
+
+    @Test func droppingAppliesToAFullFleetRunToo() {
+        let merged = BenchmarkResultsMerge.merged(
+            existing: ["b": b], fresh: ["a": a, "b": bNew], replace: true, dropping: ["b"])
+        #expect(merged == ["a": a])
+    }
+
     @Test func fullFleetRunReplacesPerClipMaps() {
         let existing: [String: [String: [String: Double]]] = ["stale": ["01": ["werBiased": 0.9]]]
         let fresh: [String: [String: [String: Double]]] = ["a": ["01": ["werBiased": 0.1]]]

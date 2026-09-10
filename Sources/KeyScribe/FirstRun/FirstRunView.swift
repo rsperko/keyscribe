@@ -100,6 +100,9 @@ struct FirstRunView: View {
                 }
                 .accessibilityIdentifier(AccessibilityID.FirstRun.Model.progress)
             }
+            if let reason = model.selectedUnavailableReason {
+                IssueText(reason, severity: .advisory, font: .callout)
+            }
             if let error = model.downloadError {
                 IssueText(error, font: .callout)
             }
@@ -116,7 +119,7 @@ struct FirstRunView: View {
                     model.beginDownload()
                 }
                 .keyboardShortcut(.defaultAction).controlSize(.large)
-                .disabled(model.downloading)
+                .disabled(model.downloading || model.selectedUnavailableReason != nil)
                 .accessibilityIdentifier(AccessibilityID.FirstRun.Model.download)
             }
         }
