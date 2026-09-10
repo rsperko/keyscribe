@@ -23,8 +23,10 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: scripts/build-mlx-metallib.sh [debug|release] [--force]
+       scripts/build-mlx-metallib.sh --probe
 
-Builds mlx.metallib into .build/<config>/. Skips the build when the shader sources are unchanged.
+Builds mlx.metallib into .build/<config>/. Skips the build when the shader sources and compiler
+flags are unchanged. --probe only compiles and links a one-line kernel, to check the toolchain.
 
 If you see "missing Metal Toolchain", run:
   xcodebuild -downloadComponent MetalToolchain
@@ -33,16 +35,43 @@ EOF
 
 CONFIG="release"
 FORCE=0
+PROBE=0
 for arg in "$@"; do
   case "$arg" in
     debug|release) CONFIG="$arg" ;;
     --force) FORCE=1 ;;
+    --probe) PROBE=1 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
 done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MIN_MACOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$ROOT/Resources/Info.plist")"
+# mlx-swift's MTL_COMPILER_FLAGS plus the app's deployment target — without it the library targets the
+# SDK's macOS, which older supported releases may refuse to load.
+METAL_FLAGS=(-x metal -Wall -Wextra -fno-fast-math -Wno-c++17-extensions -Wno-c++20-extensions
+  "-mmacosx-version-min=$MIN_MACOS")
+
+toolchain_help() {
+  echo "error: the Metal Toolchain can't compile and link shaders, and Qwen3-ASR can't run without them." >&2
+  echo "run: xcodebuild -downloadComponent MetalToolchain" >&2
+}
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/mlx-metallib.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+if [[ "$PROBE" == 1 ]]; then
+  printf 'kernel void probe(uint i [[thread_position_in_grid]]) { (void)i; }\n' > "$TMP/probe.metal"
+  if xcrun -sdk macosx metal "${METAL_FLAGS[@]}" -c "$TMP/probe.metal" -o "$TMP/probe.air" 2>"$TMP/metal.err" \
+    && xcrun -sdk macosx metallib "$TMP/probe.air" -o "$TMP/probe.metallib" 2>>"$TMP/metal.err"; then
+    exit 0
+  fi
+  cat "$TMP/metal.err" >&2
+  toolchain_help
+  exit 1
+fi
+
 BUILD_DIR="${BUILD_DIR:-$ROOT/.build}"
 MLX_DIR="$BUILD_DIR/checkouts/mlx-swift/Source/Cmlx"
 GENERATED_METAL="$MLX_DIR/mlx-generated/metal"
@@ -73,8 +102,10 @@ fi
 OUT_METALLIB="$OUT_DIR/mlx.metallib"
 HASH_FILE="$OUT_DIR/.mlx.metallib.sha"
 CURRENT_HASH="$(
-  { find "$GENERATED_METAL" -type f \( -name '*.metal' -o -name '*.h' \) | LC_ALL=C sort; echo "$FENCE"; } \
-    | xargs cat | shasum -a 256 | awk '{print $1}'
+  {
+    printf '%s\n' "${METAL_FLAGS[@]}"
+    { find "$GENERATED_METAL" -type f \( -name '*.metal' -o -name '*.h' \) | LC_ALL=C sort; echo "$FENCE"; } | xargs cat
+  } | shasum -a 256 | awk '{print $1}'
 )"
 
 if [[ "$FORCE" != "1" && -f "$OUT_METALLIB" && -f "$HASH_FILE" ]] \
@@ -83,11 +114,7 @@ if [[ "$FORCE" != "1" && -f "$OUT_METALLIB" && -f "$HASH_FILE" ]] \
   exit 0
 fi
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/mlx-metallib.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
-
-# Flags match MLX's own CMake METAL_FLAGS and mlx-swift's MTL_COMPILER_FLAGS — keep them in sync.
-METAL_FLAGS=(-x metal -Wall -Wextra -fno-fast-math -Wno-c++17-extensions -Wno-c++20-extensions)
+rm -f "$HASH_FILE"
 
 echo "== compiling ${#SOURCES[@]} Metal sources =="
 AIR_FILES=()
@@ -95,8 +122,7 @@ for src in "${SOURCES[@]}"; do
   air="$TMP/$(printf '%s' "$src" | shasum -a 256 | cut -c1-16).air"
   if ! xcrun -sdk macosx metal "${METAL_FLAGS[@]}" -c "$src" -I"$GENERATED_METAL" -o "$air" 2>"$TMP/metal.err"; then
     if grep -q "missing Metal Toolchain" "$TMP/metal.err" 2>/dev/null; then
-      echo "error: the Xcode Metal Toolchain is missing." >&2
-      echo "run: xcodebuild -downloadComponent MetalToolchain" >&2
+      toolchain_help
     fi
     cat "$TMP/metal.err" >&2
     exit 1

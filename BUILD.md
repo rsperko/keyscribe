@@ -50,24 +50,23 @@ Same name, different identity per machine; that is expected and fine.
   sudo xcode-select -s /Applications/Xcode.app
   ```
 
-- **Metal Toolchain** (one-time download — required only by the MLX-based **Qwen3-ASR** engine; the
-  other speech engines build and run without it):
+- **Metal Toolchain** (one-time download — required):
 
   ```bash
   xcodebuild -downloadComponent MetalToolchain
   ```
 
-  If you skip this, the build still succeeds and KeyScribe still runs — but selecting a Qwen3-ASR
-  engine will crash at runtime with `Failed to load the default metallib`. `make-app.sh` prints a
-  warning rather than failing when the toolchain is missing.
+  `make-app.sh` stops before building if it can't compile and link a test shader. The Qwen3-ASR
+  engine runs on MLX, which needs a compiled shader library, and a build without one would ship
+  models that crash the app when used.
 
-  This step exists because SwiftPM's native build system does not compile Metal shaders, so
-  `swift build` leaves MLX without one; `scripts/build-mlx-metallib.sh` compiles it (~3 s, 3.0 MB)
-  and caches on a source hash. That is also why the Metal Toolchain stays *optional* here — it is
-  needed by this separate step, not by `swift build` itself, which holds only because the build
-  system is pinned to `native` (see **Swift 6.0+** above). **Building KeyScribe through an Xcode
-  project instead needs none of this** — Xcode compiles those shaders itself and MLX picks them up
-  from the package's resource bundle.
+  SwiftPM's native build system does not compile Metal shaders, so `swift build` leaves MLX without
+  that library; `scripts/build-mlx-metallib.sh` compiles it (~3 s, 3.0 MB) and caches on a hash of the
+  sources and compiler flags. Any shader failure stops the build, and `make-app.sh` runs
+  `KeyScribe --mlx-smoke` on the new binary before it replaces the existing app. **Building KeyScribe
+  through an Xcode project skips the script** — Xcode compiles those shaders itself and MLX picks them
+  up from the package's resource bundle. That build still needs the Metal Toolchain; check its result
+  with `<App>.app/Contents/MacOS/<executable> --mlx-smoke`, which exits 0 when MLX runs.
 
 ## Build & run
 
@@ -206,9 +205,9 @@ Dock icon or window.
 
 ## Troubleshooting
 
-- **`Failed to load the default metallib` when selecting Qwen3-ASR** — the Metal Toolchain wasn't
-  installed at build time. Run `xcodebuild -downloadComponent MetalToolchain`, then rebuild with
-  `./make-app.sh`.
+- **`Failed to load the default metallib` when selecting Qwen3-ASR** — the app was built without a
+  usable shader library, which `make-app.sh` refuses to produce. Run
+  `xcodebuild -downloadComponent MetalToolchain`, rebuild, and confirm with `--mlx-smoke`.
 - **macOS re-prompts for Microphone/Accessibility after every rebuild** — you are
   building ad-hoc. Create the `KeyScribe Local` self-signed cert above so the signature is stable.
 - **`xcode-select` points at the Command Line Tools** — `make-app.sh` stops with this before

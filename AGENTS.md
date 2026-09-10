@@ -981,11 +981,22 @@ this class of breakage is invisible locally and only ever reported by downstream
 **MLX metallib is a hard runtime requirement — and the kernel set is load-bearing.** Qwen3-ASR (MLX)
 crashes ("Failed to load the default metallib") without `mlx.metallib` beside the executable, because
 SwiftPM's **native** build system does not compile `.metal` sources. `scripts/build-mlx-metallib.sh`
-builds it and `make-app.sh` bundles+signs it into the `.app`; the **Metal Toolchain**
-(`xcodebuild -downloadComponent MetalToolchain`) is a build-time prereq. **A downstream build through
-an Xcode project needs none of this** — Xcode's build engine compiles those shaders itself into
-`mlx-swift_Cmlx.bundle/default.metallib`, which MLX finds via its SwiftPM-bundle lookup
-(`swift build --build-system swiftbuild` does the same, and is the eventual replacement for the script).
+builds it and `make-app.sh` bundles+signs it into the `.app`. **The Metal Toolchain
+(`xcodebuild -downloadComponent MetalToolchain`) is required for every variant, and every shader failure
+is fatal.** `make-app.sh` runs `build-mlx-metallib.sh --probe` (compile + link a one-line kernel) before
+`swift build` — never `xcrun -f metal`, which finds Xcode 26's "missing Metal Toolchain" stub whether or
+not the toolchain is installed — and runs `KeyScribe --mlx-smoke` (a tiny MLX computation; it names a
+missing Metal device) on the built binary before it touches the existing `.app`; preflight's
+`a-metallib` runs the same smoke on the notarized app. The failure is
+uncatchable in-process (mlx-c `exit(-1)` / mlx-swift `fatalError`), so the smoke only ever runs as a
+subprocess whose death is the signal. The script builds with `-mmacosx-version-min` read from
+`Info.plist`'s `LSMinimumSystemVersion`: without it the library targets the SDK's macOS
+(`air64_v28-apple-macosx26.0.0` under Xcode 26), which older supported releases are expected to refuse —
+**unverified on a macOS 15 machine, and a smoke on a newer build machine cannot catch it**. **A downstream
+build through an Xcode project needs none of the script** — Xcode's build engine compiles those shaders
+itself into `mlx-swift_Cmlx.bundle/default.metallib`, which MLX finds via its SwiftPM-bundle lookup
+(`swift build --build-system swiftbuild` does the same, and is the eventual replacement for the script);
+it still needs the Metal Toolchain, and `--mlx-smoke` works against its binary.
 **Until that migration happens the build system is PINNED to `native`** — `make-app.sh`, `make test`,
 and `scripts/preflight.sh` all splice in `scripts/swiftpm-build-system.sh`'s `--build-system native`,
 because Swift 6.4 flips SwiftPM's default to `swiftbuild`, which moves products from `.build/<config>`
