@@ -137,12 +137,18 @@ struct TriggerKeyConflictTests {
         #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes)?.kind != .unreachable)
     }
 
-    @Test func unreachableIsReportedEvenWhenContextWouldSeparateTheModes() {
+    // Was `unreachableIsReportedEvenWhenContextWouldSeparateTheModes`, on the premise that context could
+    // not rescue a binding that was never registered. Registration is now context-aware
+    // (`ModeResolver.canClaimKey`), so the scoped claimant is absent outside its app and `b` owns the
+    // press there — "Shortcut never fires" would be false, and it lights the menu-bar error badge.
+    // `b` is still shadowed INSIDE com.example.a; that is the context-blind shadowing gap AGENTS.md
+    // records as unfixed, not something `.unreachable` claims to cover.
+    @Test func aScopedClaimantLeavesALaterUnconstrainedModeReachable() {
         let modes = [
             mode("a", key: "command", bundles: ["com.example.a"]),
             mode("b", key: "right_command"),
         ]
-        #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes)?.kind == .unreachable)
+        #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes)?.kind != .unreachable)
     }
 
     // The whole-config question the Modes pane and the menu-bar badge ask, since the row that explains
@@ -181,8 +187,8 @@ struct TriggerKeyConflictTests {
         let result = ModeResolver.resolvePhaseAWithReason(
             modes: [legacy], directFallback: direct, context: RoutingContext(),
             triggerKey: "control+option+shift+command")
-        #expect(result.mode.id == "a")
-        #expect(result.reason == .triggerKey)
+        #expect(result?.mode.id == "a")
+        #expect(result?.reason == .triggerKey)
     }
 
     @Test func oppositeSidesOfOneModifierAreTwoUsableTriggers() {
@@ -257,4 +263,84 @@ struct TriggerKeyConflictTests {
         #expect(TriggerKeyConflicts.conflict(for: edited, in: [other, edited])?.modeId == "a")
     }
 
+    // MARK: `.unreachable` under context-aware claiming
+
+    // Registration now drops a bundle-scoped mode outside its apps, so two modes that can never be
+    // registered at the same time can never shadow each other — reporting one dead lights the menu-bar
+    // error badge for a mode that fires perfectly well in its own app.
+    @Test func bundleDisjointModesAreNotUnreachable() {
+        let vm = mode("vm", key: "command", bundles: ["com.vmware.fusion"])
+        let notes = mode("notes", key: "right_command", bundles: ["com.apple.Notes"])
+        #expect(TriggerKeyConflicts.conflict(for: notes, in: [vm, notes])?.kind != .unreachable)
+    }
+
+    // The claimant is claimable everywhere, so it shadows the victim everywhere too.
+    @Test func anUnconstrainedClaimantStillMakesALaterModeUnreachable() {
+        let plain = mode("plain", key: "command")
+        let vm = mode("vm", key: "right_command", bundles: ["com.vmware.fusion"])
+        #expect(TriggerKeyConflicts.conflict(for: vm, in: [plain, vm])?.kind == .unreachable)
+    }
+
+    // A URL-scoped mode keeps claiming its key everywhere (the URL is unknown at registration), so it
+    // shadows exactly like an unconstrained one.
+    @Test func aURLScopedClaimantStillMakesALaterModeUnreachable() {
+        let email = mode("email", key: "command", urlPattern: #"mail\.google\.com"#)
+        let vm = mode("vm", key: "right_command", bundles: ["com.vmware.fusion"])
+        #expect(TriggerKeyConflicts.conflict(for: vm, in: [email, vm])?.kind == .unreachable)
+    }
+
+    // Overlap is by reachability, not string equality: the prefix covers the exact id.
+    @Test func aBundlePrefixClaimantCoversAnExactIdVictim() {
+        var chrome = mode("chrome", key: "command")
+        chrome.constraints = [Mode.Constraint(bundlePrefix: "com.google.")]
+        let mail = mode("mail", key: "right_command", bundles: ["com.google.Chrome"])
+        #expect(TriggerKeyConflicts.conflict(for: mail, in: [chrome, mail])?.kind == .unreachable)
+    }
+
+    // A constraint ANDs its fields, so carrying both narrows to the exact id — it does NOT widen to the
+    // prefix. Reading the prefix here would have the claimant cover every sibling bundle it can never
+    // actually run in, and put "Shortcut never fires" on a mode that fires.
+    @Test func aConstraintWithBothBundleFieldsScopesToTheExactId() {
+        var chrome = mode("chrome", key: "command")
+        chrome.constraints = [Mode.Constraint(bundleId: "com.google.Chrome", bundlePrefix: "com.google.")]
+        let gmail = mode("gmail", key: "right_command", bundles: ["com.google.Gmail"])
+        #expect(TriggerKeyConflicts.conflict(for: gmail, in: [chrome, gmail])?.kind != .unreachable)
+    }
+
+    // A retained loser claims only where the winner that beat it is ABSENT, and using its declared scope
+    // instead reports a mode that fires. In com.example.a, `a` takes right_command and shadows `b`, so
+    // `c`'s left_command — which never collides with right_command — is the first surviving claim there.
+    // `c` is scoped to that same app, so it always fires; `b` never contests it anywhere `c` runs.
+    @Test func aRetainedLoserDoesNotClaimWhereItWasItselfShadowed() {
+        let a = mode("a", key: "right_command", bundles: ["com.example.a"])
+        let b = mode("b", key: "command")
+        let c = mode("c", key: "left_command", bundles: ["com.example.a"])
+        #expect(TriggerKeyConflicts.conflict(for: c, in: [a, b, c])?.kind != .unreachable)
+    }
+
+    // The replay that decides who claimed must honor context too. `a` owns `command` only in TextEdit and
+    // `x` claims it everywhere else, so in Notes — the only place `c` runs — `x` is what takes the press.
+    // Dropping `x` from the claimant list because it lost inside TextEdit loses the warning entirely, and
+    // `a` alone cannot carry it: `a` is not registered in Notes at all.
+    @Test func aReplayLoserStillClaimsWhereTheWinnerIsAbsent() {
+        let a = mode("a", key: "command", bundles: ["com.apple.TextEdit"])
+        let x = mode("x", key: "command")
+        let c = mode("c", key: "right_command", bundles: ["com.apple.Notes"])
+        let conflict = TriggerKeyConflicts.conflict(for: c, in: [a, x, c])
+        #expect(conflict?.kind == .unreachable)
+        #expect(conflict?.modeId == "x")
+    }
+
+    // KNOWN UNDER-REPORT, pinned so a "fix" cannot quietly trade it for the false positive above.
+    // `c` runs everywhere and is dead everywhere — `a` takes TextEdit, `x` takes the rest — but no SINGLE
+    // claimant covers it: `a` is absent outside TextEdit, and `x` is contested there by `a`. Proving the
+    // union closes needs effective claiming scopes (each claimant's scope minus the earlier ones that beat
+    // it), which this model does not carry; the safe direction is to say nothing rather than light the
+    // menu-bar error badge. Belongs with the single-event arbitration rework AGENTS.md records as unbuilt.
+    @Test func aModeKilledByDifferentClaimantsInDifferentAppsIsNotReported() {
+        let a = mode("a", key: "command", bundles: ["com.apple.TextEdit"])
+        let x = mode("x", key: "command")
+        let c = mode("c", key: "right_command")
+        #expect(TriggerKeyConflicts.conflict(for: c, in: [a, x, c])?.kind != .unreachable)
+    }
 }

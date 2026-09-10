@@ -124,6 +124,23 @@ does not "fix" them — including in privacy modes, which turn context off but s
 Yes — select the text, trigger an edit-in-place mode, and speak an instruction. KeyScribe rewrites
 the selection in place.
 
+### I pressed a mode's shortcut and nothing happened, or it cancelled straight away.
+
+The mode is limited to certain apps or websites, and you pressed its shortcut somewhere it does not
+apply. What you get depends on which kind of rule the mode uses:
+
+- **Limited to apps.** The shortcut does nothing, and the key behaves normally in that app. KeyScribe
+  releases a shortcut in apps where the mode it belongs to cannot run, so a mode scoped to one app no
+  longer takes that key away from every other app.
+- **Limited to a website or window title.** You hear the start sound and then the cancel sound.
+  KeyScribe cannot tell which page or window you are on until dictation begins, so it has to start
+  before it can rule the mode out. Nothing is recorded, transcribed, or inserted.
+
+Two ways to change it. To dictate plainly there instead, give Plain Dictation the same shortcut — a
+shortcut only falls back to Plain Dictation where Plain Dictation also owns it. To silence a website
+rule outside its browser, add the browser to the same rule; see
+[Pair a website rule with its browser](docs/getting_started.md#pair-a-website-rule-with-its-browser).
+
 ### Where are my settings and history stored?
 
 Everything is a plain file under `~/Library/Application Support/KeyScribe/` — TOML config, JSONL

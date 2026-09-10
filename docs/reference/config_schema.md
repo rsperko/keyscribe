@@ -121,6 +121,10 @@ tap_threshold_ms = 250      # release under this = a tap (latches on); over = pu
 bundle_id = "com.apple.mail"
 # bundle_prefix = "com.jetbrains."        # optional; matches all bundle ids under the prefix
 # url_pattern = 'mail\.google\.com/.*'    # optional; best-effort
+# Pair url_pattern with bundle_id in the SAME block to also release the trigger key outside that
+# browser: a url-only rule cannot be disproved without probing, so its key stays claimed everywhere
+# and an out-of-scope press starts and cancels. With the bundle present the press resolves before the
+# mic opens and is a silent no-op (design.md §4.3).
 # window_title = '(?i)pull request'       # optional; regex against the focused window title
 # The editor's friendly "Website…" field stores a generated host-anchored url_pattern
 # (host = the entered domain OR a subdomain of it), e.g. github.com →

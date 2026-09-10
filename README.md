@@ -53,7 +53,7 @@ macOS 26+.
 | **On-device speech only** | Audio never leaves your Mac. There is no cloud STT mode. |
 | **No account, subscription, or telemetry** | KeyScribe does not collect usage, speech, transcripts, diagnostics, or crash reports. |
 | **Plain Dictation without an LLM** | The default mode inserts local transcript text with live edits, vocabulary, and replacements. |
-| **Modes instead of one global prompt** | Route by trigger key, app, URL, window title, menu choice, or spoken suffix such as `as an email`. |
+| **Modes instead of one global prompt** | Route by trigger key, app, URL, window title, menu choice, or spoken suffix such as `as an email`. A shortcut scoped to certain apps stays out of the way everywhere else. |
 | **Spoken edits before insertion** | Say line breaks, paragraphs, tabs, `scratch that`, verbatim spans, or `insert clipboard contents`. |
 | **Optional BYOK rewrite** | Hosted or local OpenAI-compatible providers can polish, format, or rewrite text only for modes you enable. |
 | **Plain files** | Config, modes, prompt fragments, vocabulary, replacements, and history live under `~/Library/Application Support/KeyScribe/`. |
@@ -99,6 +99,10 @@ Good starter modes:
 
 End a dictation with a spoken suffix like `as an email`, choose a one-shot mode from the menu bar,
 or bind the same key to different modes in different apps.
+
+A mode limited to certain apps releases its shortcut everywhere else, so that key keeps working
+normally in every other app. Give the same key to Plain Dictation as well when you want it to still
+dictate plainly outside those apps.
 
 ## Privacy Boundary
 

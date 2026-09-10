@@ -39,7 +39,7 @@ struct ModeEditorView: View {
                     Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Plain Dictation is also used whenever no other mode matches.")
+                Text("Plain Dictation also runs whenever no other mode matches on a shortcut it owns. A shortcut it does not own stays with the modes you gave it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Spoken editing") {
@@ -55,7 +55,7 @@ struct ModeEditorView: View {
                 nonPasteInsertionNotice
                 SettingRow(
                     title: "Do not save this mode in history",
-                    help: "When on, Direct's dictations are never written to local history. Otherwise it records per your global History setting.")
+                    help: "When on, Plain Dictation's dictations are never written to local history. Otherwise it records per your global History setting.")
                 {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)

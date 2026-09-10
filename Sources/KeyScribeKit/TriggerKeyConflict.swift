@@ -38,7 +38,7 @@ public enum TriggerKeyConflicts {
         let parsed = mode.triggerKeys.compactMap { trigger in
             (try? KeyDescriptor(parsing: trigger.key)).map { (trigger, $0) }
         }
-        let claims = parsed.map { claimedEarlier($0.1, in: earlier) }
+        let claims = parsed.map { claimedEarlier($0.1, for: mode, in: earlier) }
         if !claims.isEmpty, claims.allSatisfy({ $0 != nil }), let first = claims.first ?? nil {
             return first
         }
@@ -70,23 +70,39 @@ public enum TriggerKeyConflicts {
     /// this one. Strictly earlier — asking symmetrically told the mode that actually fires it was dead.
     /// A shared spelling is not reported here: the surviving binding's string still routes to both modes.
     private static func claimedEarlier(
-        _ descriptor: KeyDescriptor, in earlier: [Mode]
+        _ descriptor: KeyDescriptor, for mode: Mode, in earlier: [Mode]
     ) -> TriggerKeyConflict? {
         // Replays `HotkeyConflicts.shadowed`, and must keep replaying it: only bindings that actually
         // claimed can make a later one unreachable, so a mode that lost is skipped rather than treated as a
         // claimant. Diverge here and the warning blames a mode that was never registered.
-        var claimed: [(mode: Mode, key: String, descriptor: KeyDescriptor)] = []
+        var claimed: [(mode: Mode, key: String, descriptor: KeyDescriptor, contesters: [Mode])] = []
         for other in earlier {
             for trigger in other.triggerKeys {
-                guard let otherDescriptor = try? KeyDescriptor(parsing: trigger.key),
-                      !claimed.contains(where: { $0.descriptor.collides(with: otherDescriptor) })
-                else { continue }
-                claimed.append((other, trigger.key, otherDescriptor))
+                guard let otherDescriptor = try? KeyDescriptor(parsing: trigger.key) else { continue }
+                // A binding is dropped outright only by a claimant that outranks it EVERYWHERE it runs.
+                // `shadowed` is computed per-app over the claimable set, so one that loses inside a scoped
+                // claimant's apps is still the first registrant everywhere that claimant is absent — and it
+                // is that binding, not the scoped winner, that can leave a later mode dead.
+                let contesters = claimed.filter { $0.descriptor.collides(with: otherDescriptor) }
+                if contesters.contains(where: { shadowsWhereverItRuns(claimant: $0.mode, other) }) {
+                    continue
+                }
+                claimed.append((other, trigger.key, otherDescriptor, contesters.map(\.mode)))
             }
         }
+        // Registration is context-aware (`ModeResolver.canClaimKey`), so a claimant only shadows this
+        // mode where BOTH are registered. A claimant scoped to apps this mode also reaches shadows it
+        // everywhere it runs; a narrower claimant leaves it working outside those apps, and calling that
+        // "never fires" lights the menu-bar error badge for a mode that fires fine.
+        // A RETAINED loser claims only where the winner that beat it is absent, so it can only be the reason
+        // this mode never fires when no contester reaches into this mode's apps at all. Judge it by its
+        // declared scope instead and a mode that owns its key perfectly well — because the contester takes
+        // the colliding one out of its way there — is reported dead.
         for claim in claimed
         where claim.descriptor.collides(with: descriptor)
-            && claim.descriptor.canonical != descriptor.canonical {
+            && claim.descriptor.canonical != descriptor.canonical
+            && shadowsWhereverItRuns(claimant: claim.mode, mode)
+            && claim.contesters.allSatisfy({ !bundleScopesIntersect($0, mode) }) {
             return TriggerKeyConflict(
                 modeId: claim.mode.id, modeName: claim.mode.name, key: claim.key, kind: .unreachable)
         }
@@ -105,6 +121,72 @@ public enum TriggerKeyConflicts {
     private static func masks(_ descriptor: KeyDescriptor, _ other: KeyDescriptor) -> Bool {
         guard case .modifiers(let set) = descriptor, case .modifiers(let otherSet) = other else { return false }
         return set.isMasked(by: otherSet)
+    }
+
+    /// True when `claimant` is registered everywhere `mode` is — the condition for it to shadow `mode`
+    /// out of existence rather than merely out of a few apps.
+    ///
+    /// Deliberately NOT `canContend`: that answers "can two registered modes contend for one press" and
+    /// returns false for one-constrained/one-not, but an unconstrained mode is claimable EVERYWHERE and
+    /// so does still shadow a scoped one inside its apps. The question here is reachability of the
+    /// registration, not of the routing.
+    static func shadowsWhereverItRuns(claimant: Mode, _ mode: Mode) -> Bool {
+        // nil = claimable everywhere: unconstrained, or scoped only on a URL/window title, which cannot
+        // gate registration and so leaves the key claimed in every app.
+        guard let claimantScope = bundleScope(claimant) else { return true }
+        guard let modeScope = bundleScope(mode) else { return false }
+        return modeScope.allSatisfy { target in
+            claimantScope.contains { $0.covers(target) }
+        }
+    }
+
+    /// Whether the two modes can ever be registered in the same app at once. Unscoped on either side means
+    /// yes — that mode is claimable everywhere.
+    static func bundleScopesIntersect(_ a: Mode, _ b: Mode) -> Bool {
+        guard let left = bundleScope(a), let right = bundleScope(b) else { return true }
+        return left.contains { l in right.contains { l.intersects($0) } }
+    }
+
+    enum BundleMatcher: Equatable {
+        case exact(String)
+        case prefix(String)
+
+        // Overlap in either direction, unlike `covers` — two scopes share an app whenever one reaches into
+        // the other, no matter which is the broader.
+        func intersects(_ other: BundleMatcher) -> Bool {
+            covers(other) || other.covers(self)
+        }
+
+        // Reachability, not string equality: `com.google.` covers `com.google.Chrome`, and a prefix is
+        // only covered by a shorter prefix (an exact id can never cover the infinitely many a prefix does).
+        func covers(_ other: BundleMatcher) -> Bool {
+            switch (self, other) {
+            case let (.exact(a), .exact(b)): return a.lowercased() == b.lowercased()
+            case let (.prefix(a), .exact(b)): return b.lowercased().hasPrefix(a.lowercased())
+            case let (.prefix(a), .prefix(b)): return b.lowercased().hasPrefix(a.lowercased())
+            case (.exact, .prefix): return false
+            }
+        }
+    }
+
+    /// The apps a mode's key stays registered in, or nil for "everywhere". Mirrors
+    /// `ModeResolver.canClaimKey`: a single constraint without a bundle field keeps the key claimed
+    /// globally, so the whole mode is unscoped.
+    static func bundleScope(_ mode: Mode) -> [BundleMatcher]? {
+        guard !mode.constraints.isEmpty else { return nil }
+        var matchers: [BundleMatcher] = []
+        for constraint in mode.constraints {
+            // bundle_id FIRST: a constraint ANDs its fields, so carrying both narrows to the exact id.
+            // Reading the prefix would widen the scope to every sibling bundle the mode can never run in.
+            if let bundleId = constraint.bundleId {
+                matchers.append(.exact(bundleId))
+            } else if let prefix = constraint.bundlePrefix {
+                matchers.append(.prefix(prefix))
+            } else {
+                return nil
+            }
+        }
+        return matchers
     }
 
     // True when no routing context cleanly separates the two modes. Both unconstrained → collide everywhere.

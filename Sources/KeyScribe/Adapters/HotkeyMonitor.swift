@@ -405,11 +405,20 @@ final class HotkeyMonitor {
         bindings[i].armGeneration &+= 1
         bindings[i].pendingArm = true
         let generation = bindings[i].armGeneration
+        // Re-resolved by DESCRIPTOR when the grace elapses, never through the index captured here. `update`
+        // rebuilds the array in the INCOMING order and carries pendingArm/armGeneration across by
+        // descriptor, so a binding dropping out ahead of this one shifts its slot: a captured index then
+        // addresses a different binding, or points past the end and the press is swallowed with no onStart.
+        // Context-aware claiming rebuilds on every app switch, which makes that routine rather than a
+        // config-reload rarity. The generation check still discards an arm that lost its race.
+        let descriptor = bindings[i].descriptor
         schedule(chordGraceSeconds) { [weak self] in
-            guard let self, self.bindings.indices.contains(i),
-                  self.bindings[i].pendingArm, self.bindings[i].armGeneration == generation else { return }
-            self.bindings[i].pendingArm = false
-            self.fire(index: i, edge: .down, now: ProcessInfo.processInfo.systemUptime)
+            guard let self,
+                  let index = self.bindings.firstIndex(where: { $0.descriptor == descriptor }),
+                  self.bindings[index].pendingArm,
+                  self.bindings[index].armGeneration == generation else { return }
+            self.bindings[index].pendingArm = false
+            self.fire(index: index, edge: .down, now: ProcessInfo.processInfo.systemUptime)
         }
     }
 

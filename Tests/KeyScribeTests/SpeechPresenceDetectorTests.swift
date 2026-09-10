@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 import XCTest
 @testable import KeyScribeApp
 
@@ -8,34 +9,6 @@ private actor VADTestCounter {
     func increment() -> Int {
         value += 1
         return value
-    }
-}
-
-private final class VADTestGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var released = false
-
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if released {
-                lock.unlock()
-                continuation.resume()
-            } else {
-                self.continuation = continuation
-                lock.unlock()
-            }
-        }
-    }
-
-    func release() {
-        lock.lock()
-        released = true
-        let continuation = continuation
-        self.continuation = nil
-        lock.unlock()
-        continuation?.resume()
     }
 }
 
@@ -54,6 +27,13 @@ private final class VADTestClock: @unchecked Sendable {
         date = date.addingTimeInterval(seconds)
         lock.unlock()
     }
+}
+
+// `Issue.record` — the shared `Signal`'s default expiry report — does nothing outside a swift-testing test,
+// so this XCTest suite routes an expiry to `XCTFail` instead. Bounded for the same reason either way: a
+// release that never arrives must fail THIS test, not wedge the run with no result for any test.
+private func gateSignal(_ name: String) -> Signal {
+    Signal(name, onExpiry: { message, _ in XCTFail(message) })
 }
 
 final class SpeechPresenceDetectorTests: XCTestCase {
@@ -107,7 +87,7 @@ final class SpeechPresenceDetectorTests: XCTestCase {
 
     func testConcurrentLoadersShareOneInFlightTask() async {
         let attempts = VADTestCounter()
-        let gate = VADTestGate()
+        let gate = gateSignal("loadManager.gate")
         let detector = SpeechPresenceDetector(
             modelsDir: URL(fileURLWithPath: "/tmp"),
             modelPresent: { true },
@@ -121,7 +101,7 @@ final class SpeechPresenceDetectorTests: XCTestCase {
         async let prewarm: Void = detector.prewarm()
         async let reading = detector.read(samples: [0.5], url: url, sampleRate: 16_000)
         while await attempts.value == 0 { await Task.yield() }
-        gate.release()
+        gate.fire()
         _ = await (prewarm, reading)
 
         let attemptCount = await attempts.value
@@ -130,8 +110,8 @@ final class SpeechPresenceDetectorTests: XCTestCase {
 
     func testTimedOutInferencePreventsConcurrentInferenceUntilItSettles() async {
         let calls = VADTestCounter()
-        let gate = VADTestGate()
-        let settled = VADTestGate()
+        let gate = gateSignal("inference.gate")
+        let settled = gateSignal("inference.settled")
         let detector = SpeechPresenceDetector(
             modelsDir: URL(fileURLWithPath: "/tmp"),
             deadlineSeconds: 0.01,
@@ -141,7 +121,7 @@ final class SpeechPresenceDetectorTests: XCTestCase {
                     let call = await calls.increment()
                     if call == 1 {
                         await gate.wait()
-                        settled.release()
+                        settled.fire()
                     }
                     return [0.9]
                 }
@@ -154,7 +134,7 @@ final class SpeechPresenceDetectorTests: XCTestCase {
         let callsBeforeRelease = await calls.value
         XCTAssertEqual(callsBeforeRelease, 1)
 
-        gate.release()
+        gate.fire()
         await settled.wait()
         while await detector.inferenceInFlight() { await Task.yield() }
         let third = await detector.read(samples: [0.5], url: url, sampleRate: 16_000)

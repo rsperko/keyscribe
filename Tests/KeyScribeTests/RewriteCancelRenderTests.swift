@@ -3,30 +3,6 @@ import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
 
-private final class Signal: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var fired = false
-
-    func wait() async {
-        await withCheckedContinuation { c in
-            lock.lock()
-            if fired { lock.unlock(); c.resume(); return }
-            continuation = c
-            lock.unlock()
-        }
-    }
-
-    func fire() {
-        lock.lock()
-        fired = true
-        let c = continuation
-        continuation = nil
-        lock.unlock()
-        c?.resume()
-    }
-}
-
 private final class HUDSpy: HUDPresenting {
     private(set) var states: [HUDState] = []
     func render(_ state: HUDState) { states.append(state) }

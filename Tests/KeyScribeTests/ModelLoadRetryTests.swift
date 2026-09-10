@@ -62,25 +62,21 @@ private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var loaded = false
     private let text: String
-    private let held = DispatchSemaphore(value: 0)
+    private let released = Signal("SlowLoadEngine.release")
     private let blocksUntilReleased: Bool
     init(text: String = "hello world", blocksUntilReleased: Bool = false) {
         self.text = text
         self.blocksUntilReleased = blocksUntilReleased
     }
-    func release() { held.signal() }
+    func release() { released.fire() }
     func loadIfNeeded() async throws {
         let already = lock.withLock { let a = loaded; loaded = true; return a }
         guard !already else { return }
         guard blocksUntilReleased else { try await Task.sleep(for: .milliseconds(200)); return }
-        // Off the cooperative pool: waiting on the semaphore inside a Task would park a pool thread that
-        // the main actor needs to reach the state this test is waiting for.
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            Thread.detachNewThread { [held] in
-                held.wait()
-                c.resume()
-            }
-        }
+        // A continuation, never a semaphore: blocking on one inside a Task parks a cooperative-pool thread
+        // that the main actor needs to reach the state this test is waiting for, and the detached thread
+        // that used to dodge that parked forever if the release never came.
+        await released.wait()
     }
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
     func evict() async {}

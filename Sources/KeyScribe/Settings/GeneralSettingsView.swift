@@ -35,8 +35,8 @@ struct GeneralSettingsView: View {
                 Text("Plain Dictation")
             } footer: {
                 Text(directTrigger == nil
-                    ? "Choose a shortcut and how it starts in Modes. Plain Dictation is used whenever no other mode matches."
-                    : "Plain Dictation is used whenever no other mode matches.")
+                    ? "Choose a shortcut and how it starts in Modes. Plain Dictation runs whenever no other mode matches on a shortcut it owns."
+                    : "Plain Dictation runs whenever no other mode matches on a shortcut it owns.")
             }
 
             Section("Shortcuts") {

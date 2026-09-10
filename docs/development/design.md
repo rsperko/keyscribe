@@ -334,9 +334,13 @@ What users informally call "the global hotkey" is just that Fn binding.
   trigger, not just automatic selection. When **several modes share the key**, the eligible bound mode
   whose constraints best fit wins (most specific, then declaration order), with an unconstrained bound
   mode as the fallback — so one key can drive a Slack-only mode in Slack and a plain mode everywhere
-  else. **A press is never a no-op and never silently borrows a different configured mode:** when no
-  bound mode is eligible here, the key falls through to the **Direct** floor (see below) — a plain,
-  on-device dictation. (The STT *engine* is global — modes do not pick it; see §4.1.) Any key is
+  else. **A press never silently borrows a different configured mode:** when no bound mode is eligible
+  here, the key falls through to the **Direct** floor (see below) — a plain, on-device dictation —
+  **but only when Direct owns that key**. That precondition is what the documented same-key recipe
+  supplies, and it is what makes the fall-through read as "the key started plain dictation" rather than
+  as one mode's shortcut quietly running another mode. With Direct bound elsewhere the user never gave
+  this key to Direct, so the press does not dictate at all. (The STT *engine* is global — modes do not
+  pick it; see §4.1.) Any key is
   **capturable** — the **recommended default is Fn/Globe with hold-or-tap**, bound to Direct,
   with **right-Option** as a conflict-free alternative. Holding **Hyper** (⌃⌥⇧⌘) can be a trigger.
   Conflicts with system/other-app shortcuts are handled **best-effort** (detect and warn at
@@ -361,7 +365,27 @@ declaration order. Only **constrained** modes auto-start in Phase A; if none mat
 to the **Direct** floor. There is **no separate "default mode"** — Direct *is* the single catch-all
 (it owns Fn out of the box) and what every unmatched trigger lands on. Unconstrained modes never
 auto-start — they are reachable by **key or voice only**. When a key is pressed but **no mode bound
-to it is eligible here**, the press also falls to Direct — it still dictates, just plainly.
+to it is eligible here**, the press falls to Direct **if Direct owns that key** — it still dictates,
+just plainly. If it does not, the press does nothing: silently when that is known before the mic opens,
+otherwise as a cancel.
+
+**Constraints also gate whether a key is CLAIMED, not just which mode runs.** A trigger belonging only
+to modes whose `bundle_id` / `bundle_prefix` rule out the frontmost app is left unregistered there, and
+registration is rebuilt on app switch. This matters because claiming is not free: a chord registered
+through Carbon is **suppressed from the focused app**, and a bound mouse button is swallowed outright,
+so a scoped mode used to break its key in every *other* app. Only the bundle fields can do this —
+`url_pattern` and `window_title` are unknowable without probing (an Automation prompt per navigation,
+an AX read per title), so a mode scoped only on those keeps its key claimed everywhere and the decision
+stays at press time.
+
+The same predicate narrows **whether a press waits for a probe at all**. The deferral gate asks
+`requiresURLContext` / `requiresWindowTitleContext` over the modes the frontmost bundle cannot already
+rule out, not over every mode — otherwise one URL-scoped mode anywhere in the config forces every press
+onto the deferred path, and a "no mode can serve this" verdict that would have been silent arrives after
+the mic is open. So a constraint carrying **both** `bundle_id` and `url_pattern` (they AND) resolves
+inline outside that browser and the press is a silent no-op, while inside it the URL is still probed.
+A `url_pattern` alone keeps the audible cancel; that is the cost of routing on something only knowable
+once dictation has started.
 
 **Phase B — known only after STT (trigger-phrase routing):**
 - **Trigger phrase(s):** a mode may have **multiple** spoken phrases (e.g. *"as pig latin"*

@@ -309,6 +309,21 @@ Example: use `Fn` for Message in your chat app, but Plain Dictation everywhere e
 When both modes could apply, the more specific mode wins. In the chat app, Message runs. Elsewhere,
 Plain Dictation remains the fallback.
 
+Step 3 is what makes that last sentence true, so do not skip it. A shortcut falls back to Plain
+Dictation only where Plain Dictation actually owns that shortcut. Give `Fn` to Message alone and press
+it outside your chat app and nothing happens — the key is scoped to the places you assigned it. That is
+deliberate: a mode limited to a few apps should not hand its shortcut to a different mode everywhere
+else.
+
+An app rule also releases the shortcut where it cannot run, so other apps keep that key for themselves.
+A rule on a URL or window title cannot — those are only known once dictation has started. So the two
+kinds of rule behave differently when you press the shortcut somewhere it does not apply:
+
+- **App rule.** The key is not KeyScribe's there at all. Nothing happens, and the key does whatever it
+  normally does in that app.
+- **Website or window-title rule.** KeyScribe has to start dictating to find out, so you hear the start
+  sound and then the cancel sound. Nothing is recorded or inserted. See below for how to avoid this.
+
 ### URL and window-title routing
 
 URL and window-title rules are regular expressions. They are local routing keys. The browser URL is
@@ -316,6 +331,28 @@ not sent to a rewrite provider just because a mode uses URL routing.
 
 Use URL routing for web apps where the bundle ID is too broad. Use window-title routing for desktop
 apps where the document or task is visible in the title.
+
+#### Pair a website rule with its browser
+
+A website rule on its own keeps its shortcut in every app, because KeyScribe cannot know the URL until
+dictation starts. Pressing that shortcut in a text editor therefore starts and immediately cancels.
+
+Adding the browser to the *same* rule fixes that. The rule then only applies in that browser, so the
+shortcut is released everywhere else and pressing it there does nothing at all — no sound, no
+microphone.
+
+The mode editor's **Add app or website…** adds *App* and *Website* as two separate rules, and separate
+rules mean "either one matches". To require both, edit the mode's file under
+`~/Library/Application Support/KeyScribe/modes/` and put both fields in one `[[constraints]]` block:
+
+```toml
+[[constraints]]
+bundle_id = "com.google.Chrome"
+url_pattern = '(?i)^[a-z][a-z0-9+.-]*://([^/?#]*\.)?mail\.google\.com([/:?#]|$)'
+```
+
+Add one block per browser you use. Full field reference:
+[config schema](reference/config_schema.md).
 
 ### Spoken suffix routing
 
@@ -430,7 +467,8 @@ Use these as templates for your own setup.
 
 ### Chat and email from the same key
 
-- Plain Dictation owns `Fn`.
+- Plain Dictation owns `Fn`. (Required for the fallback below — a shortcut only falls back to Plain
+  Dictation where Plain Dictation owns it.)
 - Message also owns `Fn`, but only in your chat app.
 - Email has the spoken suffix `as an email`.
 - Cleanup is menu-only for occasional cleanup.

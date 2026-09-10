@@ -3,30 +3,6 @@ import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
 
-private final class Signal: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var fired = false
-
-    func wait() async {
-        await withCheckedContinuation { c in
-            lock.lock()
-            if fired { lock.unlock(); c.resume(); return }
-            continuation = c
-            lock.unlock()
-        }
-    }
-
-    func fire() {
-        lock.lock()
-        fired = true
-        let c = continuation
-        continuation = nil
-        lock.unlock()
-        c?.resume()
-    }
-}
-
 // STT engine whose transcribe() blocks on a gate, so a test can cancel mid-transcription.
 private final class GatedEngine: SpeechEngine, @unchecked Sendable {
     let id = "gated"
@@ -807,12 +783,18 @@ struct DictationCancellationTests {
     @Test func keyPressInAWrongAppFallsThroughToDirect() async throws {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        let modesDir = h.supportDir.appendingPathComponent("modes", isDirectory: true)
         // A mode bound to right_option but constrained to Slack; the harness frontmost app is
-        // "test.bundle", so the press is out of context and must fall through to the Direct floor.
+        // "test.bundle", so the press is out of context. Direct owns the same key — the documented
+        // same-key recipe — and that ownership is exactly what lets the press fall through to the floor
+        // rather than being ignored (a key Direct does NOT own is UnclaimedPressTests' subject).
         var slack = Mode(id: "slacky", name: "Slacky")
         slack.triggerKeys = [Mode.TriggerKey(key: "right_option")]
         slack.constraints = [Mode.Constraint(bundleId: "com.tinyspeck.slackmacgap")]
-        try ModeStore.write(slack, to: h.supportDir.appendingPathComponent("modes", isDirectory: true))
+        try ModeStore.write(slack, to: modesDir)
+        var direct = Mode.direct
+        direct.triggerKeys = [Mode.TriggerKey(key: "right_option")]
+        try ModeStore.write(direct, to: modesDir)
 
         h.controller.handleStart(triggerKey: "right_option")
         await h.controller.captureBringUpTask?.value

@@ -65,7 +65,11 @@ final class SpeechModelsModelTests: XCTestCase {
         func hold() async throws {
             await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
                 Thread.detachNewThread { [held] in
-                    held.wait()
+                    // Bounded for the same reason waitUntil below is: a release that never arrives must
+                    // fail THIS test, not park a thread and wedge the whole run with no result for any test.
+                    if held.wait(timeout: .now() + 10) == .timedOut {
+                        XCTFail("DownloadGate was never released")
+                    }
                     c.resume()
                 }
             }

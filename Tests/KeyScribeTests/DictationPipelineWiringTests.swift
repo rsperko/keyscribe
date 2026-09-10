@@ -71,28 +71,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    private final class Signal: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuation: CheckedContinuation<Void, Never>?
-        private var fired = false
-        func wait() async {
-            await withCheckedContinuation { c in
-                lock.lock()
-                if fired { lock.unlock(); c.resume(); return }
-                continuation = c
-                lock.unlock()
-            }
-        }
-        func fire() {
-            lock.lock()
-            fired = true
-            let c = continuation
-            continuation = nil
-            lock.unlock()
-            c?.resume()
-        }
-    }
-
     private final class HangingLLM: LLMClient, @unchecked Sendable {
         let started: Signal
         let release: Signal

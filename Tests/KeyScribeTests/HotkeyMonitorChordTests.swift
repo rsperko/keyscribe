@@ -1043,6 +1043,26 @@ struct HotkeyMonitorChordTests {
         #expect(!HUDState.error(message: "x", action: nil).holdsKeyFocus)
         #expect(!HUDState.hidden.holdsKeyFocus)
     }
+
+    // The grace closure must survive a rebuild that reshapes the bindings array. `update` carries
+    // pendingArm/armGeneration across by DESCRIPTOR, but an index captured at schedule time points at
+    // whatever now sits in that slot — so a binding dropping out ahead of the pending one silently
+    // swallows the press (or, on a generation collision, fires the wrong mode). Context-aware claiming
+    // rebuilds on app switch, which turns this from a config-reload rarity into a routine race.
+    @Test func aPendingArmSurvivesARebuildThatShiftsItsIndex() async {
+        let clock = ManualScheduler()
+        var started: [String?] = []
+        let m = monitor([chordBinding("fn"), chordBinding("left_command")],
+                        grace: 0.15, schedule: clock.schedule, onStart: { key, _ in started.append(key) })
+
+        m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
+        // A scoped mode on `fn` stops being claimable here, so the surviving binding moves 1 → 0.
+        m.update(bindings: [chordBinding("left_command")])
+        clock.fireAll()
+        await drainMain()
+
+        #expect(started == ["left_command"])
+    }
 }
 
 @MainActor

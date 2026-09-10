@@ -395,13 +395,35 @@ keyscribe/
       Two mitigations covering different halves: `normalizeKey` compares `descriptor.canonical`, so two
       SPELLINGS of one descriptor (`hyper` vs the expanded form) route identically and shadowing is
       harmless; and `TriggerKeyConflicts` reports `.unreachable` for descriptors that collide with a
-      DIFFERENT canonical form (`command` vs `right_command`), **ignoring `canContend`**, because context
-      cannot rescue a binding that was never registered. **`.unreachable` is ORDERED, like the shadowing it
+      DIFFERENT canonical form (`command` vs `right_command`). It still **ignores `canContend`** — that
+      answers "can two REGISTERED modes contend for one press", which context routing can settle, and a
+      binding that was never registered is past saving. What it does honor is
+      `shadowsWhereverItRuns`: since **registration itself is now context-aware** (below), a claimant
+      absent outside its own apps cannot make a later mode unreachable *everywhere*, only inside those
+      apps. Note the asymmetry — an UNCONSTRAINED claimant is registered everywhere, so it does shadow a
+      scoped mode outright; do NOT substitute `canContend` here, which calls that pair separable and
+      would drop the warning. **`.unreachable` is ORDERED, like the shadowing it
       predicts**: `shadowed` keeps the FIRST registrant, so only a mode with an EARLIER colliding trigger is
       reported (`claimedEarlier`). Asking symmetrically put "Shortcut never fires" on the mode that fires.
       **Collision is NOT transitive** — `right_command` ~ `command` ~ `left_command`, yet the two sided
       ones can never both engage — so `shadowed` appends to `claimed` ONLY on a successful claim, and
-      `claimedEarlier` replays that same rule. Treat a losing binding as a claimant and it suppresses a
+      `claimedEarlier` replays that same rule — but replays it **context-aware, in two halves that are
+      only correct together**. (a) A binding is dropped from `claimed` only by a winner that
+      `shadowsWhereverItRuns` it: since `shadowed` is computed per-app over the claimable set, a binding
+      that loses inside one scoped claimant's apps is still the first registrant everywhere that claimant
+      is absent, and it is THAT binding — not the scoped winner — that can leave a later mode dead (drop it
+      and a TextEdit-scoped `command` + unconstrained `command` + Notes-scoped `right_command` reports
+      nothing, though the third never fires). (b) A binding RETAINED that way carries its `contesters`, and
+      may only be blamed when NO contester's bundle scope intersects the victim's
+      (`bundleScopesIntersect`) — because it claims only where the winner that beat it is absent. Keep (a)
+      without (b) and the reverse error appears: `right_command`-in-app-A, global `command`,
+      `left_command`-in-app-A wrongly reports the third dead, when in app A the first takes `right_command`
+      out of its way and it fires. **The model tracks each claimant's DECLARED scope, never the union of
+      effective ones**, so a mode killed by different claimants in different apps is deliberately NOT
+      reported (pinned by `aModeKilledByDifferentClaimantsInDifferentAppsIsNotReported`). Under-reporting
+      is the safe direction — a false "Shortcut never fires" lights the menu-bar error badge on a mode that
+      works. Closing it needs effective claiming scopes (scope minus the earlier claimants that beat it),
+      which belongs with the single-event arbitration rework below, not a patch here. Treat a losing binding as a claimant and it suppresses a
       later one that would have worked fine (measured: right/either/left ⌘ left only Right-⌘ registered).
       **`.unreachable` answers "can this MODE fire", not "is every binding live"** — it holds only when
       EVERY trigger the mode has was claimed earlier, because the Modes list says "Shortcut never fires" and
@@ -409,6 +431,31 @@ keyscribe/
       flagged; that also covers a mode whose own second trigger claims the same press (TOML-only — the
       Settings well reads and rewrites `triggerKeys.first`). The residual gap, deliberately unreported:
       a redundant trigger inside one mode is dropped at runtime with nothing said.
+      **Constraints gate CLAIMING, not just running** (`ModeResolver.canClaimKey`, `AppDelegate.claimableModes`).
+      A trigger belonging only to modes whose bundle constraints rule out the frontmost app is left
+      unregistered there, rebuilt from an `NSWorkspace.didActivateApplicationNotification` observer through
+      the same `rebuildHotkeyMonitor` busy-deferral. This is not cosmetic: a Carbon chord is **suppressed
+      from the focused app**, and a bound mouse button is swallowed outright, so a scoped mode used to
+      break its key in every OTHER app. **One claimable set must feed BOTH `shadowedHotkeyIds` and the
+      bindings** — filter only the bindings and a mode that is no longer registered still claims the press
+      in `shadowed`, leaving the key with NO binding rather than the surviving one. Only bundle fields can
+      gate: `url_pattern`/`window_title` need a probe, so such a mode keeps its key claimed everywhere.
+      The observer diffs the claimable set before rebuilding, because a rebuild re-registers every Carbon
+      hot key and most app switches change nothing. `SettingsProblem.hotkeyConflict` deliberately passes
+      **every enabled mode**, not the claimable set — it describes the CONFIG, and would otherwise blink as
+      the user switches apps. This partially closes the context-blind gap above (bundle-scoped modes on
+      overlapping keys now coexist); it does NOT close it for URL/title-scoped modes, and single-event
+      arbitration is still the real fix and still unbuilt.
+      **`canClaimKey` also gates the PRESS-TIME probe decision**, not just registration
+      (`DictationController.probeCandidates`): the `requiresURLContext`/`requiresWindowTitleContext`
+      deferral gate asks over the modes the captured bundle cannot already rule out. Ask over every mode
+      and ONE url-scoped mode anywhere in the config forces EVERY press onto the deferred path — so a
+      mode scoped to a browser AND a site pays a mic + start cue + cancel in apps its bundle alone
+      settles, and the no-mode verdict that is silent before `beginCapture` lands after it instead. Both
+      gates must keep using the same predicate or they drift into a key that is claimed but never probed
+      (or the reverse). `bundleScope` mirrors it too: **`bundle_id` is read BEFORE `bundle_prefix`**,
+      because a constraint ANDs its fields — reading the prefix widens a claimant to every sibling bundle
+      it can never run in and puts "Shortcut never fires" on a mode that fires.
       This makes mode ORDER load-bearing for the warning, so whatever list is handed to
       `TriggerKeyConflicts` must be in registration order — `config.modes` in `AppDelegate`, and
       `ModesSettingsModel.modes`, which is the store's order unsorted. Never sort a list on its way in.
@@ -442,7 +489,13 @@ keyscribe/
       layer that matters: arming is *not* cheap (synchronous secure-field AX probe, mic open, and the start
       cue as soon as a prewarmed unit is ready), so an eager arm made every chord audibly start-then-cancel a
       dictation. It trades only latency — nothing is recorded until admission opens at cue end regardless — and
-      a release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed. It is also
+      a release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed.
+      **The held-back `.down` must re-resolve its binding by DESCRIPTOR, never through the index captured
+      when it was scheduled** (`beginArm`): `update` rebuilds the array in the INCOMING order and carries
+      `pendingArm`/`armGeneration` across by descriptor, so a binding dropping out ahead of the pending one
+      shifts its slot — a captured index then addresses a different binding or runs off the end, and the
+      press is swallowed with no `onStart` at all. Context-aware claiming rebuilds on app switch, which
+      makes that a routine race rather than the config-reload rarity it used to be. It is also
       what makes a subset trigger coexist with its superset (`left_command` alongside
       `left_command+left_control`): the smaller set's arm is still pending when the second modifier lands.
       (2) **The keyDown abort** (`handle`): the fallback for a chord slower than the grace, which really has

@@ -266,6 +266,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         buildHotkeyMonitor()
         observeKeyboardLayoutChanges()
+        observeFrontmostAppChanges()
         applyLoginItem(settings.loadOnLogin)
 
         // Start the tap now if permissions allow (idempotent); first-run retries via onReadyToDictate
@@ -351,12 +352,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? (try! SpeechEngineProvider(engines: engines, activeId: SpeechModelCatalog.defaultEnglishId))
     }
 
+    // The modes whose triggers stay registered while `frontBundleId` is frontmost. Constraints gate which
+    // mode RUNS; without this they would not gate which key is CLAIMED, and a scoped mode's chord is
+    // suppressed from the focused app by Carbon (or its mouse button swallowed outright) in every OTHER
+    // app. Only bundle constraints can prove absence here — see `ModeResolver.canClaimKey`.
+    private func claimableModes() -> [Mode] {
+        config.modes.filter { $0.enabled && ModeResolver.canClaimKey($0, bundleId: frontBundleId) }
+    }
+
     // Precedence order for the app-wide hotkey namespace: Modes (config order) then the two globals.
     // The losers of a chord collision are suppressed at dispatch so the higher-precedence owner fires
     // (first match wins; Modes beat the globals) — and the same set drives the Settings red-dot.
-    private func shadowedHotkeyIds() -> Set<String> {
+    private func shadowedHotkeyIds(in claimable: [Mode]) -> Set<String> {
         var ordered: [HotkeyConflicts.Registrant] = []
-        for mode in config.modes where mode.enabled {
+        for mode in claimable {
             for tk in mode.triggerKeys {
                 ordered.append(.init(id: "\(mode.id)#\(tk.key)", key: tk.key))
             }
@@ -367,9 +376,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildHotkeyMonitor() {
-        let shadowed = shadowedHotkeyIds()
+        // One claimable set feeds BOTH shadowing and the bindings. Diverge here and a mode filtered out of
+        // the bindings still claims the press in `shadowed`, which drops the mode that should have taken
+        // it — leaving the key with no binding at all rather than the surviving one.
+        let claimable = claimableModes()
+        let shadowed = shadowedHotkeyIds(in: claimable)
         var bindings: [HotkeyMonitor.Binding] = []
-        for mode in config.modes where mode.enabled {
+        for mode in claimable {
             for tk in mode.triggerKeys {
                 guard !shadowed.contains("\(mode.id)#\(tk.key)"),
                       let desc = try? KeyDescriptor(parsing: tk.key) else { continue }
@@ -379,6 +392,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     tapThreshold: Double(tk.tapThresholdMs) / 1000))
             }
         }
+        registeredClaimIds = claimable.map(\.id)
         let actionBindings = self.actionBindings(shadowed: shadowed)
 
         let layout = KeyboardLayout.current()
@@ -401,6 +415,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 onCancel: { [weak self] key in self?.controller.cancelStartedByModifier(triggerKey: key) })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
+        }
+    }
+
+    // Which app's constraints the current registrations were built for. KeyScribe's own windows are
+    // deliberately NOT tracked: activating Settings would unregister every scoped trigger and re-register
+    // it on the way out, churning Carbon on each visit — and a trigger pressed from our own UI is not a
+    // dictation into our own UI anyway.
+    private var frontBundleId: String? = {
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        return front == Bundle.main.bundleIdentifier ? nil : front
+    }()
+
+    private func observeFrontmostAppChanges() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            // Read off the notification before the actor hop: `note` is task-isolated, a String? is not.
+            let activated = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?
+                .bundleIdentifier
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // A bundle-less app (a helper, some CLI-launched processes) keeps the previous app's
+                // registrations rather than falling back to `canClaimKey`'s nil = claim-everything. That
+                // fallback is for an UNREADABLE frontmost app at launch; here the answer is known, and no
+                // bundle constraint can ever match a bundle-less app, so registering every scoped mode
+                // would claim keys that no mode could run on — each press resolving to no-mode and
+                // aborting. Inheriting the last real app is the cheaper wrong answer of the two.
+                guard let bundleId = activated,
+                      bundleId != Bundle.main.bundleIdentifier,
+                      bundleId != self.frontBundleId else { return }
+                self.frontBundleId = bundleId
+                // Most switches change nothing — no scoped mode, or the same ones stay claimable — and a
+                // rebuild tears down and re-registers every Carbon hot key, so only act on a real change.
+                guard self.claimableModes().map(\.id) != self.registeredClaimIds else { return }
+                self.rebuildHotkeyMonitor()
+            }
         }
     }
 
@@ -442,6 +492,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // moment (DictationController.onBecameIdle), so a key held during the reload isn't stranded by a
     // fresh PressGesture that never saw its key-down.
     private var pendingHotkeyRebuild = false
+
+    // The claimable set the live registrations were built from, so an app switch that changes nothing
+    // skips the rebuild entirely.
+    private var registeredClaimIds: [String] = []
 
     // Drop the cached config and re-register per-mode bindings from the fresh modes. Called by the file
     // watcher (external edits) and the Settings reload button; the rebuild defers if a key is held (see
@@ -777,7 +831,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             modeNeedsAIService: modes.contains { connectionUnavailable(for: $0) },
             modeUsesFailedConnection: modes.contains { usesFailedConnection($0, failed: failedConnectionIds) },
-            hotkeyConflict: Self.hotkeyConflictDetected(shadowed: shadowedHotkeyIds()),
+            // Every enabled mode, NOT the currently-claimable set: this badge describes the CONFIG, so it
+            // must not blink on and off as the user switches apps.
+            hotkeyConflict: Self.hotkeyConflictDetected(
+                shadowed: shadowedHotkeyIds(in: config.modes.filter(\.enabled))),
             modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes))
     }
 

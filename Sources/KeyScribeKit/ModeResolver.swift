@@ -53,26 +53,49 @@ public enum ModeResolver {
     public static func resolvePhaseA(
         modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?,
         eligible eligibleOverride: [Mode]? = nil
-    ) -> Mode {
+    ) -> Mode? {
         resolvePhaseAWithReason(
             modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey,
-            eligible: eligibleOverride).mode
+            eligible: eligibleOverride)?.mode
     }
 
-    // Same resolution as resolvePhaseA, plus WHY the mode was chosen. Semantics are unchanged — the reason
-    // just names which branch won.
+    /// Whether this mode's trigger key stays registered while `bundleId` is frontmost. Constraints gate
+    /// which mode RUNS; this is what stops them from also claiming a key where the mode cannot run — a
+    /// chord registered through Carbon is suppressed from the focused app, and a bound mouse button is
+    /// swallowed outright, so a scoped mode used to break its key in every OTHER app.
+    ///
+    /// Only the bundle fields can disprove a constraint here. A URL or window title is unknowable without
+    /// probing (an Automation prompt per navigation, an AX read per title), so a constraint carrying only
+    /// those keeps the key claimed and the decision stays at press time.
+    public static func canClaimKey(_ mode: Mode, bundleId: String?) -> Bool {
+        if mode.constraints.isEmpty { return true }
+        // Never unregister on unknown context: an unreadable frontmost app must not drop every scoped
+        // trigger at once.
+        guard let bundleId else { return true }
+        return mode.constraints.contains { constraint in
+            if let wanted = constraint.bundleId, wanted != bundleId { return false }
+            if let prefix = constraint.bundlePrefix,
+               !bundleId.lowercased().hasPrefix(prefix.lowercased()) { return false }
+            return true
+        }
+    }
+
+    // Same resolution as resolvePhaseA, plus WHY the mode was chosen — the reason names which branch won.
+    /// `nil` means the press must not dictate: a key was pressed, modes are bound to it, none can run
+    /// here, and the Direct floor does not own that key either.
     public static func resolvePhaseAWithReason(
         modes: [Mode], directFallback: Mode, context: RoutingContext, triggerKey: String?,
         eligible eligibleOverride: [Mode]? = nil
-    ) -> PhaseAResult {
+    ) -> PhaseAResult? {
         let enabled = modes.filter(\.enabled)
         // Reuse the caller's eligible set (also needed for Phase B) so the enabled∧isEligible constraint-
         // regex scan isn't repeated.
         let eligible = eligibleOverride ?? enabled.filter { isEligible($0, context) }
 
         // 1. Explicit key binding, gated by context. Among eligible modes bound to the pressed key, the
-        //    most specific wins (ties → declaration order). If modes are bound but none eligible here, fall
-        //    through to `directFallback`, the always-on-device no-LLM floor (design.md §4.3).
+        //    most specific wins (ties → declaration order). If modes are bound but none eligible here,
+        //    fall through to `directFallback` — the always-on-device no-LLM floor — but ONLY when it
+        //    owns the pressed key (design.md §4.3).
         if let key = triggerKey {
             let wanted = normalizeKey(key)
             let bound = enabled.filter { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
@@ -82,6 +105,13 @@ public enum ModeResolver {
                     // from the user's view — the key is what fired it.
                     return PhaseAResult(mode: m, reason: .triggerKey)
                 }
+                // Falling through to Direct is the DOCUMENTED same-key recipe, and it only reads as
+                // "the key started plain dictation" because Direct owns that key too. With Direct bound
+                // elsewhere the user never gave this key to Direct, so borrowing it silently swaps a
+                // configured mode for another one — the very thing the rule above forbids. Compared
+                // canonically, like every other trigger-string comparison.
+                guard directFallback.triggerKeys.contains(where: { normalizeKey($0.key) == wanted })
+                else { return nil }
                 return PhaseAResult(mode: directFallback, reason: .fallback)
             }
         }

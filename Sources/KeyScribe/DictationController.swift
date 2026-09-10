@@ -549,7 +549,14 @@ final class DictationController {
         // for URL-routed modes; without one, resolve inline so the mode is known before capture. When a
         // probe is needed, resolve off-main so it never blocks the cue/capture/HUD — the mode is only
         // needed at commit (transcribeAndInsert awaits this).
-        if ModeResolver.requiresURLContext(plan.modes) || ModeResolver.requiresWindowTitleContext(plan.modes) {
+        //
+        // Only modes the frontmost bundle cannot already rule out get a vote here. Ask over every mode and
+        // ONE url-scoped mode anywhere in the config forces every press onto the deferred path, so a mode
+        // scoped to a browser AND a site pays a mic + start cue + cancel in apps its bundle alone settles —
+        // and the no-mode verdict, which is silent before beginCapture, arrives after it instead.
+        let probeCandidates = self.probeCandidates()
+        if ModeResolver.requiresURLContext(probeCandidates)
+            || ModeResolver.requiresWindowTitleContext(probeCandidates) {
             session?.modeResolveTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
@@ -562,6 +569,10 @@ final class DictationController {
         } else {
             session?.modeResolveTask = nil
             applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
+            // Resolving inline can conclude that nothing can serve this press, which terminates the
+            // dictation in place. Nothing has been claimed yet, so bail before the mic and cue below —
+            // otherwise the abort is silent but we still open the microphone.
+            guard machine.state == .arming else { return }
         }
 
         // The press shows NOTHING. The HUD is the visual half of the go-signal, so it may not appear until
@@ -1025,6 +1036,25 @@ final class DictationController {
         }
     }
 
+    // The pressed key belongs only to modes that cannot run here, and the Direct floor does not own it
+    // either — so this press was never ours to serve.
+    //
+    // Resolving inline (no URL/window-title probe) lands here BEFORE beginCapture, with nothing claimed:
+    // no cue, no mic, no HUD, exactly like the chord grace discarding a pending arm. Once the probe has
+    // deferred us past beginCapture the start cue has already played, so cancel audibly instead — the
+    // probe is bounded at 0.6s and usually returns inside the cue, before admission opens, so nothing is
+    // recorded and nothing is lost. `.cancel`, not `.error`: nothing is wrong, the key just does not
+    // apply here.
+    private func abortPressWithNoEligibleMode() {
+        log.notice(
+            "press ignored — no mode for \(self.activeStartTrigger ?? "(none)", privacy: .public) here")
+        guard captureBringUpTask != nil else {
+            finish(machine: .cancel, cue: nil, state: .hidden)
+            return
+        }
+        cancel()
+    }
+
     private func cancelBeforeCaptureStarted() {
         // Release/ESC during the cue is a release during bring-up (the unit comes up under the cue). Cancel
         // the bring-up task so a fast bring-up sitting in the cue-end hold wakes at once (its guards see
@@ -1053,6 +1083,15 @@ final class DictationController {
         finish(machine: .cancel, cue: nil, state: nil)
     }
 
+    // The modes whose eligibility the frontmost bundle cannot settle on its own, so a URL or window-title
+    // probe could still change the answer for them. Same predicate registration uses
+    // (`ModeResolver.canClaimKey`) — "not disproved by the bundle alone" is exactly the question both ask,
+    // so the two can never drift into a mode whose key is claimed but never probed, or the reverse.
+    private func probeCandidates() -> [Mode] {
+        let bundleId = capturedSnapshot?.bundleId
+        return plan.modes.filter { ModeResolver.canClaimKey($0, bundleId: bundleId) }
+    }
+
     // Phase A (design.md §4.3): resolve the mode from routing context before recording. A non-nil
     // triggerKey (from a mode's own HotkeyMonitor binding) forces that mode, overriding context. The
     // URL and window title are fetched only when a matching constraint exists (resolveModeProbing);
@@ -1071,14 +1110,26 @@ final class DictationController {
             modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey,
             eligible: eligible)
         // A menu-picked one-shot mode is an explicit choice that bypasses the context gate — it is the
-        // deliberate way to run a constrained mode outside its apps (design.md §4.3).
+        // deliberate way to run a constrained mode outside its apps (design.md §4.3). It therefore also
+        // outranks a "nothing can serve this press" verdict, so it is read BEFORE that verdict is acted on.
         let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
         nextModeOverrideID = nil
-        let choice: ModeChoiceReason = override != nil ? .oneShot : resolved.reason
+        let chosen: Mode
+        let choice: ModeChoiceReason
+        if let override {
+            chosen = override
+            choice = .oneShot
+        } else if let resolved {
+            chosen = resolved.mode
+            choice = resolved.reason
+        } else {
+            abortPressWithNoEligibleMode()
+            return
+        }
         session?.modeChoice = choice
         session?.triggerDisplay = choice == .triggerKey
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
-        activeMode = securePolicyApplied(override ?? resolved.mode)
+        activeMode = securePolicyApplied(chosen)
         session?.modeReady = true
         onModeAndSnapshotReady()
     }
@@ -1135,11 +1186,13 @@ final class DictationController {
         await session?.snapshotAdoptionTask?.value
         var url: String?
         var windowTitle: String?
+        let candidates = probeCandidates()
         if let bundleId = capturedSnapshot?.bundleId {
             // Each probe is gated on a mode actually using it: the URL probe needs Apple Events (an
             // Automation prompt), the title probe an extra AX round trip — neither runs unless a mode's
-            // constraints depend on it.
-            if ModeResolver.requiresURLContext(plan.modes) {
+            // constraints depend on it. Narrowed to the same candidates the deferral gate used, so a mode
+            // this app's bundle already rules out never costs an Automation prompt here.
+            if ModeResolver.requiresURLContext(candidates) {
                 // The URL selects the mode (which can differ in connection/rewrite/context), so it is bound to
                 // the captured process+window: the probe confirms the captured target is still focused before
                 // and after the AppleScript read and discards the URL otherwise. Only the same-bundle
@@ -1149,7 +1202,7 @@ final class DictationController {
             }
             // Title routing reads the exact captured process AND, when a window was captured, only that
             // window — a same-app switch to another window won't route on its title.
-            if ModeResolver.requiresWindowTitleContext(plan.modes), let pid = capturedSnapshot?.pid {
+            if ModeResolver.requiresWindowTitleContext(candidates), let pid = capturedSnapshot?.pid {
                 windowTitle = ContextProbe.focusedWindowTitle(pid: pid, expectedWindowId: capturedSnapshot?.focusedWindowId)
             }
         }

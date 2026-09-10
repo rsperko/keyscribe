@@ -10,28 +10,9 @@ private struct FakeClient: LLMClient {
     }
 }
 
-// One-shot gate so a test can interleave state changes while a connection test is mid-flight.
-private final class Gate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var opened = false
-    func wait() async {
-        await withCheckedContinuation { c in
-            lock.lock()
-            if opened { lock.unlock(); c.resume(); return }
-            continuation = c
-            lock.unlock()
-        }
-    }
-    func open() {
-        lock.lock(); opened = true; let c = continuation; continuation = nil; lock.unlock()
-        c?.resume()
-    }
-}
-
 private struct BlockingClient: LLMClient {
     let result: Result<String, Error>
-    let gate: Gate
+    let gate: Signal
     func complete(system: String, user: String, connection: Connection) async throws -> String {
         await gate.wait()
         return try result.get()
@@ -261,7 +242,7 @@ struct AIServiceTestStateTests {
     @Test func aStaleVerdictLandingAfterAPostTestEditIsDiscarded() async {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let gate = Gate()
+        let gate = Signal()
         let model = AIServiceSettingsModel(
             repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: BlockingClient(
@@ -274,7 +255,7 @@ struct AIServiceTestStateTests {
         model.update(connection, apiKey: nil)
         #expect(model.testState(for: connection.id) == nil)
 
-        gate.open()
+        gate.fire()
         await model.testTask?.value
 
         #expect(model.testState(for: connection.id) == nil)
@@ -284,7 +265,7 @@ struct AIServiceTestStateTests {
     @Test func aStaleVerdictDoesNotAttachToANewConnectionReusingADeletedId() async {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let gate = Gate()
+        let gate = Signal()
         let model = AIServiceSettingsModel(
             repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
             tester: ConnectionTester(client: BlockingClient(
@@ -299,7 +280,7 @@ struct AIServiceTestStateTests {
         let recreated = model.selected!
         #expect(recreated.id == deleted.id)
 
-        gate.open()
+        gate.fire()
         await model.testTask?.value
 
         #expect(model.testState(for: recreated.id) == nil)

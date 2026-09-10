@@ -13,8 +13,18 @@ private func mode(
     return m
 }
 
-private func phaseA(_ modes: [Mode], context: RoutingContext, triggerKey: String?) -> Mode {
-    ModeResolver.resolvePhaseA(modes: modes, directFallback: .direct, context: context, triggerKey: triggerKey)
+private func phaseA(
+    _ modes: [Mode], context: RoutingContext, triggerKey: String?, direct: Mode = .direct
+) -> Mode? {
+    ModeResolver.resolvePhaseA(modes: modes, directFallback: direct, context: context, triggerKey: triggerKey)
+}
+
+/// The Direct floor as shipped: `Mode.direct` carries no trigger keys, so it can only catch a press
+/// whose key it actually owns. Tests that want the fallback must say which key it owns.
+private func directOwning(_ key: String) -> Mode {
+    var d = Mode.direct
+    d.triggerKeys = [Mode.TriggerKey(key: key)]
+    return d
 }
 
 struct ModeResolverTests {
@@ -75,7 +85,7 @@ struct ModeResolverTests {
         prefix.constraints = [Mode.Constraint(bundlePrefix: "com.jetbrains.")]
         let m = phaseA([prefix, exact],
             context: .init(bundleId: "com.jetbrains.intellij"), triggerKey: "right_option")
-        #expect(m.id == "exact")
+        #expect(m?.id == "exact")
     }
 
     @Test func urlBeatsWindowTitleOnSharedKey() {
@@ -86,7 +96,7 @@ struct ModeResolverTests {
         let m = phaseA([titled, urled],
             context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x", windowTitle: "GitHub"),
             triggerKey: "right_option")
-        #expect(m.id == "urled")
+        #expect(m?.id == "urled")
     }
 
     @Test func requiresWindowTitleContextOnlyWhenAModeUsesIt() {
@@ -106,7 +116,7 @@ struct ModeResolverTests {
         let m = phaseA([urlOnly, both],
             context: .init(bundleId: "com.google.Chrome", url: "https://github.com/x"),
             triggerKey: "right_option")
-        #expect(m.id == "both")
+        #expect(m?.id == "both")
     }
 
     // Phase A
@@ -114,7 +124,7 @@ struct ModeResolverTests {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"])
         let m = phaseA([plain, email], context: .init(), triggerKey: "right_option")
-        #expect(m.id == "email")
+        #expect(m?.id == "email")
     }
 
     @Test func contextDefaultPrefersAppSpecificMode() {
@@ -122,25 +132,47 @@ struct ModeResolverTests {
         let email = mode("email", bundles: ["com.apple.mail"])
         let m = phaseA([plain, email],
             context: .init(bundleId: "com.apple.mail"), triggerKey: nil)
-        #expect(m.id == "email")
+        #expect(m?.id == "email")
     }
 
     @Test func fallsBackToDirectWhenNoKeyAndNoContextMatch() {
         let plain = mode("plain")
         let email = mode("email", bundles: ["com.apple.mail"])
         let m = phaseA([plain, email], context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
-        #expect(m.id == Mode.directId)
+        #expect(m?.id == Mode.directId)
     }
 
-    @Test func keyPressFallsThroughToDirectWhenConstraintExcludesContext() {
-        // design.md §4.3: an app constraint gates every trigger, and a key press is never a no-op —
-        // pressing the key outside email's constrained app falls through to Direct.
+    // design.md §4.3: an app constraint gates every trigger. Falling through to Direct is the DOCUMENTED
+    // same-key recipe, and it only reads as "started by its shortcut" because Direct owns that key too.
+    @Test func keyPressFallsThroughToDirectWhenDirectOwnsTheKey() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
         let m = phaseA([plain, email],
-            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option")
-        #expect(m.id == Mode.direct.id)
-        #expect(m.aiRewrite == nil)
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option",
+            direct: directOwning("right_option"))
+        #expect(m?.id == Mode.direct.id)
+        #expect(m?.aiRewrite == nil)
+    }
+
+    // The other half of that rule, and the reported bug: with Direct bound elsewhere, the key was never
+    // given to Direct by the user, so a press it cannot serve must not borrow it.
+    @Test func keyPressDoesNotDictateWhenDirectDoesNotOwnTheKey() {
+        let plain = mode("plain")
+        let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
+        let m = phaseA([plain, email],
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option",
+            direct: directOwning("fn"))
+        #expect(m == nil)
+    }
+
+    // Ownership is compared canonically, like every other trigger-string comparison, so an alias spelling
+    // of the same descriptor still counts as owning the key.
+    @Test func directOwnsTheKeyUnderAnAliasSpelling() {
+        let chorded = mode("chorded", keys: ["hyper"], bundles: ["com.apple.mail"])
+        let m = phaseA([chorded],
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "hyper",
+            direct: directOwning("control+option+shift+command"))
+        #expect(m?.id == Mode.direct.id)
     }
 
     @Test func keyPressRunsConstrainedModeInsideItsContext() {
@@ -148,7 +180,7 @@ struct ModeResolverTests {
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
         let m = phaseA([plain, email],
             context: .init(bundleId: "com.apple.mail"), triggerKey: "right_option")
-        #expect(m.id == "email")
+        #expect(m?.id == "email")
     }
 
     @Test func userNamedDirectCannotCollideWithTheSystemFloor() {
@@ -165,8 +197,27 @@ struct ModeResolverTests {
         let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
         let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
         let m = phaseA([slack, obsidian],
-            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option")
-        #expect(m.id == Mode.direct.id)
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option",
+            direct: directOwning("right_option"))
+        #expect(m?.id == Mode.direct.id)
+    }
+
+    @Test func keyPressDoesNotDictateWhenEveryBoundModeIsIneligibleAndDirectIsElsewhere() {
+        let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
+        let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])
+        let m = phaseA([slack, obsidian],
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "right_option",
+            direct: directOwning("fn"))
+        #expect(m == nil)
+    }
+
+    // Branch 3 is untouched: with no key pressed there is no key for Direct to own, so the floor still
+    // catches a menu or API start unconditionally.
+    @Test func aKeylessStartStillFallsBackToDirect() {
+        let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
+        let m = phaseA([email], context: .init(bundleId: "com.apple.notes"), triggerKey: nil,
+            direct: directOwning("fn"))
+        #expect(m?.id == Mode.directId)
     }
 
     @Test func sharedKeyRoutesByAppContext() {
@@ -177,8 +228,8 @@ struct ModeResolverTests {
             context: .init(bundleId: "com.tinyspeck.slackmacgap"), triggerKey: "right_option")
         let inObsidian = phaseA(modes,
             context: .init(bundleId: "md.obsidian"), triggerKey: "right_option")
-        #expect(inSlack.id == "slack")
-        #expect(inObsidian.id == "obsidian")
+        #expect(inSlack?.id == "slack")
+        #expect(inObsidian?.id == "obsidian")
     }
 
     @Test func sharedKeyConstrainedBeatsUnconstrainedInItsApp() {
@@ -191,8 +242,8 @@ struct ModeResolverTests {
         // Obsidian runs it rather than falling through to Direct.
         let elsewhere = phaseA(modes,
             context: .init(bundleId: "com.apple.Notes"), triggerKey: "right_option")
-        #expect(inObsidian.id == "markdown")
-        #expect(elsewhere.id == "plain")
+        #expect(inObsidian?.id == "markdown")
+        #expect(elsewhere?.id == "plain")
     }
 
     @Test func phaseAPrefersMostSpecificConstraintOverDeclarationOrder() {
@@ -201,7 +252,7 @@ struct ModeResolverTests {
         let ctx = RoutingContext(bundleId: "com.google.Chrome", url: "https://github.com/x")
         // app is declared first but must lose: specificity beats declaration order.
         let m = phaseA([app, appUrl], context: ctx, triggerKey: nil)
-        #expect(m.id == "appurl")
+        #expect(m?.id == "appurl")
     }
 
     // Phase B
@@ -242,7 +293,7 @@ struct ModeResolverTests {
     @Test func fallsBackToDirectWhenTheOnlyModeIsIneligible() {
         let plain = mode("plain", bundles: ["com.apple.mail"])
         let m = phaseA([plain], context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
-        #expect(m.id == Mode.directId)
+        #expect(m?.id == Mode.directId)
     }
 
     @Test func urlOnlyConstraintMatchesByURL() {
@@ -352,32 +403,41 @@ struct ModeResolverTests {
         let polish = mode("polish", keys: ["right_option"])
         let r = ModeResolver.resolvePhaseAWithReason(
             modes: [polish], directFallback: .direct, context: .init(), triggerKey: "right_option")
-        #expect(r.mode.id == "polish")
-        #expect(r.reason == .triggerKey)
+        #expect(r?.mode.id == "polish")
+        #expect(r?.reason == .triggerKey)
     }
 
     @Test func phaseAReasonIsContextRuleForAConstraintWonMode() {
         let mail = mode("mail", bundles: ["com.apple.mail"])
         let r = ModeResolver.resolvePhaseAWithReason(
             modes: [mail], directFallback: .direct, context: .init(bundleId: "com.apple.mail"), triggerKey: nil)
-        #expect(r.mode.id == "mail")
-        #expect(r.reason == .contextRule)
+        #expect(r?.mode.id == "mail")
+        #expect(r?.reason == .contextRule)
     }
 
     @Test func phaseAReasonIsFallbackWhenNothingMatches() {
         let mail = mode("mail", bundles: ["com.apple.mail"])
         let r = ModeResolver.resolvePhaseAWithReason(
             modes: [mail], directFallback: .direct, context: .init(bundleId: "com.apple.notes"), triggerKey: nil)
-        #expect(r.mode.id == Mode.directId)
-        #expect(r.reason == .fallback)
+        #expect(r?.mode.id == Mode.directId)
+        #expect(r?.reason == .fallback)
     }
 
-    @Test func phaseAReasonIsFallbackWhenBoundKeyIsIneligibleHere() {
+    @Test func phaseAReasonIsFallbackWhenBoundKeyIsIneligibleHereAndDirectOwnsIt() {
         let mail = mode("mail", keys: ["fn"], bundles: ["com.apple.mail"])
         let r = ModeResolver.resolvePhaseAWithReason(
-            modes: [mail], directFallback: .direct, context: .init(bundleId: "com.apple.notes"), triggerKey: "fn")
-        #expect(r.mode.id == Mode.directId)
-        #expect(r.reason == .fallback)
+            modes: [mail], directFallback: directOwning("fn"),
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "fn")
+        #expect(r?.mode.id == Mode.directId)
+        #expect(r?.reason == .fallback)
+    }
+
+    @Test func phaseAHasNoResultWhenBoundKeyIsIneligibleHereAndDirectIsElsewhere() {
+        let mail = mode("mail", keys: ["fn"], bundles: ["com.apple.mail"])
+        let r = ModeResolver.resolvePhaseAWithReason(
+            modes: [mail], directFallback: directOwning("right_option"),
+            context: .init(bundleId: "com.apple.notes"), triggerKey: "fn")
+        #expect(r == nil)
     }
 
     @Test func phaseBReportsTheMatchedPhrase() {
@@ -385,5 +445,64 @@ struct ModeResolverTests {
         let r = ModeResolver.resolvePhaseB(eligibleModes: [email], transcript: "send this to bob as an email")
         #expect(r.routedModeId == "email")
         #expect(r.matchedPhrase == "as an email")
+    }
+}
+
+// A mode's trigger is registered globally unless its constraints prove it cannot run in the frontmost
+// app. Only the bundle fields can prove that at registration time — URL and window title are unknowable
+// without probing, so a constraint carrying only those keeps the key claimed.
+struct ModeClaimTests {
+    private func constrained(_ constraints: [Mode.Constraint]) -> Mode {
+        var m = try! ModeStore.decode(from: "schema_version = 1\nname = \"m\"", id: "m")
+        m.triggerKeys = [Mode.TriggerKey(key: "fn")]
+        m.constraints = constraints
+        return m
+    }
+
+    @Test func unconstrainedModeClaimsEverywhere() {
+        #expect(ModeResolver.canClaimKey(constrained([]), bundleId: "com.apple.Notes"))
+    }
+
+    @Test func aBundleScopedModeReleasesItsKeyElsewhere() {
+        let m = constrained([.init(bundleId: "com.vmware.fusion")])
+        #expect(ModeResolver.canClaimKey(m, bundleId: "com.vmware.fusion"))
+        #expect(!ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
+    }
+
+    // The whole reason URL routing cannot gate registration: off Gmail we still do not know we are off
+    // Gmail until the probe runs, so the key stays claimed.
+    @Test func aURLScopedModeKeepsClaimingWhereTheURLIsUnknown() {
+        let m = constrained([.init(urlPattern: "mail\\.google\\.com")])
+        #expect(ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
+    }
+
+    @Test func aWindowTitleScopedModeKeepsClaiming() {
+        let m = constrained([.init(windowTitle: "(?i)pull request")])
+        #expect(ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
+    }
+
+    @Test func bundlePrefixMatchesCaseInsensitively() {
+        let m = constrained([.init(bundlePrefix: "com.google.")])
+        #expect(ModeResolver.canClaimKey(m, bundleId: "COM.GOOGLE.Chrome"))
+        #expect(!ModeResolver.canClaimKey(m, bundleId: "com.apple.Safari"))
+    }
+
+    // Constraints OR together, so one bundle-disproved constraint cannot release a key another still claims.
+    @Test func oneUnprovableConstraintKeepsTheKeyClaimed() {
+        let m = constrained([.init(bundleId: "com.vmware.fusion"), .init(urlPattern: "example\\.com")])
+        #expect(ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
+    }
+
+    // A constraint ANDs its fields, so a non-matching bundle disproves it whatever else it carries.
+    @Test func aBundleMismatchDisprovesAConstraintCarryingAURL() {
+        let m = constrained([.init(bundleId: "com.google.Chrome", urlPattern: "mail\\.google\\.com")])
+        #expect(!ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
+        #expect(ModeResolver.canClaimKey(m, bundleId: "com.google.Chrome"))
+    }
+
+    // Never unregister on unknown context: an unreadable frontmost app must not silently drop every
+    // scoped trigger.
+    @Test func anUnknownFrontmostAppClaimsEverything() {
+        #expect(ModeResolver.canClaimKey(constrained([.init(bundleId: "com.vmware.fusion")]), bundleId: nil))
     }
 }
