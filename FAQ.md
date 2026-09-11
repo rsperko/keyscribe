@@ -52,9 +52,14 @@ but it falls back to paste when that direct insert cannot be verified.
 
 ### Selecting a Qwen3-ASR model crashes in a source build.
 
-The Metal Toolchain was not installed when the app was built. Run
-`xcodebuild -downloadComponent MetalToolchain`, then rebuild with `./make-app.sh`. Packaged
-downloads include the required bundled artifact.
+The app was built without the compiled Metal shader library Qwen3-ASR runs on. `make-app.sh` can no
+longer produce such a build — it stops when the Metal Toolchain cannot compile shaders, and runs
+`--mlx-smoke` on the new binary before replacing your app — so this is an older build, or one
+packaged another way.
+
+Run `xcodebuild -downloadComponent MetalToolchain`, rebuild with `./make-app.sh`, and confirm with
+`KeyScribe.app/Contents/MacOS/KeyScribe --mlx-smoke`, which exits 0 when MLX runs. Packaged downloads
+include the library already.
 
 ## Using KeyScribe
 
