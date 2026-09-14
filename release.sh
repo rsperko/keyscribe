@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Build a notarization-ready KeyScribe.app and a stapled KeyScribe-<version>.dmg, signed with a
-# Developer ID Application cert + hardened runtime + entitlements. This is the reusable core of the
-# release pipeline (used both locally and by .github/workflows/release.yml). For the dev build that
-# uses a self-signed cert and skips hardened runtime, use make-app.sh instead.
-# Full plan: agent_notes/distribution_plan/README.md.
+# Build a notarization-ready KeyScribe.app and a stapled KeyScribe-<version>.dmg: an Xcode archive +
+# export of the public target in App/project.yml, signed with a Developer ID Application cert +
+# hardened runtime + entitlements. For the dev build that uses a self-signed cert and skips hardened
+# runtime, use make-app.sh instead. Full plan: agent_notes/distribution_plan/README.md.
 #
 # Usage:
 #   ./release.sh                 build/notarize the CURRENT latest tag (re-run a release)
@@ -25,8 +24,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+for inherited in KEYSCRIBE_VERSION KEYSCRIBE_BUILD KEYSCRIBE_SCM_REVISION; do
+  if [ -n "${!inherited+set}" ]; then
+    echo "error: $inherited is set. It is a downstream build input; upstream releases derive the version" >&2
+    echo "       from the git tag, and the DMG name and appcast build number assume that. Unset it and re-run." >&2
+    exit 1
+  fi
+done
+
 APP="KeyScribe.app"
-ENT="KeyScribe.entitlements"
 ID="${KEYSCRIBE_SIGN_ID:-}"
 
 CLEANUP_P8=""
@@ -84,8 +90,8 @@ if [ -n "$BUMP" ]; then
   git tag "$NEW_TAG"
 fi
 
-# Version comes from the latest git tag (make-app.sh stamps it into Info.plist). A release must be
-# tagged so the DMG name and the in-app version agree — refuse to build an untagged release.
+# Version comes from the latest git tag (scripts/prepare-xcode-project.sh stamps it into Info.plist). A
+# release must be tagged so the DMG name and the in-app version agree — refuse to build an untagged release.
 SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
 if [ -z "$SHORT_VERSION" ]; then
   echo "error: no git tag found — pass a bump (./release.sh patch) or tag first (git tag v0.1.0)." >&2
@@ -94,8 +100,8 @@ fi
 TAG="v$SHORT_VERSION"
 DMG="KeyScribe-$SHORT_VERSION.dmg"
 
-# Whatever path got us here (bump or re-run), the packaged bits must match $TAG exactly. make-app.sh
-# stamps the in-app version from `git describe --tags --dirty`, so a dirty tree or a HEAD past the tag
+# Whatever path got us here (bump or re-run), the packaged bits must match $TAG exactly. The in-app
+# version is stamped from `git describe --tags --dirty`, so a dirty tree or a HEAD past the tag
 # would ship a "$DMG" named for the clean tag but containing uncommitted/post-tag code. Refuse both.
 if [ -n "$(git status --porcelain)" ]; then
   echo "error: working tree is dirty — a release must be built from committed code matching $TAG." >&2
@@ -118,43 +124,40 @@ elif [ -n "${NOTARY_KEY_P8:-}" ] && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTAR
   NOTARY_ARGS=(--key "$CLEANUP_P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
 fi
 
-echo "== build + assemble (KeyScribe $SHORT_VERSION) =="
-# KEYSCRIBE_SPARKLE=1 pulls Sparkle into the production build so the shipped app can self-update
-# (make-app.sh then embeds + signs the framework). Only the production release sets it — see
-# agent_notes/distribution_plan/sparkle.md.
-KEYSCRIBE_VARIANT=release KEYSCRIBE_SPARKLE=1 KEYSCRIBE_SIGN_ID="$ID" ./make-app.sh release
-
-# Re-sign for distribution: hardened runtime (--options runtime), secure timestamp, and the
-# entitlements make-app.sh's dev signing omits. Nested object first (the metallib is a nested code
-# object beside the binary), then the binary, then the bundle. No --deep (the Swift linker pre-signs
-# the binary and --deep mishandles it).
-echo "== re-sign for distribution =="
-# Sparkle is present only in the KEYSCRIBE_SPARKLE=1 production build. Re-sign its nested code with
-# hardened runtime + secure timestamp for notarization, inside-out (deepest first) then the framework,
-# ahead of the metallib/binary/bundle. Sparkle's helpers are separate executables and must NOT inherit
-# the app's entitlements (Microphone / Apple Events) — they sign with runtime only. Keyed off the
-# framework's presence so a Sparkle-free build skips it. If notarization rejects an XPC service for
-# library validation, add com.apple.security.cs.disable-library-validation per
-# agent_notes/distribution_plan/sparkle.md (not preemptively). NEEDS a real notarization run to confirm.
-EMBEDDED_FW="$APP/Contents/Frameworks/Sparkle.framework"
-if [ -d "$EMBEDDED_FW" ]; then
-  echo "== re-sign Sparkle.framework (hardened, inside-out) =="
-  FWV="$EMBEDDED_FW/Versions/Current"
-  for item in \
-    "$FWV/XPCServices/Downloader.xpc" \
-    "$FWV/XPCServices/Installer.xpc" \
-    "$FWV/Updater.app" \
-    "$FWV/Autoupdate" \
-    "$EMBEDDED_FW"; do
-    codesign --force --options runtime --timestamp --sign "$ID" "$item"
-  done
+echo "== archive + export (KeyScribe $SHORT_VERSION) =="
+# The public target in App/project.yml links Sparkle and carries hardened runtime + KeyScribe.entitlements.
+# `xcodebuild archive` + `-exportArchive` signs everything inside-out with the Developer ID and a secure
+# timestamp — Sparkle's XPC services, Updater.app, Autoupdate, the framework, the binary, the bundle —
+# so there is no re-sign step here. The team id comes out of KEYSCRIBE_SIGN_ID ("… (TEAMID)") so it is
+# not repeated anywhere else, and identity + team go in through the target-scoped KEYSCRIBE_* settings
+# (a bare CODE_SIGN_IDENTITY on the command line also hits the packages' automatically signed resource
+# bundles, which refuse it). See agent_notes/distribution_plan/sparkle.md.
+TEAM_ID="$(printf '%s' "$ID" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/p')"
+if [ -z "$TEAM_ID" ]; then
+  echo "error: could not read a team id from KEYSCRIBE_SIGN_ID ('$ID'); expected '… (TEAMID)'." >&2
+  exit 1
 fi
-codesign --force --options runtime --timestamp \
-  --sign "$ID" "$APP/Contents/MacOS/mlx.metallib"
-codesign --force --options runtime --timestamp --entitlements "$ENT" \
-  --sign "$ID" "$APP/Contents/MacOS/KeyScribe"
-codesign --force --options runtime --timestamp --entitlements "$ENT" \
-  --sign "$ID" "$APP"
+PREPARED="$(./scripts/prepare-xcode-project.sh)"
+VERSION_SETTINGS=()
+while IFS= read -r line; do VERSION_SETTINGS+=("$line"); done <<< "$PREPARED"
+DERIVED=".build/xcode"
+ARCHIVE="$DERIVED/KeyScribe.xcarchive"
+EXPORT_DIR="$DERIVED/export"
+rm -rf "$ARCHIVE" "$EXPORT_DIR"
+xcodebuild archive \
+  -project App/KeyScribe.xcodeproj -scheme KeyScribe -configuration Release \
+  -destination 'generic/platform=macOS' -derivedDataPath "$DERIVED" -archivePath "$ARCHIVE" \
+  -disableAutomaticPackageResolution -xcconfig App/Config/Packages.xcconfig \
+  "${VERSION_SETTINGS[@]}" "KEYSCRIBE_RELEASE_SIGN_IDENTITY=$ID" "KEYSCRIBE_TEAM_ID=$TEAM_ID" \
+  -quiet
+EXPORT_OPTIONS="$(mktemp /tmp/keyscribe-export.XXXXXX.plist)"
+sed "s/__TEAM_ID__/$TEAM_ID/" App/ExportOptions-developer-id.plist > "$EXPORT_OPTIONS"
+xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$EXPORT_DIR" \
+  -exportOptionsPlist "$EXPORT_OPTIONS" -quiet
+rm -f "$EXPORT_OPTIONS"
+rm -rf "$APP"
+cp -R "$EXPORT_DIR/$APP" "$APP"
+"$APP/Contents/MacOS/KeyScribe" --mlx-smoke
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 if [ ${#NOTARY_ARGS[@]} -gt 0 ]; then

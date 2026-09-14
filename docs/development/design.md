@@ -626,10 +626,11 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
 - **Distribution & updates:** direct distribution, **notarized** (Developer ID) — **not** Mac App
   Store, whose App Sandbox restricts the AX APIs KeyScribe depends on. The menu-bar update badge +
   "Update Available…" item and the `AppUpdater` injection seam are built. The public app updates via
-  **Sparkle 2, EdDSA-verified** over a redacted-free, content-free version check: the dependency is
-  manifest-gated (`KEYSCRIBE_SPARKLE=1`) and injected only for the `.production` variant, so dev and
-  downstream white-label builds carry no Sparkle and supply their own update path — the update
-  mechanism is an isolated seam, not baked into shared code (`agent_notes/distribution_plan/sparkle.md`).
+  **Sparkle 2, EdDSA-verified** over a redacted-free, content-free version check: the adapter lives in
+  its own `KeyScribeSparkle` library target that only the public app target links, and is injected only
+  for the `.production` variant, so dev and downstream white-label builds link no Sparkle and supply
+  their own update path — the update mechanism is an isolated seam, not baked into shared code
+  (`agent_notes/distribution_plan/sparkle.md`).
 - **License: GPLv3.** Compatible with the deps (Apache-2.0 and MIT code flow into a GPLv3 project;
   weights are runtime-downloaded *data*, not linked code, so the source tree stays clean), and it
   permits selling notarized binaries provided corresponding source is offered. Every app artifact

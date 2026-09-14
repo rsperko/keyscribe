@@ -1,0 +1,76 @@
+# The shared app template. Upstream's App/project.yml includes it and adds the dev and public targets; a
+# downstream distribution includes it from its own project.yml and adds its own target:
+#
+#   include:
+#     - path: ../keyscribe/App/template.yml      # wherever the upstream mirror sits
+#   settings:
+#     base:
+#       KEYSCRIBE_ROOT: $(SRCROOT)/../keyscribe  # same location, as a build setting
+#   targets:
+#     MyApp:
+#       templates: [KeyScribeAppBase]
+#       sources:
+#         - path: MyApp/main.swift               # the entry file is the target's, not the template's
+#         - path: MyApp/AppIcon.icns             # so is the icon; Resources/Info.plist names it AppIcon
+#           buildPhase: resources
+#       settings: { base: { PRODUCT_NAME: MyApp, PRODUCT_BUNDLE_IDENTIFIER: com.example.myapp, … } }
+#
+# A distribution commits its own Package.resolved: upstream's pins plus the pins of any package it adds.
+# Generate and seed its project with
+#   ../keyscribe/scripts/prepare-xcode-project.sh --spec project.yml --project-dir . --lockfile Package.resolved
+# which fails if any upstream pin is missing from that lockfile or sits at a different revision. Set
+# KEYSCRIBE_VERSION, KEYSCRIBE_BUILD, and KEYSCRIBE_SCM_REVISION for the stamped version; the script prints
+# them as xcodebuild settings.
+#
+# Include this file by a RELATIVE path (an absolute include path hung `xcodegen generate` when tried).
+# XcodeGen rewrites the source and resource paths below relative to the including spec, but build
+# SETTINGS are copied verbatim, so anything the template needs by path at build time goes through
+# KEYSCRIBE_ROOT. Settings that must reach the package targets (ARCHS, MTL_FAST_MATH) cannot live in a
+# spec at all; every xcodebuild invocation passes `-xcconfig App/Config/Packages.xcconfig`.
+options:
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    KEYSCRIBE_ROOT: $(SRCROOT)/..
+    # Stamped into Info.plist. The build invocation overrides these; the defaults only mark a build that
+    # did not pass them.
+    MARKETING_VERSION: "0.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    KEYSCRIBE_SCM_REVISION: "unknown"
+    SPARKLE_PUBLIC_ED_KEY: ""
+
+packages:
+  KeyScribe:
+    path: ..
+
+targetTemplates:
+  KeyScribeAppBase:
+    type: application
+    platform: macOS
+    sources:
+      - path: ../Resources/model-selftest.wav
+        buildPhase: resources
+      - path: ../Resources/start-cue.wav
+        buildPhase: resources
+    dependencies:
+      - package: KeyScribe
+        product: KeyScribeApp
+      - package: KeyScribe
+        product: KeyScribeKit
+    settings:
+      base:
+        INFOPLIST_FILE: $(KEYSCRIBE_ROOT)/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        EXECUTABLE_NAME: KeyScribe
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        CODE_SIGN_STYLE: Manual
+    postBuildScripts:
+      - name: Collect license notices
+        script: '"${KEYSCRIBE_ROOT}/scripts/collect-licenses.sh"'
+    scheme: {}

@@ -34,10 +34,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-BIN="${BIN:-$ROOT/.build/release/KeyScribe}"
+BIN="${BIN:-$ROOT/KeyScribeDev.app/Contents/MacOS/KeyScribe}"
 if [ ! -x "$BIN" ]; then
   echo "benchmark binary not found at: $BIN" >&2
-  echo "Build it once (bundles the MLX metallib Qwen3 needs):  ./make-app.sh release" >&2
+  echo "Build it once (bundles the MLX shaders Qwen3 needs):  ./make-app.sh" >&2
   echo "or point at another build with:  bash corpus/compare.sh --bin /path/to/KeyScribe" >&2
   exit 1
 fi

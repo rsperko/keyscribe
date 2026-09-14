@@ -30,7 +30,7 @@ make publish
 
 **Which models do the tests use?** None are pinned — the tests run across *whatever you have installed*,
 which is deliberate: a release should verify the exact engines you ship. The only engine named
-specifically is **Qwen3-ASR**, in the Tier C spot-check that proves `mlx.metallib` runs under the
+specifically is **Qwen3-ASR**, in the Tier C spot-check that proves the MLX shader library runs under the
 hardened runtime. The `--list-engines` coverage line at the top of Tier B is your record of what was
 actually exercised.
 
@@ -67,8 +67,8 @@ release live entirely in the **notarized production artifact** and are unreachab
 | Release-only failure surface | Why a dev-build test can't see it |
 |---|---|
 | **TCC grants rebind to the code signature** | A re-signed release invalidates the `csreq`-bound Mic/Accessibility grant → the app silently can't hear or paste. Only the real signed app, relaunched, exercises this. |
-| **Hardened runtime + entitlements** | `make-app.sh` omits them; only `release.sh` applies them. A missing/rejected entitlement only bites the notarized build. |
-| **`mlx.metallib` bundled + signed** | Qwen3-ASR crashes at load ("Failed to load the default metallib") without it. It is assembled and signed only on the release path. |
+| **Hardened runtime + entitlements** | The dev target omits them; only the public target `release.sh` archives carries them. A missing/rejected entitlement only bites the notarized build. |
+| **MLX shader bundle signed** | Qwen3-ASR crashes at load ("Failed to load the default metallib") without `mlx-swift_Cmlx.bundle/…/default.metallib`. Only the exported, hardened-runtime app proves it loads under library validation. |
 | **Gatekeeper quarantine** | A fresh download carries `com.apple.quarantine`; first launch behaves differently than a locally-built app. |
 | **First-run onboarding + model download** | Never touched by unit tests — needs a clean install. |
 | **Trigger matrix** (modifier tap / Carbon chord / mouse tap) | Permission-gated OS event paths; can't be unit-tested. |
@@ -82,8 +82,8 @@ actually catches the list above.
 ### Tier A — build / packaging gates (automated, no mic, always runs, hard gate)
 
 - `swift test` — full suite green.
-- Artifact present, and `codesign --verify --deep --strict` passes (nested metallib/xcframeworks too).
-- **MLX runs from the bundled `mlx.metallib`** (`--mlx-smoke`) — the silent Qwen killer.
+- Artifact present, and `codesign --verify --deep --strict` passes (nested resource bundles/xcframeworks too).
+- **MLX runs from the bundled shader library** (`--mlx-smoke`) — the silent Qwen killer.
 - `Info.plist` stamped: real `CFBundleShortVersionString` / `CFBundleVersion` / bundle id (no `__PLACEHOLDER__`).
 - Release only: Gatekeeper accepts it as **Notarized Developer ID**, ticket **stapled** (app + DMG),
   hardened-runtime **entitlements present**.

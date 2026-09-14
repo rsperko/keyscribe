@@ -42,7 +42,7 @@ done
 if [ -z "$BIN" ]; then
   for cand in \
     "$ROOT/KeyScribeDev.app/Contents/MacOS/KeyScribe" \
-    "$ROOT/.build/release/KeyScribe" \
+    "$ROOT/KeyScribeDev.app/Contents/MacOS/KeyScribe" \
     "$ROOT/.build/debug/KeyScribe"; do
     [ -x "$cand" ] && { BIN="$cand"; break; }
   done

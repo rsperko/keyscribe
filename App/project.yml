@@ -1,0 +1,54 @@
+# Upstream's app definition: the shared template (App/template.yml) plus the two upstream targets.
+# `xcodegen generate --spec App/project.yml` produces App/KeyScribe.xcodeproj (gitignored); make-app.sh
+# and release.sh drive it through scripts/prepare-xcode-project.sh.
+#
+# Signing is routed through the KEYSCRIBE_* custom settings so the scripts can override ONE target's
+# identity from the command line: a bare CODE_SIGN_IDENTITY=… on the command line applies to every
+# target, and the packages' automatically signed resource bundles (swift-crypto_Crypto,
+# swift-transformers_Hub) refuse a manually specified identity.
+name: KeyScribe
+include:
+  - path: template.yml
+
+settings:
+  base:
+    KEYSCRIBE_DEV_SIGN_IDENTITY: "KeyScribe Local"
+    KEYSCRIBE_RELEASE_SIGN_IDENTITY: "Developer ID Application"
+    KEYSCRIBE_TEAM_ID: ""
+    KEYSCRIBE_RELEASE_HARDENED_RUNTIME: YES
+    KEYSCRIBE_RELEASE_ENTITLEMENTS: $(KEYSCRIBE_ROOT)/KeyScribe.entitlements
+
+targets:
+  KeyScribeDev:
+    templates: [KeyScribeAppBase]
+    sources:
+      - path: ../Sources/KeyScribeMain
+      - path: ../Resources/AppIcon.icns
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: KeyScribeDev
+        PRODUCT_BUNDLE_IDENTIFIER: com.keyscribe.app.dev
+        CODE_SIGN_IDENTITY: $(KEYSCRIBE_DEV_SIGN_IDENTITY)
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: NO
+
+  KeyScribe:
+    templates: [KeyScribeAppBase]
+    sources:
+      - path: ../Sources/KeyScribeMain
+      - path: ../Resources/AppIcon.icns
+        buildPhase: resources
+    dependencies:
+      - package: KeyScribe
+        product: KeyScribeSparkle
+    settings:
+      base:
+        PRODUCT_NAME: KeyScribe
+        PRODUCT_BUNDLE_IDENTIFIER: com.keyscribe.app
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) KEYSCRIBE_SPARKLE"
+        SPARKLE_PUBLIC_ED_KEY: "+r7hBgfwcyF27UVPd5GY5VcTkg0p/v4HE2ae5NenyTY="
+        CODE_SIGN_IDENTITY: $(KEYSCRIBE_RELEASE_SIGN_IDENTITY)
+        DEVELOPMENT_TEAM: $(KEYSCRIBE_TEAM_ID)
+        ENABLE_HARDENED_RUNTIME: $(KEYSCRIBE_RELEASE_HARDENED_RUNTIME)
+        CODE_SIGN_ENTITLEMENTS: $(KEYSCRIBE_RELEASE_ENTITLEMENTS)

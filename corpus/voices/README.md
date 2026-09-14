@@ -61,8 +61,8 @@ preserves them).
 ## Run + analyze
 
 ```bash
-./make-app.sh release   # once, bundles the MLX metallib Qwen needs
-.build/release/KeyScribe --benchmark corpus/voices --raw > /tmp/raw.txt 2>/dev/null
+./make-app.sh   # once, bundles the MLX shaders Qwen needs
+KeyScribeDev.app/Contents/MacOS/KeyScribe --benchmark corpus/voices --raw > /tmp/raw.txt 2>/dev/null
 corpus/voices/.ttsenv/bin/python corpus/voices/analyze.py /tmp/raw.txt
 ```
 

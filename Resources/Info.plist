@@ -1,28 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Canonical Info.plist for KeyScribe.app. make-app.sh copies this into the bundle and stamps
-     __SHORT_VERSION__ / __BUILD_VERSION__ / __SCM_REVISION__ from git and __BUNDLE_ID__ / __BUNDLE_NAME__
-     from the build variant (KeyScribe vs KeyScribeDev). Edit keys here, not in the build script. -->
+<!-- Canonical Info.plist for every KeyScribe app target (App/project.yml). Xcode substitutes the $(...)
+     build settings: identity from the target (PRODUCT_BUNDLE_IDENTIFIER / PRODUCT_NAME), version and
+     revision from the build invocation (MARKETING_VERSION / CURRENT_PROJECT_VERSION /
+     KEYSCRIBE_SCM_REVISION). Edit keys here, not in the build scripts. -->
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>__BUNDLE_ID__</string>
-  <key>CFBundleName</key><string>__BUNDLE_NAME__</string>
-  <key>CFBundleExecutable</key><string>KeyScribe</string>
+  <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+  <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>__SHORT_VERSION__</string>
-  <key>CFBundleVersion</key><string>__BUILD_VERSION__</string>
-  <key>SCMRevision</key><string>__SCM_REVISION__</string>
-  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>SCMRevision</key><string>$(KEYSCRIBE_SCM_REVISION)</string>
+  <key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
   <key>LSUIElement</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
-  <!-- Sparkle EdDSA public key for verifying update payloads. Read by Sparkle only in the production
-       build (KEYSCRIBE_SPARKLE=1 + .production); inert in dev/custom builds, which never run Sparkle.
-       A downstream white-label distributor replaces this with their own key. -->
-  <key>SUPublicEDKey</key><string>+r7hBgfwcyF27UVPd5GY5VcTkg0p/v4HE2ae5NenyTY=</string>
+  <!-- Sparkle EdDSA public key for verifying update payloads. Read by Sparkle only in the public build;
+       inert in dev and downstream builds, which never link Sparkle. A downstream distributor sets its own
+       SPARKLE_PUBLIC_ED_KEY (or leaves it empty) on its target. -->
+  <key>SUPublicEDKey</key><string>$(SPARKLE_PUBLIC_ED_KEY)</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>__BUNDLE_NAME__ transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
+  <string>$(PRODUCT_NAME) transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>__BUNDLE_NAME__ reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
+  <string>$(PRODUCT_NAME) reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
 </dict>
 </plist>
