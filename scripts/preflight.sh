@@ -37,7 +37,7 @@
 # Env:
 #   KEYSCRIBE_MAX_WER=0.20   coarse biased-WER ceiling for the STT benchmark gate (default 0.20).
 #                            Set to catch a CATASTROPHIC regression (bias wiring broke → WER doubles),
-#                            not to rank engines — Moonshine ships ~15% (no recognition bias) and must
+#                            not to rank engines — Apple Speech ships ~13% (no recognition bias) and must
 #                            not false-fail. Tune to your installed engine set.
 #   KEYSCRIBE_CAPTURE_PROBE=1  run the capture-probe (needs a loopback/Aggregate device feeding a tone)
 #   KEYSCRIBE_REQUIRE_ALL_ENGINES=1  a shipped-but-not-installed engine is a hard fail, not a skip.
@@ -216,7 +216,7 @@ chk_a_swift_test() {
 guard a-swift-test "$(sig_source)" chk_a_swift_test
 
 chk_a_deps() {
-  # An upstream dep can re-upload a binaryTarget asset in place (moonshine-ai did on 2026-08-13),
+  # An upstream dep can re-upload a binaryTarget asset in place (one did on 2026-08-13),
   # which leaves OUR pin declaring a checksum the live bytes no longer match. A warm .build hides
   # it completely — it only bites a fresh checkout, i.e. downstream. Download-free: compares the
   # GitHub release API's per-asset digest against the pinned manifest's declared checksum.
@@ -285,9 +285,8 @@ chk_a_licenses() {
     result fail "third-party notices omit the downloaded Silero VAD model"
   elif ! grep -q "Sparkle" "$LEGAL/THIRD-PARTY-NOTICES.md"; then
     result fail "third-party notices omit the production-only Sparkle binary"
-  elif ! grep -q "prebuilt Moonshine.xcframework" "$LEGAL/THIRD-PARTY-NOTICES.md" ||
-       ! grep -q "statically linked into Moonshine.xcframework" "$LEGAL/THIRD-PARTY-NOTICES.md"; then
-    result fail "third-party notices do not identify the Moonshine binary and its linked ONNX Runtime"
+  elif ! grep -q "NemoTextProcessing (prebuilt Rust xcframework" "$LEGAL/THIRD-PARTY-NOTICES.md"; then
+    result fail "third-party notices do not identify the prebuilt NemoTextProcessing binary"
   elif otool -L "$EXE" 2>/dev/null | grep -q "Sparkle.framework" && [ ! -f "$DEPS/Sparkle-LICENSE" ]; then
     result fail "Sparkle is linked but its binary license notices are missing"
   else

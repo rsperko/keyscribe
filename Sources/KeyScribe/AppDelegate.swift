@@ -95,13 +95,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         loadSettings()
         let engines = EngineRegistry.makeAll(modelsDir: KeyScribePaths.modelsDir)
         ModelInstallStore.reconcile(engines: engines)
-        Task.detached(priority: .utility) { ModelInstallStore.deleteRetiredCtcCompanions() }
+        Task.detached(priority: .utility) { ModelInstallStore.deleteRetiredInstallDirs() }
+        let launchEngineId = EngineRegistry.launchEngineId(
+            saved: settings.stt.engine, installed: ModelInstallStore.installedIds(),
+            failed: ModelHealthStore.failedIds())
         let hasUsableEngine = !ModelInstallStore.installedIds().isEmpty
-            || (SpeechModelCatalog.entry(for: settings.stt.engine)?.systemManaged ?? false)
+            || (SpeechModelCatalog.entry(for: launchEngineId)?.systemManaged ?? false)
         if hasUsableEngine {
             VADModel.ensureInBackground(in: KeyScribePaths.modelsDir)
         }
-        provider = resolveProvider(engines: engines)
+        provider = resolveProvider(engines: engines, activeId: launchEngineId)
         ModeStore.recordStarterOffersIfFresh(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
         ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
         let reconciled = ModeStore.reconcileSeeds(
@@ -144,6 +147,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.preloadActiveEngineIfNeeded()
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
+        hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
@@ -220,7 +224,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         speechModels = SpeechModelsModel(
-            activeId: settings.stt.engine,
+            activeId: launchEngineId,
             stt: settings.stt,
             download: { [weak self] id, progress in
                 guard let engine = self?.provider.engine(id) else { throw EngineUnavailable.notWired(id) }
@@ -243,7 +247,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             deferWhileBusy: { [weak self] work in
                 guard let self else { work(); return }
                 self.controller.runWhenIdle(work)
-            })
+            },
+            replacedActiveId: launchEngineId == settings.stt.engine ? nil : settings.stt.engine)
 
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels, repository: configRepository,
@@ -268,6 +273,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         observeKeyboardLayoutChanges()
         observeFrontmostAppChanges()
         applyLoginItem(settings.loadOnLogin)
+        if launchEngineId != settings.stt.engine { setEngine(launchEngineId) }
 
         // Start the tap now if permissions allow (idempotent); first-run retries via onReadyToDictate
         // once granted, so dictation works regardless of onboarding completion.
@@ -347,8 +353,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func resolveProvider(engines: [any SpeechEngine]) -> SpeechEngineProvider {
-        (try? SpeechEngineProvider(engines: engines, activeId: settings.stt.engine))
+    private func resolveProvider(engines: [any SpeechEngine], activeId: String) -> SpeechEngineProvider {
+        (try? SpeechEngineProvider(engines: engines, activeId: activeId))
             ?? (try! SpeechEngineProvider(engines: engines, activeId: SpeechModelCatalog.defaultEnglishId))
     }
 
@@ -592,7 +598,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
         let previousAudio = settings.audio
-        if updated.stt.engine != settings.stt.engine {
+        // Compared against the provider, not the old setting: launch already activated a replacement for a
+        // retired saved id, and persisting it must not evict the engine that preload is warming.
+        if updated.stt.engine != provider.active.id {
             let previous = provider.active
             if (try? provider.setActive(updated.stt.engine)) != nil {
                 controller.evictSwitchedAwayEngine(previous)

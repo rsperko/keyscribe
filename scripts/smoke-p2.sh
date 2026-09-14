@@ -82,9 +82,9 @@ ask "Did the dictated sentence insert correctly and undo with a single ⌘Z?" \
 
 step "G1b · P2-1 per-engine spot check"
 echo "  In Settings → Speech Models, switch the active model and dictate one sentence each for the"
-echo "  installed engines you care about (Parakeet ×2, Whisper ×2, Qwen ×2, Moonshine, Apple)."
+echo "  installed engines you care about (Parakeet ×2, Whisper ×2, Qwen ×2, Apple)."
 echo "  A1 already proved the samples path is byte-identical offline; this confirms it end-to-end live."
-echo "  Watch for a garbled/empty insert on any engine (Moonshine garbles commands — expected)."
+echo "  Watch for a garbled/empty insert on any engine."
 pause
 
 step "G2 · P2-2 'Loading speech model…' HUD"

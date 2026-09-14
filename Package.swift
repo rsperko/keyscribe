@@ -23,13 +23,6 @@ var packageDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.0"),
     .package(url: "https://github.com/rsperko/speech-swift.git", revision: "96273cd375783531129e5bb97a7ec25a7e717994"),
     .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.30.0"),
-    // `revision:`, not `exact: "0.1.2"`, because upstream MOVES this tag: on 2026-08-13 they
-    // re-uploaded the v0.1.2 release asset in place and repointed v0.1.2 (26e0335a -> 2ff906a3) so
-    // their binaryTarget checksum matched the new bytes. A version pin resolves through that mutable
-    // tag; a revision pin names the commit outright. This revision is v0.1.2-as-of-2026-08-13 — the
-    // one whose declared checksum matches the live asset. `make check-deps` watches for the next
-    // mutation; AGENTS.md "Upstream dependency mutation" has the recovery.
-    .package(url: "https://github.com/moonshine-ai/moonshine-swift.git", revision: "2ff906a30ae17b7f263d55d8465dd5e2501cfefc"),
 ]
 
 var keyScribeDependencies: [Target.Dependency] = [
@@ -39,7 +32,6 @@ var keyScribeDependencies: [Target.Dependency] = [
     .product(name: "WhisperKit", package: "argmax-oss-swift"),
     .product(name: "Qwen3ASR", package: "speech-swift"),
     .product(name: "MLX", package: "mlx-swift"),
-    .product(name: "MoonshineVoice", package: "moonshine-swift"),
 ]
 
 if sparkleEnabled {

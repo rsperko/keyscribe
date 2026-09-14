@@ -618,7 +618,6 @@ final class SettingsModel: ObservableObject {
         return EvictionCopy.footer(
             policy: Eviction(rawValue: eviction) ?? .fastest,
             modelName: info?.displayName ?? "the active model",
-            bytes: info?.approxDownloadBytes ?? 0,
             systemManaged: info?.systemManaged ?? false,
             idleLabel: Self.idleLabel(settings.stt.evictionIdleSeconds))
     }

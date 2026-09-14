@@ -54,11 +54,10 @@ private struct NoticesView: View {
                 • Silero VAD speech-presence model — Silero Team; Core ML conversion by Fluid Inference, MIT.
                 • Whisper — OpenAI, MIT.
                 • Qwen3-ASR 0.6B / 1.7B — Alibaba Cloud (Qwen), Apache-2.0.
-                • Moonshine Base (English) — Moonshine AI, MIT.
                 • Apple on-device speech — macOS system framework.
 
                 Bundled libraries: FluidAudio, swift-transformers, swift-jinja (Apache-2.0); WhisperKit, \
-                moonshine-swift, Moonshine, ONNX Runtime, MLX Swift, TOMLKit (MIT). Public releases also include \
+                MLX Swift, TOMLKit (MIT). Public releases also include \
                 Sparkle (MIT; its upstream license includes additional notices). License and notice files are included with this app.
                 """)
                 .font(.callout).foregroundStyle(.secondary)

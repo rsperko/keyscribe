@@ -69,7 +69,7 @@ struct EvictionCopyTests {
 
     @Test func fastestStatesResidentBehaviorWithoutBytes() {
         let s = EvictionCopy.footer(
-            policy: .fastest, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
+            policy: .fastest, modelName: "Qwen3-ASR 1.7B",
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("Keeps Qwen3-ASR 1.7B loaded"))
         #expect(s.contains("microphone"))
@@ -78,7 +78,7 @@ struct EvictionCopyTests {
 
     @Test func balancedUsesIdleLabelWithoutBytes() {
         let s = EvictionCopy.footer(
-            policy: .balanced, modelName: "Qwen3-ASR 1.7B", bytes: 1_800_000_000,
+            policy: .balanced, modelName: "Qwen3-ASR 1.7B",
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("releases the microphone after 30 min idle"))
         #expect(s.contains("Qwen3-ASR 1.7B"))
@@ -87,7 +87,7 @@ struct EvictionCopyTests {
 
     @Test func frugalLeadsWithFreeingWithoutBytes() {
         let s = EvictionCopy.footer(
-            policy: .frugal, modelName: "Whisper Large v3 Turbo", bytes: 1_500_000_000,
+            policy: .frugal, modelName: "Whisper Large v3 Turbo",
             systemManaged: false, idleLabel: "30 min")
         #expect(s.contains("Frees Whisper Large v3 Turbo"))
         #expect(s.contains("after each dictation"))
@@ -95,30 +95,9 @@ struct EvictionCopyTests {
         #expect(hasNoByteCount(s))
     }
 
-    // Below the small-model threshold, the softener line replaces the policy-specific copy for all policies.
-    @Test func smallModelSoftenerReplacesPolicyCopy() {
-        for policy: Eviction in [.fastest, .balanced, .frugal] {
-            let s = EvictionCopy.footer(
-                policy: policy, modelName: "Moonshine Base (English)", bytes: 141_000_000,
-                systemManaged: false, idleLabel: "30 min")
-            #expect(s.contains("is small"))
-            #expect(s.contains("cost you little"))
-            #expect(s.contains("Moonshine Base (English)"))
-            #expect(hasNoByteCount(s))
-        }
-    }
-
-    @Test func atThresholdIsNotSmall() {
-        let s = EvictionCopy.footer(
-            policy: .fastest, modelName: "Big", bytes: EvictionCopy.smallModelBytes,
-            systemManaged: false, idleLabel: "30 min")
-        #expect(!s.contains("is small"))
-        #expect(hasNoByteCount(s))
-    }
-
     @Test func systemManagedHasNoFootprintCopy() {
         let s = EvictionCopy.footer(
-            policy: .fastest, modelName: "Apple Speech", bytes: 0,
+            policy: .fastest, modelName: "Apple Speech",
             systemManaged: true, idleLabel: "30 min")
         #expect(s.contains("managed by macOS"))
         #expect(s.contains("Apple Speech"))

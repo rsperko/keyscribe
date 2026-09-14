@@ -33,14 +33,13 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
 | Qwen3-ASR 0.6B | 8.3% | 0.96 | 0.78 | 0.014 | 1.5 GB |
 | Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 330 MB |
 | Apple Speech | 12.8% | 0.62 | 0.53 | 0.032 | managed |
-| Moonshine Base (English) | 14.9% | 0.74 | 0.66 | 0.024 | 141 MB |
 
 ## What to read into this (and what not to)
 
 - **The top three are a wash.** 5.7 / 5.8 / 6.0% biased WER is well inside the noise of a
   single-speaker corpus. Don't pick between them on these numbers alone.
 - **The dictionary helps on every engine.** The Whisper and Qwen3 models steer recognition toward
-  your terms as they listen; Parakeet, Apple, and Moonshine do not, and reach the dictionary through
+  your terms as they listen; Parakeet and Apple do not, and reach the dictionary through
   after-transcription recovery, which runs by default on all engines. So a dictionary term is never a
   no-op — the mechanism just differs by model.
 - **Everything is faster than real time.** Every RTF is well under 1.0, so on this corpus speed is
@@ -71,7 +70,6 @@ sample of it.
 | Whisper Small (English) | 6.0% | 11.9% | +5.9 pts | 0.99 |
 | Qwen3-ASR 0.6B | 8.3% | 13.2% | +4.9 pts | 0.92 |
 | Parakeet TDT-CTC 110M | 9.8% | 18.1% | +8.3 pts | 0.72 |
-| Moonshine Base (English) | 14.9% | 26.7% | +11.9 pts | 0.66 |
 | Apple Speech | 12.6% | 29.6% | +17.0 pts | 0.47 |
 
 - **The two large models are the noisy-environment picks.** Qwen3-ASR 1.7B and Whisper Large v3

@@ -42,20 +42,12 @@ public enum EvictionPolicy {
 }
 
 public enum EvictionCopy {
-    // Below this footprint, reloading is fast enough that the policy choice barely matters. Moonshine
-    // (~141 MB) lands here.
-    public static let smallModelBytes: Int64 = 200_000_000
-
-    // Humanized footer (UX2 phase 3b): NEVER interpolate a byte count. `bytes` is kept only to classify a
-    // small model (which reloads fast enough that the tier barely matters); the strings describe behavior.
+    // Humanized footer (UX2 phase 3b): NEVER interpolate a byte count; the strings describe behavior.
     public static func footer(
-        policy: Eviction, modelName: String, bytes: Int64, systemManaged: Bool, idleLabel: String
+        policy: Eviction, modelName: String, systemManaged: Bool, idleLabel: String
     ) -> String {
         if systemManaged {
             return "\(modelName) is managed by macOS, so this setting does not change its memory use."
-        }
-        if bytes > 0 && bytes < smallModelBytes {
-            return "\(modelName) is small and reloads almost instantly — Balanced and Frugal cost you little here."
         }
         switch policy {
         case .fastest:

@@ -655,11 +655,11 @@ keyscribe/
 
 ## STT engines
 
-KeyScribe ships **9 curated models across 5 engine kinds**, all with in-app download/install:
+KeyScribe ships **8 curated models across 4 engine kinds**, all with in-app download/install:
 Parakeet TDT v3 (English default), Parakeet Unified 0.6B (English), Parakeet TDT-CTC 110M,
-Whisper Large v3 Turbo, Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B,
-Qwen3-ASR 1.7B, and Moonshine Base (English). **Four are bias-capable** — both Qwen3 models (native context) and both
-Whisper models (prompt tokens); **Parakeet, Apple, and Moonshine have no recognition bias**
+Whisper Large v3 Turbo, Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B, and
+Qwen3-ASR 1.7B. **Four are bias-capable** — both Qwen3 models (native context) and both
+Whisper models (prompt tokens); **Parakeet and Apple have no recognition bias**
 (`supportsRecognitionBias = false`). The dictionary still prefers a user's spellings on **every**
 engine via after-transcription recovery (`FuzzyStage`), which now runs whenever the mode's merged
 dictionary is non-empty — no per-engine toggle. Engines are
@@ -679,7 +679,7 @@ each engine owns its install footprint (`installDirNames` / `installState`); aud
 A dev **STT benchmark** (`KeyScribe --benchmark <dir> [--engines …]`, runner + pure scoring in
 KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorded clips. On a
 107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
-Small) cluster around 5.7–6.0% biased WER; the weakest (Moonshine) is ~15%. These numbers are
+Small) cluster around 5.7–6.0% biased WER; the weakest (Apple Speech) is ~13%. These numbers are
 speaker/mic/room dependent — reference table + caveats in
 `docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
@@ -759,7 +759,6 @@ Empirically observed no-speech output (2026-07-01, one machine — deterministic
 | Parakeet TDT v3 / TDT-CTC 110M | `""` (clean empty — greedy TDT discards blanks) |
 | Parakeet Unified 0.6B (en) | `""` (clean empty; swept 2026-09-09 over 1/2/3/5 s silence + 3 s and 6 s hiss) |
 | Qwen3-ASR 0.6B | `""` |
-| Moonshine Base (en) | `""` (but upstream can loop-repeat on short audio) |
 | Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
 | Whisper Large v3 Turbo | lexical hallucinations: `Thank you.`, `.`, `...` |
 | Qwen3-ASR 1.7B | lexical, e.g. `嗯。` / `哦。` (CJK), and on a biased mode an echoed dictionary term |
@@ -854,8 +853,7 @@ creation past the `StreamingStartPolicy` threshold (4 s), so only clips longer t
 session live — the benchmark's streaming replay opens one for every clip, so it covers both. (2026-07-04,
 Apple: streaming output was byte-identical to batch — clean-empty except a deterministic `No` on 3 s
 silence, the same documented Apple lexical artifact — so streaming added no new marker class. Do not assume
-that generalizes; a slower/looping engine like Moonshine could differ, which is one more reason its
-streaming is disabled.) The no-speech gate also covers the streamed path: it runs at commit on the
+that generalizes; a slower or looping engine could differ.) The no-speech gate also covers the streamed path: it runs at commit on the
 finished take before `finalizeStreamingIfActive`, so a silent streamed session is suppressed there (its
 partials are never inserted before commit) and its driver is cancelled through the normal terminal — the
 gate is engine- and path-independent, but the per-engine streaming sweep still stands because the gate is
@@ -879,7 +877,7 @@ removed spotter lives in git history only.
 
 ### Forked / pinned STT deps
 
-One fork + three upstream deps (one a pinned binary); the fork works live and costs nothing day-to-day:
+One fork + two upstream deps; the fork works live and costs nothing day-to-day:
 - **WhisperKit** → `argmaxinc/argmax-oss-swift` (upstream, **no fork**), pinned `exact: "1.1.0"`.
   **1.1.0 is a hard floor, not a preference** — through 1.0.0, a prediction sampled while prompt
   tokens were still being force-fed could complete the segment, so *every* stock release emptied the
@@ -941,13 +939,9 @@ One fork + three upstream deps (one a pinned binary); the fork works live and co
   commits. **Do not chase upstream speech-swift casually either:** current upstream adds
   `mlx-swift-lm` as `branch: "main"`, a floating dependency inside a notarized app. Retiring the fork
   means upstreaming the patch (it no longer cherry-picks — upstream restructured the manifest).
-- **Moonshine** → `moonshine-ai/moonshine-swift` (no fork): ONNX Runtime ships as a prebuilt
-  `Moonshine.xcframework` binaryTarget. No on-device bias path, so `supportsRecognitionBias = false`
-  and dictionary recovery handles close matches after transcription. **Pinned by `revision:`, not by
-  version — upstream MOVES its tags** (see "Upstream dependency mutation" below).
 
 **Upstream dependency mutation — a green local build proves nothing about a fresh checkout.** On
-2026-08-13 moonshine-ai **re-uploaded the `v0.1.2` release asset in place** (`Moonshine.xcframework.zip`,
+2026-08-13 moonshine-ai (whose engine KeyScribe has since dropped) **re-uploaded the `v0.1.2` release asset in place** (`Moonshine.xcframework.zip`,
 `ae9074b2…` → `42311465…`) and then **moved the `v0.1.2` tag** (`26e0335a` → `2ff906a3`) so their
 `binaryTarget` checksum matched the new bytes. Our `Package.resolved` still pinned the pre-move commit,
 whose manifest declares the old checksum — so **every fresh checkout died at `swift package resolve`**

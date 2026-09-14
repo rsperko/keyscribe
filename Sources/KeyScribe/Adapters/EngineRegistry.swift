@@ -32,6 +32,14 @@ enum EngineRegistry {
         availableCatalog.first { $0.id == id }.map { construct($0.id, modelsDir) }
     }
 
+    // Launch builds its provider from this, so a saved id this OS cannot construct (retired, or Apple Speech
+    // below macOS 26) must resolve to one it can rather than reach the provider's crash path.
+    static func launchEngineId(saved: String, installed: Set<String>, failed: Set<String>) -> String {
+        var set = SpeechModelSet(catalog: availableCatalog, installed: installed, activeId: saved, failed: failed)
+        set.replaceUnknownActive()
+        return set.activeId
+    }
+
     // The one place per-engine construction lives: maps a catalog id to its adapter. Keyed off the
     // catalog (the metadata SSOT) so ids can't drift.
     private static func construct(_ id: String, _ modelsDir: URL) -> any SpeechEngine {
@@ -46,7 +54,6 @@ enum EngineRegistry {
             fatalError("EngineRegistry: Apple Speech engine requires macOS 26")
         case "qwen3-asr-0.6b": return Qwen3ASREngine(profile: .small, modelsDir: modelsDir)
         case "qwen3-asr-1.7b": return Qwen3ASREngine(profile: .large, modelsDir: modelsDir)
-        case "moonshine-base-en": return MoonshineEngine(modelsDir: modelsDir)
         default: fatalError("EngineRegistry: no constructor for engine id '\(id)'")
         }
     }

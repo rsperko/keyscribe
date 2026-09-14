@@ -527,7 +527,7 @@ final class DictationController {
         }
         let engine = provider.active
         guard activeEngineUsable(engine) else {
-            finishError("The selected speech model is not installed", action: nil)
+            finishError("The selected speech model is not installed", action: .openSpeechModels)
             return
         }
         // This synchronous AX probe stays first: the secure-field flag must be captured at press, before

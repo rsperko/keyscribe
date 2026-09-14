@@ -1,5 +1,5 @@
 {
-  "originHash": "4ec3470334113a5042592c7a6ff367fc42ea9b01c2dc1e23162dc079106b5337",
+  "originHash": "68d1db3c6236216ca17d76112317cb4b0451935f393a6e2e88598b2af7654544",
   "pins": [
     {
       "identity": "argmax-oss-swift",
@@ -34,14 +34,6 @@
       "state": {
         "revision": "dc43e62d7055353c7f99fa071a4e71d29dfddc44",
         "version": "0.31.4"
-      }
-    },
-    {
-      "identity": "moonshine-swift",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/moonshine-ai/moonshine-swift.git",
-      "state": {
-        "revision": "2ff906a30ae17b7f263d55d8465dd5e2501cfefc"
       }
     },
     {

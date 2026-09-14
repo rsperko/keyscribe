@@ -44,6 +44,23 @@ public struct SpeechModelSet: Equatable, Sendable {
         activeId = id
     }
 
+    // A known id is never rewritten, even when it is not installed, so its own not-installed state stays
+    // visible. With nothing usable, the default download is the only id the picker can show.
+    @discardableResult
+    public mutating func replaceUnknownActive() -> Bool {
+        guard info(activeId) == nil,
+              let replacement = preferredUsableId()
+                ?? catalog.first(where: \.isDefaultEnglish)?.id ?? catalog.first?.id
+        else { return false }
+        activeId = replacement
+        return true
+    }
+
+    private func preferredUsableId() -> String? {
+        let usable = catalog.map(\.id).filter(isUsable)
+        return usable.first { info($0)?.isDefaultEnglish == true } ?? usable.first
+    }
+
     public mutating func markInstalled(_ id: String) {
         guard let info = info(id), !info.systemManaged else { return }
         installed.insert(id)
@@ -56,10 +73,7 @@ public struct SpeechModelSet: Equatable, Sendable {
         guard info(id) != nil else { return }
         failed.insert(id)
         guard id == activeId else { return }
-        let remaining = catalog.map(\.id).filter(isUsable)
-        if let replacement = remaining.first(where: { info($0)?.isDefaultEnglish == true }) ?? remaining.first {
-            activeId = replacement
-        }
+        if let replacement = preferredUsableId() { activeId = replacement }
     }
 
     public mutating func clearFailed(_ id: String) {
@@ -83,9 +97,6 @@ public struct SpeechModelSet: Equatable, Sendable {
         installed.remove(id)
         failed.remove(id)
         guard id == activeId else { return }
-        let remaining = catalog.map(\.id).filter(isUsable)
-        if let replacement = remaining.first(where: { info($0)?.isDefaultEnglish == true }) ?? remaining.first {
-            activeId = replacement
-        }
+        if let replacement = preferredUsableId() { activeId = replacement }
     }
 }

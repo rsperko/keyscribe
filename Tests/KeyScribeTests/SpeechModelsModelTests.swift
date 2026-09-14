@@ -24,7 +24,9 @@ final class SpeechModelsModelTests: XCTestCase {
         recorder: Recorder,
         verifyResult: ModelVerificationResult = .skipped,
         activeId: String = "parakeet-tdt-ctc-110m",
+        installedIds: Set<String> = ["parakeet-tdt-ctc-110m", "parakeet"],
         initialFailedIds: Set<String>? = nil,
+        replacedActiveId: String? = nil,
         deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void = { _, _ in }
     ) -> SpeechModelsModel {
@@ -37,8 +39,9 @@ final class SpeechModelsModelTests: XCTestCase {
             onActiveChange: { recorder.activeChanges.append($0) },
             onDictionaryMatchingChange: { _ in },
             deferWhileBusy: deferWhileBusy ?? { $0() },
-            initialInstalledIds: ["parakeet-tdt-ctc-110m", "parakeet"],
+            initialInstalledIds: installedIds,
             initialFailedIds: initialFailedIds,
+            replacedActiveId: replacedActiveId,
             removeFiles: {
                 recorder.removed.append($0)
                 if recorder.removeShouldFail { throw Recorder.Failure() }
@@ -53,6 +56,61 @@ final class SpeechModelsModelTests: XCTestCase {
             },
             markFailed: { recorder.markedFailed.append($0) },
             clearFailed: { recorder.clearedFailed.append($0) })
+    }
+
+    func testRetiredActiveModelNoticeNamesTheReplacementUntilAModelIsSelected() {
+        let model = makeModel(recorder: Recorder(), activeId: "parakeet", replacedActiveId: "moonshine-base-en")
+        XCTAssertEqual(
+            model.activeNotice,
+            "Moonshine Base (English) is no longer included in \(Branding.appName). Now using Parakeet TDT v3.")
+        model.select("parakeet-tdt-ctc-110m")
+        XCTAssertNil(model.activeNotice)
+    }
+
+    func testRetiredActiveModelWithNothingUsableAsksForADownload() {
+        let model = makeModel(
+            recorder: Recorder(), activeId: "parakeet", installedIds: [], replacedActiveId: "moonshine-base-en")
+        XCTAssertEqual(
+            model.activeNotice,
+            "Moonshine Base (English) is no longer included in \(Branding.appName). Download a model to keep dictating.")
+    }
+
+    func testRetiredActiveModelNoticeFollowsASuccessfulReplacementDownload() async {
+        let model = makeModel(
+            recorder: Recorder(), verifyResult: .passed, activeId: "parakeet", installedIds: [],
+            replacedActiveId: "moonshine-base-en")
+
+        model.startDownload("parakeet")
+        await waitUntil({ model.rows.first { $0.id == "parakeet" }?.isUsable == true }, "replacement installed")
+
+        XCTAssertEqual(
+            model.activeNotice,
+            "Moonshine Base (English) is no longer included in \(Branding.appName). Now using Parakeet TDT v3.")
+    }
+
+    func testRetiredActiveModelNoticeNamesTheFallbackWhenTheReplacementFails() async {
+        let recorder = Recorder()
+        let model = makeModel(
+            recorder: recorder, verifyResult: .failed, activeId: "parakeet", replacedActiveId: "moonshine-base-en")
+
+        model.test("parakeet")
+        await settleTasks()
+
+        XCTAssertEqual(recorder.activeChanges.last, "parakeet-tdt-ctc-110m")
+        XCTAssertEqual(
+            model.activeNotice,
+            "Moonshine Base (English) is no longer included in \(Branding.appName). Now using Parakeet TDT-CTC 110M.")
+    }
+
+    func testNoNoticeOnceTheReplacementIsSaved() {
+        XCTAssertNil(makeModel(recorder: Recorder(), activeId: "parakeet").activeNotice)
+    }
+
+    func testSavedModelThisMacCannotRunIsNamedAsUnavailable() {
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.replacedActiveNotice(
+                replacedId: "apple", replacementName: "Parakeet TDT v3", replacementUsable: true),
+            "Apple Speech isn’t available on this Mac. Now using Parakeet TDT v3.")
     }
 
     // Holds a download open without a wall-clock sleep, and fails it on release. A 60 s sleep outlived the

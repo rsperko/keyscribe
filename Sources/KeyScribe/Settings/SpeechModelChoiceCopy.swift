@@ -27,6 +27,19 @@ enum SpeechModelChoiceCopy {
         }
     }
 
+    static func replacedActiveNotice(replacedId: String, replacementName: String, replacementUsable: Bool) -> String {
+        let reason: String
+        if let retiredName = SpeechModelCatalog.retiredDisplayNames[replacedId] {
+            reason = "\(retiredName) is no longer included in \(Branding.appName)."
+        } else if let unavailable = SpeechModelCatalog.entry(for: replacedId) {
+            reason = "\(unavailable.displayName) isn’t available on this Mac."
+        } else {
+            reason = "Your saved speech model isn’t available."
+        }
+        let next = replacementUsable ? "Now using \(replacementName)." : "Download a model to keep dictating."
+        return "\(reason) \(next)"
+    }
+
     static func primaryAction(
         isActive: Bool,
         isUsable: Bool,

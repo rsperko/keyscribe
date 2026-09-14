@@ -1,7 +1,7 @@
 import Foundation
 
 public enum EngineKind: String, Codable, Sendable, Equatable {
-    case parakeet, whisper, apple, qwen3asr, moonshine
+    case parakeet, whisper, apple, qwen3asr
 }
 
 public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
@@ -87,12 +87,11 @@ public enum SpeechModelCatalog {
             summary: "Native macOS transcription. No download, fastest startup.",
             languageCount: 20, approxDownloadBytes: 0, systemManaged: true,
             isDefaultEnglish: false, supportsRecognitionBias: false),
-        SpeechModelInfo(
-            id: "moonshine-base-en", kind: .moonshine, displayName: "Moonshine Base (English)",
-            summary: "Lightweight English model; dictionary recovery available.",
-            languageCount: 1, approxDownloadBytes: 141_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: false,
-            approxMemoryBytes: 350_000_000),
+    ]
+
+    // Models that no longer ship, kept so a saved setting that still names one can say what replaced it.
+    public static let retiredDisplayNames: [String: String] = [
+        "moonshine-base-en": "Moonshine Base (English)",
     ]
 
     public static func entry(for id: String) -> SpeechModelInfo? {

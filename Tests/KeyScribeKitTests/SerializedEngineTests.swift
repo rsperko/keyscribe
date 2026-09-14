@@ -290,8 +290,8 @@ struct SerializedEngineTests {
         #expect(!spy.loaded)          // proves evict ran AFTER the load settled, not before
     }
 
-    // 1.4b: an evict must never close the SDK handle out from under a running transcribe (Moonshine's
-    // ONNX close = use-after-close/crash). evict waits for the transcribe lock to free.
+    // 1.4b: an evict must never close the SDK handle out from under a running transcribe (a use-after-close
+    // crash). evict waits for the transcribe lock to free.
     @Test func evictWaitsForInFlightTranscribe() async throws {
         let gate = Gate()
         let spy = SpyEngine(transcribeGate: gate)

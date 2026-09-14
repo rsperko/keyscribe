@@ -30,6 +30,7 @@ final class HUDController: HUDPresenting {
     }
     var onInsertLocalTranscript: (() -> Void)?
     var onPasteLast: (() -> Void)?
+    var onOpenSpeechModels: (() -> Void)?
     var onEscapeCancel: (() -> Void)?
     var canCancel: (() -> Bool)?
     private var localKeyMonitor: Any?
@@ -95,10 +96,11 @@ final class HUDController: HUDPresenting {
             level: levelModel,
             onInsertLocalTranscript: { [weak self] in self?.onInsertLocalTranscript?() },
             onPasteLast: { [weak self] in self?.onPasteLast?() },
-            onErrorAction: { action in
+            onErrorAction: { [weak self] action in
                 switch action {
                 case .openMicrophoneSettings: Permissions.openSettings(.microphone)
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
+                case .openSpeechModels: self?.onOpenSpeechModels?()
                 }
             }))
         // Let the panel grow to the content's intrinsic height (badges wrap, text never ellipsizes); the

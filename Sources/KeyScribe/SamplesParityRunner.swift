@@ -6,7 +6,7 @@ import KeyScribeKit
 // sample-capable engine, over the *.wav files in <dir>. Runs TWO isolated same-order passes — all
 // `transcribe(wavURL:)`, then evict+reload, then all `transcribe(samples:)` fed the SAME audio at the
 // engine's captureSampleRate — asserting each clip's two transcripts are identical. Separated (not
-// interleaved) because some engines (Moonshine's ONNX transcriber) carry state across calls, so
+// interleaved) because an engine SDK can carry state across calls, so
 // interleaving would report a mismatch that never happens live; same-order passes give each call the
 // identical preceding-state trajectory, so any divergence is a real bug. Headless; exits non-zero on
 // mismatch.

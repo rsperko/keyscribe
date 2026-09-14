@@ -152,7 +152,7 @@ measured (`principles.md` §1):
   user is never stuck waiting on the cloud.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
-**Up to 9 curated models across 5 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
+**Up to 8 curated models across 4 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
 download/install except the system-managed Apple engine:
 - **FluidAudio / Parakeet TDT v3** — **default for English** (`isDefaultEnglish`). Larger
   multilingual Parakeet (25 languages); **pyannote speaker diarization bundled** in the same SDK.
@@ -167,8 +167,6 @@ download/install except the system-managed Apple engine:
 - **Qwen3-ASR 0.6B** — compact multilingual (52 languages); the speed/accuracy sweet spot.
 - **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the strongest Qwen tier in the
   current benchmark.
-- **Moonshine Base (English)** — lightweight English model; **no recognition bias** (the dictionary
-  still applies via after-transcription recovery).
 
 Engines are wired through a single **`EngineRegistry`** descriptor list (catalog ↔ constructor) that
 the provider, download path, install reconcile/delete, and the benchmark all derive from — adding an
@@ -180,7 +178,7 @@ own single-pass mechanism, taking dictionary terms through `transcribe(wavURL:bi
 - **Whisper** — a decode-time conditioning prompt (`promptTokens`); a soft hint the model may ignore.
 - **Qwen3-ASR** — native on-device bias (`Qwen3DecodingOptions.context`).
 
-**Parakeet, Apple, and Moonshine do not bias recognition** (`supportsRecognitionBias = false`) and
+**Parakeet and Apple do not bias recognition** (`supportsRecognitionBias = false`) and
 ignore `biasTerms`. Parakeet previously used FluidAudio's NeMo CTC-WS keyword spotter and Apple used
 `AnalysisContext` contextual strings; both were removed because their false substitutions outweighed
 their benefit. The engine-specific policy and bar for revisiting it live in
@@ -194,8 +192,8 @@ KeyScribe ships a **small curated list** of the best STT models, not arbitrary m
 Custom/other STTs are a later option; the seam stays clean (YAGNI).
 
 **Transcription language follows the active engine.** With one engine active globally, supported
-languages are whatever that engine supports (Parakeet 25 / Whisper 99 / Apple 20 / Qwen3 52 /
-Moonshine 1). A user who needs a language their engine lacks switches engines. There is no STT
+languages are whatever that engine supports (Parakeet 25 / Whisper 99 / Apple 20 / Qwen3 52).
+A user who needs a language their engine lacks switches engines. There is no STT
 language setting and no per-mode language override.
 
 **Rewrite output language follows the content**, which is a separate question from the above and is
@@ -220,7 +218,7 @@ A linear pipeline of typed stages, each declaring its **position** in the flow. 
 
 | Command type | Position(s) | Purpose |
 |---|---|---|
-| **Dictionary** | pre-STT bias (where supported) + dynamic system-prompt | Bias recognition toward known terms via the active engine's **decode-time** mechanism (§4.1 *Engine bias support* — Whisper and Qwen3 yes; Parakeet/Apple/Moonshine no; **disableable per engine** in the Speech Models settings); plus post-STT recovery on every engine (see the *Dictionary recovery* row); and always hint to the LLM that those terms are valid/intentional (not misspellings). A hint, not a directive — the LLM may still transform them per the mode. |
+| **Dictionary** | pre-STT bias (where supported) + dynamic system-prompt | Bias recognition toward known terms via the active engine's **decode-time** mechanism (§4.1 *Engine bias support* — Whisper and Qwen3 yes; Parakeet/Apple no; **disableable per engine** in the Speech Models settings); plus post-STT recovery on every engine (see the *Dictionary recovery* row); and always hint to the LLM that those terms are valid/intentional (not misspellings). A hint, not a directive — the LLM may still transform them per the mode. |
 | **Replacements** | post-STT | Heard→Replace, literal or regex with substitutions. Both match **case-insensitively** by default (the input is engine-cased STT output; a regex opts back into case with inline `(?-i)`). Rules match the heard text in one left-to-right pass: the longest overlap wins, mode wins equal matches over Global, topmost wins within a scope, and inserted output is never matched again. The result flows into the LLM normally and may be transformed by it (e.g. a "pig latin" mode). Replacements are not protected from rewrite — **except** when one rule consumes the **entire** utterance (modulo trailing whitespace/`.!?`): that "whole-utterance replacement" is inserted **verbatim and bare**, short-circuiting the LLM, redaction, `trailing`, and `trim_trailing_punctuation` (a deterministic spoken command — `slash resume`→`/resume`; see `config_schema.md` *Replacement matching & output*). A user regex is screened by **`ReplacementSafety`** before it runs: a nested-quantifier ("evil") pattern that could catastrophically backtrack on the dictation hot path is refused, not executed (there is no way to interrupt a synchronous `NSRegularExpression` match). |
 | **Live edits** | post-STT | Spoken commands from a **small documented list** (*insert new line*, *insert new paragraph*, *insert tab character*, *scratch that*, *insert clipboard contents*, *begin/end verbatim* — sentence/newline-aware; the insert commands use an explicit carrier phrase, optional "a"/"the", so bare prose is left alone), **opt-in per mode** (one toggle). **"Scratch that" only fires at a clause boundary** — its phrase ends with a terminator (. ! ?) or comma, or ends the utterance — so literal use ("scratch that lottery ticket", a continuing word follows) is left as text. Matching tolerates a trailing terminator/comma; the gate is scratch-only (newline/tab fire inline). **What it removes:** the words just said — the current segment (since the last terminator or newline command), or, when that segment is empty (a punctuating engine ended the clause with its own terminator, e.g. `…here. scratch that.`), the **one previous clause** (back to the nearest terminator/comma/semicolon/colon), stopping at a newline/paragraph break so it never crosses a structural boundary. Scoping the fallback to a clause rather than a whole sentence bounds a mis-fire — under-deleting is re-issuable, over-deleting is silent. This leans on the STT punctuating a spoken correction, so a non-punctuating engine (e.g. Apple) **under-fires rather than corrupts**. **Pause-punctuation absorption:** a command is an invisible operator, so the whitespace/comma the STT hangs on its boundary — **or between the operator's own words** when the speaker pauses mid-command (`insert, new line` → `⏎`) — is absorbed with it and re-normalized to one space (`blah, insert new line, foo` → `blah⏎foo`). Commas + whitespace only, at the boundary and interior alike — a sentence period is kept whether it precedes the command (`done. insert new paragraph next` → `done.⏎⏎next`) or falls inside it (`insert new. Paragraph two` is left as text, not eaten), and verbatim content keeps its own edge terminators/`;`/`:` (`begin verbatim foo(); end verbatim` → `foo();`). Pause-agnostic: no pause → nothing to absorb → same output. |
 | **Numbers (inverse text normalization)** | post-STT | Optional per-mode deterministic spoken-number → digits ("twenty five" → "25"), `commands.numbers`. Conservative by design: a run that does not form one unambiguous cardinal is left exactly as spoken (preserves year idioms like "twenty twenty six"). Wrong number output is worse than none. **Tier 1 decorators** fold in the low-ambiguity cases around a validated cardinal: sign ("minus five" → "-5", only when not preceded by a number, so subtraction is left alone), decimals ("three point one four" → "3.14"; fractional part is single digits only), percent ("fifty percent" → "50%"), and ordinals ("twenty first" → "21st"). Each decorator only fires on a cardinal that already parses and clears the standalone-small gate; anything ambiguous echoes the spoken words. **Tier 2** (currency symbols + placement, thousands grouping, dates, times) is locale/house-style/context-dependent, so it is left to the optional LLM rewrite (and skipped entirely in no-LLM modes) rather than guessed deterministically here. |
@@ -602,8 +600,8 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
 - **Language/UI:** Swift + SwiftUI (menu-bar app, settings window). Native for perf, accessibility
   APIs, and optional Apple SpeechAnalyzer access on macOS 26+.
 - **STT:** **FluidAudio** (Parakeet TDT v3 + pyannote diarization, CoreML/ANE); **WhisperKit** for
-  Whisper; system `SpeechAnalyzer` for Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR;
-  **moonshine-swift** (ONNX) for Moonshine. (Fork/pin details in `AGENTS.md`.)
+  Whisper; system `SpeechAnalyzer` for Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR.
+  (Fork/pin details in `AGENTS.md`.)
 - **Audio:** AVAudioEngine for capture; system-audio muting via Core Audio.
 - **Global hotkeys / insertion:** CGEvent (`kTCCServicePostEvent`) for paste keystroke; Accessibility
   (`kTCCServiceAccessibility`) for context reading and optional AX insert; `RegisterEventHotKey`
@@ -638,9 +636,8 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
   carries the GPLv3 `LICENSE`, `THIRD-PARTY-NOTICES.md`, and the license/notice files supplied by its
   resolved dependencies. The component index covers source dependencies, supporting downloads such as
   **Silero VAD**, and production-only binaries such as **Sparkle**; prebuilt artifacts identify their
-  incorporated components separately (Moonshine.xcframework includes the Moonshine engine and
-  statically linked ONNX Runtime, so the `moonshine-swift` wrapper license is not the complete binary
-  notice). **CC-BY-4.0 attribution is surfaced in-app** for Parakeet weights and pyannote. Weights
+  incorporated components separately (NemoTextProcessing is a prebuilt Rust xcframework statically
+  linked through FluidAudio, so the FluidAudio license is not the complete binary notice). **CC-BY-4.0 attribution is surfaced in-app** for Parakeet weights and pyannote. Weights
   download at runtime and are never committed. No CLA.
 
 ### 5.1 Config schema versioning & migration

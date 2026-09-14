@@ -9,7 +9,8 @@ import Foundation
 // The models dir is SHARED across build variants and app versions, so this binary is not the sole authority over
 // it. It therefore never touches a dir it does not recognize (an id absent from `owned`), never deletes one the
 // caller flags recently modified (`protectedDirs`, an active cross-variant download), and preserves marker ids it
-// does not know (`markedIds`) so the rewrite unions rather than clobbers the other variant's bookkeeping.
+// does not know (`markedIds`) so the rewrite unions rather than clobbers the other variant's bookkeeping. The one
+// exception is `retiredIds`: models no build ships anymore, whose files the app deletes at launch.
 public enum ModelMaintenance {
     public struct Plan: Equatable, Sendable {
         public let installed: Set<String>
@@ -27,11 +28,12 @@ public enum ModelMaintenance {
         completeIds: Set<String>,
         dirsOnDisk: Set<String>,
         markedIds: Set<String> = [],
+        retiredIds: Set<String> = [],
         protectedDirs: Set<String> = [],
         keep: Set<String> = []
     ) -> Plan {
         let complete = Set(knownIds.filter { completeIds.contains($0) })
-        let installed = complete.union(markedIds.subtracting(knownIds))
+        let installed = complete.union(markedIds.subtracting(knownIds).subtracting(retiredIds))
 
         let ownedByKnown = Set(knownIds.flatMap { owned[$0] ?? [] })
         let keepDirs = Set(complete.flatMap { owned[$0] ?? [] }).union(keep)

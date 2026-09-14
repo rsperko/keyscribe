@@ -1,10 +1,10 @@
 import Foundation
 
 // Makes engine load/transcribe/evict safe under concurrency (engines-models.md §1.1, §1.4). Base
-// adapters (Whisper/Qwen/Moonshine) hold their SDK handle in `nonisolated(unsafe)` storage assuming
+// adapters (Whisper/Qwen) hold their SDK handle in `nonisolated(unsafe)` storage assuming
 // load/evict never overlap a dictation — which the Settings/first-run download, launch preload,
 // self-test, and memory-pressure paths violate (concurrent loads race the handle; an evict under a live
-// transcribe is a use-after-close for Moonshine's ONNX session). This actor decorator enforces:
+// transcribe is a use-after-close of the SDK session). This actor decorator enforces:
 //
 //  - **Two load levels, forwarded faithfully:** a cheap runtime warm (`loadIfNeeded()`, no progress) vs
 //    the install path (`load(progress:)`, which reports download/compile progress). Forwarded separately,

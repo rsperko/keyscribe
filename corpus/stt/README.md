@@ -77,13 +77,13 @@ close** to the best, and **fastest**. Engines whose models you haven't installed
 install the ones you want from Settings → Speech Models first, or limit the set to avoid downloading
 all of them:
 
-    bash corpus/compare.sh --engines qwen3-asr-0.6b,parakeet,moonshine-base-en
+    bash corpus/compare.sh --engines qwen3-asr-0.6b,parakeet,whisper-small-en
     bash corpus/compare.sh --fuzzy      # also apply the post-STT fuzzy corrector before scoring
     bash corpus/compare.sh --raw        # raw per-clip transcripts, no scoring or ranking
     bash corpus/compare.sh --bin PATH   # score with a specific build instead of .build/release
 
 Engine ids: `parakeet`, `parakeet-tdt-ctc-110m`, `whisper`, `whisper-small-en`, `apple`,
-`qwen3-asr-0.6b`, `qwen3-asr-1.7b`, `moonshine-base-en`.
+`qwen3-asr-0.6b`, `qwen3-asr-1.7b`.
 
 **Finding the smallest engine that works for you:** record T2, then run `compare.sh`. The
 "lightest that stays close" pick is the engine with the smallest install whose `WER(bias)` and

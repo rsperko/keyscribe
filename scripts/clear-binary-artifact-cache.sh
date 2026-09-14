@@ -14,7 +14,7 @@
 #
 #   scripts/clear-binary-artifact-cache.sh                    # show what is stale
 #   scripts/clear-binary-artifact-cache.sh --apply            # clear everything
-#   scripts/clear-binary-artifact-cache.sh --apply moonshine-swift
+#   scripts/clear-binary-artifact-cache.sh --apply fluidaudio
 #
 # Afterwards: swift package resolve   (re-downloads and re-validates)
 

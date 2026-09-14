@@ -11,7 +11,7 @@
 #   bash corpus/compare.sh --bin /path/to/KeyScribe              # use a specific build
 #
 # Engine ids: parakeet · parakeet-tdt-ctc-110m · whisper · whisper-small-en · apple ·
-#             qwen3-asr-0.6b · qwen3-asr-1.7b · moonshine-base-en
+#             qwen3-asr-0.6b · qwen3-asr-1.7b
 # Engines whose models you have not installed are skipped — install the ones you want to compare from
 # Settings → Speech Models first, or limit the set with --engines to avoid downloading all of them.
 set -euo pipefail
@@ -66,12 +66,12 @@ import json, sys
 res = json.load(open(sys.argv[1]))
 
 SIZE = {  # approx download (MB), from SpeechModelCatalog — powers the "lightest that works" pick
-    "moonshine-base-en": 141, "whisper-small-en": 217, "parakeet-tdt-ctc-110m": 440,
+    "whisper-small-en": 217, "parakeet-tdt-ctc-110m": 440,
     "whisper": 632, "qwen3-asr-0.6b": 1500, "parakeet": 1800, "qwen3-asr-1.7b": 2000,
     "apple": 0,
 }
 NAME = {
-    "moonshine-base-en": "Moonshine Base (EN)", "whisper-small-en": "Whisper Small (EN)",
+    "whisper-small-en": "Whisper Small (EN)",
     "parakeet-tdt-ctc-110m": "Parakeet TDT-CTC 110M", "whisper": "Whisper Large v3 Turbo",
     "qwen3-asr-0.6b": "Qwen3-ASR 0.6B", "parakeet": "Parakeet TDT v3",
     "qwen3-asr-1.7b": "Qwen3-ASR 1.7B", "apple": "Apple Speech",

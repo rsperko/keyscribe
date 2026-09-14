@@ -64,6 +64,16 @@ struct ModelMaintenanceTests {
         #expect(plan.installed == ["parakeet", "future-engine"])
     }
 
+    // A retired model's files are removed at launch, so its marker id must go too, or the shared marker keeps
+    // reporting a model that no longer exists. Other unknown ids still belong to another build.
+    @Test func dropsRetiredMarkerIdsButKeepsOtherUnknownIds() {
+        let plan = ModelMaintenance.reconcile(
+            knownIds: known, owned: owned, completeIds: ["parakeet"],
+            dirsOnDisk: ["parakeet-tdt-0.6b-v3", "parakeet-ctc-0.6b-coreml"],
+            markedIds: ["parakeet", "retired-engine", "future-engine"], retiredIds: ["retired-engine"])
+        #expect(plan.installed == ["parakeet", "future-engine"])
+    }
+
     @Test func keepsPartialSecondaryDirOfInstalledEngine() {
         // reconcile only removes owned dirs of a known-but-incomplete engine, so a secondary dir of an
         // installed (complete) engine survives even if partial.

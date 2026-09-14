@@ -222,7 +222,7 @@ not to its label.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
-| Error | Plain-language failure | Single next action | Retry, open permissions, or dismiss as applicable |
+| Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap). The two no-speech outcomes both
@@ -514,6 +514,15 @@ plus a single maintenance row: **Test model** and **Reinstall model** lead the r
 model** sits alone at the trailing edge in red — the destructive action is spatially separated from
 routine maintenance, never stacked with it. Exactly one active engine is visually enforced, and
 deleting it still requires confirmation.
+
+When the saved model can no longer run here — it was retired, or it needs a newer macOS — launch picks
+the model deleting the active one would (the default English model if it is usable, otherwise the first
+usable model, which is Apple Speech on macOS 26+) and saves that choice. The new active model's detail
+then shows an advisory `IssueText` naming what changed — for example *Moonshine Base (English) is no
+longer included in KeyScribe. Now using Apple Speech.* — or, when nothing usable is installed, asks for a
+download. The notice clears when the user selects a model. It does not return after a relaunch, because
+the replacement is already saved. A saved model that is known but merely not installed is never
+rewritten; dictation shows the not-installed error with **Open Speech Models**.
 
 ### Dictionary and Replacements
 

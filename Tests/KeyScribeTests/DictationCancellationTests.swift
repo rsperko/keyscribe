@@ -276,7 +276,7 @@ struct DictationCancellationTests {
 
         #expect(engine.loads == 0)
         #expect(audio.starts == 0)
-        #expect(hud.states.last == .error(message: "The selected speech model is not installed", action: nil))
+        #expect(hud.states.last == .error(message: "The selected speech model is not installed", action: .openSpeechModels))
     }
 
     @Test func commitDrainsTheTailInsteadOfStoppingImmediately() async {

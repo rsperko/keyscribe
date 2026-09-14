@@ -60,7 +60,7 @@ would get). `KEYSCRIBE_BENCH_VERBOSE=1` prints per-clip batch-vs-stream text.
 Use `KeyScribeDev.app/Contents/MacOS/KeyScribe` instead of the raw `.build` binary for the Qwen MLX
 engines (the raw binary lacks the bundled metallib — see the corpus skill gotchas). The benchmark
 writes `results.json` here (gitignored). Engine ids: `parakeet`, `parakeet-tdt-ctc-110m`, `whisper`,
-`whisper-small-en`, `apple`, `qwen3-asr-0.6b`, `qwen3-asr-1.7b`, `moonshine-base-en`.
+`whisper-small-en`, `apple`, `qwen3-asr-0.6b`, `qwen3-asr-1.7b`.
 
 ## Onboarding a new engine — the standing checklist
 

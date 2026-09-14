@@ -140,6 +140,10 @@ struct SpeechModelsView: View {
             }
             .font(.callout)
 
+            if row.isActive, let notice = model.activeNotice {
+                IssueText(notice, severity: .advisory, font: .callout)
+            }
+
             if let error = row.errorText {
                 IssueText(error, font: .callout)
             }

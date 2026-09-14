@@ -32,6 +32,17 @@ final class SpeechModelsModel: ObservableObject {
     @Published private(set) var rows: [Row] = []
     @Published var pendingDeleteId: String?
     @Published var pendingDeleteLeavesNoEngine = false
+    @Published private var replacedActiveId: String?
+
+    // Derived on read: the active model can change after launch (a download completes, or a failing
+    // replacement hands off to another), and the notice must describe the model that is active now.
+    var activeNotice: String? {
+        guard let replacedActiveId else { return nil }
+        return SpeechModelChoiceCopy.replacedActiveNotice(
+            replacedId: replacedActiveId,
+            replacementName: activeName,
+            replacementUsable: isEngineUsable(set.activeId))
+    }
 
     var activeName: String { SpeechModelCatalog.entry(for: set.activeId)?.displayName ?? set.activeId }
 
@@ -103,6 +114,7 @@ final class SpeechModelsModel: ObservableObject {
         deferWhileBusy: @escaping (@escaping () -> Void) -> Void = { $0() },
         initialInstalledIds: Set<String>? = nil,
         initialFailedIds: Set<String>? = nil,
+        replacedActiveId: String? = nil,
         removeFiles: @escaping (String) async throws -> Void = { id in
             try await Task.detached(priority: .utility) {
                 try ModelInstallStore.removeFiles(for: id)
@@ -130,6 +142,7 @@ final class SpeechModelsModel: ObservableObject {
             installed: initialInstalledIds ?? ModelInstallStore.installedIds(),
             activeId: activeId,
             failed: initialFailedIds ?? ModelHealthStore.failedIds())
+        self.replacedActiveId = replacedActiveId
         refreshSizes()
         rebuild()
     }
@@ -167,6 +180,7 @@ final class SpeechModelsModel: ObservableObject {
 
     func syncActive(_ id: String) {
         guard isEngineUsable(id), set.activeId != id else { return }
+        replacedActiveId = nil
         try? set.select(id)
         rebuild()
     }
@@ -193,6 +207,7 @@ final class SpeechModelsModel: ObservableObject {
 
     func select(_ id: String) {
         guard isEngineUsable(id) else { return }
+        replacedActiveId = nil
         try? set.select(id)
         onActiveChange(set.activeId)
         rebuild()

@@ -132,8 +132,8 @@ clipboard tokenization, number normalization, and best-effort redaction. Rewrite
 validated before insertion so redaction/verbatim/clipboard tokens survive and restore correctly.
 
 Supported speech models include Parakeet TDT v3, Parakeet Unified 0.6B (English), Parakeet
-TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech, Qwen3-ASR 0.6B,
-Qwen3-ASR 1.7B, and Moonshine Base (English). Availability depends on macOS version and model download state.
+TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech, Qwen3-ASR 0.6B, and
+Qwen3-ASR 1.7B. Availability depends on macOS version and model download state.
 
 ## Build From Source
 

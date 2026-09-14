@@ -17,7 +17,7 @@ meta = {c["id"]: c for c in json.load(open(HERE / "manifest.json"))["clips"]}
 raw_path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/raw.txt"
 
 ENG_ORDER = ["parakeet", "parakeet-tdt-ctc-110m", "whisper", "apple",
-             "qwen3-asr-0.6b", "qwen3-asr-1.7b", "moonshine-base-en"]
+             "qwen3-asr-0.6b", "qwen3-asr-1.7b"]
 CATS = ["TERM", "COMMA", "END", "CONT", "ABSENT"]
 
 

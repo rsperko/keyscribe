@@ -167,4 +167,53 @@ struct SpeechModelSetTests {
         #expect(!s.installed.contains("whisper"))
         #expect(!s.isFailed("whisper"))
     }
+
+    // A saved id this catalog does not know — a retired model, or one this OS cannot run — follows the same
+    // reassignment as deleting the active model.
+    @Test func unknownActiveMovesToDefaultEnglishWhenUsable() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "retired-model")
+        let replaced = s.replaceUnknownActive()
+        #expect(replaced)
+        #expect(s.activeId == "parakeet")
+    }
+
+    @Test func unknownActiveMovesToFirstUsableWhenDefaultIsNotInstalled() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["whisper"], activeId: "retired-model")
+        let replaced = s.replaceUnknownActive()
+        #expect(replaced)
+        #expect(s.activeId == "whisper")
+    }
+
+    @Test func unknownActiveFallsBackToAppleWhenNothingIsInstalled() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: [], activeId: "retired-model")
+        let replaced = s.replaceUnknownActive()
+        #expect(replaced)
+        #expect(s.activeId == "apple")
+    }
+
+    // With nothing usable, land on the default download so the picker and the not-installed error point at
+    // a real model instead of an id nothing can show.
+    @Test func unknownActiveWithNothingUsableLandsOnTheDefaultDownload() {
+        let withoutApple = realCatalog.filter { !$0.systemManaged }
+        var s = SpeechModelSet(catalog: withoutApple, installed: [], activeId: "apple")
+        let replaced = s.replaceUnknownActive()
+        #expect(replaced)
+        #expect(s.activeId == "parakeet")
+        #expect(!s.isUsable(s.activeId))
+    }
+
+    @Test func knownActiveThatIsNotInstalledKeepsItsSavedValue() {
+        var s = SpeechModelSet(catalog: realCatalog, installed: ["whisper"], activeId: "parakeet")
+        let replaced = s.replaceUnknownActive()
+        #expect(!replaced)
+        #expect(s.activeId == "parakeet")
+    }
+
+    @Test func unknownActiveSkipsAFailedPreferredReplacement() {
+        var s = SpeechModelSet(
+            catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "retired-model", failed: ["parakeet"])
+        let replaced = s.replaceUnknownActive()
+        #expect(replaced)
+        #expect(s.activeId == "whisper")
+    }
 }

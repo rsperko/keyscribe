@@ -78,7 +78,7 @@ Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs
 - **Best in noisy places:** Whisper Large v3 Turbo or Qwen3-ASR 1.7B. Both barely lose accuracy
   with real background noise; the smaller models lose noticeably more, and Apple Speech degrades
   the most. If you often dictate in cafés, open offices, or transit, pick one of these two.
-- **Smaller / faster footprint:** Whisper Small (English), Moonshine Base.
+- **Smaller / faster footprint:** Whisper Small (English), Parakeet TDT-CTC 110M.
 - Apple Speech, Whisper Large v3 Turbo, and Parakeet TDT v3 are also available. Apple Speech appears
   only on macOS 26+.
 
@@ -92,8 +92,8 @@ off your machine.
 
 Yes, with one setup step. Pick a speech model that covers your language in **Settings ▸ Speech
 Models** — Whisper Large v3 Turbo (99 languages), Qwen3-ASR 0.6B/1.7B (52), and Apple Speech (20) are
-the broad ones. The English-only models (Whisper Small, Moonshine Base, Parakeet TDT-CTC 110M,
-Parakeet Unified) and Parakeet TDT v3, whose 25 languages are all European, will not transcribe
+the broad ones. The English-only models (Whisper Small, Parakeet TDT-CTC 110M, Parakeet Unified)
+and Parakeet TDT v3, whose 25 languages are all European, will not transcribe
 outside their coverage.
 
 If you also use AI rewrite, it writes back in whatever language you dictated — there is no language

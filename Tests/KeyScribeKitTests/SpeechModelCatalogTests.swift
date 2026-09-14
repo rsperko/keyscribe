@@ -6,8 +6,16 @@ struct SpeechModelCatalogTests {
         #expect(
             Set(SpeechModelCatalog.all.map(\.id))
                 == ["parakeet", "parakeet-unified-en", "parakeet-tdt-ctc-110m", "whisper",
-                    "whisper-small-en", "apple", "qwen3-asr-0.6b", "qwen3-asr-1.7b",
-                    "moonshine-base-en"])
+                    "whisper-small-en", "apple", "qwen3-asr-0.6b", "qwen3-asr-1.7b"])
+    }
+
+    // A retired id keeps its name so the app can say what replaced it, and must never also be a live entry
+    // or that notice would fire for a model that still ships.
+    @Test func retiredModelsAreNamedButNoLongerOffered() {
+        #expect(SpeechModelCatalog.retiredDisplayNames["moonshine-base-en"] == "Moonshine Base (English)")
+        for id in SpeechModelCatalog.retiredDisplayNames.keys {
+            #expect(SpeechModelCatalog.entry(for: id) == nil)
+        }
     }
 
     @Test func exactlyOneDefaultEnglishEngine() {
@@ -75,8 +83,8 @@ struct SpeechModelCatalogTests {
     }
 
     @Test func recognitionBiasSupportIsPerEngine() {
-        // Only Qwen3 (native context) and Whisper (prompt tokens) bias recognition; Parakeet, Apple, and
-        // Moonshine do not — the dictionary reaches them only through after-transcription recovery.
+        // Only Qwen3 (native context) and Whisper (prompt tokens) bias recognition; Parakeet and Apple do
+        // not — the dictionary reaches them only through after-transcription recovery.
         let biasCapable: Set<String> = ["qwen3-asr-0.6b", "qwen3-asr-1.7b", "whisper", "whisper-small-en"]
         for e in SpeechModelCatalog.all {
             #expect(e.supportsRecognitionBias == biasCapable.contains(e.id))

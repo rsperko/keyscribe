@@ -3,19 +3,18 @@ import Foundation
 import KeyScribeKit
 
 enum ModelInstallStore {
-    // One-shot cleanup of the retired Parakeet CTC 0.6B bias companion: the CTC-WS spotter that used it
-    // was removed, so it's stranded on old installs and `reconcile` won't touch it (models/ is shared
-    // across variants, so it preserves dirs no engine claims). Excludes parakeet-ctc-110m-coreml, which
-    // the tdt-ctc-110m load path re-downloads as its CTC head on every load — deleting it would only churn.
-    // Idempotent (missing dir = no-op), so safe to run every launch.
-    static var retiredCtcCompanionDirNames: [String] {
-        [CtcModelVariant.ctc06b].map {
-            CtcModels.defaultCacheDirectory(for: $0).lastPathComponent
-        }
+    // One-shot cleanup of install dirs stranded by models that no longer ship: the Parakeet CTC 0.6B bias
+    // companion (its CTC-WS spotter was removed) and the retired Moonshine model. `reconcile` won't touch them
+    // (models/ is shared across variants, so it preserves dirs no engine claims). Excludes
+    // parakeet-ctc-110m-coreml, which the tdt-ctc-110m load path re-downloads as its CTC head on every load —
+    // deleting it would only churn. Idempotent (missing dir = no-op), so safe to run every launch.
+    static var retiredInstallDirNames: [String] {
+        [CtcModelVariant.ctc06b].map { CtcModels.defaultCacheDirectory(for: $0).lastPathComponent }
+            + ["moonshine-base-en"]
     }
 
-    static func deleteRetiredCtcCompanions() {
-        let names = retiredCtcCompanionDirNames
+    static func deleteRetiredInstallDirs() {
+        let names = retiredInstallDirNames
         var freed: [String] = []
         for name in names {
             let url = KeyScribePaths.modelsDir.appendingPathComponent(name, isDirectory: true)
@@ -23,11 +22,11 @@ enum ModelInstallStore {
             do { try FileManager.default.removeItem(at: url); freed.append(name) }
             catch {
                 Log.models.error(
-                    "ctc cleanup: \(name, privacy: .public) delete failed: \(error.localizedDescription, privacy: .public)")
+                    "retired cleanup: \(name, privacy: .public) delete failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         if !freed.isEmpty {
-            Log.models.notice("removed retired Parakeet CTC bias companions: \(freed.sorted(), privacy: .public)")
+            Log.models.notice("removed retired model dirs: \(freed.sorted(), privacy: .public)")
         }
     }
     private static var markerURL: URL {
@@ -57,9 +56,12 @@ enum ModelInstallStore {
 
         // No protectedDirs: it only narrows removeDirs, and recency is checked below on the (usually empty)
         // candidate set instead of walking the multi-GB shared models tree every launch.
+        let retiredIds = Set(SpeechModelCatalog.retiredDisplayNames.keys)
         let plan = ModelMaintenance.reconcile(
             knownIds: Array(owned.keys), owned: owned, completeIds: complete,
-            dirsOnDisk: directoriesOnDisk(), markedIds: marked, keep: [markerFile, VADModel.dirName])
+            dirsOnDisk: directoriesOnDisk(), markedIds: marked, retiredIds: retiredIds,
+            keep: [markerFile, VADModel.dirName])
+        retiredIds.forEach(ModelHealthStore.clearFailed)
         let adopted = plan.installed.subtracting(marked)
         let dropped = marked.subtracting(plan.installed)
         do {
