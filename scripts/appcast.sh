@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
+SIGN_UPDATE=".build/xcode/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
 APPCAST="appcast.xml"
 REPO_URL="https://github.com/rsperko/keyscribe"
 MIN_OS="15.0"
@@ -20,9 +20,9 @@ VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
 TAG="v$VERSION"
 DMG="KeyScribe-$VERSION.dmg"
 [ -f "$DMG" ] || { echo "error: $DMG not found — run ./release.sh first." >&2; exit 1; }
-[ -x "$SIGN_UPDATE" ] || { echo "error: $SIGN_UPDATE missing — build once with KEYSCRIBE_SPARKLE=1 to fetch Sparkle's tools." >&2; exit 1; }
+[ -x "$SIGN_UPDATE" ] || { echo "error: $SIGN_UPDATE missing — run ./release.sh first (its Xcode build downloads Sparkle's tools)." >&2; exit 1; }
 
-# CFBundleVersion make-app.sh stamps is the commit count; compute it at the tag so it matches the DMG.
+# CFBundleVersion scripts/prepare-xcode-project.sh stamps is the commit count; compute it at the tag so it matches the DMG.
 BUILD="$(git rev-list --count "$TAG" 2>/dev/null || git rev-list --count HEAD)"
 ENCLOSURE_URL="$REPO_URL/releases/download/$TAG/$DMG"
 

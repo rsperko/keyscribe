@@ -1,0 +1,12 @@
+// Settings that must reach the SwiftPM package targets, not just the app target. Pass this file with
+// `-xcconfig` on every xcodebuild invocation (make-app.sh and release.sh do; a downstream CI must too):
+// project-level settings in project.yml do not apply to package targets.
+
+// The speech engines have no x86_64 build (FluidAudio fails with "'Float16' is unavailable in macOS"),
+// and Xcode builds packages universal in Release unless told otherwise.
+ARCHS = arm64
+ONLY_ACTIVE_ARCH = YES
+
+// Xcode compiles MLX's Metal shaders with fast math on by default. MLX's own builds use -fno-fast-math;
+// match them so Qwen3 numerics are the ones upstream tests.
+MTL_FAST_MATH = NO

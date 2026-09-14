@@ -37,17 +37,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var updater: AppUpdater?
     var legacyImporter: LegacyConfigImporter?
 
-    // The Sparkle guard lives here, not at the entry point: the conditional Sparkle dependency is attached
-    // to this library target, so `canImport(Sparkle)` is only true inside it — a host target that links this
-    // library would evaluate it as false and silently skip the updater.
-    public func attachBundledUpdater() {
-        #if canImport(Sparkle)
-        if AppVariant(bundleID: Bundle.main.bundleIdentifier).injectsBundledUpdater {
-            updater = SparkleUpdater()
-        }
-        #endif
-    }
-
     private let firstRunKey = ResetTool.firstRunKey
     private let forcePermissionsSetup = CommandLine.arguments.contains("--setup-permissions")
     private let forceResumeOnboarding = CommandLine.arguments.contains("--resume-onboarding")

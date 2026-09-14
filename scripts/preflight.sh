@@ -7,7 +7,7 @@
 #
 # The reason this exists: `swift test` is green on the DEV build, but releases break on the things
 # that ONLY exist in the notarized production artifact — TCC grants rebinding to the new signature,
-# hardened-runtime entitlements, the bundled+signed mlx.metallib (Qwen crashes without it), Gatekeeper
+# hardened-runtime entitlements, the MLX shader library in the package resource bundle (Qwen crashes without it), Gatekeeper
 # quarantine on a fresh download, first-run onboarding, and the permission-gated trigger matrix. None
 # of that is reachable from a unit test. See docs/development/release_testing.md for the full rationale.
 #
@@ -247,14 +247,14 @@ chk_a_codesign() {
 guard a-codesign "$(sig_artifact)" chk_a_codesign
 
 chk_a_metallib() {
-  [ -d "$APP_PATH" ] || { result skip "mlx.metallib — artifact missing"; return; }
+  [ -d "$APP_PATH" ] || { result skip "MLX shaders — artifact missing"; return; }
   if timeout --foreground 120 "$EXE" --mlx-smoke >/tmp/preflight-mlx-smoke.log 2>&1; then
-    result pass "MLX runs from the bundled mlx.metallib (--mlx-smoke)"
+    result pass "MLX runs from the bundled shader library (--mlx-smoke)"
   else
     result fail "--mlx-smoke FAILED — Qwen3-ASR will crash at load; see /tmp/preflight-mlx-smoke.log"
   fi
 }
-guard a-metallib "$(sig_artifact).$(stat -f '%m.%z' "$APP_PATH/Contents/MacOS/mlx.metallib" 2>/dev/null || echo none).$(sw_vers -buildVersion)" chk_a_metallib
+guard a-metallib "$(sig_artifact).$(stat -f '%m.%z' "$APP_PATH/Contents/Resources/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib" 2>/dev/null || echo none).$(sw_vers -buildVersion)" chk_a_metallib
 
 chk_a_plist() {
   [ -d "$APP_PATH" ] || { result skip "Info.plist — artifact missing"; return; }
@@ -589,9 +589,9 @@ else
   chk_c_qwen_hardened() {
     if ! ask "Changed STT engines / deps this release?"; then result skip "Qwen load / silence guard (STT unchanged)"; return; fi
     info "  Expected: using the same sandbox app/config, select Qwen3-ASR and dictate a short phrase."
-    info "  This proves mlx.metallib loads from the hardened-runtime release app."
+    info "  This proves the MLX shader library loads from the hardened-runtime release app."
     info "  Also re-run the --raw silence recipe (AGENTS.md 'Silence / no-speech') — no NEW lexical hallucination."
-    if ask "  Qwen3-ASR selected loads + transcribes (proves mlx.metallib runs under hardened runtime)"; then result pass "Qwen loads under hardened runtime"; else result fail "Qwen failed to load — check metallib signing"; fi
+    if ask "  Qwen3-ASR selected loads + transcribes (proves the MLX shaders run under hardened runtime)"; then result pass "Qwen loads under hardened runtime"; else result fail "Qwen failed to load — check the MLX resource bundle signing"; fi
   }
   guard c-qwen-hardened "$AS" chk_c_qwen_hardened
 

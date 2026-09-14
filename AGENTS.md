@@ -309,9 +309,13 @@ keyscribe/
   Tests/KeyScribeKitTests/ # pure-logic unit tests
   Tests/KeyScribeTests/    # app-target tests (@testable import KeyScribeApp) — OS-edge orchestration via DI seams
   Makefile             # task front door — `make help` lists build/run/release/test/setup/…
+  App/                 # the shared Xcode app definition: project.yml (XcodeGen template + dev/public
+                       #   targets), Config/Packages.xcconfig, ExportOptions-developer-id.plist; the
+                       #   generated KeyScribe.xcodeproj is gitignored
   make-app.sh          # → KeyScribeDev.app (dev variant, default; self-signed — see BUILD.md)
   release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major)
-  scripts/             # dev helpers: setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
+  scripts/             # dev helpers: prepare-xcode-project.sh + collect-licenses.sh (the build),
+                       #   setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
                        #   render_app_icon.swift (all reachable via make targets)
   docs/                # user docs, plus development/reference specs
   corpus/              # recorded-speech corpus + replay harnesses (committed kit; *.wav + results.json
@@ -327,7 +331,8 @@ keyscribe/
 ## Toolchain
 
 - macOS 26.x, arm64, **Swift 6.3+**, **Xcode.app installed** (`sudo xcode-select -s
-  /Applications/Xcode.app` to select it for signing/notarization).
+  /Applications/Xcode.app`), the **Metal Toolchain**, and **XcodeGen** (`brew install xcodegen`) — the
+  app is built through `App/project.yml`, never a bare `swift build`.
 - **FluidAudio** SPM dep; Parakeet weights download at runtime.
 - Local **oMLX** for LLM iteration (OpenAI-compatible): `http://127.0.0.1:11234/v1`, key in
   `~/.omlx/settings.json`. The **Gemini 2.5 Flash** floor still wants a real pass before shipping
@@ -968,45 +973,32 @@ this class of breakage is invisible locally and only ever reported by downstream
   then `swift package resolve`. **CI runners that cache `~/Library/Caches/org.swift.swiftpm` stay broken
   until that key is evicted** — clearing the repo checkout alone does nothing.
 - **Footgun:** `swift package update <dep>` does **not** fix a stale pin whose version constraint is still
-  satisfied — it left `26e0335a` in place — and it **drops the conditional Sparkle pin** from
-  `Package.resolved`, since Sparkle only joins the graph under `KEYSCRIBE_SPARKLE=1`. Edit the revision
-  directly and re-resolve; check `git diff Package.resolved` for a vanished Sparkle block before committing.
+  satisfied — it left `26e0335a` in place. Edit the revision directly and re-resolve, and review
+  `git diff Package.resolved` before committing: that file is also copied into the generated Xcode
+  project on every build, so it is the only lockfile.
 
-**MLX metallib is a hard runtime requirement — and the kernel set is load-bearing.** Qwen3-ASR (MLX)
-crashes ("Failed to load the default metallib") without `mlx.metallib` beside the executable, because
-SwiftPM's **native** build system does not compile `.metal` sources. `scripts/build-mlx-metallib.sh`
-builds it and `make-app.sh` bundles+signs it into the `.app`. **The Metal Toolchain
-(`xcodebuild -downloadComponent MetalToolchain`) is required for every variant, and every shader failure
-is fatal.** `make-app.sh` runs `build-mlx-metallib.sh --probe` (compile + link a one-line kernel) before
-`swift build` — never `xcrun -f metal`, which finds Xcode 26's "missing Metal Toolchain" stub whether or
-not the toolchain is installed — and runs `KeyScribe --mlx-smoke` (a tiny MLX computation; it names a
-missing Metal device) on the built binary before it touches the existing `.app`; preflight's
-`a-metallib` runs the same smoke on the notarized app. The failure is
-uncatchable in-process (mlx-c `exit(-1)` / mlx-swift `fatalError`), so the smoke only ever runs as a
-subprocess whose death is the signal. The script builds with `-mmacosx-version-min` read from
-`Info.plist`'s `LSMinimumSystemVersion`: without it the library targets the SDK's macOS
-(`air64_v28-apple-macosx26.0.0` under Xcode 26), which older supported releases are expected to refuse —
-**unverified on a macOS 15 machine, and a smoke on a newer build machine cannot catch it**. **A downstream
-build through an Xcode project needs none of the script** — Xcode's build engine compiles those shaders
-itself into `mlx-swift_Cmlx.bundle/default.metallib`, which MLX finds via its SwiftPM-bundle lookup
-(`swift build --build-system swiftbuild` does the same, and is the eventual replacement for the script);
-it still needs the Metal Toolchain, and `--mlx-smoke` works against its binary.
-**Until that migration happens the build system is PINNED to `native`** — `make-app.sh`, `make test`,
-and `scripts/preflight.sh` all splice in `scripts/swiftpm-build-system.sh`'s `--build-system native`,
-because Swift 6.4 flips SwiftPM's default to `swiftbuild`, which moves products from `.build/<config>`
-to `.build/out/Products/<Config>` (no `.build/release` symlink — `make-app.sh`'s copy dies on any
-machine) and pulls `.metal` sources into `swift build` (making the Metal Toolchain a hard build
-requirement and displacing the curated kernel set below). Migrating means moving the product paths,
-bundling + signing `mlx-swift_Cmlx.bundle`, `release.sh`, and preflight together; 6.4 marks `native`
-deprecated, so it has a deadline. A bare `swift build` on 6.4+ is NOT what ships.
-**Compile ONLY `Source/Cmlx/mlx-generated/metal` (mlx-swift's ahead-of-time set — exactly what its own
-Xcode build ships) plus `kernels/fence.metal`.** Every other kernel is JIT-generated at runtime — the
-SwiftPM build enables MLX's JIT (`Package.swift` excludes `nojit_kernels.cpp`) and all 23 have matching
-generators under `mlx-generated/*.cpp`. Globbing the whole `backend/metal/kernels` tree instead (what
-the script did until 2026-08-13) yielded **107 MB / 15,005 shader functions** against the **3.0 MB /
-385** actually needed — half the shipped `.app` — for byte-identical transcription over 142 corpus
-clips on both Qwen engines. The built library is verified a strict **superset** of what
-`--build-system swiftbuild` produces. Never "fix" this back to a glob.
+**MLX's Metal shader library is a hard runtime requirement, and Xcode builds it.** Qwen3-ASR (MLX)
+crashes ("Failed to load the default metallib") without a compiled shader library. SwiftPM's **native**
+build system does not compile `.metal` sources, which is why the app is built through the shared Xcode
+app definition (`App/project.yml`, below): Xcode compiles mlx-swift's ahead-of-time kernel set into
+`Contents/Resources/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib`, which MLX finds through its
+SwiftPM-bundle lookup. **The Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) is required
+for every build, and every shader failure is fatal.** `scripts/prepare-xcode-project.sh` compiles a
+one-line kernel before generating the project — never `xcrun -f metal`, which finds Xcode 26's "missing
+Metal Toolchain" stub whether or not the toolchain is installed — and `make-app.sh`/`release.sh` run
+`KeyScribe --mlx-smoke` (a tiny MLX computation; it names a missing Metal device) on the built product
+before it replaces the `.app`; preflight's `a-metallib` runs the same smoke on the notarized app. The
+failure is uncatchable in-process (mlx-c `exit(-1)` / mlx-swift `fatalError`), so the smoke only ever
+runs as a subprocess whose death is the signal. **Two settings must reach the PACKAGE targets and can only
+get there from the command line or an `-xcconfig`** — `App/Config/Packages.xcconfig`, which every
+xcodebuild invocation passes: `MTL_FAST_MATH=NO` (Xcode defaults Metal to fast math; MLX's own builds use
+`-fno-fast-math`, and the shared definition matches them — transcripts were identical either way over the
+spike's sample, so this is principle, not a measured difference) and `ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`
+(FluidAudio does not build for x86_64, and a project-level `ARCHS` in `project.yml` does not apply to
+packages). A bare `swift build` still produces `.build/release/KeyScribe` for fast iteration and the
+DevCLI flags, but it has NO shader library, so Qwen3 crashes from it; use the `.app`'s binary for anything
+MLX. `make test` and preflight's `a-swift-test` still pin `--build-system native` through
+`scripts/swiftpm-build-system.sh`; moving tests to `swiftbuild` is a separate follow-up.
 
 ---
 
@@ -1019,17 +1011,38 @@ Top-level SwiftPM (`Package.swift`): `Sources/KeyScribeKit` (pure) + `Sources/Ke
 `KeyScribeKit` as a **library product** so a downstream build through a standard Xcode project links
 one product and inherits every dependency — and its pins — transitively, instead of re-declaring them
 in a second place that silently drifts. `Sources/KeyScribeMain/main.swift` is the only file in the
-`KeyScribe` **executable** target; keep that target's name (`make-app.sh` builds
-`--product KeyScribe` and copies `.build/release/KeyScribe`). The public surface is deliberately tiny
-— `DevCLI.handleFlags()`, `AppDelegate` (+`init`, `updater`, `attachBundledUpdater()`), and
-`EditMenu.make()`; everything else stays `internal`. **The Sparkle guard lives in
-`AppDelegate.attachBundledUpdater()`, not at the entry point**: the conditional Sparkle dependency
-attaches to the library target, so `#if canImport(Sparkle)` is only true inside it — evaluating it in
-the executable (or in a downstream host target) silently yields false and no updater. Bundled into an LSUIElement
-`.app` by `./make-app.sh` — the **dev** variant signs with a stable self-signed cert (**`KeyScribe
-Local`**) for persistent TCC, else ad-hoc; it **ignores** `KEYSCRIBE_SIGN_ID` /
-`CODESIGN_IDENTITY` (those are the release Developer ID identity, so an `.envrc` for `release.sh`
-never leaks into dev). Full from-source build, prerequisites, and signing live in **`BUILD.md`**.
+`KeyScribe` **executable** target and is also the entry file every Xcode app target compiles. The public
+surface is deliberately tiny — `DevCLI.handleFlags()`, `AppDelegate` (+`init`, `updater`), `EditMenu.make()`,
+and `SparkleUpdater` in the separate `KeyScribeSparkle` library target; everything else stays `internal`.
+**The Sparkle gate is a per-target compilation condition, not `canImport`:** `Package.swift` depends on
+Sparkle unconditionally (so its pin lives in the one `Package.resolved`) but only `KeyScribeSparkle` links
+it, and only the public app target in `App/project.yml` links that, setting
+`SWIFT_ACTIVE_COMPILATION_CONDITIONS=KEYSCRIBE_SPARKLE` so `main.swift`'s `#if KEYSCRIBE_SPARKLE` block
+constructs the updater. `canImport(KeyScribeSparkle)` would read true for the dev target too once the
+public target's module sits in shared DerivedData (measured), so do not "simplify" it to that. Apps are
+built through **the shared Xcode app definition**: `App/template.yml` (XcodeGen) holds the
+`KeyScribeAppBase` target template — functional resources, package wiring, `Resources/Info.plist` with
+`$(...)` substitution, and a post-build phase that runs `scripts/collect-licenses.sh` over the packages
+pinned in the project's lockfile (never the bare checkouts directory, so a stale checkout cannot ship its
+notice) — and `App/project.yml` includes it and adds the two thin targets, `KeyScribeDev` and `KeyScribe`,
+each listing `Sources/KeyScribeMain` and `Resources/AppIcon.icns` as its own sources so a downstream target
+can list its own entry file and icon instead (two icons at one output path collide). Paths the build needs at build time go through the `KEYSCRIBE_ROOT` setting (XcodeGen rewrites
+source paths for an including spec but copies settings verbatim). `scripts/prepare-xcode-project.sh` checks the toolchain,
+runs `xcodegen`, **seeds the generated project's lockfile from the root `Package.resolved` on every build**
+(`-disableAutomaticPackageResolution` rejects a lockfile that violates the manifest but silently keeps one
+that drifted inside a `from:` range, so the copy is the real guard; a downstream passes its own lockfile
+with `--lockfile`, and the script fails unless every upstream pin matches it), and prints the version settings
+(`MARKETING_VERSION` from `git describe`, `CURRENT_PROJECT_VERSION` from the commit count,
+`KEYSCRIBE_SCM_REVISION`; `KEYSCRIBE_VERSION`/`KEYSCRIBE_BUILD`/`KEYSCRIBE_SCM_REVISION` env override them
+for a mirror whose git history is not this repo's). `./make-app.sh` builds the **dev** target with the
+stable self-signed cert (**`KeyScribe Local`**) for persistent TCC, else ad-hoc; it **ignores**
+`KEYSCRIBE_SIGN_ID` / `CODESIGN_IDENTITY` for dev (those are the release Developer ID identity, so an
+`.envrc` for `release.sh` never leaks into dev). `release.sh` archives and exports the public target;
+Xcode signs Sparkle's helpers, the framework, the binary, and the bundle inside-out with hardened runtime
+itself, so there is no re-sign block. **A downstream distribution `include:`s the template and adds its
+own target** with its own identity, signing, entry file (`main.swift` that sets `delegate.updater`), and
+export options — it never edits upstream source. Full from-source build, prerequisites, and signing live
+in **`BUILD.md`**.
 
 **Two build variants** (`KEYSCRIBE_VARIANT`, default `dev`): `./make-app.sh` builds the isolated
 **KeyScribeDev.app** (`com.keyscribe.app.dev` — its own config dir, TCC grants, and Keychain service;
@@ -1055,17 +1068,17 @@ they race on the lock and on `make publish`.
 **The release gate is mandatory and enforced: `make preflight` (→ `scripts/preflight.sh`) must pass
 before anything goes public.** `swift test` green is NOT sufficient — it runs on the dev build, but
 releases break on what only exists in the notarized artifact (TCC grants rebinding to the new
-signature, hardened-runtime entitlements, the bundled+signed `mlx.metallib`, Gatekeeper quarantine,
+signature, hardened-runtime entitlements, the signed MLX shader bundle, Gatekeeper quarantine,
 first-run onboarding, the permission-gated trigger matrix). Preflight runs the automated build/packaging
 + functional gates and walks the human smoke checks on the freshly-installed production app, then writes
 a commit-keyed stamp (`.preflight-pass`). `scripts/publish.sh` **refuses to publish without a matching
 stamp** (override: `KEYSCRIBE_SKIP_PREFLIGHT=1`, i.e. shipping unverified). `make ship` chains
 release → preflight → publish. Full contract + rationale: `docs/development/release_testing.md`.
 
-`KeyScribe.entitlements` (hardened-runtime) is passed by **`release.sh`** for the notarized build;
-`make-app.sh`'s dev signing omits it (a teamless self-signed cert can't authorize it). Keep its XML
+`KeyScribe.entitlements` (hardened-runtime) is carried by the public `KeyScribe` target in
+`App/project.yml`; the dev target omits it (a teamless self-signed cert can't authorize it). Keep its XML
 comments free of `--` — AMFI's strict parser rejects them. The bundle's `Info.plist` is a tracked
-source at `Resources/Info.plist`; the build scripts stamp `CFBundleShortVersionString` (git tag),
+source at `Resources/Info.plist`; Xcode substitutes `CFBundleShortVersionString` (git tag),
 `CFBundleVersion` (commit count), and the variant's bundle id/name — don't hand-edit those keys.
 
 Config lives under `~/Library/Application Support/<KeyScribe|KeyScribeDev>/` (per variant; the
@@ -1142,7 +1155,8 @@ also add per-flag tests — default-off fallback, override persistence, and off-
 - **Never hardcode the product name in user-facing copy — use `Branding.appName`** (resolves from the
   running bundle: "KeyScribe" prod, "KeyScribeDev" dev, the bundle name for a `custom` rebrand). The
   literal "KeyScribe" lives in exactly one place, `AppVariant.production.displayName`; everything else
-  interpolates `\(Branding.appName)`. This is the white-label seam (with `make-app.sh
-  KEYSCRIBE_VARIANT=custom` + the `__BUNDLE_NAME__` placeholder in `Info.plist`); a hardcoded name
-  breaks a downstream rebrand and shows the wrong name in the dev build.
+  interpolates `\(Branding.appName)`. This is the white-label seam (a downstream app target on the
+  `App/project.yml` template sets its own `PRODUCT_NAME` / `PRODUCT_BUNDLE_IDENTIFIER`, which
+  `Resources/Info.plist` substitutes); a hardcoded name breaks a downstream rebrand and shows the wrong
+  name in the dev build.
 - When a design choice leans on a principle, note it inline as the docs do.

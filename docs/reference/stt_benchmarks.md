@@ -92,7 +92,7 @@ paired per-engine ΔWER, worst-degrading clips, and dictionary-term flips.
 
 ```bash
 bash corpus/record.sh --tier T2   # record the ranking-grade tier (record more later for T3 precision)
-./make-app.sh release                # bundles the MLX metallib Qwen3 needs
+./make-app.sh                        # bundles the MLX shaders Qwen3 needs
 bash corpus/compare.sh            # ranked report over the engines you have installed
 ```
 

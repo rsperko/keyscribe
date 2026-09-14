@@ -65,7 +65,7 @@ Prefer a GUI? Voice Memos or QuickTime → record → export, then convert:
 
 First build the app once (bundles the MLX metallib Qwen3 needs):
 
-    ./make-app.sh release
+    ./make-app.sh
 
 Then score every installed engine over the clips you recorded and get a ranked report:
 
@@ -80,7 +80,7 @@ all of them:
     bash corpus/compare.sh --engines qwen3-asr-0.6b,parakeet,whisper-small-en
     bash corpus/compare.sh --fuzzy      # also apply the post-STT fuzzy corrector before scoring
     bash corpus/compare.sh --raw        # raw per-clip transcripts, no scoring or ranking
-    bash corpus/compare.sh --bin PATH   # score with a specific build instead of .build/release
+    bash corpus/compare.sh --bin PATH   # score with a specific build instead of KeyScribeDev.app
 
 Engine ids: `parakeet`, `parakeet-tdt-ctc-110m`, `whisper`, `whisper-small-en`, `apple`,
 `qwen3-asr-0.6b`, `qwen3-asr-1.7b`.
@@ -94,7 +94,7 @@ every engine is faster than real time anyway.
 
 `compare.sh` wraps the headless benchmark, which you can also run directly:
 
-    .build/release/KeyScribe --benchmark corpus/stt [--engines …] [--fuzzy] [--raw]
+    KeyScribeDev.app/Contents/MacOS/KeyScribe --benchmark corpus/stt [--engines …] [--fuzzy] [--raw]
 
 It prints the per-engine table (WER unbiased vs biased, bias term recall, RTF) and writes
 `results.json` here; `compare.sh` adds the ranking and recommendations on top of that file.

@@ -72,5 +72,5 @@ icon: ## Regenerate Resources/AppIcon.icns from scripts/render_app_icon.swift
 		iconutil -c icns $$set -o Resources/AppIcon.icns; \
 		rm -rf $$tmp; echo "wrote Resources/AppIcon.icns"
 
-clean: ## Remove build artifacts (.build, the .app bundles, the release DMG)
-	rm -rf .build KeyScribe.app KeyScribeDev.app KeyScribe-*.dmg
+clean: ## Remove build artifacts (.build, the generated Xcode project, the .app bundles, the release DMG)
+	rm -rf .build App/KeyScribe.xcodeproj KeyScribe.app KeyScribeDev.app KeyScribe-*.dmg
