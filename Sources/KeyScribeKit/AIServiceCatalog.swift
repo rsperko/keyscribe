@@ -12,11 +12,16 @@ import Foundation
 // `permits` decides which connections the build will talk to at all. It answers `true` here, so the public
 // build restricts nothing; a lineup that exists to pin one endpoint narrows it (e.g. the base URL must
 // normalize to the proxy's), which makes a hand-edited connections.toml naming another provider inert
-// rather than merely absent from the picker. Nothing reads it ambiently: the app hands it to the few places
-// that represent the build to the user or reach the network (status badges, Test/Find models, the rewrite
-// and preconnect paths, the connect sequence), while `Connection.configIssue` and every default seam stay
-// permissive — so narrowing the lineup never changes what "are these fields valid?" means, and the test
-// suite keeps its own fixtures instead of inheriting a downstream's policy.
+// rather than merely absent from the picker. Only the app's composition roots read it, plus RewriteService's
+// deprecated client-only initializer, which applies it rather than allowing everything. Every place that
+// represents the build to the user or reaches the network (status badges, Test/Find models, the rewrite and
+// preconnect paths, the connect sequence) takes it as a required argument with no default, so a new call
+// site cannot silently permit everything and the test suite passes its own policy instead of inheriting a
+// downstream's. The bare `Connection.configIssue` stays permissive, so narrowing the lineup never changes
+// what "are these fields valid?" means.
+//
+// AIServiceCatalogContractTests must stay green under any lineup, and scripts/check-catalog-contract.sh runs
+// the whole suite against a restrictive stand-in to prove no other test leans on the public one.
 public enum AIServiceCatalog {
     public static let openAI = ConnectionPreset(
         id: "openai", name: "OpenAI", provider: .openai,

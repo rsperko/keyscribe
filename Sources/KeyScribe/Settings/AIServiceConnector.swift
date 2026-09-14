@@ -8,13 +8,11 @@ import KeyScribeKit
 @MainActor
 struct AIServiceConnector {
     let repository: ConfigRepository
+    let permits: (Connection) -> Bool
     var saveAPIKey: (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) }
     var deleteAPIKey: (String) -> Void = { KeychainStore.delete($0) }
     var readAPIKey: (String) -> String? = { KeychainStore.get($0) }
     var testConnection: (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) }
-    // Defaults to permitting anything for the same reason RewriteService does — the app passes
-    // AIServiceCatalog.permits so only the real build carries its lineup's policy.
-    var permits: (Connection) -> Bool = { _ in true }
 
     enum Outcome: Equatable {
         case connected(Connection)

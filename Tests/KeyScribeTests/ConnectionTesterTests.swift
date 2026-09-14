@@ -210,7 +210,7 @@ struct AIServiceTestStateTests {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
-            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)), permits: { _ in true },
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
         seedConnection(model, in: dir)
         let connection = model.selected!
@@ -227,7 +227,7 @@ struct AIServiceTestStateTests {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
-            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)), permits: { _ in true },
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
         let connection = seedConnection(model, in: dir)
         #expect(connection.wireAPI == .auto)
@@ -244,7 +244,7 @@ struct AIServiceTestStateTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let gate = Signal()
         let model = AIServiceSettingsModel(
-            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)), permits: { _ in true },
             tester: ConnectionTester(client: BlockingClient(
                 result: .failure(ProviderTransportError.http(500, body: nil)), gate: gate)))
         seedConnection(model, in: dir)
@@ -267,7 +267,7 @@ struct AIServiceTestStateTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let gate = Signal()
         let model = AIServiceSettingsModel(
-            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)), permits: { _ in true },
             tester: ConnectionTester(client: BlockingClient(
                 result: .failure(ProviderTransportError.http(500, body: nil)), gate: gate)))
         seedConnection(model, in: dir)
@@ -292,7 +292,7 @@ struct AIServiceTestStateTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let repository = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
         let model = AIServiceSettingsModel(
-            repository: repository,
+            repository: repository, permits: { _ in true },
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))))
         seedConnection(model, in: dir)
         let connection = model.selected!
@@ -314,7 +314,7 @@ struct AIServiceTestStateTests {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AIServiceSettingsModel(
-            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)), permits: { _ in true },
             tester: ConnectionTester(client: FakeClient(result: .success("OK"))),
             listModels: { connection, apiKey in
                 #expect(connection.provider == .openaiCompatible)

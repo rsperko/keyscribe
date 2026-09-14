@@ -72,7 +72,7 @@ struct CaptureCueOrderingTests {
             startCueDurationOverride: cueSeconds)
         return DictationController(
             settings: Settings.defaults, provider: provider, config: ConfigCache(supportDir: dir),
-            history: nil, hud: hud, audio: audio, effects: effects, micStatus: { .granted })
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, effects: effects, micStatus: { .granted })
     }
 
     private func poll(until condition: @escaping () -> Bool) async {

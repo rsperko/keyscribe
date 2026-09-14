@@ -37,7 +37,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
             initialEngineId: initialEngineId, download: download,
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
             resumeOnboarding: resumeOnboarding,
-            repository: repository, saveAPIKey: saveAPIKey,
+            repository: repository, permits: AIServiceCatalog.permits, saveAPIKey: saveAPIKey,
             deleteAPIKey: deleteAPIKey, readAPIKey: readAPIKey,
             testConnection: testConnection, onComplete: onComplete)
         super.init()
@@ -183,6 +183,7 @@ final class FirstRunModel: ObservableObject {
     private let readAPIKey: (String) -> String?
     private let testConnection: (Connection) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
+    let permits: (Connection) -> Bool
     private var pendingConnectionId: String?
     private static let headlineSeedIds = ["polish", "edit-selection"]
     var onComplete: () -> Void
@@ -245,6 +246,7 @@ final class FirstRunModel: ObservableObject {
         permissionsOnly: Bool = false,
         resumeOnboarding: Bool = false,
         repository: ConfigRepository,
+        permits: @escaping (Connection) -> Bool,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
         readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
@@ -260,6 +262,7 @@ final class FirstRunModel: ObservableObject {
         self.selectEngine = selectEngine
         self.permissionsOnly = permissionsOnly
         self.repository = repository
+        self.permits = permits
         self.saveAPIKey = saveAPIKey
         self.deleteAPIKey = deleteAPIKey
         self.readAPIKey = readAPIKey
@@ -594,9 +597,14 @@ final class FirstRunModel: ObservableObject {
     }
 
     func fetchAIModels() async {
+        let connection = aiDraftConnection()
+        guard permits(connection) else {
+            aiDraft.modelDiscoveryState = .failed("This AI service isn't available in this app.")
+            return
+        }
         aiDraft.modelDiscoveryState = .loading
         do {
-            let models = try await listModels(aiDraftConnection(), aiDraft.requestAPIKey)
+            let models = try await listModels(connection, aiDraft.requestAPIKey)
             aiDraft.applyFetchedModels(models)
         } catch {
             let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
@@ -610,8 +618,8 @@ final class FirstRunModel: ObservableObject {
         // never diverge. The FirstRun-specific work (linking the headline rewrite modes, entering the
         // playground) stays here.
         let connector = AIServiceConnector(
-            repository: repository, saveAPIKey: saveAPIKey, deleteAPIKey: deleteAPIKey,
-            readAPIKey: readAPIKey, testConnection: testConnection, permits: AIServiceCatalog.permits)
+            repository: repository, permits: permits, saveAPIKey: saveAPIKey,
+            deleteAPIKey: deleteAPIKey, readAPIKey: readAPIKey, testConnection: testConnection)
         aiTesting = true
         let result = await connector.connect(draft: aiDraft, reusingId: pendingConnectionId)
         aiTesting = false

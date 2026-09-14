@@ -17,7 +17,7 @@ struct AIServiceModelFetchTests {
             id: "new-ai-service", name: "New AI Service", provider: .openai,
             model: "gpt-5.6-luna", keyRef: "keyscribe.llm.new-ai-service")
         try! repository.upsertConnection(seed)
-        let model = AIServiceSettingsModel(repository: repository, listModels: listModels)
+        let model = AIServiceSettingsModel(repository: repository, permits: { _ in true }, listModels: listModels)
         return (model, support)
     }
 

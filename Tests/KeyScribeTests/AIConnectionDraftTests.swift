@@ -22,6 +22,21 @@ struct AIConnectionDraftTests {
         allowedAuthMethods: [.apiKey, .tokenCommand], defaultAuthMethod: .tokenCommand,
         defaultTokenCommand: "gateway-cli token mint")
 
+    private let escapeHatch = ConnectionPreset(
+        id: "escape-hatch", name: "Escape Hatch", provider: .openaiCompatible,
+        baseURL: nil, defaultModel: "", allowedAuthMethods: [.none, .apiKey, .tokenCommand])
+
+    // Fixture tests own every field; only tests about the catalog's defaults build a bare AIConnectionDraft().
+    private func fixtureDraft(
+        name: String = "Fixture Service", provider: Connection.Provider = .openaiCompatible,
+        model: String = "fixture-model", baseURL: String = "", authMethod: Connection.AuthMethod = .apiKey,
+        apiKey: String = "", tokenCommand: String = ""
+    ) -> AIConnectionDraft {
+        AIConnectionDraft(
+            name: name, provider: provider, model: model, baseURL: baseURL, authMethod: authMethod,
+            apiKey: apiKey, tokenCommand: tokenCommand, wireAPI: .auto)
+    }
+
     @Test func defaultDraftMirrorsTheCatalogDefaultPreset() {
         let draft = AIConnectionDraft()
         let preset = AIServiceCatalog.defaultPreset
@@ -96,8 +111,7 @@ struct AIConnectionDraftTests {
     }
 
     @Test func applyingANoAuthOnlyPresetSnapsToNoAuthAndDropsCredentials() {
-        var draft = AIConnectionDraft()
-        draft.apiKey = "secret"
+        var draft = fixtureDraft(apiKey: "secret")
 
         draft.applyPreset(noAuthGateway, updateDefaultName: false)
 
@@ -112,9 +126,8 @@ struct AIConnectionDraftTests {
     // A token command is endpoint-scoped: the first visit to a preset starts from that preset's own
     // default (or empty), never the outgoing service's command.
     @Test func applyingAKeyOrCommandPresetPreservesTheAuthChoiceButNotTheCommand() {
-        var fromCommand = AIConnectionDraft(
-            provider: .openaiCompatible, baseURL: "https://self-hosted.example.com/v1",
-            authMethod: .tokenCommand, tokenCommand: "print-token")
+        var fromCommand = fixtureDraft(
+            baseURL: "https://self-hosted.example.com/v1", authMethod: .tokenCommand, tokenCommand: "print-token")
         fromCommand.applyPreset(keyedGateway, updateDefaultName: false)
         #expect(fromCommand.authMethod == .tokenCommand)
         #expect(fromCommand.tokenCommand.isEmpty)
@@ -122,26 +135,20 @@ struct AIConnectionDraftTests {
         fromCommand.applyPreset(.custom, updateDefaultName: false)
         #expect(fromCommand.tokenCommand == "print-token")
 
-        var fromNone = AIConnectionDraft(
-            provider: .openaiCompatible, baseURL: "https://self-hosted.example.com/v1",
-            authMethod: .none)
+        var fromNone = fixtureDraft(baseURL: "https://self-hosted.example.com/v1", authMethod: .none)
         fromNone.applyPreset(keyedGateway, updateDefaultName: false)
         #expect(fromNone.authMethod == keyedGateway.defaultAuthMethod)
     }
 
     @Test func applyingACommandDefaultPresetSeedsItsDefaultCommand() {
-        var fromDisallowed = AIConnectionDraft(
-            provider: .openaiCompatible, baseURL: "https://self-hosted.example.com/v1",
-            authMethod: .none)
+        var fromDisallowed = fixtureDraft(baseURL: "https://self-hosted.example.com/v1", authMethod: .none)
         fromDisallowed.apiKey = "stale-typed-key"
         fromDisallowed.applyPreset(commandGateway, updateDefaultName: false)
         #expect(fromDisallowed.authMethod == .tokenCommand)
         #expect(fromDisallowed.tokenCommand == "gateway-cli token mint")
         #expect(!fromDisallowed.hasUnsavedAPIKey)
 
-        var fromKey = AIConnectionDraft(
-            provider: .openaiCompatible, baseURL: "https://self-hosted.example.com/v1",
-            authMethod: .apiKey, apiKey: "secret")
+        var fromKey = fixtureDraft(baseURL: "https://self-hosted.example.com/v1", apiKey: "secret")
         fromKey.applyPreset(commandGateway, updateDefaultName: false)
         #expect(fromKey.authMethod == .apiKey)
         #expect(fromKey.tokenCommand == "gateway-cli token mint")
@@ -150,9 +157,7 @@ struct AIConnectionDraftTests {
 
     @Test func switchingToCommandAuthReseedsThePresetDefaultWhenEmpty() {
         let lineup = [commandGateway, ConnectionPreset.custom]
-        var draft = AIConnectionDraft(
-            provider: .openaiCompatible, baseURL: "https://self-hosted.example.com/v1",
-            authMethod: .apiKey, apiKey: "secret")
+        var draft = fixtureDraft(baseURL: "https://self-hosted.example.com/v1", apiKey: "secret")
         draft.applyPreset(commandGateway, updateDefaultName: false)
 
         draft.changeAuthMethod(to: .tokenCommand, in: lineup)
@@ -166,23 +171,20 @@ struct AIConnectionDraftTests {
         #expect(draft.tokenCommand == "gateway-cli token mint")
     }
 
-    // presetId is seeded to a non-lineup id so the switch to Custom is a real transition, not a no-op.
     @Test func onboardingKeepsAPIKeyAsTheOpenAICompatibleDefault() {
-        var draft = AIConnectionDraft(provider: .openai, authMethod: .apiKey)
-        draft.presetId = "seed"
+        var draft = fixtureDraft(name: AIServiceCatalog.defaultPreset.name, provider: .openai)
 
-        draft.applyPreset(.custom, updateDefaultName: true)
+        draft.applyPreset(escapeHatch, updateDefaultName: true)
 
         #expect(draft.provider == .openaiCompatible)
         #expect(draft.authMethod == .apiKey)
-        #expect(draft.name == ConnectionPreset.custom.name)
+        #expect(draft.name == escapeHatch.name)
     }
 
     @Test func settingsDefaultsOpenAICompatibleWithoutAStoredKeyToAPIKey() {
-        var draft = AIConnectionDraft(name: "New AI Service", provider: .openai, authMethod: .apiKey)
-        draft.presetId = "seed"
+        var draft = fixtureDraft(name: "New AI Service", provider: .openai)
 
-        draft.applyPreset(.custom, updateDefaultName: false)
+        draft.applyPreset(escapeHatch, updateDefaultName: false)
 
         #expect(draft.provider == .openaiCompatible)
         #expect(draft.authMethod == .apiKey)
@@ -190,41 +192,40 @@ struct AIConnectionDraftTests {
     }
 
     @Test func setupReadinessAllowsOpenAICompatibleNoAuthWithBaseURLAndModel() {
-        let draft = AIConnectionDraft(
-            provider: .openaiCompatible,
-            model: "qwen3",
-            baseURL: "http://127.0.0.1:11234/v1",
-            authMethod: .none)
+        let draft = fixtureDraft(model: "qwen3", baseURL: "http://127.0.0.1:11234/v1", authMethod: .none)
 
         #expect(draft.canConnectForSetup)
         #expect(draft.requestAPIKey == nil)
     }
 
     @Test func setupReadinessExplainsMissingBaseURLBeforeFetchingModels() {
-        let draft = AIConnectionDraft(
-            provider: .openaiCompatible,
-            model: "qwen3",
-            baseURL: "",
-            authMethod: .apiKey,
-            apiKey: "secret")
+        let draft = fixtureDraft(model: "qwen3", baseURL: "", apiKey: "secret")
 
         #expect(!draft.canFetchModelsForSetup)
         #expect(draft.setupModelFetchDisabledReason == "Base URL is required before fetching models.")
     }
 
     @Test func settingsRequiresSavedKeyBeforeTestingAPIKeyConnections() {
-        let draft = AIConnectionDraft(
-            provider: .gemini,
-            model: "gemini-2.5-flash",
-            authMethod: .apiKey)
+        let draft = fixtureDraft(provider: .gemini, model: "gemini-2.5-flash")
 
-        #expect(!draft.canTestInSettings(hasStoredKey: false))
-        #expect(draft.testDisabledReasonInSettings(hasStoredKey: false) == "Save an API key before testing.")
-        #expect(draft.canTestInSettings(hasStoredKey: true))
+        #expect(!draft.canTestInSettings(hasStoredKey: false, permits: { _ in true }))
+        #expect(draft.testDisabledReasonInSettings(hasStoredKey: false, permits: { _ in true }) == "Save an API key before testing.")
+        #expect(draft.canTestInSettings(hasStoredKey: true, permits: { _ in true }))
+    }
+
+    @Test func settingsDisablesTestAndModelFetchForAServiceTheBuildRefuses() {
+        let draft = fixtureDraft(provider: .gemini, model: "gemini-2.5-flash")
+        let refused: (Connection) -> Bool = { _ in false }
+        let reason = "This AI service isn't available in this app."
+
+        #expect(!draft.canTestInSettings(hasStoredKey: true, permits: refused))
+        #expect(draft.testDisabledReasonInSettings(hasStoredKey: true, permits: refused) == reason)
+        #expect(!draft.canFetchModelsInSettings(hasStoredKey: true, permits: refused))
+        #expect(draft.modelFetchDisabledReasonInSettings(hasStoredKey: true, permits: refused) == reason)
     }
 
     @Test func applyHostedPresetSeedsEndpointModelAndAPIKeyAuth() {
-        var draft = AIConnectionDraft(provider: .openai, authMethod: .apiKey)
+        var draft = fixtureDraft(name: AIServiceCatalog.defaultPreset.name, provider: .openai)
 
         draft.applyPreset(keyedGateway, updateDefaultName: true)
 
@@ -237,7 +238,7 @@ struct AIConnectionDraftTests {
     }
 
     @Test func hostedPresetIsConnectableInSetupWithOnlyAKey() {
-        var draft = AIConnectionDraft()
+        var draft = fixtureDraft()
         draft.applyPreset(keyedGateway, updateDefaultName: true)
         draft.changeAuthMethod(to: .apiKey)
 
@@ -248,17 +249,17 @@ struct AIConnectionDraftTests {
     }
 
     @Test func applyPresetKeepsAUserTypedNameButFollowsPresetDefaults() {
-        var custom = AIConnectionDraft(name: "My Rewriter", provider: .openai)
+        var custom = fixtureDraft(name: "My Rewriter", provider: .openai)
         custom.applyPreset(keyedGateway, updateDefaultName: true)
         #expect(custom.name == "My Rewriter")
 
-        var defaulted = AIConnectionDraft(name: AIServiceCatalog.defaultPreset.name, provider: .openai)
+        var defaulted = fixtureDraft(name: AIServiceCatalog.defaultPreset.name, provider: .openai)
         defaulted.applyPreset(keyedGateway, updateDefaultName: true)
         #expect(defaulted.name == "Gateway (Keyed)")
     }
 
     @Test func switchingBackToCustomClearsTheManagedEndpoint() {
-        var draft = AIConnectionDraft()
+        var draft = fixtureDraft()
         draft.applyPreset(keyedGateway, updateDefaultName: true)
         draft.applyPreset(.custom, updateDefaultName: true)
 
@@ -270,7 +271,7 @@ struct AIConnectionDraftTests {
     @Test func typingAHostedPresetURLIntoCustomStaysCustom() {
         let managedURL = AIServiceCatalog.all.first { $0.isManaged }?.baseURL
             ?? "https://gateway.example.com/keyed/v1"
-        var draft = AIConnectionDraft()
+        var draft = fixtureDraft(provider: .openai)
         draft.applyPreset(.custom, updateDefaultName: true)
 
         draft.baseURL = managedURL
@@ -279,11 +280,7 @@ struct AIConnectionDraftTests {
     }
 
     @Test func switchingServiceAndBackRestoresThePreviousEndpointModelAndAuth() {
-        var draft = AIConnectionDraft(
-            provider: .openaiCompatible,
-            model: "qwen3",
-            baseURL: "https://self-hosted.example.com/v1",
-            authMethod: .none)
+        var draft = fixtureDraft(model: "qwen3", baseURL: "https://self-hosted.example.com/v1", authMethod: .none)
         #expect(draft.selectedPreset.isCustom)
 
         draft.applyPreset(keyedGateway, updateDefaultName: true)

@@ -37,6 +37,7 @@ final class DictationController {
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
+    private let permits: @Sendable (Connection) -> Bool
     private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
     private let effects: DuringDictationEffects
     private var transcribeGate = SingleFlightDeadline()
@@ -224,6 +225,7 @@ final class DictationController {
     init(
         settings: Settings, provider: SpeechEngineProvider,
         config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
+        permits: @escaping @Sendable (Connection) -> Bool,
         audio: AudioCapturing? = nil,
         presenceDetector: SpeechPresenceDetecting? = nil,
         effects: DuringDictationEffects? = nil,
@@ -270,6 +272,7 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
+        self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
@@ -1151,7 +1154,7 @@ final class DictationController {
     private func maybePreconnect() {
         guard let session, session.modeReady, session.snapshotReady, !session.preconnectFired,
               let mode = activeMode, let connection = connection(for: mode),
-              connection.configIssue(permits: AIServiceCatalog.permits) == nil else { return }
+              connection.configIssue(permits: permits) == nil else { return }
         self.session?.preconnectFired = true
         preconnectTask?.cancel()
         preconnectTask = Task { [llmClient] in await llmClient.preconnect(connection: connection) }
@@ -2026,7 +2029,7 @@ final class DictationController {
         }
 
         let rewriteStart = DispatchTime.now()
-        let outcome = await RewriteService(client: llmClient, permits: AIServiceCatalog.permits).rewrite(
+        let outcome = await RewriteService(client: llmClient, permits: permits).rewrite(
             payload: payload, inputs: request.inputs, connection: request.sized,
             allowedTokens: instructionTokens, prompt: request.prompt)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)

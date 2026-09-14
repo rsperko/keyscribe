@@ -44,7 +44,7 @@ struct SessionLockGateTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true },

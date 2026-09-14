@@ -56,7 +56,7 @@ struct TrailingAndSubmitTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, text, awaitSettle in
                 captured.insertedText = text; captured.awaitSettle = awaitSettle; return true

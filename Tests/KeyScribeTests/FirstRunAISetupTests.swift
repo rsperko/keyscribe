@@ -8,6 +8,7 @@ struct FirstRunAISetupTests {
     private func makeModel(
         supportDir: URL,
         modesDir: URL,
+        permits: @escaping (Connection) -> Bool = { _ in true },
         saveAPIKey: @escaping (String, String) -> Bool = { _, _ in true },
         deleteAPIKey: @escaping (String) -> Void = { _ in },
         readAPIKey: @escaping (String) -> String? = { _ in nil },
@@ -19,13 +20,22 @@ struct FirstRunAISetupTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: permits,
             saveAPIKey: saveAPIKey,
             deleteAPIKey: deleteAPIKey,
             readAPIKey: readAPIKey,
             testConnection: testConnection,
             listModels: listModels,
             onComplete: onComplete)
+    }
+
+    private func aiDraft(
+        name: String = "Fixture Service", provider: Connection.Provider, model: String, baseURL: String = "",
+        authMethod: Connection.AuthMethod = .apiKey, apiKey: String = "", tokenCommand: String = ""
+    ) -> AIConnectionDraft {
+        AIConnectionDraft(
+            name: name, provider: provider, model: model, baseURL: baseURL, authMethod: authMethod,
+            apiKey: apiKey, tokenCommand: tokenCommand, wireAPI: .auto)
     }
 
     // The permission relaunch used to drop the user into the permissions-only flow, whose Done ended
@@ -37,7 +47,7 @@ struct FirstRunAISetupTests {
         let model = FirstRunModel(
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in }, selectEngine: { _ in }, resumeOnboarding: true,
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
         #expect(model.step == .tryIt)
     }
@@ -49,7 +59,7 @@ struct FirstRunAISetupTests {
         let model = FirstRunModel(
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in }, selectEngine: { _ in }, permissionsOnly: true,
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
         #expect(model.step == .permissions)
         model.stopPolling()
@@ -77,10 +87,7 @@ struct FirstRunAISetupTests {
             },
             onComplete: { completed += 1 })
 
-        model.aiServiceName = "Gemini Flash"
-        model.aiProvider = .gemini
-        model.aiModel = "gemini-2.5-flash"
-        model.aiAPIKey = "secret"
+        model.aiDraft = aiDraft(name: "Gemini Flash", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
         await model.createAIService()
 
         let connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
@@ -124,10 +131,7 @@ struct FirstRunAISetupTests {
         try ModeStore.write(polish, to: modesDir)
 
         let model = makeModel(supportDir: supportDir, modesDir: modesDir)
-        model.aiServiceName = "Gemini Flash"
-        model.aiProvider = .gemini
-        model.aiModel = "gemini-2.5-flash"
-        model.aiAPIKey = "secret"
+        model.aiDraft = aiDraft(name: "Gemini Flash", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
         await model.createAIService()
 
         let newConnection = try #require(
@@ -152,10 +156,7 @@ struct FirstRunAISetupTests {
         ModeStore.ensureSystemModes(in: modesDir)
         let model = makeModel(supportDir: supportDir, modesDir: modesDir)
 
-        model.aiServiceName = "Local"
-        model.aiProvider = .gemini
-        model.aiModel = "gemini-2.5-flash"
-        model.aiAPIKey = "secret"
+        model.aiDraft = aiDraft(name: "Local", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
         await model.createAIService()
 
         let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
@@ -182,7 +183,7 @@ struct FirstRunAISetupTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { selected = $0 },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: { completed += 1 })
 
         model.skipModelDownload()
@@ -205,8 +206,7 @@ struct FirstRunAISetupTests {
             saveAPIKey: { _, _ in false },
             onComplete: { completed += 1 })
 
-        model.aiAuthMethod = .apiKey
-        model.aiAPIKey = "secret"
+        model.aiDraft = aiDraft(provider: .openai, model: "fixture-model", apiKey: "secret")
         await model.createAIService()
 
         #expect(completed == 0)
@@ -230,10 +230,7 @@ struct FirstRunAISetupTests {
             saveAPIKey: { _, _ in saveCalled = true; return true },
             testConnection: { _ in testCalled = true; return .passed })
 
-        model.aiProvider = .openai
-        model.aiAuthMethod = .apiKey
-        model.aiModel = "gpt-5.4-mini"
-        model.aiAPIKey = "   "
+        model.aiDraft = aiDraft(provider: .openai, model: "gpt-5.4-mini", apiKey: "   ")
         await model.createAIService()
 
         #expect(model.aiSetupError == "API key is required.")
@@ -250,10 +247,11 @@ struct FirstRunAISetupTests {
             supportDir: supportDir,
             modesDir: supportDir.appendingPathComponent("modes", isDirectory: true))
 
-        model.aiProvider = .openai
-        model.aiAuthMethod = .apiKey
-        model.aiAPIKey = ""
-        model.aiDraft.applyPreset(.custom, updateDefaultName: true)
+        let escapeHatch = ConnectionPreset(
+            id: "escape-hatch", name: "Escape Hatch", provider: .openaiCompatible,
+            baseURL: nil, defaultModel: "", allowedAuthMethods: [.none, .apiKey, .tokenCommand])
+        model.aiDraft = aiDraft(provider: .openai, model: "fixture-model")
+        model.aiDraft.applyPreset(escapeHatch, updateDefaultName: true)
 
         #expect(model.aiProvider == .openaiCompatible)
         #expect(model.aiAuthMethod == .apiKey)
@@ -276,10 +274,7 @@ struct FirstRunAISetupTests {
             testConnection: { _ in started.fire(); await release.wait(); return .passed },
             onComplete: { completed += 1 })
 
-        model.aiServiceName = "Gemini"
-        model.aiProvider = .gemini
-        model.aiModel = "gemini-2.5-flash"
-        model.aiAPIKey = "secret"
+        model.aiDraft = aiDraft(name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
 
         model.connect()
         await started.wait()      // the connection test is in flight; the key is already saved
@@ -311,10 +306,7 @@ struct FirstRunAISetupTests {
             testConnection: { _ in .failed("401 Unauthorized") },
             onComplete: { completed += 1 })
 
-        model.aiServiceName = "Gemini"
-        model.aiProvider = .gemini
-        model.aiModel = "gemini-2.5-flash"
-        model.aiAPIKey = "bad-key"
+        model.aiDraft = aiDraft(name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", apiKey: "bad-key")
         await model.createAIService()
 
         #expect(completed == 0)
@@ -340,11 +332,8 @@ struct FirstRunAISetupTests {
                 return ["qwen3", "llama"]
             })
 
-        model.aiProvider = .openaiCompatible
-        model.aiAuthMethod = .apiKey
-        model.aiModel = ""
-        model.aiBaseURL = "http://127.0.0.1:11234/v1"
-        model.aiAPIKey = "secret"
+        model.aiDraft = aiDraft(
+            provider: .openaiCompatible, model: "", baseURL: "http://127.0.0.1:11234/v1", apiKey: "secret")
         await model.fetchAIModels()
 
         #expect(model.aiDraft.availableModels == ["qwen3", "llama"])
@@ -368,10 +357,8 @@ struct FirstRunAISetupTests {
                 return ["qwen3"]
             })
 
-        model.aiProvider = .openaiCompatible
-        model.aiAuthMethod = .none
-        model.aiModel = ""
-        model.aiBaseURL = "http://127.0.0.1:11234/v1"
+        model.aiDraft = aiDraft(
+            provider: .openaiCompatible, model: "", baseURL: "http://127.0.0.1:11234/v1", authMethod: .none)
         await model.fetchAIModels()
 
         #expect(model.aiDraft.availableModels == ["qwen3"])
@@ -396,12 +383,9 @@ struct FirstRunAISetupTests {
                 return .passed
             })
 
-        model.aiServiceName = "Local oMLX"
-        model.aiProvider = .openaiCompatible
-        model.aiAuthMethod = .none
-        model.aiModel = "qwen3"
-        model.aiBaseURL = "http://127.0.0.1:11234/v1"
-        model.aiAPIKey = "ignored"
+        model.aiDraft = aiDraft(
+            name: "Local oMLX", provider: .openaiCompatible, model: "qwen3",
+            baseURL: "http://127.0.0.1:11234/v1", authMethod: .none, apiKey: "ignored")
         await model.createAIService()
 
         let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
@@ -428,12 +412,9 @@ struct FirstRunAISetupTests {
                 return .passed
             })
 
-        model.aiServiceName = "Token Proxy"
-        model.aiProvider = .openaiCompatible
-        model.aiAuthMethod = .tokenCommand
-        model.aiTokenCommand = "print-token"
-        model.aiModel = "qwen3"
-        model.aiBaseURL = "http://127.0.0.1:11234/v1"
+        model.aiDraft = aiDraft(
+            name: "Token Proxy", provider: .openaiCompatible, model: "qwen3",
+            baseURL: "http://127.0.0.1:11234/v1", authMethod: .tokenCommand, tokenCommand: "print-token")
         await model.createAIService()
 
         let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
@@ -461,12 +442,9 @@ struct FirstRunAISetupTests {
                 return .passed
             })
 
-        model.aiServiceName = "OpenAI Proxy"
-        model.aiProvider = .openai
-        model.aiAuthMethod = .tokenCommand
-        model.aiTokenCommand = "print-token"
-        model.aiModel = "gpt-5.4-mini"
-        model.aiAPIKey = "ignored"
+        model.aiDraft = aiDraft(
+            name: "OpenAI Proxy", provider: .openai, model: "gpt-5.4-mini",
+            authMethod: .tokenCommand, apiKey: "ignored", tokenCommand: "print-token")
         await model.createAIService()
 
         let connection = try #require(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.first)
@@ -474,6 +452,52 @@ struct FirstRunAISetupTests {
         #expect(connection.tokenCommand == "print-token")
         #expect(saveCalled == false)
         #expect(model.step == .playground)
+    }
+
+    @Test func aServiceTheBuildRefusesIsNeverStoredTestedOrPersisted() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStarterFilesForTesting(in: modesDir)
+        var keychainTouched = false
+        var tested = false
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: modesDir,
+            permits: { _ in false },
+            saveAPIKey: { _, _ in keychainTouched = true; return true },
+            deleteAPIKey: { _ in keychainTouched = true },
+            readAPIKey: { _ in keychainTouched = true; return nil },
+            testConnection: { _ in tested = true; return .passed })
+
+        model.aiDraft = aiDraft(name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
+        await model.createAIService()
+
+        #expect(model.aiSetupError == "This AI service isn't available in this app.")
+        #expect(!keychainTouched)
+        #expect(!tested)
+        #expect(model.step != .playground)
+        #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
+    }
+
+    @Test func findingModelsForAServiceTheBuildRefusesNeverContactsIt() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        var listed = false
+        let model = makeModel(
+            supportDir: supportDir,
+            modesDir: supportDir.appendingPathComponent("modes", isDirectory: true),
+            permits: { _ in false },
+            listModels: { _, _ in listed = true; return ["m"] })
+
+        model.aiDraft = aiDraft(
+            provider: .openaiCompatible, model: "", baseURL: "https://elsewhere.example.com/v1", apiKey: "secret")
+        await model.fetchAIModels()
+
+        #expect(!listed)
+        #expect(model.aiModelDiscoveryError == "This AI service isn't available in this app.")
     }
 
     @Test func closingTheWizardMidDownloadDoesNotSwitchEngineOrAdvance() async {
@@ -487,7 +511,7 @@ struct FirstRunAISetupTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in started.fire(); await release.wait() },
             selectEngine: { selected = $0 },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
         model.beginDownload()

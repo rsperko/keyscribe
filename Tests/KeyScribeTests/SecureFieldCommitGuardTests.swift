@@ -80,7 +80,7 @@ struct SecureFieldCommitGuardTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: nil,
+            history: history, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { decision, _, _, _, _ in captured.decision = decision; return true },
             snapshot: {

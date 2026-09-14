@@ -43,7 +43,7 @@ struct CaptureWarmthTierTests {
         let provider = try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny")
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: dir),
-            history: nil, hud: nil, audio: audio, micStatus: { .granted })
+            history: nil, hud: nil, permits: { _ in true }, audio: audio, micStatus: { .granted })
     }
 
     private func settings(eviction: Eviction, idleSeconds: Int? = nil) -> Settings {

@@ -53,7 +53,7 @@ struct TokenizationRoundTripTests {
 
         // Model paraphrases but preserves both tokens.
         let preserved = "Review \(tokens[1]) and \(tokens[0]) carefully."
-        let svc = RewriteService(client: ScriptedClient([preserved]))
+        let svc = RewriteService(client: ScriptedClient([preserved]), permits: { _ in true })
         let outcome = await svc.rewrite(payload: TokenizedPayload(text: text, issuedTokens: tokens),
                                         inputs: inputs(text, tokens: tokens), connection: conn)
 
@@ -71,7 +71,7 @@ struct TokenizationRoundTripTests {
         let text = RedactionTokenizer.apply(raw, into: t)
         let tokens = t.issuedTokens
 
-        let svc = RewriteService(client: ScriptedClient(["email someone now", "still no token"]))
+        let svc = RewriteService(client: ScriptedClient(["email someone now", "still no token"]), permits: { _ in true })
         let outcome = await svc.rewrite(payload: TokenizedPayload(text: text, issuedTokens: tokens),
                                         inputs: inputs(text, tokens: tokens), connection: conn)
 

@@ -137,7 +137,7 @@ struct ModelLoadRetryTests {
 
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -209,7 +209,7 @@ struct ModelLoadRetryTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -267,7 +267,7 @@ struct ModelLoadRetryTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },

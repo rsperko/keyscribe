@@ -45,16 +45,21 @@ public actor RewriteService {
     private let client: LLMClient
     // Whether the build will talk to this connection at all. A connection the catalog refuses never reaches
     // the client, so a hand-edited connections.toml naming an endpoint the build does not offer cannot send
-    // content anywhere. The default talks to anything: the build's policy is ambient state, so reaching for
-    // it here would make every caller — including tests with their own fixtures — inherit whatever lineup
-    // the catalog happens to hold. The app passes AIServiceCatalog.permits at its one construction site.
+    // content anywhere.
     private let permits: @Sendable (Connection) -> Bool
     private static let strictReminder =
         "IMPORTANT: Return ONLY the transformed text and reproduce every ⟦SN:…⟧ token verbatim, exactly once."
 
-    public init(client: LLMClient, permits: @escaping @Sendable (Connection) -> Bool = { _ in true }) {
+    public init(client: LLMClient, permits: @escaping @Sendable (Connection) -> Bool) {
         self.client = client
         self.permits = permits
+    }
+
+    // Kept for callers written before the policy became an argument. It applies the build's own catalog rather
+    // than allowing everything, so such a call can only be as strict as the build, never looser.
+    @available(*, deprecated, message: "Pass the build's policy explicitly: RewriteService(client:permits:)")
+    public init(client: LLMClient) {
+        self.init(client: client, permits: AIServiceCatalog.permits)
     }
 
     static let genericFailureReason = "The AI service could not be reached."

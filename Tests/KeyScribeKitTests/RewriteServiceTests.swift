@@ -29,13 +29,13 @@ private func inputs(content: String = "hello") -> PromptInputs {
 
 struct RewriteServiceTests {
     @Test func returnsRewrittenOnCleanOutput() async {
-        let svc = RewriteService(client: FakeClient([.success("Hello.")]))
+        let svc = RewriteService(client: FakeClient([.success("Hello.")]), permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .rewritten("Hello.", received: "Hello."))
     }
 
     @Test func fallsBackToLocalWhenClientThrows() async {
-        let svc = RewriteService(client: FakeClient([.failure(FakeError())]))
+        let svc = RewriteService(client: FakeClient([.failure(FakeError())]), permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         // fallback carries a reason so a failure is diagnosable, not silent.
         guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
@@ -58,11 +58,22 @@ struct RewriteServiceTests {
         #expect(await client.calls == 0)
     }
 
+    // Whatever the lineup, the client-only initializer applies the build's catalog, so a call written before
+    // the policy became an argument is never looser than the build.
+    @available(*, deprecated)
+    @Test func theClientOnlyInitializerFollowsTheBuildCatalog() async {
+        let client = FakeClient([.success("Hello.")])
+        let svc = RewriteService(client: client)
+        _ = await svc.rewrite(
+            payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
+        #expect(await client.calls == (AIServiceCatalog.permits(conn) ? 1 : 0))
+    }
+
     @Test func retriesOnceThenSucceeds() async {
         // content carries the token (as the tokenized transcript does in production), so the gate
         // requires it back and retries once when the first reply drops it.
         let client = FakeClient([.success("dropped it"), .success("kept ⟦SN:REDACT:1⟧")])
-        let svc = RewriteService(client: client)
+        let svc = RewriteService(client: client, permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "kept ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "kept ⟦SN:REDACT:1⟧"), connection: conn)
@@ -72,7 +83,7 @@ struct RewriteServiceTests {
 
     @Test func fallsBackAfterRetryStillFails() async {
         let client = FakeClient([.success("no token"), .success("still no token")])
-        let svc = RewriteService(client: client)
+        let svc = RewriteService(client: client, permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "orig ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "orig ⟦SN:REDACT:1⟧"), connection: conn)
@@ -88,7 +99,7 @@ struct RewriteServiceTests {
     // dictation would retry and fall back needlessly.
     @Test func passesWhenIssuedTokenAbsentFromSentContent() async {
         let client = FakeClient([.success("The ⟦SN:REDACT:1⟧ please.")])
-        let svc = RewriteService(client: client)
+        let svc = RewriteService(client: client, permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "the ⟦SN:REDACT:1⟧ please", issuedTokens: ["⟦SN:VERB:1⟧", "⟦SN:REDACT:1⟧"]),
             inputs: inputs(content: "the ⟦SN:REDACT:1⟧ please"), connection: conn)
@@ -99,7 +110,7 @@ struct RewriteServiceTests {
     @Test func contextOnlySentinelDoesNotBecomeRequired() async {
         let contextToken = "⟦SN:VERB:1⟧"
         let client = FakeClient([.success("Clean content.")])
-        let svc = RewriteService(client: client)
+        let svc = RewriteService(client: client, permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "clean content", issuedTokens: [contextToken]),
             inputs: PromptInputs(
@@ -116,7 +127,7 @@ struct RewriteServiceTests {
     // usable in the output via `allowedTokens`.
     @Test func allowedTokenFromInstructionMayAppearInOutput() async {
         let client = FakeClient([.success("send to ⟦SN:REDACT:2⟧")])
-        let svc = RewriteService(client: client)
+        let svc = RewriteService(client: client, permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "send to", issuedTokens: []),
             inputs: inputs(content: "send to"), connection: conn,
@@ -126,7 +137,7 @@ struct RewriteServiceTests {
     }
 
     @Test func emptyOutputFallsBack() async {
-        let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]))
+        let svc = RewriteService(client: FakeClient([.success("   "), .success("   ")]), permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         guard case .localFallback(let text, _, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "hello")
@@ -134,7 +145,7 @@ struct RewriteServiceTests {
     }
 
     @Test func restoresSourceBoundaryLayoutStrippedByTheLLM() async {
-        let svc = RewriteService(client: FakeClient([.success("Hello.")]))
+        let svc = RewriteService(client: FakeClient([.success("Hello.")]), permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "\n\tHello\n", issuedTokens: []),
             inputs: inputs(content: "\n\tHello\n"), connection: conn)
@@ -142,13 +153,13 @@ struct RewriteServiceTests {
     }
 
     @Test func unwrapsContentEchoFromModelOutput() async {
-        let svc = RewriteService(client: FakeClient([.success("<content>Hello.</content>")]))
+        let svc = RewriteService(client: FakeClient([.success("<content>Hello.</content>")]), permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .rewritten("Hello.", received: "<content>Hello.</content>"))
     }
 
     @Test func keepsEchoShapedOutputWhenSentContentCarriedTheTags() async {
-        let svc = RewriteService(client: FakeClient([.success("<content>Hello.</content>")]))
+        let svc = RewriteService(client: FakeClient([.success("<content>Hello.</content>")]), permits: { _ in true })
         let out = await svc.rewrite(
             payload: TokenizedPayload(text: "<content>hello</content>", issuedTokens: []),
             inputs: inputs(content: "<content>hello</content>"), connection: conn)
@@ -157,7 +168,7 @@ struct RewriteServiceTests {
 
     @Test func emptyContentEchoFailsGateThenRetries() async {
         let client = FakeClient([.success("<content>\n</content>"), .success("Hello.")])
-        let svc = RewriteService(client: client)
+        let svc = RewriteService(client: client, permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .rewritten("Hello.", received: "Hello."))
         #expect(await client.calls == 2)

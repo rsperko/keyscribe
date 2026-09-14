@@ -40,7 +40,7 @@ struct RecognitionBiasCaptureTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: nil,
+            history: HistoryStore(supportDir: supportDir), hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },

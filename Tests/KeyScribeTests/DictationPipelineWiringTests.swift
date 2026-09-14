@@ -166,7 +166,8 @@ struct DictationPipelineWiringTests {
 
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
-        llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
+        llm: any LLMClient = DropTokenLLM(), permits: @escaping @Sendable (Connection) -> Bool = { _ in true },
+        accessibility: Bool = true,
         captureSelection: @escaping (ClipboardKeystroke) async -> String? = { _ in nil },
         clipboard: String? = nil,
         recognitionBiasEnabled: Bool? = nil,
@@ -174,7 +175,7 @@ struct DictationPipelineWiringTests {
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         await run(transcript: transcript, modes: [mode], defaultModeId: mode.id,
-                  connection: connection, llm: llm, accessibility: accessibility,
+                  connection: connection, llm: llm, permits: permits, accessibility: accessibility,
                   captureSelection: captureSelection, clipboard: clipboard,
                   recognitionBiasEnabled: recognitionBiasEnabled,
                   engineSupportsRecognitionBias: engineSupportsRecognitionBias,
@@ -183,7 +184,8 @@ struct DictationPipelineWiringTests {
 
     private func run(
         transcript: String, modes: [Mode], defaultModeId: String, connection: Connection? = nil,
-        llm: any LLMClient = DropTokenLLM(), accessibility: Bool = true,
+        llm: any LLMClient = DropTokenLLM(), permits: @escaping @Sendable (Connection) -> Bool = { _ in true },
+        accessibility: Bool = true,
         captureSelection: @escaping (ClipboardKeystroke) async -> String? = { _ in nil },
         clipboard: String? = nil,
         recognitionBiasEnabled: Bool? = nil,
@@ -219,7 +221,7 @@ struct DictationPipelineWiringTests {
         let clipboardReads = ClipboardReads()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: hudSpy,
+            history: history, hud: hudSpy, permits: permits,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, method, paste, text, _ in await insertSpy.record(method, paste, text); return insertSucceeds },
             submitKey: { await submitSpy.record($0) },
@@ -314,6 +316,17 @@ struct DictationPipelineWiringTests {
         let out = await run(transcript: "a cat", mode: m)
         #expect(out.lastResult == "a dog")
         #expect(out.historyEntry?.transformed == "a dog")
+    }
+
+    @Test func aConnectionTheBuildRefusesKeepsTheLocalTextWithoutCallingTheLLM() async {
+        let m = mode(id: "polish", connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(
+            transcript: "hello world", mode: m, connection: conn, llm: SpyLLM(), permits: { _ in false })
+
+        #expect(await (out.llm as! SpyLLM).called == false)
+        #expect(out.outcome == .localFallback)
+        #expect(out.lastResult == "hello world")
     }
 
     @Test func verbatimAndRedactionAreTokenizedBeforeTheLLMThenRestored() async {
@@ -502,7 +515,7 @@ struct DictationPipelineWiringTests {
         let started = Signal(), release = Signal()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: HUDSpy(),
+            history: history, hud: HUDSpy(), permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, method, paste, text, _ in await insertSpy.record(method, paste, text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },

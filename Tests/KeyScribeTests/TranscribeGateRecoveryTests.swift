@@ -67,7 +67,7 @@ struct TranscribeGateRecoveryTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: nil,
+            history: HistoryStore(supportDir: supportDir), hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -118,7 +118,7 @@ struct TranscribeGateRecoveryTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: nil,
+            history: HistoryStore(supportDir: supportDir), hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -165,7 +165,7 @@ struct TranscribeGateRecoveryTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: nil,
+            history: HistoryStore(supportDir: supportDir), hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },

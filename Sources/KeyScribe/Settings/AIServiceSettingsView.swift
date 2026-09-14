@@ -59,6 +59,7 @@ final class AIServiceSettingsModel: ObservableObject {
     var onCreateModeWithConnection: ((String) -> Void)?
 
     private let repository: ConfigRepository
+    let permits: (Connection) -> Bool
     private var supportDir: URL { repository.supportDir }
     private var modesDir: URL { repository.modesDir }
     private var loadedSignature: String?
@@ -74,6 +75,7 @@ final class AIServiceSettingsModel: ObservableObject {
 
     init(
         repository: ConfigRepository,
+        permits: @escaping (Connection) -> Bool,
         tester: ConnectionTester = ConnectionTester(),
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
@@ -82,6 +84,7 @@ final class AIServiceSettingsModel: ObservableObject {
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) }
     ) {
         self.repository = repository
+        self.permits = permits
         self.tester = tester
         self.listModels = listModels
         self.saveAPIKey = saveAPIKey
@@ -103,7 +106,7 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func test(_ connection: Connection) {
         let id = connection.id
-        guard testStates[id] != .testing else { return }
+        guard testStates[id] != .testing, permits(connection) else { return }
         let generation = (testGeneration[id] ?? 0) + 1
         testGeneration[id] = generation
         testStates[id] = .testing
@@ -113,7 +116,7 @@ final class AIServiceSettingsModel: ObservableObject {
             testStates[id] = result
             if case .passed = result, pendingOfferConnectionId == id,
                let current = connections.first(where: { $0.id == id }),
-               current.configIssue(permits: AIServiceCatalog.permits) == nil {
+               current.configIssue(permits: permits) == nil {
                 let pending = modesNeedingConnection()
                 if !pending.isEmpty {
                     pendingConnectOffer = ConnectModesOffer(
@@ -127,6 +130,10 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func fetchModels(for connection: Connection, apiKey: String?) async {
         let id = connection.id
+        guard permits(connection) else {
+            modelDiscoveryStates[id] = .failed("This AI service isn't available in this app.")
+            return
+        }
         modelDiscoveryStates[id] = .loading
         do {
             let models = try await listModels(connection, apiKey)
@@ -423,7 +430,7 @@ struct AIServiceSettingsView: View {
     @ViewBuilder private var detail: some View {
         if let connection = model.selected {
             AIServiceEditor(
-                connection: connection, hasKey: model.hasKey(connection),
+                connection: connection, hasKey: model.hasKey(connection), permits: model.permits,
                 dependentModeNames: model.dependentModeNames(of: connection),
                 testState: model.testState(for: connection.id),
                 modelSuggestions: model.modelSuggestions(for: connection.id),
@@ -457,7 +464,7 @@ struct AIServiceSettingsView: View {
     private func rowStatus(_ connection: Connection) -> AIServiceStatus {
         AIServiceStatus.derive(
             connection: connection, testState: model.testState(for: connection.id),
-            hasKey: model.hasKey(connection))
+            hasKey: model.hasKey(connection), permits: model.permits)
     }
 }
 
@@ -506,11 +513,13 @@ struct AIServiceStatus {
     let icon: String
     let style: AnyShapeStyle
 
-    static func derive(connection: Connection, testState: ConnectionTestState?, hasKey: Bool) -> AIServiceStatus {
+    static func derive(
+        connection: Connection, testState: ConnectionTestState?, hasKey: Bool, permits: (Connection) -> Bool
+    ) -> AIServiceStatus {
         if case .failed = testState {
             return .init(text: "Connection test failed", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.red))
         }
-        switch connection.configIssue(permits: AIServiceCatalog.permits) {
+        switch connection.configIssue(permits: permits) {
         case .notPermitted:
             return .init(text: "Not available in this app", icon: "exclamationmark.triangle.fill", style: AnyShapeStyle(.orange))
         case .missingModel:
@@ -550,6 +559,7 @@ struct AIServiceStatus {
 private struct AIServiceEditor: View {
     let connection: Connection
     let hasKey: Bool
+    let permits: (Connection) -> Bool
     var dependentModeNames: [String] = []
     let testState: ConnectionTestState?
     let modelSuggestions: [String]
@@ -567,6 +577,7 @@ private struct AIServiceEditor: View {
     init(
         connection: Connection,
         hasKey: Bool,
+        permits: @escaping (Connection) -> Bool,
         dependentModeNames: [String] = [],
         testState: ConnectionTestState?,
         modelSuggestions: [String],
@@ -581,6 +592,7 @@ private struct AIServiceEditor: View {
     ) {
         self.connection = connection
         self.hasKey = hasKey
+        self.permits = permits
         self.dependentModeNames = dependentModeNames
         self.testState = testState
         self.modelSuggestions = modelSuggestions
@@ -605,6 +617,7 @@ private struct AIServiceEditor: View {
                 presentation: .settings,
                 draft: $draft,
                 hasStoredKey: hasKey,
+                permits: permits,
                 dependentModeNames: dependentModeNames,
                 testState: testState,
                 autofocusName: autofocusName,

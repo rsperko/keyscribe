@@ -126,6 +126,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         CaptureArchive.applyRetention()
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history, hud: hud,
+            permits: AIServiceCatalog.permits,
             pressSnapshot: ContextProbe.initialSnapshot,
             snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) },
             snapshotAsync: { [hud] in await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID) },

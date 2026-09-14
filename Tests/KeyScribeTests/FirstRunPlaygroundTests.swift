@@ -14,15 +14,14 @@ struct FirstRunPlaygroundTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             saveAPIKey: { _, _ in true },
             testConnection: { _ in .passed },
             listModels: { _, _ in [] },
             onComplete: {})
-        model.aiServiceName = "Gemini Flash"
-        model.aiProvider = .gemini
-        model.aiModel = "gemini-2.5-flash"
-        model.aiAPIKey = "secret"
+        model.aiDraft = AIConnectionDraft(
+            name: "Gemini Flash", provider: .gemini, model: "gemini-2.5-flash", baseURL: "",
+            authMethod: .apiKey, apiKey: "secret", tokenCommand: "", wireAPI: .auto)
         await model.createAIService()
         return (model, supportDir)
     }
@@ -148,7 +147,7 @@ struct FirstRunPlaygroundTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: { completed += 1 })
 
         model.enterPlayground()
@@ -166,7 +165,7 @@ struct FirstRunPlaygroundTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: { completed += 1 })
 
         model.finishWithoutAI()

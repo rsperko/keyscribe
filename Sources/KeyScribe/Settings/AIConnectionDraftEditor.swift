@@ -10,6 +10,7 @@ struct AIConnectionDraftEditor: View {
     let presentation: Presentation
     @Binding var draft: AIConnectionDraft
     let hasStoredKey: Bool
+    let permits: (Connection) -> Bool
     var dependentModeNames: [String] = []
     let testState: ConnectionTestState?
     var autofocusName = false
@@ -88,7 +89,7 @@ struct AIConnectionDraftEditor: View {
                 HStack(spacing: 10) {
                     if let onTest {
                         Button("Test Connection", action: onTest)
-                            .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey))
+                            .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey, permits: permits))
                             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
                         if testState == .testing { ProgressView().controlSize(.small) }
                         testStatus
@@ -100,7 +101,7 @@ struct AIConnectionDraftEditor: View {
                     }
                 }
                 if case .failed(let message) = testState { IssueText(message) }
-                if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey) {
+                if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey, permits: permits) {
                     Text(reason).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -440,7 +441,7 @@ struct AIConnectionDraftEditor: View {
     private var fetchModelsDisabled: Bool {
         draft.isFetchingModels || (presentation == .onboarding
             ? !draft.canFetchModelsForSetup
-            : !draft.canFetchModelsInSettings(hasStoredKey: hasStoredKey))
+            : !draft.canFetchModelsInSettings(hasStoredKey: hasStoredKey, permits: permits))
     }
 
     private var modelFetchDisabledReason: String? {
@@ -448,7 +449,7 @@ struct AIConnectionDraftEditor: View {
         case .onboarding:
             draft.setupModelFetchDisabledReason
         case .settings:
-            draft.modelFetchDisabledReasonInSettings(hasStoredKey: hasStoredKey)
+            draft.modelFetchDisabledReasonInSettings(hasStoredKey: hasStoredKey, permits: permits)
         }
     }
 

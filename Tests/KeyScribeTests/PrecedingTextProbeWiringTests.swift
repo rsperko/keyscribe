@@ -79,7 +79,7 @@ struct PrecedingTextProbeWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             submitKey: { _ in },

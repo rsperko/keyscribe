@@ -85,7 +85,7 @@ struct CaptureLostTruncationTests {
         let provider = try! SpeechEngineProvider(engines: [StubEngine()], activeId: "stub")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud, audio: audio, presenceDetector: StubPresence(),
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -153,7 +153,7 @@ struct CaptureLostTruncationTests {
         let loseDuringSnapshot = LateBoundLoss()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud, audio: audio, presenceDetector: StubPresence(),
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             snapshotAsync: {
@@ -198,7 +198,7 @@ struct CaptureLostTruncationTests {
         let loseDuringFocusCheck = LateBoundLoss()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud, audio: audio, presenceDetector: StubPresence(),
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             submitKey: { _ in submits.record("return") },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -243,7 +243,7 @@ struct CaptureLostTruncationTests {
         let loseDuringSnapshot = LateBoundLoss()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud, audio: audio, presenceDetector: StubPresence(),
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             snapshotAsync: {
@@ -286,7 +286,7 @@ struct CaptureLostTruncationTests {
         let provider = try! SpeechEngineProvider(engines: [StubEngine()], activeId: "stub")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud, audio: audio, presenceDetector: StubPresence(),
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -349,7 +349,7 @@ struct CaptureLostTruncationTests {
         let provider = try! SpeechEngineProvider(engines: [StubEngine()], activeId: "stub")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud, audio: audio, presenceDetector: StubPresence(),
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })

@@ -2,8 +2,9 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Pins the PUBLIC lineup; a downstream build that swaps the catalog replaces this file too, keeping
-// the generic invariant tests below — every other test file stays lineup-agnostic.
+// Pins the PUBLIC lineup. A downstream build that swaps the catalog replaces this file too; the invariants
+// every lineup must keep live in AIServiceCatalogContractTests, and every other test file stays
+// lineup-agnostic (scripts/check-catalog-contract.sh proves it).
 struct AIServiceCatalogTests {
     @Test func lineupIsTheSevenPublicServicesInPickerOrder() {
         #expect(AIServiceCatalog.all.map(\.id) == [
@@ -11,9 +12,9 @@ struct AIServiceCatalogTests {
         ])
     }
 
-    @Test func defaultPresetIsOpenAIAndBelongsToTheLineup() {
+    // The swap contract lets a lineup leave Custom out of the picker; the public one offers it.
+    @Test func defaultPresetIsOpenAIAndCustomIsInThePicker() {
         #expect(AIServiceCatalog.defaultPreset.id == "openai")
-        #expect(AIServiceCatalog.all.contains(AIServiceCatalog.defaultPreset))
         #expect(AIServiceCatalog.all.contains(AIServiceCatalog.custom))
     }
 
@@ -25,27 +26,6 @@ struct AIServiceCatalogTests {
             baseUrl: "https://anywhere.example/v1")))
         #expect(AIServiceCatalog.permits(Connection(
             id: "c", name: "c", provider: .gemini, model: "m", keyRef: "k")))
-    }
-
-    @Test func entryIdsAreUnique() {
-        let ids = AIServiceCatalog.all.map(\.id)
-        #expect(Set(ids).count == ids.count)
-    }
-
-    @Test func everyEntrySatisfiesTheCatalogInvariants() {
-        for preset in AIServiceCatalog.all {
-            #expect(!preset.allowedAuthMethods.isEmpty)
-            #expect(Set(preset.allowedAuthMethods).count == preset.allowedAuthMethods.count)
-            #expect(preset.allowedAuthMethods.contains(preset.defaultAuthMethod))
-            if let command = preset.defaultTokenCommand {
-                #expect(!command.isEmpty)
-                #expect(preset.allowedAuthMethods.contains(.tokenCommand))
-            }
-            if preset.isManaged {
-                #expect(preset.baseURL?.isEmpty == false)
-                #expect(!preset.defaultModel.isEmpty)
-            }
-        }
     }
 
     @Test func firstPartyEntriesCarryTheCurrentDefaultModels() {

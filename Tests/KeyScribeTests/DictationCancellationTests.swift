@@ -230,7 +230,7 @@ struct DictationCancellationTests {
         let hud = HUDSpy()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: hud,
+            history: history, hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -265,7 +265,7 @@ struct DictationCancellationTests {
         let hud = HUDSpy()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true },
@@ -296,7 +296,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -332,7 +332,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -371,7 +371,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -413,7 +413,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true },
@@ -454,7 +454,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: hud, audio: audio,
+            history: history, hud: hud, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
@@ -563,7 +563,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: hud,
+            history: history, hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -601,7 +601,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -639,7 +639,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -684,7 +684,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -736,7 +736,7 @@ struct DictationCancellationTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(),
+            history: HistoryStore(supportDir: supportDir), hud: HUDSpy(), permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, text, _ in await insertSpy.record(text); return true },
             clipboard: { "⟦SN:CLIP:1⟧" },
@@ -974,7 +974,7 @@ struct DictationCaptureStartTests {
         configureSettings(&settings)
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, audio: audio, effects: effects,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio, effects: effects,
             insert: { _, _, _, _, _ in await insertSpy.record(); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })

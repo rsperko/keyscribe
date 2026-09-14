@@ -43,7 +43,7 @@ struct HistoryRetentionSweepTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: nil,
+            history: history, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             submitKey: { _ in },

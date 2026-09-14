@@ -153,7 +153,7 @@ struct DictationStreamingWiringTests {
         let insertSpy = InsertSpy()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: nil,
+            history: HistoryStore(supportDir: supportDir), hud: nil, permits: { _ in true },
             audio: StreamAudio(url: supportDir.appendingPathComponent("capture.wav"), chunk: chunk, drainGate: drainGate),
             insert: { _, _, _, text, _ in insertSpy.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },

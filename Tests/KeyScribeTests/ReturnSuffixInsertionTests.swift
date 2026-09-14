@@ -67,7 +67,7 @@ struct ReturnSuffixInsertionTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud,
+            history: nil, hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, text, _ in
                 captured.insertedText = text

@@ -143,8 +143,10 @@ extension Connection {
     // `notPermitted` is the one issue that isn't about the fields: the build's catalog does not offer this
     // service, so nothing typed here can resolve it. It is reported ONLY by `configIssue(permits:)` — the
     // bare `configIssue` stays purely structural so that asking "are these fields valid?" never depends on
-    // which lineup the build ships. Surfaces that represent the build to the user (status badges, the
-    // enablement of Test/Find models, the rewrite and preconnect paths) pass AIServiceCatalog.permits.
+    // which lineup the build ships. Everything that represents the build to the user or reaches the network
+    // (status badges, Test/Find models, the rewrite and preconnect paths) takes that policy as a required
+    // argument, and only the app's composition roots (and RewriteService's deprecated client-only initializer)
+    // read AIServiceCatalog.permits.
     public enum ConfigIssue: Equatable, Sendable {
         case notPermitted
         case missingModel

@@ -15,6 +15,13 @@ private struct StubLLMClient: LLMClient {
     }
 }
 
+private final class CallFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raised = false
+    var isRaised: Bool { lock.withLock { raised } }
+    func raise() { lock.withLock { raised = true } }
+}
+
 @MainActor
 struct AIServiceConnectorTests {
     private let starterPreset = ConnectionPreset(
@@ -26,12 +33,9 @@ struct AIServiceConnectorTests {
     }
 
     private func draft() -> AIConnectionDraft {
-        var d = AIConnectionDraft()
-        d.name = "Gemini"
-        d.provider = .gemini
-        d.model = "gemini-2.5-flash"
-        d.apiKey = "secret"
-        return d
+        AIConnectionDraft(
+            name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", baseURL: "",
+            authMethod: .apiKey, apiKey: "secret", tokenCommand: "", wireAPI: .auto)
     }
 
     @Test func passingTestSavesTheConnection() async {
@@ -39,7 +43,7 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         var savedRef: String?
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { ref, _ in savedRef = ref; return true },
             deleteAPIKey: { _ in },
             readAPIKey: { _ in nil },
@@ -54,13 +58,10 @@ struct AIServiceConnectorTests {
     }
 
     private func noAuthDraft() -> AIConnectionDraft {
-        var d = AIConnectionDraft()
-        d.name = "Open Gateway"
-        d.provider = .openaiCompatible
-        d.baseURL = "https://gateway.example.com/open/v1"
-        d.model = "standard-model"
-        d.authMethod = .none
-        return d
+        AIConnectionDraft(
+            name: "Open Gateway", provider: .openaiCompatible, model: "standard-model",
+            baseURL: "https://gateway.example.com/open/v1", authMethod: .none, apiKey: "", tokenCommand: "",
+            wireAPI: .auto)
     }
 
     @Test func noAuthConnectionConnectsWithoutTouchingTheKeychain() async {
@@ -68,7 +69,7 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         var keychainTouched = false
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
             deleteAPIKey: { _ in keychainTouched = true },
             readAPIKey: { _ in keychainTouched = true; return nil },
@@ -87,7 +88,7 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         var keychainTouched = false
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
             deleteAPIKey: { _ in keychainTouched = true },
             readAPIKey: { _ in keychainTouched = true; return nil },
@@ -108,12 +109,11 @@ struct AIServiceConnectorTests {
         var keychainTouched = false
         var tested = false
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in false },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
             deleteAPIKey: { _ in keychainTouched = true },
             readAPIKey: { _ in keychainTouched = true; return nil },
-            testConnection: { _ in tested = true; return .passed },
-            permits: { _ in false })
+            testConnection: { _ in tested = true; return .passed })
 
         let result = await connector.connect(draft: draft(), reusingId: nil)
 
@@ -128,7 +128,7 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         var deletedRef: String?
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in true },
             deleteAPIKey: { deletedRef = $0 },
             readAPIKey: { _ in nil },
@@ -150,7 +150,7 @@ struct AIServiceConnectorTests {
         var saves: [(ref: String, value: String)] = []
         var deletedRef: String?
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { ref, value in saves.append((ref, value)); return true },
             deleteAPIKey: { deletedRef = $0 },
             readAPIKey: { _ in "existing-good-key" },
@@ -170,7 +170,7 @@ struct AIServiceConnectorTests {
         var saved = false, tested = false
         var d = draft(); d.apiKey = "   "
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in saved = true; return true },
             deleteAPIKey: { _ in },
             readAPIKey: { _ in nil },
@@ -187,7 +187,7 @@ struct AIServiceConnectorTests {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
         let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in },
             readAPIKey: { _ in nil },
             testConnection: { _ in .failed("nope") })
@@ -201,13 +201,19 @@ struct AIServiceConnectorTests {
 
     // MARK: Settings add-a-service flow (persist-immediately)
 
-    private func settingsModel(support: URL) -> AIServiceSettingsModel {
+    private func settingsModel(
+        support: URL,
+        permits: @escaping (Connection) -> Bool = { _ in true },
+        testConnection: @escaping @Sendable (Connection) async -> ConnectionTestState = { _ in .passed },
+        listModels: @escaping (Connection, String?) async throws -> [String] = { _, _ in [] }
+    ) -> AIServiceSettingsModel {
         try? FileManager.default.createDirectory(
             at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
         return AIServiceSettingsModel(
-            repository: repository,
-            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
+            repository: repository, permits: permits,
+            tester: ConnectionTester(client: StubLLMClient(testConnection: testConnection)),
+            listModels: listModels,
             saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in })
     }
 
@@ -272,7 +278,7 @@ struct AIServiceConnectorTests {
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
         var saved: (ref: String, value: String)?
         let model = AIServiceSettingsModel(
-            repository: repository,
+            repository: repository, permits: { _ in true },
             tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { ref, value in saved = (ref, value); return true },
             deleteAPIKey: { _ in })
@@ -294,7 +300,7 @@ struct AIServiceConnectorTests {
         let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
         var deletedRef: String?
         let model = AIServiceSettingsModel(
-            repository: repository,
+            repository: repository, permits: { _ in true },
             tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { _, _ in true },
             deleteAPIKey: { deletedRef = $0 })
@@ -383,7 +389,58 @@ struct AIServiceConnectorTests {
     @Test func listRowAndSummaryDeriveIdenticalStatus() {
         let connection = Connection(
             id: "c", name: "C", provider: .gemini, model: "m", keyRef: "keyscribe.llm.c")
-        let status = AIServiceStatus.derive(connection: connection, testState: .passed, hasKey: true)
+        let status = AIServiceStatus.derive(
+            connection: connection, testState: .passed, hasKey: true, permits: { _ in true })
         #expect(status.text == "Connection works")
+    }
+
+    @Test func statusReadsNotAvailableForAServiceTheBuildRefusesEvenAfterAPassingTest() {
+        let connection = Connection(
+            id: "c", name: "C", provider: .gemini, model: "m", keyRef: "keyscribe.llm.c")
+        let status = AIServiceStatus.derive(
+            connection: connection, testState: .passed, hasKey: true, permits: { _ in false })
+        #expect(status.text == "Not available in this app")
+    }
+
+    // The editor disables Test and Find Models for a refused service, but the model is what reaches the
+    // network, so it refuses on its own instead of trusting the view.
+    @Test func settingsNeverTestsAServiceTheBuildRefusesOrOffersItToModes() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let modes = support.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modes, withIntermediateDirectories: true)
+        var pendingMode = Mode(id: "rewrite", name: "Rewrite")
+        pendingMode.aiRewrite = .init(connection: "", prompt: "Rewrite")
+        try? ModeStore.write(pendingMode, to: modes)
+        let tested = CallFlag()
+        let model = settingsModel(
+            support: support, permits: { _ in false },
+            testConnection: { _ in tested.raise(); return .passed })
+        model.addService(preset: starterPreset)
+        let connection = try! #require(model.selected)
+
+        model.update(connection, apiKey: "key")
+        model.test(connection)
+        await model.testTask?.value
+
+        #expect(!tested.isRaised)
+        #expect(model.testState(for: connection.id) == nil)
+        #expect(model.pendingConnectOffer == nil)
+    }
+
+    @Test func settingsNeverFetchesModelsForAServiceTheBuildRefuses() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var listed = false
+        let model = settingsModel(
+            support: support, permits: { _ in false },
+            listModels: { _, _ in listed = true; return ["m"] })
+        model.addService(preset: starterPreset)
+        let connection = try! #require(model.selected)
+
+        await model.fetchModels(for: connection, apiKey: "key")
+
+        #expect(!listed)
+        #expect(model.modelDiscoveryState(for: connection.id) == .failed("This AI service isn't available in this app."))
     }
 }

@@ -38,7 +38,7 @@ struct FrugalCaptureReleaseTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: support),
-            history: HistoryStore(supportDir: support), hud: nil, audio: audio,
+            history: HistoryStore(supportDir: support), hud: nil, permits: { _ in true }, audio: audio,
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })

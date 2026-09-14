@@ -68,7 +68,7 @@ struct DictationRecordWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: historyEnabled ? HistoryStore(supportDir: supportDir) : nil, hud: nil,
+            history: historyEnabled ? HistoryStore(supportDir: supportDir) : nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -153,7 +153,7 @@ struct DictationRecordWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
@@ -187,7 +187,7 @@ struct DictationRecordWiringTests {
         let provider = try! SpeechEngineProvider(engines: [ThrowingEngine()], activeId: "throwing")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },

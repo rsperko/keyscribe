@@ -140,7 +140,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
         modes = ModesSettingsModel(repository: repository)
-        aiServices = AIServiceSettingsModel(repository: repository)
+        aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
             addDictionaryWord: { repository.addDictionaryWord($0) },

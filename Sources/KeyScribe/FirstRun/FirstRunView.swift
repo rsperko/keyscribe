@@ -345,6 +345,7 @@ struct FirstRunView: View {
                     presentation: .onboarding,
                     draft: $model.aiDraft,
                     hasStoredKey: false,
+                    permits: model.permits,
                     testState: model.aiTesting ? .testing : nil,
                     onCommit: { _, _ in },
                     onFetchModels: { _ in Task { await model.fetchAIModels() } })

@@ -35,6 +35,7 @@ struct PreconnectWiringTests {
 
     private func makeController(
         mode: Mode, connection: Connection?, llm: PreconnectSpyLLM,
+        permits: @escaping @Sendable (Connection) -> Bool = { _ in true },
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         fullSnapshot: (@MainActor () async -> TargetSnapshot)? = nil
     ) -> DictationController {
@@ -52,7 +53,7 @@ struct PreconnectWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
         return DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: permits,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             submitKey: { _ in },
@@ -85,6 +86,19 @@ struct PreconnectWiringTests {
         await controller.captureBringUpTask?.value
 
         #expect(await poll { llm.preconnectedIds == ["c1"] })
+        controller.cancel()
+    }
+
+    @Test func aConnectionTheBuildRefusesIsNeverPreconnected() async {
+        let llm = PreconnectSpyLLM()
+        let controller = makeController(mode: rewriteMode(), connection: conn, llm: llm, permits: { _ in false })
+
+        controller.setNextModeOverride(id: "m")
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        try? await Task.sleep(for: .milliseconds(80))
+
+        #expect(llm.preconnectedIds.isEmpty)
         controller.cancel()
     }
 

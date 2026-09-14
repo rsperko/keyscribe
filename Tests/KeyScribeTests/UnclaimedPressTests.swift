@@ -83,7 +83,7 @@ struct UnclaimedPressTests {
         let inserts = InsertCounter()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud,
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
             audio: audio,
             insert: { _, _, _, _, _ in inserts.record(); return true },
             submitKey: { _ in },

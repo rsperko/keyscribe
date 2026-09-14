@@ -66,7 +66,7 @@ struct SpeechPresenceGateWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud,
+            history: nil, hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             presenceDetector: detector,
             insert: { _, _, _, _, _ in true },
@@ -121,7 +121,7 @@ struct SpeechPresenceGateWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             presenceDetector: detector,
             insert: { _, _, _, _, _ in true },
@@ -163,7 +163,7 @@ struct SpeechPresenceGateWiringTests {
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "hello world")], activeId: "fixed")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: nil,
+            history: nil, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: wav),
             presenceDetector: CancellingPresence(cancel: cancel),
             insert: { _, _, _, _, _ in true },

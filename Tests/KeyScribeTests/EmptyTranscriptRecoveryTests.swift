@@ -164,7 +164,7 @@ struct EmptyTranscriptRecoveryTests {
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "scripted")
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud,
+            history: nil, hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav"), samples: samples),
             presenceDetector: detector,
             insert: { _, _, _, text, _ in insert(text); return true },
@@ -518,7 +518,7 @@ struct EmptyTranscriptRecoveryTests {
         // >4 s at 16 kHz, so the deferred-start threshold is crossed and a session really opens.
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: nil, hud: hud,
+            history: nil, hud: hud, permits: { _ in true },
             audio: StreamAudio(
                 url: supportDir.appendingPathComponent("capture.wav"),
                 chunk: [Float](repeating: 0.1, count: 80000)),

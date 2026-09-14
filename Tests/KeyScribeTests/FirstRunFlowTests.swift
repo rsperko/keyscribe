@@ -19,7 +19,7 @@ struct FirstRunFlowTests {
             initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: download,
             selectEngine: { _ in },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: onComplete)
     }
 
@@ -133,7 +133,7 @@ struct FirstRunFlowTests {
             download: { _, _ in throw Boom() },
             selectEngine: { _ in },
             cleanupFailedDownload: { box.ids.append($0) },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
         model.beginDownload()
@@ -153,7 +153,7 @@ struct FirstRunFlowTests {
             download: { _, _ in throw Boom() },
             selectEngine: { _ in },
             cleanupFailedDownload: { _ in throw Boom() },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
         model.beginDownload()
@@ -173,7 +173,7 @@ struct FirstRunFlowTests {
             download: { _, _ in throw FirstRunDownloadError.installStateNotSaved },
             selectEngine: { _ in },
             cleanupFailedDownload: { _ in box.cleaned = true },
-            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)),
+            repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
         model.beginDownload()

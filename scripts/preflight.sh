@@ -129,7 +129,7 @@ only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-deps a-swift-test b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+PRE_CHECKS=" a-deps a-swift-test a-catalog-contract b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -178,7 +178,7 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-deps a-swift-test a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
+REQ_CORE="a-deps a-swift-test a-catalog-contract a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -214,6 +214,19 @@ chk_a_swift_test() {
   fi
 }
 guard a-swift-test "$(sig_source)" chk_a_swift_test
+
+chk_a_catalog_contract() {
+  # A downstream build swaps the AI service catalog, and the public one permits everything, so a test or
+  # seam leaning on the public lineup stays green above and breaks only downstream. Runs in a synced copy
+  # outside the checkout, kept between runs, so after the first build it is incremental.
+  if timeout --foreground 2700 ./scripts/check-catalog-contract.sh >/tmp/preflight-catalog-contract.log 2>&1; then
+    result pass "catalog contract — suite green under a restrictive stand-in AI service catalog"
+  else
+    tail -20 /tmp/preflight-catalog-contract.log
+    result fail "catalog contract — something depends on the public AI lineup; see /tmp/preflight-catalog-contract.log"
+  fi
+}
+guard a-catalog-contract "$(sig_source)" chk_a_catalog_contract
 
 chk_a_deps() {
   # An upstream dep can re-upload a binaryTarget asset in place (one did on 2026-08-13),
@@ -621,7 +634,7 @@ printf '  %s passed (%s cached, %s overridden) · %s failed · %s skipped\n' \
 
 # Any required check that is currently failing, or was never evaluated for this commit, blocks the stamp.
 if [ "$PHASE" = "pre" ]; then
-  REQUIRED="a-swift-test b-commands b-benchmark"
+  REQUIRED="a-swift-test a-catalog-contract b-commands b-benchmark"
 elif [ "$MODE" = "release" ]; then
   REQUIRED="$REQ_CORE $REQ_RELEASE"
 else

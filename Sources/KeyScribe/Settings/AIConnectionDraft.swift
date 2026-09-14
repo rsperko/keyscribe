@@ -121,8 +121,8 @@ struct AIConnectionDraft: Equatable {
 
     // What the editor reports and enables: the draft's own fields plus whether this build offers the service
     // at all, since a refused endpoint must not look testable.
-    private var draftIssue: Connection.ConfigIssue? {
-        connection(id: "draft", keyRef: "draft").configIssue(permits: AIServiceCatalog.permits)
+    private func draftIssue(permits: (Connection) -> Bool) -> Connection.ConfigIssue? {
+        connection(id: "draft", keyRef: "draft").configIssue(permits: permits)
     }
 
     var canConnectForSetup: Bool {
@@ -182,9 +182,9 @@ struct AIConnectionDraft: Equatable {
         }
     }
 
-    func canFetchModelsInSettings(hasStoredKey: Bool) -> Bool {
+    func canFetchModelsInSettings(hasStoredKey: Bool, permits: (Connection) -> Bool) -> Bool {
         if hasUnsavedAPIKey { return false }
-        if draftIssue == .notPermitted { return false }
+        if draftIssue(permits: permits) == .notPermitted { return false }
         switch provider {
         case .openaiCompatible:
             guard baseURLIssue == nil else { return false }
@@ -201,8 +201,8 @@ struct AIConnectionDraft: Equatable {
         }
     }
 
-    func canTestInSettings(hasStoredKey: Bool) -> Bool {
-        if hasUnsavedAPIKey || nameIssue != nil || modelIssue != nil || baseURLIssue != nil || tokenCommandIssue != nil || apiKeyIssue != nil || draftIssue != nil { return false }
+    func canTestInSettings(hasStoredKey: Bool, permits: (Connection) -> Bool) -> Bool {
+        if hasUnsavedAPIKey || nameIssue != nil || modelIssue != nil || baseURLIssue != nil || tokenCommandIssue != nil || apiKeyIssue != nil || draftIssue(permits: permits) != nil { return false }
         switch provider {
         case .openaiCompatible:
             switch effectiveAuthMethod {
@@ -218,10 +218,10 @@ struct AIConnectionDraft: Equatable {
         }
     }
 
-    func modelFetchDisabledReasonInSettings(hasStoredKey: Bool) -> String? {
-        guard !isFetchingModels, !canFetchModelsInSettings(hasStoredKey: hasStoredKey) else { return nil }
+    func modelFetchDisabledReasonInSettings(hasStoredKey: Bool, permits: (Connection) -> Bool) -> String? {
+        guard !isFetchingModels, !canFetchModelsInSettings(hasStoredKey: hasStoredKey, permits: permits) else { return nil }
         if hasUnsavedAPIKey { return "Save the typed key before fetching models." }
-        switch draftIssue {
+        switch draftIssue(permits: permits) {
         case .notPermitted:
             return "This AI service isn't available in this app."
         case .missingBaseURL:
@@ -246,9 +246,9 @@ struct AIConnectionDraft: Equatable {
         return nil
     }
 
-    func testDisabledReasonInSettings(hasStoredKey: Bool) -> String? {
+    func testDisabledReasonInSettings(hasStoredKey: Bool, permits: (Connection) -> Bool) -> String? {
         if hasUnsavedAPIKey { return "Typed key is not saved yet." }
-        switch draftIssue {
+        switch draftIssue(permits: permits) {
         case .notPermitted:
             return "This AI service isn't available in this app."
         case .missingModel:
