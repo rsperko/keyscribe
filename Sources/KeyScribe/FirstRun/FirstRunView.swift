@@ -4,6 +4,7 @@ import KeyScribeKit
 
 struct FirstRunView: View {
     @ObservedObject var model: FirstRunModel
+    @ObservedObject private var accessibilityRecovery = AccessibilityRecovery.shared
     @FocusState private var trialFieldFocused: Bool
     @FocusState private var playgroundFieldFocused: Bool
     @State private var modelChoiceExpanded = false
@@ -233,6 +234,10 @@ struct FirstRunView: View {
         case .accessibility:
             permissionRow("accessibility", "Accessibility", "So finished text can be pasted into the focused field.",
                           "Dictation can be transcribed, but it will be copied instead of inserted.", model.axStatus,
+                          note: accessibilityRecovery.resetFailed
+                              ? "Couldn't reset the existing Accessibility entry. Remove \(Branding.appName) from the Accessibility list in System Settings, then click Grant."
+                              : "If System Settings already shows \(Branding.appName) turned on, Grant resets that entry so you can turn it on again.",
+                          busy: accessibilityRecovery.isResetting,
                           openSettings: { model.openAccessibilitySettings() }) {
                 model.requestAccessibility()
             }
@@ -240,6 +245,7 @@ struct FirstRunView: View {
     }
 
     private func permissionRow(_ permID: String, _ title: String, _ detail: String, _ unavailable: String, _ status: PermissionStatus,
+                               note: String? = nil, busy: Bool = false,
                                openSettings: @escaping () -> Void, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 12) {
             statusIcon(status)
@@ -248,12 +254,16 @@ struct FirstRunView: View {
                 Text(detail).font(.callout).foregroundStyle(.secondary)
                 if status != .granted {
                     Text(unavailable).font(.caption).foregroundStyle(.secondary)
+                    if let note {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             Spacer()
             if status != .granted {
                 VStack(alignment: .trailing, spacing: 4) {
                     Button("Grant", action: action)
+                        .disabled(busy)
                         .accessibilityIdentifier(AccessibilityID.FirstRun.Permissions.grant(permID))
                     Button("Open System Settings", action: openSettings)
                         .buttonStyle(.link).font(.caption)

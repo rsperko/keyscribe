@@ -703,6 +703,16 @@ near the bottom of the sidebar. Each permission row states why it is needed, wha
 repair action; a missing permission makes that action the prominent trailing control. KeyScribe requests permissions just in time, never in a blanket
 first-launch wall.
 
+Accessibility's **Allow** (first run: **Grant**) first resets the app's own Accessibility entry, then
+requests access. A grant made by a differently signed build of the same app stays displayed as on in
+System Settings but no longer applies, and macOS will not prompt while that entry exists; the app cannot
+see the entry, so the row says what the button does rather than diagnosing it: “If System Settings
+already shows KeyScribe turned on, Allow resets that entry so you can turn it on again.” The reset runs
+only on the click, only while access reads as not granted at that moment, and at most once per launch —
+a later click only requests, so it can never delete a grant the running process has not observed yet.
+If the reset fails, the row says to remove the entry by hand and offers Open System Settings. After a
+reset, while access still reads as not granted, Settings offers Quit & Relaunch.
+
 ### Maintenance
 
 Separates configuration, diagnostics, interface repair, experimental features, and the destructive

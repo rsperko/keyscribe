@@ -474,8 +474,10 @@ final class FirstRunModel: ObservableObject {
     // Opening System Settings here can steal focus from the system consent dialog, so let the dialog drive
     // the grant; the row has a separate deep-link for manual repair.
     func requestAccessibility() {
-        _ = Permissions.accessibilityStatus(prompt: true)
-        refreshStatuses()
+        Task { @MainActor [weak self] in
+            await AccessibilityRecovery.shared.request()
+            self?.refreshStatuses()
+        }
     }
 
     func openAccessibilitySettings() {

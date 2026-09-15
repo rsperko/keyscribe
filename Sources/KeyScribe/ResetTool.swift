@@ -129,6 +129,30 @@ struct ResetTool {
         tccutilReset("ListenEvent", bundleID)
     }
 
+    // For resets a user clicks: off the caller's thread and terminated past its budget, so a wedged tccd can
+    // neither freeze the UI nor strand the action.
+    static func runBounded(_ executableURL: URL, _ arguments: [String], timeoutSeconds: Double) async -> TCCResetOutcome {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            let status = try await runWithDeadline(seconds: timeoutSeconds) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int32, Error>) in
+                    process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+                    do { try process.run() } catch { continuation.resume(throwing: error) }
+                }
+            }
+            return status == 0 ? .reset : .failed(exitCode: status)
+        } catch is DeadlineExceeded {
+            if process.isRunning { process.terminate() }
+            return .timedOut
+        } catch {
+            return .launchFailed
+        }
+    }
+
     private static func tccutilReset(_ service: String, _ bundleID: String) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")

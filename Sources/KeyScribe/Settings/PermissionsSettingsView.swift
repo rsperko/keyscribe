@@ -7,6 +7,7 @@ struct PermissionsSettingsView: View {
     @State private var microphoneStatus = Permissions.microphoneStatus()
     @State private var accessibilityStatus = Permissions.accessibilityStatus()
     @State private var tapActive = true
+    @ObservedObject private var accessibilityRecovery = AccessibilityRecovery.shared
 
     var body: some View {
         Form {
@@ -37,11 +38,23 @@ struct PermissionsSettingsView: View {
                     purpose: "Lets \(Branding.appName) detect a modifier-key trigger and paste finished text into the focused field.",
                     unavailable: "Modifier-key triggers won't start dictation, and finished text is copied instead of inserted.",
                     request: {
-                        _ = Permissions.accessibilityStatus(prompt: true)
+                        Task {
+                            await accessibilityRecovery.request()
+                            accessibilityStatus = Permissions.accessibilityStatus()
+                        }
                     },
-                    openSettings: { Permissions.openSettings(.accessibility) })
+                    openSettings: { Permissions.openSettings(.accessibility) },
+                    note: "If System Settings already shows \(Branding.appName) turned on, Allow resets that entry so you can turn it on again.",
+                    requestDisabled: accessibilityRecovery.isResetting)
                 if accessibilityStatus == .granted && !tapActive {
                     relaunchBanner("Accessibility is granted, but it only takes effect after a relaunch. Until then, modifier-key triggers won't start dictation.", permID: "accessibility")
+                } else if accessibilityStatus != .granted {
+                    if accessibilityRecovery.resetFailed {
+                        accessibilityResetFailedBanner
+                    }
+                    if accessibilityRecovery.didAttemptReset {
+                        relaunchBanner("If you've turned on Accessibility for \(Branding.appName) in System Settings and it still shows Not allowed yet, quit and reopen \(Branding.appName) to apply it.", permID: "accessibility")
+                    }
                 }
             }
         }
@@ -80,6 +93,17 @@ struct PermissionsSettingsView: View {
         }
         .padding(.vertical, 4)
     }
+
+    private var accessibilityResetFailedBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Couldn't reset the existing Accessibility entry. Remove \(Branding.appName) from the Accessibility list in System Settings, then click Allow.", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Button("Open System Settings") { Permissions.openSettings(.accessibility) }
+                .accessibilityIdentifier(AccessibilityID.Settings.Permissions.openSettings("accessibility"))
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 private struct PermissionRow: View {
@@ -90,6 +114,8 @@ private struct PermissionRow: View {
     let unavailable: String
     let request: () -> Void
     let openSettings: () -> Void
+    var note: String?
+    var requestDisabled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -102,6 +128,9 @@ private struct PermissionRow: View {
             Text(purpose).font(.caption).foregroundStyle(.secondary)
             if status != .granted {
                 Text(unavailable).font(.caption).foregroundStyle(.secondary)
+                if let note {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Spacer()
                     // System Settings only helps once the in-app request has been denied, so it doesn't
@@ -109,6 +138,7 @@ private struct PermissionRow: View {
                     if status == .notDetermined {
                         Button("Allow", action: request)
                             .buttonStyle(.borderedProminent)
+                            .disabled(requestDisabled)
                             .accessibilityIdentifier(AccessibilityID.Settings.Permissions.allow(permID))
                     } else {
                         Button("Open System Settings", action: openSettings)

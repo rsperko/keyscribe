@@ -624,6 +624,12 @@ keyscribe/
 - **TCC verdicts are read at launch and cached for the process lifetime** — a grant/revoke needs an
   app **relaunch** to take effect. Toggling off→on does **not** rebind a grant's `csreq`; only
   remove+re-add or `tccutil reset <service> com.keyscribe.app` rebinds it to the current signature.
+  Accessibility's Allow/Grant does that reset itself (`AccessibilityRecovery`), because a stale row
+  still displays as on and suppresses the prompt. Three guards are load-bearing: it re-reads
+  `AXIsProcessTrusted()` at click time, it resets **at most once per process** (a later click only
+  requests — if this process cannot observe a fresh grant, a second reset would delete it), and it is
+  **never** driven from a status poll. Own bundle id only; a missing bundle id skips the reset rather than
+  falling back to `com.keyscribe.app`.
 - **Token-fencing:** `⟦SN:…⟧` nonce tokens survive LLM rewrite (verified against the Gemini 2.5
   Flash floor, 24/24 across hard rewrite shapes).
 - **macOS 27 may require an entitlement for BACKGROUND Neural Engine use — UNMEASURED, do not "fix"

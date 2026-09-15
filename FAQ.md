@@ -31,6 +31,7 @@ per-mode.
 Quit and relaunch KeyScribe after changing macOS permission toggles. macOS caches permission
 verdicts for the life of a running process. If it still does not take effect, remove KeyScribe from
 that permission list and re-add it, or reset it with `tccutil reset <Service> com.keyscribe.app`.
+For Accessibility, clicking **Allow** in **Settings ▸ Permissions** does that reset for you.
 
 ### My dictation went to the clipboard instead of being typed in.
 
@@ -169,7 +170,10 @@ KeyScribe does **not** request Input Monitoring.
 
 macOS caches permission verdicts for the life of a running process, so **quit and relaunch
 KeyScribe** after changing a toggle. If it still doesn't take effect, the grant may be bound to an old
-build signature. Remove KeyScribe from that permission's list and re-add it, or reset it with
+build signature — common after switching from a build you made yourself to a downloaded release.
+System Settings keeps showing the old entry as on, but it no longer applies. For Accessibility, click
+**Allow** in **Settings ▸ Permissions**: KeyScribe resets the old entry so you can turn it on again.
+For other permissions, remove KeyScribe from that permission's list and re-add it, or reset it with
 `tccutil reset <Service> com.keyscribe.app`.
 
 ## Troubleshooting
