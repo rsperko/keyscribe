@@ -61,6 +61,39 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return firstRunActive ? .firstRun : .settings
     }
 
+    enum LaunchAttention: Equatable {
+        case none
+        case permissions
+    }
+
+    // Keyed on the grant, never on the tap: granted-but-tap-inactive is the just-granted state the
+    // Permissions pane already explains with its relaunch banner. Opens once per loss, not per launch: a
+    // previous launch already without access opens nothing, whether the user declined the permission or
+    // just has not repaired it yet -- the code cannot tell those apart, and the menu-bar badge still
+    // says so. A missing marker reads as lost, so an install upgraded from a build that never recorded
+    // one is pointed at the repair once.
+    static func launchAttention(
+        firstRunCompleted: Bool, accessibilityGranted: Bool, accessibilityGrantedAtLastLaunch: Bool?
+    ) -> LaunchAttention {
+        guard firstRunCompleted, !accessibilityGranted, accessibilityGrantedAtLastLaunch != false else { return .none }
+        return .permissions
+    }
+
+    static func routeLaunchAttention(
+        firstRunCompleted: Bool, accessibilityGranted: Bool, defaults: UserDefaults,
+        present: (SettingsDestination) -> Void
+    ) {
+        let previous = defaults.object(forKey: ResetTool.accessibilityAtLastLaunchKey) as? Bool
+        defaults.set(accessibilityGranted, forKey: ResetTool.accessibilityAtLastLaunchKey)
+        let attention = launchAttention(
+            firstRunCompleted: firstRunCompleted, accessibilityGranted: accessibilityGranted,
+            accessibilityGrantedAtLastLaunch: previous)
+        if attention == .permissions {
+            Log.config.info("accessibility missing since last launch; opening Settings on Permissions")
+            present(.permissions)
+        }
+    }
+
     // An LSUIElement app has no Dock icon, so the status item is its only other entry point. When that
     // item is gone -- hidden, dragged out of the menu bar, tucked away by a menu-bar manager, or pushed
     // off a full/notched bar -- double-clicking the app is the user's remaining way in.
@@ -268,8 +301,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start the tap now if permissions allow (idempotent); first-run retries via onReadyToDictate
         // once granted, so dictation works regardless of onboarding completion.
         startListening()
-        let permissionsReady = Permissions.microphoneStatus() == .granted
-            && Permissions.accessibilityStatus() == .granted
+        let accessibilityGranted = Permissions.accessibilityStatus() == .granted
+        let permissionsReady = Permissions.microphoneStatus() == .granted && accessibilityGranted
+        var firstRunCompleted = false
         if forceFirstRun {
             // Dev flag: replay the full wizard regardless of the completion flag or permission state.
             presentFirstRun()
@@ -283,8 +317,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if UserDefaults.standard.bool(forKey: firstRunKey) || permissionsReady {
             // Already set up (or returning) — don't re-show the wizard; record completion.
             UserDefaults.standard.set(true, forKey: firstRunKey)
+            firstRunCompleted = true
         } else {
             presentFirstRun()
+        }
+        Self.routeLaunchAttention(
+            firstRunCompleted: firstRunCompleted, accessibilityGranted: accessibilityGranted,
+            defaults: .standard
+        ) { [self] destination in
+            // The UI-test landing flag below must keep landing on the default pane.
+            guard !openSettingsOnLaunch else { return }
+            settingsController.present(destination)
         }
 
         if openSettingsOnLaunch {

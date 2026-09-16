@@ -712,6 +712,18 @@ a later click only requests, so it can never delete a grant the running process 
 If the reset fails, the row says to remove the entry by hand and offers Open System Settings. After a
 reset, while access still reads as not granted, Settings offers Quit & Relaunch.
 
+Once first run is complete, a launch that finds Accessibility missing when the previous launch had it
+opens Settings on this pane. Without Accessibility the app cannot do its main job, and the red dot alone
+does not say so; landing here is the whole remedy, not a wizard or a dialog. The rule keys on the grant,
+never on the event tap: Accessibility granted but the tap not yet active is the just-granted state, and
+the relaunch banner above already explains it, so nothing opens for it. It opens once per loss, not on
+every launch: a launch whose previous launch also lacked Accessibility opens nothing, and the app cannot
+tell whether that person declined the permission or has simply not repaired it yet — the menu-bar badge
+and status line keep saying so either way. That is the accepted tradeoff against opening a window at
+someone who chose clipboard fallback. A launch with no recorded verdict (an install upgraded from a
+build that never recorded one) counts as lost and opens the pane once. Onboarding, not this rule, owns
+a launch before first run is complete.
+
 ### Maintenance
 
 Separates configuration, diagnostics, interface repair, experimental features, and the destructive

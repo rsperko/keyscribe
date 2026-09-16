@@ -27,10 +27,12 @@ struct ResetToolTests {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let defaults = ephemeralDefaults()
+        defaults.set(true, forKey: ResetTool.accessibilityAtLastLaunchKey)
 
         ResetTool(supportDir: dir, defaults: defaults).run(.onboarding)
 
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
+        #expect(defaults.object(forKey: ResetTool.accessibilityAtLastLaunchKey) == nil)
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("models/parakeet/weights.bin").path))
     }

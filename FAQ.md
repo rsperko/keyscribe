@@ -172,8 +172,9 @@ KeyScribe does **not** request Input Monitoring.
 macOS caches permission verdicts for the life of a running process, so **quit and relaunch
 KeyScribe** after changing a toggle. If it still doesn't take effect, the grant may be bound to an old
 build signature — common after switching from a build you made yourself to a downloaded release.
-System Settings keeps showing the old entry as on, but it no longer applies. For Accessibility, click
-**Allow** in **Settings ▸ Permissions**: KeyScribe resets the old entry so you can turn it on again.
+System Settings keeps showing the old entry as on, but it no longer applies. When Accessibility goes
+missing this way, KeyScribe opens **Settings ▸ Permissions** for you at launch. Click **Allow** there:
+KeyScribe resets the old entry so you can turn it on again.
 For other permissions, remove KeyScribe from that permission's list and re-add it, or reset it with
 `tccutil reset <Service> com.keyscribe.app`.
 

@@ -7,6 +7,7 @@ enum ResetTarget: String, CaseIterable {
 
 struct ResetTool {
     static let firstRunKey = "didCompleteFirstRun"
+    static let accessibilityAtLastLaunchKey = "accessibilityGrantedAtLastLaunch"
     // TCC service names as `tccutil` expects them: Automation grants live under "AppleEvents".
     static let tccServices = ["Microphone", "Accessibility", "AppleEvents"]
 
@@ -63,6 +64,7 @@ struct ResetTool {
 
     private func clearOnboarding() -> [String] {
         defaults.removeObject(forKey: Self.firstRunKey)
+        defaults.removeObject(forKey: Self.accessibilityAtLastLaunchKey)
         return ["Cleared onboarding flag (\(Self.firstRunKey))."]
     }
 

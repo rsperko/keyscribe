@@ -641,7 +641,14 @@ keyscribe/
   `AXIsProcessTrusted()` at click time, it resets **at most once per process** (a later click only
   requests — if this process cannot observe a fresh grant, a second reset would delete it), and it is
   **never** driven from a status poll. Own bundle id only; a missing bundle id skips the reset rather than
-  falling back to `com.keyscribe.app`.
+  falling back to `com.keyscribe.app`. Getting the user to that button is `AppDelegate.launchAttention`:
+  after first run, a launch that finds Accessibility missing when the previous launch had it opens
+  Settings on Permissions. It keys on the **grant, never the tap** (granted-but-tap-inactive is the
+  just-granted state the pane's relaunch banner owns) and on a per-launch verdict marker
+  (`ResetTool.accessibilityAtLastLaunchKey`, written every launch; absent reads as lost, so an upgraded
+  install is pointed at the repair once). Once per loss is a product call, not a detection: a previous
+  launch already without access opens nothing, and declined vs. not-yet-repaired are indistinguishable
+  there. Do not widen it to tap state or to every launch without revisiting that call.
 - **Token-fencing:** `⟦SN:…⟧` nonce tokens survive LLM rewrite (verified against the Gemini 2.5
   Flash floor, 24/24 across hard rewrite shapes).
 - **macOS 27 may require an entitlement for BACKGROUND Neural Engine use — UNMEASURED, do not "fix"
