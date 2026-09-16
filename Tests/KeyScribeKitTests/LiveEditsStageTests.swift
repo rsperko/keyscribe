@@ -44,7 +44,6 @@ struct LiveEditsStageTests {
         #expect(run("alpha Insert New Line beta") == "alpha\nbeta")
     }
 
-    // Pause commas the STT hangs around a command are absorbed with it (commas only).
     @Test func absorbsPauseCommasAroundNewline() {
         #expect(run("blah, insert new line, foo") == "blah\nfoo")
     }
@@ -57,8 +56,6 @@ struct LiveEditsStageTests {
         #expect(run("def foo, insert tab character, bar") == "def foo\tbar")
     }
 
-    // A pause comma hung INSIDE a command ("insert, new line") is a prosody artifact, not content —
-    // the command still fires.
     @Test func interiorPauseCommaStillFires() {
         #expect(run("insert, new line") == "\n")
         #expect(run("alpha insert, new line beta") == "alpha\nbeta")
@@ -69,7 +66,6 @@ struct LiveEditsStageTests {
         #expect(run("insert tab, character here") == "\there")
     }
 
-    // Same pause artifact, but tokenized as a standalone comma instead of hung on a word.
     @Test func interiorStandaloneCommaTokenStillFires() {
         #expect(run("insert , new line") == "\n")
         #expect(run("alpha insert , new line beta") == "alpha\nbeta")
@@ -85,19 +81,14 @@ struct LiveEditsStageTests {
         #expect(run("drop this scratch , that") == "")
     }
 
-    // A standalone comma does not override the clause-boundary gate: a continuing word after
-    // "that" still means literal text.
     @Test func standaloneCommaScratchWithTrailingWordIsLiteral() {
         #expect(run("scratch , that lottery ticket") == "scratch , that lottery ticket")
     }
 
-    // Interior periods block the match on purpose: a real sentence boundary must survive rather
-    // than be eaten by the command.
     @Test func interiorPeriodDoesNotFireCommand() {
         #expect(run("insert new. paragraph two covers") == "insert new. paragraph two covers")
     }
 
-    // A preceding period is real punctuation, not a pause artifact — keep it.
     @Test func preservesPrecedingPeriod() {
         #expect(run("done. insert new paragraph next") == "done.\n\nnext")
     }
@@ -122,8 +113,6 @@ struct LiveEditsStageTests {
         #expect(run("a, insert new line, b, insert new paragraph, c") == "a\nb\n\nc")
     }
 
-    // Only commas are absorbed as pause artifacts — colon/semicolon/terminators on a preceding word
-    // are real punctuation and are preserved.
     @Test func preservesPrecedingColon() {
         #expect(run("note: insert new line body") == "note:\nbody")
     }
@@ -158,7 +147,6 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatBackToNewline() {
-        // A newline command also bounds a segment.
         #expect(run("keep this insert new line drop this scratch that. final")
             == "keep this\nfinal")
     }
@@ -172,7 +160,6 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchThatEmptySegmentEatsPreviousSentence() {
-        // Nothing dictated since the last terminator: fall back to the one previous sentence.
         #expect(run("done. scratch that. more") == "more")
     }
 
@@ -184,13 +171,11 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchAfterNewlineCancelsTheNewline() {
-        // A scratch immediately after a command cancels that command rather than reaching past it.
         #expect(run("keep this insert new line scratch that. final")
             == "keep this final")
     }
 
     @Test func scratchThatEmptySegmentStopsAtComma() {
-        // The fallback removes one clause, not the whole comma-spliced sentence.
         #expect(run("eggs, milk, bread. scratch that. done")
             == "eggs, milk, done")
     }
@@ -227,7 +212,6 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchAfterTabRemovesOnlyWhatFollowsTheTab() {
-        // Tab is a segment boundary, so scratch removes only the words after it, not across it.
         #expect(run("column one insert tab character column two scratch that")
             == "column one\t")
     }
@@ -238,7 +222,6 @@ struct LiveEditsStageTests {
     }
 
     @Test func scratchImmediatelyAfterClipboardTokenCancelsIt() {
-        // Regression case: a comma-joined clipboard command cancelled, surrounding text untouched.
         #expect(run("blah blah ⟦SN:CLIP:1⟧, scratch that, foo foo")
             == "blah blah foo foo")
     }
@@ -259,7 +242,6 @@ struct LiveEditsStageTests {
         #expect(stage.order < StageOrder.replacements)
     }
 
-    // These bare phrases used to be default command triggers; they are literal text now.
     @Test func droppedBarePhrasesAreLiteral() {
         #expect(run("a new line b") == "a new line b")
         #expect(run("alpha newline beta") == "alpha newline beta")

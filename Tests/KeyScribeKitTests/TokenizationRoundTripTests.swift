@@ -34,8 +34,6 @@ private func fallbackText(_ o: RewriteOutcome) -> String? {
 }
 
 struct TokenizationRoundTripTests {
-    // The wedge tying the privacy invariants together: verbatim then redaction tokenize (order per
-    // design.md §4.2.1), the model never sees the protected spans, and restore returns the originals.
     @Test func sensitiveSpansNeverReachModelAndRestoreAfterRewrite() async throws {
         let raw = "email john@example.com and begin verbatim KEEP_EXACT end verbatim"
         let t = Tokenizer()
@@ -51,7 +49,6 @@ struct TokenizationRoundTripTests {
         #expect(!prompt.user.contains("john@example.com"))
         #expect(!prompt.user.contains("KEEP_EXACT"))
 
-        // Model paraphrases but preserves both tokens.
         let preserved = "Review \(tokens[1]) and \(tokens[0]) carefully."
         let svc = RewriteService(client: ScriptedClient([preserved]), permits: { _ in true })
         let outcome = await svc.rewrite(payload: TokenizedPayload(text: text, issuedTokens: tokens),
@@ -63,8 +60,6 @@ struct TokenizationRoundTripTests {
         #expect(!final.contains("⟦SN:"))   // no raw token ever inserted
     }
 
-    // A dropped token fails the gate, retries, then falls back to local tokenized text — which is
-    // restored too, so the user gets correct output, never a raw token.
     @Test func droppedTokenFallsBackAndRestoresLocally() async throws {
         let raw = "email john@example.com now"
         let t = Tokenizer()

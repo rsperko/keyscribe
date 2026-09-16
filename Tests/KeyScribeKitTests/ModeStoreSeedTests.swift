@@ -91,7 +91,6 @@ struct ModeStoreSeedTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-\(UUID().uuidString)")
         let ledgerDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-modeseed-ledger-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: ledgerDir) }
-        // fresh install already ran (only _direct.toml), then the ledger dir was deleted by hand
         ModeStore.ensureSystemModes(in: dir)
         try? FileManager.default.removeItem(at: ledgerDir)
 
@@ -145,7 +144,6 @@ struct ModeStoreSeedTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-tamper-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        // hand-edited Direct file: sets editable fields AND tries to weaken the locked ones
         var tampered = Mode.direct
         tampered.triggerKeys = [.init(key: "right_option")]   // editable — must survive
         tampered.insertion = .type                            // editable — must survive
@@ -281,7 +279,6 @@ struct ModeStoreSeedTests {
 
         ModeStore.ensureSystemModes(in: dir)
 
-        // the customized mode is never deleted; Direct does not steal its key
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("plain-dictation.toml").path))
         let direct = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
         #expect(direct.triggerKeys.isEmpty)

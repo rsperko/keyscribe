@@ -49,8 +49,6 @@ struct CaptureRingLifecycleTests {
         AudioSampleRing.RingGeometry(slotCount: slots, maxFramesPerSlot: 1024, maxChannels: 2)
     }
 
-    // The reviewer's case: generation A is abandoned mid-callback and generation B arms behind it. A's already
-    // admitted callback must not be able to write A's samples into B's ring.
     @Test func anAdmittedCallbackFromAnAbandonedGenerationCannotWriteIntoTheSuccessorsRing() throws {
         let atGate = DispatchSemaphore(value: 0)
         let resume = DispatchSemaphore(value: 0)
@@ -69,7 +67,6 @@ struct CaptureRingLifecycleTests {
         let unitA = try capture.armForTesting(url: urlA, geometry: geometry(slots: 16))
         let ringA = try #require(capture.armedRingForTesting)
 
-        // A's callback is admitted by the gate, then parked before it writes.
         let boxA = UnitBox(unitA)
         Thread.detachNewThread {
             boxA.unit.invokeHandlerForTesting(self.buffer(frames: 128, value: 0.5), hostTime: 1_000)
@@ -83,16 +80,13 @@ struct CaptureRingLifecycleTests {
         capture.swapToFreshGenerationForTesting()
         try capture.armForTesting(url: urlB, geometry: geometry(slots: 16))
         let ringB = try #require(capture.armedRingForTesting)
-        // Join B's writer too, so it cannot consume a stray frame before the assertion reads ringB.
         capture.finalizeForTesting()
 
         resume.signal()
         handled.wait()
 
         #expect(ringB !== ringA)
-        // The whole point: B's audio is untouched by the dead generation's late write.
         #expect(firstFrame(of: ringB) == nil)
-        // And A's frames went somewhere harmless — its own ring, which nothing will ever read again.
         #expect(firstFrame(of: ringA) == 0.5)
     }
 
@@ -123,14 +117,10 @@ struct CaptureRingLifecycleTests {
         resume.signal()
         handled.wait()
 
-        // The buffer landed in the ring the capture armed, not in a replacement the callback never agreed to.
         #expect(firstFrame(of: armedRing) == 0.5)
         #expect(armedRing.slotCount == 16)
     }
 
-    // A ring instance belongs to exactly one arm — the property the per-unit binding rests on. If two captures
-    // shared (or reset) one ring, binding it per-unit would still let a dead generation's write reach a live
-    // capture's audio.
     @Test func eachArmGetsItsOwnRingInstanceEvenWhenTheGeometryIsIdentical() throws {
         let capture = AudioCapture()
         let urlA = tempURL()

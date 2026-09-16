@@ -63,8 +63,6 @@ struct KeyDescriptorTests {
         }
     }
 
-    // A set dedupes these into something valid-looking, so they are caught per token instead: `hyper+control`
-    // would silently BE Hyper, and `hyper+left_control` would blame the size rather than the clash.
     @Test func aModifierRepeatedAcrossTokensIsRejected() {
         #expect(throws: TriggerKeyError.duplicateModifier("control")) {
             try KeyDescriptor(parsing: "hyper+control")
@@ -113,7 +111,6 @@ struct KeyDescriptorTests {
         #expect(d.canonical == "right_control")
     }
 
-    // An `fn`-only trigger keys off the Fn flag, which no chord carries, so nothing can shadow it.
     @Test func onlySetsCarryingAChordModifierCanBeShadowed() throws {
         #expect(try !KeyDescriptor(parsing: "fn").carriesChordModifier)
         #expect(try KeyDescriptor(parsing: "fn+left_command").carriesChordModifier)
@@ -140,8 +137,6 @@ struct KeyDescriptorTests {
         #expect(d == .chord(modifiers: [.control, .option], key: .character("a")))
     }
 
-    // Chords are unchanged by the sided grammar: `option+a` still means either Option key, and still
-    // resolves to the same Carbon registration it always did.
     @Test func aChordsModifiersAreSidelessAndUnchanged() throws {
         let chord = try KeyDescriptor(parsing: "option+a")
         #expect(chord == .chord(modifiers: [.option], key: .character("a")))
@@ -199,8 +194,6 @@ struct KeyDescriptorTests {
         #expect(try KeyDescriptor(parsing: "control+option+/") == .chord(modifiers: [.control, .option], key: .character("/")))
     }
 
-    // `plus` is the one spelling the grammar cannot do without: parsing splits on "+", so the character
-    // can only be named, and it must canonicalize back to the word rather than to a "+" that re-splits.
     @Test func plusIsWrittenAsAWordAndRoundTrips() throws {
         let descriptor = try KeyDescriptor(parsing: "control+plus")
         #expect(descriptor == .chord(modifiers: [.control], key: .character("+")))
@@ -380,8 +373,6 @@ struct KeyDescriptorTests {
         #expect(try KeyDescriptor(parsing: "fn").collides(with: KeyDescriptor(parsing: "fn")))
     }
 
-    // Collision is "one press engages both", not set equality: a sideless member accepts either key, so
-    // `command` and `right_command` are the same press and must not both stay registered.
     @Test func modifierSetsCollideWhenOnePressEngagesBoth() throws {
         #expect(try KeyDescriptor(parsing: "left_command+left_control")
             .collides(with: KeyDescriptor(parsing: "left_control+left_command")))
@@ -391,7 +382,6 @@ struct KeyDescriptorTests {
             .collides(with: KeyDescriptor(parsing: "right_command")))
         #expect(try KeyDescriptor(parsing: "command+control")
             .collides(with: KeyDescriptor(parsing: "left_command+left_control")))
-        // Opposite sides of the same modifier are never one press, so they are two usable triggers.
         #expect(try !KeyDescriptor(parsing: "left_command")
             .collides(with: KeyDescriptor(parsing: "right_command")))
         #expect(try !KeyDescriptor(parsing: "left_command+left_control")

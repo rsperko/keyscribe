@@ -22,7 +22,6 @@ struct PerfBenchmarkTests {
         print("\n[#2] Token path (RedactionTokenizer.apply + ValidationGate.check + Tokenizer.restore)")
         print(pad("chars", 9) + padL("tokens", 8) + padL("apply", 11) + padL("gate", 11)
             + padL("restore", 11) + padL("total", 11))
-        // (text length, redaction-matchable span count); last row is an unrealistic stress case.
         let cases: [(Int, Int)] = [(200, 1), (2_000, 5), (10_000, 20), (50_000, 100), (50_000, 500)]
         for (chars, tokenCount) in cases {
             let text = synthText(chars: chars, emails: tokenCount)
@@ -81,7 +80,6 @@ struct PerfBenchmarkTests {
         while s.count < chars { s += filler }
         s = String(s.prefix(chars))
         guard emails > 0 else { return s }
-        // Spread evenly so apply() allocates exactly `emails` distinct tokens.
         var chunks: [String] = []
         let step = max(1, s.count / emails)
         var idx = s.startIndex

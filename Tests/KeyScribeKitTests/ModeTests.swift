@@ -76,7 +76,6 @@ struct ModeTests {
     }
 
     @Test func privacyModeForcesContextOffSemantics() throws {
-        // the toggle is just stored data; forcing context off is enforced at use time (effectiveContext)
         let mode = try ModeStore.decode(
             from: "schema_version = 1\nname = \"Secure\"\n[commands]\nprivacy = true", id: "secure")
         #expect(mode.commands.privacy)
@@ -93,7 +92,6 @@ struct ModeTests {
         #expect(secured.commands.privacy)
         #expect(secured.effectiveContext == Mode.ContextOptIn())
         #expect(secured.effectiveContextCategories.isEmpty)
-        // identity/name survive so the HUD still shows the resolved mode
         #expect(secured.id == "polished")
         #expect(secured.name == "Polished")
     }
@@ -201,8 +199,6 @@ struct ModeTests {
         #expect(again.commands.liveEdits)
     }
 
-    // Every field is set to a non-default value so the round-trip catches any broken snake_case key in
-    // encode (trigger_keys, ai_rewrite, the nested context opt-ins, etc.).
     @Test func fullModeRoundTripPreservesEveryField() throws {
         var m = Mode(id: "email", name: "Email")
         m.enabled = false
@@ -317,8 +313,6 @@ struct ModeTests {
         #expect(again.copyKeystroke == mode.copyKeystroke)
     }
 
-    // A typo must not be silently erased on the next save. The raw string round-trips (as trigger_keys does)
-    // so the user can still see and fix it, while the runtime falls back to ⌘V rather than posting nothing.
     @Test func anUnparsableChordFallsBackToTheDefaultAndStillRoundTrips() throws {
         let toml = "schema_version = 1\nname = \"Typo\"\npaste_key = \"cotnrol+v\""
         let mode = try ModeStore.decode(from: toml, id: "t")
@@ -326,8 +320,6 @@ struct ModeTests {
         #expect(try ModeStore.encode(mode).contains("cotnrol+v"))
     }
 
-    // The fallback keeps dictation working, but ⌘V into a guest that wanted ⌃V just does nothing — so the
-    // bad chord has to be reportable rather than inferred from a paste that silently went nowhere.
     @Test func unparsableClipboardChordsAreReportable() throws {
         let ok = try ModeStore.decode(from: "schema_version = 1\nname = \"OK\"\npaste_key = \"control+v\"", id: "ok")
         #expect(ok.invalidClipboardChords.isEmpty)
@@ -337,8 +329,6 @@ struct ModeTests {
         #expect(bad.invalidClipboardChords == ["paste_key": "cotnrol+v", "copy_key": "fn"])
     }
 
-    // clipboard_modifier shipped through 0.3.3, so a v1 file carrying it must migrate — silently ignoring
-    // the key would revert a "control" user to ⌘V on upgrade.
     @Test func legacyControlClipboardModifierMigratesToChords() throws {
         let toml = "schema_version = 1\nname = \"VM\"\nclipboard_modifier = \"control\""
         let mode = try ModeStore.decode(from: toml, id: "vm")
@@ -377,9 +367,6 @@ struct ModeTests {
         #expect(mode.pasteKeystroke == .paste)
     }
 
-    // clipboard_sync is decoupled from the chord: an RDP client wants ⌘V (it translates the keystroke for
-    // the remote session) but foreign clipboard semantics, because its delayed-rendering fetch of the
-    // clipboard can arrive after our restore would have run.
     @Test func clipboardSyncFollowsTheChordUnlessSetExplicitly() throws {
         #expect(!Mode(id: "n", name: "N").syncsClipboard)
 
@@ -438,8 +425,6 @@ struct ModeTests {
         #expect(Mode.Trailing.newline.suffix(after: "hello") == "\n")
     }
 
-    // A separator space is suppressed once the insert already ends in whitespace, so a command like
-    // "insert new line" doesn't land a stray "\n " (next dictation would start at column 0).
     @Test func trailingSpaceSuppressedAfterWhitespace() {
         #expect(Mode.Trailing.space.suffix(after: "\n") == "")
         #expect(Mode.Trailing.space.suffix(after: "\n\n") == "")
@@ -448,8 +433,6 @@ struct ModeTests {
         #expect(Mode.Trailing.space.suffix(after: "trailing ") == "")
     }
 
-    // Unlike trailing space, a trailing newline always appends, even onto an existing break — a
-    // line-break-per-dictation mode may legitimately double a spoken newline into a blank line.
     @Test func trailingNewlineAlwaysAppends() {
         #expect(Mode.Trailing.newline.suffix(after: "hello") == "\n")
         #expect(Mode.Trailing.newline.suffix(after: "\n") == "\n")

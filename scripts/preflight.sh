@@ -362,7 +362,7 @@ else
   # tries to update (or the app crashes at launch on a missing rpath). Gate the three ways it silently
   # breaks: framework not embedded (release built without KEYSCRIBE_SPARKLE=1), the load-bearing
   # @executable_path/../Frameworks rpath missing (dyld can't find it → launch crash), or SUPublicEDKey
-  # absent/placeholder (updates can't be EdDSA-verified). See agent_notes/distribution_plan/sparkle.md.
+  # absent/placeholder (updates can't be EdDSA-verified).
   chk_a_sparkle() {
     [ -d "$APP_PATH" ] || { result skip "Sparkle updater — artifact missing"; return; }
     local BIN FW PL KEY

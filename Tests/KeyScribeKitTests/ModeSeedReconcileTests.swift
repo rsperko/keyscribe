@@ -25,9 +25,6 @@ struct ModeSeedReconcileTests {
         try ModeStore.write(mode, to: modesDir)
     }
 
-    // Pins the frozen pre-rename template fingerprints (bytes v0.1.0–v0.1.6 actually wrote). Never
-    // "fix" these to match the live catalog — an accidental edit here would silently break the rename
-    // migration for real upgraders.
     @Test func preRenameTemplatesAreFrozen() throws {
         let pinned: [String: String] = [
             "polished-dictation": "51c638201452def4",
@@ -55,8 +52,6 @@ struct ModeSeedReconcileTests {
         #expect(ModeStore.loadAll(in: d.modes).count == 8)
     }
 
-    // A rename whose new-file write fails must not delete the old file or record the new id — an
-    // unconditional delete-then-record would strand the mode (old gone, new never written).
     @Test func failedRenameWritePreservesTheOldFileAndDoesNotRecord() throws {
         let d = tempDirs()
         defer {
@@ -93,9 +88,6 @@ struct ModeSeedReconcileTests {
         #expect(polish.enabled == true)
     }
 
-    // Matches against the frozen OLD template, not the current catalog, so a genuine pre-rename file (old
-    // prompt, no trigger) upgrades to today's polish. Trigger bindings still carry forward as-is (P2-16:
-    // a migration never silently binds a hotkey the user didn't choose) — renamed polish stays keyless.
     @Test func preRenameFileWithOldPromptIsUpgradedToCurrentTemplate() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -112,8 +104,6 @@ struct ModeSeedReconcileTests {
         #expect(polish.triggerKeys.isEmpty)   // preserves the old file's absent trigger binding
     }
 
-    // A file shaped like TODAY's polish sitting at the old id is not a pre-rename file — no old build
-    // ever wrote today's template there — so it must be left alone rather than overwritten.
     @Test func currentShapedFileAtOldIdIsNotTreatedAsARename() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -140,12 +130,9 @@ struct ModeSeedReconcileTests {
         #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("polish.toml").path))
     }
 
-    // UX2 phase 4c: a genuinely new catalog id is OFFERED (gallery/menu template), never auto-written as
-    // a file — a legacy install shouldn't sprout an unrequested disabled row.
     @Test func additiveOffersAGenuinelyNewCatalogModeWithoutWritingAFile() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        // Pre-ledger install: only email survives, no ledger file yet.
         let survivor = try #require(ModeStore.starterModes().first { $0.id == "email" })
         try ModeStore.write(survivor, to: d.modes)
 
@@ -158,8 +145,6 @@ struct ModeSeedReconcileTests {
         #expect(ledger?.entry("code")?.fingerprint == nil)
     }
 
-    // An offer record (nil fingerprint) marks the id as "known to the ledger", so reconcile never
-    // materializes a file for it.
     @Test func anOfferRecordSuppressesTheAdditiveStep() {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -171,8 +156,6 @@ struct ModeSeedReconcileTests {
         #expect(ModeStore.loadAll(in: d.modes).isEmpty)
     }
 
-    // UX2 phase 4c: reconcile only touches files whose seedId equals the catalog id, so a hand-placed
-    // seedId-nil file at a catalog id is never re-baselined or updated.
     @Test func aSeedlessFileAtACatalogIdSurvivesAVersionBumpUntouched() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -190,8 +173,6 @@ struct ModeSeedReconcileTests {
         #expect(after.aiRewrite?.prompt == "a user's own message mode at this id")
     }
 
-    // Fingerprint recorded at materialization + still matching → the bump updates it, carrying forward
-    // connection/enabled/triggerKeys.
     @Test func aMaterializedUneditedSeedIsUpdatedByAVersionBump() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -223,7 +204,6 @@ struct ModeSeedReconcileTests {
         }
         try ModeStore.write(mode, to: d.modes)
         ModeStore.recordMaterializedSeed(mode, ledgerDir: d.ledger)
-        // edit after materializing breaks the fingerprint match
         mode.aiRewrite?.prompt = "my own edited message prompt"
         try ModeStore.write(mode, to: d.modes)
 
@@ -238,7 +218,6 @@ struct ModeSeedReconcileTests {
     @Test func preLedgerDeletedModesAreNotResurrected() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
-        // old build where everything but email was deleted
         let survivor = try #require(ModeStore.starterModes().first { $0.id == "email" })
         try ModeStore.write(survivor, to: d.modes)
 
@@ -255,7 +234,6 @@ struct ModeSeedReconcileTests {
                         editPrompt: true, to: d.modes)
 
         ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
-        // edited old file stays; additive must not seed a duplicate "ai-prompt"
         #expect(FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("prompt.toml").path))
         #expect(!FileManager.default.fileExists(atPath: d.modes.appendingPathComponent("ai-prompt.toml").path))
     }
@@ -293,13 +271,10 @@ struct ModeSeedReconcileTests {
         #expect(ModeStore.loadLedger(in: d.ledger)?.entry("message")?.version == future)
     }
 
-    // Regression guard: onboarding's connection/enable write must not desync the fingerprint and
-    // permanently block future updates — this broke pre-fix for exactly the starters most users keep.
     @Test func versionBumpRefreshesAConnectedSeedPreservingConnectionAndEnabled() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
         ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
-        // simulates FirstRunController.connectStarterModes
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         message.aiRewrite?.connection = "conn-1"
         message.enabled = true
@@ -315,15 +290,10 @@ struct ModeSeedReconcileTests {
         #expect(after.enabled == true)
     }
 
-    // P2-16: a seed_version bump must never silently push a new trigger key onto an upgrading install —
-    // triggers are user-owned like connection/enabled, so carryForward preserves the on-disk keys (here,
-    // none) while still updating prompt/behavior. A fresh install still gets the default via the
-    // additive path, which never calls carryForward.
     @Test func versionBumpDoesNotPushANewTriggerKeyOntoAnUneditedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
         ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
-        // enabled but unedited; message ships with no trigger key
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         #expect(message.triggerKeys.isEmpty)
         message.enabled = true
@@ -353,7 +323,6 @@ struct ModeSeedReconcileTests {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
         ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
-        // edited message.toml no longer matches the template, so the update skips it
         var message = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "message" })
         message.aiRewrite?.prompt = "my own message prompt"
         try ModeStore.write(message, to: d.modes)
@@ -405,8 +374,6 @@ struct ModeSeedReconcileTests {
         #expect(email.aiRewrite?.prompt.contains("already contains a closing or signature") == true)
     }
 
-    // A user-authored rule is an edit like any other — fingerprint mismatch skips the update, so the
-    // catalog's rule never overwrites it.
     @Test func versionBumpNeverClobbersUserAuthoredModeRules() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -422,8 +389,6 @@ struct ModeSeedReconcileTests {
         #expect(after.replacements.rules == [.init(heard: "my own rule", replace: "custom", regex: false)])
     }
 
-    // A pre-fix install's ledger holds a raw-byte fingerprint; reconcile must re-baseline it to a
-    // template fingerprint or the next version bump is silently missed.
     @Test func reconcileReBaselinesALegacyFingerprintForAConnectedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -432,7 +397,6 @@ struct ModeSeedReconcileTests {
         message.aiRewrite?.connection = "conn-1"
         message.enabled = true
         try ModeStore.write(message, to: d.modes)
-        // stale fingerprint, as a pre-fix install or post-onboarding drift would hold
         var ledger = try #require(ModeStore.loadLedger(in: d.ledger))
         let i = try #require(ledger.entries.firstIndex { $0.seedId == "message" })
         ledger.entries[i].fingerprint = "deadbeef"
@@ -443,10 +407,6 @@ struct ModeSeedReconcileTests {
         #expect(healed == ModeStore.seedTemplateFingerprint(message))
     }
 
-    // Discipline tripwire (config_schema.md seed reconcile): pins each starter's (seed_version,
-    // fingerprint). A template edit flips the fingerprint and fails this ON PURPOSE — fix by bumping
-    // seed_version in starterModes() and updating the entry here; the bump is what carries the revision
-    // to existing installs (reconcileSeeds step 3).
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
             "polish": (5, "f69ef368dd964eed"),
@@ -469,8 +429,6 @@ struct ModeSeedReconcileTests {
         }
     }
 
-    // "Polish" → "Cleanup" (seed_version 4 → 5) reaches an unedited install: name updates while
-    // connection/enabled/trigger are preserved.
     @Test func polishRenameMigratesAnUnmodifiedInstall() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -501,7 +459,6 @@ struct ModeSeedReconcileTests {
         old.seedVersion = 4
         try ModeStore.write(old, to: d.modes)
         ModeStore.recordMaterializedSeed(old, ledgerDir: d.ledger)
-        // edit after seeding breaks the fingerprint match
         old.aiRewrite?.prompt = "my own custom cleanup prompt"
         try ModeStore.write(old, to: d.modes)
 

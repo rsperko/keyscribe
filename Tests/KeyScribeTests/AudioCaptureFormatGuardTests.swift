@@ -51,9 +51,6 @@ struct CaptureReplacementUnitStartTests {
             generation: 4, currentGeneration: 4, captureActive: false))
     }
 
-    // A device that has momentarily gone away mid-route-change is the NORMAL case this restart exists for,
-    // so it must retry inside the same bounded budget rather than declaring the take lost on the first
-    // empty read. Only running out of attempts is fatal.
     @Test func aMomentarilyAbsentDeviceRetriesRatherThanLosingTheTake() {
         #expect(AudioCapture.midRecordingRestartDecision(
             attempts: 1, maxAttempts: 5, hasDevice: false) == .retryLater)
@@ -66,8 +63,6 @@ struct CaptureReplacementUnitStartTests {
             attempts: 1, maxAttempts: 5, hasDevice: true) == .restart)
     }
 
-    // Past the cap the route is genuinely gone: no more buffers will arrive, so the recording must be
-    // reported lost instead of silently finalizing whatever prefix reached the file.
     @Test func exhaustedRestartsReportTheCaptureLost() {
         #expect(AudioCapture.midRecordingRestartDecision(
             attempts: 6, maxAttempts: 5, hasDevice: true) == .captureLost)
@@ -75,8 +70,6 @@ struct CaptureReplacementUnitStartTests {
             attempts: 6, maxAttempts: 5, hasDevice: false) == .captureLost)
     }
 
-    // The meter is PULLED at ~30 Hz, so nothing repaints it when buffers stop — it holds the last real
-    // level and reads as a live mic on a route that has died.
     @Test func theMeterGoesStaleOnceBuffersStopArriving() {
         let timebase = mach_timebase_info(numer: 1, denom: 1)   // 1 tick == 1 ns
         let start: UInt64 = 1_000_000_000
@@ -130,7 +123,6 @@ struct BringUpAbortSupersedeTests {
     }
 }
 
-// V1: the queued step-4 unit teardown may only touch the unit while its scheduling generation is current.
 struct CaptureUnitTeardownGuardTests {
     @Test func currentGenerationTearsDownUnit() {
         #expect(AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 3, captureActive: false))
@@ -144,7 +136,6 @@ struct CaptureUnitTeardownGuardTests {
         #expect(!AudioCapture.shouldTeardownUnit(generation: 3, currentGeneration: 3, captureActive: true))
     }
 
-    // A regression to a Task-wrapped enqueue would leave `enqueued` false at the first expectation.
     @Test func teardownIsEnqueuedSynchronouslyAndLatchReleasesOnRun() async {
         final class Box: @unchecked Sendable { var enqueued = false; var ran = false }
         let box = Box()
@@ -257,7 +248,6 @@ struct RingSlotFrameCeilingTests {
 
 struct HALInputUnitScratchPreallocationTests {
     @Test func scratchCapacityFloorsAtTheCeilingForInSpecDevices() {
-        // A small in-spec period is rounded up to the ceiling so the realtime callback never has to grow it.
         #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 128) == HALInputUnit.scratchFrameCeiling)
         #expect(HALInputUnit.scratchFrameCapacity(deviceBufferFrameSize: 512) == HALInputUnit.scratchFrameCeiling)
     }
@@ -271,7 +261,6 @@ struct HALInputUnitScratchPreallocationTests {
     }
 }
 
-// The shim must turn a raised NSException into a Swift error, and stay transparent on a clean block.
 struct ObjCExceptionShimTests {
     @Test func raisedNSExceptionBecomesASwiftError() {
         #expect(throws: (any Error).self) {
@@ -306,7 +295,6 @@ struct CaptureIdleRebuildTests {
         #expect(!AudioCapture.shouldRebuildWhileIdle(mustRebuild: true, hasSession: true, isArming: false))
     }
 
-    // The regression: arming without a published session is a start mid-configure, not an idle capture.
     @Test func aStartStillConfiguringIsNotIdle() {
         #expect(!AudioCapture.shouldRebuildWhileIdle(mustRebuild: true, hasSession: false, isArming: true))
     }

@@ -2,7 +2,7 @@
 # Build a notarization-ready KeyScribe.app and a stapled KeyScribe-<version>.dmg: an Xcode archive +
 # export of the public target in App/project.yml, signed with a Developer ID Application cert +
 # hardened runtime + entitlements. For the dev build that uses a self-signed cert and skips hardened
-# runtime, use make-app.sh instead. Full plan: agent_notes/distribution_plan/README.md.
+# runtime, use make-app.sh instead.
 #
 # Usage:
 #   ./release.sh                 build/notarize the CURRENT latest tag (re-run a release)
@@ -131,7 +131,7 @@ echo "== archive + export (KeyScribe $SHORT_VERSION) =="
 # so there is no re-sign step here. The team id comes out of KEYSCRIBE_SIGN_ID ("… (TEAMID)") so it is
 # not repeated anywhere else, and identity + team go in through the target-scoped KEYSCRIBE_* settings
 # (a bare CODE_SIGN_IDENTITY on the command line also hits the packages' automatically signed resource
-# bundles, which refuse it). See agent_notes/distribution_plan/sparkle.md.
+# bundles, which refuse it).
 TEAM_ID="$(printf '%s' "$ID" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/p')"
 if [ -z "$TEAM_ID" ]; then
   echo "error: could not read a team id from KEYSCRIBE_SIGN_ID ('$ID'); expected '… (TEAMID)'." >&2

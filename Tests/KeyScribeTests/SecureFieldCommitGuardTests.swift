@@ -25,7 +25,6 @@ struct SecureFieldCommitGuardTests {
         func stop() -> URL? { url }
     }
 
-    // Records whether the rewrite ever reached the transport. A secure field must mean no call at all.
     private final class SpyLLM: LLMClient, @unchecked Sendable {
         private let lock = NSLock()
         private var _calls = 0
@@ -109,15 +108,12 @@ struct SecureFieldCommitGuardTests {
         var decision: InsertionDecision?
     }
 
-    // The whole point of X-1: the rewrite ran BEFORE anything noticed the password field, so the spoken
-    // password crossed the network boundary while the HUD claimed it was kept local.
     @Test func aSecureFieldFocusedAfterPressStillBlocksTheCloudRewrite() async {
         let result = await run(secureFrom: 1)
         #expect(result.llmCalls == 0)
         #expect(result.record?.cloudInvolved == false)
     }
 
-    // design.md §4.4: "Password-field dictations are never written to history, regardless of the setting."
     @Test func aSecureFieldFocusedAfterPressIsNeverWrittenToHistory() async {
         let result = await run(secureFrom: 1)
         #expect(result.historyEntries.isEmpty)
@@ -128,18 +124,12 @@ struct SecureFieldCommitGuardTests {
         #expect(result.decision == .clipboardFallback(reason: .secureField))
     }
 
-    // The narrowest window the commit probe cannot close: focus lands on the password field after the probe
-    // resolved, so only the insert-time read sees it. The rewrite is already gone, but the inserter's
-    // password-grade verdict must still veto history — the layer that stops a spoken password landing in
-    // plaintext JSONL.
     @Test func aSecureFieldSeenOnlyAtInsertTimeStillVetoesHistory() async {
         let result = await run(secureFrom: 2)
         #expect(result.decision == .clipboardFallback(reason: .secureField))
         #expect(result.historyEntries.isEmpty)
     }
 
-    // The press-time path must keep working unchanged — the commit probe only ever adds secure, never
-    // clears it.
     @Test func aSecureFieldPresentAtPressStaysLocalAndUnrecorded() async {
         let result = await run(secureFrom: 0)
         #expect(result.llmCalls == 0)

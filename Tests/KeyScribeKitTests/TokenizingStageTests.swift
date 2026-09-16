@@ -43,7 +43,6 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "email me at alice@example.com")
     }
 
-    // Restore unwinds redaction (last in) before verbatim (first in).
     @Test func verbatimAndRedactionUnwindLIFO() {
         let p = Pipeline([
             TokenizingStage.verbatim(),
@@ -75,8 +74,6 @@ struct TokenizingStageTests {
         #expect(p.forward("hi").issuedTokens.isEmpty)
     }
 
-    // "insert clipboard contents" pulls the clipboard into a token before the text stages, so pasted
-    // content is opaque to replacements/numbers and to the LLM.
     @Test func clipboardContentSurvivesTextStages() {
         let p = Pipeline([
             TokenizingStage.clipboard(read: { "twenty five" }),
@@ -87,9 +84,6 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "count 25 twenty five")   // loose number converted, pasted one preserved
     }
 
-    // A verbatim span and a clipboard paste in the SAME dictation must not collide: verbatim mints a
-    // VERB token and clipboard a CLIP token, so restore keeps them independent (a shared token string
-    // would let the clipboard's reverse pass overwrite the verbatim span, leaking clipboard content).
     @Test func verbatimAndClipboardDoNotCollide() {
         let p = Pipeline([
             TokenizingStage.verbatim(),
@@ -101,10 +95,6 @@ struct TokenizingStageTests {
         #expect(p.restore(payload.text) == "A and B")
     }
 
-    // A clipboard phrase INSIDE a verbatim span is literal text, not a paste: verbatim sorts before
-    // clipboard, so it swallows the phrase first and clipboard never fires — AND, because the read is
-    // lazy, the host's clipboard is never even read (privacy: a phrase in a verbatim span must not
-    // trigger a pasteboard read).
     @Test func clipboardPhraseInsideVerbatimStaysLiteral() {
         let reads = Counter()
         let p = Pipeline([
@@ -117,7 +107,6 @@ struct TokenizingStageTests {
         #expect(reads.value == 0)
     }
 
-    // The mirror of the above: a real (unwrapped) paste DOES read the clipboard exactly once.
     @Test func clipboardPhraseOutsideVerbatimReadsOnce() {
         let reads = Counter()
         let p = Pipeline([
@@ -130,9 +119,6 @@ struct TokenizingStageTests {
         #expect(reads.value == 1)
     }
 
-    // Two verbatim spans with EQUAL content must stay distinct tokens (dedup: false), or a faithful
-    // LLM rewrite that reproduces both occurrences can never satisfy the gate's exactly-once check
-    // (H2: a deduped token appearing twice always fails ValidationGate's `count > 1` rule).
     @Test func repeatedVerbatimSpanGetsDistinctTokens() {
         let p = Pipeline([TokenizingStage.verbatim()])
         let payload = p.forward("begin verbatim hello end verbatim then begin verbatim hello end verbatim")
@@ -146,7 +132,6 @@ struct TokenizingStageTests {
         let p = Pipeline([TokenizingStage.verbatim(tokenizer: v)])
         let payload = p.forward("begin verbatim keep me end verbatim please")
         let token = payload.issuedTokens.first!
-        // A faithful rewrite reproduces the token verbatim while editing around it.
         let edited = payload.text.replacingOccurrences(of: "please", with: "thanks")
         #expect(ValidationGate.check(output: edited, issuedTokens: payload.issuedTokens) == .pass)
         #expect(p.restore(edited) == "keep me thanks")

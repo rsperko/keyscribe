@@ -87,7 +87,6 @@ private func compatConnection(model: String = "qwen", baseUrl: String = "http://
     Connection(id: "local", name: "Local", provider: .openaiCompatible, model: model, keyRef: "k", baseUrl: baseUrl)
 }
 
-// Shared global handler → serialized suite.
 @Suite(.serialized)
 struct HTTPLLMClientTests {
     @Test func trailingSlashBaseURLDoesNotDoubleSlashThePath() async throws {
@@ -181,8 +180,6 @@ struct HTTPLLMClientTests {
         #expect(body?["temperature"] as? Double == 0.7)
     }
 
-    // A Responses server that rejects temperature self-heals through the same remediation loop the chat
-    // wire uses, and the accepted adaptation is cached so the next rewrite pays no rejected round trip.
     @Test func responsesTemperatureRejectionRetriesWithoutItAndCaches() async throws {
         let cache = RequestAdaptationCache()
         let client = stubbedClient(cache: cache)
@@ -214,8 +211,6 @@ struct HTTPLLMClientTests {
         #expect(secondRun[0]?["temperature"] == nil)
     }
 
-    // A minimal gateway can implement /responses without a `status` field; a well-formed output must still
-    // be read rather than dropped to local.
     @Test func responsesWithoutAStatusFieldIsAcceptedWhenOutputIsWellFormed() async throws {
         LLMStubProtocol.handler = { request in
             let data = try! JSONSerialization.data(withJSONObject: [
@@ -230,8 +225,6 @@ struct HTTPLLMClientTests {
         #expect(try await stubbedClient().complete(system: "s", user: "u", connection: connection) == "Rewritten.")
     }
 
-    // But a status that IS present and is not `completed` stays strict — an unfinished reply is never
-    // inserted just because it parsed.
     @Test func responsesWithAnUnfinishedStatusIsRejected() async {
         LLMStubProtocol.handler = { request in
             let data = try! JSONSerialization.data(withJSONObject: [
@@ -408,9 +401,6 @@ struct HTTPLLMClientTests {
         #expect(paths.map { $0.hasSuffix("/responses") } == [false, true])
     }
 
-    // Full proxy-envelope reproduction: a string-valued `error` with the actionable remediation in a
-    // top-level `reason`, returned as a live 400. `auto` must parse it, upgrade chat → responses, return
-    // the output, cache the wire override, and send later rewrites straight to /responses.
     @Test func autoWireAPIUpgradesForAProxyReasonEnvelopeAndCachesIt() async throws {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -439,7 +429,6 @@ struct HTTPLLMClientTests {
         #expect(paths.map { $0.hasSuffix("/responses") } == [false, true])
         #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == .responses)
 
-        // A later rewrite on the same host skips /chat/completions entirely.
         paths.removeAll()
         _ = try await client.complete(system: "s", user: "u", connection: connection)
         #expect(paths.count == 1)
@@ -727,8 +716,6 @@ struct HTTPLLMClientTests {
         #expect(folded?.contains("USR") == true)
     }
 
-    // Some compatible servers / proxies return `content` as an array of typed parts rather than a string.
-    // It must be read, not rejected as a bad response and silently dropped to local.
     @Test func openAIContentAsPartsArrayIsAccepted() async throws {
         LLMStubProtocol.handler = { request in
             let data = try! JSONSerialization.data(withJSONObject: [
@@ -739,8 +726,6 @@ struct HTTPLLMClientTests {
         #expect(out == "Hello there.")
     }
 
-    // A proxy can wrap a SUCCESS body in a single-element top-level array too, the same shape it uses for
-    // errors — unwrap it rather than failing every rewrite.
     @Test func arrayWrappedSuccessResponseIsUnwrapped() async throws {
         LLMStubProtocol.handler = { request in
             let data = try! JSONSerialization.data(withJSONObject: [
@@ -751,7 +736,6 @@ struct HTTPLLMClientTests {
         #expect(out == "OK")
     }
 
-    // Gemini can split its reply across multiple parts; read them all, not just the first.
     @Test func geminiJoinsMultipleTextParts() async throws {
         LLMStubProtocol.handler = { request in
             let data = try! JSONSerialization.data(withJSONObject: [
@@ -764,8 +748,6 @@ struct HTTPLLMClientTests {
         #expect(out == "Hello world.")
     }
 
-    // A proxy that wraps its error in a single-element top-level array (e.g. one fronting Gemini) must
-    // still drive remediation, not slip past the parser as an unrecognized body.
     @Test func arrayWrappedProxyErrorStillRemediates() async throws {
         nonisolated(unsafe) var bodies: [[String: Any]?] = []
         let wrapped = try! JSONSerialization.data(withJSONObject: [
@@ -786,7 +768,6 @@ struct HTTPLLMClientTests {
 
     @Test func messageOnlyRoleRejectionFoldsSystemIntoUser() async throws {
         nonisolated(unsafe) var bodies: [[String: Any]?] = []
-        // A generic 400 with no structured `param` — only prose — the shape a non-OpenAI proxy returns.
         let roleErr = try! JSONSerialization.data(withJSONObject: [
             "error": ["message": "This model does not support the 'system' role."]])
         let steps: [(Int, Data)] = [(400, roleErr), (200, okBody("OK"))]
@@ -816,8 +797,6 @@ struct HTTPLLMClientTests {
         #expect(calls == 1)   // a 400 is deterministic: no transient retry
     }
 
-    // A transient 5xx (proxy rebooting, model still warming) shouldn't cost the rewrite — one quick retry
-    // recovers it.
     @Test func transientServerErrorRetriesOnceThenSucceeds() async throws {
         nonisolated(unsafe) var calls = 0
         let steps: [(Int, Data)] = [(503, Data("overloaded".utf8)), (200, okBody("OK"))]
@@ -831,7 +810,6 @@ struct HTTPLLMClientTests {
         #expect(calls == 2)
     }
 
-    // A dropped connection is transient too — retry once rather than falling back on a blip.
     @Test func droppedConnectionRetriesOnceThenSucceeds() async throws {
         nonisolated(unsafe) var calls = 0
         LLMStubProtocol.handler = { request in
@@ -844,8 +822,6 @@ struct HTTPLLMClientTests {
         #expect(calls == 2)
     }
 
-    // But it is a SINGLE quick retry, not a backoff ladder — a persistent 5xx fails fast so dictation
-    // falls back to the local transcript promptly.
     @Test func persistentServerErrorFailsAfterExactlyOneRetry() async {
         nonisolated(unsafe) var calls = 0
         LLMStubProtocol.handler = { request in
@@ -858,7 +834,6 @@ struct HTTPLLMClientTests {
         #expect(calls == 2)
     }
 
-    // A timeout already waited the full request window; retrying would double the wait, so it must not.
     @Test func timeoutDoesNotRetry() async {
         nonisolated(unsafe) var calls = 0
         LLMStubProtocol.handler = { _ in
@@ -962,10 +937,6 @@ struct HTTPLLMClientTests {
         #expect(secondRun[0]?["max_completion_tokens"] == nil)
     }
 
-    // A remediation the server never accepted must not be cached. A max_tokens VALUE error carries no
-    // structured param, so the message scan remaps the FIELD name — the wrong remediation — and the retry
-    // fails identically. Caching it would pin max_completion_tokens for the process lifetime with no
-    // reverse remediation, 400ing every later rewrite including ones that would have succeeded.
     @Test func aRemediationTheServerNeverAcceptedIsNotCached() async throws {
         let cache = RequestAdaptationCache()
         let client = stubbedClient(cache: cache)
@@ -993,9 +964,6 @@ struct HTTPLLMClientTests {
         #expect(next?["max_completion_tokens"] == nil)
     }
 
-    // The host behind an unchanged base URL was swapped for a chat-only server: the remembered /responses
-    // override now 404s with a body naming no redirect, so nothing in the error can correct it. It must be
-    // forgotten rather than pinning a dead endpoint for every later rewrite until restart.
     @Test func aStaleResponsesOverrideIsForgottenAndFallsBackToChat() async throws {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -1025,9 +993,6 @@ struct HTTPLLMClientTests {
         #expect(paths.first?.hasSuffix("/chat/completions") == true)
     }
 
-    // An endpoint that answers 401/429/5xx was FOUND — that says nothing about the wire, so the override
-    // must survive and the prompt must not be resent through the other wire. Only an endpoint-mismatch
-    // status (404/405) is evidence the remembered wire is gone.
     @Test(arguments: [401, 429, 502])
     func anAnsweringEndpointDoesNotForgetTheWireOverride(status: Int) async {
         let wireCache = WireAPIOverrideCache()
@@ -1051,9 +1016,6 @@ struct HTTPLLMClientTests {
         #expect(await wireCache.lookup(overrideKey) == .responses)
     }
 
-    // With two wires, a redirect's target and the stale-override fallback's target are the same endpoint.
-    // A redirect that already ran and failed must not be repeated by that fallback — the prompt would be
-    // sent to the same failing endpoint twice.
     @Test func aFailedRedirectFromAStaleOverrideIsNotRetriedTwice() async throws {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -1066,7 +1028,6 @@ struct HTTPLLMClientTests {
         LLMStubProtocol.handler = { request in
             let path = request.url?.path ?? ""
             paths.append(path)
-            // The remembered wire points at chat, and chat is gone too.
             if path.hasSuffix("/responses") {
                 return (resp(request.url!, 404), requiresChatCompletionsBody())
             }
@@ -1092,9 +1053,6 @@ struct HTTPLLMClientTests {
         #expect(paths.first?.hasSuffix("/chat/completions") == true)
     }
 
-    // OpenAI answers a bad model id with a structured 404. That is the endpoint speaking about the model —
-    // which is itself part of the override's cache key — not about the wire, so the override must survive
-    // and the prompt must not be resent through the other wire.
     @Test func aMissingModel404DoesNotForgetTheWireOverride() async {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -1125,8 +1083,6 @@ struct HTTPLLMClientTests {
         #expect(await wireCache.lookup(overrideKey) == .responses)
     }
 
-    // An endpoint that names a wire it then fails to serve must not leave that wire behind for every later
-    // rewrite to start at.
     @Test func aRedirectThatFailsIsNotRememberedAsTheWire() async {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -1147,8 +1103,6 @@ struct HTTPLLMClientTests {
         #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == nil)
     }
 
-    // A response the endpoint spoke correctly is not evidence against the override — only an endpoint-
-    // mismatch status is. A truncated reply must leave the remembered wire alone.
     @Test func aTruncatedReplyDoesNotForgetTheWireOverride() async {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -1174,9 +1128,6 @@ struct HTTPLLMClientTests {
         #expect(await wireCache.lookup(WireAPIOverrideCache.key(for: connection)) == .responses)
     }
 
-    // An explicitly configured wire is a starting hint, not a strict contract — the client already falls
-    // back when the endpoint says so. Having learned that, it must not repeat the known-failing round trip
-    // on every dictation.
     @Test func anExplicitChatConnectionStartsAtTheWireItFellBackTo() async throws {
         let wireCache = WireAPIOverrideCache()
         let client = stubbedClient(wireCache: wireCache)
@@ -1365,7 +1316,6 @@ private extension URLRequest {
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
-    // URLProtocol receives the body as a stream, so httpBody is often nil under the stub.
     func httpBodyStreamData() -> Data? {
         guard let stream = httpBodyStream else { return nil }
         stream.open()

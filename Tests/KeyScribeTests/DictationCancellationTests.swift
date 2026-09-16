@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
 
-// STT engine whose transcribe() blocks on a gate, so a test can cancel mid-transcription.
 private final class GatedEngine: SpeechEngine, @unchecked Sendable {
     let id = "gated"
     let displayName = "Gated"
@@ -72,7 +71,6 @@ private final class EvictRecordingEngine: SpeechEngine, @unchecked Sendable {
     }
 }
 
-// Returns immediately with a fixed text — stands in for a second, different engine.
 private final class InstantEngine: SpeechEngine, @unchecked Sendable {
     let id: String
     let displayName = "Instant"
@@ -109,7 +107,6 @@ private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     func stop() -> URL? { url }
 }
 
-// Records whether the commit path drained the tail (finishDraining) or tore down immediately (stop).
 private final class DrainTrackingAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     private let lock = NSLock()
@@ -348,13 +345,10 @@ struct DictationCancellationTests {
         await task?.value
 
         #expect(idleCount == 1)
-        // The press renders .hidden to clear any stale HUD, so count the terminal's own hide separately.
         #expect(hud.states.first == .hidden)
         #expect(hud.states.dropFirst().filter { $0 == .hidden }.count == 1)
     }
 
-    // An empty/failed capture (finishDraining returns nil) reaches the cancel terminal exactly once — one
-    // .hidden HUD, one onBecameIdle, back to idle — through the unified finish() tail.
     @Test func nilDrainReachesTheCancelTerminalExactlyOnce() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -384,7 +378,6 @@ struct DictationCancellationTests {
         await controller.dictationTask?.value
 
         #expect(idleCount == 1)
-        // The press renders .hidden to clear any stale HUD, so count the terminal's own hide separately.
         #expect(hud.states.first == .hidden)
         #expect(hud.states.dropFirst().filter { $0 == .hidden }.count == 1)
         #expect(controller.isBusy == false)
@@ -394,9 +387,6 @@ struct DictationCancellationTests {
         #expect(controller.lastRecord?.outcome == .failed)
     }
 
-    // The over-limit abort must finalizeRecord (.failed, "recording limit") and land in a non-busy
-    // terminal. A cancel via machine.cancel() that skips the record entirely leaves lastRecord
-    // describing the PREVIOUS dictation. Driven via the maxRecordingSeconds injection seam.
     @Test func overLimitAbortRecordsAFailedOutcomeAndReturnsToIdle() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -432,9 +422,6 @@ struct DictationCancellationTests {
         #expect(hud.states.contains { if case .error = $0 { return true } else { return false } })
     }
 
-    // A bring-up that lands late must be ADOPTED — the dictation reaches live recording and inserts —
-    // not pre-empted by any controller-side timeout. Guards against a future controller watchdog that
-    // would fail a slow-but-successful start.
     @Test func aSlowButSuccessfulBringUpIsAdoptedAndRecords() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -472,9 +459,6 @@ struct DictationCancellationTests {
         #expect(!hud.states.contains { if case .error = $0 { true } else { false } })
     }
 
-    // A right-modifier "chord wins" abort must cancel ONLY the dictation its own key started. A different
-    // trigger's in-flight transcription must survive — right-⌥ punctuation typed while an Fn dictation is
-    // still transcribing must not discard it.
     @Test func modifierAbortLeavesAnotherTriggersTranscriptionAlone() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -492,9 +476,6 @@ struct DictationCancellationTests {
         #expect(await h.insertSpy.calls == 1)                           // its transcript was inserted
     }
 
-    // Even the SAME key must not cancel its own dictation once it has reached transcribing — commit
-    // happens on release, so the starting gesture is already up and a still-held aborting press is a
-    // new gesture (the key re-pressed in a chord right after its own tap-to-toggle commit).
     @Test func modifierAbortLeavesItsOwnCommittedTranscriptionAlone() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -512,7 +493,6 @@ struct DictationCancellationTests {
         #expect(await h.insertSpy.calls == 1)
     }
 
-    // The legitimate chord-wins case — the key's own still-recording (pre-commit) dictation IS cancelled.
     @Test func modifierAbortCancelsItsOwnRecordingDictation() async {
         let h = makeHarness()
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
@@ -584,8 +564,6 @@ struct DictationCancellationTests {
         #expect(hud.states.last == .hidden)
     }
 
-    // A dictation that fails in transcribe must still release the model on Frugal — otherwise the model
-    // stays resident until quit because no other terminal re-arms eviction.
     @Test func aFailedTranscribeStillEvictsOnFrugal() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -882,14 +860,12 @@ struct DictationCancellationTests {
     }
 }
 
-// Bring-up that never succeeds — stands in for a wedged/failed device whose watchdog fired.
 private final class ThrowingStartAudio: AudioCapturing, @unchecked Sendable {
     struct Boom: Error {}
     func start(sampleRate: Int) async throws -> URL { throw Boom() }
     func stop() -> URL? { nil }
 }
 
-// Bring-up failing with formatUnavailable (no usable input stream).
 private final class NoInputDeviceAudio: AudioCapturing, @unchecked Sendable {
     func start(sampleRate: Int) async throws -> URL {
         throw AudioCaptureError.formatUnavailable
@@ -904,7 +880,6 @@ private final class PreferredInputFailedAudio: AudioCapturing, @unchecked Sendab
     func stop() -> URL? { nil }
 }
 
-// Bring-up that blocks until released — models a commit arriving while the mic is still coming up.
 private final class GatedStartAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     private let gate: Signal
@@ -1054,10 +1029,6 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy == false)
     }
 
-    // With sounds on, capture comes up UNDER the cue and the bring-up task then sleeps until cue end
-    // before flipping to `.recording`. A release during that hold must cancel the task and tear the mic
-    // down AT ONCE, not leave it live until the hold expires. Drives a fast bring-up into a long (0.5s)
-    // cue hold, releases mid-hold, and asserts teardown far inside the hold.
     @Test func releasingDuringTheCueHoldStopsCaptureImmediately() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
@@ -1073,7 +1044,6 @@ struct DictationCaptureStartTests {
 
         controller.handleStart()
         let bringUpTask = controller.captureBringUpTask
-        // Let the fast bring-up finish and the task enter the ~0.54s hold; well before it would flip live.
         try? await Task.sleep(for: .milliseconds(80))
         #expect(controller.isBusy)
         #expect(audio.stopCalls == 0)
@@ -1086,9 +1056,6 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy == false)
     }
 
-    // Cancellable from the press, with nothing on screen. Arming shows no HUD, so ESC cannot reach us there;
-    // this state is cancelled by the trigger (handleCommit's .arming case) and by cancel()'s non-ESC callers
-    // — the chord-wins abort, a screen lock, and quit.
     @Test func startIsCancellableWithNoVisibleHUDBeforeCaptureIsLive() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)

@@ -58,9 +58,10 @@ cd keyscribe
 open ./KeyScribeDev.app
 ```
 
-Common tasks are also exposed through **`make`** — run `make help` to list them (`make build`, `make
-run`, `make release BUMP=patch`, `make test`, `make setup`, `make reset-permissions`, `make verify`,
-`make icon`, `make clean`). It's a thin front door over the same scripts documented here.
+Common tasks are also exposed through **`make`** — run `make help` for the current list, which
+includes the build/run/test targets, the release gate (`make preflight`, `make publish`, `make ship`),
+and maintenance helpers such as `make check-deps`, `make setup`, and `make clean`. It's a thin front
+door over the same scripts documented here.
 
 ## How the build works
 
@@ -180,7 +181,8 @@ Cutting a release:
 
 ## Signing: getting permissions that survive rebuilds
 
-KeyScribe needs two TCC permissions (**Microphone**, **Accessibility**).
+Everyday dictation needs two TCC permissions (**Microphone**, **Accessibility**); a mode that routes
+by website additionally requests **Automation** so KeyScribe can read the browser's current URL.
 macOS ties those grants to the app's code signature. An **ad-hoc** signature changes on every
 rebuild, so macOS treats each rebuild as a new app and **re-prompts for both permissions**.
 
@@ -243,12 +245,17 @@ The first signed build prompts once for keychain access — click **Always Allow
 
 ## First launch — grant permissions
 
-On first launch, grant the two permissions in **System Settings ▸ Privacy & Security**:
+On first launch, grant the two permissions everyday dictation needs, in **System Settings ▸ Privacy &
+Security**:
 
 - **Microphone** — on-device speech recognition.
 - **Accessibility** — detecting a modifier-key trigger (the event tap watches modifier flags only) and
   inserting transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E registers as a
   system hotkey via `RegisterEventHotKey` and needs no permission.)
+
+**Automation** is requested later, and only if you set up a mode that routes by website — that is the
+one case where KeyScribe asks the browser for its current URL. KeyScribe never requests Input
+Monitoring.
 
 KeyScribe is a menu-bar app (`LSUIElement`) — look for the waveform glyph in the menu bar, not a
 Dock icon or window.

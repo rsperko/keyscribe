@@ -29,7 +29,6 @@ struct FirstRunFlowTests {
         try ModeStore.write(direct, to: modesDir)
     }
 
-    // MARK: 1a — reorder
 
     @Test func continueFromPermissionsWithLiveTapAdvancesToTrial() {
         let supportDir = tempSupportDir()
@@ -120,8 +119,6 @@ struct FirstRunFlowTests {
         #expect(model.downloading == false)
     }
 
-    // An interrupted download must wipe its partial weights — otherwise it wedges retry and can't be
-    // deleted (it was never marked installed).
     @Test func failedDownloadCleansUpPartialWeights() async {
         let supportDir = tempSupportDir()
         defer { try? FileManager.default.removeItem(at: supportDir) }
@@ -184,7 +181,6 @@ struct FirstRunFlowTests {
         #expect(model.downloading == false)
     }
 
-    // MARK: 2b — step-dot mapping
 
     @Test func stepIndexMapsEveryStepAndPlaygroundSharesTheLastDot() {
         let supportDir = tempSupportDir()
@@ -200,7 +196,6 @@ struct FirstRunFlowTests {
         model.step = .playground; #expect(model.stepIndex == 4)
     }
 
-    // MARK: 1c — resolved trigger
 
     @Test func resolvedTriggerReflectsTheDirectMode() throws {
         let supportDir = tempSupportDir()
@@ -221,7 +216,6 @@ struct FirstRunFlowTests {
         #expect(model.directTriggerDisplay == "Fn (Globe)")
     }
 
-    // MARK: 1f — trigger rebind
 
     @Test func rebindPreservesPressStyleAndUpdatesCacheImmediately() throws {
         let supportDir = tempSupportDir()

@@ -77,8 +77,6 @@ struct SettingsTests {
         #expect(throws: ConfigError.self) { try SettingsStore.decode(from: toml) }
     }
 
-    // Every field differs from defaults, catching a snake_case encode-key regression the
-    // defaults-only round-trip would miss.
     @Test func nonDefaultSettingsRoundTrip() throws {
         let s = Settings(
             schemaVersion: 1, loadOnLogin: true,
@@ -157,9 +155,6 @@ struct SettingsTests {
         #expect(!decoded.stt.recognitionBiasEnabled(for: capable))
     }
 
-    // The per-engine dictionary-recovery keys were removed (recovery now runs unconditionally). A
-    // settings file from an older build still carries them; it must decode cleanly, drop them on
-    // re-encode, and leave the recognition-bias disable list untouched.
     @Test func legacyRecoveryKeysAreIgnoredAndDroppedWhileBiasSurvives() throws {
         let toml = """
         schema_version = 1
@@ -260,8 +255,6 @@ struct SettingsTests {
         #expect(s.audio.inputDeviceName == "MacBook Pro Microphone")
     }
 
-    // A name may be absent even when the UID is set (older config, or the device was disconnected when
-    // first saved) — the picker falls back to a generic label until the next startup refresh.
     @Test func audioUIDWithoutNameDecodes() throws {
         let s = try SettingsStore.decode(from: "schema_version = 1\n[audio]\ninput_device_uid = \"BuiltInMic\"")
         #expect(s.audio.inputDeviceUID == "BuiltInMic")
@@ -306,8 +299,6 @@ struct SettingsTests {
         #expect(try SettingsStore.decode(from: encoded).insertion.clipboardRestoreMs == 1500)
     }
 
-    // Zero restores before any target can read, so every paste would land as the user's old clipboard;
-    // the file is refused rather than silently doing that.
     @Test func clipboardRestoreMsBelowOneIsRejected() throws {
         for value in [0, -250] {
             #expect(throws: ConfigError.invalid("insertion.clipboard_restore_ms must be >= 1")) {
@@ -318,8 +309,6 @@ struct SettingsTests {
             .insertion.clipboardRestoreMs == 1)
     }
 
-    // Off carries no information (absent already means off), so a normal user's settings.toml never grows
-    // the debug keys — same deviations-only rule as [features].
     @Test func encodeOmitsKeepCapturesWhenOff() throws {
         var s = Settings.defaults
         s.audio = .init(inputDeviceUID: "BuiltInMic")
@@ -335,8 +324,6 @@ struct SettingsTests {
         }
     }
 
-    // keepCapturesMaxBytes multiplies by a MiB and Swift traps on Int64 overflow, so an absurd-but-positive
-    // budget must be refused at decode — otherwise it crashes the app at launch, unrecoverably from the UI.
     @Test func anOverflowingCaptureBudgetIsRejected() {
         #expect(throws: ConfigError.self) {
             try SettingsStore.decode(
@@ -351,8 +338,6 @@ struct SettingsTests {
         #expect(s.audio.keepCapturesMaxBytes > 0)
     }
 
-    // An absurd budget with the feature OFF is inert (it is never converted), so it must not lock the user
-    // out of a config they can still fix by other means.
     @Test func anOversizedCaptureBudgetIsIgnoredWhileKeepCapturesIsOff() throws {
         let s = try SettingsStore.decode(
             from: "schema_version = 1\n[audio]\nkeep_captures_max_mb = 9223372036854775807")

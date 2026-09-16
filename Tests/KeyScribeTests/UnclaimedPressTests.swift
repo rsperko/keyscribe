@@ -116,8 +116,6 @@ struct UnclaimedPressTests {
         return d
     }
 
-    // The reported bug. Resolution is inline here (no URL-scoped mode anywhere in the config), so the
-    // verdict lands before beginCapture and nothing is claimed: no cue, no mic, no HUD.
     @Test func aPressNoModeCanServeDoesNotDictateWhenDirectIsBoundElsewhere() async {
         let h = harness(
             modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"),
@@ -137,8 +135,6 @@ struct UnclaimedPressTests {
         #expect(h.inserts.count == 0)
     }
 
-    // The documented same-key recipe still works: Direct owns the key, so the press it cannot serve
-    // still dictates plainly.
     @Test func theSamePressStillFallsBackWhenDirectOwnsTheKey() async {
         let h = harness(
             modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"), direct(owning: "fn")],
@@ -151,7 +147,6 @@ struct UnclaimedPressTests {
         #expect(h.hud.recordingModeName == Mode.direct.name)
     }
 
-    // Inside the scoped mode's own app the press is served by that mode, unchanged.
     @Test func theScopedModeStillRunsInsideItsApp() async {
         let h = harness(
             modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"),
@@ -165,8 +160,6 @@ struct UnclaimedPressTests {
         #expect(h.hud.recordingModeName == "Vm")
     }
 
-    // A menu-picked one-shot is an explicit choice that bypasses the context gate, so it must outrank
-    // the "nothing can serve this press" verdict rather than being cancelled by it.
     @Test func aMenuOneShotSurvivesAPressNoModeCouldServe() async {
         let h = harness(
             modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"),
@@ -181,12 +174,7 @@ struct UnclaimedPressTests {
         #expect(h.hud.recordingModeName == "Vm")
     }
 
-    // MARK: the deferred path — a verdict that lands after the mic is already open
 
-    // A url-scoped mode cannot be ruled out by the bundle, so resolution defers past `beginCapture` and the
-    // no-mode verdict arrives with the mic live. That press cancels audibly rather than silently: the
-    // documented trade for routing on something only knowable after dictation starts. `com.apple.Notes` is
-    // not an https handler, so `ContextProbe.browserURLAsync` returns nil without any AppleScript.
     @Test func aURLScopedPressCancelsAfterTheMicIsAlreadyOpen() async {
         let h = harness(
             modes: [urlScoped("email", key: "fn", bundle: nil, url: #"mail\.google\.com"#),
@@ -204,11 +192,6 @@ struct UnclaimedPressTests {
         #expect(h.hud.states.last == HUDState.hidden)
     }
 
-    // The recipe that buys silence back: pair the site rule with the browser it can only match in. The
-    // bundle now settles eligibility on its own, so the press resolves inline and never opens the mic —
-    // the same terminal a bundle-only scoped mode gets. Before the probe gate was narrowed to the modes
-    // the bundle cannot rule out, ONE url-scoped mode anywhere in the config forced this press onto the
-    // deferred path above.
     @Test func pairingASiteRuleWithItsBrowserRestoresTheSilentNoOp() async {
         let h = harness(
             modes: [urlScoped("email", key: "fn", bundle: "com.google.Chrome",
@@ -226,9 +209,6 @@ struct UnclaimedPressTests {
         #expect(h.hud.states.allSatisfy { $0 == HUDState.hidden })
     }
 
-    // The other half of that narrowing: inside the app the rule names, the URL still has to be probed, so
-    // the press must NOT resolve inline. Same non-browser bundle as above keeps the probe hermetic — it is
-    // the deferral decision under test, not the AppleScript.
     @Test func theSiteRuleStillProbesInsideTheAppItNames() async {
         let h = harness(
             modes: [urlScoped("email", key: "fn", bundle: "com.apple.Notes",

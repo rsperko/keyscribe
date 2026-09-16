@@ -164,7 +164,6 @@ struct DictationStreamingWiringTests {
         return Harness(controller: controller, engine: engine, insertSpy: insertSpy, supportDir: supportDir)
     }
 
-    // 16 kHz: >64000 frames crosses the 4 s deferred-start threshold; a short chunk stays under it.
     private static let longChunk = [Float](repeating: 0.1, count: 80000)
     private static let shortChunk = [Float](repeating: 0.1, count: 16000)
 
@@ -212,14 +211,12 @@ struct DictationStreamingWiringTests {
         #expect(h.engine.session == nil)                  // no session ever opened
     }
 
-    // ESC mid-stream: releaseCapturedPlan must cancel the live session so the engine lock is released.
     @Test func cancelClosesTheLiveStreamingSession() async {
         let drainGate = Signal()
         let h = makeHarness(chunk: Self.longChunk, drainGate: drainGate)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.handleStart()
         await h.controller.captureBringUpTask?.value
-        // Wait for the feed task to cross the threshold and open the session.
         for _ in 0..<200 where h.engine.session == nil { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(h.engine.session != nil)
         h.controller.handleCommit()                       // finishDraining now blocks on the gate
@@ -231,8 +228,6 @@ struct DictationStreamingWiringTests {
         await h.controller.dictationTask?.value
     }
 
-    // A wedged append hangs at the feed-drain await BEFORE finalize is reached; the finalize deadline
-    // abandons it as terminal — never a same-engine batch fallback (the abandoned session holds the gate).
     @Test func wedgedAppendHitsTheFinalizeDeadline() async {
         let appendGate = Signal()   // never fired during the run → append blocks forever
         let h = makeHarness(chunk: Self.longChunk, appendGates: [appendGate], finalizeTimeout: 0.05)
@@ -245,7 +240,6 @@ struct DictationStreamingWiringTests {
         #expect(await h.controller.transcribeGateBusy()) // the abandoned session still holds the gate
     }
 
-    // A wedged finalize (feed drained, but the SDK finalize hangs) hits the same deadline and is terminal.
     @Test func wedgedFinalizeHitsTheDeadline() async {
         let finalizeGate = Signal()
         let h = makeHarness(chunk: Self.longChunk, finalizeGates: [finalizeGate], finalizeTimeout: 0.05)
@@ -258,8 +252,6 @@ struct DictationStreamingWiringTests {
         #expect(await h.controller.transcribeGateBusy())
     }
 
-    // The abandoned wedged finalize keeps the gate busy (so the next press reports "Still finishing"), and
-    // once it truly settles the gate frees and a later dictation proceeds — mirroring the batch deadline.
     @Test func abandonedFinalizeReleasesTheGateOnceItSettlesThenNextDictationProceeds() async {
         let gate1 = Signal()   // wedges ONLY dictation 1's finalize (finalizeGates has one entry)
         let h = makeHarness(chunk: Self.longChunk, finalizeGates: [gate1], finalizeTimeout: 0.05)
@@ -283,15 +275,10 @@ struct DictationStreamingWiringTests {
         #expect(h.insertSpy.text?.contains("STREAMED_TEXT") == true)
     }
 
-    // The deferred-start threshold must sit at/above the streaming floor, so a session never opens while
-    // press-time prepare/prewarm still hold the engine lock.
     @Test func startThresholdSitsAtOrAboveTheStreamingFloor() {
         #expect(DictationController.streamingStartThresholdSeconds >= StreamingStartPolicy.minimumThresholdSeconds)
     }
 
-    // A STREAMED transcript flows through the exact same post-transcript pipeline as batch: a whole-utterance
-    // replacement (exact-match sensitive, and it bypasses the LLM/trailing/trim) fires on the streamed text
-    // and is inserted bare — proving streaming does not divert around ReplacementsStage.
     @Test func streamedTranscriptFlowsThroughWholeUtteranceReplacement() async {
         let rules = [ReplacementsSet.Rule(heard: "slash replace", replace: "/replace", regex: false)]
         let h = makeHarness(chunk: Self.longChunk, streamText: "slash replace", rules: rules)

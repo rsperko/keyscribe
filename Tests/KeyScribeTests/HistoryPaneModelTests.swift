@@ -70,7 +70,6 @@ struct HistoryPaneModelTests {
         try store.append(entry("first"), today: "2026-07-10")
         let model = model(store)
 
-        // SettingsController uses this to skip a redundant reload, so it must be stable when nothing changed.
         let a = model.storeSignature()
         let b = model.storeSignature()
         #expect(a == b)
@@ -86,7 +85,6 @@ struct HistoryPaneModelTests {
         let model = model(store)
 
         model.reload()
-        // Auto-select is deferred a tick after rows commit; poll rather than race a fixed sleep.
         for _ in 0..<40 where model.selected == nil { try await Task.sleep(for: .milliseconds(50)) }
 
         #expect(model.selected?.result == "only entry")

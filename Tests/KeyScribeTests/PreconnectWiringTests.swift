@@ -115,8 +115,6 @@ struct PreconnectWiringTests {
         controller.cancel()
     }
 
-    // Production shape: the fast press snapshot carries no secure-field info, so the endpoint is warmed
-    // only after the async full snapshot confirms a non-secure field.
     @Test func aRewriteModePreconnectsOnlyAfterANonSecureFullSnapshot() async {
         let llm = PreconnectSpyLLM()
         let controller = makeController(
@@ -132,8 +130,6 @@ struct PreconnectWiringTests {
         controller.cancel()
     }
 
-    // The fast press snapshot (bundle id only) doesn't yet know the field is secure; the async full
-    // snapshot reveals it and must still suppress the preconnect.
     @Test func aSecureFieldRevealedByTheFullSnapshotSuppressesPreconnect() async {
         let llm = PreconnectSpyLLM()
         let controller = makeController(

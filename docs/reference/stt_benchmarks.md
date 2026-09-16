@@ -11,17 +11,19 @@
 **Recorded:** 2026-06-30, single speaker, quiet room, built-in mic, normal pace.
 **Metrics:** WER = word error rate (lower is better); recall = dictionary-term recall (higher is
 better); RTF = real-time factor (lower is faster; < 1.0 means faster than real time).
-Numbers are **as shipped** — the dictionary active with default settings (after-transcription recovery
-on every engine, plus recognition bias on the Whisper and Qwen3 models). "Recall — no dictionary" is the
+Numbers are **as shipped on the recording date above** — the dictionary active with default settings
+(after-transcription recovery on every engine, plus recognition bias on the models that supported it
+at the time). "Recall — no dictionary" is the
 raw engine with an empty dictionary, so the two recall columns show the dictionary's total lift.
 Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26+.
 
-> These results use recognition-time dictionary bias only for the **Whisper and Qwen3** models.
-> Parakeet and Apple bias were removed because they could substitute dictionary terms that were never
-> spoken; see the [decision record](../../agent_notes/decisions/recognition_bias.md). The dictionary still
-> lifts recall on **every** engine via after-transcription recovery; on Whisper and Qwen3 recognition
-> bias lifts it further. So the recall gap between the two columns below is the dictionary's whole effect,
-> and it is largest on the bias-capable models.
+> **As measured, 2026-06-30.** This run used recognition-time dictionary bias only for the **Whisper
+> and Qwen3** models; Parakeet and Apple bias had been removed because they could substitute
+> dictionary terms that were never spoken. Which models can bias is a per-model capability that can
+> change — Settings ▸ Speech Models is current. The dictionary still
+> lifts recall on **every** engine via after-transcription recovery; on the bias-capable models
+> recognition bias lifts it further. So the recall gap between the two columns below is the
+> dictionary's whole effect, and it is largest on the bias-capable models.
 
 | Model | WER (as shipped) | Recall — with dictionary | Recall — no dictionary | RTF | Download |
 |---|---|---|---|---|---|
@@ -38,10 +40,10 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
 
 - **The top three are a wash.** 5.7 / 5.8 / 6.0% biased WER is well inside the noise of a
   single-speaker corpus. Don't pick between them on these numbers alone.
-- **The dictionary helps on every engine.** The Whisper and Qwen3 models steer recognition toward
-  your terms as they listen; Parakeet and Apple do not, and reach the dictionary through
-  after-transcription recovery, which runs by default on all engines. So a dictionary term is never a
-  no-op — the mechanism just differs by model.
+- **The dictionary helps on every engine.** Models that support recognition bias steer toward your
+  terms as they listen; the rest reach the dictionary through after-transcription recovery, which
+  runs on every engine. So a dictionary term is never a no-op — the mechanism just differs by model,
+  and Settings ▸ Speech Models says which does which.
 - **Everything is faster than real time.** Every RTF is well under 1.0, so on this corpus speed is
   rarely the deciding factor — footprint and accuracy are.
 - **The default isn't the most accurate, by design.** Parakeet TDT v3 is the recommended English

@@ -464,14 +464,9 @@ enum TextInserter {
         return value as? String
     }
 
-    // Best-effort typed keystrokes; there is no acceptance signal to drive fallback. The targets this path
-    // exists for (a VM hypervisor, a remote client) translate the event's VIRTUAL KEY and drop the unicode
-    // payload entirely — VMware Fusion delivers keycode 0, a literal "a", even with a one-character payload —
-    // so every character the active layout can produce posts as a real keycode with its modifiers as
-    // physical key events. Off-layout characters (é, emoji) fall back to payload events, which land in
-    // native apps only; that loss is inherent to a translating target. The cost is a long insert holding
-    // .inserting for the whole run, so a trigger pressed mid-insert is dropped by beginArming
-    // (DictationController.noteBusyPress).
+    // Some remote targets translate virtual keycodes and discard Unicode payloads. Use physical key
+    // events for characters on the active layout; off-layout characters fall back to payload events.
+    // The target offers no acceptance signal, so this path cannot detect a failed insertion.
     @discardableResult
     static func insertViaTyping(_ text: String) async -> Bool {
         let src = CGEventSource(stateID: .combinedSessionState)

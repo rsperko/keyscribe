@@ -50,14 +50,18 @@ When it runs:
 
 ## Network use, in full
 
-KeyScribe touches the network in exactly three situations:
+KeyScribe only reaches the network for these things, and never to send your audio:
 
 1. **Downloading speech models** — on-device engine weights are fetched on demand from their
    publishers (e.g. Hugging Face) the first time you select an engine, then cached locally and reused
    offline. A tiny (~1 MB) voice-activity-detection model is fetched the same way, alongside your first
    speech model; it runs entirely on-device to detect whether a recording contains any speech (so a
    silent trigger inserts nothing) and never sends audio anywhere.
-2. **The optional BYOK LLM cleanup** — described above, to your own provider.
+2. **Your own AI service**, if you set one up — the optional LLM cleanup described above, plus the
+   connection test and model list when you add or edit a connection. All of it goes to the provider
+   you configured and nowhere else. While you are recording a mode that uses it, KeyScribe may also
+   open the connection ahead of time so the cleanup comes back faster; that request carries no
+   content, and it is skipped entirely when you are typing in a password field.
 3. **Checking for app updates** — KeyScribe periodically fetches a small update feed to see whether a
    newer version is available, and downloads it only if you choose to install one. It asks before the
    first automatic check and you can turn it off. It carries no speech, transcript, or usage data —

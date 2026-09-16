@@ -84,7 +84,6 @@ struct RewriteErrorPrivacyTests {
         return Result(historyReason: entry?.fallbackReason, recordReason: controller.lastRecord?.fallbackReason)
     }
 
-    // A compatible endpoint or proxy can echo the request content back inside its error body.
     @Test func aProviderErrorBodyNeverReachesHistoryOrTheRecord() async {
         let body = #"{"error":{"message":"upstream rejected: \#(promptEcho) key=\#(secret)"}}"#
         let result = await run(error: ProviderTransportError.http(400, body: body))
@@ -96,8 +95,6 @@ struct RewriteErrorPrivacyTests {
         #expect(!(result.recordReason ?? "").contains(promptEcho))
     }
 
-    // A credential broker that prints the token before failing must not write it to history JSONL —
-    // "credential material is never persisted in config" extends to history.
     @Test func tokenCommandStderrNeverReachesHistoryOrTheRecord() async {
         let result = await run(
             error: TokenCommandError.failed(1, message: "auth broker error, token was \(secret)"))
@@ -107,8 +104,6 @@ struct RewriteErrorPrivacyTests {
         #expect(!(result.recordReason ?? "").contains(secret))
     }
 
-    // Default-deny: an error type that has not opted into RewriteFailureReporting must not have its
-    // localizedDescription trusted — a new error type must not leak by omission.
     @Test func anUnknownErrorIsReportedGenericallyRatherThanByLocalizedDescription() async {
         struct Leaky: LocalizedError {
             var errorDescription: String? { "boom: \(secret)" }
@@ -119,7 +114,6 @@ struct RewriteErrorPrivacyTests {
         #expect(!(result.historyReason ?? "").contains(secret))
     }
 
-    // A chatty or runaway command must not size the excerpt that rides the error into every consumer.
     @Test func veryLargeStderrIsBoundedInTheErrorExcerpt() throws {
         let huge = String(repeating: "x", count: 50_000)
         do {
@@ -136,8 +130,6 @@ struct RewriteErrorPrivacyTests {
 // drained with readDataToEndOfFile-style reads, so a chatty command's whole stream would be resident before
 // any excerpt is taken. These drive the real Process/Pipe path, which the excerpt test bypasses entirely.
 struct TokenCommandDrainBoundTests {
-    // Bounding must not be implemented by refusing to read: the child blocks once the ~64 KB pipe buffer
-    // fills, so a reader that stops at its cap deadlocks the command instead of bounding it.
     @Test func drainKeepsReadingPastTheLimitAndReportsTruncation() async throws {
         let pipe = Pipe()
         let payload = Data(String(repeating: "x", count: 512 * 1024).utf8)
@@ -165,16 +157,12 @@ struct TokenCommandDrainBoundTests {
         #expect(!result.truncated)
     }
 
-    // The real end-to-end shape: a command that floods stderr with far more than the capture limit must still
-    // return its token, and must not have held the whole flood in memory to do it.
     @Test func aCommandFloodingStderrStillReturnsItsTokenWithoutBufferingItAll() async throws {
         let output = try await TokenCommandRunner.run(
             "yes flood-line-of-noise | head -c 4000000 1>&2; echo the-token", timeout: 30)
         #expect(try TokenCommandOutput.parse(from: output).token == "the-token")
     }
 
-    // stdout is the credential, so an oversized stream fails loudly rather than truncating into a corrupt
-    // token that would then be sent to a provider.
     @Test func aCommandFloodingStdoutFailsRatherThanTruncatingTheToken() async {
         await #expect(throws: TokenCommandError.self) {
             do {

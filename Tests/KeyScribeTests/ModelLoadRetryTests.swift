@@ -35,7 +35,6 @@ private final class FlakyLoadEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
-// Exercises the "do not auto-retry a 300 s hang" branch without waiting on the real deadline.
 private final class TimeoutLoadEngine: SpeechEngine, @unchecked Sendable {
     let id = "timeout"
     let displayName = "Timeout"
@@ -241,7 +240,6 @@ struct ModelLoadRetryTests {
         #expect(await insertSpy.calls == 1)
         let sawLoading = hud.states.contains { if case .loadingModel = $0 { return true }; return false }
         #expect(sawLoading)
-        // Loading is transient, so the last processing state before insertion should be transcribing again.
         let lastProcessing = hud.states.last {
             if case .loadingModel = $0 { return true }
             if case .transcribing = $0 { return true }
@@ -283,7 +281,6 @@ struct ModelLoadRetryTests {
         #expect(recorder.records.count == 1)
         #expect(recorder.records.first?.timedOut == true)
         #expect(sawError(hud.states, message: "Loading the speech model timed out"))
-        // A timeout is terminal on the first attempt — unlike a plain load failure, it is not retried.
         #expect(engine.loadCalls == 1)
     }
 }

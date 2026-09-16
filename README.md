@@ -86,7 +86,7 @@ Modes are reusable pipeline presets. A mode can decide when it runs, which local
 whether rewrite is enabled, which provider handles that rewrite, what context may be sent, and how
 the result is inserted.
 
-Good starter modes:
+A few of the starter modes:
 
 | Mode | Use it for | Requires rewrite |
 | --- | --- | --- |
@@ -96,6 +96,8 @@ Good starter modes:
 | Edit Selection | Select text, speak an instruction, replace the selection. | Yes |
 | Markdown | Notes with headings, bullets, and code fences. | Yes |
 | Shell | A terminal-ready command inserted as text, never run by KeyScribe. | Yes |
+
+More ship alongside these — Settings ▸ Modes ▸ Add Mode lists the current template set.
 
 End a dictation with a spoken suffix like `as an email`, choose a one-shot mode from the menu bar,
 or bind the same key to different modes in different apps.
@@ -131,9 +133,10 @@ The local pipeline handles dictionary bias/recovery, replacements, spoken edits,
 clipboard tokenization, number normalization, and best-effort redaction. Rewrite, when enabled, is
 validated before insertion so redaction/verbatim/clipboard tokens survive and restore correctly.
 
-Supported speech models include Parakeet TDT v3, Parakeet Unified 0.6B (English), Parakeet
-TDT-CTC 110M, Whisper Large v3 Turbo, Whisper Small (English), Apple Speech, Qwen3-ASR 0.6B, and
-Qwen3-ASR 1.7B. Availability depends on macOS version and model download state.
+Speech models span the Parakeet, Whisper, Apple Speech, and Qwen3-ASR families, from compact
+English-only models of a few hundred megabytes up to multi-gigabyte multilingual ones. Settings ▸
+Speech Models has the current list with sizes and language coverage. Availability depends on macOS
+version and model download state.
 
 ## Build From Source
 

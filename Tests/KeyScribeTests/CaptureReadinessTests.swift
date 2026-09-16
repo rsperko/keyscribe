@@ -4,8 +4,8 @@ import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
 
-// Phase 1 of agent_notes/mic_issue: capture is READY only once a valid input buffer has crossed off the
-// realtime thread — a successful AudioUnit start return proves nothing. Readiness is observed on the writer
+// Capture is READY only once a valid input buffer has crossed off the realtime thread — a successful
+// AudioUnit start return proves nothing. Readiness is observed on the writer
 // thread (never signalled from the RT callback), and it must be observed ABOVE head admission: the very
 // buffer that proves the mic is live arrives while admission is still closed, so a readiness check placed
 // below the gate would never see it.
@@ -78,8 +78,6 @@ struct CaptureReadinessTests {
         return writer
     }
 
-    // The readiness proof itself: exactly once, from the writer thread — the only place allowed to do
-    // control-plane work (the RT callback must never signal a wakeup). 20 buffers, one signal.
     @Test func readinessSignalsOnceFromTheWriterThread() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -89,7 +87,6 @@ struct CaptureReadinessTests {
         #expect(spy.threadNames == ["com.keyscribe.audio.writer"])
     }
 
-    // A 0 Hz / 0 ch slot is a mid-churn device, not proof the route delivers audio.
     @Test func anUnusableFormatBufferDoesNotSignalReadiness() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -98,9 +95,6 @@ struct CaptureReadinessTests {
         #expect(spy.fires == 0)
     }
 
-    // Readiness is observed ABOVE head admission, so the proving buffers are discarded rather than recorded —
-    // and that discard is intentional, so it must not read as a capture defect (writerDropped is a canary the
-    // teardown log asserts is 0 on every healthy capture).
     @Test func audioBeforeAdmissionOpensIsDiscardedWithoutAWriterDrop() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -109,12 +103,9 @@ struct CaptureReadinessTests {
         #expect(writer.writerDroppedFrames() == 0)
     }
 
-    // The cue-exclusion contract, now anchored to readiness instead of arm time: frames before the published
-    // cue-end boundary stay out of the recording, and speech starting at the boundary is kept whole.
     @Test func openingAdmissionExcludesTheCueWindowAndKeepsEverythingAfterIt() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
-        // Nanosecond host clock: a 100-frame slot at 16 kHz spans 6.25 ms. Boundary at slot 5's start.
         let slotTicks: UInt64 = 6_250_000
         try runCapture(
             to: url,
@@ -123,7 +114,6 @@ struct CaptureReadinessTests {
         #expect(try readMonoFloat(url).count == 600)  // slots 5…10 admitted; 1…4 are the cue window
     }
 
-    // Sounds off ⇒ no cue ⇒ nothing to exclude: a 0 boundary opens admission immediately at readiness.
     @Test func openingAdmissionWithNoCueBoundaryAdmitsFromReadiness() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -133,8 +123,6 @@ struct CaptureReadinessTests {
         #expect(try readMonoFloat(url).count == 1000)
     }
 
-    // A present Bluetooth route needs room for the A2DP->HFP transition that blew through the old 4 s
-    // watchdog; every other transport keeps the fast deadline so a wedged built-in mic still fails quickly.
     @Test func aBluetoothTargetGetsAdditionalTimeToBecomeReady() {
         let bluetooth = AudioCapture.startDeadlineSeconds(targetIsBluetooth: true)
         let wired = AudioCapture.startDeadlineSeconds(targetIsBluetooth: false)
@@ -143,11 +131,6 @@ struct CaptureReadinessTests {
         #expect(bluetooth > wired)
     }
 
-    // THE guard for the cancellation-as-readiness hazard. `awaitReadiness` must release its wait on
-    // cancellation (runWithBudget ABANDONS the operation rather than awaiting it, so an unsignalled latch
-    // would strand the continuation forever) — but a wait released that way must throw rather than let the
-    // operation return a URL. Cancelling the task directly makes that deterministic; racing the budget's timer
-    // does NOT (see the budget test below).
     @Test func aCancelledReadinessWaitThrowsInsteadOfReportingReady() async {
         let ready = SignalLatch()  // no buffer ever arrives
         let task = Task { () -> String in
@@ -159,8 +142,6 @@ struct CaptureReadinessTests {
         #expect(throws: CancellationError.self) { try result.get() }
     }
 
-    // The other half of that guard: a real first buffer must still report ready, so it cannot degrade into
-    // "always throw".
     @Test func aFirstBufferReportsReady() async throws {
         let ready = SignalLatch()
         let task = Task { () -> String in
@@ -171,10 +152,6 @@ struct CaptureReadinessTests {
         #expect(try await task.value == "capture.wav")
     }
 
-    // End-to-end: a start whose input never delivers yields no URL, only a failure. This does NOT reproduce
-    // the gate race (the timer publishes DeadlineExceeded on the statement after work.cancel(), so it
-    // effectively always wins) — the test above covers that. What this catches is the readiness wait being
-    // weakened or dropped from the operation altogether.
     @Test func aBudgetWithNoFirstBufferNeverReportsReady() async {
         let ready = SignalLatch()
         var returned: String?
@@ -184,7 +161,6 @@ struct CaptureReadinessTests {
                 return "capture.wav"
             }
         } catch {
-            // Expected: DeadlineExceeded, or the operation's own CancellationError.
         }
         #expect(returned == nil)
     }
@@ -193,12 +169,6 @@ struct CaptureReadinessTests {
         CaptureStartRecord(targetIsBluetooth: targetIsBluetooth, explicitDevice: false, target: target)
     }
 
-    // Phase 2 groups first-buffer timings by the transport that DELIVERED, so a restart landing just after
-    // readiness must not re-file this start's timing under a device that never produced it.
-    //
-    // Sequential and record-scoped. It does NOT prove noteFirstBuffer's atomicity (the rebind here only lands
-    // after it returns) and it does NOT prove AudioCapture publishes the bind before the start that delivers.
-    // Both rest on code reading; testing either needs a concurrency seam this file does not have.
     @Test func firstBufferRecordsTimingAndPreventsLaterRebinds() {
         let record = record(targetIsBluetooth: false, target: "MacBook Pro Microphone")
         record.noteBound("Pan", isBluetooth: true)     // rebound to Bluetooth during arming
@@ -211,15 +181,12 @@ struct CaptureReadinessTests {
         #expect(!summary.contains("Some Dock"))
     }
 
-    // Before any delivery there is nothing to freeze, so a failed start reports the last device it bound.
     @Test func aFailedStartReportsTheLastDeviceItBound() {
         let record = record(targetIsBluetooth: false, target: "MacBook Pro Microphone")
         record.noteBound("Pan", isBluetooth: true)
         #expect(record.summary(outcome: "never-ready").contains("bound=Pan"))
     }
 
-    // A start that never rebinds must not emit a redundant bound-transport, so the grouping rule stays "use
-    // bound-transport when present, else transport".
     @Test func aStartThatNeverRebindsReportsOneTransport() {
         let record = record(targetIsBluetooth: true, target: "Pan")
         record.noteBound("Pan", isBluetooth: true)
@@ -228,8 +195,6 @@ struct CaptureReadinessTests {
         #expect(!summary.contains("bound-transport="))
     }
 
-    // A saved preference for a device that is not currently connected falls back to the system default, so it
-    // must be labeled (and deadlined) as the default route it will actually bind — not as an explicit pick.
     @Test func aDisconnectedPreferenceResolvesToTheSystemDefault() {
         let target = AudioCapture.captureTarget(
             preferredUID: "absent-airpods-uid",

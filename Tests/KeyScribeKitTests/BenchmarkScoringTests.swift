@@ -16,7 +16,6 @@ struct BenchmarkScoringTests {
     }
 
     @Test func deletionAndInsertionCount() {
-        // ref 3 words; hyp drops one and adds one elsewhere → 2 edits / 3
         let w = BenchmarkScoring.wer(reference: "alpha beta gamma", hypothesis: "alpha gamma delta")
         #expect(abs(w - (2.0 / 3.0)) < 1e-9)
     }
@@ -37,14 +36,12 @@ struct BenchmarkScoringTests {
     }
 
     @Test func falseFireWhenTermInHypButNotReference() {
-        // "GitHub" surfaced in the transcript but the sentence was about getting up early → false fire.
         let n = BenchmarkScoring.termFalseFires(
             terms: ["GitHub"], reference: "I need to get up early", hypothesis: "I need to GitHub early")
         #expect(n == 1)
     }
 
     @Test func noFalseFireWhenTermLegitimatelySpoken() {
-        // The term is in the reference, so its presence in the hypothesis is correct, not a false fire.
         let n = BenchmarkScoring.termFalseFires(
             terms: ["GitHub"], reference: "I pushed to GitHub", hypothesis: "I pushed to GitHub")
         #expect(n == 0)
@@ -81,7 +78,6 @@ struct BenchmarkScoringTests {
     }
 
     @Test func breakdownCountsSubstitutionWhenWordsDiffer() {
-        // "review" spoken, "Redis" emitted — "redis" is not in the collapsed reference, a different word.
         let b = BenchmarkScoring.termFalseFireBreakdown(
             terms: ["Redis"],
             reference: "review the whole code base before merging",
@@ -90,7 +86,6 @@ struct BenchmarkScoringTests {
     }
 
     @Test func breakdownSplitsAMixedUtteranceAndSumsToTotalFalseFires() {
-        // One sentence, two fires: "code base"→"CodeBase" (orthographic) and "review"→"Redis" (substitution).
         let terms = ["CodeBase", "Redis"]
         let reference = "review the whole code base before merging"
         let hypothesis = "Redis the whole CodeBase before merging"
@@ -102,7 +97,6 @@ struct BenchmarkScoringTests {
     }
 
     @Test func breakdownIgnoresTermsThatDidNotFire() {
-        // A term legitimately spoken (present in the reference) is not a fire and is classified as neither.
         let b = BenchmarkScoring.termFalseFireBreakdown(
             terms: ["Kubernetes"],
             reference: "we deploy on Kubernetes", hypothesis: "we deploy on Kubernetes")

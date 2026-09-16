@@ -214,8 +214,7 @@ Candidate prompt changes are **eval-gated, not adopted on judgment**: implement 
 prompt, test-enforced), add it as a variant in `RewriteEvalVariants`, and run
 `KeyScribe --rewrite-eval evals/rewrite` (harness, corpus, and check semantics in
 `evals/rewrite/README.md`) against a local model and the Gemini floor. A variant that wins graduates
-by making its option unconditional and deleting the flag; one that loses is deleted. The durable
-outcomes live in `agent_notes/decisions/prompt_evaluation.md`.
+by making its option unconditional and deleting the flag; one that loses is deleted.
 
 ## Sources
 - [Prompt design strategies — Gemini API](https://ai.google.dev/gemini-api/docs/prompting-strategies)

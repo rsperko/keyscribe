@@ -14,8 +14,6 @@ struct StreamingStartPolicyTests {
         #expect(policy.shouldStartSession(accumulatedFrames: 80001))
     }
 
-    // Below the floor is clamped up to it: the deferred start must stay above press-time prepare/prewarm
-    // so a session never opens while those hold the engine lock — a 0 (or negative) threshold can't defeat it.
     @Test func belowFloorThresholdClampsToFloor() {
         let floor = StreamingStartPolicy.minimumThresholdSeconds
         for requested in [-2.0, 0, 0.5, floor - 0.1] {
@@ -32,7 +30,6 @@ struct StreamingStartPolicyTests {
                                      sampleRate: 16000).thresholdSeconds == StreamingStartPolicy.minimumThresholdSeconds)
     }
 
-    // A non-positive sample rate can never cross, so a session never opens (defensive: batch always runs).
     @Test func nonPositiveSampleRateNeverStarts() {
         let policy = StreamingStartPolicy(thresholdSeconds: 5, sampleRate: 0)
         #expect(policy.thresholdFrames == Int.max)

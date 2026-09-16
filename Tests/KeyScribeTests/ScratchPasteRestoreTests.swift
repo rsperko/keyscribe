@@ -26,7 +26,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "dictationA")
         await TextInserter.settleScratch(first!, awaitSettle: false)
 
-        // Begins while A's restore is still pending; must drain A first, or it would snapshot "dictationA".
         let second = await TextInserter.beginScratchPaste("dictationB", on: pb)
         #expect(second != nil)
         await TextInserter.settleScratch(second!, awaitSettle: true)
@@ -35,7 +34,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // awaitSettle: true still restores detached, so drain before asserting the clipboard is back.
     @Test func aSubmitSettleRestoresTheUserClipboardInTheBackground() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -65,8 +63,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_COPIED_LATE")
     }
 
-    // The stabilize loop re-captures across successive mid-capture copies, so a second or third copy
-    // racing the recovery snapshot is not lost either.
     @Test func repeatedCopiesDuringCaptureStabilizeToTheLatest() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -84,9 +80,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "COPY_2")
     }
 
-    // With no next interaction to drain it, the backstop must restore the user's clipboard on its own —
-    // and at the mode's own restore delay, not a fixed one. The hold is the window in which a user ⌘V
-    // pastes the dictation a second time, so its length is the behavior under test.
     @Test func theBackstopRestoresAtTheConfiguredDelay() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -100,7 +93,6 @@ struct ScratchPasteRestoreTests {
         #expect(await restores(pb, to: "USER_ORIGINAL", withinMs: 900))
     }
 
-    // A target that needs longer can buy it back; the default must not be the only option.
     @Test func aLongerConfiguredDelayHoldsTheScratchLonger() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -116,8 +108,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // IH-1: the spoken "insert clipboard contents" command read the pending scratch — the previous
-    // dictation — instead of the user's clipboard, because it never drained.
     @Test func readingTheClipboardDrainsAPendingRestore() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -140,7 +130,6 @@ struct ScratchPasteRestoreTests {
         return pb.string(forType: .string) == expected
     }
 
-    // ── Consumption-driven restore (Feature.consumptionDrivenRestore) ────────────────────────────────
     // The scratch is published as a LAZY `.string` flavor, so the target reading it is observable and the
     // clipboard can come back as soon as the paste has actually been served, instead of after a fixed
     // guess. The read through this pasteboard handle stands in for the target app's read. These live in
@@ -160,8 +149,6 @@ struct ScratchPasteRestoreTests {
         #expect(await restores(pb, to: "USER_ORIGINAL", withinMs: 1000))
     }
 
-    // A target may read the pasteboard more than once per ⌘V (reported of Chromium and Electron, not yet
-    // measured here); restoring on the first read would hand a second one the user's old clipboard.
     @Test func aSecondReadInsideTheGraceStillGetsTheDictation() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -176,8 +163,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "dictation")
     }
 
-    // A clipboard manager inspecting the scratch before the ⌘V is not the paste, and must not start the
-    // grace — that would restore out from under the target's own read.
     @Test func aReadBeforeThePasteDoesNotShortenTheHold() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -197,9 +182,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // A target that never reads (the ⌘V went nowhere) still has to get the clipboard back. The pasteboard
-    // is not touched until the backstop has had time to fire: any read here would serve the lazy flavor
-    // ourselves and turn this into the read-triggered path.
     @Test func noReadFallsBackToTheConfiguredBackstop() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -214,7 +196,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // The changeCount no-clobber guard is unchanged by laziness: a copy landing before the restore wins.
     @Test func aCopyBeforeTheRestoreIsPreserved() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -231,7 +212,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_COPIED")
     }
 
-    // With the flag off nothing is published lazily, so the fixed window is the only thing that restores.
     @Test func withoutTheFlagTheScratchIsEagerAndTimerDriven() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -248,7 +228,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
 
-    // Never stabilizes; the paste must fail closed rather than write scratch over the churning copy.
     @Test func aPersistentlyUnstableClipboardFailsClosedWithoutClobbering() async {
         let pb = makePasteboard()
         pb.clearContents()
@@ -262,7 +241,6 @@ struct ScratchPasteRestoreTests {
         #expect(pb.string(forType: .string)?.hasPrefix("CHURN_") == true)
     }
 
-    // ── A paste chord the active layout cannot post ──────────────────────────────────────────
 
     private func unpostable() throws -> ClipboardPaste {
         ClipboardPaste(keystroke: try ClipboardKeystroke(parsing: "control+☃"))

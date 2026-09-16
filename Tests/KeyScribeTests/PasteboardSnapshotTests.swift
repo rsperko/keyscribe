@@ -111,7 +111,6 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: binaryType) == nil)
     }
 
-    // Reversal of the old heavyweight divert that wiped even a tiny screenshot on every dictation.
     @Test func smallImageClipboardIsPreservedNotDropped() {
         let pb = NSPasteboard.withUniqueName()
         let image = NSImage(size: NSSize(width: 4, height: 4))
@@ -138,8 +137,6 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: .tiff) == tiff)
     }
 
-    // The full restore replaces the scratch entirely, so the dictated text (which can include restored
-    // redacted spans) is never left behind alongside the restored image.
     @Test func imageOnlyClipboardIsRestoredWithoutLeakingScratch() {
         let pb = NSPasteboard.withUniqueName()
         let image = NSImage(size: NSSize(width: 4, height: 4))
@@ -163,9 +160,6 @@ struct PasteboardSnapshotTests {
         #expect(pb.string(forType: .string) == nil)
     }
 
-    // The budget bounds the render ACROSS flavors, not within one: it is only checked between
-    // `data(forType:)` calls. Two slow flavors, so the bound holds whichever order `types` reports — the
-    // first render spends the budget, the second never starts and capture falls back to plain text.
     @Test func lazyFlavorsThatBlowTheBudgetFallBackToPlainText() {
         let pb = NSPasteboard.withUniqueName()
         let slowA = NSPasteboard.PasteboardType("com.keyscribe.test.slowA")
@@ -192,10 +186,6 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: slowB) == nil)
     }
 
-    // The accepted cost of rendering on the main actor: macOS exposes no bounded pasteboard read, so a flavor
-    // already rendering cannot be interrupted — it runs to completion and IS captured even though it outlasts
-    // the budget. Pins the trade deliberately, so a future change can't quietly "fix" the stall by moving the
-    // render back off-main. Sole flavor, so no other type's budget check can bail this to plain text first.
     @Test func aSlowFlavorOutlastingTheBudgetStillRendersToCompletion() {
         let pb = NSPasteboard.withUniqueName()
         let slowType = NSPasteboard.PasteboardType("com.keyscribe.test.slowOnly")
@@ -217,9 +207,6 @@ struct PasteboardSnapshotTests {
         #expect(pb.data(forType: slowType) == Data(repeating: 9, count: 1024))
     }
 
-    // Regression lock for the PAC trap: NSPasteboardItem is main-thread-only, so the flavor render must run
-    // on the main thread. Nothing else here can catch this — an off-main render returns correct bytes and
-    // only traps on a promised flavor, which is why it reached production.
     @Test func promisedFlavorRendersOnTheMainThread() {
         let pb = NSPasteboard.withUniqueName()
         let probeType = NSPasteboard.PasteboardType("com.keyscribe.test.probe")
@@ -234,7 +221,6 @@ struct PasteboardSnapshotTests {
         #expect(provider.renderedOnMainThread == true)
     }
 
-    // The gate behind the Add-to-Vocabulary prefill: an image/rich flavor is left untouched.
     @Test func emptyAndPlainTextClipboardsRestorePerfectly() {
         let empty = NSPasteboard.withUniqueName()
         empty.clearContents()

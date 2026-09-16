@@ -3,11 +3,8 @@ import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
 
-// End-to-end wiring of the post-STT pipeline + insertion through the REAL DictationController
-// (design.md §4.2.1): verbatim tokenizes before the text stages, the optional LLM runs on the
-// tokenized text, restore is the reverse pass, then insertion applies trailing + submit. Only the OS
-// edges are mocked (audio, STT text, insertion sink, submit keystroke) — except the opt-in oMLX test,
-// which drives the real HTTP client against a local model. No microphone required.
+// Pipeline integration tests use the real controller and mock OS edges; the opt-in local model test
+// uses the real HTTP client.
 @MainActor
 struct DictationPipelineWiringTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
@@ -37,8 +34,6 @@ struct DictationPipelineWiringTests {
         func stop() -> URL? { url }
     }
 
-    // Faithful rewrite: echoes the <content> block verbatim (so issued tokens survive the gate), and
-    // records what it was sent so the test can prove protected spans were tokenized before the call.
     private actor EchoLLM: LLMClient {
         private(set) var lastUser = ""
         func complete(system: String, user: String, connection: Connection) async throws -> String {
@@ -49,7 +44,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    // Records whether the cloud rewrite was ever invoked.
     private actor SpyLLM: LLMClient {
         private(set) var called = false
         func complete(system: String, user: String, connection: Connection) async throws -> String {
@@ -58,7 +52,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    // Ignores the preserve-tokens rule — the gate must reject it and fall back to local.
     private struct DropTokenLLM: LLMClient {
         func complete(system: String, user: String, connection: Connection) async throws -> String {
             "completely rewritten with no tokens"
@@ -82,9 +75,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    // Reads the ⟦SN:REDACT:…⟧ token out of the <instructions> block and inserts it into the rewritten
-    // content — simulating a faithful edit that needs the redacted instruction value in its output
-    // (e.g. "change the recipient to jane@example.com").
     private struct InstructionValueLLM: LLMClient {
         func complete(system: String, user: String, connection: Connection) async throws -> String {
             guard let start = user.range(of: "<instructions>\n"),
@@ -96,7 +86,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    // Captures the real insertion call (method + the exact string, which includes the trailing suffix).
     private actor InsertSpy {
         private(set) var method: Mode.Insertion?
         private(set) var paste: ClipboardPaste?
@@ -104,7 +93,6 @@ struct DictationPipelineWiringTests {
         func record(_ m: Mode.Insertion, _ p: ClipboardPaste, _ t: String) { method = m; paste = p; text = t }
     }
 
-    // Captures every post-insert submit keystroke the controller fires.
     private actor SubmitSpy {
         private(set) var keys: [Mode.Submit] = []
         func record(_ s: Mode.Submit) { keys.append(s) }
@@ -121,11 +109,6 @@ struct DictationPipelineWiringTests {
         func render(_ state: HUDState) { states.append(state) }
     }
 
-    // Returns the captured target's bundle for the first two snapshot() reads (handleStart capture +
-    // finishInsertion entry), then a different bundle for the pre-submit re-snapshot — simulating the
-    // user switching apps during the paste-settle window.
-    // The snapshot seam is read three times before the submit — press, the commit-time secure probe, and
-    // finishInsertion — all of which see the captured target. Only the fourth (pre-submit) read moves.
     private static let readsBeforeSubmit = 3
 
     @MainActor private final class FocusSequence {
@@ -137,8 +120,6 @@ struct DictationPipelineWiringTests {
         }
     }
 
-    // Same app throughout, but the focused window changes for the pre-submit snapshot — a same-app
-    // window switch during the paste-settle window that a bundle-only check would miss.
     @MainActor private final class WindowSwitchSequence {
         private var calls = 0
         func next() -> TargetSnapshot {
@@ -277,7 +258,6 @@ struct DictationPipelineWiringTests {
         return m
     }
 
-    // ── Pipeline wiring (verbatim-first / redaction / restore) ────────────────────────────────────
 
     @Test func verbatimSurvivesTheTextStagesOnTheNoLLMPath() async {
         let m = mode(id: "code", liveEdits: true,
@@ -300,10 +280,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "list the files")
     }
 
-    // The local pipeline runs on EVERY dictation, so history records the on-device intermediate even
-    // when local processing changed nothing. Otherwise a no-op leaves no artifact, and the JSONL (or
-    // anything mining it) reads "the local pipeline was skipped" — the exact misread that prompted this.
-    // `transformed` is the local output recorded unconditionally; it equals `heard` when nothing changed.
     @Test func transformedRecordsLocalOutputEvenWhenLocalIsANoOp() async {
         let out = await run(transcript: "hello world", mode: mode(id: "plain"))
         #expect(out.lastResult == "hello world")
@@ -345,9 +321,6 @@ struct DictationPipelineWiringTests {
         #expect(!sent.contains("alice@example.com"))
     }
 
-    // Regression for the reported bug: pausing around the verbatim markers made the STT insert commas
-    // that leaked into and around the protected span ("the , new line,, change"). They are now absorbed
-    // as pause artifacts, end to end through the real controller and an LLM rewrite.
     @Test func pauseCommasAroundVerbatimAreCleanedEndToEnd() async {
         let m = mode(id: "polish", liveEdits: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -361,8 +334,6 @@ struct DictationPipelineWiringTests {
         #expect(!sent.contains("new line"))
     }
 
-    // "insert clipboard contents" pastes the clipboard as a distinct CLIP token: the LLM sees only the
-    // token (the pasted content never crosses the cloud boundary) and the original is restored after.
     @Test func clipboardContentsAreTokenizedBeforeTheLLMThenRestored() async {
         let m = mode(id: "polish", liveEdits: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -378,8 +349,6 @@ struct DictationPipelineWiringTests {
         #expect(out.clipboardReadCount == 1)
     }
 
-    // Privacy: an ordinary live-edits dictation never reads the clipboard — only when the command is
-    // actually spoken. Guards against silently capturing clipboard text on every dictation.
     @Test func clipboardNotReadWhenCommandAbsent() async {
         let out = await run(
             transcript: "just some ordinary dictated words",
@@ -388,8 +357,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "just some ordinary dictated words")
     }
 
-    // A clipboard phrase deliberately wrapped in a verbatim span is literal, so it must not read the
-    // clipboard either (the read gate runs after verbatim tokenization).
     @Test func clipboardNotReadWhenPhraseIsInsideVerbatim() async {
         let out = await run(
             transcript: "begin verbatim insert clipboard contents end verbatim",
@@ -398,8 +365,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "insert clipboard contents")
     }
 
-    // Regression for the Whisper-Small report: it puts a spurious period before the paste
-    // ("directory. <paste>"), which the bracketed-fold removes end-to-end.
     @Test func whisperPeriodBeforePasteIsFoldedEndToEnd() async {
         let out = await run(
             transcript: "Read through the directory. insert clipboard contents. Decide whether this makes any sense.",
@@ -407,8 +372,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "Read through the directory agent_notes/foo/. Decide whether this makes any sense.")
     }
 
-    // Two clipboard pastes in one AI-rewrite dictation get DISTINCT tokens, so a faithful rewrite is
-    // accepted by the exactly-once gate instead of being rejected into a local fallback.
     @Test func twoClipboardCommandsSurviveTheGateInARewrite() async {
         let m = mode(id: "polish", liveEdits: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -419,10 +382,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "first PASTE then PASTE")
     }
 
-    // "scratch that" deleting a verbatim span before the LLM removes an already-issued VERB token from
-    // the sent text. That token is not required by the gate (it never reached the model, so nothing
-    // leaked and nothing needs to come back), so even a token-dropping LLM is accepted — no spurious
-    // fallback for an intentional scratch.
     @Test func scratchedVerbatimTokenIsNotRequiredByTheGate() async {
         let m = mode(id: "polish", liveEdits: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -433,9 +392,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "completely rewritten with no tokens")
     }
 
-    // Same for a scratched clipboard command: the clipboard is read (the read gate runs before live
-    // edits) but the CLIP token is scratched out before the LLM, so it is not required, the pasted value
-    // never crosses the boundary, and the rewrite is accepted rather than forced into a local fallback.
     @Test func scratchedClipboardTokenIsNotRequiredByTheGate() async {
         let m = mode(id: "polish", liveEdits: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -466,7 +422,6 @@ struct DictationPipelineWiringTests {
         #expect(out.insertedText == "\n\tHello.\n")
     }
 
-    // No-LLM mode: the paste is literal, no rewrite involved.
     @Test func clipboardContentsInsertLiterallyOnTheNoLLMPath() async {
         let m = mode(id: "plain", liveEdits: true)
         let out = await run(
@@ -474,7 +429,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "paste it https://ex.com/a?b=c done")
     }
 
-    // Empty clipboard leaves the spoken phrase as literal text rather than silently deleting it.
     @Test func emptyClipboardLeavesThePhraseLiteral() async {
         let m = mode(id: "plain", liveEdits: true)
         let out = await run(transcript: "insert clipboard contents", mode: m, clipboard: nil)
@@ -587,10 +541,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "ChargeBee")
     }
 
-    // Privacy mode forces every context channel off, even when the mode explicitly opts into all of
-    // them (design.md §4.4 — the redacted transcript is the only user content that may leave). The
-    // controller must consult effectiveContext, not the raw opt-in: if it used the raw flags the app
-    // child would render (appName falls back to the bundle id) and the categories would be recorded.
     @Test func privacyModeForcesAllContextOffEvenWhenTheModeRequestsIt() async {
         let m = mode(id: "secure", privacy: true, connectionId: "c",
                      context: .init(app: true, precedingText: true))
@@ -604,10 +554,6 @@ struct DictationPipelineWiringTests {
         #expect(out.historyEntry?.redaction == true)
     }
 
-    // The persisted history prompt mirrors the cloud payload: it carries the ⟦SN:…⟧ tokens, never the
-    // original redacted span (design.md §4.7). The wiring test proves the LIVE payload is tokenized;
-    // this proves the DURABLE record on disk is too — a regression here writes plaintext secrets to
-    // history.
     @Test func historyPromptStoresTokensNotTheOriginalRedactedSpan() async {
         let m = mode(id: "secure", privacy: true, connectionId: "c")
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -620,9 +566,6 @@ struct DictationPipelineWiringTests {
         #expect(!prompt.contains("alice@example.com"))
     }
 
-    // Phase B (design.md §4.3): a trailing trigger phrase re-routes to that mode's pipeline AND is
-    // stripped from the transcript. Proven through the real controller: only the routed mode carries a
-    // replacement, so the rule firing proves the route, and the absent phrase proves the strip.
     @Test func phaseBTriggerPhraseRoutesToThatModeAndStripsThePhrase() async {
         let plain = mode(id: "plain")
         let coder = mode(id: "coder",
@@ -646,11 +589,7 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "my password is hunter2")
     }
 
-    // ── Edit-in-place (selection mode) ─────────────────────────────────────────────────────────────
 
-    // A selection rewrite that fails the gate (dropped tokens → local fallback) must ABORT and leave the
-    // selection untouched — a destructive op never clobbers the user's text on failure (design.md §4.3).
-    // The redactable span in the selection forces a token to be issued, which DropTokenLLM drops.
     @Test func selectionRewriteFailureAbortsWithoutTouchingTheSelection() async {
         let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -664,8 +603,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastHUD == .error(message: "Rewrite failed — selection unchanged", action: nil))
     }
 
-    // Edit-in-place happy path: the selection is the content, the spoken words are the instruction, and
-    // the rewritten selection is what gets inserted.
     @Test func selectionRewriteInsertsTheRewrittenSelection() async {
         let m = mode(id: "edit", connectionId: "c", source: .selection)
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -678,8 +615,6 @@ struct DictationPipelineWiringTests {
         #expect(out.outcome == .inserted)
     }
 
-    // Privacy mode on a selection mode must also redact the spoken instruction (design.md §4.4),
-    // not just the captured selection.
     @Test func selectionInstructionIsRedactedBeforeReachingTheLLM() async {
         let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -693,8 +628,6 @@ struct DictationPipelineWiringTests {
         #expect(sent.contains("⟦SN:REDACT:"))
     }
 
-    // An instruction token must also be USABLE, not just kept off the wire — a faithful edit that
-    // inserts the redacted value must pass the gate and restore to the real value.
     @Test func selectionInstructionTokenCanBeUsedInTheRewrittenSelection() async {
         let m = mode(id: "edit", privacy: true, connectionId: "c", source: .selection)
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -707,7 +640,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "Dear jane@example.com,")
     }
 
-    // ── paste_key / copy_key / clipboard_sync: the mode's chords must reach BOTH clipboard keystrokes ──
 
     @Test func defaultModeInsertsWithTheNativeCommandChord() async {
         let out = await run(transcript: "hello", mode: mode(id: "plain"))
@@ -734,8 +666,6 @@ struct DictationPipelineWiringTests {
         #expect(await seen.value == (try? ClipboardKeystroke(parsing: "control+shift+c")))
     }
 
-    // An RDP client translates ⌘V for the remote session, so the chord stays native while the clipboard
-    // needs foreign semantics — the two must be settable independently.
     @Test func clipboardSyncReachesTheInsertPathWithoutChangingTheChord() async {
         var m = mode(id: "rdp")
         m.clipboardSync = true
@@ -751,21 +681,17 @@ struct DictationPipelineWiringTests {
         #expect(out.insertedPaste?.settleMs == 250)
     }
 
-    // The delay is global settings, not mode config: it reaches every mode's paste unchanged.
     @Test func theClipboardRestoreDelayReachesTheInsertPath() async {
         let out = await run(transcript: "hello", mode: mode(id: "plain"),
                             updateSettingsAfterStart: { $0.insertion.clipboardRestoreMs = 1200 })
         #expect(out.insertedPaste?.restoreMs == 1200)
     }
 
-    // The default has to reach the insert path too — settings that say nothing must not land on 0 ms and
-    // restore out from under the target's read.
     @Test func unconfiguredSettingsCarryTheDefaultRestoreDelay() async {
         let out = await run(transcript: "hello", mode: mode(id: "plain"))
         #expect(out.insertedPaste?.restoreMs == Settings.Insertion.defaultClipboardRestoreMs)
     }
 
-    // The consumption-driven restore is opt-in; nothing downstream may see it on by default.
     @Test func consumptionDrivenRestoreIsOffUnlessTheFlagIsSet() async {
         let out = await run(transcript: "hello", mode: mode(id: "plain"))
         #expect(out.insertedPaste?.restoreOnRead == false)
@@ -777,7 +703,6 @@ struct DictationPipelineWiringTests {
         #expect(out.insertedPaste?.restoreOnRead == true)
     }
 
-    // ── Insertion-end features: trailing + submit (the just-added work) ────────────────────────────
 
     @Test func trailingSpaceRidesInsideTheInsert() async {
         let out = await run(transcript: "hello", mode: mode(id: "t", trailing: .space))
@@ -796,8 +721,6 @@ struct DictationPipelineWiringTests {
         #expect(out.submits == [.cmdReturn])
     }
 
-    // The load-bearing guarantee: a submit keystroke must NEVER fire on a clipboard fallback (the text
-    // did not reach the target, so a synthesized Return would hit whatever is now focused).
     @Test func submitNeverFiresOnClipboardFallback() async {
         let out = await run(transcript: "send it", mode: mode(id: "s", submit: .return), accessibility: false)
         #expect(out.outcome == .copied)
@@ -805,8 +728,6 @@ struct DictationPipelineWiringTests {
         #expect(out.insertedText == "send it")       // trailing/insert still happens; only submit is gated
     }
 
-    // A silently failed paste (writeScratchVerified false) must NOT claim "inserted", and the submit
-    // Return must not fire (it would send a stale draft in a chat app).
     @Test func silentPasteFailureReportsFailedAndSkipsSubmit() async {
         let out = await run(
             transcript: "send it", modes: [mode(id: "s", submit: .return)], defaultModeId: "s",
@@ -816,8 +737,6 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == "send it")   // still recoverable via "Paste last dictation"
     }
 
-    // Focus moved between the paste-settle window and the submit — the frontmost app at submit time
-    // differs from the captured target, so the Return is skipped (it would fire into the wrong app).
     @Test func submitSkippedWhenFocusMovesBeforeReturn() async {
         let focus = FocusSequence()   // "test.bundle" for capture + finishInsertion, then "other.bundle"
         let out = await run(
@@ -827,8 +746,6 @@ struct DictationPipelineWiringTests {
         #expect(out.submits.isEmpty)
     }
 
-    // Same-app window switch: bundle id is unchanged but the focused window moved, so the submit must
-    // still be suppressed (the insertion focus guard, reused here, compares window id too).
     @Test func submitSkippedWhenWindowSwitchesWithinSameApp() async {
         let focus = WindowSwitchSequence()
         let out = await run(
@@ -845,16 +762,12 @@ struct DictationPipelineWiringTests {
         #expect(out.submits == [.return])
     }
 
-    // Modes round-trip through TOML on disk (the harness writes via ModeStore + reads via ConfigCache),
-    // so this also proves trailing/submit decode/encode.
     @Test func trailingAndSubmitRoundTripThroughTOML() async {
         let out = await run(transcript: "x", mode: mode(id: "rt", trailing: .newline, submit: .shiftReturn))
         #expect(out.insertedText == "x\n")
         #expect(out.submits == [.shiftReturn])
     }
 
-    // ── Real local LLM (oMLX). Opt-in: RUN_OMLX_TEST=1 OMLX_KEY=… [OMLX_MODEL=…] OMLX_BASE=… ────────
-    // Exercises the REAL HTTPLLMClient → local model → validation gate → restore → insert path.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["RUN_OMLX_TEST"] == "1"))
     func realLocalModelRewriteCompletesThroughTheGate() async {
         let env = ProcessInfo.processInfo.environment

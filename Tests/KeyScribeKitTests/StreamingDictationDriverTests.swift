@@ -39,7 +39,6 @@ private final class FakeSession: StreamingSpeechSession, @unchecked Sendable {
 
 private struct FakeSessionError: Error {}
 
-// Monotonic clock controllable for the fell-behind-trip test.
 private final class StepClock: @unchecked Sendable {
     private let lock = NSLock()
     private var t: Double
@@ -48,7 +47,6 @@ private final class StepClock: @unchecked Sendable {
     func read() -> Double { lock.withLock { t } }
 }
 
-// Counts sessions built, so "no session for a short clip" is provable.
 private final class SessionFactory: @unchecked Sendable {
     private let lock = NSLock()
     private var _built = 0
@@ -147,7 +145,6 @@ private actor BlockingAppendSession: StreamingSpeechSession {
 }
 
 struct StreamingDictationDriverTests {
-    // 16 kHz, 4 s threshold → 64000 frames.
     private func policy(threshold: Double = 4) -> StreamingStartPolicy {
         StreamingStartPolicy(thresholdSeconds: threshold, sampleRate: 16000)
     }
@@ -164,7 +161,6 @@ struct StreamingDictationDriverTests {
     @Test func crossingThresholdCreatesSessionReplaysThenStreamsLive() async {
         let factory = SessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
-        // Three 2 s chunks: session opens on the second (4 s crossed), replays chunks 1+2, streams chunk 3.
         for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
         let outcome = await driver.finish()
         #expect(factory.built == 1)
@@ -183,7 +179,6 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
-    // Never retries after the one failed build attempt.
     @Test func sessionBuildFailureFallsBackToBatch() async {
         let factory = SessionFactory(fails: true)
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -193,7 +188,6 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
-    // Real triggers: ESC or an over-limit abort.
     @Test func cancelClosesSessionWithoutFinalizing() async {
         let factory = SessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -213,8 +207,6 @@ struct StreamingDictationDriverTests {
         #expect(factory.last?.appendedFrames == framesBefore)
     }
 
-    // The controller fires cancel() on every terminal path to guarantee the engine lock releases;
-    // this must be a no-op, never re-touching an already-finalized session.
     @Test func cancelAfterFinishIsANoOp() async {
         let factory = SessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -225,8 +217,6 @@ struct StreamingDictationDriverTests {
         #expect(factory.last?.cancelled == false)
     }
 
-    // A replayed chunk that fails to append (e.g. a resample error) cancels the just-opened
-    // session to release the engine lock.
     @Test func appendThrowDuringReplayCancelsSessionAndFallsBackToBatch() async {
         let factory = SessionFactory(make: { FakeSession(appendThrowsAt: 1) })
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -238,9 +228,6 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
-    // cancel() (ESC near the 4 s threshold) landing WHILE makeSession is still building must close the
-    // session that build ultimately hands back — never store it. A stored-but-never-closed session leaks
-    // the engine's exclusive lock (SerializedEngine) and wedges the engine until relaunch.
     @Test func cancelDuringSessionBuildClosesTheOpenedSessionAndDoesNotLeakIt() async {
         let factory = GatedSessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -255,7 +242,6 @@ struct StreamingDictationDriverTests {
         #expect(await driver.finish() == .fallBackToBatch)
     }
 
-    // Same window as above, but for a backpressure drop instead of cancel.
     @Test func backpressureDropDuringSessionBuildClosesTheOpenedSession() async {
         let factory = GatedSessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -269,9 +255,6 @@ struct StreamingDictationDriverTests {
         #expect(await driver.finish() == .fallBackToBatch)
     }
 
-    // cancel() landing WHILE a replay append is suspended must reach and close the just-opened session
-    // (not hit the session==nil path), unblocking a slow/wedged replay append rather than leaving it
-    // stranded until the append returns on its own.
     @Test func cancelDuringReplayAppendClosesTheOpeningSession() async {
         let session = BlockingAppendSession()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: { session })
@@ -286,7 +269,6 @@ struct StreamingDictationDriverTests {
     }
 
     @Test func appendThrowOnLiveChunkCancelsSessionAndFallsBackToBatch() async {
-        // 4 s threshold, 2 s chunks: replay = 2 appends (calls 1,2); the live 3rd chunk is call 3.
         let factory = SessionFactory(make: { FakeSession(appendThrowsAt: 3) })
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
         for _ in 0..<3 { await driver.ingest([Float](repeating: 0.1, count: 32000)) }
@@ -296,9 +278,6 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
-    // A wedged/slow session.append that can't drain the controller's feed buffer piles chunks up past
-    // the cap; the resulting backpressure drop must trip the same fall-back-to-batch as the time-based
-    // fell-behind check, so memory stays bounded and batch re-transcribes the committed audio in full.
     @Test func backpressureDropTripsToBatch() async {
         let factory = SessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -312,8 +291,6 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
-    // A backpressure drop before any session opened (a slow makeSession/replay stalling the feed while
-    // still under the threshold) still routes the dictation to batch and opens no session.
     @Test func backpressureDropBeforeSessionOpenFallsBackToBatch() async {
         let factory = SessionFactory()
         let driver = StreamingDictationDriver(policy: policy(), makeSession: factory.callable())
@@ -326,8 +303,6 @@ struct StreamingDictationDriverTests {
         #expect(outcome == .fallBackToBatch)
     }
 
-    // When a session can't keep up with real time (wall-clock outruns ingested audio by > maxLagSeconds),
-    // the driver stops streaming and degrades to batch rather than piling up unbounded memory.
     @Test func fallsBehindRealtimeTripsToBatch() async {
         let clock = StepClock()
         let factory = SessionFactory()

@@ -37,15 +37,12 @@ struct RewriteServiceTests {
     @Test func fallsBackToLocalWhenClientThrows() async {
         let svc = RewriteService(client: FakeClient([.failure(FakeError())]), permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
-        // fallback carries a reason so a failure is diagnosable, not silent.
         guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
         #expect(text == "hello")
         #expect(reason != nil)
         #expect(received == nil)
     }
 
-    // A build whose catalog refuses this connection must not reach the endpoint at all — the fallback
-    // stands in for the rewrite and the reason lands in history like any other abandoned rewrite.
     @Test func keepsLocalTextWithoutCallingAServiceTheCatalogRefuses() async {
         let client = FakeClient([.success("Hello.")])
         let svc = RewriteService(client: client, permits: { _ in false })
@@ -94,9 +91,6 @@ struct RewriteServiceTests {
         #expect(await client.calls == 2)   // initial call + exactly one stricter retry
     }
 
-    // A token issued but swallowed upstream (a verbatim token captured inside a redaction span) never
-    // reaches the sent content, so the gate must not require it back — otherwise every privacy+verbatim
-    // dictation would retry and fall back needlessly.
     @Test func passesWhenIssuedTokenAbsentFromSentContent() async {
         let client = FakeClient([.success("The ⟦SN:REDACT:1⟧ please.")])
         let svc = RewriteService(client: client, permits: { _ in true })
@@ -123,8 +117,6 @@ struct RewriteServiceTests {
         #expect(await client.calls == 1)
     }
 
-    // A token minted for the instruction (not in payload.text, so never `required`) must still be
-    // usable in the output via `allowedTokens`.
     @Test func allowedTokenFromInstructionMayAppearInOutput() async {
         let client = FakeClient([.success("send to ⟦SN:REDACT:2⟧")])
         let svc = RewriteService(client: client, permits: { _ in true })

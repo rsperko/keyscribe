@@ -67,21 +67,19 @@ you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
 
 ### Which speech model should I pick?
 
-Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint:
+Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint.
+**Settings ▸ Speech Models** lists what is available, with each model's size and language coverage.
+What to look for:
 
-- **Best accuracy:** Qwen3-ASR 1.7B.
-- **Best default for English:** Parakeet TDT v3 — the shipped default: fast, low-memory, and it
-  also covers 25 languages if you switch languages.
-- **Best punctuation without AI rewrite:** Parakeet Unified 0.6B (English) — the only Parakeet
-  that writes punctuation and capitalization for you, and the most accurate one on English.
-  English only.
-- **Best multilingual balance:** Qwen3-ASR 0.6B.
-- **Best in noisy places:** Whisper Large v3 Turbo or Qwen3-ASR 1.7B. Both barely lose accuracy
-  with real background noise; the smaller models lose noticeably more, and Apple Speech degrades
-  the most. If you often dictate in cafés, open offices, or transit, pick one of these two.
-- **Smaller / faster footprint:** Whisper Small (English), Parakeet TDT-CTC 110M.
-- Apple Speech, Whisper Large v3 Turbo, and Parakeet TDT v3 are also available. Apple Speech appears
-  only on macOS 26+.
+- **Best accuracy:** the largest multilingual model in the list.
+- **Good default:** the one already selected — fast, low-memory, and multilingual. Start there and
+  switch only if something specific pushes you off it.
+- **Punctuation without AI rewrite:** one English-only model writes punctuation and capitalization
+  for you; its description says so.
+- **Smallest / fastest footprint:** the compact English-only models.
+- **Noisy places:** the large models barely lose accuracy with real background noise; the small ones
+  lose noticeably more, and the built-in system model degrades the most. If you often dictate in
+  cafés, open offices, or transit, pick a large one.
 
 You can switch engines anytime in **Settings ▸ Speech Models**; each is downloaded on first use.
 Alongside your first speech model, KeyScribe also fetches a tiny (~1 MB) voice-activity-detection model
@@ -92,10 +90,9 @@ off your machine.
 ### Can I dictate in a language other than English?
 
 Yes, with one setup step. Pick a speech model that covers your language in **Settings ▸ Speech
-Models** — Whisper Large v3 Turbo (99 languages), Qwen3-ASR 0.6B/1.7B (52), and Apple Speech (20) are
-the broad ones. The English-only models (Whisper Small, Parakeet TDT-CTC 110M, Parakeet Unified)
-and Parakeet TDT v3, whose 25 languages are all European, will not transcribe
-outside their coverage.
+Models** — each model lists the languages it handles, and several are broadly multilingual. The
+English-only models will not transcribe anything else, and the default model's languages are all
+European, so check the list before assuming your language is covered.
 
 If you also use AI rewrite, it writes back in whatever language you dictated — there is no language
 setting to find, and you can switch languages between dictations without changing anything. Mixing
@@ -108,9 +105,9 @@ the result in English."
 
 Add them to the **Dictionary** (Settings ▸ Vocabulary, or the on-the-spot correction shortcut). When
 you say a term you added, KeyScribe prefers your spelling — the way you wrote it. That works on every
-speech model: two of the model families (Whisper and Qwen3) also steer recognition toward your terms
-as they listen, and on every model KeyScribe fixes near-misses right after transcription. The fix
-sticks for next time.
+speech model: some models can also steer recognition toward your terms as they listen — **Settings ▸
+Speech Models** says which — and on every model KeyScribe fixes near-misses right after
+transcription. The fix sticks for next time.
 
 If a word comes out correctly spelled but mis-capitalized or punctuated (say `pi` → `Pi.`), see
 [Tips & Tricks](docs/tips.md) for how to pin the exact output.
@@ -157,12 +154,16 @@ or delete any of it. Removing that folder resets KeyScribe.
 
 ### Which permissions does KeyScribe need, and why?
 
-Two, granted in **System Settings ▸ Privacy & Security**:
+Two for everyday dictation, granted in **System Settings ▸ Privacy & Security**:
 
 - **Microphone** — on-device speech recognition.
 - **Accessibility** — detecting a modifier-key trigger (Fn / right-⌥ / right-⌘) and inserting
   transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E is registered as a system
   hotkey and needs no permission.)
+
+A third, **Automation**, is requested only if you set up a mode that routes by website — that is the
+one case where KeyScribe has to ask your browser for the current URL. Modes that do not route by
+website never trigger the request.
 
 KeyScribe does **not** request Input Monitoring.
 
@@ -191,11 +192,12 @@ text, clipboard contents, or API keys. The same report is available from a termi
 `inserted` means KeyScribe posted the paste keystroke, not that the app accepted it. See
 [Troubleshooting](docs/troubleshooting.md) for how to tell the cases apart and what to change.
 
-### Background audio cuts out while I dictate.
+### Background audio changes while I dictate.
 
-With **Settings ▸ General ▸ Mute system audio while dictating** on, playback is muted for the
-duration. If start/end sounds are also on, the mute begins *after* the start sound so the cue isn't
-swallowed — turn the start sound off if you want an instant mute.
+**Settings ▸ General ▸ Other audio** decides what happens to other playback while you dictate:
+**Quiet** (the default) turns it down, **Mute** silences it, and **Unchanged** leaves it alone. If
+start/end sounds are also on, the change begins *after* the start sound so the cue isn't swallowed —
+turn the start sound off if you want it to take effect instantly.
 
 ### macOS re-prompts for permissions on every rebuild (building from source).
 

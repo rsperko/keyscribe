@@ -56,10 +56,8 @@ final class DictationController {
 
     private final class DictationIdentity: Sendable {}
 
-    // Loss recorded synchronously on the reporting thread: the main-actor hop is queued behind the
-    // executor, which gives mutual exclusion, not FIFO (SE-0306), so a main-actor-only flag can read false
-    // while a loss is already known. One flag per dictation, never keyed by identity — ObjectIdentifier is
-    // unique only for an object's lifetime, and 49 of 50 sequential identities measured the same address.
+    // Record loss before the main-actor hop, which can arrive after insertion checks. Keep the flag per
+    // session; object identifiers can reuse addresses after a session ends.
     final class CaptureLossFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var lost = false
@@ -69,7 +67,6 @@ final class DictationController {
 
     private struct DictationSession {
         let identity = DictationIdentity()
-        // This dictation's own loss flag; see CaptureLossFlag on why it is per-session and not keyed.
         let captureLoss = CaptureLossFlag()
         var building: DictationRecord
         var pressedAt = DispatchTime.now()
@@ -101,9 +98,7 @@ final class DictationController {
         var modeReady = false
         var snapshotReady = false
         var preconnectFired = false
-        // Set when the secure-aware full snapshot could not confirm the captured target (it moved before the
-        // probe finished). We can't prove the field is safe, so the dictation is forced fully local — no
-        // cloud rewrite, no context, no history — exactly like a confirmed secure field (KS-01).
+        // An unconfirmed target is treated as secure: no cloud rewrite, context, or history.
         var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
     }
@@ -144,13 +139,10 @@ final class DictationController {
     private var lastUsedAt: Double = 0
     private var lastRetentionSweepDay: String?
     private(set) var lastResult: String?
-    // Set when capture reports its route gone for good. Deliberately NOT gated on `.recording`: the user can
-    // release before the loss lands, so the flag has to survive into transcription and is read where
-    // insertion begins. Cleared at each capture start.
+    // Survives release into transcription because route loss can arrive after release.
     private var captureTruncated = false
 
-    // The authoritative "this dictation's microphone died" read. Prefers the synchronous flag so a queued
-    // main-actor hop cannot hide a loss from a check that runs before it lands.
+    // The synchronous flag catches loss before the main-actor handler runs.
     private var captureWasLost: Bool {
         captureTruncated || (session?.captureLoss.isLost ?? false)
     }
@@ -205,7 +197,6 @@ final class DictationController {
 
     private var pendingIdleWork: [() -> Void] = []
 
-    // Main-actor confined, so the parked closures need no synchronization.
     func runWhenIdle(_ work: @escaping () -> Void) {
         guard isBusy else { work(); return }
         pendingIdleWork.append(work)
@@ -279,23 +270,16 @@ final class DictationController {
         installMemoryPressureHandler()
     }
 
-    // Records the loss rather than acting on it: the take may already be transcribing, and a half-finished
-    // pipeline is torn down at the insertion boundary where every terminal converges. Ignored when no
-    // dictation is in flight so a late report cannot touch the next one.
+    // Record loss here; every terminal handles it at insertion. A stale report must not affect a successor.
     private func handleCaptureLost(identity: DictationIdentity?) {
-        // Identity, not just "some dictation is running": the hop can land after this take ended and a
-        // successor began, and marking THAT one truncated would discard a perfectly good recording.
         guard let identity, let current = session?.identity, current === identity else { return }
         captureTruncated = true
         switch machine.state {
         case .recording:
-            // No further audio can arrive, so don't sit in `.recording` waiting for a release a
-            // tap-to-toggle user may never give. Commit now: the prefix still transcribes, and every
-            // terminal downstream honours `captureTruncated`.
+            // A tap-to-toggle user may never release; commit the available prefix now.
             handleCommit()
         case .arming:
-            // handleCommit treats `.arming` as an early release and cancels bring-up silently, which would
-            // hide the failure entirely. Nothing was recorded, so report the microphone directly.
+            // Arming has no audio; report the microphone failure instead of a silent early release.
             cancelBeforeCaptureStarted()
             finishTruncatedCapture(transcript: "")
         default:
@@ -480,10 +464,7 @@ final class DictationController {
                 self.audio.refreshBinding()
             }
         } else if EvictionPolicy.releasesWarmCaptureOnIdle(mode: mode) {
-            // Balanced disposes the warm unit at the idle checkpoint. After a dictation the engine's
-            // idle-eviction task does that; but a prewarm OUTSIDE a dictation (launch, wake, a switch into
-            // Balanced) has no such task, so schedule the release here — else the mic stays held until the
-            // first dictation, a leak for a tier chosen to coexist with mic-sensitive apps.
+            // Prewarming outside dictation has no eviction task, so schedule a release for Balanced mode.
             let after = settings.stt.evictionIdleSeconds.map(Double.init) ?? EvictionPolicy.defaultIdleSeconds
             captureRefreshTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(after))
@@ -499,7 +480,6 @@ final class DictationController {
         }
     }
 
-    // ui_design.md §6. Only when idle — never stomp an in-flight dictation's state.
     func acknowledgeNextMode() {
         guard !isBusy, let name = nextModeOverrideName else { return }
         hud?.render(.ready(mode: name))
@@ -507,23 +487,17 @@ final class DictationController {
     }
 
     func handleStart(triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap) {
-        // The trigger is a bare modifier event tap with no notion of session state; a key used to
-        // wake/unlock the machine can fire it while the login window still owns the console. Never arm
-        // the mic while the screen is locked — no audio may be captured while locked, ever. Silent
-        // return, same shape as the beginArming guard.
+        // A wake key can reach the tap while the login window still owns the console.
         guard !isSessionLocked() else { return }
-        guard machine.beginArming() else { noteBusyPress(); return }
+        guard machine.beginArming() else { playBusyPressCue(); return }
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
         idleEvictionTask?.cancel()
         captureRefreshTask?.cancel()
-        // Every captured*/activeMode/task/building field below writes through this session; it is
-        // dropped as a unit at the terminal (releaseCapturedPlan).
         session = DictationSession(building: DictationRecord(modeName: currentModeName))
-        // A denied mic does NOT throw — it captures silence, surfacing as a misleading "No speech
-        // detected". Catch the real cause up front and point the user at the fix.
+        // A denied mic captures silence without throwing, so diagnose permission before starting.
         if micStatus() == .denied {
             finishError("Microphone access is off", action: .openMicrophoneSettings)
             return
@@ -533,10 +507,7 @@ final class DictationController {
             finishError("The selected speech model is not installed", action: .openSpeechModels)
             return
         }
-        // This synchronous AX probe stays first: the secure-field flag must be captured at press, before
-        // anything can act on the field (two AX calls, each capped by a 100 ms messaging timeout, so ~200 ms
-        // worst case against an unresponsive target; sub-ms normally). Measured rather than assumed, so the
-        // cost is visible if a target regresses.
+        // Capture secure-field state at press before any asynchronous work can change the target.
         let snapshotStart = DispatchTime.now()
         capturedSnapshot = pressSnapshot()
         Log.context.debug("press snapshot=\(self.elapsedMs(since: snapshotStart), privacy: .public)ms")
@@ -548,15 +519,7 @@ final class DictationController {
         session?.capturedRecognitionBias = settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
-        // Resolve the Phase-A mode. The only slow step is the browser-URL probe (synchronous AppleScript)
-        // for URL-routed modes; without one, resolve inline so the mode is known before capture. When a
-        // probe is needed, resolve off-main so it never blocks the cue/capture/HUD — the mode is only
-        // needed at commit (transcribeAndInsert awaits this).
-        //
-        // Only modes the frontmost bundle cannot already rule out get a vote here. Ask over every mode and
-        // ONE url-scoped mode anywhere in the config forces every press onto the deferred path, so a mode
-        // scoped to a browser AND a site pays a mic + start cue + cancel in apps its bundle alone settles —
-        // and the no-mode verdict, which is silent before beginCapture, arrives after it instead.
+        // Probe only eligible modes: URL and window lookups can defer the decision past capture.
         let probeCandidates = self.probeCandidates()
         if ModeResolver.requiresURLContext(probeCandidates)
             || ModeResolver.requiresWindowTitleContext(probeCandidates) {
@@ -564,7 +527,7 @@ final class DictationController {
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
                 guard !Task.isCancelled else { return }
-                // Only while recording: a late resolution must not paint anything before admission opens.
+                // A late resolution must not show the HUD before admission opens.
                 if self.machine.state == .recording {
                     self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel), latchedTrigger: self.latchedTriggerName))
                 }
@@ -572,16 +535,11 @@ final class DictationController {
         } else {
             session?.modeResolveTask = nil
             applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
-            // Resolving inline can conclude that nothing can serve this press, which terminates the
-            // dictation in place. Nothing has been claimed yet, so bail before the mic and cue below —
-            // otherwise the abort is silent but we still open the microphone.
+            // An unclaimed press must exit before opening the mic or playing the cue.
             guard machine.state == .arming else { return }
         }
 
-        // The press shows NOTHING. The HUD is the visual half of the go-signal, so it may not appear until
-        // admission actually opens (beginCapture) — a panel here invites speech into the bring-up + cue window
-        // and every word of it is discarded. Rendering .hidden rather than nothing clears a previous
-        // dictation's lingering error/complete HUD and drops key focus, so the keyboard works while arming.
+        // Keep the HUD hidden until audio admission opens; showing it earlier invites discarded speech.
         hud?.render(.hidden)
 
         warmActiveEngine()
@@ -591,27 +549,19 @@ final class DictationController {
         beginCapture()
     }
 
-    // A trigger pressed while the previous dictation is still transcribing or inserting is refused by
-    // beginArming and records nothing. Announced, that is "too early"; silent, it reads as a malfunction —
-    // the previous dictation's text can still be landing (a typed insert posts over several events), so it
-    // appears while the user is speaking and looks like the app inserted the wrong dictation. Sound only: the
-    // HUD belongs to the dictation still running, and rendering over it would drop the key focus ESC needs.
-    // Nothing is played while the mic is live, where the cue would land in the take.
-    private func noteBusyPress() {
+    private func playBusyPressCue() {
         guard !machine.isCapturingAudio else { return }
         log.notice("trigger ignored — \(String(describing: self.machine.state), privacy: .public) still in flight")
         effects.alert(settings.duringDictation, cue: .error)
     }
 
     private func adoptFullSnapshot() {
-        // No async adoption: the press snapshot is already authoritative (incl. its secure-field flag).
         guard shouldAdoptFullSnapshot else { markSnapshotReady(); return }
         let capturedBundle = capturedSnapshot?.bundleId
         let capturedPid = capturedSnapshot?.pid
         session?.snapshotAdoptionTask?.cancel()
         session?.snapshotAdoptionTask = Task { @MainActor [weak self] in
             await Task.yield()
-            // Clean bail: the dictation was torn down or superseded while we yielded — nothing to protect.
             guard let self, !Task.isCancelled,
                   self.capturedSnapshot?.bundleId == capturedBundle,
                   self.capturedSnapshot?.pid == capturedPid else { return }
@@ -1252,8 +1202,8 @@ final class DictationController {
                 return TranscribeResult(text: first)
             }
             // "No output, some sound" — the engine returned nothing on a take VAD heard speech in, after
-            // provable leading silence. Parakeet TDT v3 collapses to all-blank on exactly that shape
-            // (agent_notes/parakeet_silent_bug_recovery), but nothing here is engine-specific: the gate is the
+            // provable leading silence. Parakeet TDT v3 collapses to all-blank on exactly that shape,
+            // but nothing here is engine-specific: the gate is the
             // declared sample capability, never an identity. A nonempty engine annotation (`[BLANK_AUDIO]`) is
             // the engine asserting blank audio, not a silent failure — it is nonempty here, so it never
             // retries. Streamed transcripts never reach this call.

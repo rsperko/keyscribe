@@ -97,20 +97,17 @@ struct AudioSampleRingTests {
     }
 
     @Test func commonPeriodKeepsTheBaselineGeometryUnchanged() {
-        // A ~10 ms IO buffer must yield EXACTLY today's fixed geometry — common case byte-for-byte unchanged.
         #expect(geo(frames: 512, rate: 48_000) == .init(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8))
         #expect(geo(frames: 1024, rate: 44_100) == .init(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8))
     }
 
     @Test func smallIOBufferGrowsSlotsToKeepHeadroomAboveAPollTick() {
-        // 32 frames/48 kHz is 0.67 ms/period — 8 slots (~5.3 ms) is at/below the 5 ms poll tick, so widen.
         let g = geo(frames: 32, rate: 48_000)
         #expect(g.slotCount > 8)
         #expect(headroom(g, frames: 32, rate: 48_000) >= 0.03)
     }
 
     @Test func headroomAlwaysClearsThePollTickAcrossPeriodSizes() {
-        // The M4 correctness property: every plausible period holds more than one writer poll interval.
         for frames in [16, 24, 32, 48, 64, 96, 128, 256, 480, 512, 1024, 2048, 4096] {
             for rate in [16_000.0, 44_100.0, 48_000.0, 96_000.0] {
                 let g = geo(frames: frames, rate: rate)
@@ -120,7 +117,6 @@ struct AudioSampleRingTests {
     }
 
     @Test func slotCountIsBoundedByMaxSlots() {
-        // An extreme 16-frame buffer wants ~90 slots; the cap bounds memory yet still clears the poll tick.
         let g = geo(frames: 16, rate: 96_000)
         #expect(g.slotCount == 64)
         #expect(headroom(g, frames: 16, rate: 96_000) > poll)
@@ -131,7 +127,6 @@ struct AudioSampleRingTests {
     }
 
     @Test func perSlotAndChannelCapacityAreNeverShrunkBelowBaseline() {
-        // Shrinking either would newly drop a large or multichannel buffer the fixed ring accepts today.
         for frames in [16, 32, 512, 4096] {
             let g = geo(frames: frames, rate: 48_000)
             #expect(g.maxFramesPerSlot == 8192)
@@ -140,7 +135,6 @@ struct AudioSampleRingTests {
     }
 
     @Test func degenerateDeviceReadsFallBackToTheBaseline() {
-        // 0 frames / 0 rate must not divide-by-zero or under-provision.
         #expect(geo(frames: 0, rate: 48_000).slotCount >= 8)
         #expect(geo(frames: 512, rate: 0) == .init(slotCount: 8, maxFramesPerSlot: 8192, maxChannels: 8))
     }

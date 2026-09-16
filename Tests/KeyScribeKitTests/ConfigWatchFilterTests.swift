@@ -39,7 +39,6 @@ final class ConfigWatchFilterTests: XCTestCase {
     }
 
     func testPrivatePrefixNormalization() {
-        // FSEvents delivers /private/var/... while the support URL is /var/...
         let tmpBase = "/var/folders/ab/xyz/T/keyscribe-test"
         XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
             changedPath: "/private" + tmpBase + "/history/2026-07-01.jsonl", supportDir: tmpBase))

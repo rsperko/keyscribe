@@ -2,8 +2,6 @@ import Testing
 @testable import KeyScribeKit
 
 struct HistoryComparisonTests {
-    // A cloud-rewritten entry whose local pipeline was a no-op is stored with transformed == nil; the
-    // breakdown must still appear, with the rewrite step showing heard -> result.
     @Test func cloudEntryWithNoLocalChangeStillShowsRewriteBreakdown() {
         let stages = HistoryComparison.stages(cloudInvolved: true)
         #expect(stages == [.heardInserted, .onThisMac, .rewrite])

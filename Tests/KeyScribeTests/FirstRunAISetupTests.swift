@@ -38,8 +38,6 @@ struct FirstRunAISetupTests {
             apiKey: apiKey, tokenCommand: tokenCommand, wireAPI: .auto)
     }
 
-    // The permission relaunch used to drop the user into the permissions-only flow, whose Done ended
-    // onboarding early. Resuming lands on the trial, whose modifier tap the relaunch revives.
     @Test func resumeOnboardingStartsAtTheTrialStep() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-resume-\(UUID().uuidString)", isDirectory: true)
@@ -112,9 +110,6 @@ struct FirstRunAISetupTests {
         #expect(try #require(modes.first { $0.id == "custom" }).aiRewrite?.connection == "")
     }
 
-    // A headline starter already wired to a live connection and deliberately turned OFF must be left exactly
-    // as the user has it — connecting a new service must not re-enable it or repoint it. An unlinked headline
-    // is still wired up as usual.
     @Test func connectingLeavesADeliberatelyDisabledLinkedHeadlineAlone() async throws {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
@@ -145,9 +140,6 @@ struct FirstRunAISetupTests {
         #expect(editSelection.aiRewrite?.connection == newConnection.id)
     }
 
-    // Fresh install (templates-only: no starter files, just _direct.toml): connecting the first service
-    // materializes the two headline modes as enabled seeds wired to the new connection, and touches no other
-    // starter. Their seed identity survives so the playground and future seed updates keep finding them.
     @Test func connectingOnAFreshProfileMaterializesHeadlineModesAsSeeds() async throws {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)

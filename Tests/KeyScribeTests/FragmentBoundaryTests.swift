@@ -18,8 +18,6 @@ struct FragmentBoundaryTests {
         return (ModesSettingsModel(repository: repository), support)
     }
 
-    // The destructive one: closeFragment removes the file it builds from `id`, so a traversing id would
-    // delete an unrelated Markdown file outside the fragments directory.
     @Test func closingAnEmptyFragmentCannotDeleteOutsideTheFragmentsDirectory() throws {
         let (model, support) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -37,7 +35,6 @@ struct FragmentBoundaryTests {
     // observe, so any test would pass with or without the boundary. Its id validation is pinned directly on
     // FragmentStore.url(forID:in:) in FragmentStoreTests, which revealFragment now routes through.
 
-    // The boundary must not break ordinary ids — an in-directory fragment still deletes on close.
     @Test func closingAnEmptyOrdinaryFragmentStillDeletesItsFile() throws {
         let (model, support) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

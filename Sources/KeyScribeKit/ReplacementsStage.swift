@@ -64,7 +64,7 @@ public struct ReplacementsStage: PipelineStage {
             // a case-sensitive pattern would silently miss. Opt back in with an inline `(?-i)`.
             guard ReplacementSafety.isSafe(rule.heard), let re = compile(rule.heard) else { return .dropped }
             // Recognize a terminal `<CR>` submit marker after escape expansion; an unescaped
-            // non-terminal marker is invalid config and drops the rule (agent_notes/replace_with_return).
+            // non-terminal marker is invalid config and drops the rule.
             guard let parsed = ReturnSuffix.parse(ReplacementEscapes.expandTemplate(rule.replace)) else {
                 return .droppedForReturnMarker
             }

@@ -15,8 +15,7 @@ exercises (empty = a plain-accuracy clip).
 ## Corpus design — tiers
 
 The corpus is stratified and scaled by **word count**, not clip count (WER precision needs error
-*events*, which need words). Record in tiers; each tier is a superset you grow into. See
-`agent_notes/evaluate_stt_models_with_corpus/keyscribe-stt-corpus.md` for the full rationale.
+*events*, which need words). Record in tiers; each tier is a superset you grow into.
 
 | Tier | Purpose | When it's enough |
 |------|---------|------------------|

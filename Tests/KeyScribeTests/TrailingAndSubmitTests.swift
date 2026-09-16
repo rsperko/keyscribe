@@ -90,8 +90,6 @@ struct TrailingAndSubmitTests {
         #expect(out.insertedText == "hello")
     }
 
-    // A command-only utterance ends in a control char, so the trailing SPACE separator is suppressed —
-    // the insert is a clean "\n" (next dictation at column 0), not "\n ".
     @Test func trailingSpaceSuppressedAfterNewlineCommand() async {
         let out = await run(transcript: "insert new line", trailing: .space, submit: .none, liveEdits: true)
         #expect(out.insertedText == "\n")
@@ -123,8 +121,6 @@ struct TrailingAndSubmitTests {
         #expect(out.awaitSettle == true)
     }
 
-    // Clipboard fallback means the text never reached the target — a synthesized Return would hit
-    // whatever app is focused, so submit must not fire.
     @Test func submitDoesNotFireOnClipboardFallback() async {
         let out = await run(transcript: "hello", trailing: .space, submit: .return, accessibilityGranted: false)
         #expect(out.submits.isEmpty)

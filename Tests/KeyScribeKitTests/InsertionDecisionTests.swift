@@ -41,7 +41,6 @@ struct InsertionDecisionTests {
         #expect(decideInsertion(captured: a, current: a) == .insert)
     }
 
-    // A pid known on one side but missing on the other is indeterminate identity — divert, don't insert.
     @Test func pidLostOnOneSideFallsBack() {
         let withPid = TargetSnapshot(bundleId: "com.apple.mail", pid: 100)
         let noPid = TargetSnapshot(bundleId: "com.apple.mail", pid: nil)
@@ -49,7 +48,6 @@ struct InsertionDecisionTests {
         #expect(decideInsertion(captured: noPid, current: withPid) == .clipboardFallback(reason: .appChanged))
     }
 
-    // Two pid-less snapshots (no pid tracking at all) still fall through to the bundle/window checks.
     @Test func bothPidsUnknownInsertsBestEffort() {
         #expect(decideInsertion(captured: mail, current: mail) == .insert)
     }

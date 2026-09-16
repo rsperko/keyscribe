@@ -103,7 +103,6 @@ struct TextComparisonTests {
         let left = (0..<2200).map { "word\($0)" }.joined(separator: " ")
         let right = left + " extra"
         let comparison = TextComparison.compare(left, right)
-        // Above the diff cap: one plain span per side, no per-word LCS, but the difference is still flagged.
         #expect(comparison.left.map(\.kind) == [.unchanged])
         #expect(comparison.right.map(\.kind) == [.unchanged])
         #expect(comparison.left.map(\.text).joined() == left)

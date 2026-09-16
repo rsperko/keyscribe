@@ -115,5 +115,3 @@ no quota.
 - **Repeat noise:** Gemini flakes ~1 attempt in 20 even at temperature 0 (observed: "Postgress"
   kept once under two variants whose prompts were baseline-identical). Use `--repeat 2`+ and treat
   any ±1-case delta that doesn't reproduce across models as noise.
-
-Findings and ship/no-ship calls per variant land in `agent_notes/prompt_eval/`.

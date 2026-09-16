@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribeApp
 
 struct AccessibilityIDTests {
-    // Catalog ids are a lowercase dot-path, e.g. "settings.sidebar.speechModels".
     static let pattern = "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
 
     @Test func everyCatalogIdentifierMatchesTheNamingPattern() {
@@ -45,8 +44,6 @@ struct AccessibilityIDTests {
             == "settings.vocabulary.composer.useInstead.editor")
     }
 
-    // Dynamic ids splice a domain id (e.g. "_direct") into a fixed prefix, so the lowercase dot-path
-    // pattern doesn't apply to the whole id — only the fixed prefix and no-spaces rule are checked here.
     @Test func dynamicRowIdentifiersKeepTheirFixedPrefixAndHaveNoSpaces() {
         let cases: [(String, String)] = [
             (AccessibilityID.Settings.Speech.primaryAction("apple"), "settings.speech.row."),

@@ -60,7 +60,6 @@ struct ModeLoadTests {
         #expect(first.failures.isEmpty)
         #expect(FileManager.default.fileExists(atPath: lkg.appendingPathComponent("alpha.toml").path))
 
-        // The launch case: no in-memory prior, so recovery must come from the disk LKG stashed above.
         try "broken = [".write(
             to: dir.appendingPathComponent("alpha.toml"), atomically: true, encoding: .utf8)
         let second = ModeStore.load(in: dir, previous: [], lkgDir: lkg)
@@ -82,7 +81,6 @@ struct ModeLoadTests {
         try ModeStore.write(renamed, to: dir)
         _ = ModeStore.load(in: dir, previous: [], lkgDir: lkg)
 
-        // A malformed file must not overwrite the disk LKG, so recovery yields the latest good copy.
         try "broken = [".write(
             to: dir.appendingPathComponent("alpha.toml"), atomically: true, encoding: .utf8)
         let recovered = ModeStore.load(in: dir, previous: [], lkgDir: lkg)

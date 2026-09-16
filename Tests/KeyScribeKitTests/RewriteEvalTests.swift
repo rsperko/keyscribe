@@ -106,7 +106,6 @@ struct RewriteEvalScoringTests {
     }
 
     @Test func cleanOutputPassesNoPreamble() {
-        // "Here" as a sentence opener is legitimate prose — only preamble phrasing fails.
         #expect(verdict(.noPreamble, in: results("Here at the office, all is well.", makeCase())) == true)
     }
 

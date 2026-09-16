@@ -30,8 +30,6 @@ struct ClipboardTokenizerTests {
         #expect(out == "paste this ⟦SN:CLIP:1⟧.")
     }
 
-    // Tokens are per-site, not deduped — two paste sites get distinct tokens so the post-LLM
-    // exactly-once validation gate doesn't reject a faithful rewrite of both.
     @Test func multipleOccurrencesGetDistinctTokens() {
         let (out, t) = tokenize("insert clipboard contents and insert clipboard contents", clipboard: "X")
         #expect(out == "⟦SN:CLIP:1⟧ and ⟦SN:CLIP:2⟧")
@@ -44,14 +42,11 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "the value X done")
     }
 
-    // Not bracketed on both sides, so not folded — the paste may start a new sentence.
     @Test func precedingPeriodIsPreserved() {
         let (out, _) = tokenize("done. insert clipboard contents", clipboard: "X")
         #expect(out == "done. ⟦SN:CLIP:1⟧")
     }
 
-    // Whisper's spurious period before the paste ("directory. <paste>. decide") is dropped and
-    // relocated to the true clause end.
     @Test func bracketedTerminatorFolds() {
         let (out, t) = tokenize("read the directory. insert clipboard contents. decide", clipboard: "agent_notes/foo/")
         #expect(out == "read the directory ⟦SN:CLIP:1⟧. decide")
@@ -75,8 +70,6 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "it's broken. P fixes it")
     }
 
-    // Parakeet TDT v3 sometimes punctuates mid-phrase ("insert clipboard, contents"); the command
-    // must still fire (verified against real audio via the commands-check corpus).
     @Test func internalCommaFromSTTStillFires() {
         let (out, t) = tokenize("read the directory insert clipboard, contents now", clipboard: "P")
         #expect(out == "read the directory ⟦SN:CLIP:1⟧ now")
@@ -92,14 +85,12 @@ struct ClipboardTokenizerTests {
         #expect(out == expected)
     }
 
-    // Unlike pause commas, attached brackets are not STT artifacts to strip — no space is inserted.
     @Test func attachedBracketsStayAttached() {
         let (out, t) = tokenize("(insert clipboard contents)", clipboard: "X")
         #expect(out == "(⟦SN:CLIP:1⟧)")
         #expect(t.restore(out) == "(X)")
     }
 
-    // A colon after the command is intended punctuation, not a pause comma to strip.
     @Test func followingColonIsPreserved() {
         let (out, _) = tokenize("insert clipboard contents: rest", clipboard: "X")
         #expect(out == "⟦SN:CLIP:1⟧: rest")
@@ -111,7 +102,6 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "a X b X c")
     }
 
-    // An empty clipboard means no match runs at all, so pause commas are left untouched too.
     @Test func emptyClipboardLeavesEverythingLiteral() {
         let (out, _) = tokenize("value, insert clipboard contents, done", clipboard: "")
         #expect(out == "value, insert clipboard contents, done")
@@ -142,14 +132,11 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == clip)
     }
 
-    // A clipboard that literally contains the fence sentinel must not hang restore (Tokenizer.restore
-    // caps its passes) — pathological input, but must degrade safely rather than loop.
     @Test func clipboardContainingTheSentinelIsInsertedAsIsWithoutHanging() {
         let (out, t) = tokenize("insert clipboard contents", clipboard: "⟦SN:CLIP:1⟧")
         #expect(t.restore(out) == "⟦SN:CLIP:1⟧")
     }
 
-    // `mentions` gates the host's clipboard read so an ordinary dictation never touches it.
     @Test(arguments: [
         "please insert clipboard contents now",
         "insert the clipboard contents",
@@ -170,7 +157,6 @@ struct ClipboardTokenizerTests {
         #expect(!ClipboardTokenizer.mentions(text))
     }
 
-    // The clipboard provider is only invoked lazily, when the command phrase is actually present.
     @Test func providerNotReadWhenCommandAbsent() {
         var reads = 0
         let t = Tokenizer()

@@ -51,7 +51,6 @@ struct ConfigCacheErrorTests {
         cache.invalidate()
         #expect(cache.replacements == ReplacementsSet())
 
-        // Fallback on a subsequent malformed write must be the post-delete empty state, not the stale rules.
         try "schema_version = 1\n[[rules]\nheard = \"x\"".write(
             to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
         cache.invalidate()

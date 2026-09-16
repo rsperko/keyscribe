@@ -79,12 +79,21 @@ The AI rewrite did not complete, so your local transcript was kept. The `fallbac
 row gives the reason. Note that this outcome replaces `inserted`/`copied`, so it does not tell you
 how the text was delivered — if the text also never appeared, treat it as the `inserted` case above.
 
+### `failed`
+
+KeyScribe tried to deliver the text and nothing landed. The transcript is not lost: it is still the
+most recent result, so **Paste last dictation** — from the menu bar, or its shortcut — will insert
+it. Unlike `local_fallback`, this row carries no reason line. If it keeps happening in one app, try
+the `insertion` alternatives described under `inserted` above.
+
 ### No row at all
 
-Two cases produce a dictation with no history record. If the focused field was a password field,
-delivery is diverted to the clipboard and nothing is written to history by design. Otherwise, check
-whether history is switched off, or whether the mode has `exclude_from_history` set — the
-`--diagnose` output says which.
+Three cases produce a dictation with no history record. If nothing was said, or the microphone heard
+nothing, the dictation stops before any text exists — nothing is transcribed, inserted, or written to
+history, and the HUD tells you so at the time. If the focused field was a password field, delivery is
+diverted to the clipboard and nothing is written to history by design. Otherwise, check whether
+history is switched off, or whether the mode has `exclude_from_history` set — the `--diagnose` output
+says which.
 
 ## Nothing happens when I press the trigger
 

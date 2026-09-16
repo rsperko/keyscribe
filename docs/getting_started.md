@@ -108,8 +108,9 @@ Where to add them:
 4. History > select the misheard words > Create Replacement or Add to Dictionary.
 
 The dictionary works on every speech model: KeyScribe fixes near-misses right after transcription on
-all of them, and the Whisper and Qwen3 models additionally steer recognition toward your terms as
-they listen. Either way, when you say a term you added, KeyScribe prefers your spelling.
+all of them, and some models can additionally steer recognition toward your terms as they listen —
+Settings > Speech Models says which. Either way, when you say a term you added, KeyScribe prefers
+your spelling.
 
 Checkpoint: after adding a term, dictate the same phrase in a new sentence. If the engine still gets
 it wrong the same way, use a replacement instead of adding more dictionary entries.
@@ -216,15 +217,15 @@ Set it up:
 
 1. Open Settings > AI Services.
 2. Add a service.
-3. Choose OpenAI, Anthropic, Gemini, or an OpenAI-compatible endpoint.
+3. Pick your provider from the list, or Custom (OpenAI-compatible) for anything else.
 4. Save the key in Keychain, use no auth for a local endpoint, or use a token command for a
    short-lived bearer token.
 5. Test the connection.
 
 During first run, connecting an AI service enables the starter rewrite modes: Cleanup and Edit
-Selection. Email, Message, Markdown, Shell, and AI Prompt stay available as examples you can enable
-when you want them. If you add a service later, open Settings > Modes and enable the modes you
-actually want.
+Selection. The other starter modes ship switched off as examples you can turn on whenever you want
+them. Open Settings > Modes to see them all and enable the ones you actually want, or use Add Mode…
+to start a new one.
 
 Checkpoint: try **Cleanup** first. It is the smallest rewrite: same meaning, cleaner text.
 
@@ -239,7 +240,7 @@ Modes are normal editable files. A mode decides:
 - What context, if any, is sent with the AI request.
 - How the final text is inserted.
 
-Good first modes:
+A few good first modes:
 
 | Mode | Use it for | Needs AI service |
 |---|---|---|
@@ -418,7 +419,7 @@ Open menu bar > History to:
 - Inspect privacy and processing details.
 - See the exact prompt sent for AI rewrite when one exists.
 - Create a replacement or dictionary entry from selected text.
-- Export filtered history as Markdown, text, or JSON.
+- Export filtered history as Markdown, plain text, or JSON.
 - Delete individual entries.
 
 History is enabled by default with local retention. Change retention in Settings > General, or turn on

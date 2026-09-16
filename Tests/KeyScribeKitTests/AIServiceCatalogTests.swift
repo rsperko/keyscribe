@@ -12,14 +12,11 @@ struct AIServiceCatalogTests {
         ])
     }
 
-    // The swap contract lets a lineup leave Custom out of the picker; the public one offers it.
     @Test func defaultPresetIsOpenAIAndCustomIsInThePicker() {
         #expect(AIServiceCatalog.defaultPreset.id == "openai")
         #expect(AIServiceCatalog.all.contains(AIServiceCatalog.custom))
     }
 
-    // The public build offers every service it lists and restricts nothing; a downstream catalog narrows
-    // this to its own endpoints and replaces this expectation.
     @Test func publicCatalogPermitsEveryConnection() {
         #expect(AIServiceCatalog.permits(Connection(
             id: "c", name: "c", provider: .openaiCompatible, model: "m", keyRef: "k",

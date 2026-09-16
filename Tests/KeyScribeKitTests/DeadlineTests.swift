@@ -23,10 +23,6 @@ struct DeadlineTests {
         #expect(value == "done")
     }
 
-    // The invariant is ORDERING — the deadline throws while the operation is still outstanding — not a
-    // wall-clock budget. A `< 1.0 s` bound against a 0.1 s deadline was a proxy for that and flaked under
-    // CPU contention: a late-but-correct throw failed the test. The operation blocks a real 2 s on its own
-    // thread, so `finished` staying false proves the throw beat it however loaded the machine is.
     @Test func throwsAtDeadlineEvenWhenOperationIgnoresCancellation() async {
         let finished = Latch()
         await #expect(throws: DeadlineExceeded.self) {
@@ -39,9 +35,6 @@ struct DeadlineTests {
         #expect(!finished.isSet)
     }
 
-    // The same late-landing operation a tight deadline discards is adopted under a widened one.
-    // Mirrors AudioCapture.start() waiting bringUpTimeout + bringUpGrace: without the grace window, a
-    // stale-binding re-realization at ~2s surfaced as a spurious "Could not start the microphone".
     @Test func adoptsALateResultWithinTheGraceWindowButNotPastIt() async throws {
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.15) {
@@ -63,9 +56,6 @@ struct DeadlineTests {
         }
     }
 
-    // A cancelled timer must not still resume DeadlineExceeded. With the old `try?`-swallowed sleep,
-    // timeout.cancel() woke the sleep and the timer resumed failure anyway, racing the success and
-    // intermittently reporting a spurious timeout. Run many close-races to catch the race reliably.
     @Test func cancelledTimerNeverResumesFailureAfterFastSuccess() async throws {
         for _ in 0..<200 {
             let value = try await runWithDeadline(seconds: 0.05) {
@@ -76,8 +66,6 @@ struct DeadlineTests {
         }
     }
 
-    // onSettled fires when the operation truly finishes, not at the deadline — even on a wedged op the
-    // deadline already abandoned, so it lands after the DeadlineExceeded throw.
     @Test func onSettledFiresAfterAbandonedOperationTrulyFinishes() async {
         let settled = Counter()
         await #expect(throws: DeadlineExceeded.self) {
@@ -113,8 +101,6 @@ struct SingleFlightDeadlineTests {
         #expect(value == "done")
     }
 
-    // While a non-cooperative op is abandoned-but-alive (deadline fired, work still running), a second
-    // run must be rejected with Busy rather than starting a concurrent transcribe.
     @Test func secondRunWhileFirstIsWedgedThrowsBusy() async {
         let gate = SingleFlightDeadline()
         let concurrent = Counter()
@@ -173,15 +159,10 @@ struct SingleFlightDeadlineTests {
         }
     }
 
-    // A cancel landing before the gate is entered must not launch the operation: the transcribe/finalize
-    // op runs as an unstructured task holding the engine lock until it truly settles, so starting one for
-    // an already-cancelled dictation would hold the gate Busy against the next dictation and delete a
-    // fresh WAV. run() bails with CancellationError before setting inFlight, so the closure never runs.
     @Test func aCancelledCallerNeverEntersTheGate() async {
         let gate = SingleFlightDeadline()
         let ran = Counter()
         let t = Task {
-            // Wait for cancellation before entering the gate, else the closure could race ahead of cancel().
             while !Task.isCancelled { await Task.yield() }
             return try await gate.run(seconds: 5) {
                 await ran.bump()

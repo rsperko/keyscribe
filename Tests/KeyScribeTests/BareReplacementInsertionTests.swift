@@ -90,8 +90,6 @@ struct BareReplacementInsertionTests {
         #expect(await run(transcript: "slash dog", rules: slashWord) == "/dog")
     }
 
-    // STT capitalizes and punctuates ("Slash dog."); case-insensitive-by-default regex must still
-    // match and clamp bare, not fall through to "Slash Dog. ".
     @Test func capitalizedSTTStillClampsBare() async {
         #expect(await run(transcript: "Slash dog.", rules: slashWord) == "/dog")
     }

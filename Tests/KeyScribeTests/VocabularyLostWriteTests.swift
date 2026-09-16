@@ -55,8 +55,6 @@ struct VocabularyLostWriteTests {
             == "This mode-only replacement will be removed. This cannot be undone.")
     }
 
-    // Removing a DIFFERENT word in the pane must not resurrect the pane's stale in-memory list and drop
-    // a term the global Add-to-Vocabulary hotkey wrote concurrently through ConfigRepository.
     @Test func dictionaryRemovePreservesAWordAddedConcurrentlyOnDisk() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -182,8 +180,6 @@ struct VocabularyLostWriteTests {
         #expect(updated.dictionary.words == ["Postgres", "Kubernetes"])
     }
 
-    // A subsequent editor control toggle full-file-writes the whole mode, and must not resurrect the
-    // pane's stale draft and drop a term the Add-to-Vocabulary hotkey routed in concurrently.
     @Test func modeEditorControlEditPreservesAVocabTermAddedConcurrentlyOnDisk() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -225,8 +221,6 @@ struct VocabularyLostWriteTests {
         #expect(updated.replacements.rules == [.init(heard: "cube cuddle", replace: "kubectl", regex: false)])
     }
 
-    // Mirrors the FSEvents reload path (AppDelegate.reloadConfig calls notifyExternalChange) for an
-    // edit made outside the app while the Vocabulary pane is open.
     @Test func externalEditNotificationRefreshesPaneModels() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

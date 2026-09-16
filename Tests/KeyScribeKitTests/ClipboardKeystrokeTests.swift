@@ -20,9 +20,6 @@ struct ClipboardKeystrokeTests {
         #expect(try ClipboardKeystroke(parsing: " CTRL + Y ").modifiers == [.control])
     }
 
-    // ⌘ marks a chord the focused macOS app handles itself. A chord without it is aimed at a target that
-    // forwards raw keystrokes — a VM guest, a remote session — which is what decides both how the chord is
-    // posted and what the clipboard defaults to.
     @Test(arguments: [
         ("command+v", false),
         ("command+shift+v", false),
@@ -34,7 +31,6 @@ struct ClipboardKeystrokeTests {
         #expect(try ClipboardKeystroke(parsing: key).isForeignTarget == foreign)
     }
 
-    // The grammar also describes triggers, which have no clipboard meaning — a paste key must be a chord.
     @Test(arguments: ["fn", "hyper", "right_option", "mouse3"])
     func rejectsATriggerOnlyDescriptor(_ key: String) {
         #expect(throws: ClipboardKeystrokeError.notAChord(key)) { try ClipboardKeystroke(parsing: key) }

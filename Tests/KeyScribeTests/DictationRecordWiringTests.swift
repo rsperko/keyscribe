@@ -36,7 +36,6 @@ struct DictationRecordWiringTests {
         func evict() async {}
     }
 
-    // Echoes the <content> block verbatim so issued tokens survive the validation gate.
     private struct EchoLLM: LLMClient {
         func complete(system: String, user: String, connection: Connection) async throws -> String {
             guard let start = user.range(of: "<content>\n"),
@@ -91,7 +90,6 @@ struct DictationRecordWiringTests {
         return m
     }
 
-    // Must populate even with persistent history off — guards against gating it on history.enabled.
     @Test func lastRecordPopulatedWithHistoryDisabled() async {
         let record = await run(transcript: "hello world", mode: mode(id: "plain"), historyEnabled: false)
         #expect(record != nil)
@@ -104,8 +102,6 @@ struct DictationRecordWiringTests {
         #expect(record?.cloudInvolved == false)
     }
 
-    // Redaction tokenizes the email before the cloud rewrite, so text SENT to the LLM must differ from
-    // the FINAL restored text; the token→original map itself must never enter the record.
     @Test func redactionBoundaryFingerprintsDifferAndOnlyCountIsKept() async {
         let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
         let record = await run(
@@ -130,15 +126,11 @@ struct DictationRecordWiringTests {
         #expect(record?.outcome == .noSpeech)
     }
 
-    // Whisper renders a silent clip as the literal string "[BLANK_AUDIO]"; must route to noSpeech
-    // end-to-end through the real controller instead of pasting the marker.
     @Test func wholeUtteranceAnnotationRoutesToNoSpeech() async {
         let record = await run(transcript: "[BLANK_AUDIO]", mode: mode(id: "plain"), historyEnabled: false)
         #expect(record?.outcome == .noSpeech)
     }
 
-    // modeId must be read while the session is alive and carried into the terminal tail — it survives
-    // releaseCapturedPlan nilling the session only if captured before that teardown runs.
     @Test func completionReportsTheModeIdThatProducedTheText() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-record-\(UUID().uuidString)", isDirectory: true)

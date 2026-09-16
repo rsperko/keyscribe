@@ -224,7 +224,6 @@ final class SpeechModelsModelTests: XCTestCase {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder, verifyResult: .passed)
 
-        // "parakeet" is installed but not the active engine ("parakeet-tdt-ctc-110m").
         model.test("parakeet")
         await settleTasks()
 
@@ -243,7 +242,6 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(recorder.evicted, [])
     }
 
-    // Files are kept (not removed) so the user can re-test cheaply or reinstall.
     func testFailedSelfTestQuarantinesButKeepsFiles() async throws {
         let recorder = Recorder()
         let model = makeModel(
@@ -285,7 +283,6 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertNotNil(try row("parakeet", in: model).errorText)
     }
 
-    // hasFailedModel feeds the Settings problem badge / menu-bar error dot.
     func testHasFailedModelHydratesFromPersistedFailure() {
         let recorder = Recorder()
         XCTAssertFalse(makeModel(recorder: recorder).hasFailedModel)
@@ -387,7 +384,6 @@ final class SpeechModelsModelTests: XCTestCase {
     func testASecondInstallIsRefusedWhileOneIsStillLoading() async throws {
         let recorder = Recorder()
         let gate = DownloadGate()
-        // defer: an assertion throwing below would otherwise strand the waiting thread forever.
         defer { gate.release() }
         let model = makeModel(recorder: recorder, download: { _, _ in try await gate.hold() })
 
@@ -414,7 +410,6 @@ final class SpeechModelsModelTests: XCTestCase {
         model.startDownload("qwen3-asr-1.7b")
         await settleTasks()
 
-        // Both attempts reached their partial-file cleanup, so the second one really started.
         XCTAssertEqual(recorder.removed, ["whisper", "qwen3-asr-1.7b"])
     }
 
@@ -461,7 +456,6 @@ final class SpeechModelsModelTests: XCTestCase {
         await settleTasks()
 
         XCTAssertEqual(recorder.removed, [])
-        // Pins the "before" state so the wait below observes a real transition rather than passing vacuously.
         XCTAssertNotNil(try row("whisper", in: model).downloadFraction)
 
         gate.release()
@@ -599,7 +593,7 @@ final class SpeechModelsModelTests: XCTestCase {
                 engineId: "whisper", installedIds: ["whisper"], failedIds: ["whisper"]))
     }
 
-    // The two list sections partition by residency (agent_notes/three_column_designs/option-1-rollout.md):
+    // The two list sections partition by residency:
     // every usable model, including the always-usable system-managed Apple engine, is On This Mac;
     // everything else is Available to Download. Exhaustive and disjoint.
     func testRowsPartitionByResidency() {
@@ -616,7 +610,6 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertTrue(model.availableRows.contains { $0.id == "whisper" })
     }
 
-    // A quarantined model keeps its maintenance recovery, so it is not treated as a pristine catalog preview.
     func testFailedModelStaysAvailableWithRecovery() {
         let recorder = Recorder()
         let model = makeModel(recorder: recorder, initialFailedIds: ["parakeet"])

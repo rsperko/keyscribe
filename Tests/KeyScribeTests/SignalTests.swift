@@ -14,7 +14,6 @@ struct SignalTests {
         func bump() { value += 1 }
     }
 
-    // `onExpiry` is @Sendable, so what it reports has to land somewhere shared.
     private final class Expiries: @unchecked Sendable {
         private let lock = NSLock()
         private var messages: [String] = []
@@ -24,8 +23,6 @@ struct SignalTests {
         var all: [String] { lock.withLock { messages } }
     }
 
-    // The regression this type exists for: the wait must END, and say why. The elapsed check proves it
-    // honored ITS OWN bound rather than some outer timeout quietly rescuing it.
     @Test func anUnfiredLatchFailsWithinItsBoundInsteadOfHanging() async {
         let expiries = Expiries()
         let clock = ContinuousClock()
@@ -37,8 +34,6 @@ struct SignalTests {
         #expect(expiries.all.count == 1)
     }
 
-    // The failure has to name the latch: "signal never fired" for one of six latches in a wiring test costs
-    // more time than it saves.
     @Test func theReportedExpiryNamesTheLatch() async {
         let expiries = Expiries()
 
@@ -58,8 +53,6 @@ struct SignalTests {
         #expect(expiries.all.isEmpty)
     }
 
-    // Fire-before-wait is the common ordering in these tests: the fake reaches its point of interest before
-    // the test gets around to awaiting it.
     @Test func firingBeforeTheWaitIsNotMissed() async {
         let expiries = Expiries()
         let signal = Signal("early", onExpiry: expiries.reporter)
@@ -73,8 +66,6 @@ struct SignalTests {
         #expect(expiries.all.isEmpty)
     }
 
-    // The copies this replaced kept ONE continuation property, so a second waiter overwrote the first —
-    // stranding it forever and leaking a checked continuation. Both waiters must be released by one fire.
     @Test func oneFireReleasesEveryWaiter() async {
         let expiries = Expiries()
         let signal = Signal("multi", onExpiry: expiries.reporter)
@@ -92,8 +83,6 @@ struct SignalTests {
         #expect(expiries.all.isEmpty)
     }
 
-    // Each wait owns its own deadline, so a short one expiring must not resume a longer one that is still
-    // legitimately waiting — one shared waiter table makes that a real hazard, not a hypothetical.
     @Test func aShortWaitExpiringDoesNotDisturbALongerOne() async {
         let expiries = Expiries()
         let signal = Signal("independent", onExpiry: expiries.reporter)

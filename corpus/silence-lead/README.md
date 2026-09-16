@@ -5,16 +5,13 @@ take, even though the take contains clear speech (proven on a real recording; tr
 silence recovered the full transcript). This sub-corpus keeps that failure watched: human stt clips
 with a fixed leading span prepended, replayed through the real engines.
 
-Plan and product contract for the recovery: `agent_notes/parakeet_silent_bug_recovery/README.md`.
-
 **The load-bearing clip is `lead_repro1.wav`** — a real failing capture (1.536 s: ~0.9 s quiet
 webcam lead-in + ~0.6 s speech). On it, Parakeet TDT v3 returns an empty transcript while every
 other engine returns text and VAD reads speech at maxP=1.000; trimming the leading silence recovers
 text. **It is local-only and NOT in a fresh checkout** — every WAV here is gitignored (only
 `manifest.json`, `gen.sh`, and this README are committed), and it cannot be regenerated, so nothing
 in this sub-corpus currently gives another machine a working reproduction of the failure. See
-"Known limitation" below. Full verification detail:
-`agent_notes/parakeet_silent_bug_recovery/README.md` §Validation.
+"Known limitation" below.
 
 Root cause is **unconfirmed**. NVIDIA-NeMo/Speech #15757 is related evidence — `parakeet-tdt-0.6b-v3`
 returning empty when 400 ms of silence is *appended* to speech, which the reporter (not a maintainer)

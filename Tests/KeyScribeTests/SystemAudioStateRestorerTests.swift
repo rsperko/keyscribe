@@ -59,11 +59,8 @@ struct SystemAudioStateRestorerTests {
         #expect(box.deleteCount == 1)
     }
 
-    // A pre-duck build could crash while output was muted; reconcile must unmute that device once on the
-    // upgraded build, even with no input override (the common shape).
     @Test func launchReconcileUnmutesLegacyOutputMuteMarker() throws {
         let recorder = AudioRestoreRecorder()
-        // Raw legacy bytes — a current build would never produce an `outputMute` key.
         let box = MarkerBox(Data(#"{"outputMute":{"deviceUID":"out","previousMute":0}}"#.utf8))
         let restorer = SystemAudioStateRestorer(
             readMarker: box.read,
@@ -98,7 +95,6 @@ struct SystemAudioStateRestorerTests {
         #expect(box.deleteCount == 1)
     }
 
-    // A half-written-by-a-crash marker must be left on disk, not cleared as if empty.
     @Test func reconcileLeavesUndecodableMarkerOnDisk() {
         let recorder = AudioRestoreRecorder()
         let box = MarkerBox(Data("garbage".utf8))

@@ -21,7 +21,6 @@ struct EvictionPolicyTests {
     }
 
     @Test func balancedRescheduleWhenStillActive() {
-        // Used again at 200, checked at 230: only 30s idle so far, reschedule the remaining 90.
         #expect(EvictionPolicy.onIdleCheck(mode: .balanced, lastUsedAt: 200, now: 230, idleSeconds: 120)
             == .scheduleIdleCheck(afterSeconds: 90))
     }
@@ -41,7 +40,6 @@ struct EvictionPolicyTests {
             == .scheduleIdleCheck(afterSeconds: EvictionPolicy.defaultIdleSeconds))
     }
 
-    // Idle mic warm-up is gated on the same Eviction tier as STT model residency.
     @Test func onlyFrugalSkipsPrewarm() {
         #expect(EvictionPolicy.shouldPrewarmCapture(mode: .fastest))
         #expect(EvictionPolicy.shouldPrewarmCapture(mode: .balanced))
@@ -62,7 +60,6 @@ struct EvictionPolicyTests {
 }
 
 struct EvictionCopyTests {
-    // Footer copy describes behavior, never a byte size.
     private func hasNoByteCount(_ s: String) -> Bool {
         !s.contains("KB") && !s.contains("MB") && !s.contains("GB")
     }

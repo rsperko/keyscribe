@@ -5,7 +5,6 @@ import Testing
 
 @MainActor
 struct AIServiceModelFetchTests {
-    // Creation is now a draft flow; seed the connection directly to exercise edit-existing via update/fetchModels.
     private func makeModel(
         listModels: @escaping (Connection, String?) async throws -> [String]
     ) -> (AIServiceSettingsModel, URL) {
@@ -29,8 +28,6 @@ struct AIServiceModelFetchTests {
         return conn
     }
 
-    // A fetch keeps only the connection id, so its result belongs to whatever endpoint it queried. If the
-    // base URL changes while the fetch is in flight, the stale list must not overwrite the new endpoint's model.
     @Test func staleFetchDoesNotOverwriteAModelAfterTheBaseURLChanged() async {
         let (model, support) = makeModel { _, _ in ["only-on-old-server"] }
         defer { try? FileManager.default.removeItem(at: support) }
@@ -50,8 +47,6 @@ struct AIServiceModelFetchTests {
         #expect(model.modelDiscoveryState(for: id) == nil)
     }
 
-    // A model-only edit doesn't change what the endpoint offers, so suggestions still publish — only
-    // auto-select is suppressed (covered above).
     @Test func modelEditPublishesSuggestionsButKeepsTheUsersModel() async {
         let (model, support) = makeModel { _, _ in ["server-a", "server-b"] }
         defer { try? FileManager.default.removeItem(at: support) }

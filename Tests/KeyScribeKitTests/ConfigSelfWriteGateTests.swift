@@ -32,7 +32,6 @@ struct ConfigSelfWriteGateTests {
         #expect(gate.shouldReload(current: .init(stamps: ["settings.toml": "12:9"])) == false)
     }
 
-    // A self-write to one file must not mask an external edit to another.
     @Test func externalEditToAnotherFileStillReloadsAfterASelfWrite() {
         let gate = ConfigSelfWriteGate(baseline: .init(stamps: ["settings.toml": "10:5", "modes/a.toml": "3:1"]))
         gate.recordSelfWrite(relativePath: "settings.toml", stamp: "12:9")

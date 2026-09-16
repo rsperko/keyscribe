@@ -11,7 +11,6 @@ struct ModelSelfTestTests {
     }
 
     @Test func passesAtThresholdWithOneWordDropped() {
-        // 2 of 3 distinctive words is enough — tolerates per-model wording differences.
         #expect(ModelSelfTest.passes(
             transcript: "the quick brown ox", expectedWords: expected, minMatches: 2))
     }

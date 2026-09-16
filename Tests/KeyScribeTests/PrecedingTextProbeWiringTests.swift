@@ -23,7 +23,6 @@ struct PrecedingTextProbeWiringTests {
         func stop() -> URL? { url }
     }
 
-    // Echoes the <content> block so the test can check the probed value landed in it.
     private actor EchoLLM: LLMClient {
         private(set) var lastUser = ""
         func complete(system: String, user: String, connection: Connection) async throws -> String {
@@ -111,7 +110,6 @@ struct PrecedingTextProbeWiringTests {
         controller.handleCommit()
         await controller.dictationTask?.value
 
-        // Reused, not re-run: still exactly one probe, carrying the captured pid AND window id.
         #expect(probe.pids == [4242])
         #expect(probe.windowIds == ["cg:99"])
         #expect(await llm.lastUser.contains("PRECEDINGCTX"))
@@ -132,7 +130,6 @@ struct PrecedingTextProbeWiringTests {
         #expect(probe.pids.isEmpty)
     }
 
-    // The async full snapshot's isSecureField neuters the mode before the probe gate opens.
     @Test func aSecureFieldSuppressesThePrecedingTextProbe() async {
         let probe = ProbeSpy()
         let controller = makeController(
@@ -149,9 +146,6 @@ struct PrecedingTextProbeWiringTests {
         controller.cancel()
     }
 
-    // Secure is sticky: the press snapshot saw a password field (same pid 5), but the async full snapshot
-    // read a non-secure field (focus moved within the process). The full read must NOT clear secure — the
-    // cloud LLM stays uncalled and the probe stays shut (KS-01).
     @Test func aStickySecurePressSnapshotSuppressesCloudEvenIfFullSnapshotIsNonSecure() async {
         let probe = ProbeSpy()
         let llm = CountingLLM()
@@ -171,9 +165,6 @@ struct PrecedingTextProbeWiringTests {
         #expect(probe.pids.isEmpty)
     }
 
-    // The target moved before the secure-aware snapshot could confirm it (press pid 1, full pid 2). We can't
-    // prove the field was safe, so the dictation is forced local — the cloud LLM must never be called, and
-    // the preceding-text probe must stay shut (KS-01).
     @Test func anUnconfirmedTargetSuppressesTheCloudRewrite() async {
         let probe = ProbeSpy()
         let llm = CountingLLM()

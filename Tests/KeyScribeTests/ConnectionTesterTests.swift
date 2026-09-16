@@ -43,7 +43,6 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
-// Serialized: these tests share the global StubURLProtocol.handler, so they can't run concurrently.
 @MainActor
 @Suite(.serialized)
 struct ConnectionTesterTests {
@@ -193,7 +192,6 @@ struct AIServiceTestStateTests {
         return dir
     }
 
-    // Creation is now a draft flow, so seed the connection directly rather than via create().
     @discardableResult
     private func seedConnection(_ model: AIServiceSettingsModel, in dir: URL, id: String = "new-ai-service") -> Connection {
         let conn = Connection(
@@ -275,7 +273,6 @@ struct AIServiceTestStateTests {
 
         model.test(deleted)
         model.delete(deleted)
-        // A fresh connection re-mints the freed id.
         seedConnection(model, in: dir)
         let recreated = model.selected!
         #expect(recreated.id == deleted.id)

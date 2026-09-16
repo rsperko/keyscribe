@@ -90,8 +90,6 @@ struct CaptureWarmthTierTests {
         #expect(audio.refreshes == 1)
     }
 
-    // Fastest has no pending idle-eviction checkpoint to dispose the unit, so downgrading tiers must do
-    // it explicitly — else the mic stays held after picking a mic-friendlier tier.
     @Test func switchingFromFastestToFrugalDisposesTheWarmUnit() {
         let audio = RecordingAudio()
         let controller = makeController(eviction: .fastest, audio: audio)
@@ -111,8 +109,6 @@ struct CaptureWarmthTierTests {
         #expect(audio.releases >= 1)
     }
 
-    // A launch-time Balanced prewarm has no post-dictation checkpoint, so release must be scheduled at
-    // prewarm time or the mic is held until the first dictation.
     @Test func balancedPrewarmDoesNotHoldTheMicIndefinitely() async {
         let audio = RecordingAudio()
         let controller = makeController(eviction: .balanced, idleSeconds: 0, audio: audio)

@@ -112,8 +112,6 @@ struct CaptureLostTruncationTests {
         #expect(terminalMessage(states)?.contains("microphone stopped") == true)
     }
 
-    // The release can win the race: by the time the loss lands the machine has already left .recording, so
-    // a state-gated flag would drop the signal and auto-insert a truncated take.
     @Test func aTakeLostAfterReleaseStillInsertsNothing() async {
         let (record, states, inserted, _) = await run(loseBeforeRelease: false)
 
@@ -122,16 +120,12 @@ struct CaptureLostTruncationTests {
         #expect(terminalMessage(states)?.contains("microphone stopped") == true)
     }
 
-    // Refusing to insert must not also destroy the words that WERE captured.
     @Test func theCapturedPrefixStaysRecoverable() async {
         let (_, _, _, lastResult) = await run(loseBeforeRelease: true)
 
         #expect(lastResult == "the prefix that was recorded")
     }
 
-    // The top-of-function check runs BEFORE `snapshotAsync`. A loss landing inside that suspension would
-    // otherwise be observed only after the text had already been put into the user's document, so the last
-    // gate has to sit after the final suspension point.
     @Test func aLossArrivingDuringTheInsertionSnapshotStillInsertsNothing() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-capture-lost-\(UUID().uuidString)", isDirectory: true)
@@ -166,7 +160,6 @@ struct CaptureLostTruncationTests {
         controller.setNextModeOverride(id: "plain")
         controller.handleStart()
         await controller.captureBringUpTask?.value
-        // Armed only now, so it cannot fire before the take reaches insertion.
         loseDuringSnapshot.run = { audio.loseCapture() }
         controller.handleCommit()
         await controller.dictationTask?.value
@@ -174,9 +167,6 @@ struct CaptureLostTruncationTests {
         #expect(inserted.count == 0)
     }
 
-    // A Return is the one action here that cannot be undone — it sends the message or submits the form. The
-    // focus check before it is another suspension, so the loss has to be re-read after it, not just at the
-    // top of finishInsertion.
     @Test func aLossArrivingDuringTheSubmitFocusCheckFiresNoReturn() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-capture-lost-\(UUID().uuidString)", isDirectory: true)
@@ -203,7 +193,6 @@ struct CaptureLostTruncationTests {
             submitKey: { _ in submits.record("return") },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             snapshotAsync: {
-                // Calls in order: commit secure probe, insertion snapshot, then the submit focus check.
                 loseDuringFocusCheck.fireOn(call: 3)
                 for _ in 0..<10 { await Task.yield() }
                 return TargetSnapshot(bundleId: "test.bundle")
@@ -220,10 +209,6 @@ struct CaptureLostTruncationTests {
         #expect(submits.count == 0)
     }
 
-    // The strict version of the guarantee: fire the loss and do NOT yield, so the queued @MainActor hop
-    // that sets the state flag has provably not run. Only a signal recorded SYNCHRONOUSLY at report time can
-    // be seen here — serial executors give mutual exclusion, not FIFO, so the hop is not guaranteed to land
-    // before actuation continues.
     @Test func aLossNotYetDeliveredToTheMainActorStillBlocksInsertion() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-capture-lost-\(UUID().uuidString)", isDirectory: true)
@@ -247,7 +232,6 @@ struct CaptureLostTruncationTests {
             insert: { _, _, _, text, _ in inserted.record(text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             snapshotAsync: {
-                // No yields: the loss is recorded and we return straight into the insertion path.
                 loseDuringSnapshot.fireOn(call: 2)
                 return TargetSnapshot(bundleId: "test.bundle")
             },
@@ -263,11 +247,6 @@ struct CaptureLostTruncationTests {
         #expect(inserted.count == 0)
     }
 
-    // The loss flag must belong to ONE dictation. An earlier version kept a single shared flag keyed by
-    // ObjectIdentifier of the owning identity — but ObjectIdentifier is unique only for an object's
-    // lifetime, and measured, 49 of 50 sequentially allocated identities reused the same address. A single
-    // lost capture would then have matched nearly every later dictation and refused to insert until
-    // relaunch. This drives several healthy dictations after a lost one.
     @Test func aLostCaptureDoesNotPoisonLaterDictations() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-capture-lost-\(UUID().uuidString)", isDirectory: true)
@@ -291,7 +270,6 @@ struct CaptureLostTruncationTests {
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
-        // One dictation that genuinely loses its capture.
         controller.setNextModeOverride(id: "plain")
         controller.handleStart()
         await controller.captureBringUpTask?.value
@@ -300,7 +278,6 @@ struct CaptureLostTruncationTests {
         await controller.dictationTask?.value
         #expect(inserted.count == 0)
 
-        // Then several healthy ones. Each allocates a fresh identity, very likely at the same address.
         for _ in 0..<5 {
             controller.setNextModeOverride(id: "plain")
             controller.handleStart()
@@ -329,8 +306,6 @@ struct CaptureLostTruncationTests {
         }
     }
 
-    // The delivery hop is asynchronous, so a loss belonging to dictation N can land after N ended and N+1
-    // began. It must not truncate N+1 — that would throw away a recording nothing was wrong with.
     @Test func aLossQueuedFromAnEarlierDictationDoesNotTruncateTheNextOne() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-capture-lost-\(UUID().uuidString)", isDirectory: true)
@@ -354,7 +329,6 @@ struct CaptureLostTruncationTests {
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
 
-        // Dictation N: runs to completion normally, but its handler is held back.
         controller.setNextModeOverride(id: "plain")
         controller.handleStart()
         await controller.captureBringUpTask?.value
@@ -362,7 +336,6 @@ struct CaptureLostTruncationTests {
         controller.handleCommit()
         await controller.dictationTask?.value
 
-        // Dictation N+1 begins, and only now does N's loss arrive.
         controller.setNextModeOverride(id: "plain")
         controller.handleStart()
         await controller.captureBringUpTask?.value

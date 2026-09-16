@@ -35,10 +35,21 @@ This file is the entry point. Read the design docs before writing code — they 
   Implementation details, schemas, benchmark methodology, prompt internals, architecture, and
   contributor-only rationale belong under `docs/reference/` or `docs/development/`, with links from
   user docs only when they help an advanced reader continue.
-- **Distribution docs are feature-facing.** `agent_notes/distribution_docs/feature-inventory.md`
-  is a user-visible feature inventory: keep what users can do, why they care, and relative marketing
-  value. Do not turn it into implementation notes, verification details, benchmark harness notes, or
-  GIF/storyboard scripts; those belong in development/reference docs or the distribution GIF scripts.
+- **Docs state rules, never tallies.** Nothing in this file, `docs/`, `README.md`, `FAQ.md`,
+  `PRIVACY.md`, or `BUILD.md` may pin a count or an exhaustive list of code entities: no "ships 8
+  models across 4 engine kinds", no "the only two engines that bias", no "exactly three network
+  situations", no roster that has to match an `allCases`, a catalog, an enum, or a directory listing.
+  **Name the source of truth and let the reader read it** (`SpeechModelCatalog.all`, `Log.swift`,
+  `SettingsDestination`, `ls corpus/`), or state the rule the tally was standing in for. Naming a
+  symbol that exists is fine; counting them is not. A tally is owned by nobody, goes stale the first
+  time the code changes, and goes stale **silently** — every instance found so far had already drifted
+  between two commits, including a "single flag" claim in a file whose own next section documents the
+  second flag.
+  **Measurements are the exception and they stay.** WER, latency, RTF, thresholds, budgets, memory,
+  and "measured over N clips / N layouts" are evidence, not inventory — deleting the number destroys
+  the claim. Anchor them in time instead ("as measured, `<date>`"). Apply the same care to a claim
+  that something is *unbuilt*: building it is precisely the change that will not touch the doc, so
+  say what to check rather than asserting the absence.
 
 ---
 
@@ -131,7 +142,7 @@ This file is the entry point. Read the design docs before writing code — they 
   clip, and a retry that rebinds a different device cannot leave the ring mis-sized.** The ring is published into
   the unit's slot inside the SAME generation-checked critical section that publishes the session, and the RT
   thread sees it via the `capturing.store(true, .releasing)` its acquire load pairs with; the unit is not started
-  yet, so its handler cannot be reading the slot. A slot is written in exactly two places — that arm, and the
+  yet, so its handler cannot be reading the slot. A slot is written only at that arm and at the
   mid-recording restart, which SEEDS the replacement unit's slot with the SAME `session.ring` (before
   `fresh.start()`), because a fresh ring there would strand the frames the outgoing unit queued. Never write a
   slot a started unit can read. The previous capture's writer is JOINED
@@ -160,7 +171,6 @@ This file is the entry point. Read the design docs before writing code — they 
   rather than skipping, because `--capture-probe` deletes its working file trusting the archive. The
   archive lives OUTSIDE `supportDir` so a WAV can't fire `ConfigWatcher` — which means every wipe path
   misses it by default, so `ResetTool.eraseAll` deletes it explicitly (it is raw speech).
-  See `agent_notes/fable_review/audio-capture.md` H4 and the W17 entry in `worklist.md`.
 - **HAL unit bring-up/teardown run off the main thread on a serial queue, watchdogged — never move them
   back onto `@MainActor`.** `AudioUnitInitialize`/`AudioOutputUnitStart`/`Stop`/`AudioComponentInstanceDispose`
   can block for a long time (or indefinitely) on a transitioning device — classically a Bluetooth headset
@@ -179,23 +189,22 @@ This file is the entry point. Read the design docs before writing code — they 
   admission CLOSED and records nothing** until `openAdmission(afterHostTime:)` publishes the cue-end boundary
   (0 ⇒ admit from now): the start cue is the go-signal, so it may not sound until the route is proven live,
   and it then plays into an already-open mic that must not record it. Every `AudioCapture.start` caller must
-  open admission or it captures silence — `DictationController.beginCapture` and `--capture-probe` are the two.
+  open admission or it captures silence — grep `openAdmission` to see every caller.
   **One extensible `ReadinessBudget` bounds the WHOLE operation** — configure, start, and the wait for a
   buffer — since any of them can be the slow step on a transitioning route: `bringUpTimeout` (2 s) **plus**
   `bringUpGrace` (2 s) for local devices, `bluetoothReadyTimeout` (9 s) for Bluetooth, whose A2DP→HFP
   negotiation can outrun the 4 s window and surface as a spurious "Could not start the microphone" (observed
   once as two failures then a success on the third trigger; the exact route state during the failures was
-  never established — see `agent_notes/mic_issue`). **The budget must not stay fixed at the initial target**:
+  never established). **The budget must not stay fixed at the initial target**:
   the delivering device can change after it is sized — a failed default bind re-reads the system default, and
   an arming-time restart can rebind (the session is published before readiness, so topology changes act on it).
   `selectRoute` RAISES the budget as each route is CHOSEN — before the configure/start it pays for, since that
   call is itself what blocks, and the latch is one-shot so a budget that already expired cannot be recovered.
   It never lowers. Repeated churn cannot wait forever because the window is measured from ONE origin (the
   timer arming inside `runWithBudget`), not restarted per raise — so the total wait is bounded by the slowest
-  transport's value however many times a route is reselected. There is deliberately no separate clamp: with
-  only two transports the only reachable values are 4 s and 9 s, and a cap over them would be unreachable
-  code. A future transport slower than Bluetooth raises that ceiling by construction — decide then whether an
-  absolute cap is wanted, rather than carrying a dead one now.
+  transport's value however many times a route is reselected. There is deliberately no separate clamp: it
+  would be unreachable over the transports that exist. A transport slower than Bluetooth raises that ceiling
+  by construction — decide then whether an absolute cap is wanted, rather than carrying a dead one now.
   Drop the raise and a local target that rebinds onto Bluetooth inherits the 4 s cliff: the
   original bug, one route change removed. Policy label and diagnostics likewise key off ONE `captureTarget()`
   resolution threaded into `armSync` (sampling transport separately from the bind also mislabels a
@@ -234,8 +243,8 @@ This file is the entry point. Read the design docs before writing code — they 
   'category == "audio"'`. A disposed unit's render callback cannot fire (`AudioOutputUnitStop` is synchronous), and a
   stray late buffer is a no-op because the RT handler guards on the `capturing` atomic (set false at teardown
   before the unit is stopped). Because bring-up is async, `handleCommit` before `captureStarted` cancels the not-yet-live attempt rather
-  than queueing a commit against audio that was not recording yet. Two idle HAL listeners
-  (`kAudioHardwarePropertyDefaultInputDevice` + the device list) re-prewarm on a device change while idle;
+  than queueing a commit against audio that was not recording yet. Idle HAL listeners on the default-input
+  device (`kAudioHardwarePropertyDefaultInputDevice`) and the device list re-prewarm on a device change while idle;
   **while recording**, raw AUHAL posts no `AVAudioEngineConfigurationChange`, so a per-capture listener on
   the BOUND device (`DeviceIsAlive` + `NominalSampleRate` + `BufferFrameSize`, for disconnect, a Bluetooth
   A2DP↔HFP flip, and a mid-capture IO-period growth past scratch) restarts capture into the same file on the
@@ -268,8 +277,9 @@ This file is the entry point. Read the design docs before writing code — they 
   the clipboard. The **cost is accepted, not overlooked**: macOS exposes no bounded or cancellable pasteboard
   read (`NSFilePromiseReceiver` is file-promises-only; there is no timeout knob on CFPasteboard's XPC), so
   `renderBudgetSeconds` (0.25) can only be checked BETWEEN flavors — the aggregate is bounded, but one wedged
-  flavor blocks main for its whole render. `beginScratchPaste` threads ONE deadline through all four
-  stabilize captures, else that stall multiplies by 4. Tests pin both halves
+  flavor blocks main for its whole render. `beginScratchPaste` threads ONE deadline through every
+  stabilize capture (`maxSnapshotStabilizeAttempts` retries plus the first), else that stall multiplies
+  by the attempt count. Tests pin both halves
   (`lazyFlavorsThatBlowTheBudgetFallBackToPlainText`, `aSlowFlavorOutlastingTheBudgetStillRendersToCompletion`)
   plus a data-provider probe asserting the render ran on the main thread. Two traps when touching this:
   nested types do **NOT** inherit the enclosing `@MainActor` (`PasteboardSnapshot` sits inside `@MainActor
@@ -281,7 +291,7 @@ This file is the entry point. Read the design docs before writing code — they 
 
 ## Read order
 
-1. `docs/development/principles.md` — the 9 engineering/product principles. Govern every decision.
+1. `docs/development/principles.md` — the engineering/product principles. Govern every decision.
 2. `docs/development/design.md` — the architecture: vision, invariants, pipeline (§4.2 ordering is load-bearing),
    modes & two-phase routing (§4.3), context (§4.4), insertion (§4.5), storage/versioning (§5).
 3. `docs/development/roadmap.md` — build status and the remaining (unbuilt) work.
@@ -294,6 +304,9 @@ This file is the entry point. Read the design docs before writing code — they 
 8. `docs/development/icon_design.md` — app icon / menu-bar glyph direction.
 9. `docs/development/competitors.md` — competitive landscape and STT-engine survey.
 
+Also normative when you touch their areas: `docs/development/release_testing.md` (the mandatory
+release gate) and everything under `docs/reference/`.
+
 ---
 
 ## Repo layout
@@ -301,29 +314,29 @@ This file is the entry point. Read the design docs before writing code — they 
 ```
 keyscribe/
   AGENTS.md            # this file (CLAUDE.md is just `@AGENTS.md`)
-  Package.swift        # SwiftPM: KeyScribeKit + KeyScribeApp library products + KeyScribe exe + tests
+  Package.swift        # SwiftPM: the library products + KeyScribe executable + tests — read it for the targets
   Sources/
     KeyScribeKit/        # pure, OS-free logic (TDD red→green)
     KeyScribe/           # the menu-bar app: adapters + SwiftUI/AppKit — target/module KeyScribeApp
     KeyScribeMain/       # main.swift only: the thin executable over KeyScribeApp
+                         #   (further targets exist — see Package.swift)
   Tests/KeyScribeKitTests/ # pure-logic unit tests
   Tests/KeyScribeTests/    # app-target tests (@testable import KeyScribeApp) — OS-edge orchestration via DI seams
   Makefile             # task front door — `make help` lists build/run/release/test/setup/…
-  App/                 # the shared Xcode app definition: project.yml (XcodeGen template + dev/public
-                       #   targets), Config/Packages.xcconfig, ExportOptions-developer-id.plist; the
+  App/                 # the shared Xcode app definition: template.yml (the target template a downstream
+                       #   include:s) + project.yml (this repo's targets), plus signing/export config; the
                        #   generated KeyScribe.xcodeproj is gitignored
   make-app.sh          # → KeyScribeDev.app (dev variant, default; self-signed — see BUILD.md)
   release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major)
-  scripts/             # dev helpers: prepare-xcode-project.sh + collect-licenses.sh (the build),
-                       #   setup-dev-signing.sh, reset-permissions.sh, verify-live.sh,
-                       #   render_app_icon.swift (all reachable via make targets)
+  scripts/             # dev helpers behind the make targets — `make help` lists them; prepare-xcode-project.sh
+                       #   and collect-licenses.sh belong to the build itself. Cite a script by its make target.
   docs/                # user docs, plus development/reference specs
   corpus/              # recorded-speech corpus + replay harnesses (committed kit; *.wav + results.json
                        #   gitignored — your own voice). One folder per sub-corpus = a manifest + flat
-                       #   <id>.wav (the runner convention). Sub-corpora: stt/ engine WER benchmark
-                       #   (→ KeyScribe --benchmark corpus/stt, ranked by compare.sh), commands/ spoken-
-                       #   command regression (→ KeyScribe --commands-check corpus/commands), voices/
-                       #   multi-voice TTS/human studies. Record: bash corpus/record.sh [--commands].
+                       #   <id>.wav (the runner convention); ls corpus/ for the current set, each with
+                       #   its own README. Runners: KeyScribe --benchmark <dir> (engine WER, ranked by
+                       #   compare.sh) and --commands-check <dir> (spoken-command regression).
+                       #   Record: bash corpus/record.sh [--commands].
 ```
 
 ---
@@ -340,8 +353,8 @@ keyscribe/
 - Swift 6 **strict concurrency** applies. The patterns for AppKit/CGEvent/AX code are
   `nonisolated(unsafe)`, `@MainActor`, `MainActor.assumeIsolated` — see the adapters in
   `Sources/KeyScribe/Adapters/`.
-- **Logging:** `os.Logger` under subsystem `com.keyscribe.app` (categories in
-  `Sources/KeyScribe/Log.swift`: `bias`, `context`, `models`, `insertion`, `audio`). Footgun: `log show` /
+- **Logging:** `os.Logger` under subsystem `com.keyscribe.app` (categories are declared in
+  `Sources/KeyScribe/Log.swift` — read the file for the current set). Footgun: `log show` /
   `log stream` do **not** reliably surface these on this machine even when the strings are compiled
   in — don't trust "no log output" as "the code path didn't run." The reliable ground-truth for
   verifying insertion is a **clipboard-marker probe**: `printf MARKER | pbcopy`, dictate, then
@@ -375,7 +388,7 @@ keyscribe/
       `left_command`, `left_command+left_control`, `control+option+shift+command`) → a `.listenOnly`
       `CGEventTap` watching `.flagsChanged`, `.keyDown`, the three `*MouseDown`s and `.scrollWheel`.
       **There is ONE matcher, not a case per named key** (`ModifierMatcher` + `resolveModifierSet`): `hyper`
-      and the five old spellings are parse aliases in the grammar, never code paths, and `NamedKey` is gone.
+      and the legacy per-key spellings are parse aliases in the grammar, never code paths, and `NamedKey` is gone.
       Three rules carry it, and each is load-bearing:
       (a) **Engaged = an EXACT match of the NORMALIZED flags** — the four generic bits compared bit for bit,
       Fn matched on presence, and every sided member's `NX_DEVICE{L,R}…KEYMASK` bit set **with the opposite
@@ -597,8 +610,7 @@ keyscribe/
       plain key and a Cyrillic keycap still saves its Latin legend. `ClipboardKeystroke`
       (`paste_key`/`copy_key`) shares all of this with no fallback of its own: a chord the live layout
       cannot produce is logged and not posted, exactly like a trigger. Grammar:
-      `docs/reference/config_schema.md` "Key descriptor format"; the full per-layout survey behind these
-      claims is `agent_notes/keyboard_layout_survey.md`.
+      `docs/reference/config_schema.md` "Key descriptor format".
     - **Mouse-button triggers** (`mouseN`, button ≥ 2 — middle / thumb buttons) → a **`.defaultTap`**
       `CGEventTap` watching `.otherMouseDown`/`.otherMouseUp` (`MouseEventTap`). Mouse-button events,
       unlike `keyDown`, are delivered under **Accessibility alone** — no Input Monitoring (verified
@@ -666,12 +678,11 @@ keyscribe/
 
 ## STT engines
 
-KeyScribe ships **8 curated models across 4 engine kinds**, all with in-app download/install:
-Parakeet TDT v3 (English default), Parakeet Unified 0.6B (English), Parakeet TDT-CTC 110M,
-Whisper Large v3 Turbo, Whisper Small (English), Apple SpeechAnalyzer, Qwen3-ASR 0.6B, and
-Qwen3-ASR 1.7B. **Four are bias-capable** — both Qwen3 models (native context) and both
-Whisper models (prompt tokens); **Parakeet and Apple have no recognition bias**
-(`supportsRecognitionBias = false`). The dictionary still prefers a user's spellings on **every**
+Every shipped model is one entry in `SpeechModelCatalog.all`, with in-app download/install; its family
+is an `EngineKind` and its bias capability is `supportsRecognitionBias`. **Read the catalog for the
+current list — never restate it here.** Where a model biases at all, the mechanism is engine-family
+policy: Qwen3 uses native context, Whisper uses decode-time prompt tokens. `supportsRecognitionBias`
+is the source of truth for which models bias; do not restate that roster here either. The dictionary still prefers a user's spellings on **every**
 engine via after-transcription recovery (`FuzzyStage`), which now runs whenever the mode's merged
 dictionary is non-empty — no per-engine toggle. Engines are
 wired through a single **`EngineRegistry`** descriptor list (catalog ↔ constructor) that the
@@ -751,12 +762,12 @@ ffmpeg -f lavfi -i "anoisesrc=r=16000:a=0.02:d=3:seed=33" -c:a pcm_s16le hiss.wa
 **Two gates, and a change to `minSpeechChunks` must clear both.** `corpus/blips` is the
 suppression side (empty presses that must not be admitted) and carries the whole margin — its
 `short_right_now` is the only clip anywhere sitting exactly on the minimum. `corpus/commands` is the
-false-negative side: all 35 clips assert `presence: "speech"`, and they are the shortest real
-utterances in the corpus. It is a **coarse** floor, not a fine one — 23 of the 35 are `say` TTS
+false-negative side: every clip asserts `presence: "speech"`, and they are the shortest real
+utterances in the corpus. It is a **coarse** floor, not a fine one — most are `say` TTS
 (clean and unclipped, an easier case for VAD than a real fast-release take), and measured today every
 clip clears 4+ chunks against a minimum of 2. It catches a gross regression; only `blips` measures the
 margin. The population that would actually expose a too-high minimum — a real one-word take clipped by
-a fast trigger release — is **declared but not yet recorded**: `corpus/blips`' ten `clip_*` entries are
+a fast trigger release — is **declared but not yet recorded**: `corpus/blips`' `clip_*` entries are
 fast-release twins of the `short_*` clips, carrying no `checks.vad` until measured (procedure and
 decision rule in `corpus/blips/README.md`, "Fast-release twins"). Record those before raising the
 minimum — and note that until they exist, no evidence in this repo bounds the false-negative side for a
@@ -803,7 +814,7 @@ voice), measured in **chunks clearing 0.30** — the axis admission actually key
 Nothing real lands below 2 and nothing empty lands above 1, so `minSpeechChunks = 2` separates them with
 the whole gap to itself — but the margin on the speech side is exactly one clip, so **re-measure before
 raising it**. `corpus/stt`'s `c69` reads `noSpeech` and that is correct, not a regression: its WAV is 1.1 s
-of near-silence that scores WER 1.0 on all eight engines while its manifest claims an 88-character
+of near-silence that scores WER 1.0 on every engine while its manifest claims an 88-character
 sentence — a broken recording worth re-recording, unrelated to this gate. Excluding it, the minimum
 take-level max probability over `corpus/stt` is 0.555.
 
@@ -852,8 +863,7 @@ closure must never log it**: an abandoned closure keeps running and can still re
 dictation the user saw fail, so the decision is RETURNED as a value and logged only once the gate has
 ACCEPTED the result (the deadline path logs `retry-deadline` itself). Whoever owns the authoritative
 outcome writes the line, so it always matches the terminal. `--vad-probe` prints
-each clip's `speechStart` (the trim boundary). Full rationale + rejected alternatives:
-`agent_notes/parakeet_silent_bug_recovery/`.
+each clip's `speechStart` (the trim boundary).
 
 **A streaming session is a DISTINCT no-speech path — sweep it separately.** An engine's `makeStreamingSession`
 feed→finalize can emit different silence artifacts than its batch `transcribe`, so a model that ships a
@@ -880,15 +890,15 @@ words are absent from the reference (different words the dictionary put in the s
 **Orthographic snaps are reported but tolerated**: a fire whose words ARE in the reference is the
 dictionary snapping spacing/casing ("text field" → "TextField"), which is the dictionary system's
 intended behavior — after-transcription recovery does the same by design. The bar and the
-counter-example are in `agent_notes/fable_bias_test/results.md`: Qwen3 native context = 0 substitution
-fires (kept); the removed Parakeet CTC-WS spotter substituted on 53% of ordinary sentences (removed).
+counter-example: Qwen3 native context = 0 substitution fires (kept); the removed Parakeet CTC-WS
+spotter substituted on 53% of ordinary sentences (removed).
 The `supportsRecognitionBias` seam, the `biasTerms` plumbing through the pipeline, and this corpus ARE
 the re-entry path for a future engine that biases cleanly — nothing else is kept for that purpose; the
 removed spotter lives in git history only.
 
 ### Forked / pinned STT deps
 
-One fork + two upstream deps; the fork works live and costs nothing day-to-day:
+The STT deps, and which of them is forked; the fork works live and costs nothing day-to-day:
 - **WhisperKit** → `argmaxinc/argmax-oss-swift` (upstream, **no fork**), pinned `exact: "1.1.0"`.
   **1.1.0 is a hard floor, not a preference** — through 1.0.0, a prediction sampled while prompt
   tokens were still being force-fed could complete the segment, so *every* stock release emptied the
@@ -905,7 +915,7 @@ One fork + two upstream deps; the fork works live and costs nothing day-to-day:
   transcription. Historical: KeyScribe once paired it with FluidAudio's **CTC-WS** keyword spotter
   (NeMo constrained-CTC) for Parakeet recognition bias, gated by `spotterRescueEnabled`. That spotter
   was **removed** (2026-07-09) — it false-fired a dictionary term into a majority of ordinary
-  sentences (`agent_notes/fable_bias_test/`); Parakeet now transcribes **TDT-only** and ignores
+  sentences; Parakeet now transcribes **TDT-only** and ignores
   `biasTerms` (`supportsRecognitionBias = false`), with the companion CTC download and disk footprint
   gone. It also supplies Parakeet Unified through a DIFFERENT manager (`UnifiedAsrManager`, not
   `AsrModels`) — see the STT engines section. FluidAudio is the only dep that supplies BOTH Parakeet
@@ -925,7 +935,7 @@ One fork + two upstream deps; the fork works live and costs nothing day-to-day:
   names beyond the repo's required set, so naming the older artifact works even though the SDK now
   defaults to v6.2.1; both files coexist in `models/silero-vad/` at ~1 MB each. Verified: blips and
   commands both PASS unchanged (identical 13/11 split, identical 0.675 margin), STT byte-identical,
-  2461 tests green. Verified the pin is LOAD-BEARING, not coincidental: flipping only that string to
+  full suite green. Verified the pin is LOAD-BEARING, not coincidental: flipping only that string to
   v6.2.1 on the same SDK reproduces **FAIL 2/23 on exactly `blip_breath_03` and `dbl_gap15`**.
   Consequence: KeyScribe now depends on a file upstream no longer advertises. If it were deleted the
   VAD model would fail to download and the gate **fails open** — silently. `make check-deps` now
@@ -946,8 +956,8 @@ One fork + two upstream deps; the fork works live and costs nothing day-to-day:
   (37 packages, no conflict) and then fails graph loading with `multiple similar targets 'ArgmaxCLI',
   'ArgmaxCore', 'ArgmaxOSS' and 3 others appear in package 'whisperkit' and 'argmax-oss-swift'`. Prove
   it in ~2 min with a throwaway package depending on both, then `swift package show-dependencies` —
-  `swift package resolve` alone will NOT show the failure. Upstream has not adopted the gating in 265
-  commits. **Do not chase upstream speech-swift casually either:** current upstream adds
+  `swift package resolve` alone will NOT show the failure. Upstream has not adopted the gating.
+  **Do not chase upstream speech-swift casually either:** current upstream adds
   `mlx-swift-lm` as `branch: "main"`, a floating dependency inside a notarized app. Retiring the fork
   means upstreaming the patch (it no longer cherry-picks — upstream restructured the manifest).
 
@@ -1017,9 +1027,9 @@ Top-level SwiftPM (`Package.swift`): `Sources/KeyScribeKit` (pure) + `Sources/Ke
 `KeyScribeKit` as a **library product** so a downstream build through a standard Xcode project links
 one product and inherits every dependency — and its pins — transitively, instead of re-declaring them
 in a second place that silently drifts. `Sources/KeyScribeMain/main.swift` is the only file in the
-`KeyScribe` **executable** target and is also the entry file every Xcode app target compiles. The public
-surface is deliberately tiny — `DevCLI.handleFlags()`, `AppDelegate` (+`init`, `updater`), `EditMenu.make()`,
-and `SparkleUpdater` in the separate `KeyScribeSparkle` library target; everything else stays `internal`.
+`KeyScribe` **executable** target and is also the entry file every Xcode app target compiles. Keep the app
+target's public surface minimal — only what `main.swift` and a downstream entry file must call; everything
+else stays `internal`. Grep `^public` in `Sources/KeyScribe` before adding one.
 **The Sparkle gate is a per-target compilation condition, not `canImport`:** `Package.swift` depends on
 Sparkle unconditionally (so its pin lives in the one `Package.resolved`) but only `KeyScribeSparkle` links
 it, and only the public app target in `App/project.yml` links that, setting
@@ -1030,7 +1040,7 @@ built through **the shared Xcode app definition**: `App/template.yml` (XcodeGen)
 `KeyScribeAppBase` target template — functional resources, package wiring, `Resources/Info.plist` with
 `$(...)` substitution, and a post-build phase that runs `scripts/collect-licenses.sh` over the packages
 pinned in the project's lockfile (never the bare checkouts directory, so a stale checkout cannot ship its
-notice) — and `App/project.yml` includes it and adds the two thin targets, `KeyScribeDev` and `KeyScribe`,
+notice) — and `App/project.yml` includes it and adds this repo's thin targets, `KeyScribeDev` and `KeyScribe`,
 each listing `Sources/KeyScribeMain` and `Resources/AppIcon.icns` as its own sources so a downstream target
 can list its own entry file and icon instead (two icons at one output path collide). Paths the build needs at build time go through the `KEYSCRIBE_ROOT` setting (XcodeGen rewrites
 source paths for an including spec but copies settings verbatim). `scripts/prepare-xcode-project.sh` checks the toolchain,
@@ -1050,14 +1060,15 @@ own target** with its own identity, signing, entry file (`main.swift` that sets 
 export options — it never edits upstream source. Full from-source build, prerequisites, and signing live
 in **`BUILD.md`**.
 
-**Two build variants** (`KEYSCRIBE_VARIANT`, default `dev`): `./make-app.sh` builds the isolated
+**Build variants** (`KEYSCRIBE_VARIANT`, default `dev`; `AppVariant` resolves the running bundle to
+dev, production, or a `custom` white-label identity): `./make-app.sh` builds the isolated
 **KeyScribeDev.app** (`com.keyscribe.app.dev` — its own config dir, TCC grants, and Keychain service;
 orange menu-bar tint) so it runs alongside an installed production app; `./release.sh` forces the
 production **KeyScribe.app** (`com.keyscribe.app`, Developer ID, hardened runtime, notarized + stapled
 DMG). `./release.sh patch|minor|major` bumps the tag, builds, notarizes, and prints the publish steps —
 it stops before pushing anything public. Variant plumbing: `AppVariant` (KeyScribeKit) resolved through
 `KeyScribePaths`/`KeychainStore`; **downloaded models are shared** (pinned to `KeyScribe/models`, never
-per-variant — the easy-to-miss part). Full detail in `agent_notes/distribution_plan` + `dev_variant`.
+per-variant — the easy-to-miss part).
 
 **Shipping a release** (`./release.sh patch|minor|major` → `make ship`): the build + double Apple
 notarization (app, then DMG) takes ~10–30 min, so it is a **background + poll** job, not a foreground
@@ -1138,8 +1149,34 @@ Features** (the section hides itself when there are no flags).
 - **Roll out / retire:** delete the `static let` and its `allCases` entry, and make the gate unconditional
   (or delete the dead branch). A stale id left in a user's `settings.toml` is ignored and dropped on the next write.
 
-The catalog currently holds a single flag, `streamingTranscription` (the first shipped flag); before it,
-`allCases` was empty, and it returns to empty once every flag is rolled out. `Feature` is a **struct** with a
+**`consumptionDrivenRestore` carries a rollout debt — do not delete the flag until it is paid.** The
+flag restores the scratch as soon as the target has actually read the lazily-published pasteboard,
+instead of waiting out `[insertion] clipboard_restore_ms`. Four things block its rollout, and the
+in-process tests can observe none of them:
+
+1. **The target's ⌘V waits on KeyScribe's main run loop.** A cross-process read of the lazy flavor is
+   fulfilled on the owner's main thread via its run loop — measured, the owner's main thread blocked
+   3 s made the reader's `string(forType:)` block 2 s — so the target's paste is served only after the
+   post-insert cue, HUD render, and record-keeping, and a wedged main thread here stalls the *target*
+   app. Measure target-side paste latency on vs off (the `held=` log cannot show it) and decide whether
+   the coupling is acceptable at all. A yield after `postKey` is untested.
+2. **Only the first read is ever observed, and nothing identifies the reader.** After fulfilment the
+   pasteboard caches the string and releases the provider. The write and the ⌘V post are microseconds
+   apart, so a clipboard manager that ignores the concealed marker and reads the string lands after the
+   ⌘V mark and is taken for the target's paste; restore then fires early and a slow target pastes the
+   old clipboard. Honoring managers inspect types only, which never fires the provider — so test with a
+   manager that does **not** honor `org.nspasteboard.ConcealedType`.
+3. **The "Chromium reads more than once" claim is second-hand.** Measure the 100 ms grace against a
+   real Chrome/Electron paste before trusting it.
+4. **A cross-process regression test is owed.** Shape: compile a small reader with `swiftc` against a
+   named pasteboard, spawn it, and assert both the served text and the restore timing.
+
+Then run the clipboard-marker probe (`printf MARKER | pbcopy`, dictate, ⌘V) with the flag ON in
+TextEdit, Slack, VS Code, Chrome, Terminal, and Word, and with a clipboard manager running: each must
+paste the dictation, and the immediate ⌘V must paste `MARKER`.
+
+`allCases` may be empty — that is the normal state once every flag has been rolled out, not a bug.
+`Feature` is a **struct** with a
 `static let` catalog rather than an enum precisely so that empty state does not read to the compiler as
 unreachable code, and so the Advanced section can hide itself when `allCases` is empty. When you add a flag,
 also add per-flag tests — default-off fallback, override persistence, and off-elision.

@@ -152,8 +152,9 @@ measured (`principles.md` §1):
   user is never stuck waiting on the cloud.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
-**Up to 8 curated models across 4 engine kinds** ship (`SpeechModelCatalog.all`), all with in-app
-download/install except the system-managed Apple engine:
+A **curated set** of models ships across the **Parakeet**, **Whisper**, **Apple Speech**, and
+**Qwen3-ASR** families — `SpeechModelCatalog.all` is the list — all with in-app download/install
+except the system-managed Apple engine:
 - **FluidAudio / Parakeet TDT v3** — **default for English** (`isDefaultEnglish`). Larger
   multilingual Parakeet (25 languages); **pyannote speaker diarization bundled** in the same SDK.
 - **FluidAudio / Parakeet Unified 0.6B (English)** — the strongest Parakeet on English and the only
@@ -173,16 +174,16 @@ the provider, download path, install reconcile/delete, and the benchmark all der
 engine is one descriptor + one catalog entry.
 
 **Engine bias support.** Recognition bias is grounded in the acoustics, never a blind post-STT
-find-and-replace (that silently corrupts output). Only two engine families bias, each via its model's
-own single-pass mechanism, taking dictionary terms through `transcribe(wavURL:biasTerms:)`:
+find-and-replace (that silently corrupts output). A model biases only if it declares
+`supportsRecognitionBias`; those that do take dictionary terms through
+`transcribe(wavURL:biasTerms:)` via their own single-pass mechanism:
 - **Whisper** — a decode-time conditioning prompt (`promptTokens`); a soft hint the model may ignore.
 - **Qwen3-ASR** — native on-device bias (`Qwen3DecodingOptions.context`).
 
-**Parakeet and Apple do not bias recognition** (`supportsRecognitionBias = false`) and
-ignore `biasTerms`. Parakeet previously used FluidAudio's NeMo CTC-WS keyword spotter and Apple used
-`AnalysisContext` contextual strings; both were removed because their false substitutions outweighed
-their benefit. The engine-specific policy and bar for revisiting it live in
-`agent_notes/decisions/recognition_bias.md`.
+A model whose `supportsRecognitionBias` is false ignores `biasTerms` entirely. Two such mechanisms
+were removed deliberately rather than never built: Parakeet's FluidAudio NeMo CTC-WS keyword spotter
+and Apple's `AnalysisContext` contextual strings, both because their false substitutions outweighed
+their benefit.
 
 Independently of the engine, the dictionary still reaches the output two ways: post-STT **dictionary
 recovery** (`FuzzyStage`, which runs whenever the mode's dictionary is non-empty) and the LLM "valid
@@ -218,7 +219,7 @@ A linear pipeline of typed stages, each declaring its **position** in the flow. 
 
 | Command type | Position(s) | Purpose |
 |---|---|---|
-| **Dictionary** | pre-STT bias (where supported) + dynamic system-prompt | Bias recognition toward known terms via the active engine's **decode-time** mechanism (§4.1 *Engine bias support* — Whisper and Qwen3 yes; Parakeet/Apple no; **disableable per engine** in the Speech Models settings); plus post-STT recovery on every engine (see the *Dictionary recovery* row); and always hint to the LLM that those terms are valid/intentional (not misspellings). A hint, not a directive — the LLM may still transform them per the mode. |
+| **Dictionary** | pre-STT bias (where supported) + dynamic system-prompt | Bias recognition toward known terms via the active engine's **decode-time** mechanism (§4.1 *Engine bias support* — a per-model capability (`supportsRecognitionBias`); **disableable per engine** in the Speech Models settings); plus post-STT recovery on every engine (see the *Dictionary recovery* row); and always hint to the LLM that those terms are valid/intentional (not misspellings). A hint, not a directive — the LLM may still transform them per the mode. |
 | **Replacements** | post-STT | Heard→Replace, literal or regex with substitutions. Both match **case-insensitively** by default (the input is engine-cased STT output; a regex opts back into case with inline `(?-i)`). Rules match the heard text in one left-to-right pass: the longest overlap wins, mode wins equal matches over Global, topmost wins within a scope, and inserted output is never matched again. The result flows into the LLM normally and may be transformed by it (e.g. a "pig latin" mode). Replacements are not protected from rewrite — **except** when one rule consumes the **entire** utterance (modulo trailing whitespace/`.!?`): that "whole-utterance replacement" is inserted **verbatim and bare**, short-circuiting the LLM, redaction, `trailing`, and `trim_trailing_punctuation` (a deterministic spoken command — `slash resume`→`/resume`; see `config_schema.md` *Replacement matching & output*). A user regex is screened by **`ReplacementSafety`** before it runs: a nested-quantifier ("evil") pattern that could catastrophically backtrack on the dictation hot path is refused, not executed (there is no way to interrupt a synchronous `NSRegularExpression` match). |
 | **Live edits** | post-STT | Spoken commands from a **small documented list** (*insert new line*, *insert new paragraph*, *insert tab character*, *scratch that*, *insert clipboard contents*, *begin/end verbatim* — sentence/newline-aware; the insert commands use an explicit carrier phrase, optional "a"/"the", so bare prose is left alone), **opt-in per mode** (one toggle). **"Scratch that" only fires at a clause boundary** — its phrase ends with a terminator (. ! ?) or comma, or ends the utterance — so literal use ("scratch that lottery ticket", a continuing word follows) is left as text. Matching tolerates a trailing terminator/comma; the gate is scratch-only (newline/tab fire inline). **What it removes:** the words just said — the current segment (since the last terminator or newline command), or, when that segment is empty (a punctuating engine ended the clause with its own terminator, e.g. `…here. scratch that.`), the **one previous clause** (back to the nearest terminator/comma/semicolon/colon), stopping at a newline/paragraph break so it never crosses a structural boundary. Scoping the fallback to a clause rather than a whole sentence bounds a mis-fire — under-deleting is re-issuable, over-deleting is silent. This leans on the STT punctuating a spoken correction, so a non-punctuating engine (e.g. Apple) **under-fires rather than corrupts**. **Pause-punctuation absorption:** a command is an invisible operator, so the whitespace/comma the STT hangs on its boundary — **or between the operator's own words** when the speaker pauses mid-command (`insert, new line` → `⏎`) — is absorbed with it and re-normalized to one space (`blah, insert new line, foo` → `blah⏎foo`). Commas + whitespace only, at the boundary and interior alike — a sentence period is kept whether it precedes the command (`done. insert new paragraph next` → `done.⏎⏎next`) or falls inside it (`insert new. Paragraph two` is left as text, not eaten), and verbatim content keeps its own edge terminators/`;`/`:` (`begin verbatim foo(); end verbatim` → `foo();`). Pause-agnostic: no pause → nothing to absorb → same output. |
 | **Numbers (inverse text normalization)** | post-STT | Optional per-mode deterministic spoken-number → digits ("twenty five" → "25"), `commands.numbers`. Conservative by design: a run that does not form one unambiguous cardinal is left exactly as spoken (preserves year idioms like "twenty twenty six"). Wrong number output is worse than none. **Tier 1 decorators** fold in the low-ambiguity cases around a validated cardinal: sign ("minus five" → "-5", only when not preceded by a number, so subtraction is left alone), decimals ("three point one four" → "3.14"; fractional part is single digits only), percent ("fifty percent" → "50%"), and ordinals ("twenty first" → "21st"). Each decorator only fires on a cardinal that already parses and clears the standalone-small gate; anything ambiguous echoes the spoken words. **Tier 2** (currency symbols + placement, thousands grouping, dates, times) is locale/house-style/context-dependent, so it is left to the optional LLM rewrite (and skipped entirely in no-LLM modes) rather than guessed deterministically here. |
@@ -280,7 +281,8 @@ order is fixed and explicit:
                                             span stays literal
 4. post-STT text  live edits → replacements → numbers (ITN) → dictionary recovery   (apply)
                   (StageOrder: liveEdits 0 · replacements 10 · numbers 20 · fuzzy 30;
-                   dictionary recovery is the FuzzyStage, gated by the active engine's bias capability)
+                   dictionary recovery is the FuzzyStage, and runs whenever the mode's merged
+                   dictionary is non-empty — on every engine, bias-capable or not)
 5. redaction mark redaction tokenize       (apply) — AFTER the text stages, on the fully-transformed
                                             text, just before the LLM (produces nonce tokens + prompt
                                             constraints); only when privacy is on AND a rewrite runs
@@ -507,11 +509,11 @@ changed, else **falls back to paste** — so `insert` uses AX on native fields a
 web/Electron and never loses text. Type posts Unicode key events with no success signal, so it is
 best-effort with no fallback. The focus-race clipboard fallback (below) overrides whichever method
 the mode picks.
-- **Permissions:** **two** TCC categories — **Accessibility** (post ⌘V/⌘C and AX reads;
+- **Permissions:** **Accessibility** (post ⌘V/⌘C and AX reads;
   `kTCCServicePostEvent` for posting, `kTCCServiceAccessibility` for AX, both shown under
-  "Accessibility") **and** the modifier-only trigger event tap (a `.listenOnly` tap watching
-  `flagsChanged`, `keyDown`, the mouse-down types and `scrollWheel` — all authorized by Accessibility
-  alone) — plus **Automation/Apple Events** (browser
+  "Accessibility") — which also authorizes the modifier-only trigger event tap (a `.listenOnly` tap
+  watching `flagsChanged`, `keyDown`, the mouse-down types and `scrollWheel`) — and
+  **Automation/Apple Events** (browser
   URL via AppleScript, per browser). **Input Monitoring is NOT used:** key+modifier chord triggers
   register via `RegisterEventHotKey` (no permission, OS-suppressed) and ESC-to-cancel is a local
   keystroke on the recording HUD. The tap sees the non-modifier events only to discard a modifier-only
@@ -533,13 +535,12 @@ than risk inserting in the wrong place.
   overlapping insertions.
 
 ### 4.6 Settings
-- **General:** load on login; **warm-up / eviction tier** — governs STT-model residency *and* idle
-  microphone warm-up together (Fastest = model kept loaded + mic held warm; Balanced = both released
-  after an idle timer; Frugal = model freed each dictation + mic opened only while dictating);
-  during-dictation (mute system
-  audio, keep display awake, sound on start/end); local history; optional correction-panel shortcuts.
-- **Speech models:** download/select/delete.
-- **Vocabulary:** global Dictionary & Replacements.
+The pane roster, sidebar order, information architecture, progressive-help contract, and control
+behavior are normative in `ui_design.md` §7 and `ui_components.md` (`SettingsDestination` is the
+roster in code). Three settings carry architecture rather than presentation:
+- **Warm-up / eviction tier:** governs STT-model residency *and* idle microphone warm-up together
+  (Fastest = model kept loaded + mic held warm; Balanced = both released after an idle timer;
+  Frugal = model freed each dictation + mic opened only while dictating).
 - **AI Services (BYOK):** **named LLM connections** — each a `(name, provider, model, auth method,
   params)`. Hosted providers use a `key_ref` into Keychain. OpenAI-compatible endpoints additionally
   support no auth for local/no-auth servers or a token command that mints a bearer token on demand;
@@ -549,9 +550,6 @@ than risk inserting in the wrong place.
   behavior; each mode persists as a **TOML** file. Schema and the referenced config files are
   specified in `config_schema.md`.
 
-The settings information architecture, progressive-help contract, and control behavior are normative
-in `ui_design.md` and `ui_components.md`.
-
 ### 4.7 Local history
 Optional, **on-device only** (a **`history/` directory with one JSONL file per day**, append-only),
 never synced. A **simple retention policy** bounds it (delete day-files older than N days). Per-mode "exclude from
@@ -560,7 +558,7 @@ per-mode setting.
 
 **Stored per entry:** raw transcription, the mode used, the **exact prompt sent to the LLM**, and the
 **final text pasted/inserted**. History can be searched, summarized, and exported as Markdown, plain
-text, or JSONL. **Audio is never stored.** The stored prompt carries the **tokens**
+text, or JSON (one JSON object per line, saved with a `.jsonl` extension). **Audio is never stored.** The stored prompt carries the **tokens**
 (⟦SN:…⟧), not their originals — the **redaction map is never stored** — but the raw transcription and
 final insert do contain the real values, so for sensitive work the lever is **disabling history** for
 that app/mode (per-mode "exclude from history").
@@ -602,7 +600,9 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
 - **STT:** **FluidAudio** (Parakeet TDT v3 + pyannote diarization, CoreML/ANE); **WhisperKit** for
   Whisper; system `SpeechAnalyzer` for Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR.
   (Fork/pin details in `AGENTS.md`.)
-- **Audio:** AVAudioEngine for capture; system-audio muting via Core Audio.
+- **Audio:** a device-pinned AUHAL input unit (`HALInputUnit`) for capture — it never changes the
+  macOS default input; other audio is ducked while dictating (`other_audio` = quiet / mute /
+  unchanged, quiet by default) via Core Audio.
 - **Global hotkeys / insertion:** CGEvent (`kTCCServicePostEvent`) for paste keystroke; Accessibility
   (`kTCCServiceAccessibility`) for context reading and optional AX insert; `RegisterEventHotKey`
   (Carbon) for chord triggers.
@@ -629,8 +629,7 @@ HUD states, data-boundary wording, and fallback behavior are normative in `ui_de
   **Sparkle 2, EdDSA-verified** over a redacted-free, content-free version check: the adapter lives in
   its own `KeyScribeSparkle` library target that only the public app target links, and is injected only
   for the `.production` variant, so dev and downstream white-label builds link no Sparkle and supply
-  their own update path — the update mechanism is an isolated seam, not baked into shared code
-  (`agent_notes/distribution_plan/sparkle.md`).
+  their own update path — the update mechanism is an isolated seam, not baked into shared code.
 - **License: GPLv3.** Compatible with the deps (Apache-2.0 and MIT code flow into a GPLv3 project;
   weights are runtime-downloaded *data*, not linked code, so the source tree stays clean), and it
   permits selling notarized binaries provided corresponding source is offered. Every app artifact
@@ -679,7 +678,7 @@ carries a **`schema_version`**.
 | Capability | KeyScribe | Superwhisper | Wispr Flow | VoiceInk | Apple |
 |---|---|---|---|---|---|
 | STT always local (no cloud STT) | ✅ | ✅ (opt) | ❌ cloud | ✅ | ✅ |
-| Pluggable engines | ✅ 8 | ✅ 2 | ❌ | ✅ 1 | n/a |
+| Pluggable engines | ✅ multiple | ✅ 2 | ❌ | ✅ 1 | n/a |
 | Per-context modes (data-driven) | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Staged pipeline (pre/post STT+LLM) | ✅ **unique** | partial | ❌ | ❌ | ❌ |
 | Best-effort recognizable-span redaction | ✅ | ❌ | ❌ | ❌ | ❌ |

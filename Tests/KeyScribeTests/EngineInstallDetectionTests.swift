@@ -50,7 +50,6 @@ final class EngineInstallDetectionTests: XCTestCase {
         XCTAssertEqual(WhisperEngine(profile: .largeV3Turbo, modelsDir: dir).verifyInstalled(in: dir), true)
     }
 
-    // An interrupted download that landed only one bundle must NOT be adopted as installed.
     func testWhisperUnverifiedWhenCacheIsPartial() throws {
         try writeBundles(["AudioEncoder"],
             into: variantDir("whisper", "openai_whisper-large-v3-v20240930_turbo_632MB"))

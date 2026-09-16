@@ -84,7 +84,6 @@ struct BiasBenchmarkTests {
         return s[s.count / 2]
     }
 
-    // MARK: - Audio fixture (real speech via `say`, generated once)
 
     static func audioURL() throws -> URL {
         let wav = URL(fileURLWithPath: "/tmp/keyscribe-bench.wav")

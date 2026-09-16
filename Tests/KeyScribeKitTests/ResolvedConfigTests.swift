@@ -32,7 +32,6 @@ struct ResolvedConfigTests {
     @Test func nilModeFallsBackToGlobalDictionaryAndDefaultStages() {
         let rc = resolved(dictionary: ["Global"])
         #expect(rc.mergedDictionary(for: nil) == ["Global"])
-        // nil-mode defaults yield 3 stages: LiveEdits + Replacements + FuzzyStage (dictionary non-empty).
         let stages = rc.postSTTTextStages(for: nil)
         #expect(stages.count == 3)
     }
@@ -42,14 +41,12 @@ struct ResolvedConfigTests {
         mode.commands.liveEdits = true
         mode.commands.numbers = true
         let rc = resolved(modes: [mode], dictionary: ["ChargeBee"])
-        // LiveEdits + Replacements + Numbers + FuzzyStage.
         #expect(rc.postSTTTextStages(for: mode).count == 4)
     }
 
     @Test func fuzzyStageAppendedOnlyWhenMergedDictionaryNonEmpty() {
         var mode = Mode(id: "m", name: "M")
         mode.commands.liveEdits = true
-        // Non-empty dictionary → LiveEdits + Replacements + FuzzyStage; empty → no FuzzyStage.
         let withDict = resolved(modes: [mode], dictionary: ["ChargeBee"])
         #expect(withDict.postSTTTextStages(for: mode).count == 3)
         let empty = resolved(modes: [mode], dictionary: [])
@@ -81,8 +78,6 @@ struct ResolvedConfigTests {
         #expect(rc.recognitionBiasTerms(for: nil) == ["Global"])
     }
 
-    // mergedDictionary shares its cache with recognitionBiasTerms/postSTTTextStages — priming via bias
-    // must not diverge from the public accessor.
     @Test func mergedDictionaryAndBiasShareCache() {
         var mode = Mode(id: "m", name: "M")
         mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["ChargeBee", "Postgres"])

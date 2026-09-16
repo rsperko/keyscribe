@@ -28,7 +28,6 @@ private func directOwning(_ key: String) -> Mode {
 }
 
 struct ModeResolverTests {
-    // Eligibility
     @Test func emptyConstraintsEligibleEverywhere() {
         let plain = mode("plain")
         #expect(ModeResolver.eligibleModes([plain], context: .init(bundleId: "anything")).map(\.id) == ["plain"])
@@ -119,7 +118,6 @@ struct ModeResolverTests {
         #expect(m?.id == "both")
     }
 
-    // Phase A
     @Test func triggerKeyBindingSelectsKeyedMode() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"])
@@ -142,8 +140,6 @@ struct ModeResolverTests {
         #expect(m?.id == Mode.directId)
     }
 
-    // design.md §4.3: an app constraint gates every trigger. Falling through to Direct is the DOCUMENTED
-    // same-key recipe, and it only reads as "started by its shortcut" because Direct owns that key too.
     @Test func keyPressFallsThroughToDirectWhenDirectOwnsTheKey() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
@@ -154,8 +150,6 @@ struct ModeResolverTests {
         #expect(m?.aiRewrite == nil)
     }
 
-    // The other half of that rule, and the reported bug: with Direct bound elsewhere, the key was never
-    // given to Direct by the user, so a press it cannot serve must not borrow it.
     @Test func keyPressDoesNotDictateWhenDirectDoesNotOwnTheKey() {
         let plain = mode("plain")
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
@@ -165,8 +159,6 @@ struct ModeResolverTests {
         #expect(m == nil)
     }
 
-    // Ownership is compared canonically, like every other trigger-string comparison, so an alias spelling
-    // of the same descriptor still counts as owning the key.
     @Test func directOwnsTheKeyUnderAnAliasSpelling() {
         let chorded = mode("chorded", keys: ["hyper"], bundles: ["com.apple.mail"])
         let m = phaseA([chorded],
@@ -211,8 +203,6 @@ struct ModeResolverTests {
         #expect(m == nil)
     }
 
-    // Branch 3 is untouched: with no key pressed there is no key for Direct to own, so the floor still
-    // catches a menu or API start unconditionally.
     @Test func aKeylessStartStillFallsBackToDirect() {
         let email = mode("email", keys: ["right_option"], bundles: ["com.apple.mail"])
         let m = phaseA([email], context: .init(bundleId: "com.apple.notes"), triggerKey: nil,
@@ -250,12 +240,10 @@ struct ModeResolverTests {
         let app = mode("app", bundles: ["com.google.Chrome"])                                  // score 1
         let appUrl = mode("appurl", bundles: ["com.google.Chrome"], urlPattern: #"github\.com"#) // score 3
         let ctx = RoutingContext(bundleId: "com.google.Chrome", url: "https://github.com/x")
-        // app is declared first but must lose: specificity beats declaration order.
         let m = phaseA([app, appUrl], context: ctx, triggerKey: nil)
         #expect(m?.id == "appurl")
     }
 
-    // Phase B
     @Test func suffixPhraseRoutesAndStrips() {
         let email = mode("email", phrases: [#"(?i)\bas an email$"#])
         let r = ModeResolver.resolvePhaseB(eligibleModes: [email], transcript: "send this to bob as an email")
@@ -277,7 +265,6 @@ struct ModeResolverTests {
     }
 
     @Test func suffixPhraseToleratesSTTPunctuationAndCase() {
-        // Parakeet emits capitalized, period-terminated output — must still route.
         let email = mode("email", phrases: [#"(?i)\bas an email$"#])
         let r = ModeResolver.resolvePhaseB(eligibleModes: [email], transcript: "send this to bob as an email.")
         #expect(r.routedModeId == "email")
@@ -303,22 +290,18 @@ struct ModeResolverTests {
         #expect(ModeResolver.eligibleModes([gh], context: .init(bundleId: "anything", url: "https://gitlab.com")).isEmpty)
     }
 
-    // The Chrome / ModeB / ModeC / ModeD example from design.md §4.3.
     @Test func phaseBPrefersMoreSpecificEligibleModeOverDeclarationOrder() {
         let search = #"(?i)\bas search$"#
         let b = mode("b", phrases: [search], bundles: ["md.obsidian"])         // ineligible in Chrome
         let c = mode("c", phrases: [search], bundles: ["com.google.Chrome"])   // specific, score 1
         let d = mode("d", phrases: [search])                                   // unconstrained, score 0
         let ctx = RoutingContext(bundleId: "com.google.Chrome")
-        // d declared before c to prove specificity beats declaration order; b filtered out entirely.
         let eligible = ModeResolver.eligibleModes([d, b, c], context: ctx)
         let r = ModeResolver.resolvePhaseB(eligibleModes: eligible, transcript: "find this as search", context: ctx)
         #expect(r.routedModeId == "c")
         #expect(r.transcript == "find this")
     }
 
-    // URL probing is opt-in: only worth the Apple Events round trip + Automation prompt when an
-    // enabled mode could actually match on URL (design.md §4.4).
     @Test func requiresURLContextOnlyWhenAnEnabledModeHasURLPattern() {
         let plain = mode("plain")
         let appOnly = mode("app", bundles: ["com.apple.mail"])
@@ -347,8 +330,6 @@ struct ModeResolverTests {
         #expect(r.routedModeId == "d1")
     }
 
-    // A bare spoken phrase (no (?i), \b, or $) must route on every common STT output ending: the
-    // matcher supplies case-insensitivity, the end anchor, and trailing-cruft tolerance itself.
     @Test(arguments: [
         "summarize this thread as prompt",
         "summarize this thread as prompt.",       // Parakeet/Whisper default
@@ -369,7 +350,6 @@ struct ModeResolverTests {
     }
 
     @Test func bareLiteralPhraseHonorsLeadingWordBoundary() {
-        // Must not fire inside "has prompt" / "gas prompt" — that would split a word.
         let ai = mode("ai-prompt", phrases: ["as prompt"])
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "this has prompt").routedModeId == nil)
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "increase the gas prompt").routedModeId == nil)
@@ -391,13 +371,11 @@ struct ModeResolverTests {
     }
 
     @Test func caseSensitivityCanBeOptedBackIn() {
-        // Phrases are case-insensitive by default; (?-i) opts back in.
         let m = mode("cs", phrases: [#"(?-i)as prompt"#])
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this as prompt").routedModeId == "cs")
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [m], transcript: "do this As Prompt").routedModeId == nil)
     }
 
-    // MARK: mode-choice reasons (UX2 phase 7c) — additions, not behavioral changes.
 
     @Test func phaseAReasonIsTriggerKeyForAKeySelectedMode() {
         let polish = mode("polish", keys: ["right_option"])
@@ -469,8 +447,6 @@ struct ModeClaimTests {
         #expect(!ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
     }
 
-    // The whole reason URL routing cannot gate registration: off Gmail we still do not know we are off
-    // Gmail until the probe runs, so the key stays claimed.
     @Test func aURLScopedModeKeepsClaimingWhereTheURLIsUnknown() {
         let m = constrained([.init(urlPattern: "mail\\.google\\.com")])
         #expect(ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
@@ -487,21 +463,17 @@ struct ModeClaimTests {
         #expect(!ModeResolver.canClaimKey(m, bundleId: "com.apple.Safari"))
     }
 
-    // Constraints OR together, so one bundle-disproved constraint cannot release a key another still claims.
     @Test func oneUnprovableConstraintKeepsTheKeyClaimed() {
         let m = constrained([.init(bundleId: "com.vmware.fusion"), .init(urlPattern: "example\\.com")])
         #expect(ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
     }
 
-    // A constraint ANDs its fields, so a non-matching bundle disproves it whatever else it carries.
     @Test func aBundleMismatchDisprovesAConstraintCarryingAURL() {
         let m = constrained([.init(bundleId: "com.google.Chrome", urlPattern: "mail\\.google\\.com")])
         #expect(!ModeResolver.canClaimKey(m, bundleId: "com.apple.Notes"))
         #expect(ModeResolver.canClaimKey(m, bundleId: "com.google.Chrome"))
     }
 
-    // Never unregister on unknown context: an unreadable frontmost app must not silently drop every
-    // scoped trigger.
     @Test func anUnknownFrontmostAppClaimsEverything() {
         #expect(ModeResolver.canClaimKey(constrained([.init(bundleId: "com.vmware.fusion")]), bundleId: nil))
     }

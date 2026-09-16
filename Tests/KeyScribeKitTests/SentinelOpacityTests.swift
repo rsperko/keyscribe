@@ -15,7 +15,6 @@ struct SentinelOpacityTests {
     }
 
     @Test func literalRuleDoesNotMatchInsideTokenBody() {
-        // `\bverb\b` matches "VERB" inside ⟦SN:VERB:1⟧ (colons are word boundaries) — must not fire.
         var ctx = PipelineContext(text: "hello ⟦SN:VERB:1⟧ world")
         ReplacementsStage(rules: [ReplacementRule(heard: "verb", replace: "X", isRegex: false)]).apply(&ctx)
         #expect(ctx.text == "hello ⟦SN:VERB:1⟧ world")

@@ -27,7 +27,6 @@ struct HistoryDiffWhitespaceTests {
         #expect(rendered.originalText(for: NSRange(location: 5, length: 1)) == "\n")
     }
 
-    // A bare "\n" from an "insert new line" command used to render as an invisible blank line.
     @Test func addedNewlineBecomesVisibleButSelectionYieldsRawNewline() {
         let spans = [
             TextComparison.Span(id: 0, text: "hello", kind: .unchanged),

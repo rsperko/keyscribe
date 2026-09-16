@@ -101,8 +101,6 @@ struct AIServiceConnectorTests {
         #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
     }
 
-    // A catalog that refuses the service must stop the connect before the key is stored and before the
-    // endpoint is contacted — onboarding and Settings both come through here, so neither can persist one.
     @Test func aServiceTheCatalogRefusesIsNeverStoredTestedOrPersisted() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -141,9 +139,6 @@ struct AIServiceConnectorTests {
         #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
     }
 
-    // A retest of an already-persisted connection reuses its keyRef, so saving overwrites a possibly-good key.
-    // A failed retest must RESTORE the prior key, never delete it — otherwise a working service is left
-    // with no credential.
     @Test func failedRetestRestoresAPreExistingKeyInsteadOfDeletingIt() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -199,7 +194,6 @@ struct AIServiceConnectorTests {
         #expect(second.allocatedId == "gemini")   // did not become gemini-2 despite the first failure
     }
 
-    // MARK: Settings add-a-service flow (persist-immediately)
 
     private func settingsModel(
         support: URL,
@@ -217,8 +211,6 @@ struct AIServiceConnectorTests {
             saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in })
     }
 
-    // Persists a seeded connection immediately and selects it — no test, no key — landing in an honest
-    // "no key" config state, not usable until the user finishes it in the editor and tests it.
     @Test func addServicePersistsASeededConnectionAndSelectsIt() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -268,8 +260,6 @@ struct AIServiceConnectorTests {
         #expect(model.pendingConnectOffer?.connectionId == connection.id)
     }
 
-    // Must persist through the injected saveAPIKey seam, never KeychainStore directly — otherwise every
-    // test run writes a real entry into the developer's login Keychain.
     @Test func updateSavesTheKeyThroughTheInjectedSeam() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -326,8 +316,6 @@ struct AIServiceConnectorTests {
         #expect(model.selected?.keyRef != connection.keyRef)
     }
 
-    // Repeated boundary crossings must not stack UUIDs onto the keyRef (base.uuid1.uuid2…) — each rotation
-    // strips the prior UUID and appends one fresh, so the ref stays base + exactly one UUID.
     @Test func repeatedCredentialBoundaryRotationsStayBounded() throws {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -369,8 +357,6 @@ struct AIServiceConnectorTests {
         #expect(connection.configIssue == nil)
     }
 
-    // A provider starter is reusable: a second connection for the same provider disambiguates the name
-    // rather than overwriting the first.
     @Test func addingASecondServiceForAProviderKeepsBothWithDistinctNames() {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -384,7 +370,6 @@ struct AIServiceConnectorTests {
         #expect(Set(saved.map(\.name)).count == 2)   // uniqued, not two identical "Gemini" rows
     }
 
-    // MARK: shared status vocabulary
 
     @Test func listRowAndSummaryDeriveIdenticalStatus() {
         let connection = Connection(
@@ -402,8 +387,6 @@ struct AIServiceConnectorTests {
         #expect(status.text == "Not available in this app")
     }
 
-    // The editor disables Test and Find Models for a refused service, but the model is what reaches the
-    // network, so it refuses on its own instead of trusting the view.
     @Test func settingsNeverTestsAServiceTheBuildRefusesOrOffersItToModes() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }

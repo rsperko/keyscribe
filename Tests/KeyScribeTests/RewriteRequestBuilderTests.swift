@@ -12,7 +12,6 @@ struct RewriteRequestBuilderTests {
         return cal.date(from: comps)!
     }
 
-    // Localized formats use narrow/no-break spaces (U+202F before AM/PM) that don't compare against ASCII.
     private func asciiSpaces(_ s: String) -> String {
         String(s.map { $0.isWhitespace ? " " : $0 })
     }
@@ -41,7 +40,6 @@ struct RewriteRequestBuilderTests {
             modes: [mode], dictionary: DictionarySet(words: ["Postgres"]), replacements: ReplacementsSet(),
             connections: ConnectionSet(), fragments: [:])
 
-        // Sanity: this transcript genuinely holds a near-miss the fuzzy corrector would surface.
         let content = "deployed postgress today"
         #expect(!FuzzyCorrector.candidates(
             content, prepared: FuzzyCorrector.prepare(["Postgres"])).isEmpty)
@@ -53,7 +51,6 @@ struct RewriteRequestBuilderTests {
         #expect(assembled.inputs.fuzzyCandidates.isEmpty)
     }
 
-    // History must not claim "preceding text" was shared when the probe returned nothing (KS-02).
     @MainActor
     @Test func contextCategoriesOmitsPrecedingTextWhenProbeReturnsNil() async {
         var mode = Mode(id: "ai", name: "AI")

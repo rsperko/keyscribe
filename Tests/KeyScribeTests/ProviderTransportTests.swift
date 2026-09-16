@@ -83,7 +83,6 @@ private func redirectSession() -> URLSession {
     return URLSession(configuration: config)
 }
 
-// Serialized: the stub's routing table is static, so parallel cases would rewrite each other's status.
 @Suite(.serialized)
 struct RewriteRedirectPinningTests {
     private func post() -> URLRequest {
@@ -93,9 +92,6 @@ struct RewriteRedirectPinningTests {
         return req
     }
 
-    // 307/308 preserve the method AND the body, so an unpinned redirect replays the prompt and the
-    // tokenized transcript to another host. The assertion that matters is that the other host is never
-    // contacted at all.
     @Test(arguments: [301, 302, 303, 307, 308])
     func crossOriginRedirectsNeverReachTheTarget(status: Int) async {
         RedirectStubProtocol.reset(status: status, target: "http://elsewhere.test/v1/chat")
@@ -195,9 +191,6 @@ struct ProviderTransportTests {
         #expect(snippet?.count == 301)
     }
 
-    // send wires the full errorBody into the HTTP error so OpenAIAPIError.parse still recovers
-    // error.code/param, which the 400-remediation loop and model-not-found detection depend on — a
-    // >1000-char truncation would produce invalid JSON and silently disable both.
     @Test func errorBodyKeepsLargePayloadParseableBeyond1000Chars() {
         let padding = String(repeating: "x", count: 1500)
         let bodyJSON = "{\"error\":{\"message\":\"\(padding)\",\"code\":\"model_not_found\",\"param\":\"model\"}}"

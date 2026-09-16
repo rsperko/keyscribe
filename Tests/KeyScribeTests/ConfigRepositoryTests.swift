@@ -12,8 +12,6 @@ struct ConfigRepositoryTests {
         return dir
     }
 
-    // Routing writes through the repository must make the change visible on the NEXT config read
-    // without waiting on the FSEvents watcher, and notify the host.
     @Test func aModeWriteInvalidatesTheCacheAndNotifies() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -32,8 +30,6 @@ struct ConfigRepositoryTests {
         #expect(notified == 1)
     }
 
-    // Fragment files are written directly, not through `commit`, so their self-write must independently
-    // invalidate + notify — otherwise the resolved plan keeps stale instruction text until relaunch.
     @Test func recordingAFragmentSelfWriteInvalidatesResolvedAndNotifies() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -90,8 +86,6 @@ struct ConfigRepositoryTests {
         #expect(Set(DictionaryStore.loadOrDefault(supportDir: dir).words) == ["Postgres", "Redis"])
     }
 
-    // A repository write records the touched file so its own echo is suppressed, but an external edit
-    // still reloads.
     @Test func aRepositoryWriteRecordsIntoTheSelfWriteGate() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -106,7 +100,6 @@ struct ConfigRepositoryTests {
         #expect(gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) == true)
     }
 
-    // A rename records both the created and the removed file, so neither half echoes.
     @Test func aModeRenameRecordsBothTheNewAndOldFileIntoTheGate() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -179,8 +172,6 @@ struct ConfigRepositoryTests {
         #expect(!config.modes.contains { $0.id == "temp" })
     }
 
-    // Connection writes must read-modify-write from disk, not clobber a whole caller-supplied set: a
-    // connection another surface added must survive a subsequent delete of an unrelated connection.
     @Test func deletingAConnectionPreservesOneAddedConcurrentlyOnDisk() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

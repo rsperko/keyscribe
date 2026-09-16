@@ -37,7 +37,6 @@ struct MenuKeyEquivalentTests {
         #expect(try #require(equivalent(key)).key == expected)
     }
 
-    // ⌤ shares Return's equivalent, so only the numeric-pad flag distinguishes it in a menu.
     @Test func theKeypadIsFlaggedAsNumericPad() throws {
         let keypad5 = try #require(equivalent("control+keypad_5"))
         #expect(keypad5.key == "5")

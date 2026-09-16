@@ -34,9 +34,6 @@ struct HotkeyConflictsTests {
         #expect(shadowed == ["b", "c"])
     }
 
-    // Collision stopped being transitive the moment a sideless member could stand in for either key:
-    // right_command ~ command ~ left_command, but right_command and left_command cannot both engage. A
-    // binding that LOST was never registered, so it must not claim the press away from a later one.
     @Test func aShadowedRegistrantDoesNotItselfShadowALaterOne() {
         let shadowed = HotkeyConflicts.shadowed([
             reg("right", "right_command"), reg("either", "command"), reg("left", "left_command"),
@@ -44,7 +41,6 @@ struct HotkeyConflictsTests {
         #expect(shadowed == ["either"])
     }
 
-    // …but a registrant that actually claimed still shadows everything it overlaps.
     @Test func aSidelessClaimShadowsBothSidedSpellingsAfterIt() {
         let shadowed = HotkeyConflicts.shadowed([
             reg("either", "command"), reg("right", "right_command"), reg("left", "left_command"),

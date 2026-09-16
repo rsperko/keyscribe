@@ -7,7 +7,6 @@ struct LeadingSilenceTrimTests {
     @Test func trimsToOneChunkOfPreRollBeforeTheSpeechStart() {
         let samples = [Float](repeating: 0, count: 16000)
         let trimmed = LeadingSilenceTrim.trimming(samples: samples, sampleRate: 16000, speechStart: 0.512)
-        // 0.512 − 0.256 = 0.256 s → 4,096 samples removed.
         #expect(trimmed.count == 16000 - 4096)
     }
 
@@ -20,7 +19,6 @@ struct LeadingSilenceTrimTests {
     @Test func convertsTheBoundaryAtTheEnginesCaptureRate() {
         let samples = [Float](repeating: 0, count: 24000)
         let trimmed = LeadingSilenceTrim.trimming(samples: samples, sampleRate: 24000, speechStart: 0.512)
-        // 0.256 s at 24 kHz is 6,144 samples — not the VAD's 4,096.
         #expect(trimmed.count == 24000 - 6144)
     }
 

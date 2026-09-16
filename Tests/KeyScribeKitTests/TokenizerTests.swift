@@ -8,8 +8,6 @@ struct TokenizerTests {
         #expect(t.tokenize("hello world", type: .verbatim) == "⟦SN:VERB:1⟧")
     }
 
-    // A clipboard paste can map a token to an original that re-contains that same token — a cycle the
-    // acyclic fixpoint assumption doesn't hold for. restore must terminate (pass cap), never hang.
     @Test func selfReferentialOriginalDoesNotHang() {
         let t = Tokenizer()
         let token = t.tokenize("⟦SN:VERB:1⟧", type: .verbatim)   // value equals the token it is assigned
@@ -54,7 +52,6 @@ struct TokenizerTests {
         let t = Tokenizer()
         let inner = t.tokenize("inner", type: .redact)
         let outer = t.tokenize("before \(inner) after", type: .redact) // original literally embeds inner
-        // forward restore would strand the inner token; LIFO unwinds it correctly
         #expect(t.restore(outer) == "before inner after")
     }
 
@@ -66,14 +63,11 @@ struct TokenizerTests {
     }
 
     @Test func mapNeverExposedAsOriginalsInIssuedTokens() {
-        // issuedTokens is the public surface; it must contain only tokens, never originals
         let t = Tokenizer()
         _ = t.tokenize("4111 1111 1111 1111", type: .redact)
         #expect(t.issuedTokens.allSatisfy { $0.hasPrefix("⟦SN:") })
     }
 
-    // Cross-type nesting, the real pipeline shape: redaction's original literally embeds a verbatim
-    // token; a single-pass restore must still expand both.
     @Test func restoreUnwindsCrossTypeNesting() {
         let t = Tokenizer()
         let verb = t.tokenize("keep this", type: .verbatim)
@@ -81,7 +75,6 @@ struct TokenizerTests {
         #expect(t.restore("x \(red) y") == "x a keep this b y")
     }
 
-    // An unknown token (e.g. one the LLM hallucinated) is left untouched and must not loop forever.
     @Test func restoreLeavesUnknownTokensAndTerminates() {
         let t = Tokenizer()
         let known = t.tokenize("real", type: .redact)

@@ -23,8 +23,6 @@ struct RequestOriginTests {
         #expect(!allows("http://127.0.0.1:11234/v1", "http://127.0.0.1:9999/v1"))
     }
 
-    // `https://user@host/` reads as one server and resolves to another, so it never counts as a
-    // comparable origin — on either side of the comparison.
     @Test func userinfoIsNeverAComparableOrigin() {
         #expect(RequestOrigin(URL(string: "https://evil@api.example.com/v1")) == nil)
         #expect(RequestOrigin(URL(string: "https://u:p@api.example.com/v1")) == nil)
@@ -39,8 +37,6 @@ struct RequestOriginTests {
         #expect(!RequestOrigin.redirectIsPermitted(from: nil, to: URL(string: "https://api.example.com/v1")))
     }
 
-    // The chain case: each hop is compared to the ORIGINAL pin, so a same-origin first hop cannot be
-    // used to launder a cross-origin second hop.
     @Test func everyHopIsComparedToTheOriginalPinNotThePreviousHop() {
         let origin = pinned("https://api.example.com/v1")
         #expect(RequestOrigin.redirectIsPermitted(from: origin, to: URL(string: "https://api.example.com/hop1")))

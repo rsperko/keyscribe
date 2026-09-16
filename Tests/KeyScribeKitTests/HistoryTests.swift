@@ -375,7 +375,6 @@ struct HistoryStoreTests {
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
     }
 
-    // delete resolves the entry's own timestamp day file directly, not the "today" arg used to append it.
     @Test func deleteFindsTheEntryInItsTimestampDayFile() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }
@@ -387,7 +386,6 @@ struct HistoryStoreTests {
         #expect(store.dayFiles() == ["2099-01-01.jsonl"])
     }
 
-    // 0o500 (no write) on the dir lets the locating read succeed but forces the atomic rewrite to throw.
     @Test func deleteReportsFailureWhenTheRewriteFails() throws {
         let store = tempStore()
         defer {
@@ -414,8 +412,6 @@ struct HistoryStoreTests {
         #expect(store.entries().count == 1)
     }
 
-    // Timestamps round-trip at second precision, so two same-second identical entries decode equal;
-    // deleting one must remove only one, not both.
     @Test func deleteRemovesOnlyOneOfTwoIdenticalSameSecondEntries() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }
@@ -427,8 +423,6 @@ struct HistoryStoreTests {
         #expect(store.entries().first?.heard == "same")
     }
 
-    // A crash can leave the last line without its trailing newline; append must not glue onto it,
-    // which would fuse two entries into one undecodable blob and lose both.
     @Test func appendHealsMissingTrailingNewline() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }

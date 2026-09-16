@@ -1,9 +1,9 @@
 import Foundation
 
 // Recognizes an inline `<CR>` suffix on an already-`expandTemplate`-expanded regex replacement template:
-// a terminal, unescaped `<CR>` requests a physical Return keystroke after the whole-utterance insert
-// (see agent_notes/replace_with_return). The marker is stripped from the template here, so `<CR>` never
-// reaches NSRegularExpression, the pasteboard, the target, or an LLM as text.
+// a terminal, unescaped `<CR>` requests a physical Return keystroke after the whole-utterance insert.
+// The marker is stripped from the template here, so `<CR>` never reaches NSRegularExpression, the
+// pasteboard, the target, or an LLM as text.
 //
 // `\<CR>` escapes the marker to the literal text `<CR>`. Escape parity is judged against the expanded
 // template, where ReplacementEscapes emits a literal backslash as a *pair* (`\\`): a `<CR>` preceded by

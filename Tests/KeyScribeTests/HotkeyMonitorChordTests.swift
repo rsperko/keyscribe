@@ -26,7 +26,6 @@ final class FakeMouseTap: MouseTapping {
     func stop() { stopped = true; consumedButtons = [] }
 }
 
-// Runs the chord grace on demand instead of on a real timer, so a grace test never sleeps.
 @MainActor
 final class ManualScheduler {
     private var pending: [@MainActor () -> Void] = []
@@ -131,10 +130,6 @@ struct HotkeyMonitorChordTests {
         #expect(!m.hasPhysicallyDownGesture)
     }
 
-    // A rebuild (Settings toggle / config reload) mid-hold must NOT strand an in-progress gesture. With
-    // an identical descriptor + style, update() carries the live gesture over, so the release edge still
-    // delivers its commit. Without the carry-over the fresh PressGesture never saw the .down and the .up
-    // would be dropped.
     @Test func updatePreservesInProgressGestureForIdenticalDescriptor() async {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
@@ -153,7 +148,6 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 1)
     }
 
-    // A changed descriptor gets a fresh gesture — no stale state carried onto a different key.
     @Test func updateGivesAChangedDescriptorAFreshGesture() async {
         let fake = FakeChordRegistrar()
         var commits = 0
@@ -198,8 +192,6 @@ struct HotkeyMonitorChordTests {
         CGEventFlags(rawValue: generic.rawValue | device)
     }
 
-    // Caps Lock sets `maskAlphaShift` on every flagsChanged while it is on. Comparing raw flags would make
-    // every modifier-only trigger silently dead for the whole time the light is lit.
     @Test func capsLockDoesNotBreakEngagement() async {
         var starts = 0, commits = 0
         let m = monitor([namedBinding("right_option")], onStart: { _, _ in starts += 1 },
@@ -230,7 +222,6 @@ struct HotkeyMonitorChordTests {
         await drainMain()
         #expect(starts == 1)
 
-        // Staggered release: ⌃ lifts first, then ⌘. Exactly one commit, on the first drop out of the set.
         m.handle(type: .flagsChanged, keyCode: 59, flags: flags([.maskCommand], Self.leftCmd))
         await drainMain()
         #expect(commits == 1)
@@ -267,8 +258,6 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
-    // Both a subset and its superset bound: pressing the pair must start only the pair. The grace is what
-    // buys that — the subset's arm is still pending when the second modifier lands.
     @Test func aSubsetTriggerInsideTheGraceYieldsToTheLargerSet() async {
         let clock = ManualScheduler()
         var started: [String?] = []
@@ -285,8 +274,6 @@ struct HotkeyMonitorChordTests {
         #expect(started == ["left_command+left_control"])
     }
 
-    // A held modifier followed by a click is a modifier-click, not a dictation: without this every ⌘-click
-    // in the browser would start and cancel a dictation for anyone on a `left_command` trigger.
     @Test func aMouseDownCancelsAPendingArmAndAbortsAStartedOne() async {
         let clock = ManualScheduler()
         var starts = 0, cancels = 0
@@ -312,8 +299,6 @@ struct HotkeyMonitorChordTests {
         #expect(cancels == 1)
     }
 
-    // Scroll is not a chord: a stray trackpad or momentum scroll must never kill a dictation already
-    // running. It only discards an arm that has not started anything yet.
     @Test func scrollCancelsAPendingArmButNeverAbortsAStartedOne() async {
         let clock = ManualScheduler()
         var starts = 0, cancels = 0, commits = 0
@@ -344,10 +329,6 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 1)
     }
 
-    // Holding both ⌘ keys must not engage a sided binding: that is the physical state in which a
-    // `left_command` and a `right_command` trigger would otherwise both fire and run two dictations.
-    // The opposite key is FOREIGN participation, so releasing it may not leave the left ⌘ looking freshly
-    // pressed — the gesture is spent until both are up, exactly like a foreign modifier.
     @Test func theOppositeSideSpendsASidedTriggerUntilFullRelease() async {
         var starts = 0
         let m = monitor([namedBinding("left_command")], onStart: { _, _ in starts += 1 })
@@ -367,8 +348,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // The mirror of the above while a dictation is already running: the opposite key joining is a different
-    // gesture forming, so it aborts rather than being ignored.
     @Test func theOppositeSideJoiningMidDictationAborts() async {
         var starts = 0, commits = 0, cancels = 0
         let m = monitor([namedBinding("right_option")], onStart: { _, _ in starts += 1 },
@@ -387,9 +366,6 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
-    // `right_option` is a SHIPPED default (the Polish mode), and this is the one place its behavior moved:
-    // the old soleness rule subtracted the key's OWN modifier from "foreign", so left ⌥ held did not stop
-    // right ⌥ from arming. Exact matching is what lets left and right be two separate triggers.
     @Test func aShippedRightSideTriggerNoLongerArmsWhileTheOtherOptionIsHeld() async {
         var starts = 0
         let m = monitor([namedBinding("right_option")], onStart: { _, _ in starts += 1 })
@@ -401,7 +377,6 @@ struct HotkeyMonitorChordTests {
         await drainMain()
         #expect(starts == 0)
 
-        // …and it stays spent until BOTH are up, so the left one lifting is not a fresh right-⌥ press.
         m.handle(type: .flagsChanged, keyCode: 58,
                  flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
         await drainMain()
@@ -414,7 +389,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // A sideless set is the opposite contract: either key satisfies it, including both at once.
     @Test func aSidelessSetEngagesFromEitherSideAndFromBoth() async {
         for device in [Self.leftCmd, UInt64(NX_DEVICERCMDKEYMASK), Self.leftCmd | UInt64(NX_DEVICERCMDKEYMASK)] {
             var starts = 0, commits = 0
@@ -430,7 +404,6 @@ struct HotkeyMonitorChordTests {
         }
     }
 
-    // Hyper is matched exactly, not as a superset: Fn joining it is a foreign modifier like any other.
     @Test func fnJoiningHyperAborts() async {
         var starts = 0, cancels = 0
         let m = monitor([namedBinding("hyper")], onStart: { _, _ in starts += 1 },
@@ -446,8 +419,6 @@ struct HotkeyMonitorChordTests {
         #expect(cancels == 1)
     }
 
-    // A trackpad reports plenty of scrollWheel events that are not scrolling. Each of these would eat a
-    // trigger pressed nearby, since cancelling the arm also suppresses it until release.
     @Test(arguments: [
         (128 as Int64, "fingers resting on the trackpad (mayBegin)"),
         (4 as Int64, "fingers lifting (ended)"),
@@ -461,7 +432,6 @@ struct HotkeyMonitorChordTests {
     @Test func aScrollTheUserIsDrivingCounts() {
         #expect(HotkeyMonitor.scrollIsUserDriven(momentumPhase: 0, scrollPhase: 1, deltaAxis1: 0, deltaAxis2: 0))
         #expect(HotkeyMonitor.scrollIsUserDriven(momentumPhase: 0, scrollPhase: 2, deltaAxis1: 0, deltaAxis2: 0))
-        // A legacy wheel carries no phase at all, so its delta is the only signal.
         #expect(HotkeyMonitor.scrollIsUserDriven(momentumPhase: 0, scrollPhase: 0, deltaAxis1: -1, deltaAxis2: 0))
         #expect(!HotkeyMonitor.scrollIsUserDriven(momentumPhase: 0, scrollPhase: 0, deltaAxis1: 0, deltaAxis2: 0))
         #expect(!HotkeyMonitor.scrollIsUserDriven(momentumPhase: 1, scrollPhase: 2, deltaAxis1: 5, deltaAxis2: 0))
@@ -481,9 +451,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // A member pressed BESIDE a foreign modifier is spent until fully released. Otherwise the foreign
-    // modifier's RELEASE leaves the set alone and reads as a fresh engage: ⇧⌘4, then lifting ⇧, would start
-    // a dictation the user never asked for — and on hold-or-tap the ⌘ release latches an open mic.
     @Test func aForeignModifierPressedFirstSpendsTheTriggerUntilRelease() async {
         var starts = 0, commits = 0
         let m = monitor([namedBinding("left_command", style: .holdOrTap)],
@@ -511,8 +478,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // The same shape with no key involved at all — nothing ever armed, so no abort ever ran, which is why
-    // the suppression has to be set from the flags rather than from the abort path.
     @Test func aForeignModifierPressedFirstSpendsTheTriggerWithNoKeyInvolved() async {
         var starts = 0
         let m = monitor([namedBinding("left_command")], onStart: { _, _ in starts += 1 })
@@ -526,8 +491,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 0)
     }
 
-    // Fn regresses the same way: the old path keyed on keyCode 63, so a foreign modifier's release was
-    // invisible to it. The general rule has to cover Fn too.
     @Test func aForeignModifierPressedFirstSpendsAnFnTrigger() async {
         var starts = 0
         let m = monitor([namedBinding("fn")], onStart: { _, _ in starts += 1 })
@@ -540,8 +503,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 0)
     }
 
-    // A pair has no foreign modifier at any point, so neither release order may be suppressed — releasing
-    // either member is the user letting go, and must commit exactly once.
     @Test(arguments: [[59, 55], [55, 59]])
     func aPairCommitsOnceInEitherReleaseOrder(_ order: [Int]) async {
         var starts = 0, commits = 0
@@ -564,8 +525,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // A click can never be part of an Fn gesture — a click carries the generic modifier flags, and an
-    // Fn-only set carries none of them — so clicking mid-sentence must not throw the dictation away.
     @Test func aClickDoesNotAbortAnFnDictationButStillDropsAPendingArm() async {
         let clock = ManualScheduler()
         var starts = 0, commits = 0, cancels = 0
@@ -657,7 +616,6 @@ struct HotkeyMonitorChordTests {
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
-        // ⌃ held, then the right Option engages (e.g. building ⌃⌥⇧⌘D with the right Option) → not a bare hold.
         let flags = CGEventFlags.maskControl.rawValue | CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)
         m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: flags))
         await drainMain()
@@ -671,13 +629,11 @@ struct HotkeyMonitorChordTests {
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
-        // Bare right Option first → dictation starts.
         m.handle(type: .flagsChanged, keyCode: 61,
                  flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
         await drainMain()
         #expect(starts == 1)
 
-        // ⌃ joins while the right Option is still held → it was a chord, not a hold → abort, no commit.
         let joined = CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt) | CGEventFlags.maskControl.rawValue
         m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: joined))
         await drainMain()
@@ -704,9 +660,6 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
-    // After a chord abort, releasing the chord drops its modifiers one at a time, so the trigger key is
-    // transiently SOLE again while still physically down. It must NOT re-arm a fresh dictation (which would
-    // tap-latch and strand the mic recording); suppression persists until the key is fully released.
     @Test func rightOptionDoesNotReArmWhileHeldAfterAChordAbort() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
@@ -714,26 +667,22 @@ struct HotkeyMonitorChordTests {
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
-        // Bare right Option → start.
         m.handle(type: .flagsChanged, keyCode: 61,
                  flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
         await drainMain()
         #expect(starts == 1)
 
-        // ⌃ joins while right Option is held → chord → abort.
         let joined = CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt) | CGEventFlags.maskControl.rawValue
         m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: joined))
         await drainMain()
         #expect(cancels == 1)
 
-        // ⌃ lifts first → right Option is momentarily sole again but still down. No re-arm, no latch.
         m.handle(type: .flagsChanged, keyCode: 59,
                  flags: CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue | UInt64(rightAlt)))
         await drainMain()
         #expect(starts == 1)
         #expect(commits == 0)
 
-        // Right Option fully released → suppression lifts; a subsequent genuine bare press arms again.
         m.handle(type: .flagsChanged, keyCode: 61, flags: CGEventFlags(rawValue: 0))
         await drainMain()
         m.handle(type: .flagsChanged, keyCode: 61,
@@ -742,9 +691,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 2)
     }
 
-    // "Chord wins" for Fn: fn+delete / fn+arrow are the user's own key mappings, not a dictation hold. The
-    // keystroke must reach the focused app, so the just-started dictation is discarded and the Fn release
-    // commits nothing (without this the HUD takes key focus mid-chord and swallows the keystroke).
     @Test func fnAbortsWhenAChordKeyFollows() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
@@ -802,8 +748,6 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
-    // With all four modifiers still held after an abort, every later flagsChanged still reads as engaged —
-    // it must not re-arm. Suppression persists until the modifier set drops below Hyper.
     @Test func hyperDoesNotReArmWhileEngagedAfterAChordAbort() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
@@ -816,13 +760,11 @@ struct HotkeyMonitorChordTests {
         await drainMain()
         #expect(starts == 1)
 
-        // Still every modifier held (e.g. a second chord key goes down) → no fresh arm, no stray commit.
         m.handle(type: .flagsChanged, keyCode: 56, flags: hyperFlags)
         await drainMain()
         #expect(starts == 1)
         #expect(commits == 0)
 
-        // Modifiers fully released → suppression lifts; a genuine Hyper hold arms again.
         m.handle(type: .flagsChanged, keyCode: 59, flags: CGEventFlags(rawValue: 0))
         await drainMain()
         m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
@@ -943,8 +885,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // A tap shorter than the grace is a real tap, not a chord: the held-back .down must still fire on release
-    // so the gesture sees a down/up pair. Dropping it would swallow every fast tap.
     @Test func aTapReleasedInsideTheGraceStillDrivesTheGesture() async {
         var starts = 0, commits = 0
         let clock = ManualScheduler()
@@ -978,7 +918,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 0)
         #expect(cancels == 0)
 
-        // A second key in the same chord press must not arm either, and releasing Hyper re-enables the trigger.
         m.handle(type: .keyDown, keyCode: 3, flags: hyperFlags)
         clock.fireAll()
         await drainMain()
@@ -991,8 +930,6 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    // The idle resync (AppDelegate.onBecameIdle) calls cancelGestures() whenever nothing is held. A press
-    // still inside its grace IS held, so it must report as such or the resync silently eats it.
     @Test func aPressInsideTheGraceCountsAsHeld() async {
         var starts = 0
         let clock = ManualScheduler()
@@ -1010,8 +947,6 @@ struct HotkeyMonitorChordTests {
         #expect(m.hasPhysicallyDownGesture)
     }
 
-    // The right-side keys reach the same silent outcome by the other route: a foreign modifier joining inside
-    // the grace is resolved by flags, not by a keyDown.
     @Test func aForeignModifierInsideTheGraceStartsNothingAtAll() async {
         var starts = 0, cancels = 0
         let clock = ManualScheduler()
@@ -1032,8 +967,6 @@ struct HotkeyMonitorChordTests {
         #expect(cancels == 0)
     }
 
-    // Only the VISIBLE cancellable states: arming is cancellable but shows no HUD, so there is no panel to
-    // take key focus — ESC does not reach an arming dictation and the trigger cancels it instead.
     @Test func hudHoldsKeyFocusOnlyAcrossVisibleCancellableStates() {
         #expect(HUDState.recording(mode: nil, level: 0, latchedTrigger: nil).holdsKeyFocus)
         #expect(HUDState.transcribing(mode: "m").holdsKeyFocus)
@@ -1044,11 +977,6 @@ struct HotkeyMonitorChordTests {
         #expect(!HUDState.hidden.holdsKeyFocus)
     }
 
-    // The grace closure must survive a rebuild that reshapes the bindings array. `update` carries
-    // pendingArm/armGeneration across by DESCRIPTOR, but an index captured at schedule time points at
-    // whatever now sits in that slot — so a binding dropping out ahead of the pending one silently
-    // swallows the press (or, on a generation collision, fires the wrong mode). Context-aware claiming
-    // rebuilds on app switch, which turns this from a config-reload rarity into a routine race.
     @Test func aPendingArmSurvivesARebuildThatShiftsItsIndex() async {
         let clock = ManualScheduler()
         var started: [String?] = []
@@ -1056,7 +984,6 @@ struct HotkeyMonitorChordTests {
                         grace: 0.15, schedule: clock.schedule, onStart: { key, _ in started.append(key) })
 
         m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
-        // A scoped mode on `fn` stops being claimable here, so the surviving binding moves 1 → 0.
         m.update(bindings: [chordBinding("left_command")])
         clock.fireAll()
         await drainMain()

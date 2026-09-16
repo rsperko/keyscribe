@@ -46,7 +46,6 @@ struct FocusGuardWiringTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let result = Captured()
-        // snapshot() fires once at press and once at insertion; return captured, then current.
         let calls = LockedCounter()
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
         let controller = DictationController(
@@ -93,14 +92,11 @@ struct FocusGuardWiringTests {
         #expect(decision == .insert)
     }
 
-    // Diverts even when app/window match, proving isSecureField flows from the snapshot into decideInsertion.
     @Test func secureFieldDivertsToClipboard() async {
         let decision = await run(captured: "cg:101", current: "cg:101", secure: true)
         #expect(decision == .clipboardFallback(reason: .secureField))
     }
 
-    // Same bundle id, different process (a same-bundle helper stole focus) must divert — proving the pid
-    // captured at press flows into decideInsertion, not just the bundle id.
     @Test func sameBundleDifferentPidDivertsToClipboard() async {
         let decision = await run(
             captured: "cg:101", current: "cg:101", capturedPid: 100, currentPid: 200)

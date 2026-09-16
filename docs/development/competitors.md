@@ -99,10 +99,9 @@ pipeline stages cannot stay purely theoretical until late in the build (cf. `roa
 
 ## B. Underlying STT model families (our pluggable engines)
 
-KeyScribe ships **up to 8 curated models across 4 engine families** (Parakeet TDT v3,
-Parakeet Unified 0.6B (English), Parakeet TDT-CTC 110M, Whisper Large v3 Turbo,
-Whisper Small (English), Apple Speech on macOS 26+,
-Qwen3-ASR 0.6B, Qwen3-ASR 1.7B). Here is the state of each family as of
+KeyScribe ships a curated set of models across four engine families — **Parakeet**, **Whisper**,
+**Apple Speech** (macOS 26+), and **Qwen3-ASR**. The shipped roster, with sizes and per-model
+language coverage, is in `../reference/stt_benchmarks.md`. Here is the state of each family as of
 2026. A 13,000-recording shootout by Dictato first flagged **Qwen3** as a rising option; on the
 current KeyScribe 107-clip single-speaker benchmark, Whisper Large v3 Turbo, Qwen3-ASR 1.7B, and
 Whisper Small are effectively the top accuracy cluster. See `../reference/stt_benchmarks.md` instead of
@@ -116,8 +115,10 @@ treating this table as a personal ranking.
 | **Qwen3-ASR** (0.6B + 1.7B) | 0.6B is the speed/accuracy sweet spot in our benchmarks | Near the top accuracy cluster on the current KeyScribe real-voice corpus; 1.7B is the stronger Qwen tier | **52** | Two shipping tiers. Native on-device bias (`Qwen3DecodingOptions.context`). |
 
 **Implications for KeyScribe's pluggable-STT design (as shipped):**
-- **Parakeet TDT v3 = English default** (fast + low-memory + 25 languages); **Parakeet Unified
-  0.6B = most accurate English Parakeet, and the only one that punctuates**; **Qwen3-ASR / Whisper = multilingual** (52 / 99 langs); **Apple = zero-footprint on macOS 26+** (no download, good EU-language accuracy).
+- The families cover different needs: **Parakeet** is the fast, low-memory default family and
+  includes the only tier that punctuates; **Whisper** and **Qwen3-ASR** carry the broad multilingual
+  coverage; **Apple** is zero-footprint on macOS 26+ (no download, good EU-language accuracy). Tier
+  names, sizes, and language counts live in `../reference/stt_benchmarks.md`.
 - Model **download/compile-with-progress + select + delete** is the shipped UX — every serious local app does this; engines are wired through a single `EngineRegistry` descriptor.
 - Diarization is a Parakeet-v3 capability we get largely "for free" and could expose.
 - **Bias is decisive for dictionary-term recall** and often improves WER, so recognition bias is a

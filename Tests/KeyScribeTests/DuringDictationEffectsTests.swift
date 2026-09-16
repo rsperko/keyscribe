@@ -76,8 +76,6 @@ struct DuringDictationEffectsTests {
         #expect(levels[2] == 1)
     }
 
-    // If ducking is unavailable (the private API is absent on a future macOS), every duck fails — the
-    // device must not be tracked, so restore issues no unduck for a duck that never happened.
     @Test func aDuckThatFailsIsNotTrackedSoRestoreIsANoOp() {
         var writes: [Float32] = []
         let effects = DuringDictationEffects(
@@ -105,8 +103,6 @@ struct DuringDictationEffectsTests {
         #expect(writes.isEmpty)
     }
 
-    // The Bluetooth A2DP<->HFP switch moves the audible output to a different device a beat after the mic
-    // opens; the follow loop must duck whatever becomes the default, and restore every device it touched.
     @Test func duckFollowsTheOutputWhenTheRouteMovesToANewDevice() async {
         var defaultDev: AudioDeviceID = 1
         var levels: [AudioDeviceID: Float32] = [:]
@@ -127,8 +123,6 @@ struct DuringDictationEffectsTests {
         #expect(levels[2] == 1)
     }
 
-    // The Bluetooth HFP->A2DP switch as the mic closes can drop the restore write; the re-apply backstop
-    // re-asserts full volume once the route settles.
     @Test func restoreIsReappliedAfterTheRouteDropsTheWrite() async {
         var level: Float32 = 1
         let effects = DuringDictationEffects(
@@ -165,9 +159,6 @@ struct DuringDictationEffectsTests {
         #expect(level == 0)
     }
 
-    // Every sound the app plays — the start cue, the three end cues, and the settings preview — carries the
-    // configured volume. The start cue needs the injected asset: the xctest bundle has no start-cue.wav, so
-    // `play` would otherwise return early on a nil sound and this path would go unmeasured.
     @Test func configuredVolumeIsAppliedToEveryDictationSound() {
         var volumes: [Float] = []
         let effects = DuringDictationEffects(
@@ -188,8 +179,6 @@ struct DuringDictationEffectsTests {
         #expect(volumes.allSatisfy { abs($0 - 0.1225) < 0.0001 })
     }
 
-    // 0 and 100 are the ends users can actually reach on the slider, and the taper must hit them exactly:
-    // a max that is not 1.0 quietly attenuates the shipped cue level, and a 0 that is not silent is not off.
     @Test(arguments: [(0, Float(0)), (50, 0.25), (100, 1)])
     func volumeTaperIsExactAtTheSliderEnds(percent: Int, expected: Float) {
         var volumes: [Float] = []
@@ -205,8 +194,6 @@ struct DuringDictationEffectsTests {
         #expect(volumes == [expected])
     }
 
-    // Zero volume means no audible cue, so there is nothing to fence out of the take: recording must admit
-    // immediately instead of paying the cue hold for silence. Same timing as sounds-off.
     @Test func aSilentCueIsSkippedSoCaptureAdmitsImmediately() {
         var played = 0
         let effects = DuringDictationEffects(
@@ -222,8 +209,6 @@ struct DuringDictationEffectsTests {
         #expect(played == 0)
     }
 
-    // One percent is still audible policy-wise, so it keeps the hold — the skip is exact-zero only, never a
-    // fuzzy "quiet enough" threshold that would let a real cue leak into the head of the recording.
     @Test func theQuietestAudibleVolumeStillHoldsAdmission() {
         let effects = DuringDictationEffects(
             reapplyDelays: [], duckFollowInterval: 100,
@@ -237,7 +222,6 @@ struct DuringDictationEffectsTests {
         #expect(hold > 0)
     }
 
-    // The start cue's length is the capture-admission hold, so `begin` must report the asset's own duration.
     @Test func beginReportsTheCueAssetDurationAsTheAdmissionHold() {
         let effects = DuringDictationEffects(
             reapplyDelays: [], duckFollowInterval: 100,
@@ -251,7 +235,6 @@ struct DuringDictationEffectsTests {
         #expect(abs(hold - 0.05) < 0.005)
     }
 
-    // Minimal 16-bit mono PCM WAV. NSSound rejects malformed data, so this must be a real container.
     private static func silentWAV(seconds: Double, sampleRate: Int = 44_100) -> Data {
         let frames = Int(Double(sampleRate) * seconds)
         let dataBytes = frames * 2

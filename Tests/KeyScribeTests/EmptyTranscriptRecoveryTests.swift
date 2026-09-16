@@ -6,7 +6,7 @@ import Testing
 @testable import KeyScribeKit
 
 // The recovery for an engine that returns no text on a take the VAD heard speech in — the Parakeet TDT v3
-// silent-collapse shape (agent_notes/parakeet_silent_bug_recovery), guarded generically.
+// silent-collapse shape, guarded generically.
 @MainActor
 struct EmptyTranscriptRecoveryTests {
     private struct ScriptedFailure: Error {}
@@ -21,7 +21,6 @@ struct EmptyTranscriptRecoveryTests {
         case slow(seconds: Double, then: String)
     }
 
-    // Answers each transcribe call from `replies` in order, recording every input it was handed.
     private final class ScriptedEngine: SpeechEngine, @unchecked Sendable {
         let id = "scripted"
         let displayName = "Scripted Model"
@@ -33,7 +32,6 @@ struct EmptyTranscriptRecoveryTests {
         private var _wavCalls = 0
         private var _completedCalls = 0
         private var next = 0
-        // Fires with the 0-based index of a call as it begins — the seam a cancel-mid-retry test needs.
         var onCall: (@Sendable (Int) -> Void)?
 
         init(replies: [Reply], acceptsSamples: Bool = true) {
@@ -72,7 +70,6 @@ struct EmptyTranscriptRecoveryTests {
             case .failure:
                 throw ScriptedFailure()
             case .slow(let seconds, let then):
-                // `try?`: a cancelled sleep still answers, modelling an engine that never observes cancellation.
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
                 text = then
             }
@@ -182,7 +179,6 @@ struct EmptyTranscriptRecoveryTests {
         return (controller.lastRecord, hud.states)
     }
 
-    // 1 s of PCM at 16 kHz, marked at the sample the 0.512 s trim boundary should land on.
     private func markedSamples() -> [Float] {
         var samples = [Float](repeating: 0.1, count: 16000)
         samples[4096] = 0.9
@@ -204,7 +200,6 @@ struct EmptyTranscriptRecoveryTests {
             insert: { inserted.record($0) })
         #expect(engine.callCount == 2)
         #expect(engine.sampleCalls.count == 2)
-        // 0.512 − 0.256 s of pre-roll = 4,096 samples removed, and the retry starts exactly at the mark.
         #expect(engine.sampleCalls[1].samples.count == 16000 - 4096)
         #expect(engine.sampleCalls[1].samples.first == 0.9)
         #expect(engine.sampleCalls[1].sampleRate == 16000)
@@ -243,9 +238,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(terminalMessage(states) == "Heard speech, but Scripted Model returned no text")
     }
 
-    // A repair that fails does not change what happened: the engine still returned nothing on a take with
-    // speech in it. Reporting the generic "Transcription failed" would blame the retry for the first
-    // attempt's silent failure.
     @Test func aRetryThatThrowsNamesTheModelRatherThanAGenericFailure() async {
         let engine = ScriptedEngine(replies: [.text(""), .failure])
         let (record, states) = await run(
@@ -255,14 +247,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(terminalMessage(states) == "Heard speech, but Scripted Model returned no text")
     }
 
-    // The shared deadline is never extended, so it can expire mid-retry. That is still the engine failing to
-    // produce text on speech — not a timeout the user should be told to blame.
-    //
-    // The deadline ABANDONS the retry without stopping it, so the engine can hand back text after the terminal
-    // was decided. The gate's verdict is the authoritative one: that late success must not insert, must not
-    // change the terminal, and (structurally — the decision is logged only after the gate ACCEPTS a result)
-    // must not report `recovered` for a dictation the user saw fail. Settling past the engine's own return
-    // proves the late result is discarded rather than merely not-yet-arrived.
     @Test func aDeadlineDuringTheRetryNamesTheModelAndDiscardsTheLateResult() async {
         let inserted = InsertSpy()
         let decisions = DecisionSpy()
@@ -281,8 +265,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(decisions.lines.contains { $0.contains("outcome=recovered") } == false)
     }
 
-    // Each skip reason and retry outcome is named in the one decision line, so a silent-engine report can be
-    // diagnosed from a log rather than guessed at.
     @Test func theRecoveryDecisionNamesWhyItSkippedOrHowItEnded() async {
         func decisionFor(
             _ engine: ScriptedEngine, speechStart: TimeInterval?, modelUsed: Bool = true, samples: [Float]?
@@ -347,7 +329,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(decisions.lines.first?.contains("outcome=skipped-deadline-budget") == true)
     }
 
-    // A first-attempt deadline never reached a recovery decision, so it must not claim one.
     @Test func anInitialDeadlineLogsNoRecoveryDecision() async {
         let decisions = DecisionSpy()
         let engine = ScriptedEngine(replies: [.slow(seconds: 5, then: "")])
@@ -358,8 +339,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(terminalMessage(states) == "Transcription timed out")
     }
 
-    // The recovery only reinterprets a failure that FOLLOWS a successful empty first pass. A first attempt
-    // that throws or times out never reached that point and keeps the existing generic terminals.
     @Test func aFirstAttemptErrorKeepsTheGenericFailureTerminal() async {
         let engine = ScriptedEngine(replies: [.failure])
         let (record, states) = await run(
@@ -378,7 +357,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(terminalMessage(states) == "Transcription timed out")
     }
 
-    // A user cancel during the retry is a cancel, not an engine failure: it keeps the silent cancel terminal.
     @Test func cancellationDuringTheRetryIsNotConvertedIntoAHeardSpeechError() async {
         let engine = ScriptedEngine(replies: [.text(""), .slow(seconds: 5, then: "too late")])
         let cancel = LateBoundCancel()
@@ -395,8 +373,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(terminalMessage(states) != "Heard speech, but Scripted Model returned no text")
     }
 
-    // speechStart at exactly one chunk means the 256 ms pre-roll reaches back to the take's start: the "trim"
-    // is the original PCM. Re-running the engine on byte-identical input cannot produce a different answer.
     @Test func aTrimThatRemovesNothingIsNotRetried() async {
         let inserted = InsertSpy()
         let engine = ScriptedEngine(responses: ["", "unreachable"])
@@ -428,8 +404,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(record?.outcome == .inserted)
     }
 
-    // The engine asserting blank audio, not failing silently: nonempty raw, so ineligible — and the cleanup
-    // blanks the marker, so it keeps the ordinary no-speech terminal rather than the named-model one.
     @Test func anAnnotationResultNeverRetriesAndKeepsNoSpeech() async {
         let engine = ScriptedEngine(responses: ["[BLANK_AUDIO]", "unreachable"])
         let (record, states) = await run(
@@ -497,8 +471,6 @@ struct EmptyTranscriptRecoveryTests {
         func takeDrainedSamples() -> [Float]? { chunk }
     }
 
-    // A spent session cannot be re-fed and the streamed arm deliberately drops the PCM, so a streamed empty
-    // transcript is never retried — it goes straight to the named-model terminal.
     @Test func aStreamedEmptyTranscriptNeverRetries() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-recovery-stream-\(UUID().uuidString)", isDirectory: true)
@@ -515,7 +487,6 @@ struct EmptyTranscriptRecoveryTests {
         let hud = HUDSpy()
         let engine = EmptyStreamEngine()
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "streamer")
-        // >4 s at 16 kHz, so the deferred-start threshold is crossed and a session really opens.
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: nil, hud: hud, permits: { _ in true },
@@ -541,9 +512,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(decisions.lines.first?.contains("outcome=skipped-streamed") == true)
     }
 
-    // A deadline that lands mid-retry must report the engine's silent failure, while an initial-attempt
-    // deadline stays a plain timeout. That distinction cannot come from a return value — the gate abandons its
-    // closure — so it is the one fact this carries.
     @Test func recoveryProgressDistinguishesAnInitialDeadlineFromARetryDeadline() {
         let recovery = DictationController.RecoveryProgress()
         #expect(recovery.retryTrimmedSeconds == nil)
@@ -551,9 +519,6 @@ struct EmptyTranscriptRecoveryTests {
         #expect(recovery.retryTrimmedSeconds == 0.256)
     }
 
-    // The chunk geometry the speech-start math converts with is the SDK's, not a guess. It is
-    // version-dependent, so a FluidAudio bump that changes it must fail here rather than silently mistime
-    // every trim.
     @Test func theChunkGeometryMatchesTheVadSdk() {
         #expect(SpeechPresenceGate.chunkSamples == VadManager.chunkSize)
         #expect(SpeechPresenceGate.chunkSampleRate == VadManager.sampleRate)

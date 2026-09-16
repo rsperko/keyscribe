@@ -64,6 +64,7 @@ fi
 python3 - "$BENCH_DIR/results.json" <<'PY'
 import json, sys
 res = json.load(open(sys.argv[1]))
+res = res.get("engines", res)   # results.json wraps the engine map beside "fuzzy"/"clips"
 
 SIZE = {  # approx download (MB), from SpeechModelCatalog — powers the "lightest that works" pick
     "whisper-small-en": 217, "parakeet-tdt-ctc-110m": 440,

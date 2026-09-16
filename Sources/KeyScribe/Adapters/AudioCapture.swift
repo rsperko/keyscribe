@@ -7,13 +7,11 @@ import os
 import Synchronization
 
 protocol AudioCapturing: AnyObject, Sendable {
-    // Returns only once capture is READY — the input has delivered a valid buffer. A successful AudioUnit
-    // start proves nothing: bind/initialize/start all succeed on a Bluetooth route that never delivers audio.
+    // Ready means a valid input buffer arrived; AudioUnit can start without delivering audio.
     func start(sampleRate: Int) async throws -> URL
     func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
     func start(sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
-    // Open recording admission at the cue-end boundary (0 ⇒ no cue played, admit immediately). Capture arms
-    // with admission closed, so this is what turns a live mic into a recording.
+    // Capture arms closed; admission opens at cue end (or immediately for zero).
     func openAdmission(afterHostTime: UInt64)
     var currentLevel: Float { get }
     var currentInputName: String? { get }
@@ -24,9 +22,7 @@ protocol AudioCapturing: AnyObject, Sendable {
     func refreshBinding()
     func releaseWarm()
     func setPreferredInputUID(_ uid: String?)
-    // Fires when a recording's route is gone for good (restart budget spent). The take is truncated: audio
-    // stops arriving while the controller still believes it is recording, so without this the prefix is
-    // finalized and inserted as an ordinary success.
+    // Report permanent route loss so a truncated take cannot be inserted as complete.
     func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void)
 }
 
@@ -60,7 +56,6 @@ private final class UnitBox: @unchecked Sendable {
     init(_ unit: HALInputUnit) { self.unit = unit }
 }
 
-// One-shot signal, awaitable across threads.
 final class SignalLatch: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
@@ -93,14 +88,11 @@ private final class CaptureSession: @unchecked Sendable {
     let url: URL
     let file: AVAudioFile
     let writer: CaptureWriter
-    // This capture's own ring. Never shared with, or reused by, another capture: a ring instance belongs to
-    // exactly one arm, so a stray realtime write from an abandoned capture cannot reach a live one's audio.
+    // A ring belongs to one arm so a late callback cannot write into its successor.
     let ring: AudioSampleRing
     var configRestartCount = 0
-    // One capture reports its loss at most once, however many restart paths converge on it.
     var captureLostReported = false
-    // Snapshotted at arm so the report reaches the dictation that owned THIS capture. Reading the live
-    // handler at fire time would hand a stale capture's loss to whichever dictation is current by then.
+    // Snapshot at arm so a stale capture cannot report loss to the next dictation.
     var lostHandler: (@Sendable () -> Void)?
 
     init(url: URL, file: AVAudioFile, writer: CaptureWriter, ring: AudioSampleRing) {
@@ -111,18 +103,8 @@ private final class CaptureSession: @unchecked Sendable {
     }
 }
 
-// The ring a single HAL unit's realtime handler writes into. The handler captures the SLOT immutably, so it can
-// never read some other capture's ring out of a shared mutable property — which is what made a late callback
-// from an abandoned generation able to write into its successor's audio.
-//
-// A unit belongs to exactly ONE generation (swapToFreshGeneration bumps the generation and drops the unit in the
-// same critical section; configureUnit reuses the resident unit only within a generation), so slot ⇔ generation
-// is 1:1 too.
-//
-// `ring` is written ONLY while this slot's unit cannot deliver: at arm, before the
-// `capturing.store(true, .releasing)` whose acquiring load in the handler is the publishing edge; and on a
-// mid-recording restart, before the replacement unit is started. Never while its unit is running — which is why
-// the realtime read needs no lock and no atomic.
+// One slot per HAL generation keeps late callbacks from writing into a successor's ring. The ring
+// changes only before that generation can deliver, so realtime reads need no lock.
 final class CaptureRingSlot: @unchecked Sendable {
     var ring: AudioSampleRing?
 }
@@ -139,10 +121,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     private var preferredInputUID: String?
     private var boundInputName: String?
     private var session: CaptureSession?
-    // Rebound per capture by the controller, so it is lock-guarded and snapshotted into the session at arm.
+    // Snapshot at arm; a live handler may already belong to the next dictation.
     private var captureLostHandler: (@Sendable () -> Void)?
-    // Per-start, seeded from the start's own target: `lastEffectiveDeviceID` is a long-lived idle cursor and
-    // would report a transition from some earlier dictation.
+    // Seed each arm from its own target, not the idle device cursor from an earlier dictation.
     private final class ArmingContext {
         let record: CaptureStartRecord
         let budget: ReadinessBudget
@@ -157,9 +138,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
-    // Mach absolute time of the last buffer the WRITER observed — stamped off the realtime thread, which
-    // must stay free of anything beyond its ring copy. Without it the meter keeps displaying the last real
-    // level after a route dies, which reads as "still hearing you".
+    // Writer timestamp lets the meter fall to zero after route loss without realtime thread work.
     private let lastBufferTicks = Atomic<UInt64>(0)
     private let overloadCount = Atomic<Int>(0)
     private var lastRingDroppedCount = 0
@@ -177,7 +156,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private static let bringUpGrace: Double = 2.0
 
-    // Covers an A2DP->HFP negotiation the local-device deadline is far too tight for.
+    // Bluetooth A2DP-to-HFP negotiation can outlast the local-device deadline.
     private static let bluetoothReadyTimeout: Double = 9.0
 
     private let deviceListenerQueue = DispatchQueue(label: "com.keyscribe.audio.device-listener")
@@ -195,8 +174,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
          kAudioDevicePropertyBufferFrameSize]
 
     #if DEBUG
-    // Test seam: called by the realtime handler between its admission gate and `handle`, so a test can park a
-    // callback past the gate across finalization. An immutable `let`, so the realtime read is of a constant.
+    // Lets tests park a realtime callback across finalization; immutable for realtime reads.
     private let realtimeBarrier: (@Sendable () -> Void)?
 
     init(realtimeBarrier: (@Sendable () -> Void)? = nil) {

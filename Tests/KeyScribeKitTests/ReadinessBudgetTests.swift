@@ -23,7 +23,6 @@ private final class ReadProbe: @unchecked Sendable {
         return budget.allowedSeconds
     }
 
-    // Returns once the timer has read the budget at least once, i.e. it is armed on the current value.
     func waitUntilRead() async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             let already: Bool = lock.withLock {
@@ -44,16 +43,12 @@ struct ReadinessBudgetTests {
         #expect(budget.allowedSeconds == 9.0)
     }
 
-    // Churn back onto a fast route must not claw back time already granted to a slow one mid-negotiation.
     @Test func aFasterTransportNeverShortensTheBudget() {
         let budget = ReadinessBudget(allowed: 9.0)
         budget.allow(atLeast: 4.0)
         #expect(budget.allowedSeconds == 9.0)
     }
 
-    // The whole point: a raise that lands AFTER the timer armed on the old value must still be honored, or a
-    // route that rebinds onto a slower transport mid-flight dies at the deadline it no longer deserves. The
-    // barrier removes the scheduling assumption — the timer has provably read the original budget first.
     @Test func aBudgetRaisedAfterTheTimerArmedIsHonored() async throws {
         let probe = ReadProbe(allowed: 0.3)
         let value = try await runWithBudget(allowedSeconds: { probe.allowedSeconds() }) {
@@ -65,12 +60,6 @@ struct ReadinessBudgetTests {
         #expect(value == "delivered")
     }
 
-    // And the window still ends things: an operation that never finishes dies at its (unraised) budget.
-    //
-    // The error IDENTITY is the contract, not merely that it throws. Callers branch on DeadlineExceeded to
-    // separate a timeout from an ordinary failure (a hung model load is terminal, a transient one retries), and
-    // the operation here is cancellation-aware — so a timeout that cancels the work before claiming the gate
-    // lets the work's own CancellationError win the race and report a timeout as a plain failure.
     @Test func anOperationThatOutlivesItsBudgetIsAbandoned() async {
         let budget = ReadinessBudget(allowed: 0.02)
         var returned: String?

@@ -230,7 +230,7 @@ or make global behavior hard to reason about.
 
 ## Seeded starter modes
 
-A fresh install writes **only `_direct.toml`** (the Direct floor). The eight starter modes below are
+A fresh install writes **only `_direct.toml`** (the Direct floor). The starter modes below are
 **templates**, not files: at first launch each catalog id is recorded in the seed ledger as an
 **offer** (a `seed-ledger.toml` entry with a nil fingerprint), and the modes materialize on demand
 from the Modes pane (Add Mode menu + template gallery) or when the first AI service connects
@@ -535,7 +535,7 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 # dictation.
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 # The one dictionary-mechanism control: recognition bias is default-ON for the engines that support it
-# (both Qwen3, both Whisper) and can be disabled per engine. Post-STT dictionary recovery has no toggle
+# (the bias-capable ones) and can be disabled per engine. Post-STT dictionary recovery has no toggle
 # — it runs whenever the mode's dictionary is non-empty. Only deviations are recorded (fresh install
 # writes the list empty):
 # recognition_bias_disabled_engines = []  # bias-capable engines with recognition bias turned OFF

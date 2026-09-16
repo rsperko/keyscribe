@@ -35,7 +35,6 @@ private func oneLine(_ s: String, _ max: Int) -> String {
 //     PROBE_BASE_URL=http://127.0.0.1:11234/v1 PROBE_MODEL=Rocinante-X-12B-v1-mlx-4bit \
 //     PROBE_API_KEY=… swift test --filter sentinelSurvival
 struct SentinelSurvivalProbeTests {
-    // MARK: - Scenario matrix
 
     enum Tok: Sendable { case redact(String); case verbatim(String) }
 
@@ -45,7 +44,6 @@ struct SentinelSurvivalProbeTests {
         let dictated: String          // edit-in-place spoken instruction; "" for dictation rewrite
         let editInPlace: Bool
         let toks: [Tok]
-        // builds the content given the rendered token strings (one per `toks`, in order)
         let content: @Sendable ([String]) -> String
     }
 
@@ -85,11 +83,9 @@ struct SentinelSurvivalProbeTests {
             content: { t in "\(t[0]) is my work email reply instead to \(t[1])" }),
     ]
 
-    // MARK: - Sentinel candidates (Table B)
 
     struct Candidate: Sendable {
         let name: String
-        // type rawValue ("REDACT"/"VERB"), 1-based index → token string
         let render: @Sendable (String, Int) -> String
     }
 
@@ -100,7 +96,6 @@ struct SentinelSurvivalProbeTests {
         Candidate(name: "PUA \u{E000}\u{E001}", render: { "\u{E000}SN:\($0):\($1)\u{E001}" }),
     ]
 
-    // MARK: - Harness
 
     static func env(_ k: String) -> String? { ProcessInfo.processInfo.environment[k] }
 

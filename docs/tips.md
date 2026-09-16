@@ -70,10 +70,8 @@ as the rules produce it; with rewrite on, the model tends to fix quote spacing o
 entirely on their own — just "code fence," nothing else — they come out bare, skipping the rewrite
 (the same whole-utterance behavior that makes `slash resume` land as a clean `/resume`).
 
-The starter modes ship with worked examples of this pattern — open **Markdown** ("insert checkbox",
-"insert horizontal rule", "begin/end bold", "begin/end italic", "begin/end code block"), **Code**
-("insert todo"), **Message** ("shrug emoji"), or **Email** ("my sign off") in Settings ▸ Modes and
-look at their Replacements to see how each is built, or edit them to match your own way of speaking.
+Several starter modes ship with worked examples of this pattern. Open Settings ▸ Modes, pick one, and
+look at its Replacements to see how each is built — or edit them to match your own way of speaking.
 
 ## Inject a secret or URL mid-dictation without it reaching the AI
 

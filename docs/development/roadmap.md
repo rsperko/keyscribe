@@ -9,8 +9,7 @@ intentionally short. It records work with a concrete user outcome, not a running
 ### Release confidence
 
 - Exercise an installed build through an update and release smoke before calling the distribution
-  flow routine. The release mechanics live in
-  [`agent_notes/distribution_plan/`](../../agent_notes/distribution_plan/).
+  flow routine.
 - Continue visual and keyboard/VoiceOver checks of first run, the menu bar, Settings, HUD, History,
   and error recovery. The interaction contract is
   [`ui_design.md`](ui_design.md); treat it as the source of truth rather than historical UI plans.
@@ -25,30 +24,23 @@ intentionally short. It records work with a concrete user outcome, not a running
 
 ### High-value product gaps
 
-- A quiet diagnostics/readiness pane that explains whether dictation can work now and names the next
-  recovery action.
 - A first-run practice receipt that explains successful insertion and clipboard fallback.
 - Intent-first mode creation, portable mode bundles, and cancellable large-model downloads.
-
-Acceptance criteria and non-goals for these are in
-[`agent_notes/improvement_ideas/improvements.md`](../../agent_notes/improvement_ideas/improvements.md).
 
 ## Held decisions
 
 - Speech recognition remains on-device. Rewrite is optional, provider-configured, and must never be
   described as a reliable redaction boundary.
 - Recognition bias is engine-specific: keep the current Whisper/Qwen3 policy unless new distractor
-  data clears a different mechanism. See
-  [`agent_notes/decisions/recognition_bias.md`](../../agent_notes/decisions/recognition_bias.md).
+  data clears a different mechanism.
 - Do not automatically collect visible screen text for rewrites without new evidence that changes its
-  permission and privacy trade-off. See
-  [`agent_notes/decisions/screen_context.md`](../../agent_notes/decisions/screen_context.md).
-- Prompt changes are eval-gated; see
-  [`agent_notes/decisions/prompt_evaluation.md`](../../agent_notes/decisions/prompt_evaluation.md).
+  permission and privacy trade-off.
+- Prompt changes are eval-gated.
+- Streaming transcription ships behind an experimental toggle (Settings > Maintenance) and stays
+  opt-in until it is proven to preserve commit-on-release insertion in ordinary use.
 
 ## Later, only with a demonstrated need
 
-- Streaming transcription as a latency optimization that preserves commit-on-release insertion.
 - OCR for sparse-Accessibility apps, but only with an explicit Screen Recording trust decision.
 - Diarization and batch transcription.
 - Cross-platform support.

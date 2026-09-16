@@ -8,7 +8,6 @@ private struct AppendStage: PipelineStage {
     func apply(_ context: inout PipelineContext) { context.text += mark }
 }
 
-// Brackets text in apply, strips it in post — proves post runs in strict reverse of apply.
 private struct WrapStage: PipelineStage {
     let position: StagePosition
     let order: Int
@@ -27,7 +26,6 @@ private extension Pipeline {
 
 struct PipelineTests {
     @Test func runsStagesInCanonicalPositionOrder() {
-        // Stages added out of declaration order; must still run verbatimMark → postSTTText → postSTTMark.
         let p = Pipeline([
             AppendStage(position: .postSTTMark, order: 0, mark: "C"),
             AppendStage(position: .verbatimMark, order: 0, mark: "A"),
@@ -46,7 +44,6 @@ struct PipelineTests {
     }
 
     @Test func liveEditsRunBeforeReplacements() {
-        // Canonical: within postSTTText, live edits (lower order) precede replacements.
         #expect(StagePosition.postSTTText < StagePosition.postSTTMark)
         #expect(StageOrder.liveEdits < StageOrder.replacements)
     }
@@ -60,8 +57,6 @@ struct PipelineTests {
         #expect(StagePosition.postSTTText < StagePosition.postSTTMark)
     }
 
-    // forward applies in (position, order); reverse runs post in STRICT REVERSE, so nested wraps
-    // unwind LIFO and the text returns to its original.
     @Test func reverseRunsPostInStrictReverse() {
         let p = Pipeline([
             WrapStage(position: .verbatimMark, order: 0, tag: "outer"),
@@ -72,7 +67,6 @@ struct PipelineTests {
         #expect(p.restore(payload.text) == "x")        // inner.post then outer.post — LIFO
     }
 
-    // A one-way stage's default post is a no-op, so reverse leaves its forward effect intact.
     @Test func oneWayStagePostIsNoOp() {
         let p = Pipeline([AppendStage(position: .postSTTText, order: 0, mark: "!")])
         let payload = p.forward("hi")

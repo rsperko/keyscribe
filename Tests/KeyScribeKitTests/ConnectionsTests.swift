@@ -21,8 +21,6 @@ struct ConnectionsTests {
         #expect(original.crossesCredentialBoundary(to: differentProvider))
     }
 
-    // Two base URLs that can't parse to an origin both normalize to nil; without a raw-text fallback they
-    // would read as the same origin and reuse the key across a real endpoint change.
     @Test func credentialBoundaryFallsBackToRawTextWhenOriginsAreUnparseable() {
         let original = connection(provider: .openaiCompatible, model: "m", baseUrl: "not a url")
         var changed = original
@@ -95,8 +93,6 @@ struct ConnectionsTests {
         #expect(c.configIssue(permits: { _ in true }) == nil)
     }
 
-    // A service the build does not offer can't be fixed by editing its fields, so saying so outranks
-    // reporting whatever else is unset.
     @Test func notPermittedOutranksTheOtherConfigurationIssues() {
         #expect(connection(provider: .openaiCompatible, model: "   ", baseUrl: nil)
             .configIssue(permits: { _ in false }) == .notPermitted)
@@ -259,7 +255,6 @@ struct ConnectionsTests {
         try ConnectionStore.write(set, to: dir)
         #expect(ConnectionStore.load(supportDir: dir) == .loaded(set))
 
-        // Malformed must surface as .failed, not silently drop every connection.
         try "schema_version = 1\n[[connection]\nid = \"x\"".write(
             to: dir.appendingPathComponent(ConnectionStore.fileName), atomically: true, encoding: .utf8)
         guard case .failed = ConnectionStore.load(supportDir: dir) else {
@@ -274,7 +269,6 @@ struct ConnectionsTests {
             .appendingPathComponent("keyscribe-connection-unreadable-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Not valid UTF-8 — must not be mistaken for an absent file and silently defaulted.
         try Data([0xFF, 0xFE, 0x00, 0xFF]).write(to: dir.appendingPathComponent(ConnectionStore.fileName))
         guard case .failed = ConnectionStore.load(supportDir: dir) else {
             Issue.record("expected .failed for a present but unreadable connections.toml")

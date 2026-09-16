@@ -26,9 +26,6 @@ struct SettingsSoundTests {
         #expect(previewedVolumes == [35])
     }
 
-    // A continuous Slider writes its binding on every drag tick. Persisting each one rewrites settings.toml
-    // and re-registers the global hotkeys through applySettingsEffects, so the drag must stay uncommitted
-    // until it ends. Nothing about this is audible or visible, which is exactly why it needs a test.
     @Test func draggingTheVolumeSliderPersistsOnceOnRelease() {
         var written: [Int] = []
         var previewedVolumes: [Int] = []
@@ -48,9 +45,6 @@ struct SettingsSoundTests {
         #expect(previewedVolumes == [40])
     }
 
-    // Closing the Settings window mid-gesture means the drag's end never arrives. The hold must degrade to
-    // "the volume saves late", never to "nothing saves" — so it guards soundVolume's own didSet rather than
-    // persist() itself, and any later edit carries the in-flight volume along with it.
     @Test func aDragThatNeverEndsDoesNotBlockOtherSettings() {
         var written: [(awake: Bool, volume: Int)] = []
         let model = makeModel(onChange: {

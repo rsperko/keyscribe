@@ -50,7 +50,6 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
-    // Production layout: models are nested inside the support dir, so `all` must wipe config but keep them.
     @Test func allWipesConfigButKeepsNestedSharedModels() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -67,8 +66,6 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
-    // Dev layout: models live outside the support dir, so `all` removes the whole support dir while the
-    // shared cache elsewhere stays untouched.
     @Test func allRemovesSupportDirWhenModelsLiveOutsideIt() throws {
         let dir = try makeSupportDir()
         let modelsDir = try makeSupportDir()
@@ -85,8 +82,6 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
-    // eraseAll = all (wipe config, keep shared models) PLUS erasing the BYOK Keychain keys. The Keychain
-    // seam is injected so the test never touches the real login keychain.
     @Test func eraseAllWipesConfigKeepsModelsAndErasesKeychain() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -109,8 +104,6 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
-    // Retained capture WAVs (`[audio] keep_captures`) live OUTSIDE supportDir, so every supportDir wipe
-    // misses them. They are raw speech and the UI promises permanent deletion, so the erase must take them.
     @Test func eraseAllRemovesRetainedCaptureRecordings() throws {
         let dir = try makeSupportDir()
         let captures = dir.deletingLastPathComponent()
@@ -135,8 +128,6 @@ struct ResetToolTests {
         #expect(actions.contains { $0.contains("2 retained recordings") })
     }
 
-    // The archive is opt-in and usually absent; an erase must not claim to have deleted recordings that
-    // never existed.
     @Test func eraseAllReportsNoRecordingsWhenTheArchiveIsAbsent() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -167,7 +158,6 @@ struct ResetToolTests {
 
         #expect(calls == ["Microphone:com.keyscribe.app", "Accessibility:com.keyscribe.app", "AppleEvents:com.keyscribe.app"])
         #expect(actions.contains { $0.contains("Relaunch") })
-        // TCC-only: config files and the first-run flag are untouched.
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == true)
     }
@@ -182,7 +172,6 @@ struct ResetToolTests {
         let tomls = (try? FileManager.default.contentsOfDirectory(at: modesDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "toml" }) ?? []
         let stems = Set(tomls.map { $0.deletingPathExtension().lastPathComponent })
-        // Reset writes only the system Direct floor; the starters become ledger offers (templates), not files.
         #expect(stems == [Mode.directId])
         #expect(!stems.contains("custom-junk"))
         let ledger = ModeStore.loadLedger(in: dir.appendingPathComponent("lkg", isDirectory: true))

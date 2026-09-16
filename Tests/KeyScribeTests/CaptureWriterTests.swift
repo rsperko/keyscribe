@@ -106,7 +106,6 @@ struct CaptureWriterTests {
         return writer.drainedSamples()
     }
 
-    // failWriteIndex < 0 ⇒ no write fails.
     private func droppedFramesFromFlakyCapture(to url: URL, frames: Int, count: Int, failWriteIndex: Int) throws -> Int {
         let format = recordFormat(16_000)
         let real = try AVAudioFile(forWriting: url, settings: format.settings)
@@ -147,7 +146,6 @@ struct CaptureWriterTests {
         defer { try? FileManager.default.removeItem(at: url) }
         try writeCapture(to: url, recordRate: 16_000, pushRate: 48_000, frames: 480, count: 10)
         let read = try AVAudioFile(forReading: url)
-        // 4800 input frames at 3:1 ⇒ ~1600 output frames; allow resampler edge/latency slack.
         #expect(read.length > 1400 && read.length < 1800)
     }
 
@@ -162,8 +160,6 @@ struct CaptureWriterTests {
         #expect(read.length == 500)  // slots 1…5 × 100 frames; slots 6…20 dropped after the seal
     }
 
-    // Mainline STT transcribes drainedSamples(), not the WAV — they must be sample-for-sample identical,
-    // even through the resampler (48 kHz push → 16 kHz record) and its tail flush.
     @Test func drainedSamplesAreBitIdenticalToTheWAV() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -173,8 +169,6 @@ struct CaptureWriterTests {
         #expect(drained == wav)
     }
 
-    // An engine that can't consume samples (Apple) gets none — the accumulator is skipped and reported
-    // nil — while the WAV is still written in full.
     @Test func noSamplesAccumulatedWhenEngineCannotConsumeThem() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -185,21 +179,15 @@ struct CaptureWriterTests {
         #expect(wav.count == 1600)  // file still fully written
     }
 
-    // A sealed COMMIT exits run() on the drain-gate trip BEFORE finish(flushConverter:true) sets
-    // flushOnStop, so the "clear when not flushing" logic must not fire — the committed samples the
-    // caller is about to read via drainedSamples() must survive.
     @Test func sealedCommitRetainsTheAccumulatorForTheCaller() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
-        // Seal once a slot with host time ≥ 5 is observed (slots 1…5 written, then sealed).
         let drained = try drainedFromCapture(
             to: url, recordRate: 16_000, pushRate: 16_000, frames: 100, count: 20,
             flush: true, seal: { ($0 ?? 0) >= 5 })
         #expect(drained?.count == 500)  // 5 × 100 frames survive the seal, not cleared to []
     }
 
-    // The cancel/discard path (flushConverter == false) must not leave the writer pinning the multi-MiB
-    // accumulator until the next arm — it is cleared on thread exit.
     @Test func cancelPathClearsTheAccumulator() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -208,12 +196,9 @@ struct CaptureWriterTests {
         #expect(drained?.isEmpty == true)
     }
 
-    // A failed WAV write must also keep that chunk out of the in-memory samples mainline STT transcribes —
-    // otherwise STT hears audio the file/archive/probe never got. Both drop it, staying equal.
     @Test func aFailedWriteKeepsTheAccumulatorInLockstepWithTheWAV() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
-        // Direct path ⇒ one write per slot; the 3rd write (index 2) throws.
         let drained = try drainedFromFlakyCapture(to: url, frames: 100, count: 5, failWriteIndex: 2)
         let wav = try readMonoFloat(url)
         #expect(wav.count == 400)   // 5 × 100 − the dropped 100-frame write
@@ -252,14 +237,12 @@ struct CaptureWriterTests {
         #expect(writer.writerDroppedFrames() == 300)
     }
 
-    // Post-seal ring overruns (RT keeps pushing after the writer sealed) must not reach the seal snapshot.
     @Test func postSealRingOverrunsAreExcludedFromTheSealSnapshot() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let format = recordFormat(16_000)
         let file = try AVAudioFile(forWriting: url, settings: format.settings)
         let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 1024, maxChannels: 2)
-        // Seal on the first slot's host time, with no pre-seal ring drops.
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { ($0 ?? 0) >= 1 })
         writer.start()
         writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
@@ -267,7 +250,6 @@ struct CaptureWriterTests {
             for k in 0..<dest.count { dest[k] = 0.25 }
         }
         writer.finish(flushConverter: true)
-        // Stand in for the RT thread still pushing post-seal: nothing drains these, so they overrun the ring.
         for i in 2...20 {
             ring.write(channelCount: 1, frameCount: 100, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -277,7 +259,6 @@ struct CaptureWriterTests {
         #expect(writer.ringDropCountAtSeal() == 0)  // but the sealed snapshot excludes them
     }
 
-    // A capture whose gate never trips (backstop/cancel) has no seal snapshot → caller uses the live count.
     @Test func anUnsealedCaptureHasNoSealSnapshot() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }

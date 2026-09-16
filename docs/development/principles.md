@@ -66,7 +66,7 @@ Write a failing test that defines the behavior, then make it pass.
 - **Strict red→green for all pure logic:** the pipeline and stage ordering, replacements /
   regex, redaction & verbatim token-fencing, mode resolution, model-lifecycle state. This
   logic lives behind thin protocol seams so it is testable without the OS.
-- **Thin adapters + integration tests for the system edges:** AVAudioEngine capture,
+- **Thin adapters + integration tests for the system edges:** audio capture,
   Accessibility insertion, global hotkeys, the SwiftUI layer — where a unit test would only
   mock the OS, we keep the adapter thin and verify it with integration tests.
 - Not applicable to config, migrations, or pure refactors with no behavior change.

@@ -48,7 +48,6 @@ struct RewriteCancelRenderTests {
         try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
 
-        // Preceding-text context is what makes build() await the AX probe — the suspension X-2 lands in.
         var mode = Mode(id: "cloud", name: "Cloud")
         mode.aiRewrite = Mode.AIRewrite(
             connection: "c", prompt: "Clean this up.", context: Mode.ContextOptIn(precedingText: true))

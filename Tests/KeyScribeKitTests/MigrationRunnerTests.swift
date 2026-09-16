@@ -53,7 +53,6 @@ struct MigrationRunnerTests {
         }
     }
 
-    // gate never transforms; an older-than-target file returns verbatim so additive decode re-derives defaults.
     @Test func gatePassesOlderVersionThrough() throws {
         let source = try MigrationRunner.gate(toml: "schema_version = 0\nname = \"x\"", target: 2)
         #expect(source == "schema_version = 0\nname = \"x\"")
@@ -65,8 +64,6 @@ struct MigrationRunnerTests {
         }
     }
 
-    // Empty migration chain + older schema_version must gate-and-decode, not throw "no migration step"
-    // (AGENTS.md §Config migrations additive-decode contract).
     @Test func configDecodeWithoutMigrationsDecodesOlderVersion() throws {
         let decoded = try ConfigDecode.table(
             "schema_version = 0\nname = \"old\"", supportedVersion: 2

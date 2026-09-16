@@ -1,8 +1,8 @@
 import Foundation
 
 // Removes the leading silence an engine choked on, keeping one VAD chunk of pre-roll so the first word's
-// onset survives. Trimming harder degrades sharply (agent_notes/parakeet_silent_bug_recovery: 0.512 s of
-// pre-roll still recovers the repro, 0.768 s turns it into a different word). Trailing audio is untouched.
+// onset survives. Trimming harder degrades sharply (0.512 s of pre-roll still recovers the repro,
+// 0.768 s turns it into a different word). Trailing audio is untouched.
 public enum LeadingSilenceTrim {
     public static let preRollSeconds = SpeechPresenceGate.chunkSeconds
 

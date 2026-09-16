@@ -3,7 +3,6 @@ import Testing
 @testable import KeyScribeKit
 
 struct TextFingerprintTests {
-    // Canonical FNV-1a 64-bit test vectors.
     @Test func knownFNV1aVectors() {
         #expect(TextFingerprint.of("").hash == 0xcbf29ce484222325)
         #expect(TextFingerprint.of("a").hash == 0xaf63dc4c8601ec8c)
@@ -18,7 +17,6 @@ struct TextFingerprintTests {
         #expect(fp.newlines == 1)
     }
 
-    // chars vs bytes diverging is how the fingerprint catches encoding mangling without logging text.
     @Test func multibyteCharsDifferFromBytes() {
         let fp = TextFingerprint.of("é")
         #expect(fp.chars == 1)
@@ -72,7 +70,6 @@ struct DictationRecordTests {
         #expect(r.rtf == nil)
     }
 
-    // humanSummary substitutes for the unreliable logger, so it must NEVER leak transcript text.
     @Test func humanSummaryContainsNoTranscriptText() {
         let r = sampleRecord()
         let summary = r.humanSummary()

@@ -14,7 +14,6 @@ private func info(
 private let realCatalog = SpeechModelCatalog.all
 
 struct SpeechModelSetTests {
-    // Usability
     @Test func systemManagedAlwaysUsable() {
         let s = SpeechModelSet(catalog: realCatalog, installed: [], activeId: "apple")
         #expect(s.isUsable("apple"))
@@ -28,7 +27,6 @@ struct SpeechModelSetTests {
         #expect(!s.isUsable("whisper"))
     }
 
-    // Selection
     @Test func selectUsableSucceeds() throws {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple")
         try s.select("parakeet")
@@ -45,7 +43,6 @@ struct SpeechModelSetTests {
         #expect(throws: ModelSelectionError.unknown("nope")) { try s.select("nope") }
     }
 
-    // Deletion consequences
     @Test func systemManagedNotDeletable() {
         let s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "parakeet")
         #expect(s.deletionConsequence("apple") == .notDeletable)
@@ -62,19 +59,16 @@ struct SpeechModelSetTests {
     }
 
     @Test func deletingActiveWithAppleFloorConfirmsActive() {
-        // apple is always usable, so deleting the active downloadable never strands the app
         let s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "parakeet")
         #expect(s.deletionConsequence("parakeet") == .confirmActive)
     }
 
     @Test func deletingOnlyUsableEngineWarnsNoEngineLeft() {
-        // a degenerate catalog with no system-managed floor
         let cat = [info("only", system: false, defaultEnglish: true)]
         let s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
         #expect(s.deletionConsequence("only") == .confirmLeavesNoUsableEngine)
     }
 
-    // Deletion effects
     @Test func deletingActiveReassignsToDefaultEnglishWhenUsable() {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "whisper")
         s.delete("whisper")
@@ -94,8 +88,6 @@ struct SpeechModelSetTests {
         #expect(s.activeId == "parakeet")
     }
 
-    // Must actually remove from `installed` (the "no model installed" state) — not desync so the row
-    // still reads "Installed" and the next dictation silently re-downloads.
     @Test func deletingTheOnlyUsableEngineRemovesItIntoANoUsableState() {
         let cat = [info("only", system: false, defaultEnglish: true)]
         var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
@@ -111,8 +103,6 @@ struct SpeechModelSetTests {
         #expect(s.isUsable("whisper"))
     }
 
-    // A model that failed its self-test stays installed (on disk) but not usable/selectable, for both
-    // downloadable and system-managed engines.
     @Test func failedModelIsNotUsable() {
         let s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet"], activeId: "apple", failed: ["parakeet"])
         #expect(s.installed.contains("parakeet"))
@@ -144,8 +134,6 @@ struct SpeechModelSetTests {
         #expect(!s.isUsable("whisper"))
     }
 
-    // Strands activeId on the now-unusable id — same "no usable model" state deleting the last engine
-    // produces; callers surface it as the active-engine-unavailable banner.
     @Test func markFailedOnlyUsableStrandsActive() {
         let cat = [info("only", system: false, defaultEnglish: true)]
         var s = SpeechModelSet(catalog: cat, installed: ["only"], activeId: "only")
@@ -168,8 +156,6 @@ struct SpeechModelSetTests {
         #expect(!s.isFailed("whisper"))
     }
 
-    // A saved id this catalog does not know — a retired model, or one this OS cannot run — follows the same
-    // reassignment as deleting the active model.
     @Test func unknownActiveMovesToDefaultEnglishWhenUsable() {
         var s = SpeechModelSet(catalog: realCatalog, installed: ["parakeet", "whisper"], activeId: "retired-model")
         let replaced = s.replaceUnknownActive()
@@ -191,8 +177,6 @@ struct SpeechModelSetTests {
         #expect(s.activeId == "apple")
     }
 
-    // With nothing usable, land on the default download so the picker and the not-installed error point at
-    // a real model instead of an id nothing can show.
     @Test func unknownActiveWithNothingUsableLandsOnTheDefaultDownload() {
         let withoutApple = realCatalog.filter { !$0.systemManaged }
         var s = SpeechModelSet(catalog: withoutApple, installed: [], activeId: "apple")

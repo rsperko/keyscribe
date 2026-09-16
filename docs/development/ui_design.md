@@ -209,7 +209,7 @@ all. There is no "arming"/"preparing" HUD: a panel that appears before admission
 permission to speak into a window whose audio is discarded, and users react to the panel appearing,
 not to its label.
 
-### Required states
+### HUD states
 
 | State | Primary content | Secondary content | Available action |
 |---|---|---|---|
@@ -413,7 +413,8 @@ them subtle — they hint, they don't alarm.
 ## 7. Settings
 
 Settings follows the user’s configuration path, from basic behavior to increasingly technical
-capabilities. The sidebar order is fixed:
+capabilities. The panes are whatever `SettingsDestination` defines, and their sidebar order is
+fixed — a new pane takes its place in this progression rather than being appended:
 
 1. **General** — startup, feedback, and model memory behavior.
 2. **Speech Models** — active local engine, language capability, download/prepare/select/delete
@@ -475,8 +476,8 @@ Show the few choices a new user is most likely to need:
   so a trigger recorded on one side does not fire on the other, and a recorded ⌃⌥⇧⌘ shows as **Custom**
   rather than matching the menu's sideless entry. Left and right of the same modifier cannot be combined,
   and the well says so instead of recording. Its menu still
-  lists the familiar ones — **Fn (Globe)**, **Right-⌥**, **Right-⌘**, **Right-⌃**, **⌃⌥⇧⌘** — and
-  anything else you record shows as **Custom**. A modifier set that is a strict subset of another
+  offers a short list of the familiar sideless triggers, and anything else you record shows as
+  **Custom**. A modifier set that is a strict subset of another
   contending mode's set is *pressed on the way into* it, and the well says so as an advisory; the
   chord grace makes pressing the larger one as a single motion start only that mode.
 - Every shortcut well records the **character a key types**, not its position, so a saved chord may
@@ -561,14 +562,13 @@ composer and lists do not live inside the mode editor.
   trash action; deleting either opens an item-specific confirmation that distinguishes global entries
   from mode-only entries.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
-  happens). Recognition bias is a best-effort hint whose strength varies by engine (strongest on
-  Apple; a soft nudge on Whisper/Parakeet), and dictionary terms always help the optional rewrite
-  regardless of engine. Models without recognition bias should be labeled **No recognition bias**,
-  then offer **Dictionary recovery** as a best-effort post-transcription fallback that can be turned
-  off if it changes ordinary words. On **Parakeet** specifically, bias runs a second lightweight
-  recognition pass over the audio — on the order of **a second on a long dictation, negligible on short
-  ones** (measured: `BiasBenchmarkTests`). Frame it as a small, worth-it cost; never imply guaranteed
-  recognition or a noticeable wait for normal use.
+  happens). Recognition bias is a best-effort hint that only some models can take, so let each
+  model's own capability drive the copy rather than naming engines here. A model that supports it
+  offers a per-model switch for using the dictionary during recognition; a model without it should be
+  labeled **No recognition bias**. Independently of the model, KeyScribe repairs near-misses right
+  after transcription whenever the mode's dictionary is non-empty — that is always on, so never
+  present it as something the user can turn off — and dictionary terms always help the optional
+  rewrite. Never imply guaranteed recognition.
 - Replacements: human-readable `When heard`/`Use instead` rows. The `Use instead` value shows as
   exactly **one bounded preview line** (line breaks and tabs rendered as `\n`/`\r`/`\t`, a
   whitespace-only value showing its spaces as `␣` so it never looks empty, capped so a row
@@ -675,9 +675,8 @@ sections:
    **More precise matching**. Availability is separate from the ways a user starts or selects a mode.
 4. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
    (inverse text normalization), and an always-visible **Recognition and replacements** summary. Its
-   **Edit Vocabulary…** action opens Vocabulary with that mode selected. (Dictionary recovery is no
-   longer a mode setting — it is a per-engine option on bias-less speech models; see the Speech Models
-   settings.)
+   **Edit Vocabulary…** action opens Vocabulary with that mode selected. (Dictionary recovery is not
+   a setting anywhere — it runs automatically whenever the mode's dictionary is non-empty.)
 5. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
    mode's **reusable writing instructions** (fragments): listed by name directly under the
    instruction they extend, reorderable (they append in order), edited in place in a popover, and

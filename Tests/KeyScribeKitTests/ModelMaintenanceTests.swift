@@ -64,8 +64,6 @@ struct ModelMaintenanceTests {
         #expect(plan.installed == ["parakeet", "future-engine"])
     }
 
-    // A retired model's files are removed at launch, so its marker id must go too, or the shared marker keeps
-    // reporting a model that no longer exists. Other unknown ids still belong to another build.
     @Test func dropsRetiredMarkerIdsButKeepsOtherUnknownIds() {
         let plan = ModelMaintenance.reconcile(
             knownIds: known, owned: owned, completeIds: ["parakeet"],

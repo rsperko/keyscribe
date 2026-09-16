@@ -9,7 +9,6 @@ struct ContextBudgetTests {
     @Test func maxTokensScalesAboveFloorForLongSelection() {
         let t = ContextBudget.maxTokens(forSelectionChars: 20_000, floor: 2048)
         #expect(t > 2048)
-        // ~ 20000/4 * 1.25 = 6250
         #expect(t == 6250)
     }
 }

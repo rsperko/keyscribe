@@ -26,7 +26,6 @@ struct AIConnectionDraftTests {
         id: "escape-hatch", name: "Escape Hatch", provider: .openaiCompatible,
         baseURL: nil, defaultModel: "", allowedAuthMethods: [.none, .apiKey, .tokenCommand])
 
-    // Fixture tests own every field; only tests about the catalog's defaults build a bare AIConnectionDraft().
     private func fixtureDraft(
         name: String = "Fixture Service", provider: Connection.Provider = .openaiCompatible,
         model: String = "fixture-model", baseURL: String = "", authMethod: Connection.AuthMethod = .apiKey,
@@ -74,8 +73,6 @@ struct AIConnectionDraftTests {
             authMethod: .apiKey, in: lineup) == "custom")
     }
 
-    // A lineup that offers one endpoint twice — open and credentialed — must reopen each stored connection
-    // under the entry that accepts its sign-in, not demote the credentialed one to Custom.
     @Test func derivePresetIdPicksTheEntryAcceptingTheAuthWhenPresetsShareAnEndpoint() {
         let openProxy = ConnectionPreset(
             id: "proxy-open", name: "Proxy", provider: .openaiCompatible,
@@ -123,8 +120,6 @@ struct AIConnectionDraftTests {
         #expect(draft.requestAPIKey == nil)
     }
 
-    // A token command is endpoint-scoped: the first visit to a preset starts from that preset's own
-    // default (or empty), never the outgoing service's command.
     @Test func applyingAKeyOrCommandPresetPreservesTheAuthChoiceButNotTheCommand() {
         var fromCommand = fixtureDraft(
             baseURL: "https://self-hosted.example.com/v1", authMethod: .tokenCommand, tokenCommand: "print-token")

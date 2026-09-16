@@ -9,8 +9,6 @@ struct SpeechModelCatalogTests {
                     "whisper-small-en", "apple", "qwen3-asr-0.6b", "qwen3-asr-1.7b"])
     }
 
-    // A retired id keeps its name so the app can say what replaced it, and must never also be a live entry
-    // or that notice would fire for a model that still ships.
     @Test func retiredModelsAreNamedButNoLongerOffered() {
         #expect(SpeechModelCatalog.retiredDisplayNames["moonshine-base-en"] == "Moonshine Base (English)")
         for id in SpeechModelCatalog.retiredDisplayNames.keys {
@@ -44,7 +42,6 @@ struct SpeechModelCatalogTests {
         #expect(small?.languageCount == 1)
         #expect(small?.supportsRecognitionBias == true)
         #expect(small?.isDefaultEnglish == false)
-        // Meaningfully smaller than the Large v3 Turbo it sits beside.
         let turbo = SpeechModelCatalog.entry(for: "whisper")
         #expect((small?.approxDownloadBytes ?? .max) < (turbo?.approxDownloadBytes ?? 0))
     }
@@ -61,8 +58,6 @@ struct SpeechModelCatalogTests {
         #expect((u?.approxMemoryBytes ?? 0) > 0)
     }
 
-    // Catalog order IS the UI order and is hand-curated, with no other guard. Keep the Parakeet family
-    // contiguous so a later insert can't scatter it.
     @Test func parakeetUnifiedSitsInsideTheParakeetFamilyBlock() {
         let ids = SpeechModelCatalog.all.map(\.id)
         let v3 = ids.firstIndex(of: "parakeet")

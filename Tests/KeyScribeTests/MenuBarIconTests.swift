@@ -31,7 +31,6 @@ struct MenuBarIconTests {
         #expect(title == "Email — ⌃⌥E")
     }
 
-    // Guards the label source shared by the menu, the Settings mode list, and the hotkey recorder.
     @Test func modeItemShortcutMatchesTheSharedLabelSource() {
         for token in ["fn", "right_option", "right_command", "hyper", "control+option+e", "mouse2"] {
             guard let descriptor = try? KeyDescriptor(parsing: token) else {
@@ -138,8 +137,6 @@ struct MenuBarIconTests {
         #expect(MenuBarController.errorIndicatorImage.size == NSSize(width: 8, height: 8))
     }
 
-    // The menu is the only step between the glyph badge and the Settings sidebar's pane dot, so a
-    // navigation element that hides the problem carries the same marker (ui_design.md §6).
     @Test func settingsMenuItemCarriesIndicatorWhileAProblemExists() {
         let controller = MenuBarController()
         controller.install()
@@ -161,8 +158,6 @@ struct MenuBarIconTests {
         #expect(controller.settingsItem.image == nil)
     }
 
-    // Color-only state needs a text mirror for VoiceOver (ui_design.md §9); menu items ignore custom
-    // accessibility identifiers, so the label is the seam.
     @Test func settingsMenuItemMirrorsTheProblemToVoiceOver() {
         let controller = MenuBarController()
         controller.install()
@@ -198,9 +193,6 @@ struct MenuBarIconTests {
         #expect(settings < check && check < about)
     }
 
-    // Without `autoenablesItems = false`, AppKit force-enables this item at display time (its target
-    // responds to its action), overriding `setHasResult(false)`; `NSMenu.update()` runs the same
-    // validation pass AppKit runs before showing the menu, without needing it on screen.
     @Test func pasteLastDictationStaysDisabledWithNoResultUnderMenuValidation() {
         let controller = MenuBarController()
         controller.install()

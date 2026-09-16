@@ -3,7 +3,7 @@ import Testing
 
 // ReturnSuffix recognizes a terminal `<CR>` on an already-expanded regex template, stripping it and
 // requesting a Return submit. `\<CR>` escapes to literal text; a non-terminal unescaped `<CR>` is
-// invalid (agent_notes/replace_with_return).
+// invalid.
 struct ReturnSuffixTests {
     @Test func terminalMarkerRequestsReturn() {
         #expect(ReturnSuffix.parse("/resume<CR>") == .init(template: "/resume", submit: .return))
@@ -23,8 +23,6 @@ struct ReturnSuffixTests {
         #expect(ReturnSuffix.parse(#"\<CR>"#) == .init(template: "<CR>", submit: nil))
     }
 
-    // A literal backslash survives as a pair through ReplacementEscapes, so `\\<CR>` (even run) is a real
-    // marker with a literal backslash before it.
     @Test func doubledBackslashIsRealMarker() {
         #expect(ReturnSuffix.parse(#"\\<CR>"#) == .init(template: #"\\"#, submit: .return))
     }

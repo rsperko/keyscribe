@@ -28,8 +28,6 @@ struct CaptureRetentionTests {
         #expect(CaptureRetention.expired(files: files, maxBytes: 7 * 1_048_576) == ["oldest.wav"])
     }
 
-    // A single take larger than the whole budget must still be retained — the point of the feature is to
-    // have the last recording to inspect. Accumulate-then-cut would delete it and retain nothing.
     @Test func theNewestCaptureIsKeptEvenWhenItAloneExceedsTheBudget() {
         let files = [file("huge.wav", mb: 50, minutesAgo: 0), file("old.wav", mb: 1, minutesAgo: 5)]
         #expect(CaptureRetention.expired(files: files, maxBytes: 10 * 1_048_576) == ["old.wav"])

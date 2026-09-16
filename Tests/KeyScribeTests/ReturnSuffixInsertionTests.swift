@@ -87,7 +87,6 @@ struct ReturnSuffixInsertionTests {
         controller.setNextModeOverride(id: mode.id)
         controller.handleStart()
         await controller.captureBringUpTask?.value
-        // Flips focus after capture pinned the original target, so the commit-time decision sees a move.
         if moveFocusBeforeCommit { captured.focusMoved = true }
         controller.handleCommit()
         await controller.dictationTask?.value
@@ -110,14 +109,12 @@ struct ReturnSuffixInsertionTests {
         #expect(out.submits == [.return])
     }
 
-    // The <CR> Return overrides the mode's standing submit (.cmdReturn → .return), still once.
     @Test func crOverridesModeSubmit() async {
         let out = await run(transcript: "slash resume", rules: crResume, modeSubmit: .cmdReturn)
         #expect(out.insertedText == "/resume")
         #expect(out.submits == [.return])
     }
 
-    // A bare replacement WITHOUT <CR> does not suppress the mode's submit — override applies only with <CR>.
     @Test func bareWithoutCRKeepsModeSubmit() async {
         let plain = [ReplacementsSet.Rule(heard: "slash replace", replace: "/replace", regex: false)]
         let out = await run(transcript: "slash replace", rules: plain, modeSubmit: .cmdReturn)
@@ -125,7 +122,6 @@ struct ReturnSuffixInsertionTests {
         #expect(out.submits == [.cmdReturn])
     }
 
-    // Clipboard fallback (Accessibility off): the text never reached the target, so no Return.
     @Test func crReturnSkippedOnClipboardFallback() async {
         let out = await run(transcript: "slash resume", rules: crResume, accessibilityGranted: false)
         #expect(out.insertedText == "/resume")
@@ -148,8 +144,6 @@ struct ReturnSuffixInsertionTests {
         #expect(out.submits.isEmpty)
     }
 
-    // A <CR>-only replacement trims to empty text but still presses Return — pressing enter is the whole
-    // point of the rule, so nothing is inserted but the submit fires and the HUD reads success.
     @Test func crOnlyOutputPressesReturnWithoutInserting() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules)
@@ -158,8 +152,6 @@ struct ReturnSuffixInsertionTests {
         #expect(terminalState(out) == .complete(outcome: .inserted, mode: "M"))
     }
 
-    // The bare <CR> submit inherits the insert-path guards: Accessibility off (clipboard divert) means no
-    // Return, and the HUD names the real cause with the settings action, never a misleading "No speech".
     @Test func crOnlyReturnSkippedWithoutAccessibility() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, accessibilityGranted: false)
@@ -172,8 +164,6 @@ struct ReturnSuffixInsertionTests {
         #expect(action == .openAccessibilitySettings)
     }
 
-    // Secure field diverts to concealed clipboard, so the bare <CR> presses nothing into a password
-    // field, and the HUD says so truthfully rather than "No speech detected".
     @Test func crOnlyReturnSkippedOnSecureField() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, secureField: true)
@@ -186,7 +176,6 @@ struct ReturnSuffixInsertionTests {
         #expect(action == nil)
     }
 
-    // The target changed out from under a bare <CR> before its Return — refused truthfully, not silence.
     @Test func crOnlyReturnRefusedWhenTargetChanged() async {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, moveFocusBeforeCommit: true)
@@ -197,7 +186,6 @@ struct ReturnSuffixInsertionTests {
         #expect(message.contains("target window changed"))
     }
 
-    // The refusal path must not swallow the honest no-speech completion.
     @Test func genuineSilenceStillReadsNoSpeech() async {
         let out = await run(transcript: "", rules: crResume)
         #expect(out.insertedText == nil)

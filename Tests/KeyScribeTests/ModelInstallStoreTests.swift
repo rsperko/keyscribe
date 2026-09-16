@@ -16,9 +16,6 @@ struct ModelInstallStoreActivityTests {
         try? FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
     }
 
-    // A download bumps only the FILE's mtime as bytes stream in, not the parent dir's; a top-level-
-    // mtime-only check would see the dir as idle and let the other variant delete it mid-download.
-    // directoryActive must recurse and treat the recent nested file as activity.
     @Test func nestedFileWriteKeepsADirActiveEvenWhenTheDirMtimeIsStale() throws {
         let root = tempDir()
         defer { try? FileManager.default.removeItem(at: root) }

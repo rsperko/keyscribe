@@ -23,7 +23,7 @@ public enum StageOrder {
 
 // A whole-utterance replacement: one rule owned the entire utterance, so its generated value is inserted
 // verbatim (bypassing the LLM and trim/trailing). `submit` is set iff that rule's regex template ended in
-// a `<CR>` marker, requesting a physical Return after the insert (agent_notes/replace_with_return).
+// a `<CR>` marker, requesting a physical Return after the insert.
 public struct BareReplacement: Sendable, Equatable {
     public let text: String
     public let submit: Mode.Submit?

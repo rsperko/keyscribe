@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// A one-shot async gate: callers `wait()` until someone `fire()`s.
 private actor Gate {
     private var open = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -51,7 +50,6 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
         self.makeStreamingSessionThrows = makeStreamingSessionThrows
     }
 
-    // Opt in to prove the wrapper forwards supportsStreaming (default false) and routes makeStreamingSession.
     let supportsStreaming = true
     private var _lastStreamingSession: SpyStreamingSession?
     var lastStreamingSession: SpyStreamingSession? { lock.withLock { _lastStreamingSession } }
@@ -74,10 +72,8 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     var prepareCount: Int { lock.withLock { _prepareCount } }
     func prepareForDictation() async { lock.withLock { _prepareCount += 1 } }
 
-    // Opt out to prove the wrapper forwards the metadata rather than returning the protocol default.
     let benefitsFromWarmupClip = false
 
-    // Opt in to prove the wrapper forwards supportsSampleInput (default false) and routes the samples call.
     let supportsSampleInput = true
     private var _sampleTranscribeCalled = false
     private var _lastSampleRate = 0
@@ -96,7 +92,6 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
         if shouldFail { throw FakeLoadError() }
     }
 
-    // Runtime-only warm: runs the runtime body, never the install body.
     func loadIfNeeded() async throws {
         lock.withLock { _runtimeBodies += 1 }
         if let loadGate { await loadGate.wait() }
@@ -104,7 +99,6 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
         lock.withLock { _loaded = true }
     }
 
-    // Install path: runs the runtime body AND the install body (idempotent — safe after a warm).
     func load(progress: (@Sendable (ModelLoadProgress) -> Void)?) async throws {
         lock.withLock { _loadBodies += 1 }
         if let loadGate { await loadGate.wait() }
@@ -174,8 +168,6 @@ private final class ProgressFractions: @unchecked Sendable {
 }
 
 struct SerializedEngineTests {
-    // P1-2: the wrapper must forward prepareForDictation to the base, else the protocol-extension no-op on
-    // the wrapper silently swallows Apple's preheat and the feature does nothing.
     @Test func prepareForDictationForwardsToBase() async {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -183,23 +175,16 @@ struct SerializedEngineTests {
         #expect(spy.prepareCount == 1)
     }
 
-    // P1-2: benefitsFromWarmupClip must reflect the base, not the protocol default (true) — otherwise the
-    // controller would run a warmup transcribe that consumes Apple's prepared analyzer.
     @Test func benefitsFromWarmupClipForwardsFromBase() {
         let engine = SerializedEngine(SpyEngine())
         #expect(engine.benefitsFromWarmupClip == false)
     }
 
-    // P2-1: supportsSampleInput must reflect the base, not the protocol default (false) — otherwise the
-    // controller never hands the in-memory PCM to a sample-capable engine and always re-reads the WAV.
     @Test func supportsSampleInputForwardsFromBase() {
         let engine = SerializedEngine(SpyEngine())
         #expect(engine.supportsSampleInput)
     }
 
-    // P2-1: the samples transcribe must forward to the base under the lock (with the runtime model loaded),
-    // else the protocol-extension default throws sampleInputUnsupported on the wrapper — the same silent
-    // trap as prepareForDictation. Also proves the runtime model is ensured first.
     @Test func transcribeSamplesForwardsToBaseAndEnsuresRuntimeModel() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -211,7 +196,6 @@ struct SerializedEngineTests {
         #expect(spy.loadBodies == 0)
     }
 
-    // 1.1: two concurrent loads share ONE base.load — the model compiles once, no racing handle write.
     @Test func concurrentLoadsRunBaseLoadOnce() async throws {
         let gate = Gate()
         let spy = SpyEngine(loadGate: gate)
@@ -271,9 +255,6 @@ struct SerializedEngineTests {
         #expect(spy.loaded)
     }
 
-    // 1.4a: an evict issued while a load is in flight must not drop the eviction — it waits for the load
-    // to settle, then evicts. If evict raced ahead of load, the final state would be loaded (evict sets
-    // loaded=false, then the completing load sets it true); waiting yields evicted + not loaded.
     @Test func evictWaitsForInFlightLoad() async throws {
         let gate = Gate()
         let spy = SpyEngine(loadGate: gate)
@@ -290,8 +271,6 @@ struct SerializedEngineTests {
         #expect(!spy.loaded)          // proves evict ran AFTER the load settled, not before
     }
 
-    // 1.4b: an evict must never close the SDK handle out from under a running transcribe (a use-after-close
-    // crash). evict waits for the transcribe lock to free.
     @Test func evictWaitsForInFlightTranscribe() async throws {
         let gate = Gate()
         let spy = SpyEngine(transcribeGate: gate)
@@ -309,10 +288,6 @@ struct SerializedEngineTests {
         #expect(!spy.evictOverlappedTranscribe)
     }
 
-    // The load a transcribe triggers must be in the SAME critical section as base.transcribe, so an
-    // evict (and the Settings file delete that follows it) can't slip in after the load settles but
-    // before the transcribe runs. Here evict is blocked the whole time the transcribe holds the lock —
-    // across its load AND its base.transcribe — so it never overlaps and lands strictly after.
     @Test func loadAndTranscribeAreOneOperationVersusEvict() async throws {
         let loadGate = Gate()
         let spy = SpyEngine(loadGate: loadGate)   // base.load blocks; base.transcribe is instant
@@ -344,15 +319,11 @@ struct SerializedEngineTests {
         #expect(spy.maxConcurrentTranscribes == 1)
     }
 
-    // P3-1: supportsStreaming must reflect the base, not the protocol default (false) — otherwise the
-    // controller never opens a streaming session even for a streaming-capable engine.
     @Test func supportsStreamingForwardsFromBase() {
         let engine = SerializedEngine(SpyEngine())
         #expect(engine.supportsStreaming)
     }
 
-    // The session forwards append + finalize to the base session, and the runtime model is ensured before
-    // the base session is built (same load-then-work discipline as transcribe).
     @Test func makeStreamingSessionForwardsAppendAndFinalize() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -366,8 +337,6 @@ struct SerializedEngineTests {
         #expect(spy.lastStreamingSession?.finalized == true)
     }
 
-    // P3-1 (adj. #2a): the session holds the exclusive lock for its whole lifetime, so an evict issued
-    // mid-session blocks until finalize releases it — evict never tears the handle down under a live stream.
     @Test func streamingSessionHoldsLockUntilFinalize() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -380,8 +349,6 @@ struct SerializedEngineTests {
         #expect(spy.evicted)              // released on finalize, so evict could proceed
     }
 
-    // P3-1 (adj. #2a): a finalize that THROWS must still release the lock, or the batch fallback the
-    // controller runs next deadlocks behind the leaked lock. Proven by a transcribe completing after.
     @Test func streamingSessionReleasesLockOnFinalizeThrow() async throws {
         let spy = SpyEngine(streamFinalizeThrows: true)
         let engine = SerializedEngine(spy)
@@ -397,7 +364,6 @@ struct SerializedEngineTests {
         #expect(text == "text")           // did not deadlock → the lock was released on the throw
     }
 
-    // P3-1 (adj. #2a): cancel (ESC/over-limit) must release the lock too.
     @Test func streamingSessionReleasesLockOnCancel() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -408,7 +374,6 @@ struct SerializedEngineTests {
         #expect(text == "text")           // lock released on cancel → no deadlock
     }
 
-    // P3-1 (adj. #2a): a failure BUILDING the session must release the lock acquired before the build.
     @Test func makeStreamingSessionReleasesLockWhenBuildThrows() async throws {
         let spy = SpyEngine(makeStreamingSessionThrows: true)
         let engine = SerializedEngine(spy)
@@ -436,8 +401,6 @@ struct SerializedEngineTests {
         #expect(engine.supportsRecognitionBias == false)
     }
 
-    // P1-7: a runtime warm must NOT run the install body — the whole point of the loadIfNeeded/load
-    // split. Before the fix, loadIfNeeded funneled into base.load and always ran the install body.
     @Test func runtimeWarmRunsOnlyTheRuntimeBodyNotInstall() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -448,7 +411,6 @@ struct SerializedEngineTests {
         #expect(!spy.installBodyRan)
     }
 
-    // The install path runs the install body (download/verify/compile) so the first dictation never stalls.
     @Test func installLoadRunsTheInstallBody() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -457,9 +419,6 @@ struct SerializedEngineTests {
         #expect(spy.installBodyRan)
     }
 
-    // The load-flavor distinction must survive across levels: a warm that already loaded the runtime
-    // model must NOT let a later install short-circuit the install body. Before the fix a single `loaded`
-    // bool would skip base.load here, leaving the install work undone until it stalled a live dictation.
     @Test func installAfterAWarmStillRunsTheInstallBody() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -470,7 +429,6 @@ struct SerializedEngineTests {
         #expect(spy.installBodyRan)
     }
 
-    // A full/install load satisfies a later runtime warm — the warm is a no-op, never a second load.
     @Test func warmAfterAnInstallIsANoOp() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -480,8 +438,6 @@ struct SerializedEngineTests {
         #expect(spy.loadBodies == 1)
     }
 
-    // Transcribe only needs the runtime model resident, so it ensures the runtime body and never the
-    // install body.
     @Test func transcribeEnsuresOnlyTheRuntimeModel() async throws {
         let spy = SpyEngine()
         let engine = SerializedEngine(spy)
@@ -491,7 +447,6 @@ struct SerializedEngineTests {
         #expect(!spy.installBodyRan)
     }
 
-    // Concurrent warms coalesce to a single runtime load (single-flight, at the runtime level).
     @Test func concurrentWarmsRunBaseRuntimeLoadOnce() async throws {
         let gate = Gate()
         let spy = SpyEngine(loadGate: gate)

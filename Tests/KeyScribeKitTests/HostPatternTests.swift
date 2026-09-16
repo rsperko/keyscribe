@@ -28,7 +28,6 @@ struct HostPatternTests {
         #expect(matches(p, "https://GITHUB.COM/foo"))
     }
 
-    // A domain with regex metacharacters is escaped, not interpreted, so a `.` matches only a literal dot.
     @Test func domainMetacharactersAreEscaped() throws {
         let p = try #require(HostPattern.regex(forDomain: "a.b.com"))
         #expect(matches(p, "https://a.b.com/x"))
@@ -42,8 +41,6 @@ struct HostPatternTests {
         #expect(HostPattern.regex(forDomain: "github.com/foo") == nil) // a path, not a domain
     }
 
-    // These all pass the old `contains(".")` guard but would escape into a regex that can never match a
-    // real URL host, yet still display as a valid rule — must be rejected outright.
     @Test func rejectsDomainsThatCanNeverMatchAHost() {
         #expect(HostPattern.regex(forDomain: "*.github.com") == nil) // wildcard label
         #expect(HostPattern.regex(forDomain: ".github.com") == nil)  // leading dot / empty label
@@ -54,8 +51,6 @@ struct HostPatternTests {
         #expect(HostPattern.regex(forDomain: "foo..bar.com") == nil) // empty middle label
     }
 
-    // ModeResolver.regexFound matches unanchored over the whole URL string, so the `^` anchor here is
-    // load-bearing — without it the pattern would match mid-URL.
     @Test func generatedPatternIsHostAnchoredFromTheStart() throws {
         let p = try #require(HostPattern.regex(forDomain: "github.com"))
         #expect(p.hasPrefix("(?i)^"))
@@ -78,7 +73,6 @@ struct HostPatternTests {
         #expect(HostPattern.domain(fromRegex: "github\\.com") == nil)
         #expect(HostPattern.domain(fromRegex: "(?i)pull request") == nil)
         #expect(HostPattern.domain(fromRegex: "") == nil)
-        // Right shell, but a bare unescaped dot in the middle — not what our escaper would emit.
         #expect(HostPattern.domain(fromRegex: "(?i)^[a-z][a-z0-9+.-]*://([^/?#]*\\.)?github.com([/:?#]|$)") == nil)
     }
 

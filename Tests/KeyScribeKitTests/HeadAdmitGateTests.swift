@@ -19,13 +19,11 @@ struct HeadAdmitGateTests {
     }
 
     @Test func dropsAWholeSlotEndingBeforeTheBoundary() {
-        // Slot [base, base+30ms); boundary at base+40ms → entirely before.
         var gate = HeadAdmitGate(admitAfterHostTime: base + ms(40), hostTicksPerSecond: ticksPerSecond)
         #expect(gate.observe(slotStartHostTime: base, frameCount: 480, sampleRate: 16000) == .drop)
     }
 
     @Test func trimsAStraddlingSlotToTheSample() {
-        // Slot [base, base+30ms) @16kHz (480 frames); boundary at base+10ms → drop first 160, admit 320.
         var gate = HeadAdmitGate(admitAfterHostTime: base + ms(10), hostTicksPerSecond: ticksPerSecond)
         #expect(gate.observe(slotStartHostTime: base, frameCount: 480, sampleRate: 16000) == .admitTrailing(dropFrames: 160))
     }
@@ -40,7 +38,6 @@ struct HeadAdmitGateTests {
         let boundary = base + ms(40)
         var gate = HeadAdmitGate(admitAfterHostTime: boundary, hostTicksPerSecond: ticksPerSecond)
         #expect(gate.observe(slotStartHostTime: base, frameCount: 480, sampleRate: 16000) == .drop)
-        // Next slot [base+30ms, base+60ms) straddles the base+40ms boundary → trims, not blanket-admits.
         let s2 = base + slotTicks(frames: 480, sampleRate: 16000)  // base+30ms
         #expect(gate.observe(slotStartHostTime: s2, frameCount: 480, sampleRate: 16000) == .admitTrailing(dropFrames: 160))
     }
@@ -54,7 +51,6 @@ struct HeadAdmitGateTests {
     }
 
     @Test func invalidTimestampsDropAboutTheCueWindowBeforeAdmitting() {
-        // Cue window 100 ms; 30 ms slots. Drop through 30/60/90 ms (still under the window), admit at 120 ms.
         var gate = HeadAdmitGate(
             admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond, fallbackDropSeconds: 0.1)
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .drop)
@@ -64,14 +60,12 @@ struct HeadAdmitGateTests {
     }
 
     @Test func aShortCueWindowAdmitsInvalidTimestampsAlmostImmediately() {
-        // A 10 ms cue window is already exceeded by the first 30 ms slot.
         var gate = HeadAdmitGate(
             admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond, fallbackDropSeconds: 0.01)
         #expect(gate.observe(slotStartHostTime: nil, frameCount: 480, sampleRate: 16000) == .admit)
     }
 
     @Test func unmeasurableInvalidSlotsCannotAccumulateDurationSoTheSlotBackstopGuaranteesAdmission() {
-        // Zero-frame slots can't add cue-window duration, so even a large window relies on the slot backstop.
         var gate = HeadAdmitGate(
             admitAfterHostTime: base, hostTicksPerSecond: ticksPerSecond,
             fallbackDropSeconds: 10, maxInvalidSlotsBeforeAdmit: 2)
@@ -80,14 +74,12 @@ struct HeadAdmitGateTests {
     }
 
     @Test func aFractionalBoundaryRoundsTheDroppedFrameCountUp() {
-        // Boundary 160.4 frames into the slot @16kHz: strict "admit at/after" drops 161, not 160.
         let boundary = base + UInt64(160.4 / 16000 * ticksPerSecond)
         var gate = HeadAdmitGate(admitAfterHostTime: boundary, hostTicksPerSecond: ticksPerSecond)
         #expect(gate.observe(slotStartHostTime: base, frameCount: 480, sampleRate: 16000) == .admitTrailing(dropFrames: 161))
     }
 
     @Test func aSlotEndingExactlyOnTheBoundaryDrops() {
-        // Slot [base, base+30ms); boundary at exactly base+30ms → nothing at/after the boundary.
         let boundary = base + slotTicks(frames: 480, sampleRate: 16000)
         var gate = HeadAdmitGate(admitAfterHostTime: boundary, hostTicksPerSecond: ticksPerSecond)
         #expect(gate.observe(slotStartHostTime: base, frameCount: 480, sampleRate: 16000) == .drop)

@@ -72,7 +72,6 @@ import Testing
         #expect(model.value?.canonical == "left_command")
     }
 
-    // A pair keeps the keys it was pressed on, so Left-⌘ + Left-⌃ binds those keys and not the other pair.
     @Test func aModifierPairRecordsBothMembersSided() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
@@ -83,8 +82,6 @@ import Testing
         #expect(model.value?.canonical == "left_control+left_command")
     }
 
-    // The release of a multi-modifier press is staggered, so the set at the final release is a subset of
-    // what the user actually held. Recording the peak union is what makes ⌃⌥⇧⌘ record as ⌃⌥⇧⌘ and not ⌘.
     @Test func aStaggeredReleaseRecordsThePeakSetNotTheLastKeyDown() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
@@ -136,9 +133,6 @@ import Testing
         #expect(model.hint == "Use at most four modifiers")
     }
 
-    // A CHORD never carries a side, however the user typed it: recording ⌥A on the left Option stores the
-    // sideless `option+a`, which fires on either Option key. Sides exist only for modifier-ONLY triggers,
-    // because Carbon cannot distinguish them for a registered chord.
     @Test func aChordRecordedOnOneSideIsStillSideless() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
@@ -157,8 +151,6 @@ import Testing
         #expect(model.phase == .idle)
     }
 
-    // A key that failed to record still consumes the held modifiers, so releasing them afterwards must
-    // not quietly commit a modifier-only trigger the user never meant to bind.
     @Test func aRejectedKeyClearsThePendingModifierSet() {
         var model = ShortcutCaptureModel(profile: .modeTrigger, stored: "")
         model.beginRecording()
@@ -168,8 +160,6 @@ import Testing
         #expect(model.value == nil)
     }
 
-    // The action-chord profile takes chords only, so a modifier press it can't use must say why rather
-    // than record a trigger the Carbon path could never register.
     @Test func actionChordProfileRejectsModifierOnlyWithTheNoKeyHint() {
         var model = ShortcutCaptureModel(profile: .actionChord, stored: "")
         model.beginRecording()

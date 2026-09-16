@@ -37,13 +37,10 @@ struct FeaturesTests {
         #expect(Settings.Features(overrides: ["ghost": true]) == Settings.Features())
     }
 
-    // Off deviations carry no information — absence already means off — so they must not persist.
     @Test func offOverridesArePruned() {
         #expect(Settings.Features(overrides: ["not_a_real_flag": false]) == Settings.Features())
     }
 
-    // ids are hand-written strings keying both storage and pruning; a collision would make one flag
-    // shadow another. Guards every future case as soon as it is added.
     @Test func featureIdsAreUnique() {
         let ids = Feature.allCases.map(\.id)
         #expect(ids.count == Set(ids).count)
@@ -83,7 +80,6 @@ struct FeaturesTests {
         #expect(try !SettingsStore.encode(s).contains("consumption_driven_restore"))
     }
 
-    // Absence already means off, so turning the flag back off carries no information and is elided.
     @Test func streamingTranscriptionOffIsElided() throws {
         var s = Settings.defaults
         s.features.setEnabled(true, for: .streamingTranscription)
