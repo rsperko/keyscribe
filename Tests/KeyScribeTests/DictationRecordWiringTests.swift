@@ -46,7 +46,7 @@ struct DictationRecordWiringTests {
 
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
-        llm: any LLMClient = EchoLLM(), historyEnabled: Bool
+        llm: any LLMClient = EchoLLM(), historyEnabled: Bool, pressedAt: DispatchTime? = nil
     ) async -> DictationRecord? {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-record-\(UUID().uuidString)", isDirectory: true)
@@ -76,7 +76,11 @@ struct DictationRecordWiringTests {
             llmClient: llm)
 
         controller.setNextModeOverride(id: mode.id)
-        controller.handleStart()
+        if let pressedAt {
+            controller.handleStart(pressedAt: pressedAt)
+        } else {
+            controller.handleStart()
+        }
         await controller.captureBringUpTask?.value
         controller.handleCommit()
         await controller.dictationTask?.value
@@ -119,6 +123,17 @@ struct DictationRecordWiringTests {
         #expect(sent != final)
         #expect(final == TextFingerprint.of("email alice@example.com"))
         #expect(!(record?.humanSummary().contains("alice@example.com") ?? true))
+    }
+
+    @Test func armIsMeasuredFromThePhysicalPressAndGraceIsItsOwnStage() async throws {
+        let pressedAt = DispatchTime(uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds - 200_000_000)
+        let record = await run(
+            transcript: "hello world", mode: mode(id: "plain"), historyEnabled: false, pressedAt: pressedAt)
+        let grace = try #require(record?.stageMillis[.grace])
+        let arm = try #require(record?.stageMillis[.arm])
+        #expect(grace >= 200)
+        #expect(arm >= grace)
+        #expect(record?.humanSummary().contains("grace ") == true)
     }
 
     @Test func noSpeechTranscriptRecordsNoSpeechOutcome() async {

@@ -195,6 +195,15 @@ struct CaptureReadinessTests {
         #expect(!summary.contains("bound-transport="))
     }
 
+    @Test func aPresentPreferenceNeverReadsTheSystemDefault() {
+        var defaultReads = 0
+        func readDefault() -> AudioDeviceID? { defaultReads += 1; return 42 }
+        let target = AudioCapture.captureTarget(
+            preferredUID: "airpods-uid", resolvePreferred: { _ in 7 }, systemDefault: readDefault())
+        #expect(target == .preferred(7))
+        #expect(defaultReads == 0)
+    }
+
     @Test func aDisconnectedPreferenceResolvesToTheSystemDefault() {
         let target = AudioCapture.captureTarget(
             preferredUID: "absent-airpods-uid",

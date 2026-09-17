@@ -297,7 +297,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 try await Self.awaitReadiness(ready)
                 return url
             }
-            Log.audio.debug("capture-start \(record.summary(outcome: "ready"), privacy: .public)")
+            Log.audio.info("capture-start \(record.summary(outcome: "ready"), privacy: .public)")
             return url
         } catch let error where Self.bringUpAbortSupersedes(error) {
             // The queued armSync completes regardless of a timeout or cancellation, so supersede it eagerly
@@ -1094,10 +1094,11 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // Resolve the device to capture from: a present preferred device wins; else the system default; else
     // nothing is available. Pure so the resolution + error-mapping policy is unit-tested without a device.
     static func captureTarget(
-        preferredUID: String?, resolvePreferred: (String) -> AudioDeviceID?, systemDefault: AudioDeviceID?
+        preferredUID: String?, resolvePreferred: (String) -> AudioDeviceID?,
+        systemDefault: @autoclosure () -> AudioDeviceID?
     ) -> CaptureTarget {
         if let uid = preferredUID, !uid.isEmpty, let id = resolvePreferred(uid) { return .preferred(id) }
-        if let systemDefault { return .systemDefault(systemDefault) }
+        if let systemDefault = systemDefault() { return .systemDefault(systemDefault) }
         return .unavailable
     }
 

@@ -61,7 +61,8 @@ final class HotkeyMonitor {
     private let chordGraceSeconds: TimeInterval
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
 
-    let onStart: (String?, PressStyle) -> Void
+    // The DispatchTime is the physical press, which precedes the call by the chord grace and a main-queue hop.
+    let onStart: (String?, PressStyle, DispatchTime) -> Void
     let onCommit: (String?) -> Void
     let onAction: (String) -> Void
     // Fired when a bare modifier-only start turns out to be part of a chord (a foreign modifier or a key
@@ -72,7 +73,7 @@ final class HotkeyMonitor {
 
     init(
         bindings: [Binding], actionBindings: [ActionBinding] = [],
-        onStart: @escaping (String?, PressStyle) -> Void, onCommit: @escaping (String?) -> Void,
+        onStart: @escaping (String?, PressStyle, DispatchTime) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
         onCancel: @escaping (String?) -> Void = { _ in },
         carbon: ChordRegistering = CarbonHotKeys(),
@@ -339,11 +340,11 @@ final class HotkeyMonitor {
         fire(index: index, edge: edge, now: ProcessInfo.processInfo.systemUptime)
     }
 
-    private func fire(index: Int, edge: TriggerEdge, now: TimeInterval) {
+    private func fire(index: Int, edge: TriggerEdge, now: TimeInterval, pressedAt: DispatchTime = .now()) {
         let key = bindings[index].triggerKey
         let style = bindings[index].gesture.style
         switch bindings[index].gesture.handle(edge, at: now) {
-        case .start: dispatchSideEffect { self.onStart(key, style) }
+        case .start: dispatchSideEffect { self.onStart(key, style, pressedAt) }
         case .commit: dispatchSideEffect { self.onCommit(key) }
         case .none: break
         }
@@ -412,13 +413,14 @@ final class HotkeyMonitor {
         // Context-aware claiming rebuilds on every app switch, which makes that routine rather than a
         // config-reload rarity. The generation check still discards an arm that lost its race.
         let descriptor = bindings[i].descriptor
+        let pressedAt = DispatchTime.now()
         schedule(chordGraceSeconds) { [weak self] in
             guard let self,
                   let index = self.bindings.firstIndex(where: { $0.descriptor == descriptor }),
                   self.bindings[index].pendingArm,
                   self.bindings[index].armGeneration == generation else { return }
             self.bindings[index].pendingArm = false
-            self.fire(index: index, edge: .down, now: ProcessInfo.processInfo.systemUptime)
+            self.fire(index: index, edge: .down, now: ProcessInfo.processInfo.systemUptime, pressedAt: pressedAt)
         }
     }
 

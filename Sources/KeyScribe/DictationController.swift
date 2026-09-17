@@ -97,6 +97,7 @@ final class DictationController {
         var streamingFeedTask: Task<Void, Never>?
         var modeReady = false
         var snapshotReady = false
+        var effectsBegan = false
         var preconnectFired = false
         // An unconfirmed target is treated as secure: no cloud rewrite, context, or history.
         var targetUnconfirmed = false
@@ -440,6 +441,10 @@ final class DictationController {
         Task { await detector.prewarm() }
     }
 
+    func prewarmCues() {
+        effects.prewarm()
+    }
+
     func prewarmCapture() {
         guard micStatus() == .granted,
               EvictionPolicy.shouldPrewarmCapture(mode: settings.stt.eviction) else { return }
@@ -486,7 +491,9 @@ final class DictationController {
         scheduleHide()
     }
 
-    func handleStart(triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap) {
+    func handleStart(
+        triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap, pressedAt: DispatchTime? = nil
+    ) {
         // A wake key can reach the tap while the login window still owns the console.
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else { playBusyPressCue(); return }
@@ -497,6 +504,10 @@ final class DictationController {
         idleEvictionTask?.cancel()
         captureRefreshTask?.cancel()
         session = DictationSession(building: DictationRecord(modeName: currentModeName))
+        if let pressedAt {
+            session?.pressedAt = pressedAt
+            building.stageMillis[.grace] = elapsedMs(since: pressedAt)
+        }
         // A denied mic captures silence without throwing, so diagnose permission before starting.
         if micStatus() == .denied {
             finishError("Microphone access is off", action: .openMicrophoneSettings)
@@ -507,6 +518,14 @@ final class DictationController {
             finishError("The selected speech model is not installed", action: .openSpeechModels)
             return
         }
+        session?.capturedEngine = engine
+        protectedEngineIds.insert(engine.id)
+        // The mic comes up while the probe and mode resolution below run. Audio never leaves the machine and
+        // admission stays closed until the start cue, so nothing here needs the secure-field verdict first:
+        // everything content-bearing (preconnect, context, rewrite, history) waits for snapshot adoption. A
+        // press no mode can serve now opens the mic briefly and tears it down without a cue.
+        beginCapture()
+
         // Capture secure-field state at press before any asynchronous work can change the target.
         let snapshotStart = DispatchTime.now()
         capturedSnapshot = pressSnapshot()
@@ -514,8 +533,6 @@ final class DictationController {
         adoptFullSnapshot()
         building.targetBundleId = capturedSnapshot?.bundleId
         session?.capturedPlan = config.resolved
-        session?.capturedEngine = engine
-        protectedEngineIds.insert(engine.id)
         session?.capturedRecognitionBias = settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
@@ -535,7 +552,7 @@ final class DictationController {
         } else {
             session?.modeResolveTask = nil
             applyResolvedMode(triggerKey: triggerKey, url: nil, windowTitle: nil)
-            // An unclaimed press must exit before opening the mic or playing the cue.
+            // An unclaimed press has already been cancelled; nothing more to prepare.
             guard machine.state == .arming else { return }
         }
 
@@ -545,8 +562,6 @@ final class DictationController {
         warmActiveEngine()
         prepareActiveEngineForDictation()
         prewarmPresenceDetector()
-
-        beginCapture()
     }
 
     private func playBusyPressCue() {
@@ -662,12 +677,21 @@ final class DictationController {
         let sampleRate = activeEngine.captureSampleRate
         let wantsSamples = activeEngine.supportsSampleInput
         let onSamples = setUpStreamingIfEnabled(sampleRate: sampleRate)
+        // Detached so bring-up starts NOW, while the caller still holds the main actor for the press probe and
+        // mode resolution. A main-actor task would not begin until handleStart returned.
+        let starting = Task.detached(priority: .userInitiated) { [audio] in
+            try await audio.start(sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples)
+        }
         captureBringUpTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self else { starting.cancel(); return }
             do {
                 // Resolves on the input's first delivered buffer, not on the AudioUnit start returning: a
                 // Bluetooth route that binds and starts but never delivers must not read as a live mic.
-                _ = try await self.audio.start(sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples)
+                _ = try await withTaskCancellationHandler {
+                    try await starting.value
+                } onCancel: {
+                    starting.cancel()
+                }
                 self.session?.capturedInputDevice = self.audio.currentInputName
             } catch {
                 // Bring-up failed or timed out (e.g. a wedged Bluetooth device). A cancel/commit may have
@@ -699,6 +723,7 @@ final class DictationController {
             // The mic is live, so the cue can honestly invite speech. It plays into an OPEN mic, so admission
             // opens only at cue end: the cue stays out of the recording and speech right after it is kept
             // whole. No cue (sounds off) ⇒ a 0 boundary admits from here.
+            self.session?.effectsBegan = true
             let cueSeconds = self.effects.begin(self.settings.duringDictation)
             let hold = cueSeconds > 0 ? cueSeconds + Self.cueAdmitPadSeconds : 0
             self.audio.openAdmission(
@@ -992,12 +1017,11 @@ final class DictationController {
     // The pressed key belongs only to modes that cannot run here, and the Direct floor does not own it
     // either — so this press was never ours to serve.
     //
-    // Resolving inline (no URL/window-title probe) lands here BEFORE beginCapture, with nothing claimed:
-    // no cue, no mic, no HUD, exactly like the chord grace discarding a pending arm. Once the probe has
-    // deferred us past beginCapture the start cue has already played, so cancel audibly instead — the
-    // probe is bounded at 0.6s and usually returns inside the cue, before admission opens, so nothing is
-    // recorded and nothing is lost. `.cancel`, not `.error`: nothing is wrong, the key just does not
-    // apply here.
+    // The mic is already coming up (beginCapture runs before resolution). If the start cue has not played,
+    // tear it down silently: no cue, no HUD, like the chord grace discarding a pending arm. Once it has
+    // played — a URL/window-title probe can land after the cue — cancel audibly so the go-signal is answered.
+    // The probe is bounded at 0.6s and usually returns before admission opens, so nothing is recorded.
+    // `.cancel`, not `.error`: nothing is wrong, the key just does not apply here.
     private func abortPressWithNoEligibleMode() {
         log.notice(
             "press ignored — no mode for \(self.activeStartTrigger ?? "(none)", privacy: .public) here")
@@ -1005,10 +1029,14 @@ final class DictationController {
             finish(machine: .cancel, cue: nil, state: .hidden)
             return
         }
+        if machine.state == .arming, session?.effectsBegan != true {
+            cancelBeforeCaptureStarted(silently: true)
+            return
+        }
         cancel()
     }
 
-    private func cancelBeforeCaptureStarted() {
+    private func cancelBeforeCaptureStarted(silently: Bool = false) {
         // Release/ESC during the cue is a release during bring-up (the unit comes up under the cue). Cancel
         // the bring-up task so a fast bring-up sitting in the cue-end hold wakes at once (its guards see
         // `.isCancelled` and tear the mic down) rather than staying live until the hold expires. The task's
@@ -1018,13 +1046,13 @@ final class DictationController {
         session?.modeResolveTask?.cancel()
         session?.modeResolveTask = nil
         guard waitForBringUpCleanup else {
-            finish(machine: .cancel, cue: .cancel, state: .hidden)
+            finish(machine: .cancel, cue: silently ? nil : .cancel, state: .hidden)
             return
         }
         // Surface the cancel now, but defer the release tail to finishCanceledBringUp so the in-flight
         // bring-up task unwinds first.
         machine.beginCancellingBringUp()
-        effects.end(settings.duringDictation, cue: .cancel)
+        if !silently { effects.end(settings.duringDictation, cue: .cancel) }
         hud?.render(.hidden)
         clearRewriteEscapeHatch()
     }

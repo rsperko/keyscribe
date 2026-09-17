@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import KeyScribeApp
@@ -17,10 +18,9 @@ struct UnclaimedPressTests {
         func evict() async {}
     }
 
-    // Ground truth for "the press did not dictate". Two traps this avoids: the terminal drops the
-    // session, so `captureBringUpTask` reads nil whether or not beginCapture ran; and the bring-up is a
-    // Task, so counting mic opens alone races the assertion and passes vacuously. `setCaptureLostHandler`
-    // is called synchronously at the top of beginCapture, so it records the entry itself.
+    // Capture starts before the mode is resolved, so an unclaimed press may open the mic briefly. What it
+    // must never do is cue, show a HUD, or insert. `setCaptureLostHandler` is called synchronously at the
+    // top of beginCapture, so it records the entry itself.
     private final class StubAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
         private let lock = NSLock()
@@ -64,8 +64,15 @@ struct UnclaimedPressTests {
         func record() { lock.withLock { _count += 1 } }
     }
 
+    private final class CueCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _played = 0
+        var played: Int { lock.withLock { _played } }
+        func record() { lock.withLock { _played += 1 } }
+    }
+
     private func harness(
-        modes: [Mode], bundleId: String
+        modes: [Mode], bundleId: String, cues: CueCounter? = nil
     ) -> (controller: DictationController, hud: HUDRecorder, audio: StubAudio, inserts: InsertCounter,
           dir: URL) {
         let supportDir = FileManager.default.temporaryDirectory
@@ -76,7 +83,13 @@ struct UnclaimedPressTests {
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
-        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: cues != nil)
+        let effects = cues.map { counter in
+            DuringDictationEffects(
+                reapplyDelays: [], duckFollowInterval: 100,
+                loadStartCueSound: { NSSound(data: DuringDictationEffectsTests.silentWAV(seconds: 0.02)) },
+                playSound: { _, _ in counter.record() })
+        }
         let provider = try! SpeechEngineProvider(engines: [StubEngine()], activeId: "fixed")
         let hud = HUDRecorder()
         let audio = StubAudio(url: supportDir.appendingPathComponent("capture.wav"))
@@ -85,6 +98,7 @@ struct UnclaimedPressTests {
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
             audio: audio,
+            effects: effects,
             insert: { _, _, _, _, _ in inserts.record(); return true },
             submitKey: { _ in },
             captureSelection: { _ in nil },
@@ -126,13 +140,44 @@ struct UnclaimedPressTests {
         h.controller.handleStart(triggerKey: "fn")
         await h.controller.captureBringUpTask?.value
 
-        // Nothing claimed: no capture was ever brought up, the machine is idle again, and the HUD never
-        // painted anything but the arming-time clear.
-        #expect(h.audio.captureBegins == 0)
-        #expect(h.audio.starts == 0)
+        // Nothing claimed: the machine is idle again, the HUD never painted anything but the arming-time
+        // clear, and whatever capture the press opened was torn down.
         #expect(!h.controller.isBusy)
+        #expect(h.audio.starts == 0 || h.audio.stopped.hasFired)
         #expect(h.hud.states.allSatisfy { $0 == HUDState.hidden })
         #expect(h.inserts.count == 0)
+    }
+
+    @Test func anUnclaimedPressWhoseMicIsAlreadyComingUpStaysSilent() async {
+        let cues = CueCounter()
+        let h = harness(
+            modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"),
+                    direct(owning: "right_option")],
+            bundleId: "com.apple.Notes", cues: cues)
+        defer { try? FileManager.default.removeItem(at: h.dir) }
+
+        h.controller.handleStart(triggerKey: "fn")
+        await h.controller.captureBringUpTask?.value
+
+        #expect(h.audio.captureBegins == 1)
+        #expect(cues.played == 0)
+        #expect(!h.controller.isBusy)
+        #expect(h.hud.states.allSatisfy { $0 == HUDState.hidden })
+    }
+
+    @Test func theSameHarnessCuesAPressAModeCanServe() async {
+        let cues = CueCounter()
+        let h = harness(
+            modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"),
+                    direct(owning: "right_option")],
+            bundleId: "com.vmware.fusion", cues: cues)
+        defer { try? FileManager.default.removeItem(at: h.dir) }
+
+        h.controller.handleStart(triggerKey: "fn")
+        await h.controller.captureBringUpTask?.value
+
+        #expect(cues.played == 1)
+        h.controller.cancel()
     }
 
     @Test func theSamePressStillFallsBackWhenDirectOwnsTheKey() async {
@@ -203,7 +248,6 @@ struct UnclaimedPressTests {
         h.controller.handleStart(triggerKey: "fn")
         await h.controller.captureBringUpTask?.value
 
-        #expect(h.audio.captureBegins == 0)
         #expect(!h.controller.isBusy)
         #expect(h.inserts.count == 0)
         #expect(h.hud.states.allSatisfy { $0 == HUDState.hidden })

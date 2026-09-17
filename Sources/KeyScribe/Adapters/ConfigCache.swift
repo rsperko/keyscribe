@@ -83,6 +83,20 @@ final class ConfigCache {
         return resolved
     }
 
+    // Realizes this generation's plan now, and compiles each enabled mode's text stages and bias terms off
+    // the main actor, so the first press after launch or a config change reads no fragments and compiles no
+    // replacement regexes on the hot path.
+    @discardableResult
+    func prewarm() -> Task<Void, Never> {
+        let plan = resolved
+        return Task.detached(priority: .utility) {
+            for mode in plan.modes where mode.enabled {
+                _ = plan.postSTTTextStages(for: mode)
+                _ = plan.recognitionBiasTerms(for: mode)
+            }
+        }
+    }
+
     // Disk-backed last-known-good for modes, OUTSIDE the watched modes/ dir so a recovery copy is never read
     // as a real mode and the launch case (malformed before any in-memory good exists) is still recoverable.
     private var lkgModesDir: URL {

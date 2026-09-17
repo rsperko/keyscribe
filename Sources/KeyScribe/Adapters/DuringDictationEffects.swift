@@ -107,6 +107,12 @@ final class DuringDictationEffects {
         playSound(sound, position * position)
     }
 
+    // Loads every cue at launch so the first press's admission boundary does not absorb the asset load.
+    func prewarm() {
+        _ = startCueSound()
+        for cue in [EndCue.success, .cancel, .error] { _ = sound(named: cue.soundName) }
+    }
+
     func previewStartCue(volumePercent: Int) {
         play(startCueSound(), volumePercent: volumePercent)
     }

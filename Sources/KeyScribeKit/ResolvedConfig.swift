@@ -17,16 +17,28 @@ public final class ResolvedConfig: @unchecked Sendable {
     private var biasTermsCache: [String: [String]] = [:]
     private var textStageCache: [String: [any PipelineStage]] = [:]
     private static let nilModeKey = "\u{0}nil"
+    private let onBuildTextStages: (@Sendable (String) -> Void)?
 
-    public init(
+    public convenience init(
         modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet,
         connections: ConnectionSet, fragments: [String: String]
+    ) {
+        self.init(
+            modes: modes, dictionary: dictionary, replacements: replacements, connections: connections,
+            fragments: fragments, onBuildTextStages: nil)
+    }
+
+    init(
+        modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet,
+        connections: ConnectionSet, fragments: [String: String],
+        onBuildTextStages: (@Sendable (String) -> Void)?
     ) {
         self.modes = modes
         self.dictionary = dictionary
         self.replacements = replacements
         self.connections = connections
         self.fragments = fragments
+        self.onBuildTextStages = onBuildTextStages
     }
 
     public func connection(id: String) -> Connection? { connections.connection(id: id) }
@@ -36,31 +48,50 @@ public final class ResolvedConfig: @unchecked Sendable {
         ids.compactMap { fragments[$0] }.filter { !$0.isEmpty }
     }
 
+    // Each memo below is built OUTSIDE the lock and published under it, so a mode compiling its stages (a
+    // background prewarm) never blocks a main-actor lookup for another mode. A race builds twice; the first
+    // published result wins, which is harmless because a build is a pure function of this frozen config.
     public func mergedDictionary(for mode: Mode?) -> [String] {
-        lock.lock(); defer { lock.unlock() }
-        return mergedDictionaryUnlocked(for: mode)
+        memoized(mode, in: \.mergedDictionaryCache) {
+            mode.map { m in
+                VocabularyMerge.words(
+                    global: dictionary.words, local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
+            } ?? dictionary.words
+        }
     }
 
     // Memoized per mode so the per-dictation bias path is a cache hit, not a fresh map+filter.
     public func recognitionBiasTerms(for mode: Mode?) -> [String] {
-        let key = mode?.id ?? Self.nilModeKey
-        lock.lock(); defer { lock.unlock() }
-        if let cached = biasTermsCache[key] { return cached }
-        let terms = mergedDictionaryUnlocked(for: mode)
-            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        biasTermsCache[key] = terms
-        return terms
+        memoized(mode, in: \.biasTermsCache) {
+            mergedDictionary(for: mode)
+                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
     }
+
+    var cachedTextStageModeIds: Set<String> { lock.withLock { Set(textStageCache.keys) } }
+    var cachedBiasTermModeIds: Set<String> { lock.withLock { Set(biasTermsCache.keys) } }
 
     // Verbatim/redaction tokenizers are per-dictation and added separately by the host; these stages
     // are pure config.
     public func postSTTTextStages(for mode: Mode?) -> [any PipelineStage] {
+        memoized(mode, in: \.textStageCache) {
+            onBuildTextStages?(mode?.id ?? Self.nilModeKey)
+            return buildTextStages(for: mode)
+        }
+    }
+
+    private func memoized<Value>(
+        _ mode: Mode?, in cache: ReferenceWritableKeyPath<ResolvedConfig, [String: Value]>,
+        build: () -> Value
+    ) -> Value {
         let key = mode?.id ?? Self.nilModeKey
-        lock.lock(); defer { lock.unlock() }
-        if let cached = textStageCache[key] { return cached }
-        let stages = buildTextStages(for: mode)
-        textStageCache[key] = stages
-        return stages
+        if let cached = lock.withLock({ self[keyPath: cache][key] }) { return cached }
+        let built = build()
+        return lock.withLock {
+            if let raced = self[keyPath: cache][key] { return raced }
+            self[keyPath: cache][key] = built
+            return built
+        }
     }
 
     private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {
@@ -72,20 +103,8 @@ public final class ResolvedConfig: @unchecked Sendable {
             includeGlobal: mode?.replacements.includeGlobal ?? true)
         stages.append(ReplacementsStage(rules: rules))
         if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
-        let terms = mergedDictionaryUnlocked(for: mode)
+        let terms = mergedDictionary(for: mode)
         if !terms.isEmpty { stages.append(FuzzyStage(terms: terms)) }
         return stages
-    }
-
-    // PRECONDITION: caller holds `lock` — mergedDictionary and buildTextStages both hold it.
-    private func mergedDictionaryUnlocked(for mode: Mode?) -> [String] {
-        let key = mode?.id ?? Self.nilModeKey
-        if let cached = mergedDictionaryCache[key] { return cached }
-        let words = mode.map { m in
-            VocabularyMerge.words(
-                global: dictionary.words, local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
-        } ?? dictionary.words
-        mergedDictionaryCache[key] = words
-        return words
     }
 }

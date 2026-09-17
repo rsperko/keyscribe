@@ -222,6 +222,26 @@ struct DuringDictationEffectsTests {
         #expect(hold > 0)
     }
 
+    @Test func prewarmLoadsTheStartCueOnceWithoutPlayingAnything() {
+        var loads = 0
+        var played = 0
+        let effects = DuringDictationEffects(
+            reapplyDelays: [], duckFollowInterval: 100,
+            loadStartCueSound: { loads += 1; return NSSound(data: Self.silentWAV(seconds: 0.05)) },
+            playSound: { _, _ in played += 1 })
+
+        effects.prewarm()
+        #expect(loads == 1)
+        #expect(played == 0)
+
+        let hold = effects.begin(
+            Settings.DuringDictation(
+                otherAudio: .unchanged, keepDisplayAwake: false, sounds: true, soundVolumePercent: 100))
+        #expect(loads == 1)
+        #expect(played == 1)
+        #expect(hold > 0)
+    }
+
     @Test func beginReportsTheCueAssetDurationAsTheAdmissionHold() {
         let effects = DuringDictationEffects(
             reapplyDelays: [], duckFollowInterval: 100,
@@ -235,7 +255,7 @@ struct DuringDictationEffectsTests {
         #expect(abs(hold - 0.05) < 0.005)
     }
 
-    private static func silentWAV(seconds: Double, sampleRate: Int = 44_100) -> Data {
+    static func silentWAV(seconds: Double, sampleRate: Int = 44_100) -> Data {
         let frames = Int(Double(sampleRate) * seconds)
         let dataBytes = frames * 2
         var wav = Data()

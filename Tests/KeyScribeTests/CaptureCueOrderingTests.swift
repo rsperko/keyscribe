@@ -62,6 +62,42 @@ struct CaptureCueOrderingTests {
         func openAdmission(afterHostTime: UInt64) { lock.withLock { _boundaries.append(afterHostTime) } }
     }
 
+    private final class StartMarkingAudio: AudioCapturing, @unchecked Sendable {
+        let startBegan = DispatchSemaphore(value: 0)
+        private let url: URL
+        init(url: URL) { self.url = url }
+        func start(sampleRate: Int) async throws -> URL {
+            startBegan.signal()
+            return url
+        }
+        func stop() -> URL? { url }
+    }
+
+    @Test func micBringUpIsUnderWayWhileThePressProbeRuns() async {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-cue-order-\(UUID().uuidString)", isDirectory: true)
+        let audio = StartMarkingAudio(url: dir.appendingPathComponent("capture.wav"))
+        var startedBeforeProbeFinished = false
+        let controller = DictationController(
+            settings: Settings.defaults,
+            provider: try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny"),
+            config: ConfigCache(supportDir: dir), history: nil, hud: RecordingHUD(), permits: { _ in true },
+            audio: audio,
+            effects: DuringDictationEffects(
+                defaultOutputDeviceID: { nil }, setDuck: { _, _ in false }, startCueDurationOverride: 0),
+            snapshot: {
+                startedBeforeProbeFinished = audio.startBegan.wait(timeout: .now() + 2) == .success
+                return TargetSnapshot(bundleId: "test.bundle")
+            },
+            micStatus: { .granted })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+
+        #expect(startedBeforeProbeFinished)
+        controller.cancel()
+    }
+
     private func makeController(audio: AudioCapturing, hud: HUDPresenting, cueSeconds: TimeInterval) -> DictationController {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-cue-order-\(UUID().uuidString)", isDirectory: true)
@@ -103,7 +139,6 @@ struct CaptureCueOrderingTests {
         let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
         controller.handleStart()
         #expect(!hud.sawVisibleHUD)
-        #expect(audio.startCalls == 0)
         ready.signal()
         await poll { hud.sawRecording }
         #expect(audio.startCalls == 1)

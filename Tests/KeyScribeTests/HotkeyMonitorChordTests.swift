@@ -59,7 +59,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
         #expect(fake.lastRegistrations.count == 1)
 
@@ -76,7 +76,7 @@ struct HotkeyMonitorChordTests {
     @Test func mouseBindingRegistersConsumedButton() {
         let mouse = FakeMouseTap()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse3")])
         #expect(mouse.consumedButtons == [3])
@@ -86,7 +86,7 @@ struct HotkeyMonitorChordTests {
         let mouse = FakeMouseTap()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse4")])
 
@@ -104,7 +104,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .tapToToggle)])
 
         fake.lastRegistrations[0].onPressed()
@@ -121,7 +121,7 @@ struct HotkeyMonitorChordTests {
     @Test func heldGestureIsReportedWhilePhysicalKeyIsDown() async {
         let fake = FakeChordRegistrar()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in }, onCommit: { _ in }, carbon: fake)
+            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .holdOnly)])
 
         fake.lastRegistrations[0].onPressed()
@@ -134,7 +134,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
 
         fake.lastRegistrations[0].onPressed()
@@ -152,7 +152,7 @@ struct HotkeyMonitorChordTests {
         let fake = FakeChordRegistrar()
         var commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in }, onCommit: { _ in commits += 1 }, carbon: fake)
+            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .tapToToggle)])
 
         fake.lastRegistrations[0].onPressed()   // tap-to-toggle start; gesture now "recording"
@@ -171,7 +171,7 @@ struct HotkeyMonitorChordTests {
     private func monitor(
         _ bindings: [HotkeyMonitor.Binding], grace: TimeInterval = 0,
         schedule: ((TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil,
-        onStart: @escaping (String?, PressStyle) -> Void = { _, _ in },
+        onStart: @escaping (String?, PressStyle, DispatchTime) -> Void = { _, _, _ in },
         onCommit: @escaping (String?) -> Void = { _ in },
         onCancel: @escaping (String?) -> Void = { _ in }
     ) -> HotkeyMonitor {
@@ -194,7 +194,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func capsLockDoesNotBreakEngagement() async {
         var starts = 0, commits = 0
-        let m = monitor([namedBinding("right_option")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("right_option")], onStart: { _, _, _ in starts += 1 },
                         onCommit: { _ in commits += 1 })
         let capsLock = CGEventFlags.maskAlphaShift.rawValue
 
@@ -210,7 +210,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func aLeftSidedPairEngagesAndCommitsOnStaggeredRelease() async {
         var starts = 0, commits = 0
-        let m = monitor([namedBinding("left_command+left_control")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("left_command+left_control")], onStart: { _, _, _ in starts += 1 },
                         onCommit: { _ in commits += 1 })
         let both = flags([.maskCommand, .maskControl], Self.leftCmd | Self.leftCtl)
 
@@ -234,7 +234,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func theOppositeSideDoesNotEngageASidedTrigger() async {
         var starts = 0
-        let m = monitor([namedBinding("left_command")], onStart: { _, _ in starts += 1 })
+        let m = monitor([namedBinding("left_command")], onStart: { _, _, _ in starts += 1 })
         m.handle(type: .flagsChanged, keyCode: 54,
                  flags: flags([.maskCommand], UInt64(NX_DEVICERCMDKEYMASK)))
         await drainMain()
@@ -243,7 +243,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func aForeignModifierJoiningAPairAborts() async {
         var starts = 0, cancels = 0, commits = 0
-        let m = monitor([namedBinding("left_command+left_control")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("left_command+left_control")], onStart: { _, _, _ in starts += 1 },
                         onCommit: { _ in commits += 1 }, onCancel: { _ in cancels += 1 })
         let both = flags([.maskCommand, .maskControl], Self.leftCmd | Self.leftCtl)
 
@@ -263,7 +263,7 @@ struct HotkeyMonitorChordTests {
         var started: [String?] = []
         let m = monitor(
             [chordBinding("left_command"), chordBinding("left_command+left_control")],
-            grace: 0.15, schedule: clock.schedule, onStart: { key, _ in started.append(key) })
+            grace: 0.15, schedule: clock.schedule, onStart: { key, _, _ in started.append(key) })
 
         m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
         m.handle(type: .flagsChanged, keyCode: 59,
@@ -274,11 +274,29 @@ struct HotkeyMonitorChordTests {
         #expect(started == ["left_command+left_control"])
     }
 
+    @Test func aGracedStartReportsThePhysicalPressTimeNotTheGraceExpiry() async throws {
+        let clock = ManualScheduler()
+        var pressedAt: DispatchTime?
+        let m = monitor([namedBinding("left_command")], grace: 0.15, schedule: clock.schedule,
+                        onStart: { _, _, at in pressedAt = at })
+
+        let beforePress = DispatchTime.now()
+        m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
+        try await Task.sleep(nanoseconds: 30_000_000)
+        let graceExpiry = DispatchTime.now()
+        clock.fireAll()
+        await drainMain()
+
+        let at = try #require(pressedAt)
+        #expect(at >= beforePress)
+        #expect(at < graceExpiry)
+    }
+
     @Test func aMouseDownCancelsAPendingArmAndAbortsAStartedOne() async {
         let clock = ManualScheduler()
         var starts = 0, cancels = 0
         let m = monitor([namedBinding("left_command")], grace: 0.15, schedule: clock.schedule,
-                        onStart: { _, _ in starts += 1 }, onCancel: { _ in cancels += 1 })
+                        onStart: { _, _, _ in starts += 1 }, onCancel: { _ in cancels += 1 })
         let down = flags([.maskCommand], Self.leftCmd)
 
         m.handle(type: .flagsChanged, keyCode: 55, flags: down)
@@ -303,7 +321,7 @@ struct HotkeyMonitorChordTests {
         let clock = ManualScheduler()
         var starts = 0, cancels = 0, commits = 0
         let m = monitor([namedBinding("left_command")], grace: 0.15, schedule: clock.schedule,
-                        onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+                        onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
                         onCancel: { _ in cancels += 1 })
         let down = flags([.maskCommand], Self.leftCmd)
 
@@ -331,7 +349,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func theOppositeSideSpendsASidedTriggerUntilFullRelease() async {
         var starts = 0
-        let m = monitor([namedBinding("left_command")], onStart: { _, _ in starts += 1 })
+        let m = monitor([namedBinding("left_command")], onStart: { _, _, _ in starts += 1 })
         let bothCmd = flags([.maskCommand], Self.leftCmd | UInt64(NX_DEVICERCMDKEYMASK))
 
         m.handle(type: .flagsChanged, keyCode: 54, flags: bothCmd)
@@ -350,7 +368,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func theOppositeSideJoiningMidDictationAborts() async {
         var starts = 0, commits = 0, cancels = 0
-        let m = monitor([namedBinding("right_option")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("right_option")], onStart: { _, _, _ in starts += 1 },
                         onCommit: { _ in commits += 1 }, onCancel: { _ in cancels += 1 })
 
         m.handle(type: .flagsChanged, keyCode: 61,
@@ -368,7 +386,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func aShippedRightSideTriggerNoLongerArmsWhileTheOtherOptionIsHeld() async {
         var starts = 0
-        let m = monitor([namedBinding("right_option")], onStart: { _, _ in starts += 1 })
+        let m = monitor([namedBinding("right_option")], onStart: { _, _, _ in starts += 1 })
         let bothOptions = CGEventFlags(rawValue: CGEventFlags.maskAlternate.rawValue
             | UInt64(NX_DEVICELALTKEYMASK) | UInt64(rightAlt))
 
@@ -392,7 +410,7 @@ struct HotkeyMonitorChordTests {
     @Test func aSidelessSetEngagesFromEitherSideAndFromBoth() async {
         for device in [Self.leftCmd, UInt64(NX_DEVICERCMDKEYMASK), Self.leftCmd | UInt64(NX_DEVICERCMDKEYMASK)] {
             var starts = 0, commits = 0
-            let m = monitor([namedBinding("command")], onStart: { _, _ in starts += 1 },
+            let m = monitor([namedBinding("command")], onStart: { _, _, _ in starts += 1 },
                             onCommit: { _ in commits += 1 })
             m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], device))
             await drainMain()
@@ -406,7 +424,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func fnJoiningHyperAborts() async {
         var starts = 0, cancels = 0
-        let m = monitor([namedBinding("hyper")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("hyper")], onStart: { _, _, _ in starts += 1 },
                         onCancel: { _ in cancels += 1 })
 
         m.handle(type: .flagsChanged, keyCode: 59, flags: hyperFlags)
@@ -441,7 +459,7 @@ struct HotkeyMonitorChordTests {
         let clock = ManualScheduler()
         var starts = 0
         let m = monitor([namedBinding("left_command")], grace: 0.15, schedule: clock.schedule,
-                        onStart: { _, _ in starts += 1 })
+                        onStart: { _, _, _ in starts += 1 })
         let down = flags([.maskCommand], Self.leftCmd)
 
         m.handle(type: .flagsChanged, keyCode: 55, flags: down)
@@ -454,7 +472,7 @@ struct HotkeyMonitorChordTests {
     @Test func aForeignModifierPressedFirstSpendsTheTriggerUntilRelease() async {
         var starts = 0, commits = 0
         let m = monitor([namedBinding("left_command", style: .holdOrTap)],
-                        onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 })
+                        onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 })
         let shift = flags([.maskShift], UInt64(NX_DEVICELSHIFTKEYMASK))
         let shiftCmd = flags([.maskShift, .maskCommand], UInt64(NX_DEVICELSHIFTKEYMASK) | Self.leftCmd)
 
@@ -480,7 +498,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func aForeignModifierPressedFirstSpendsTheTriggerWithNoKeyInvolved() async {
         var starts = 0
-        let m = monitor([namedBinding("left_command")], onStart: { _, _ in starts += 1 })
+        let m = monitor([namedBinding("left_command")], onStart: { _, _, _ in starts += 1 })
         let shift = flags([.maskShift], UInt64(NX_DEVICELSHIFTKEYMASK))
 
         m.handle(type: .flagsChanged, keyCode: 56, flags: shift)
@@ -493,7 +511,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func aForeignModifierPressedFirstSpendsAnFnTrigger() async {
         var starts = 0
-        let m = monitor([namedBinding("fn")], onStart: { _, _ in starts += 1 })
+        let m = monitor([namedBinding("fn")], onStart: { _, _, _ in starts += 1 })
 
         m.handle(type: .flagsChanged, keyCode: 59, flags: flags([.maskControl], Self.leftCtl))
         m.handle(type: .flagsChanged, keyCode: 63,
@@ -506,7 +524,7 @@ struct HotkeyMonitorChordTests {
     @Test(arguments: [[59, 55], [55, 59]])
     func aPairCommitsOnceInEitherReleaseOrder(_ order: [Int]) async {
         var starts = 0, commits = 0
-        let m = monitor([namedBinding("left_command+left_control")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("left_command+left_control")], onStart: { _, _, _ in starts += 1 },
                         onCommit: { _ in commits += 1 })
         let bits: [Int: UInt64] = [55: Self.leftCmd, 59: Self.leftCtl]
         let generic: [Int: CGEventFlags] = [55: .maskCommand, 59: .maskControl]
@@ -529,7 +547,7 @@ struct HotkeyMonitorChordTests {
         let clock = ManualScheduler()
         var starts = 0, commits = 0, cancels = 0
         let m = monitor([namedBinding("fn")], grace: 0.15, schedule: clock.schedule,
-                        onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+                        onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
                         onCancel: { _ in cancels += 1 })
 
         m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
@@ -554,7 +572,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func fnCombinedWithASidedModifierEngages() async {
         var starts = 0, commits = 0
-        let m = monitor([namedBinding("fn+left_command")], onStart: { _, _ in starts += 1 },
+        let m = monitor([namedBinding("fn+left_command")], onStart: { _, _, _ in starts += 1 },
                         onCommit: { _ in commits += 1 })
 
         m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
@@ -574,7 +592,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionReleaseFiresEvenWhenLeftOptionStillHeld() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
@@ -591,7 +609,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightCommandReleaseFiresEvenWhenLeftCommandStillHeld() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_command")])
 
@@ -612,7 +630,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionSuppressedWhenAChordModifierIsAlreadyHeld() async {
         var starts = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
@@ -625,7 +643,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionAbortsWhenAChordModifierJoinsAfterABareDown() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
@@ -644,7 +662,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionAbortsWhenAChordKeyFollows() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
@@ -663,7 +681,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightOptionDoesNotReArmWhileHeldAfterAChordAbort() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_option")])
 
@@ -694,7 +712,7 @@ struct HotkeyMonitorChordTests {
     @Test func fnAbortsWhenAChordKeyFollows() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("fn")])
 
@@ -714,7 +732,7 @@ struct HotkeyMonitorChordTests {
     @Test func fnReArmsAfterAChordAbortOnceReleased() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("fn")])
 
@@ -734,7 +752,7 @@ struct HotkeyMonitorChordTests {
     @Test func hyperAbortsWhenAChordKeyFollows() async {
         var starts = 0, commits = 0, cancels = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("hyper")])
 
@@ -751,7 +769,7 @@ struct HotkeyMonitorChordTests {
     @Test func hyperDoesNotReArmWhileEngagedAfterAChordAbort() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("hyper")])
 
@@ -775,7 +793,7 @@ struct HotkeyMonitorChordTests {
     @Test func rightControlStartsAndCommitsAsABareModifier() async {
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0)
         m.update(bindings: [namedBinding("right_control")])
 
@@ -794,7 +812,7 @@ struct HotkeyMonitorChordTests {
         let mouse = FakeMouseTap()
         var starts = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse4")])
 
@@ -806,7 +824,7 @@ struct HotkeyMonitorChordTests {
     @Test func suspendEmptiesMouseButtonsAndResumeRestoresThem() {
         let mouse = FakeMouseTap()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse3")])
         #expect(mouse.consumedButtons == [3])
@@ -820,7 +838,7 @@ struct HotkeyMonitorChordTests {
 
     @Test func suspendUnregistersChordsAndResumeRestoresThem() {
         let fake = FakeChordRegistrar()
-        let m = HotkeyMonitor(bindings: [], onStart: { _, _ in }, onCommit: { _ in }, carbon: fake)
+        let m = HotkeyMonitor(bindings: [], onStart: { _, _, _ in }, onCommit: { _ in }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
         #expect(fake.lastRegistrations.count == 1)
 
@@ -834,7 +852,7 @@ struct HotkeyMonitorChordTests {
     @Test func untrustedDefersTapButStillRegistersChords() {
         let fake = FakeChordRegistrar()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in },
             carbon: fake, mouseTap: FakeMouseTap(), isProcessTrusted: { false })
         m.update(bindings: [chordBinding("control+option+e")])
 
@@ -852,7 +870,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0, cancels = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(),
             chordGraceSeconds: 0.15, schedule: clock.schedule)
         m.update(bindings: [namedBinding("fn")])
@@ -872,7 +890,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0.15, schedule: clock.schedule)
         m.update(bindings: [namedBinding("fn")])
 
@@ -889,7 +907,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, commits = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0.15, schedule: clock.schedule)
         m.update(bindings: [namedBinding("fn", style: .holdOnly)])
 
@@ -906,7 +924,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, cancels = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(),
             chordGraceSeconds: 0.15, schedule: clock.schedule)
         m.update(bindings: [namedBinding("hyper")])
@@ -934,7 +952,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in },
             carbon: FakeChordRegistrar(), chordGraceSeconds: 0.15, schedule: clock.schedule)
         m.update(bindings: [namedBinding("fn")])
 
@@ -951,7 +969,7 @@ struct HotkeyMonitorChordTests {
         var starts = 0, cancels = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in },
             onCancel: { _ in cancels += 1 }, carbon: FakeChordRegistrar(),
             chordGraceSeconds: 0.15, schedule: clock.schedule)
         m.update(bindings: [namedBinding("right_option")])
@@ -981,7 +999,7 @@ struct HotkeyMonitorChordTests {
         let clock = ManualScheduler()
         var started: [String?] = []
         let m = monitor([chordBinding("fn"), chordBinding("left_command")],
-                        grace: 0.15, schedule: clock.schedule, onStart: { key, _ in started.append(key) })
+                        grace: 0.15, schedule: clock.schedule, onStart: { key, _, _ in started.append(key) })
 
         m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
         m.update(bindings: [chordBinding("left_command")])
@@ -1001,7 +1019,7 @@ struct HotkeyMonitorLayoutTests {
     private func monitor(_ fake: FakeChordRegistrar, layout: @escaping () -> KeyboardLayoutIndex)
         -> HotkeyMonitor {
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in }, onCommit: { _ in },
+            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in },
             carbon: fake, mouseTap: FakeMouseTap())
         m.layout = layout
         return m
@@ -1052,7 +1070,7 @@ struct HotkeyMonitorLayoutTests {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 },
             carbon: fake, mouseTap: FakeMouseTap())
         m.layout = { .ansiUS }
         m.update(bindings: [binding("control+`")])

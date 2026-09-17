@@ -145,6 +145,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // rebinds until relaunch.
             self?.rebuildHotkeyMonitor()
             self?.refreshStatus()
+            // Off the write path, so saving never pays it and the next press does not either.
+            Task { @MainActor [weak self] in self?.config.prewarm() }
         }
         selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
         configWatcher = ConfigWatcher(path: KeyScribePaths.supportDir.path) { [weak self, gate = selfWriteGate, dir = KeyScribePaths.supportDir] in
@@ -347,13 +349,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Warm the HUD window, audio unit, and resolved config so the FIRST dictation doesn't pay their
+        // Warm the HUD window, audio unit, cue sounds and resolved config so the FIRST dictation doesn't pay their
         // one-time realization on the hot path (handleStart reads config.resolved before the mic starts).
         // Deferred a tick so it never adds to launch itself.
         Task { @MainActor [weak self] in
             self?.hud.prewarm()
             self?.controller.prewarmCapture()
-            _ = self?.config.resolved
+            self?.controller.prewarmCues()
+            self?.config.prewarm()
         }
 
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -445,7 +448,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotkey == nil {
             hotkey = HotkeyMonitor(
                 bindings: bindings, actionBindings: actionBindings,
-                onStart: { [weak self] key, style in self?.controller.handleStart(triggerKey: key, pressStyle: style) },
+                onStart: { [weak self] key, style, pressedAt in
+                    self?.controller.handleStart(triggerKey: key, pressStyle: style, pressedAt: pressedAt)
+                },
                 onCommit: { [weak self] _ in
                     self?.controller.handleCommit()
                     self?.refreshStatus()
@@ -564,7 +569,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
         // modes/dictionary/fragments realization invalidate() just discarded (mirrors the launch warm).
-        Task { @MainActor [weak self] in _ = self?.config.resolved }
+        Task { @MainActor [weak self] in self?.config.prewarm() }
     }
 
     private func startListening() {

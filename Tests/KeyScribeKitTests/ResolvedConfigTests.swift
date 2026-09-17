@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import KeyScribeKit
 
@@ -13,6 +14,37 @@ struct ResolvedConfigTests {
             modes: modes, dictionary: DictionarySet(words: dictionary),
             replacements: ReplacementsSet(rules: replacements),
             connections: ConnectionSet(), fragments: fragments)
+    }
+
+    @Test func aModeCompilingItsStagesDoesNotBlockAnotherModesLookup() {
+        let slow = Mode(id: "slow", name: "Slow")
+        let fast = Mode(id: "fast", name: "Fast")
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let rc = ResolvedConfig(
+            modes: [slow, fast], dictionary: DictionarySet(), replacements: ReplacementsSet(),
+            connections: ConnectionSet(), fragments: [:],
+            onBuildTextStages: { id in
+                guard id == "slow" else { return }
+                entered.signal()
+                release.wait()
+            })
+        _ = rc.postSTTTextStages(for: fast)
+
+        let building = Thread { _ = rc.postSTTTextStages(for: slow) }
+        building.start()
+        #expect(entered.wait(timeout: .now() + 2) == .success)
+
+        let lookedUp = DispatchSemaphore(value: 0)
+        Thread {
+            _ = rc.postSTTTextStages(for: fast)
+            _ = rc.recognitionBiasTerms(for: fast)
+            _ = rc.mergedDictionary(for: fast)
+            lookedUp.signal()
+        }.start()
+        let unblocked = lookedUp.wait(timeout: .now() + 1) == .success
+        release.signal()
+        #expect(unblocked)
     }
 
     @Test func mergedDictionaryUnionsGlobalAndModeWithDedup() {

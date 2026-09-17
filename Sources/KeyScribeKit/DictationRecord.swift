@@ -46,10 +46,11 @@ public struct DictationRecord: Codable, Equatable, Sendable {
         case inserted, copied, localFallback, noSpeech, failed
     }
 
-    // Wall-clock stage timings, stamped by the app layer, chronological. `arm` is press→mic-live,
-    // `modelWait` is the commit-time load await.
+    // Wall-clock stage timings, stamped by the app layer, chronological. `grace` is the physical press until
+    // the controller sees it (chord grace + main-queue hop); `arm` is physical press→recording and INCLUDES
+    // `grace`; `modelWait` is the commit-time load await.
     public enum Stage: String, Codable, Sendable, CaseIterable {
-        case arm, drain, modelWait, transcribe, streamFinalize, localProcess, rewrite, insert
+        case grace, arm, drain, modelWait, transcribe, streamFinalize, localProcess, rewrite, insert
     }
 
     // The text boundaries a fingerprint is taken at, in pipeline order.

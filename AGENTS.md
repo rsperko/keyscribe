@@ -229,16 +229,18 @@ This file is the entry point. Read the design docs before writing code — they 
   mic-usage monitors as a repeated grab/release; Balanced/Frugal exist for coexistence with mic-sensitive apps.
   To diagnose the next occurrence rather than
   infer it, `start()` emits ONE structured record per capture start on the `audio` category
-  (`CaptureStartRecord`; `Log.audio`, `.debug`, `.error` on a terminal failure): `capture-start
-  outcome=ready|never-ready|cancelled|failed policy=explicit|default transport=bluetooth|other
-  bound-transport=… target=… bound=… configure=…ms start-returned=…ms first-buffer=…ms events=[…]`. A healthy
+  (`CaptureStartRecord`; `Log.audio`, `.info` when ready, `.debug` when cancelled, `.error` on a terminal
+  failure): `capture-start outcome=ready|never-ready|cancelled|failed policy=explicit|default
+  transport=bluetooth|other bound-transport=… target=… bound=… configure=…ms start-returned=…ms
+  first-buffer=…ms events=[…]`. A healthy
   prewarmed start is a few ms to first buffer; the gap between `start-returned` and `first-buffer` is the
   route actually opening. **Group by the transport that DELIVERED — `bound-transport` when present, else
   `transport`**: they differ when a rebind moved the route, and grouping on `transport` alone files a capture
   that delivered over Bluetooth under `other`. `bound`/`bound-transport` are frozen at the first buffer on a
   `ready` outcome, so a restart landing just after readiness cannot re-file that timing under a device which
-  never delivered it. Timings are from `start()`, **not** from the trigger (the press pays the synchronous
-  secure-field probe and mode resolution first) — trigger-to-recording is `DictationRecord.stageMillis[.arm]`.
+  never delivered it. Timings are from `start()`, **not** from the trigger (the press pays the chord grace
+  first; `DictationController` starts capture in a detached task so the secure-field probe and mode
+  resolution run alongside it) — trigger-to-recording is `DictationRecord.stageMillis[.arm]`.
   Subject to the `log show` unreliability footgun below — capture it live via `log stream --predicate
   'category == "audio"'`. A disposed unit's render callback cannot fire (`AudioOutputUnitStop` is synchronous), and a
   stray late buffer is a no-op because the RT handler guards on the `capturing` atomic (set false at teardown
@@ -469,7 +471,10 @@ keyscribe/
       deferral gate asks over the modes the captured bundle cannot already rule out. Ask over every mode
       and ONE url-scoped mode anywhere in the config forces EVERY press onto the deferred path — so a
       mode scoped to a browser AND a site pays a mic + start cue + cancel in apps its bundle alone
-      settles, and the no-mode verdict that is silent before `beginCapture` lands after it instead. Both
+      settles. The mic opens before ANY mode is resolved (`handleStart` calls `beginCapture` first, and
+      the press probe and resolution run while it comes up), so an unclaimed press always costs a brief
+      mic open; it stays SILENT only while the start cue has not played (`effectsBegan`), which a
+      deferred probe can outlast. Both
       gates must keep using the same predicate or they drift into a key that is claimed but never probed
       (or the reverse). `bundleScope` mirrors it too: **`bundle_id` is read BEFORE `bundle_prefix`**,
       because a constraint ANDs its fields — reading the prefix widens a claimant to every sibling bundle
