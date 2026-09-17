@@ -29,6 +29,7 @@ final class HotkeyMonitor {
         // race (cancelled, released, or rebuilt onto a different binding) recognises itself as stale.
         var pendingArm = false
         var armGeneration = 0
+        var engagedAt: TimeInterval?
 
         init(triggerKey: String?, descriptor: KeyDescriptor, style: PressStyle, tapThreshold: Double) {
             self.triggerKey = triggerKey
@@ -115,6 +116,7 @@ final class HotkeyMonitor {
             carried.suppressedUntilRelease = match.suppressedUntilRelease
             carried.pendingArm = match.pendingArm
             carried.armGeneration = match.armGeneration
+            carried.engagedAt = match.engagedAt
             return carried
         }
         self.actionBindings = actionBindings
@@ -254,9 +256,11 @@ final class HotkeyMonitor {
             let click = type != .keyDown
             for i in bindings.indices where bindings[i].descriptor.isModifierSet {
                 if bindings[i].pendingArm {
+                    logChordGap(index: i, via: click ? "click" : "key", now: now)
                     cancelPendingArm(index: i)
                 } else if bindings[i].gesture.isPhysicallyDown,
                           !click || bindings[i].descriptor.carriesChordModifier {
+                    logChordGap(index: i, via: click ? "click" : "key", now: now)
                     abort(index: i)
                 }
             }
@@ -389,8 +393,13 @@ final class HotkeyMonitor {
         if wholeSetHeld {
             // Still down, but a foreign modifier joined → it's a chord. Inside the grace nothing started, so
             // drop the arm silently rather than starting and cancelling a dictation the user never asked for.
-            if bindings[i].pendingArm { cancelPendingArm(index: i); return }
+            if bindings[i].pendingArm {
+                logChordGap(index: i, via: "modifier", now: now)
+                cancelPendingArm(index: i)
+                return
+            }
             guard bindings[i].gesture.isPhysicallyDown else { return }
+            logChordGap(index: i, via: "modifier", now: now)
             abort(index: i)
         } else {
             flushPendingArm(index: i, now: now) // released inside the grace → still a tap
@@ -402,6 +411,7 @@ final class HotkeyMonitor {
     // Hold the .down for the grace instead of firing it. A grace of 0 arms inline, which is the pre-grace
     // behaviour and what the edge-semantics tests pin.
     private func beginArm(index i: Int, now: TimeInterval) {
+        bindings[i].engagedAt = now
         guard chordGraceSeconds > 0 else { fire(index: i, edge: .down, now: now); return }
         bindings[i].armGeneration &+= 1
         bindings[i].pendingArm = true
@@ -440,6 +450,15 @@ final class HotkeyMonitor {
         bindings[i].pendingArm = false
         bindings[i].armGeneration &+= 1
         fire(index: i, edge: .down, now: now)
+    }
+
+    // How long after the trigger engaged a chord key landed — the distribution the chord grace is tuned
+    // against. Which key it was is never logged.
+    private func logChordGap(index i: Int, via: String, now: TimeInterval) {
+        guard let engagedAt = bindings[i].engagedAt else { return }
+        let outcome = bindings[i].pendingArm ? "grace" : "abort"
+        hotkeyLog.info(
+            "chord gap=\(Int((now - engagedAt) * 1000), privacy: .public)ms via=\(via, privacy: .public) outcome=\(outcome, privacy: .public) grace=\(Int(self.chordGraceSeconds * 1000), privacy: .public)ms")
     }
 
     // `engaged` is deliberately NOT cleared here: it mirrors the flags, and clearing it would make the very

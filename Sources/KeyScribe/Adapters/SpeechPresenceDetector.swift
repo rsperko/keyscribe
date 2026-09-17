@@ -1,4 +1,5 @@
 import Accelerate
+import AVFoundation
 import CoreML
 import FluidAudio
 import Foundation
@@ -11,7 +12,7 @@ struct SpeechPresenceReading: Sendable {
     let modelUsed: Bool
     // Where speech began, when the model ran and found it after provable leading silence — the evidence the
     // empty-transcript recovery trims on. Nil when the model didn't run, no chunk cleared the gate, or speech
-    // started in chunk zero. Wall-clock: FluidAudio resamples to 16 kHz before chunking, so a 24 kHz capture
+    // started in chunk zero. Wall-clock: the detector resamples to 16 kHz before chunking, so a 24 kHz capture
     // (Qwen3) still reads back in take time.
     var speechStart: TimeInterval? = nil
     var chunkProbabilities: [Float] = []
@@ -30,9 +31,9 @@ extension SpeechPresenceDetecting {
 }
 
 struct SpeechPresenceManager: Sendable {
-    let process: @Sendable ([Float]?, URL, Int) async throws -> [Float]
+    let process: @Sendable ([Float]) async throws -> [Float]
 
-    init(process: @escaping @Sendable ([Float]?, URL, Int) async throws -> [Float]) {
+    init(process: @escaping @Sendable ([Float]) async throws -> [Float]) {
         self.process = process
     }
 }
@@ -93,11 +94,24 @@ enum VADModel {
 }
 
 actor SpeechPresenceDetector: SpeechPresenceDetecting {
+    private enum SkipReason: String, Error {
+        case noModel = "no-model"
+        case loadDeadline = "load-deadline"
+        case busy, deadline, unreadable, failed, cancelled
+    }
+
+    // Inference is one model call per 256 ms chunk, so its cost grows with the take; a flat budget
+    // silently turned the gate off on long takes. The load has its own budget so a cold model never
+    // spends the inference window.
     private let deadlineSeconds: Double
+    private let deadlinePerAudioSecond: Double
+    private let loadDeadlineSeconds: Double
     private let loadRetryBaseSeconds: Double
     private let now: @Sendable () -> Date
     private let modelPresent: @Sendable () -> Bool
     private let loadManager: @Sendable () async throws -> SpeechPresenceManager
+    private let prepareInput: @Sendable ([Float]?, URL, Int) async throws -> [Float]
+    private let preparationGate = SingleFlightDeadline()
     private let inferenceGate = SingleFlightDeadline()
     private var manager: SpeechPresenceManager?
     private var managerTask: Task<SpeechPresenceManager, Error>?
@@ -107,26 +121,28 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
     init(
         modelsDir: URL,
         deadlineSeconds: Double = 0.25,
+        deadlinePerAudioSecond: Double = 0.003,
+        loadDeadlineSeconds: Double = 1,
         loadRetryBaseSeconds: Double = 1,
         now: @escaping @Sendable () -> Date = { Date() },
         modelPresent: (@Sendable () -> Bool)? = nil,
-        loadManager: (@Sendable () async throws -> SpeechPresenceManager)? = nil
+        loadManager: (@Sendable () async throws -> SpeechPresenceManager)? = nil,
+        prepareInput: (@Sendable ([Float]?, URL, Int) async throws -> [Float])? = nil
     ) {
+        self.prepareInput = prepareInput ?? { samples, url, sampleRate in
+            try Self.vadInput(samples: samples, url: url, sampleRate: sampleRate)
+        }
         self.deadlineSeconds = deadlineSeconds
+        self.deadlinePerAudioSecond = deadlinePerAudioSecond
+        self.loadDeadlineSeconds = loadDeadlineSeconds
         self.loadRetryBaseSeconds = loadRetryBaseSeconds
         self.now = now
         self.modelPresent = modelPresent ?? { VADModel.isPresent(in: modelsDir) }
         self.loadManager = loadManager ?? {
             let manager = VadManager(
                 config: .default, vadModel: try await VADModel.load(in: modelsDir))
-            return SpeechPresenceManager { samples, url, sampleRate in
-                let results: [VadResult]
-                if sampleRate == VadManager.sampleRate, let samples {
-                    results = try await manager.process(samples)
-                } else {
-                    results = try await manager.process(url)
-                }
-                return results.map(\.probability)
+            return SpeechPresenceManager { samples in
+                try await manager.process(samples).map(\.probability)
             }
         }
     }
@@ -137,6 +153,10 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
     func inferenceInFlight() async -> Bool {
         await inferenceGate.isBusy
+    }
+
+    func preparationInFlight() async -> Bool {
+        await preparationGate.isBusy
     }
 
     private func ensureManager() async -> SpeechPresenceManager? {
@@ -167,37 +187,117 @@ actor SpeechPresenceDetector: SpeechPresenceDetecting {
 
     func read(samples: [Float]?, url: URL, sampleRate: Int) async -> SpeechPresenceReading {
         let start = Date()
-        let peak = samples.map(Self.peakMagnitude)
 
-        if let peak, peak < SpeechPresenceGate.silenceFloor {
-            return SpeechPresenceReading(
-                presence: .noSpeech, peak: peak,
-                latencyMs: Self.elapsedMs(since: start), modelUsed: false)
+        let samplesPeak = samples.map(Self.peakMagnitude)
+        if let samplesPeak, samplesPeak < SpeechPresenceGate.silenceFloor {
+            return Self.silentReading(peak: samplesPeak, since: start)
         }
 
-        let probabilities: [Float]?
+        let audioSeconds = samples.map { Double($0.count) / Double(sampleRate) } ?? Self.fileSeconds(url)
+        guard let audioSeconds else {
+            return Self.failOpen(.unreadable, peak: 1, audioSeconds: 0, budget: 0, since: start)
+        }
+        let budget = deadlineSeconds + deadlinePerAudioSecond * audioSeconds
+
+        // In-memory samples were already checked for silence, so preparing them for a model that is still
+        // busy buys nothing. A WAV-only take is still decoded: that decode is its silence check.
+        if samples != nil, await inferenceGate.isBusy {
+            return Self.failOpen(
+                .busy, peak: samplesPeak ?? 1, audioSeconds: audioSeconds, budget: budget, since: start)
+        }
+
+        let input: [Float]
+        let prepareStart = Date()
         do {
-            probabilities = try await inferenceGate.run(seconds: deadlineSeconds) { [self] () async throws -> [Float]? in
-                guard let manager = await ensureManager() else { return nil }
-                return try await manager.process(samples, url, sampleRate)
+            input = try await preparationGate.run(seconds: budget) { [prepareInput] in
+                try await prepareInput(samples, url, sampleRate)
             }
         } catch {
-            probabilities = nil
+            return Self.failOpen(
+                Self.skipReason(for: error), peak: samplesPeak ?? 1,
+                audioSeconds: audioSeconds, budget: budget, since: start)
+        }
+        let inferenceBudget = max(0, budget - Date().timeIntervalSince(prepareStart))
+        let peak = samplesPeak ?? Self.peakMagnitude(input)
+        if peak < SpeechPresenceGate.silenceFloor {
+            return Self.silentReading(peak: peak, since: start)
         }
 
-        guard let probabilities else {
-            return SpeechPresenceReading(
-                presence: .speech, peak: peak ?? 1,
-                latencyMs: Self.elapsedMs(since: start), modelUsed: false)
+        let manager: SpeechPresenceManager
+        switch await loadedManager() {
+        case .success(let loaded): manager = loaded
+        case .failure(let reason):
+            return Self.failOpen(reason, peak: peak, audioSeconds: audioSeconds, budget: budget, since: start)
         }
 
-        let verdict = SpeechPresenceGate.evaluate(
-            chunkProbabilities: probabilities, peak: peak ?? 1)
+        let probabilities: [Float]
+        do {
+            probabilities = try await inferenceGate.run(seconds: inferenceBudget) {
+                try await manager.process(input)
+            }
+        } catch {
+            return Self.failOpen(
+                Self.skipReason(for: error), peak: peak, audioSeconds: audioSeconds, budget: budget, since: start)
+        }
+
+        let verdict = SpeechPresenceGate.evaluate(chunkProbabilities: probabilities, peak: peak)
         return SpeechPresenceReading(
-            presence: verdict, peak: peak ?? 1,
+            presence: verdict, peak: peak,
             latencyMs: Self.elapsedMs(since: start), modelUsed: true,
             speechStart: SpeechPresenceGate.speechStart(chunkProbabilities: probabilities),
             chunkProbabilities: probabilities)
+    }
+
+    private static func skipReason(for error: any Error) -> SkipReason {
+        switch error {
+        case is SingleFlightDeadline.Busy: .busy
+        case is DeadlineExceeded: .deadline
+        case is CancellationError: .cancelled
+        default: .failed
+        }
+    }
+
+    private func loadedManager() async -> Result<SpeechPresenceManager, SkipReason> {
+        if let manager { return .success(manager) }
+        do {
+            let loaded = try await runWithDeadline(seconds: loadDeadlineSeconds) { [self] in
+                await ensureManager()
+            }
+            return loaded.map { .success($0) } ?? .failure(.noModel)
+        } catch is DeadlineExceeded {
+            return .failure(.loadDeadline)
+        } catch {
+            return .failure(.cancelled)
+        }
+    }
+
+    private static func vadInput(samples: [Float]?, url: URL, sampleRate: Int) throws -> [Float] {
+        guard let samples else { return try AudioDecoder.pcmMono(url, sampleRate: VadManager.sampleRate) }
+        guard sampleRate != VadManager.sampleRate else { return samples }
+        return try AudioDecoder.resampleMono(samples, from: sampleRate, to: VadManager.sampleRate)
+    }
+
+    private static func fileSeconds(_ url: URL) -> Double? {
+        guard let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0 else { return nil }
+        return Double(file.length) / file.fileFormat.sampleRate
+    }
+
+    private static func silentReading(peak: Float, since start: Date) -> SpeechPresenceReading {
+        SpeechPresenceReading(
+            presence: .noSpeech, peak: peak, latencyMs: elapsedMs(since: start), modelUsed: false)
+    }
+
+    private static func failOpen(
+        _ reason: SkipReason, peak: Float, audioSeconds: Double, budget: Double, since start: Date
+    ) -> SpeechPresenceReading {
+        let latencyMs = elapsedMs(since: start)
+        let message = "vad skipped, gate open reason=\(reason.rawValue) audio=\(String(format: "%.1f", audioSeconds))s budget=\(Int(budget * 1000))ms after=\(Int(latencyMs))ms"
+        if reason == .cancelled {
+            Log.audio.debug("\(message, privacy: .public)")
+        } else {
+            Log.audio.notice("\(message, privacy: .public)")
+        }
+        return SpeechPresenceReading(presence: .speech, peak: peak, latencyMs: latencyMs, modelUsed: false)
     }
 
     private static func peakMagnitude(_ samples: [Float]) -> Float {

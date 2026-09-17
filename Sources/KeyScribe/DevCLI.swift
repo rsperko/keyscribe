@@ -57,6 +57,12 @@ public enum DevCLI {
                                       missing. Headless: no mic/insertion. Add --chunks to dump each clip's
                                       per-chunk probability vector plus how many chunks clear the threshold and
                                       the longest consecutive run — the inputs a duration-aware rule is tuned on.
+                                      A clip the model did not score is marked model=false.
+                --rate <hz>             Hand the gate audio at this capture rate, as an engine recording at it would
+                                        (default 16000).
+                --wav-only              Hand the gate no samples, as a WAV-only engine does.
+                --cold                  Skip the model prewarm, so the first clip pays the load.
+                --deadline <s>          Override the gate's time limit, to time a clip past it.
               --samples-parity <dir>  Verify the in-memory samples transcription path matches the WAV path for
                                       every installed sample-capable engine over the *.wav files in <dir> (P2-1).
                                       Exits non-zero on any mismatch. Honors --engines.
@@ -247,11 +253,21 @@ public enum DevCLI {
 
         if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {
             let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
-            let chunks = CommandLine.arguments.contains("--chunks")
+            let args = CommandLine.arguments
+            let chunks = args.contains("--chunks")
+            let wavOnly = args.contains("--wav-only")
+            let cold = args.contains("--cold")
+            func value(_ flag: String) -> String? {
+                args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            }
+            let sampleRate = value("--rate").flatMap { Int($0) } ?? 16000
+            let deadline = value("--deadline").flatMap { Double($0) }
             let done = DispatchSemaphore(value: 0)
             let ok = Atomic<Bool>(true)
             Task.detached {
-                ok.store(await VadProbeRunner.run(dir: dir, chunks: chunks), ordering: .relaxed)
+                ok.store(await VadProbeRunner.run(
+                    dir: dir, chunks: chunks, sampleRate: sampleRate, wavOnly: wavOnly, cold: cold,
+                    deadline: deadline), ordering: .relaxed)
                 done.signal()
             }
             done.wait()

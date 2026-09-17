@@ -21,16 +21,41 @@ enum AudioDecoder {
         else { throw EngineError.audioDecodeFailed }
 
         let reader = ChunkReader(file: file, format: source, chunkFrames: chunkFrames)
-        let ratio = Double(sampleRate) / source.sampleRate
+        return try convert(
+            converter, to: target, sourceFrames: Int(file.length), sourceRate: source.sampleRate,
+            feed: reader.feed)
+    }
+
+    // Chunked on purpose: FluidAudio's one-shot array resample measured ~4x slower over a long take.
+    static func resampleMono(_ samples: [Float], from sourceRate: Int, to sampleRate: Int) throws -> [Float] {
+        guard sourceRate != sampleRate, !samples.isEmpty else { return samples }
+        guard let source = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: Double(sourceRate), channels: 1, interleaved: false),
+            let target = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false),
+            let converter = AVAudioConverter(from: source, to: target)
+        else { throw EngineError.audioDecodeFailed }
+
+        let reader = ArrayChunkReader(samples: samples, format: source, chunkFrames: chunkFrames)
+        return try convert(
+            converter, to: target, sourceFrames: samples.count, sourceRate: Double(sourceRate),
+            feed: reader.feed)
+    }
+
+    private static func convert(
+        _ converter: AVAudioConverter, to target: AVAudioFormat, sourceFrames: Int, sourceRate: Double,
+        feed: @escaping AVAudioConverterInputBlock
+    ) throws -> [Float] {
+        let ratio = target.sampleRate / sourceRate
         let outCapacity = AVAudioFrameCount(Double(chunkFrames) * ratio) + 1024
         let outChunk = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: outCapacity)!
 
         var out: [Float] = []
-        out.reserveCapacity(Int(Double(file.length) * ratio) + Int(outCapacity))
+        out.reserveCapacity(Int(Double(sourceFrames) * ratio) + Int(outCapacity))
         while true {
             outChunk.frameLength = 0
             var convError: NSError?
-            let status = converter.convert(to: outChunk, error: &convError, withInputFrom: reader.feed)
+            let status = converter.convert(to: outChunk, error: &convError, withInputFrom: feed)
             if convError != nil { throw EngineError.audioDecodeFailed }
             append(outChunk, to: &out)
             if status == .haveData { continue }
@@ -91,6 +116,34 @@ private final class ChunkReader: @unchecked Sendable {
             status.pointee = .endOfStream
             return nil
         }
+        status.pointee = .haveData
+        return buffer
+    }
+}
+
+private final class ArrayChunkReader: @unchecked Sendable {
+    private let samples: [Float]
+    private let buffer: AVAudioPCMBuffer
+    private var offset = 0
+
+    init(samples: [Float], format: AVAudioFormat, chunkFrames: AVAudioFrameCount) {
+        self.samples = samples
+        buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames)!
+    }
+
+    func feed(
+        _ count: AVAudioPacketCount, _ status: UnsafeMutablePointer<AVAudioConverterInputStatus>
+    ) -> AVAudioPCMBuffer? {
+        let n = min(Int(buffer.frameCapacity), samples.count - offset)
+        guard n > 0 else {
+            status.pointee = .endOfStream
+            return nil
+        }
+        samples.withUnsafeBufferPointer { src in
+            buffer.floatChannelData![0].update(from: src.baseAddress! + offset, count: n)
+        }
+        buffer.frameLength = AVAudioFrameCount(n)
+        offset += n
         status.pointee = .haveData
         return buffer
     }

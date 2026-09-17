@@ -2,7 +2,10 @@ import Foundation
 import KeyScribeKit
 
 enum VadProbeRunner {
-    static func run(dir: URL, chunks: Bool = false) async -> Bool {
+    static func run(
+        dir: URL, chunks: Bool = false, sampleRate: Int = 16000, wavOnly: Bool = false, cold: Bool = false,
+        deadline: Double? = nil
+    ) async -> Bool {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         let manifest: BenchmarkManifest
         do {
@@ -15,10 +18,13 @@ enum VadProbeRunner {
             print("error: VAD model unavailable (download failed)")
             return false
         }
-        let detector = SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir)
-        await detector.prewarm()
+        let detector = deadline.map {
+            SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir, deadlineSeconds: $0)
+        } ?? SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir)
+        if !cold { await detector.prewarm() }
 
-        print("VAD probe: \(manifest.entries.count) clips\n")
+        let path = wavOnly ? "wav-only" : "samples"
+        print("VAD probe: \(manifest.entries.count) clips, \(sampleRate) Hz \(path)\(cold ? ", cold" : "")\n")
         var speechCount = 0
         var suppressed: [String] = []
         var minSpeechMaxProb = Float.greatestFiniteMagnitude
@@ -38,17 +44,18 @@ enum VadProbeRunner {
                 }
                 continue
             }
-            let samples = try? AudioDecoder.pcmMono(wav, sampleRate: 16000)
-            let reading = await detector.read(samples: samples, url: wav, sampleRate: 16000)
+            let samples = wavOnly ? nil : try? AudioDecoder.pcmMono(wav, sampleRate: sampleRate)
+            let reading = await detector.read(samples: samples, url: wav, sampleRate: sampleRate)
             latencies.append(reading.latencyMs)
             let verdict = reading.presence.rawValue
             // speechStart doubles as the empty-transcript recovery's trim boundary: "-" means chunk zero
             // already had speech, so a silent-engine take on this clip would not be retried.
             let speechStart = reading.speechStart.map { String(format: "%.3fs", $0) } ?? "-"
             print(String(
-                format: "  %-28@  %-8@  maxP=%.3f  speechStart=%-7@  %.1fms",
+                format: "  %-28@  %-8@  maxP=%.3f  speechStart=%-7@  %.1fms%@",
                 entry.id as NSString, verdict as NSString, reading.maxProbability,
-                speechStart as NSString, reading.latencyMs))
+                speechStart as NSString, reading.latencyMs,
+                (reading.modelUsed ? "" : "  model=false") as NSString))
             if chunks {
                 let clearing = SpeechPresenceGate.chunksClearingGate(reading.chunkProbabilities)
                 let run = SpeechPresenceGate.longestRunClearingGate(reading.chunkProbabilities)
