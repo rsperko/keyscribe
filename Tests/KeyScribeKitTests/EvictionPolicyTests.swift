@@ -46,6 +46,12 @@ struct EvictionPolicyTests {
         #expect(!EvictionPolicy.shouldPrewarmCapture(mode: .frugal))
     }
 
+    @Test func onlyFrugalSkipsModelPreload() {
+        #expect(EvictionPolicy.shouldPreloadModel(mode: .fastest))
+        #expect(EvictionPolicy.shouldPreloadModel(mode: .balanced))
+        #expect(!EvictionPolicy.shouldPreloadModel(mode: .frugal))
+    }
+
     @Test func onlyFastestRefreshesPeriodically() {
         #expect(EvictionPolicy.periodicallyRefreshesCapture(mode: .fastest))
         #expect(!EvictionPolicy.periodicallyRefreshesCapture(mode: .balanced))

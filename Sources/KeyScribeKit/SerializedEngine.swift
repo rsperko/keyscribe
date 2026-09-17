@@ -134,7 +134,9 @@ public actor SerializedEngine: SpeechEngine {
     public func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         await acquire()
         defer { release() }
+        try Task.checkCancellation()
         try await ensureRuntimeLocked()
+        try Task.checkCancellation()
         return try await base.transcribe(wavURL: wavURL, biasTerms: biasTerms)
     }
 
@@ -143,7 +145,9 @@ public actor SerializedEngine: SpeechEngine {
     public func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         await acquire()
         defer { release() }
+        try Task.checkCancellation()
         try await ensureRuntimeLocked()
+        try Task.checkCancellation()
         return try await base.transcribe(samples: samples, sampleRate: sampleRate, biasTerms: biasTerms)
     }
 

@@ -73,4 +73,5 @@ targetTemplates:
     postBuildScripts:
       - name: Collect license notices
         script: '"${KEYSCRIBE_ROOT}/scripts/collect-licenses.sh"'
+        basedOnDependencyAnalysis: false
     scheme: {}

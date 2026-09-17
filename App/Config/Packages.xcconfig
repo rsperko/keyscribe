@@ -10,3 +10,7 @@ ONLY_ACTIVE_ARCH = YES
 // Xcode compiles MLX's Metal shaders with fast math on by default. MLX's own builds use -fno-fast-math;
 // match them so Qwen3 numerics are the ones upstream tests.
 MTL_FAST_MATH = NO
+
+// mlx-swift's kernels use `if constexpr` under a pre-C++17 Metal language default; upstream builds see
+// the same warning, so it is noise here.
+MTL_COMPILER_FLAGS = $(inherited) -Wno-c++17-extensions

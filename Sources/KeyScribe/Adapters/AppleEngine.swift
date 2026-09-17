@@ -29,7 +29,7 @@ actor AppleEngine: SpeechEngine {
     // Analyzers are one-shot, so the next pair is prewarmed at press to overlap session setup with speech.
     // Best-effort: any failure leaves `prepared` nil and transcribe builds fresh.
     func prepareForDictation() async {
-        guard (try? await loadIfNeeded()) != nil else { return }
+        guard prepared == nil, (try? await loadIfNeeded()) != nil else { return }
         let transcriber = DictationTranscriber(locale: locale, preset: .longDictation)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])

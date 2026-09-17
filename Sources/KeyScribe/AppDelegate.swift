@@ -787,7 +787,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // Terminate only once the replacement instance is actually running: a discarded launch error made every
     // failure (a translocated or moved bundle, a rejected launch) look like the app silently vanishing.
     private func relaunch(_ configuration: NSWorkspace.OpenConfiguration, guidance: String) {
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { [weak self] app, error in
             Task { @MainActor [weak self] in
                 if app != nil { NSApp.terminate(nil); return }
                 self?.reportRelaunchFailure(error, guidance: guidance)

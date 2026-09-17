@@ -31,6 +31,8 @@ public enum EvictionPolicy {
         }
     }
 
+    public static func shouldPreloadModel(mode: Eviction) -> Bool { mode != .frugal }
+
     // Idle microphone warm-up rides the same tier as model residency: Fastest holds the input unit
     // warm (and periodically refreshes its binding), Balanced warms around use and releases at the
     // model's idle checkpoint, Frugal never warms and opens the mic only on trigger.

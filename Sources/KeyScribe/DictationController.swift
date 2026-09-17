@@ -158,6 +158,7 @@ final class DictationController {
 
     private var warmTask: Task<Void, Error>?
     private var warmEngineId: String?
+    private var warmClipTask: Task<Void, Never>?
     private var protectedEngineIds: Set<String> = []
     private static let modelLoadDeadlineSeconds: Double = 300
 
@@ -240,7 +241,8 @@ final class DictationController {
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
         },
-        maxRecordingSeconds: Double = 300
+        maxRecordingSeconds: Double = 300,
+        warmupClip: URL? = DictationController.bundledWarmupClip
     ) {
         self.settings = settings
         self.provider = provider
@@ -267,6 +269,7 @@ final class DictationController {
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
+        self.warmupClip = warmupClip
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
     }
@@ -402,21 +405,30 @@ final class DictationController {
         Task { await engine.prepareForDictation() }
     }
 
+    // Returns the load alone, which is all a commit awaits. The warm-up clip follows it but is skipped once
+    // a commit is under way: it would only queue a full inference ahead of the user's own on the engine lock.
     @discardableResult
     private func warm(_ engine: any SpeechEngine) -> Task<Void, Error> {
         if warmEngineId == engine.id, let task = warmTask { return task }
-        let clip = Self.warmupClipURL
-        let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
-        let task = Task {
-            try await engine.loadIfNeeded()
-            if let clip, engine.benefitsFromWarmupClip { _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms) }
-        }
+        let load = Task { try await engine.loadIfNeeded() }
         warmEngineId = engine.id
-        warmTask = task
-        return task
+        warmTask = load
+        warmClipTask?.cancel()
+        warmClipTask = nil
+        if let clip = warmupClip, engine.benefitsFromWarmupClip {
+            let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
+            // Cancelled with the warm it belongs to: a clip that outlives an eviction would reload the model.
+            warmClipTask = Task { @MainActor [weak self] in
+                guard (try? await load.value) != nil, !Task.isCancelled,
+                      let self, !self.machine.isBusy || self.machine.isCapturingAudio else { return }
+                _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms)
+            }
+        }
+        return load
     }
 
-    private static let warmupClipURL = Bundle.main.url(forResource: "model-selftest", withExtension: "wav")
+    nonisolated static let bundledWarmupClip = Bundle.main.url(forResource: "model-selftest", withExtension: "wav")
+    private let warmupClip: URL?
 
     static func warmupBiasTerms(settings: Settings, engine: any SpeechEngine, plan: ResolvedConfig) -> [String] {
         guard settings.stt.recognitionBiasEnabled(
@@ -428,12 +440,23 @@ final class DictationController {
         guard warmEngineId == engineId else { return }
         warmTask = nil
         warmEngineId = nil
+        warmClipTask?.cancel()
+        warmClipTask = nil
     }
 
     func preloadActiveEngineIfNeeded() {
-        guard InstalledEngineFilter.shouldRun(engineId: activeEngine.id) else { return }
-        warmActiveEngine()
+        let engine = activeEngine
+        guard InstalledEngineFilter.shouldRun(engineId: engine.id) else { return }
         prewarmPresenceDetector()
+        guard EvictionPolicy.shouldPreloadModel(mode: settings.stt.eviction) else { return }
+        let load = warm(engine)
+        // The tier and the active engine are read after the load: either can change while it runs, and a
+        // superseded preload must not replace the current engine's idle eviction.
+        Task { @MainActor [weak self] in
+            guard (try? await load.value) != nil, let self, !self.isBusy,
+                  self.warmTask == load, self.provider.active.id == engine.id else { return }
+            self.applyEvictionAfterDictation(engine: engine)
+        }
     }
 
     private func prewarmPresenceDetector() {
@@ -764,7 +787,7 @@ final class DictationController {
         if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
         finish(machine: .finish(.failed), cue: .cancel,
                state: .error(message: "Recording stopped after \(Int(maxRecordingSeconds / 60)) min", action: nil),
-               hideAfter: 4, record: (.failed, "recording limit"), evict: true)
+               hideAfter: 4, record: (.failed, "recording limit"))
     }
 
     // Release the frozen config at a terminal so an idle app doesn't pin a stale ResolvedConfig after a
@@ -920,7 +943,7 @@ final class DictationController {
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .cancel,
                state: .complete(outcome: .noSpeech, mode: currentModeName),
-               hideAfter: 2, record: (.noSpeech, nil), evict: true, completion: completion)
+               hideAfter: 2, record: (.noSpeech, nil), completion: completion)
     }
 
     // Nothing was heard — a hardware/mute problem. Renders like an error with the microphone-settings repair
@@ -932,7 +955,7 @@ final class DictationController {
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .error,
                state: .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings),
-               hideAfter: 8, record: (.noSpeech, nil), evict: true, completion: completion)
+               hideAfter: 8, record: (.noSpeech, nil), completion: completion)
     }
 
     // VAD heard speech but the speech model returned no text. Names the model instead of claiming silence —
@@ -951,7 +974,7 @@ final class DictationController {
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .error,
                state: .error(message: "Heard speech, but \(engine.displayName) returned no text", action: nil),
-               hideAfter: 8, record: (.noSpeech, nil), evict: true, completion: completion)
+               hideAfter: 8, record: (.noSpeech, nil), completion: completion)
     }
 
     private enum StreamingFinalizeOutcome {
@@ -1668,7 +1691,7 @@ final class DictationController {
                record: (recordOutcome, nil),
                history: HistoryWrite(heard: heard, transformed: transformed, result: transcript,
                                      insertion: outcome, rewrite: rewrite),
-               evict: true, completion: completion)
+               completion: completion)
     }
 
     // The submit Return fires after the paste-settle window and lands outside the insert atom. Re-run the
@@ -2228,8 +2251,9 @@ final class DictationController {
     // The one terminal tail every dictation exits through. The fixed order is load-bearing: finalizeRecord
     // and recordHistory read session state (activeMode/activeEngine/currentModeName) so they run before
     // releaseCapturedPlan nils the session; the engine is captured before release so eviction targets the
-    // engine this dictation used; onBecameIdle fires exactly once (only from releaseCapturedPlan). A caller
-    // that already ran its machine transition (finishInsertion) passes .alreadyTransitioned, and one that
+    // engine this dictation used. Every terminal applies the tier, cancels included: handleStart dropped any
+    // pending idle eviction, so a terminal that skipped it would pin the model. onBecameIdle fires exactly
+    // once (only from releaseCapturedPlan). A caller that already ran its machine transition (finishInsertion) passes .alreadyTransitioned, and one that
     // must report the mode it used builds `completion` before calling in (activeMode is gone after release).
     private func finish(
         machine terminal: MachineTerminal,
@@ -2238,7 +2262,6 @@ final class DictationController {
         hideAfter: Double? = nil,
         record: (outcome: DictationRecord.Outcome, error: String?)? = nil,
         history: HistoryWrite? = nil,
-        evict: Bool = false,
         completion: DictationCompletion? = nil
     ) {
         switch terminal {
@@ -2258,7 +2281,7 @@ final class DictationController {
         }
         let engineUsed = activeEngine
         releaseCapturedPlan()
-        if evict { applyEvictionAfterDictation(engine: engineUsed) }
+        applyEvictionAfterDictation(engine: engineUsed)
         if let completion { onDictationCompleted?(completion) }
     }
 
@@ -2272,7 +2295,7 @@ final class DictationController {
             : "The microphone stopped, so this dictation is incomplete. Use “Paste last dictation” to insert what was captured."
         log.error("capture lost mid-recording — dictation truncated, nothing inserted")
         finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: nil),
-               hideAfter: 8, record: (.failed, "capture lost mid-recording"), evict: true)
+               hideAfter: 8, record: (.failed, "capture lost mid-recording"))
     }
 
     private func finishError(_ message: String, action: HUDErrorAction? = nil) {
@@ -2286,7 +2309,7 @@ final class DictationController {
         // press-time-warmed model here can't race the in-flight call; without it a transcribe failure/
         // timeout would pin the model resident until quit (no other terminal re-arms the idle check).
         finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: action),
-               hideAfter: action == nil ? 2 : 8, record: (.failed, message), evict: true)
+               hideAfter: action == nil ? 2 : 8, record: (.failed, message))
     }
 
     private func scheduleHide(after seconds: Double = 2) {

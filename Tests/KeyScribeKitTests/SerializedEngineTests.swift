@@ -79,6 +79,8 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
     private var _lastSampleRate = 0
     var sampleTranscribeCalled: Bool { lock.withLock { _sampleTranscribeCalled } }
     var lastSampleRate: Int { lock.withLock { _lastSampleRate } }
+    private var _wavTranscribes = 0
+    var wavTranscribes: Int { lock.withLock { _wavTranscribes } }
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         lock.withLock { _sampleTranscribeCalled = true; _lastSampleRate = sampleRate }
         return "samples-text"
@@ -109,6 +111,7 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
 
     func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
         lock.withLock {
+            _wavTranscribes += 1
             _transcribing = true
             _concurrentTranscribes += 1
             _maxConcurrentTranscribes = max(_maxConcurrentTranscribes, _concurrentTranscribes)
@@ -460,5 +463,52 @@ struct SerializedEngineTests {
         #expect(spy.runtimeBodies == 1)
         #expect(spy.loaded)
         #expect(!spy.installBodyRan)
+    }
+
+    @Test func aCancelledWavTranscribeQueuedBehindTheLockNeverReachesTheBase() async throws {
+        let gate = Gate()
+        let spy = SpyEngine(loadGate: gate)
+        let engine = SerializedEngine(spy)
+        let warm = Task { try await engine.loadIfNeeded() }
+        try await Task.sleep(for: .milliseconds(20))
+        let queued = Task { try await engine.transcribe(wavURL: URL(fileURLWithPath: "/q"), biasTerms: []) }
+        try await Task.sleep(for: .milliseconds(20))
+        queued.cancel()
+        await gate.fire()
+        try await warm.value
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        #expect(spy.wavTranscribes == 0)
+        #expect(try await engine.transcribe(wavURL: URL(fileURLWithPath: "/n"), biasTerms: []) == "text")
+        #expect(spy.wavTranscribes == 1)
+    }
+
+    @Test func aCancelledSampleTranscribeQueuedBehindTheLockNeverReachesTheBase() async throws {
+        let gate = Gate()
+        let spy = SpyEngine(loadGate: gate)
+        let engine = SerializedEngine(spy)
+        let warm = Task { try await engine.loadIfNeeded() }
+        try await Task.sleep(for: .milliseconds(20))
+        let queued = Task { try await engine.transcribe(samples: [0], sampleRate: 16_000, biasTerms: []) }
+        try await Task.sleep(for: .milliseconds(20))
+        queued.cancel()
+        await gate.fire()
+        try await warm.value
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        #expect(!spy.sampleTranscribeCalled)
+        #expect(try await engine.transcribe(samples: [0], sampleRate: 16_000, biasTerms: []) == "samples-text")
+    }
+
+    @Test func aTranscribeCancelledDuringItsOwnLoadSkipsTheBase() async throws {
+        let gate = Gate()
+        let spy = SpyEngine(loadGate: gate)
+        let engine = SerializedEngine(spy)
+        let pending = Task { try await engine.transcribe(wavURL: URL(fileURLWithPath: "/l"), biasTerms: []) }
+        try await Task.sleep(for: .milliseconds(20))
+        pending.cancel()
+        await gate.fire()
+        await #expect(throws: CancellationError.self) { try await pending.value }
+        #expect(spy.wavTranscribes == 0)
+        #expect(spy.loaded)
+        #expect(try await engine.transcribe(wavURL: URL(fileURLWithPath: "/n"), biasTerms: []) == "text")
     }
 }
