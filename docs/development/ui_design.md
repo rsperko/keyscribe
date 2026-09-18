@@ -656,7 +656,9 @@ The Modes list shows the user-visible summary of each mode:
 
 - name and enabled state (a disabled mode reads "Disabled");
 - one routing fact and one processing fact, such as `Right-⌥ · On this Mac`, `Safari · Cloud rewrite`,
-  or `Say “as an email” · Cloud rewrite`.
+  or `Say “as an email” · Cloud rewrite`. Wherever a mode's shortcuts are shown, several are joined
+  with “or” (`Fn (Globe) or Mouse Button 4 · On this Mac`), and a shortcut that repeats an earlier
+  one on the same mode is not listed.
 
 The editor presents a short **Mode summary** at the top. The editor is divided into progressive
 sections:
@@ -669,6 +671,14 @@ sections:
    presenting the two supported actions in parallel. The phrase explanation says what the feature does
    and that the phrase is removed from the result. Add controls precede saved phrases. Plain Dictation
    uses the same shortcut structure and adds one concise explanation of its special fallback role.
+   The shortcut well edits the mode's **first** shortcut and preserves any others. Additional
+   shortcuts written in the mode's file appear here as a read-only **Also starts with …, configured in
+   its TOML file.** note, naming an extra shortcut's press behavior when it differs from the first. The
+   same note says when a later shortcut is ignored because it is the same press as an earlier one, or
+   is listed twice. The conflict caption beside them names the shortcut it concerns whenever that is
+   not the first, so a warning under the well is never misread as being about the well's key. A
+   shortcut another mode already claims is reported as never firing, in red, even while the mode's
+   other shortcuts keep it reachable; only a mode with no working shortcut is flagged in the list.
 3. **Where it works** — states whether the mode is available everywhere or only in listed places.
    **Add app or website…** precedes saved places and offers running apps, Choose from Applications…,
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
@@ -685,7 +695,7 @@ sections:
 6. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
    mutually exclusive by design; the UI makes the tradeoff explicit before allowing either.
 7. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
-   notes when TOML-only insertion or submit behavior is active.
+   notes when TOML-only behavior such as a custom insertion method or submit key is active.
 
 Plain Dictation stays deliberately small: **How to start Plain Dictation**, **Spoken editing**, and **Result handling**.
 Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it

@@ -163,8 +163,7 @@ final class FirstRunModel: ObservableObject {
     @Published private(set) var directTrigger: KeyDescriptor?
     @Published private(set) var directTriggerStyle: String?
     @Published private(set) var triggerSaveError: String?
-    private var rememberedTriggerStyle: String?
-    private var rememberedTriggerThreshold: Int?
+    private var rememberedTrigger: Mode.TriggerKey?
 
     let catalog = EngineRegistry.availableCatalog
     var appleSpeechAvailable: Bool { catalog.contains { $0.id == "apple" } }
@@ -558,26 +557,15 @@ final class FirstRunModel: ObservableObject {
     }
 
     // Rewrites `_direct.toml` through the same repository owner Modes uses, so the rebind goes live
-    // immediately (configRepository.onChange rebuilds the hotkey monitor). Preserves an existing entry's
-    // press style / tap threshold, mirroring ModeTriggerRow.
+    // immediately (configRepository.onChange rebuilds the hotkey monitor). Edits only the first entry,
+    // mirroring ModeTriggerRow, so a second trigger written in the file survives the rebind.
     func setDirectTrigger(_ key: String) {
         triggerSaveError = nil
         guard var mode = ModeStore.loadAll(in: modesDir).first(where: { $0.id == Mode.directId }) else { return }
-        if key.isEmpty {
-            if let existing = mode.triggerKeys.first {
-                rememberedTriggerStyle = existing.pressStyle
-                rememberedTriggerThreshold = existing.tapThresholdMs
-            }
-            mode.triggerKeys = []
-        } else {
-            let existing = mode.triggerKeys.first
-            mode.triggerKeys = [.init(
-                key: key,
-                pressStyle: existing?.pressStyle ?? rememberedTriggerStyle ?? "hold-or-tap",
-                tapThresholdMs: existing?.tapThresholdMs ?? rememberedTriggerThreshold ?? 250)]
-        }
+        let removed = mode.setPrimaryTriggerKey(key, restoring: rememberedTrigger)
         do {
             try repository.writeMode(mode)
+            if let removed { rememberedTrigger = removed }
             refreshDirectTrigger()
         } catch {
             triggerSaveError = "Could not save the shortcut."

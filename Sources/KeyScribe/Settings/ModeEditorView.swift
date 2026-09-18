@@ -34,8 +34,9 @@ struct ModeEditorView: View {
             Section("How to start Plain Dictation") {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
-                TriggerConflictLabel(conflict: trigger.conflict)
-                if usesMouseShortcut {
+                TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
+                ExtraTriggersNote(mode: mode)
+                if trigger.usesMouseShortcut {
                     Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -150,14 +151,6 @@ struct ModeEditorView: View {
         .onAppear {
             if autofocusName { onConsumeFocus() }
         }
-    }
-
-    private var usesMouseShortcut: Bool {
-        guard let key = mode.triggerKeys.first?.key,
-              let descriptor = try? KeyDescriptor(parsing: key)
-        else { return false }
-        if case .mouseButton = descriptor { return true }
-        return false
     }
 
     @ViewBuilder private var nonPasteInsertionNotice: some View {

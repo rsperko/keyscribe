@@ -162,6 +162,7 @@ enum AccessibilityID {
             static let enabled = "mode.editor.enabled"
             static let shortcutWell = "mode.editor.shortcutWell"
             static let pressStyle = "mode.editor.pressStyle"
+            static let extraTriggersNote = "mode.editor.extraTriggersNote"
             static let rewriteSelection = "mode.editor.rewriteSelection"
             static let liveEdits = "mode.editor.liveEdits"
             static let aiService = "mode.editor.aiService"
@@ -360,6 +361,7 @@ enum AccessibilityID {
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle,
+        Mode.Editor.extraTriggersNote,
         Mode.Editor.rewriteSelection, Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,
         Mode.Editor.instructionExpand, Mode.Editor.instructionExpandDone,
         Mode.Editor.addInstruction, Mode.Editor.newInstruction, Mode.Editor.newInstructionName,

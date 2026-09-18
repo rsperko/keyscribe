@@ -448,9 +448,14 @@ keyscribe/
       **`.unreachable` answers "can this MODE fire", not "is every binding live"** — it holds only when
       EVERY trigger the mode has was claimed earlier, because the Modes list says "Shortcut never fires" and
       the badge lights. A mode keeping one live trigger beside a shadowed one still fires, so it is not
-      flagged; that also covers a mode whose own second trigger claims the same press (TOML-only — the
-      Settings well reads and rewrites `triggerKeys.first`). The residual gap, deliberately unreported:
-      a redundant trigger inside one mode is dropped at runtime with nothing said.
+      flagged; its dead trigger gets `.triggerUnreachable` instead — a red caption naming that key in the
+      editor, deliberately kept OUT of `hasUnreachableTrigger` so the badge still means "the whole mode is
+      dead". The Settings well edits the first entry and preserves the rest; further entries are TOML-only
+      and surfaced as a read-only "Also starts with" note in the editor. A later entry that is the same
+      press as an earlier entry of the SAME mode is dropped at runtime, and
+      `TriggerKeyConflicts.parsedTriggers` mirrors that so the note reports it and every summary omits
+      it. **Registrant ids are positional** (`HotkeyConflicts.registrantId`): keyed by key text, a
+      repeated entry shared its id with the one it repeats, and suppressing the copy dropped both.
       **Constraints gate CLAIMING, not just running** (`ModeResolver.canClaimKey`, `AppDelegate.claimableModes`).
       A trigger belonging only to modes whose bundle constraints rule out the frontmost app is left
       unregistered there, rebuilt from an `NSWorkspace.didActivateApplicationNotification` observer through

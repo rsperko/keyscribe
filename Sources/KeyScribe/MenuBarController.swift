@@ -320,13 +320,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             // A rewrite-using starter mode stays listed but inert until its AI service exists, and
             // says so in place rather than disappearing (ui_design.md §6).
             let reason = inertReasons[mode.id]
-            let trigger = (mode.triggerKeys.first?.key).flatMap { try? KeyDescriptor(parsing: $0) }
+            let triggers = ModeSummary.triggerDescriptors(mode)
             let phrase = mode.triggerPhrases.first
             let item = NSMenuItem(
-                title: Self.modeItemTitle(name: mode.name, trigger: trigger, phrase: phrase, inertReason: reason),
+                title: Self.modeItemTitle(name: mode.name, triggers: triggers, phrase: phrase, inertReason: reason),
                 action: reason == nil ? #selector(selectMode) : nil, keyEquivalent: "")
             item.attributedTitle = Self.modeItemAttributedTitle(
-                name: mode.name, trigger: trigger, phrase: phrase, inertReason: reason)
+                name: mode.name, triggers: triggers, phrase: phrase, inertReason: reason)
             item.target = self
             item.representedObject = mode.id
             item.isEnabled = reason == nil
@@ -346,26 +346,26 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // triggers are modifier-only (Fn / Right-⌥ / Right-⌘) or a mouse button, which cannot be a
     // keyEquivalent. KeyDescriptor.displayString is the single label source, so the glyphs match the
     // Settings mode list and hotkey recorder exactly; the inert reason follows it.
-    static func modeItemAnnotation(trigger: KeyDescriptor?, phrase: String? = nil, inertReason: String?) -> String? {
+    static func modeItemAnnotation(triggers: [KeyDescriptor], phrase: String? = nil, inertReason: String?) -> String? {
         // The spoken phrase is a headline routing capability that is otherwise invisible — showing the actual
         // FIRST phrase (`say "as an email"`) here is the menu's discovery surface for it.
         let phrasePart = phrase.map { ModeSummary.spokenPhrase($0, capitalized: false) }
-        let parts = [trigger?.displayString, phrasePart, inertReason].compactMap { $0 }
+        let parts = [ModeSummary.triggerDisplay(triggers), phrasePart, inertReason].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    static func modeItemTitle(name: String, trigger: KeyDescriptor?, phrase: String? = nil, inertReason: String?) -> String {
-        guard let annotation = modeItemAnnotation(trigger: trigger, phrase: phrase, inertReason: inertReason) else { return name }
+    static func modeItemTitle(name: String, triggers: [KeyDescriptor], phrase: String? = nil, inertReason: String?) -> String {
+        guard let annotation = modeItemAnnotation(triggers: triggers, phrase: phrase, inertReason: inertReason) else { return name }
         return "\(name) — \(annotation)"
     }
 
     // The shortcut/reason are secondary metadata, dimmed after the name so the mode name stays the
     // primary target and the shortcut reads as a hint (like a native keyEquivalent's muted glyph).
     static func modeItemAttributedTitle(
-        name: String, trigger: KeyDescriptor?, phrase: String? = nil, inertReason: String?
+        name: String, triggers: [KeyDescriptor], phrase: String? = nil, inertReason: String?
     ) -> NSAttributedString {
         let title = NSMutableAttributedString(string: name)
-        if let annotation = modeItemAnnotation(trigger: trigger, phrase: phrase, inertReason: inertReason) {
+        if let annotation = modeItemAnnotation(triggers: triggers, phrase: phrase, inertReason: inertReason) {
             title.append(NSAttributedString(
                 string: " — \(annotation)",
                 attributes: [.foregroundColor: NSColor.secondaryLabelColor]))

@@ -481,4 +481,59 @@ struct ModeTests {
         let mode = try ModeStore.decode(from: toml, id: "fine")
         #expect(mode.aiRewrite?.fragments == ["my-voice", "café-notes"])
     }
+
+    private func triggers(_ entries: [(String, String)]) -> Mode {
+        var m = Mode(id: "m", name: "M")
+        m.triggerKeys = entries.map { Mode.TriggerKey(key: $0.0, pressStyle: $0.1, tapThresholdMs: 300) }
+        return m
+    }
+
+    @Test func settingThePrimaryTriggerKeyKeepsItsStyleAndTheRest() {
+        var m = triggers([("fn", "hold-only"), ("mouse4", "tap-to-toggle")])
+        let removed = m.setPrimaryTriggerKey("right_option", restoring: nil)
+        #expect(removed == nil)
+        #expect(m.triggerKeys == [
+            .init(key: "right_option", pressStyle: "hold-only", tapThresholdMs: 300),
+            .init(key: "mouse4", pressStyle: "tap-to-toggle", tapThresholdMs: 300),
+        ])
+    }
+
+    @Test func settingThePrimaryTriggerKeyOnAnEmptyListRestoresTheRememberedEntry() {
+        var m = triggers([])
+        m.setPrimaryTriggerKey("fn", restoring: .init(key: "old", pressStyle: "hold-only", tapThresholdMs: 400))
+        #expect(m.triggerKeys == [.init(key: "fn", pressStyle: "hold-only", tapThresholdMs: 400)])
+    }
+
+    @Test func settingThePrimaryTriggerKeyOnAnEmptyListUsesTheDefaults() {
+        var m = triggers([])
+        m.setPrimaryTriggerKey("fn", restoring: nil)
+        #expect(m.triggerKeys == [.init(
+            key: "fn", pressStyle: Mode.TriggerKey.defaultPressStyle,
+            tapThresholdMs: Mode.TriggerKey.defaultTapThresholdMs)])
+    }
+
+    @Test func clearingThePrimaryTriggerKeyPromotesTheNextAndReturnsTheRemoved() {
+        var m = triggers([("fn", "hold-only"), ("mouse4", "tap-to-toggle")])
+        let removed = m.setPrimaryTriggerKey("", restoring: nil)
+        #expect(removed == .init(key: "fn", pressStyle: "hold-only", tapThresholdMs: 300))
+        #expect(m.triggerKeys == [.init(key: "mouse4", pressStyle: "tap-to-toggle", tapThresholdMs: 300)])
+    }
+
+    @Test func clearingAnEmptyTriggerListLeavesItEmpty() {
+        var m = triggers([])
+        #expect(m.setPrimaryTriggerKey("", restoring: nil) == nil)
+        #expect(m.triggerKeys.isEmpty)
+    }
+
+    @Test func settingThePrimaryPressStyleChangesOnlyTheFirstEntry() {
+        var m = triggers([("fn", "hold-only"), ("mouse4", "tap-to-toggle")])
+        m.setPrimaryPressStyle("hold-or-tap")
+        #expect(m.triggerKeys.map(\.pressStyle) == ["hold-or-tap", "tap-to-toggle"])
+    }
+
+    @Test func settingThePrimaryPressStyleOnAnEmptyListIsANoOp() {
+        var m = triggers([])
+        m.setPrimaryPressStyle("hold-only")
+        #expect(m.triggerKeys.isEmpty)
+    }
 }

@@ -228,7 +228,86 @@ struct TriggerKeyConflictTests {
     @Test func findsConflictOnANonFirstTriggerKey() {
         let edited = mode("b", keys: ["fn", "right_option"])
         let other = mode("a", key: "right_option")
-        #expect(TriggerKeyConflicts.conflict(for: edited, in: [other, edited])?.modeId == "a")
+        let conflict = TriggerKeyConflicts.conflict(for: edited, in: [other, edited])
+        #expect(conflict?.modeId == "a")
+        #expect(conflict?.triggerKey == "right_option")
+    }
+
+    @Test func namesTheUnreachableTriggerKey() {
+        let plain = mode("plain", key: "command")
+        let edited = mode("b", key: "right_command")
+        let conflict = TriggerKeyConflicts.conflict(for: edited, in: [plain, edited])
+        #expect(conflict?.kind == .unreachable)
+        #expect(conflict?.triggerKey == "right_command")
+    }
+
+    private func descriptor(_ key: String) -> KeyDescriptor { try! KeyDescriptor(parsing: key) }
+
+    @Test func reportsALaterTriggerThatIsTheSamePressAsAnEarlierOne() {
+        let redundant = TriggerKeyConflicts.redundantTriggers(in: mode("m", keys: ["right_command", "command"]))
+        #expect(redundant == [.init(index: 1, descriptor: descriptor("command"), sameAs: descriptor("right_command"))])
+    }
+
+    @Test func aRepeatedEntryIsRedundantWithTheFirst() {
+        let redundant = TriggerKeyConflicts.redundantTriggers(in: mode("m", keys: ["fn", "fn"]))
+        #expect(redundant == [.init(index: 1, descriptor: descriptor("fn"), sameAs: descriptor("fn"))])
+    }
+
+    @Test func sidedPairOnOneModeIsTwoUsableTriggers() {
+        #expect(TriggerKeyConflicts.redundantTriggers(in: mode("m", keys: ["left_command", "right_command"])).isEmpty)
+    }
+
+    @Test func singleTriggerIsNeverRedundant() {
+        #expect(TriggerKeyConflicts.redundantTriggers(in: mode("m", keys: ["fn"])).isEmpty)
+    }
+
+    @Test func unparsableTriggerIsIgnoredForRedundancy() {
+        #expect(TriggerKeyConflicts.redundantTriggers(in: mode("m", keys: ["fn", "not a key", "fn"])).map(\.index) == [2])
+    }
+
+    @Test func liveTriggersSkipRedundantAndUnparsableEntries() {
+        let live = TriggerKeyConflicts.liveTriggers(in: mode("m", keys: ["right_command", "not a key", "command", "fn"]))
+        #expect(live.map(\.index) == [0, 3])
+        #expect(live.map(\.descriptor) == [descriptor("right_command"), descriptor("fn")])
+        #expect(live.allSatisfy { $0.sameAs == nil })
+    }
+
+    @Test func aDeadExtraTriggerIsReportedForThatKeyOnly() {
+        let owner = mode("a", key: "command")
+        let edited = mode("b", keys: ["fn", "right_command"])
+        let conflict = TriggerKeyConflicts.conflict(for: edited, in: [owner, edited])
+        #expect(conflict?.kind == .triggerUnreachable)
+        #expect(conflict?.triggerKey == "right_command")
+        #expect(conflict?.modeId == "a")
+        #expect(!TriggerKeyConflicts.hasUnreachableTrigger(in: [owner, edited]))
+    }
+
+    @Test func aWhollyDeadModeStillReportsUnreachable() {
+        let owner = mode("a", key: "command")
+        let edited = mode("b", keys: ["right_command", "left_command"])
+        #expect(TriggerKeyConflicts.conflict(for: edited, in: [owner, edited])?.kind == .unreachable)
+    }
+
+    @Test func identicalEntriesInOneModeKeepTheFirstBound() {
+        let m = mode("m", keys: ["fn", "fn"])
+        let registrants = HotkeyConflicts.modeRegistrants([m])
+        let shadowed = HotkeyConflicts.shadowed(registrants)
+        #expect(HotkeyConflicts.boundTriggers(in: [m], shadowed: shadowed).map(\.trigger) == [m.triggerKeys[0]])
+    }
+
+    @Test func anExtraModeTriggerBeatsAGlobalOnTheSameChord() {
+        let m = mode("m", keys: ["fn", "control+option+d"])
+        let registrants = HotkeyConflicts.modeRegistrants([m]) + [.init(id: "global", key: "control+option+d")]
+        let shadowed = HotkeyConflicts.shadowed(registrants)
+        #expect(shadowed == ["global"])
+        #expect(HotkeyConflicts.boundTriggers(in: [m], shadowed: shadowed).map(\.trigger.key) == ["fn", "control+option+d"])
+    }
+
+    @Test func aDisabledModeRegistersNothing() {
+        let off = mode("off", key: "fn", enabled: false)
+        let on = mode("on", key: "fn")
+        let shadowed = HotkeyConflicts.shadowed(HotkeyConflicts.modeRegistrants([off, on]))
+        #expect(HotkeyConflicts.boundTriggers(in: [on], shadowed: shadowed).map(\.mode.id) == ["on"])
     }
 
 

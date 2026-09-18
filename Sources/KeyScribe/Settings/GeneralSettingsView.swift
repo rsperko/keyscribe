@@ -8,9 +8,15 @@ struct GeneralSettingsView: View {
     var directMode: Mode?
     var onEditPlainDictation: () -> Void = {}
 
-    private var directTrigger: Mode.TriggerKey? { directMode?.triggerKeys.first }
-    private var directPressStyle: PressStyle {
-        PressStyle(rawValue: directTrigger?.pressStyle ?? "") ?? .holdOrTap
+    private var directTriggers: [Mode.TriggerKey] {
+        guard let directMode else { return [] }
+        let ignored = Set(TriggerKeyConflicts.redundantTriggers(in: directMode).map(\.index))
+        return directMode.triggerKeys.enumerated().filter { !ignored.contains($0.offset) }.map(\.element)
+    }
+    private var sharedPressStyle: PressStyle? {
+        let styles = Set(directTriggers.map(\.pressStyle))
+        guard styles.count == 1, let style = styles.first else { return nil }
+        return PressStyle(rawValue: style) ?? .holdOrTap
     }
 
     var body: some View {
@@ -18,10 +24,17 @@ struct GeneralSettingsView: View {
             Section {
                 LabeledContent("Shortcut") {
                     HStack(spacing: 10) {
-                        if let directTrigger {
-                            shortcutDisplay(directTrigger.key)
-                            Text(directPressStyle.title)
-                                .foregroundStyle(.secondary)
+                        if !directTriggers.isEmpty {
+                            ForEach(Array(directTriggers.enumerated()), id: \.offset) { index, trigger in
+                                if index > 0 {
+                                    Text("or").foregroundStyle(.secondary)
+                                }
+                                shortcutDisplay(trigger.key)
+                            }
+                            if let sharedPressStyle {
+                                Text(sharedPressStyle.title)
+                                    .foregroundStyle(.secondary)
+                            }
                         } else {
                             Text("None")
                                 .foregroundStyle(.secondary)
@@ -34,7 +47,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Plain Dictation")
             } footer: {
-                Text(directTrigger == nil
+                Text(directTriggers.isEmpty
                     ? "Choose a shortcut and how it starts in Modes. Plain Dictation runs whenever no other mode matches on a shortcut it owns."
                     : "Plain Dictation runs whenever no other mode matches on a shortcut it owns.")
             }

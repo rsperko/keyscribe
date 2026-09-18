@@ -7,8 +7,7 @@ struct ModeTriggerRow: View {
     let onUpdate: (Mode) -> Void
     var label: String = "Start this mode with"
     var accessibilityID: String = AccessibilityID.Mode.Editor.shortcutWell
-    @State private var rememberedStyle: String?
-    @State private var rememberedThreshold: Int?
+    @State private var remembered: Mode.TriggerKey?
 
     var body: some View {
         LabeledContent(label) {
@@ -21,19 +20,7 @@ struct ModeTriggerRow: View {
             get: { mode.triggerKeys.first?.key ?? "" },
             set: { key in
                 var updated = mode
-                if key.isEmpty {
-                    if let existing = mode.triggerKeys.first {
-                        rememberedStyle = existing.pressStyle
-                        rememberedThreshold = existing.tapThresholdMs
-                    }
-                    updated.triggerKeys = []
-                } else {
-                    let existing = mode.triggerKeys.first
-                    updated.triggerKeys = [.init(
-                        key: key,
-                        pressStyle: existing?.pressStyle ?? rememberedStyle ?? "hold-or-tap",
-                        tapThresholdMs: existing?.tapThresholdMs ?? rememberedThreshold ?? 250)]
-                }
+                if let removed = updated.setPrimaryTriggerKey(key, restoring: remembered) { remembered = removed }
                 onUpdate(updated)
             })
     }
@@ -62,20 +49,44 @@ struct PressStyleRow: View {
 
 struct TriggerConflictLabel: View {
     let conflict: TriggerKeyConflict?
+    let mode: Mode
 
     @ViewBuilder var body: some View {
         if let conflict {
             switch conflict.kind {
             case .collision:
-                IssueText("Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
+                IssueText(prefix(conflict) + "Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
                           severity: .advisory)
             case .unreachable:
-                IssueText("This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. Give this mode a different shortcut, or write both the same way.",
+                IssueText(prefix(conflict) + "This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. Give this mode a different shortcut, or write both the same way.",
+                          severity: .failure)
+            case .triggerUnreachable:
+                IssueText(prefix(conflict) + "This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. This mode's other shortcuts still start it.",
                           severity: .failure)
             case .masking:
-                IssueText("Pressed on the way into \(conflict.modeName)'s shortcut. Press that one as a single motion, or this mode starts first.",
+                IssueText(prefix(conflict) + "Pressed on the way into \(conflict.modeName)'s shortcut. Press that one as a single motion, or this mode starts first.",
                           severity: .advisory)
             }
+        }
+    }
+
+    private func prefix(_ conflict: TriggerKeyConflict) -> String {
+        guard !conflict.triggerKey.isEmpty,
+              conflict.triggerKey != mode.triggerKeys.first?.key,
+              let descriptor = try? KeyDescriptor(parsing: conflict.triggerKey)
+        else { return "" }
+        return "\(descriptor.displayString): "
+    }
+}
+
+struct ExtraTriggersNote: View {
+    let mode: Mode
+
+    @ViewBuilder var body: some View {
+        if let note = ModeSummary.extraTriggersNote(mode) {
+            Label(note, systemImage: "keyboard")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.extraTriggersNote)
         }
     }
 }
@@ -90,14 +101,20 @@ struct ModeTrigger {
         TriggerKeyConflicts.conflict(for: mode, in: allModes)
     }
 
+    var usesMouseShortcut: Bool {
+        ModeSummary.triggerDescriptors(mode).contains {
+            if case .mouseButton = $0 { return true }
+            return false
+        }
+    }
+
     var pressStyle: Binding<String> {
         Binding(
-            get: { mode.triggerKeys.first?.pressStyle ?? "hold-or-tap" },
+            get: { mode.triggerKeys.first?.pressStyle ?? Mode.TriggerKey.defaultPressStyle },
             set: { style in
-                guard let existing = mode.triggerKeys.first else { return }
+                guard !mode.triggerKeys.isEmpty else { return }
                 var updated = mode
-                updated.triggerKeys = [.init(
-                    key: existing.key, pressStyle: style, tapThresholdMs: existing.tapThresholdMs)]
+                updated.setPrimaryPressStyle(style)
                 onUpdate(updated)
             })
     }

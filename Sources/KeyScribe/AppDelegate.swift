@@ -406,12 +406,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // The losers of a chord collision are suppressed at dispatch so the higher-precedence owner fires
     // (first match wins; Modes beat the globals) — and the same set drives the Settings red-dot.
     private func shadowedHotkeyIds(in claimable: [Mode]) -> Set<String> {
-        var ordered: [HotkeyConflicts.Registrant] = []
-        for mode in claimable {
-            for tk in mode.triggerKeys {
-                ordered.append(.init(id: "\(mode.id)#\(tk.key)", key: tk.key))
-            }
-        }
+        var ordered = HotkeyConflicts.modeRegistrants(claimable)
         ordered.append(.init(id: GlobalHotkey.vocabularyId, key: settings.shortcuts.addVocabulary))
         ordered.append(.init(id: GlobalHotkey.pasteLastId, key: settings.shortcuts.pasteLastDictation))
         return HotkeyConflicts.shadowed(ordered)
@@ -423,17 +418,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // it — leaving the key with no binding at all rather than the surviving one.
         let claimable = claimableModes()
         let shadowed = shadowedHotkeyIds(in: claimable)
-        var bindings: [HotkeyMonitor.Binding] = []
-        for mode in claimable {
-            for tk in mode.triggerKeys {
-                guard !shadowed.contains("\(mode.id)#\(tk.key)"),
-                      let desc = try? KeyDescriptor(parsing: tk.key) else { continue }
-                bindings.append(.init(
+        let bindings: [HotkeyMonitor.Binding] = HotkeyConflicts.boundTriggers(in: claimable, shadowed: shadowed)
+            .compactMap { bound in
+                let tk = bound.trigger
+                guard let desc = try? KeyDescriptor(parsing: tk.key) else { return nil }
+                return .init(
                     triggerKey: tk.key, descriptor: desc,
                     style: PressStyle(rawValue: tk.pressStyle) ?? .holdOrTap,
-                    tapThreshold: Double(tk.tapThresholdMs) / 1000))
+                    tapThreshold: Double(tk.tapThresholdMs) / 1000)
             }
-        }
         registeredClaimIds = claimable.map(\.id)
         let actionBindings = self.actionBindings(shadowed: shadowed)
 

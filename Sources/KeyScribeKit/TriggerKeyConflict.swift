@@ -1,17 +1,20 @@
 public struct TriggerKeyConflict: Equatable, Sendable {
-    // Collision shares a press; unreachable loses registration; masking is a strict modifier subset.
-    public enum Kind: Equatable, Sendable { case collision, unreachable, masking }
+    // Collision shares a press; unreachable loses registration for every trigger, triggerUnreachable for
+    // one while another still fires; masking is a strict modifier subset.
+    public enum Kind: Equatable, Sendable { case collision, unreachable, triggerUnreachable, masking }
 
     public let modeId: String
     public let modeName: String
     public let key: String
     public let kind: Kind
+    public let triggerKey: String
 
-    public init(modeId: String, modeName: String, key: String, kind: Kind = .collision) {
+    public init(modeId: String, modeName: String, key: String, kind: Kind = .collision, triggerKey: String) {
         self.modeId = modeId
         self.modeName = modeName
         self.key = key
         self.kind = kind
+        self.triggerKey = triggerKey
     }
 }
 
@@ -26,9 +29,14 @@ public enum TriggerKeyConflicts {
         let parsed = mode.triggerKeys.compactMap { trigger in
             (try? KeyDescriptor(parsing: trigger.key)).map { (trigger, $0) }
         }
-        let claims = parsed.map { claimedEarlier($0.1, for: mode, in: earlier) }
+        let claims = parsed.map { claimedEarlier($0.1, key: $0.0.key, for: mode, in: earlier) }
         if !claims.isEmpty, claims.allSatisfy({ $0 != nil }), let first = claims.first ?? nil {
             return first
+        }
+        if let dead = claims.lazy.compactMap({ $0 }).first {
+            return TriggerKeyConflict(
+                modeId: dead.modeId, modeName: dead.modeName, key: dead.key, kind: .triggerUnreachable,
+                triggerKey: dead.triggerKey)
         }
         for editedTrigger in mode.triggerKeys {
             guard let descriptor = try? KeyDescriptor(parsing: editedTrigger.key) else { continue }
@@ -38,12 +46,14 @@ public enum TriggerKeyConflicts {
                     guard canContend(mode, other) else { continue }
                     if otherDescriptor.collides(with: descriptor) {
                         return TriggerKeyConflict(
-                            modeId: other.id, modeName: other.name, key: trigger.key, kind: .collision)
+                            modeId: other.id, modeName: other.name, key: trigger.key, kind: .collision,
+                            triggerKey: editedTrigger.key)
                     }
                     // Prefer a collision warning over masking.
                     if masking == nil, masks(descriptor, otherDescriptor) {
                         masking = TriggerKeyConflict(
-                            modeId: other.id, modeName: other.name, key: trigger.key, kind: .masking)
+                            modeId: other.id, modeName: other.name, key: trigger.key, kind: .masking,
+                            triggerKey: editedTrigger.key)
                     }
                 }
             }
@@ -54,7 +64,7 @@ public enum TriggerKeyConflicts {
     /// An earlier claimant with a different spelling makes this trigger unreachable; the same spelling
     /// still routes to both modes.
     private static func claimedEarlier(
-        _ descriptor: KeyDescriptor, for mode: Mode, in earlier: [Mode]
+        _ descriptor: KeyDescriptor, key: String, for mode: Mode, in earlier: [Mode]
     ) -> TriggerKeyConflict? {
         // Replay ordered registration: a dropped binding cannot claim a later press.
         var claimed: [(mode: Mode, key: String, descriptor: KeyDescriptor, contesters: [Mode])] = []
@@ -77,9 +87,43 @@ public enum TriggerKeyConflicts {
             && shadowsWhereverItRuns(claimant: claim.mode, mode)
             && claim.contesters.allSatisfy({ !bundleScopesIntersect($0, mode) }) {
             return TriggerKeyConflict(
-                modeId: claim.mode.id, modeName: claim.mode.name, key: claim.key, kind: .unreachable)
+                modeId: claim.mode.id, modeName: claim.mode.name, key: claim.key, kind: .unreachable,
+                triggerKey: key)
         }
         return nil
+    }
+
+    public struct ParsedTrigger: Equatable, Sendable {
+        public let index: Int
+        public let descriptor: KeyDescriptor
+        public let sameAs: KeyDescriptor?
+
+        public init(index: Int, descriptor: KeyDescriptor, sameAs: KeyDescriptor?) {
+            self.index = index
+            self.descriptor = descriptor
+            self.sameAs = sameAs
+        }
+    }
+
+    /// Mirrors intra-mode shadowing at registration: only a bound entry can make a later one redundant.
+    public static func parsedTriggers(in mode: Mode) -> [ParsedTrigger] {
+        var bound: [KeyDescriptor] = []
+        var parsed: [ParsedTrigger] = []
+        for (index, trigger) in mode.triggerKeys.enumerated() {
+            guard let descriptor = try? KeyDescriptor(parsing: trigger.key) else { continue }
+            let sameAs = bound.first { $0.collides(with: descriptor) }
+            if sameAs == nil { bound.append(descriptor) }
+            parsed.append(ParsedTrigger(index: index, descriptor: descriptor, sameAs: sameAs))
+        }
+        return parsed
+    }
+
+    public static func liveTriggers(in mode: Mode) -> [ParsedTrigger] {
+        parsedTriggers(in: mode).filter { $0.sameAs == nil }
+    }
+
+    public static func redundantTriggers(in mode: Mode) -> [ParsedTrigger] {
+        parsedTriggers(in: mode).filter { $0.sameAs != nil }
     }
 
     /// Whether any enabled mode has an unreachable trigger.
@@ -161,6 +205,31 @@ public enum TriggerKeyConflicts {
 }
 
 public enum HotkeyConflicts {
+    public struct BoundTrigger: Equatable, Sendable {
+        public let mode: Mode
+        public let trigger: Mode.TriggerKey
+    }
+
+    /// Keyed by position, not key text, so a repeated entry cannot share its id with the one it repeats.
+    public static func registrantId(mode: Mode, index: Int) -> String { "\(mode.id)#\(index)" }
+
+    public static func modeRegistrants(_ modes: [Mode]) -> [Registrant] {
+        modes.flatMap { mode in
+            mode.triggerKeys.enumerated().map { index, trigger in
+                Registrant(id: registrantId(mode: mode, index: index), key: trigger.key, enabled: mode.enabled)
+            }
+        }
+    }
+
+    public static func boundTriggers(in modes: [Mode], shadowed: Set<String>) -> [BoundTrigger] {
+        modes.filter(\.enabled).flatMap { mode in
+            mode.triggerKeys.enumerated().compactMap { index, trigger in
+                shadowed.contains(registrantId(mode: mode, index: index))
+                    ? nil : BoundTrigger(mode: mode, trigger: trigger)
+            }
+        }
+    }
+
     public struct Registrant: Equatable, Sendable {
         public let id: String
         public let key: String

@@ -73,11 +73,17 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var syncsClipboard: Bool { clipboardSync ?? pasteKeystroke.isForeignTarget }
 
     public struct TriggerKey: Codable, Equatable, Sendable {
+        public static let defaultPressStyle = "hold-or-tap"
+        public static let defaultTapThresholdMs = 250
+
         public var key: String
         public var pressStyle: String
         public var tapThresholdMs: Int
         enum CodingKeys: String, CodingKey { case key; case pressStyle = "press_style"; case tapThresholdMs = "tap_threshold_ms" }
-        public init(key: String, pressStyle: String = "hold-or-tap", tapThresholdMs: Int = 250) {
+        public init(
+            key: String, pressStyle: String = TriggerKey.defaultPressStyle,
+            tapThresholdMs: Int = TriggerKey.defaultTapThresholdMs
+        ) {
             self.key = key
             self.pressStyle = pressStyle
             self.tapThresholdMs = tapThresholdMs
@@ -85,9 +91,30 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             key = try c.decode(String.self, forKey: .key)
-            pressStyle = try c.decodeIfPresent(String.self, forKey: .pressStyle) ?? "hold-or-tap"
-            tapThresholdMs = try c.decodeIfPresent(Int.self, forKey: .tapThresholdMs) ?? 250
+            pressStyle = try c.decodeIfPresent(String.self, forKey: .pressStyle) ?? TriggerKey.defaultPressStyle
+            tapThresholdMs = try c.decodeIfPresent(Int.self, forKey: .tapThresholdMs) ?? TriggerKey.defaultTapThresholdMs
         }
+    }
+
+    @discardableResult
+    public mutating func setPrimaryTriggerKey(_ key: String, restoring remembered: TriggerKey?) -> TriggerKey? {
+        if key.isEmpty {
+            return triggerKeys.isEmpty ? nil : triggerKeys.removeFirst()
+        }
+        if triggerKeys.isEmpty {
+            triggerKeys = [TriggerKey(
+                key: key,
+                pressStyle: remembered?.pressStyle ?? TriggerKey.defaultPressStyle,
+                tapThresholdMs: remembered?.tapThresholdMs ?? TriggerKey.defaultTapThresholdMs)]
+        } else {
+            triggerKeys[0].key = key
+        }
+        return nil
+    }
+
+    public mutating func setPrimaryPressStyle(_ style: String) {
+        guard !triggerKeys.isEmpty else { return }
+        triggerKeys[0].pressStyle = style
     }
 
     public struct Constraint: Codable, Equatable, Sendable {

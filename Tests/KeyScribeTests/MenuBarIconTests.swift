@@ -3,6 +3,10 @@ import KeyScribeKit
 import Testing
 @testable import KeyScribeApp
 
+private func descriptors(_ keys: String...) -> [KeyDescriptor] {
+    keys.compactMap { try? KeyDescriptor(parsing: $0) }
+}
+
 @MainActor
 struct MenuBarIconTests {
     @Test func menuPutsEverydayDictationActionsBeforeManagement() {
@@ -19,14 +23,14 @@ struct MenuBarIconTests {
 
     @Test func modeItemTitleShowsAModifierOnlyShortcut() {
         let title = MenuBarController.modeItemTitle(
-            name: "Polish", trigger: try? KeyDescriptor(parsing: "right_option"), inertReason: nil)
+            name: "Polish", triggers: descriptors("right_option"), inertReason: nil)
 
         #expect(title == "Polish — Right-⌥")
     }
 
     @Test func modeItemTitleShowsAChordShortcut() {
         let title = MenuBarController.modeItemTitle(
-            name: "Email", trigger: try? KeyDescriptor(parsing: "control+option+e"), inertReason: nil)
+            name: "Email", triggers: descriptors("control+option+e"), inertReason: nil)
 
         #expect(title == "Email — ⌃⌥E")
     }
@@ -38,27 +42,34 @@ struct MenuBarIconTests {
                 continue
             }
             let title = MenuBarController.modeItemTitle(
-                name: "Mode", trigger: descriptor, inertReason: nil)
+                name: "Mode", triggers: [descriptor], inertReason: nil)
             #expect(title == "Mode — \(descriptor.displayString)")
         }
     }
 
+    @Test func modeItemTitleListsEveryShortcut() {
+        let title = MenuBarController.modeItemTitle(
+            name: "Polish", triggers: descriptors("fn", "mouse4"), inertReason: nil)
+
+        #expect(title == "Polish — Fn (Globe) or Mouse Button 4")
+    }
+
     @Test func modeItemTitleIsBareWhenNoShortcutIsAssigned() {
-        let title = MenuBarController.modeItemTitle(name: "Direct", trigger: nil, inertReason: nil)
+        let title = MenuBarController.modeItemTitle(name: "Direct", triggers: [], inertReason: nil)
 
         #expect(title == "Direct")
     }
 
     @Test func modeItemTitleShowsAPhraseOnlyModesSpokenPhrase() {
         let title = MenuBarController.modeItemTitle(
-            name: "Email", trigger: nil, phrase: "as an email", inertReason: nil)
+            name: "Email", triggers: [], phrase: "as an email", inertReason: nil)
 
         #expect(title == "Email — say \"as an email\"")
     }
 
     @Test func modeItemTitleJoinsAKeyAndAPhrase() {
         let title = MenuBarController.modeItemTitle(
-            name: "Pig Latin", trigger: try? KeyDescriptor(parsing: "right_option"),
+            name: "Pig Latin", triggers: descriptors("right_option"),
             phrase: "as pig latin", inertReason: nil)
 
         #expect(title == "Pig Latin — Right-⌥ · say \"as pig latin\"")
@@ -66,7 +77,7 @@ struct MenuBarIconTests {
 
     @Test func modeItemTitleKeepsShortcutAndInertReasonTogether() {
         let title = MenuBarController.modeItemTitle(
-            name: "Email", trigger: try? KeyDescriptor(parsing: "fn"),
+            name: "Email", triggers: descriptors("fn"),
             inertReason: "needs an AI service")
 
         #expect(title == "Email — Fn (Globe) · needs an AI service")
@@ -74,7 +85,7 @@ struct MenuBarIconTests {
 
     @Test func modeItemDimsTheShortcutButNotTheName() {
         let attributed = MenuBarController.modeItemAttributedTitle(
-            name: "Polish", trigger: try? KeyDescriptor(parsing: "right_option"), inertReason: nil)
+            name: "Polish", triggers: descriptors("right_option"), inertReason: nil)
 
         #expect(attributed.string == "Polish — Right-⌥")
         let nameColor = attributed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
@@ -86,7 +97,7 @@ struct MenuBarIconTests {
 
     @Test func modeItemAttributedTitleIsBareWhenNoShortcutIsAssigned() {
         let attributed = MenuBarController.modeItemAttributedTitle(
-            name: "Direct", trigger: nil, inertReason: nil)
+            name: "Direct", triggers: [], inertReason: nil)
 
         #expect(attributed.string == "Direct")
         #expect(attributed.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
@@ -97,14 +108,14 @@ struct MenuBarIconTests {
         controller.install()
 
         var polish = Mode(id: "polish", name: "Polish")
-        polish.triggerKeys = [.init(key: "right_option")]
+        polish.triggerKeys = [.init(key: "right_option"), .init(key: "mouse4")]
         var direct = Mode(id: "direct", name: "Direct")
         direct.triggerKeys = []
 
         controller.setModes([polish, direct], automaticName: "Direct", overrideName: nil)
 
         let titles = controller.modeMenuItems.map { $0.attributedTitle?.string ?? $0.title }
-        #expect(titles.contains("Polish — Right-⌥"))
+        #expect(titles.contains("Polish — Right-⌥ or Mouse Button 4"))
         #expect(titles.contains("Direct"))
     }
 

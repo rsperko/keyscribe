@@ -438,7 +438,7 @@ default; bind a different mode there to change it.
 Direct is a **guaranteed minimal recipe** that can never be deleted, duplicated, made-default, or
 misconfigured to leak: **never an LLM rewrite, never context, never edit-in-place, no vocabulary of
 its own** (it relies on the **global** dictionary for recognition bias and **global** replacements).
-A few fields *are* user-editable — its **trigger key**, insertion method, trailing/submit, live-edits,
+A few fields *are* user-editable — its **trigger keys**, insertion method, trailing/submit, live-edits,
 and whether it **records to history** (it records per the global History setting by default; you can
 switch that off for Direct specifically). It occupies a reserved **system-mode id namespace** (a
 leading underscore, `_direct`) that the mode-name slugger can never produce, so a user-created mode can
@@ -549,7 +549,7 @@ roster in code). Three settings carry architecture rather than presentation:
   generated tokens are cached in memory only and never persisted. Modes reference a connection by
   name; multiple connections allowed.
 - **Modes:** a focused mode editor for common behavior plus read-only notes for advanced TOML-only
-  behavior; each mode persists as a **TOML** file. Schema and the referenced config files are
+  behavior, such as additional trigger keys; each mode persists as a **TOML** file. Schema and the referenced config files are
   specified in `config_schema.md`.
 
 ### 4.7 Local history

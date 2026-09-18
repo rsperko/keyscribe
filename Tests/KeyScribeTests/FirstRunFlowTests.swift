@@ -234,6 +234,50 @@ struct FirstRunFlowTests {
         #expect(reloaded?.triggerKeys.first?.tapThresholdMs == 300)
     }
 
+    @Test func rebindKeepsAdditionalTriggersFromTheFile() throws {
+        let supportDir = tempSupportDir()
+        let modesDir = supportDir.appendingPathComponent("modes")
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let second = Mode.TriggerKey(key: "mouse4", pressStyle: "hold-only", tapThresholdMs: 400)
+        try writeDirect([.init(key: "fn"), second], to: modesDir)
+        let model = makeModel(supportDir: supportDir)
+
+        model.setDirectTrigger("right_command")
+
+        let reloaded = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }
+        #expect(reloaded?.triggerKeys.map(\.key) == ["right_command", "mouse4"])
+        #expect(reloaded?.triggerKeys.last == second)
+    }
+
+    @Test func recordingAfterClearingRestoresTheClearedPressStyle() throws {
+        let supportDir = tempSupportDir()
+        let modesDir = supportDir.appendingPathComponent("modes")
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        try writeDirect([.init(key: "fn", pressStyle: "hold-only", tapThresholdMs: 300)], to: modesDir)
+        let model = makeModel(supportDir: supportDir)
+
+        model.setDirectTrigger("")
+        model.setDirectTrigger("right_option")
+
+        let reloaded = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }
+        #expect(reloaded?.triggerKeys == [.init(key: "right_option", pressStyle: "hold-only", tapThresholdMs: 300)])
+    }
+
+    @Test func clearingPromotesTheNextTriggerFromTheFile() throws {
+        let supportDir = tempSupportDir()
+        let modesDir = supportDir.appendingPathComponent("modes")
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let second = Mode.TriggerKey(key: "mouse4", pressStyle: "tap-to-toggle", tapThresholdMs: 400)
+        try writeDirect([.init(key: "fn", pressStyle: "hold-only"), second], to: modesDir)
+        let model = makeModel(supportDir: supportDir)
+
+        model.setDirectTrigger("")
+
+        let reloaded = ModeStore.loadAll(in: modesDir).first { $0.id == Mode.directId }
+        #expect(reloaded?.triggerKeys == [second])
+        #expect(model.directTrigger?.canonical == "mouse4")
+    }
+
     @Test func clearingTheTriggerReportsTheNoTriggerState() throws {
         let supportDir = tempSupportDir()
         let modesDir = supportDir.appendingPathComponent("modes")

@@ -125,6 +125,13 @@ struct ModeResolverTests {
         #expect(m?.id == "email")
     }
 
+    @Test func everyTriggerKeyOnAModeSelectsIt() {
+        let plain = mode("plain", keys: ["right_command"])
+        let email = mode("email", keys: ["fn", "mouse4"])
+        #expect(phaseA([plain, email], context: .init(), triggerKey: "mouse4")?.id == "email")
+        #expect(phaseA([plain, email], context: .init(), triggerKey: "fn")?.id == "email")
+    }
+
     @Test func contextDefaultPrefersAppSpecificMode() {
         let plain = mode("plain")
         let email = mode("email", bundles: ["com.apple.mail"])

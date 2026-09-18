@@ -309,7 +309,7 @@ private enum ModeSummaryIssue {
         case .needsService: "Choose an AI service for this enabled mode."
         case .missingService: "The selected AI service no longer exists."
         case .failedService: "This mode's AI service failed its last connection test."
-        case .triggerUnreachable: "Another mode claims the same press, written a different way, so this shortcut never fires."
+        case .triggerUnreachable: "Another mode claims the same press, written a different way, so no shortcut on this mode fires."
         }
     }
 }
@@ -323,20 +323,49 @@ enum ModeSummary {
         "\(capitalized ? "Say" : "say") \"\(phrase)\""
     }
 
+    static func triggerDescriptors(_ mode: Mode) -> [KeyDescriptor] {
+        TriggerKeyConflicts.liveTriggers(in: mode).map(\.descriptor)
+    }
+
+    static func extraTriggersNote(_ mode: Mode) -> String? {
+        let parsed = TriggerKeyConflicts.parsedTriggers(in: mode)
+        let primaryStyle = mode.triggerKeys.first?.pressStyle
+        let extras = parsed.filter { $0.index > 0 && $0.sameAs == nil }.map { entry in
+            let style = mode.triggerKeys[entry.index].pressStyle
+            guard style != primaryStyle else { return entry.descriptor.displayString }
+            return "\(entry.descriptor.displayString) (\((PressStyle(rawValue: style) ?? .holdOrTap).title))"
+        }
+        var sentences: [String] = []
+        if !extras.isEmpty {
+            sentences.append("Also starts with \(extras.joined(separator: " or ")), configured in its TOML file.")
+        }
+        for entry in parsed {
+            guard let earlier = entry.sameAs else { continue }
+            let shortcut = entry.descriptor.displayString
+            let sentence = entry.descriptor == earlier
+                ? "\(shortcut) is listed twice; the second is ignored."
+                : "\(shortcut) is ignored because it is the same press as \(earlier.displayString)."
+            if !sentences.contains(sentence) { sentences.append(sentence) }
+        }
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
+    }
+
+    static func triggerDisplay(_ descriptors: [KeyDescriptor]) -> String? {
+        descriptors.isEmpty ? nil : descriptors.map(\.displayString).joined(separator: " or ")
+    }
+
+    static func triggerDisplay(_ mode: Mode) -> String? {
+        triggerDisplay(triggerDescriptors(mode))
+    }
+
     static func whenRuns(_ mode: Mode) -> String {
         let constrained = !mode.constraints.isEmpty
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
-        if mode.isSystem {
-            if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-                return descriptor.displayString
-            }
-            return "Fallback"
-        }
+        if mode.isSystem { return triggerDisplay(mode) ?? "Fallback" }
         // A constrained mode with no shortcut/phrase never auto-runs (Fn goes to Plain Dictation) — it's
         // menu-reachable, so don't imply it's automatic.
-        if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-            return constrained ? "\(descriptor.displayString) in matching apps"
-                               : descriptor.displayString
+        if let shortcuts = triggerDisplay(mode) {
+            return constrained ? "\(shortcuts) in matching apps" : shortcuts
         }
         if let phrase = mode.triggerPhrases.first {
             let said = spokenPhrase(phrase, capitalized: true)

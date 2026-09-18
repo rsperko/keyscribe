@@ -333,10 +333,7 @@ struct SettingsRootView: View {
     @State private var destination: SettingsDestination?
 
     private func shadowedHotkeys() -> Set<String> {
-        var ordered = modes.modes.map {
-            HotkeyConflicts.Registrant(
-                id: $0.id, key: $0.triggerKeys.first?.key ?? "", enabled: $0.enabled)
-        }
+        var ordered = HotkeyConflicts.modeRegistrants(modes.modes)
         ordered.append(.init(id: GlobalHotkey.vocabularyId, key: general.addVocabularyShortcut))
         ordered.append(.init(id: GlobalHotkey.pasteLastId, key: general.pasteLastShortcut))
         return HotkeyConflicts.shadowed(ordered)

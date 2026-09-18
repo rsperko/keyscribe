@@ -113,6 +113,11 @@ key = "right_option"        # canonical key descriptor; also e.g. "fn", "left_co
 press_style = "hold-or-tap"
 tap_threshold_ms = 250      # release under this = a tap (latches on); over = push-to-talk hold
 
+# A further entry starts the same mode, each with its own press style. Settings edits only the first.
+# [[trigger_keys]]
+# key = "mouse4"
+# press_style = "hold-only"
+
 # Context eligibility. Empty = eligible everywhere. A constraint ANDs its fields; any of
 # bundle_id (exact), bundle_prefix (case-insensitive bundle-id prefix), url_pattern (regex, when
 # detectable), window_title (regex). Also constrains which phrases can route here. Specificity ranks
@@ -181,7 +186,7 @@ context = { app = true, preceding_text = false }
 | `schema_version` | int | Required. Current: `2`. Older versions are normalized on read; v1→v2 migrates the retired `clipboard_modifier` key (`"control"` → `paste_key = "control+v"` + `copy_key = "control+c"`; `"command"` was the default and just drops). |
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
-| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
+| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more; every entry starts the mode. Settings edits the **first** entry and preserves the rest. Further entries are TOML-only and appear in the mode editor as a read-only "Also starts with" note; a later entry that is the same press as an earlier one (`command` after `right_command`, or the same key twice) is ignored at runtime, the note says so, and it is left out wherever the mode's shortcuts are listed. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
@@ -224,7 +229,7 @@ or make global behavior hard to reason about.
 | `dictionary.include_global` | No per-mode toggle in Settings; global dictionary terms stay included by default. | Turning this off makes a mode stop using vocabulary the user expects to apply everywhere. |
 | `replacements.include_global` | No per-mode toggle in Settings; global replacements stay included by default. | Turning this off creates surprising mode-specific replacement gaps. |
 | `source` + `output` | Shown as one “Rewrite selected text” control. | The app-supported selection workflow is the paired shape: capture the current selection and replace it with the rewritten result. |
-| `trigger_keys[].press_style` / `tap_threshold_ms` | The mode shortcut itself is editable in Settings. Press style and tap threshold stay with advanced routing details. | Most users need only “which key starts this mode”; hold/tap behavior is a routing detail. |
+| `trigger_keys[]` beyond the first, `tap_threshold_ms` | The first entry's key and press style are editable in Settings (“Shortcut” and “Press behavior”). `tap_threshold_ms` and every entry after the first are TOML-only; further entries show as a read-only “Also starts with” note in the mode editor and are preserved when the first is edited. | One shortcut covers nearly everyone; a second is a routing detail, and the shortcut well stays one control showing one binding. |
 
 ---
 
