@@ -564,8 +564,10 @@ keyscribe/
     - **Chord triggers + the Add-Dictionary / Add-Replacement action shortcuts** (key + modifiers,
       e.g. ⌃⌥E) → **`RegisterEventHotKey`** (Carbon, `CarbonHotKeys`). No permission at all: the OS
       dispatches the chord and suppresses it from the focused app. Delivers
-      `kEventHotKeyPressed`/`Released`, so hold/tap gestures work. Cannot register a bare
-      modifier-less key (needs ≥1 modifier).
+      `kEventHotKeyPressed`/`Released`, so hold/tap gestures work. **Only a function-row key may be
+      bound bare** (`BaseKey.isBareable` → `SpecialKey.isFunctionKey`; Carbon itself accepts an
+      empty modifier mask); every other base key needs ≥1 modifier (`bareNonFunctionKey`), so a
+      trigger can never swallow ordinary typing or navigation.
       **A chord's base key is a CHARACTER resolved through the active keyboard layout's SHORTCUT
       table — never a hardcoded printable-key table, and never the plain-typing layer alone.**
       `RegisterEventHotKey` takes a key code, but a key code is a *position*: letters move under

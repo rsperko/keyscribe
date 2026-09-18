@@ -342,8 +342,10 @@ What users informally call "the global hotkey" is just that Fn binding.
   supplies, and it is what makes the fall-through read as "the key started plain dictation" rather than
   as one mode's shortcut quietly running another mode. With Direct bound elsewhere the user never gave
   this key to Direct, so the press does not dictate at all. (The STT *engine* is global — modes do not
-  pick it; see §4.1.) Any key is
-  **capturable** — the **recommended default is Fn/Globe with hold-or-tap**, bound to Direct,
+  pick it; see §4.1.) A trigger is a held **modifier-only set**, a **modifier+key chord**, a bare
+  **function-row key**, or a **mouse button** other than left/right; every other key needs at least one
+  modifier, so a trigger can never swallow ordinary typing (grammar: `config_schema.md` "Key
+  descriptor format"). The **recommended default is Fn/Globe with hold-or-tap**, bound to Direct,
   with **right-Option** as a conflict-free alternative. Holding **Hyper** (⌃⌥⇧⌘) can be a trigger.
   Conflicts with system/other-app shortcuts are handled **best-effort** (detect and warn at
   assignment).
