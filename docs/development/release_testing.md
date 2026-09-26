@@ -115,8 +115,8 @@ actually catches the list above.
   expectation fails.
 - **`--benchmark corpus/stt`** — biased WER stays under a **coarse** ceiling (`KEYSCRIBE_MAX_WER`,
   default 0.20). This is a *catastrophic-regression* backstop (bias wiring broke → WER doubles), not a
-  rank check — the default is set so no shipped engine false-fails (Apple Speech ships ~13% with no
-  recognition bias). The commands-check baseline is the precise gate; this is the cheap safety net.
+  rank check — the default is set so no shipped engine false-fails (the Apple Dictation fallback measured
+  12.6% on 2026-09-25, with no recognition bias). The commands-check baseline is the precise gate; this is the cheap safety net.
 - **`--capture-probe`** — opt-in (`KEYSCRIBE_CAPTURE_PROBE=1`, needs a loopback/Aggregate device
   feeding a steady tone): `ringDropped` and `overloads` must both be 0. Run it whenever the audio
   path changed.

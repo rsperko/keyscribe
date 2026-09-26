@@ -16,3 +16,8 @@ enum EngineUnavailable: Error, CustomStringConvertible {
         }
     }
 }
+
+struct AppleSpeechUnavailable: Error, CustomStringConvertible {
+    let message: String
+    var description: String { message }
+}

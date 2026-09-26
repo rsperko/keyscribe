@@ -25,6 +25,12 @@ enum BenchmarkRunner {
         var orthoFiresBiased = 0.0
     }
 
+    static func announceAppleModel(_ engines: [any SpeechEngine]) async {
+        guard let apple = engines.first(where: { $0.id == "apple" }), #available(macOS 26, *) else { return }
+        try? await apple.loadIfNeeded()
+        FileHandle.standardError.write("· apple: \(await AppleEngine.statusText())\n".data(using: .utf8)!)
+    }
+
     static func run(dir: URL, only: Set<String>? = nil, raw: Bool = false, fuzzy: Bool = false) async {
         let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
         let manifestURL = dir.appendingPathComponent("manifest.json")
@@ -34,6 +40,7 @@ enum BenchmarkRunner {
         }
         let engines = InstalledEngineFilter.filter(makeEngines())
             .filter { only == nil || only!.contains($0.id) }
+        await announceAppleModel(engines)
         if raw {
             await runRaw(dir: dir, manifest: manifest, engines: engines)
             return
@@ -167,6 +174,7 @@ enum BenchmarkRunner {
         let engines = InstalledEngineFilter.filter(makeEngines())
             .filter { (only == nil || only!.contains($0.id)) && $0.supportsStreaming }
         guard !engines.isEmpty else { print("no installed streaming-capable engines to compare"); return }
+        await announceAppleModel(engines)
         let verbose = ProcessInfo.processInfo.environment["KEYSCRIBE_BENCH_VERBOSE"] != nil
         // Raw streamed output per clip (the silence sweep uses this: no reference scoring, just the literal
         // text each streaming session emits so no-speech artifacts on the streaming path are visible).

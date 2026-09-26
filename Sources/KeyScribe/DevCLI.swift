@@ -95,6 +95,11 @@ public enum DevCLI {
                                       (off unless set). Rides `open --args`, so it survives a LaunchServices
                                       launch (which Microphone TCC needs) where an env var would not. Equivalent
                                       env var: KEYSCRIBE_KEEP_CAPTURE=<dir>.
+              --apple-model <model>   Run the Apple Speech entry on a specific Apple model: speech or dictation.
+                                      For measuring the Apple Dictation fallback on a Mac that would otherwise
+                                      use Apple Speech; applies to the app and to --benchmark/--commands-check.
+                                      A model this Mac or language cannot run still falls back. Equivalent env
+                                      var: KEYSCRIBE_APPLE_MODEL=<model>.
               --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                                       (downloaded models stay shared). Pair with --first-run to test
                                       onboarding without touching your real configuration.
@@ -119,6 +124,19 @@ public enum DevCLI {
         // shell env var never reaches the app; a flag rides `open --args`. Sets the same env the read path uses.
         if let i = CommandLine.arguments.firstIndex(of: "--keep-capture"), i + 1 < CommandLine.arguments.count {
             setenv("KEYSCRIBE_KEEP_CAPTURE", CommandLine.arguments[i + 1], 1)
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: "--apple-model") {
+            let arg = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : ""
+            guard let model = AppleSpeechModel(argument: arg) else {
+                FileHandle.standardError.write(Data("""
+                Usage: KeyScribe --apple-model <model>
+                  speech     Apple Speech (the default wherever this Mac and language support it).
+                  dictation  Apple Dictation, the compatibility-mode fallback.\n
+                """.utf8))
+                exit(2)
+            }
+            setenv(AppleSpeechModel.overrideEnvironmentKey, model.rawValue, 1)
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--reset") {

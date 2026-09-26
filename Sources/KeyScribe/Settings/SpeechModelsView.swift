@@ -140,6 +140,14 @@ struct SpeechModelsView: View {
             }
             .font(.callout)
 
+            if let status = model.modelStatuses[row.id] {
+                Text(status)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Speech.modelStatus(row.id))
+            }
+
             if row.isActive, let notice = model.activeNotice {
                 IssueText(notice, severity: .advisory, font: .callout)
             }
@@ -298,7 +306,7 @@ struct SpeechModelsView: View {
 
     private func languageScope(_ info: SpeechModelInfo?) -> String {
         guard let info else { return "Speech recognition" }
-        return info.languageCount <= 1 ? "English" : "\(info.languageCount) languages"
+        return SpeechModelChoiceCopy.languageScope(info)
     }
 
     private func storageLabel(_ row: SpeechModelsModel.Row) -> String {

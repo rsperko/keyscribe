@@ -70,7 +70,12 @@ struct SpeechModelCatalogTests {
     @Test func languageCountsAreSane() {
         #expect(SpeechModelCatalog.entry(for: "parakeet")?.languageCount == 25)
         #expect(SpeechModelCatalog.entry(for: "whisper")?.languageCount == 99)
-        #expect((SpeechModelCatalog.entry(for: "apple")?.languageCount ?? 0) > 0)
+    }
+
+    @Test func onlySystemManagedEntriesLeaveLanguageCoverageToMacOS() {
+        for info in SpeechModelCatalog.all {
+            #expect((info.languageCount == nil) == info.systemManaged, "\(info.id)")
+        }
     }
 
     @Test func unknownEntryIsNil() {

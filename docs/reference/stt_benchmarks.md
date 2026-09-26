@@ -15,7 +15,11 @@ Numbers are **as shipped on the recording date above** — the dictionary active
 (after-transcription recovery on every engine, plus recognition bias on the models that supported it
 at the time). "Recall — no dictionary" is the
 raw engine with an empty dictionary, so the two recall columns show the dictionary's total lift.
-Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26+.
+Apple Speech is built into macOS and appears in KeyScribe only on macOS 26+. It runs Apple's current
+model (**Apple Speech**) where the Mac and language support it, and Apple's earlier dictation model
+(**Apple Dictation**) where they do not; both are listed so you can see what the fallback costs. The
+Apple rows were measured on the same corpus on 2026-09-25, with the fallback forced by
+`--apple-model dictation`.
 
 > **As measured, 2026-06-30.** This run used recognition-time dictionary bias only for the **Whisper
 > and Qwen3** models; Parakeet and Apple bias had been removed because they could substitute
@@ -33,8 +37,9 @@ Apple Speech is the macOS system model and appears in KeyScribe only on macOS 26
 | Parakeet Unified 0.6B (English) | 6.5% | 0.91 | 0.80 | 0.010 | 614 MB |
 | Parakeet TDT v3 (default) | 7.1% | 0.89 | 0.77 | 0.014 | 480 MB |
 | Qwen3-ASR 0.6B | 8.3% | 0.96 | 0.78 | 0.014 | 1.5 GB |
+| Apple Speech | 8.7% | 0.75 | 0.53 | 0.021 | managed |
 | Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 330 MB |
-| Apple Speech | 12.8% | 0.62 | 0.53 | 0.032 | managed |
+| Apple Dictation (fallback) | 12.6% | 0.64 | 0.53 | 0.029 | managed |
 
 ## What to read into this (and what not to)
 
@@ -71,12 +76,14 @@ sample of it.
 | Parakeet TDT v3 | 7.1% | 10.8% | +3.7 pts | 0.87 |
 | Whisper Small (English) | 6.0% | 11.9% | +5.9 pts | 0.99 |
 | Qwen3-ASR 0.6B | 8.3% | 13.2% | +4.9 pts | 0.92 |
+| Apple Speech | 8.7% | 14.2% | +5.5 pts | 0.74 |
 | Parakeet TDT-CTC 110M | 9.8% | 18.1% | +8.3 pts | 0.72 |
-| Apple Speech | 12.6% | 29.6% | +17.0 pts | 0.47 |
+| Apple Dictation (fallback) | 12.6% | 29.6% | +17.0 pts | 0.47 |
 
 - **The two large models are the noisy-environment picks.** Qwen3-ASR 1.7B and Whisper Large v3
   Turbo lose ~2 points and keep dictionary recall at 96–97%; every smaller model pays 2–7× that
-  penalty, and Apple Speech more than doubles its error rate.
+  penalty. Apple Speech's penalty is in line with the smaller downloadable models; its Apple Dictation
+  fallback more than doubles its error rate.
 - **Noise-suppression preprocessing was tested and rejected.** Running the noisy clips through
   three denoisers (DeepFilterNet3, RNNoise, a Demucs-based enhancer) before transcription made
   accuracy *worse* on every model worth using — modern speech models are trained on noisy audio,

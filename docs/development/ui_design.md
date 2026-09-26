@@ -531,6 +531,17 @@ model** sits alone at the trailing edge in red — the destructive action is spa
 routine maintenance, never stacked with it. Exactly one active engine is visually enforced, and
 deleting it still requires confirmation.
 
+**Apple Speech** is one entry that runs one of two Apple models. It uses Apple Speech wherever this
+Mac and language support it, and otherwise Apple Dictation, Apple's earlier dictation model. The list
+name never changes. Its detail shows which model is in play as a plain secondary line under the facts:
+`Using Apple Speech`, or `Using Apple Dictation (compatibility mode) — Apple Speech isn’t available
+on this Mac` (or `… for <language>`, or `… Apple Speech couldn’t be downloaded yet` when its download
+failed and Apple Dictation stood in; the app retries in the background and switches back once it lands).
+When neither Apple model covers the user's language, the line
+reads `Apple Speech isn’t available for <language>` and claims no model in use. The fallback is a valid outcome, not a problem, so it is not an
+`IssueText`. Its Languages fact reads `Depends on this Mac`, because macOS sets that coverage and it
+differs between the two models.
+
 When the saved model can no longer run here — it was retired, or it needs a newer macOS — launch picks
 the model deleting the active one would (the default English model if it is usable, otherwise the first
 usable model, which is Apple Speech on macOS 26+) and saves that choice. The new active model's detail

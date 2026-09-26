@@ -163,8 +163,21 @@ except the system-managed Apple engine:
 - **FluidAudio / Parakeet TDT-CTC 110M** — compact (~330MB), fast. English only.
 - **Whisper** (Large v3 Turbo via WhisperKit) — broad multilingual coverage, 99 languages.
 - **Whisper Small (English)** — compact English Whisper, smaller and faster than Turbo.
-- **Apple Speech** (SpeechAnalyzer, macOS 26+) — zero-install, system-managed, 20 languages. It is
-  hidden on older supported macOS releases.
+- **Apple Speech** (SpeechAnalyzer, macOS 26+) — zero-install, system-managed. It is hidden on older
+  supported macOS releases. One catalog entry, two Apple models: it runs **Apple Speech**
+  (`SpeechTranscriber`, Apple's current on-device transcription model) wherever this Mac and language
+  support it, and otherwise falls back to **Apple Dictation** (`DictationTranscriber`, Apple's earlier
+  dictation model, with broader Mac and language coverage). Each model's locale is mapped through its
+  own `supportedLocale(equivalentTo:)` and counts only if that model also lists it in
+  `supportedLocales` (the mapping alone accepts languages the model cannot run); when neither covers
+  the language, the entry does not load and Settings says so. If Apple Speech's download fails, Apple
+  Dictation stands in where it covers the language, and the Apple Speech download is retried in the
+  background on later dictations, switching over once it succeeds. The choice is resolved once per engine load (`AppleSpeechModelChoice`); Settings
+  shows which one is in use and why. Two entries were rejected: no user should pick the older model
+  where the newer one runs, and the fallback already covers where it does not. Language coverage is set by macOS and differs by model, so the app states no count.
+  `--apple-model dictation` (or `KEYSCRIBE_APPLE_MODEL`) forces the fallback so it stays measurable on
+  a Mac that would never reach it. Apple Dictation acts on some spoken words itself (it applies
+  keyboard-dictation commands), which Apple Speech does not; no API option disables it.
 - **Qwen3-ASR 0.6B** — compact multilingual (52 languages); the speed/accuracy sweet spot.
 - **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the strongest Qwen tier in the
   current benchmark.
@@ -211,7 +224,8 @@ Model lifecycle: **download → prepare (with progress) → select → delete**.
 SDK allows a custom download directory, and otherwise manages the SDK's own location through its API
 for the same single disk-usage/delete story. In Application Support, not Caches, so the OS cannot
 purge them mid-session; they are re-downloadable so deletion is safe and the dir is backup-excluded.
-Apple SpeechAnalyzer is **system-managed** when available (no KeyScribe-side storage).
+Apple's models are **system-managed** when available (installed through `AssetInventory`, no
+KeyScribe-side storage).
 
 ### 4.2 Command pipeline (the core)
 A linear pipeline of typed stages, each declaring its **position** in the flow. Several stages are
@@ -624,7 +638,8 @@ Silence-based auto-stop is a non-goal (§1) and stays one: the limit is the only
 - **Language/UI:** Swift + SwiftUI (menu-bar app, settings window). Native for perf, accessibility
   APIs, and optional Apple SpeechAnalyzer access on macOS 26+.
 - **STT:** **FluidAudio** (Parakeet TDT v3 + pyannote diarization, CoreML/ANE); **WhisperKit** for
-  Whisper; system `SpeechAnalyzer` for Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR.
+  Whisper; system `SpeechAnalyzer` (`SpeechTranscriber`, falling back to `DictationTranscriber`) for
+  Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR.
   (Fork/pin details in `AGENTS.md`.)
 - **Audio:** a device-pinned AUHAL input unit (`HALInputUnit`) for capture — it never changes the
   macOS default input; other audio is ducked while dictating (`other_audio` = quiet / mute /

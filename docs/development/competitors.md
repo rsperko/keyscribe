@@ -91,7 +91,9 @@ pipeline stages cannot stay purely theoretical until late in the build (cf. `roa
 
 #### Apple Dictation / Voice Control (macOS 26 / Tahoe + SpeechAnalyzer)
 - **Posture:** built-in, free, on-device on Apple Silicon (when "Send to Apple" disabled).
-- **macOS Tahoe transcription APIs:** ~55% faster than Whisper per Apple.
+- **Developer APIs (macOS 26):** `SpeechAnalyzer` exposes two Apple models — Apple's current
+  transcription model (`SpeechTranscriber`) and its earlier dictation model (`DictationTranscriber`,
+  the one iOS 10's on-device `SFSpeechRecognizer` used). KeyScribe's Apple entry uses both (see §B).
 - **Limitations everyone routes around:** ~30s continuous-speech / silence cutoff; flaky in third-party text fields; accent/locale brittleness; no AI rewrite, no modes, no custom pipeline.
 - **Why it matters:** the free default we must clearly beat. Every competitor's pitch is "better than Apple Dictation" — ours has to be obvious too.
 
@@ -111,7 +113,7 @@ treating this table as a personal ranking.
 |---|---|---|---|---|
 | **NVIDIA Parakeet** (TDT 0.6B v3 + TDT-CTC 110M) | ~3,333x realtime; ~10x faster than Whisper Large v3 Turbo; latency can hit ~80ms | ~12.0% WER — slightly **better** than Whisper; wins on disfluent speech (tuned to drop fillers, reconstruct sentences) | **25** (v3) / **1** (110M) | Fastest by a wide margin. Built-in diarization (v3). **v3 is KeyScribe's English default** (multilingual, fast, low-memory); the 110M tier is the compact English option, and **Parakeet Unified 0.6B** is the most accurate English Parakeet and the only one that punctuates. |
 | **OpenAI Whisper** (Large v3 Turbo + Small English) | ~146x realtime for Large v3 Turbo | ~12.6% WER for Large v3 Turbo | **99** / **1** | The multilingual workhorse plus a compact English tier. Best when language coverage matters. WhisperKit makes on-device easy. |
-| **Apple Speech** (SpeechAnalyzer, macOS 26+) | ~150–400ms latency; ~55% faster than Whisper | Most accurate on clean read-aloud FR/ES/DE/IT; weaker than Parakeet in English; ~Whisper for supported langs | **20** | Zero-install, OS-native, free, on-device, system-managed. Great latency/accuracy for European languages; session/robustness limits. |
+| **Apple Speech** (SpeechAnalyzer, macOS 26+) | Faster than real time on our corpus; see `../reference/stt_benchmarks.md` | Behind the downloadable models on our English corpus; Apple's earlier dictation model is markedly worse, especially in noise | Set by macOS; differs by model | Zero-install, OS-native, system-managed. Runs Apple Speech (`SpeechTranscriber`) where this Mac and language support it, and falls back to Apple Dictation (`DictationTranscriber`) where they do not. |
 | **Qwen3-ASR** (0.6B + 1.7B) | 0.6B is the speed/accuracy sweet spot in our benchmarks | Near the top accuracy cluster on the current KeyScribe real-voice corpus; 1.7B is the stronger Qwen tier | **52** | Two shipping tiers. Native on-device bias (`Qwen3DecodingOptions.context`). |
 
 **Implications for KeyScribe's pluggable-STT design (as shipped):**

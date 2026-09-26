@@ -718,10 +718,36 @@ v3 fails for lack of a period, and breaks `sc_cb`; both engines land 30/35). `lo
 each engine owns its install footprint (`installDirNames` / `installState`); audio decode is shared
 (`AudioDecoder`).
 
+**The Apple entry is one catalog entry running one of two Apple models**, resolved once per engine load by
+the pure `AppleSpeechModelChoice`: **Apple Speech** (`SpeechTranscriber`, Apple's current on-device model)
+wherever `SpeechTranscriber.isAvailable` and the locale is supported, else **Apple Dictation**
+(`DictationTranscriber`, Apple's earlier dictation model — broader Mac/language coverage, and it applies
+keyboard-dictation commands to the transcript itself, with no API option to stop it). The fallback is
+automatic, and Settings says which one is in play and why. **Map the locale through each model's own
+`supportedLocale(equivalentTo:)`, then require the result to be in that model's `supportedLocales`**
+(`AppleSpeechModelChoice.coveredLocale`). The mapping does the regional remapping (`en_150` → `en_US`,
+`zh_Hant_TW` → `zh_TW`) but is not a support check: on macOS 26.6 it returns `nl_NL` for `SpeechTranscriber`
+though that model does not list Dutch. Trusting the mapping alone sent Dutch, Polish, Russian and Swedish
+Macs to a model that cannot run them instead of to Apple Dictation: the asset install then fails
+(`transcription.nl asset unavailable after attempted download`), and skipping the install makes
+transcription fail with a misleading "Audio format is not supported" (as measured, 2026-09-26). A language neither covers (`is_IS`)
+resolves to no model at all, which must refuse to load rather than claim Apple Dictation. **A failed Apple
+Speech download also falls back** (`AppleSpeechModelChoice.afterSpeechFailedToLoad`): an upgraded user
+whose Apple Dictation worked yesterday must not lose dictation because they are offline on the first load.
+`AppleEngine` retries the Apple Speech download in the background (at the fallback and at each later
+dictation's prewarm, one attempt in flight) and switches on success; Settings and the benchmark's
+`· apple:` line read the live fallback, so the benchmark loads the engine before announcing. Do not split it into two entries: nobody
+should choose the older model where the newer one runs. `DictationTranscriber` was originally chosen
+only because it honored `contextualStrings`; that reason left with Apple recognition bias. **Every Apple
+measurement must name the model that produced it** — `--apple-model dictation` (or
+`KEYSCRIBE_APPLE_MODEL`) forces the fallback on a Mac that would never reach it, and each benchmark /
+commands-check run prints `· apple: Using …` to stderr.
+
 A dev **STT benchmark** (`KeyScribe --benchmark <dir> [--engines …]`, runner + pure scoring in
 KeyScribeKit) measures WER (biased vs unbiased) / term recall / RTF over recorded clips. On a
 107-clip single-voice corpus the top engines (Whisper Large v3 Turbo, Qwen3-ASR 1.7B, Whisper
-Small) cluster around 5.7–6.0% biased WER; the weakest (Apple Speech) is ~13%. These numbers are
+Small) cluster around 5.7–6.0% biased WER; Apple Speech measured 8.7% and its Apple Dictation
+fallback 12.6% (as measured 2026-09-25). These numbers are
 speaker/mic/room dependent — reference table + caveats in
 `docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
@@ -747,7 +773,7 @@ not run, so reaching `evaluate` means it ran and the take was too short to fill 
 `speechStart` is deliberately NOT coupled to `minSpeechChunks` — it stays "first chunk clearing the
 threshold" because it is the trim boundary for the leading-silence recovery below. This closes the whole
 engine-silence-artifact class in one move
-(Qwen3's biased-dictionary echo on silence, Whisper's `Thank you.`, Apple's `No`), which a string
+(Qwen3's biased-dictionary echo on silence, Whisper's `Thank you.`, Apple Dictation's `No`), which a string
 denylist provably cannot (see below). The gate **fails open**: a missing VAD model, an error, or a
 timeout proceeds to transcription unchanged, so the transcript-level checks below remain the mandatory
 second line. The ~1 MB model downloads alongside speech models into the shared `models/silero-vad/`.
@@ -804,7 +830,8 @@ Empirically observed no-speech output (2026-07-01, one machine — deterministic
 | Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
 | Whisper Large v3 Turbo | lexical hallucinations: `Thank you.`, `.`, `...` |
 | Qwen3-ASR 1.7B | lexical, e.g. `嗯。` / `哦。` (CJK), and on a biased mode an echoed dictionary term |
-| Apple SpeechAnalyzer | rare lexical, e.g. `No` |
+| Apple Speech (`SpeechTranscriber`) | `""` on silence (swept 2026-09-25 over 1/2/3/5/7 s, batch and streaming); **lexical on white noise**: `.`, `I`, `So` at amplitude 0.02–0.03, `""` at 0.01 and 0.05 (swept 2026-09-26, 4 s and 6 s × three seeds, batch and streaming identical — every clip that emitted text was suppressed by the gate here, but a lone `-` on 6 s of 0.02 noise that passed the gate was reported from another generator) |
+| Apple Dictation (`DictationTranscriber`, the fallback) | rare lexical, e.g. `No` (reproduced 2026-09-25 on 3 s silence) |
 
 Qwen3's CJK output is its **language head auto-detecting** on ambiguous noise (`Qwen3DecodingOptions.language`
 is deliberately left `nil`; KeyScribe has no language setting and the engine ships multilingual). The fix
@@ -891,9 +918,12 @@ streaming path (`supportsStreaming=true`) must be exercised against silence **bo
 `--benchmark <sil-dir> --engines <id> --streaming --raw` (raw dumps the literal streamed output per clip)
 alongside the batch `--raw`. Include a **≥5 s** silence/hiss clip: the real dictation path defers session
 creation past the `StreamingStartPolicy` threshold (4 s), so only clips longer than that actually open a
-session live — the benchmark's streaming replay opens one for every clip, so it covers both. (2026-07-04,
-Apple: streaming output was byte-identical to batch — clean-empty except a deterministic `No` on 3 s
-silence, the same documented Apple lexical artifact — so streaming added no new marker class. Do not assume
+session live. The benchmark's streaming replay applies the same threshold, so a clip under 4 s reports
+`<fell back to batch>` — expected, not a failure; only the longer clips exercise the streaming session.
+(2026-07-04, Apple Dictation: streaming output was byte-identical to batch — clean-empty except a
+deterministic `No` on 3 s silence, the same documented lexical artifact — so streaming added no new
+marker class. 2026-09-26, Apple Speech: streaming output byte-identical to batch over silence and
+white noise, including its noise artifacts. Do not assume
 that generalizes; a slower or looping engine could differ.) The no-speech gate also covers the streamed path: it runs at commit on the
 finished take before `finalizeStreamingIfActive`, so a silent streamed session is suppressed there (its
 partials are never inserted before commit) and its driver is cancelled through the normal terminal — the

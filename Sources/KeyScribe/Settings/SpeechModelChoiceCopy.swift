@@ -18,6 +18,23 @@ enum SpeechModelChoiceCopy {
         }
     }
 
+    static func languageScope(_ info: SpeechModelInfo) -> String {
+        guard let count = info.languageCount else { return "Depends on this Mac" }
+        return count <= 1 ? "English" : "\(count) languages"
+    }
+
+    static func appleModelStatus(_ choice: AppleSpeechModelChoice, languageName: String) -> String {
+        guard choice.model != nil else { return "Apple Speech isn’t available for \(languageName)" }
+        let fallback = "Using Apple Dictation (compatibility mode) — "
+        switch choice.reason {
+        case .preferred: return "Using Apple Speech"
+        case .macUnsupported: return fallback + "Apple Speech isn’t available on this Mac"
+        case .languageUnsupported: return fallback + "Apple Speech isn’t available for \(languageName)"
+        case .forced: return fallback + "selected for testing"
+        case .speechDownloadFailed: return fallback + "Apple Speech couldn’t be downloaded yet"
+        }
+    }
+
     static func memoryUse(for info: SpeechModelInfo) -> String {
         switch info.approxMemoryBytes {
         case 0: "Almost no memory"

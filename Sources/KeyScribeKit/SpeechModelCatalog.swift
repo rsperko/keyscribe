@@ -9,7 +9,7 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     public let kind: EngineKind
     public let displayName: String
     public let summary: String
-    public let languageCount: Int
+    public let languageCount: Int?
     public let approxDownloadBytes: Int64
     // Resident memory while dictating (wired-inclusive, measured via `--mem-probe`). On Apple Silicon the
     // accelerator wires model weights into RAM outside this process's footprint, so this is far more honest
@@ -20,7 +20,7 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     public let supportsRecognitionBias: Bool
 
     public init(
-        id: String, kind: EngineKind, displayName: String, summary: String, languageCount: Int,
+        id: String, kind: EngineKind, displayName: String, summary: String, languageCount: Int?,
         approxDownloadBytes: Int64, systemManaged: Bool, isDefaultEnglish: Bool,
         supportsRecognitionBias: Bool, approxMemoryBytes: Int64 = 0
     ) {
@@ -85,7 +85,7 @@ public enum SpeechModelCatalog {
         SpeechModelInfo(
             id: "apple", kind: .apple, displayName: "Apple Speech",
             summary: "Native macOS transcription. No download, fastest startup.",
-            languageCount: 20, approxDownloadBytes: 0, systemManaged: true,
+            languageCount: nil, approxDownloadBytes: 0, systemManaged: true,
             isDefaultEnglish: false, supportsRecognitionBias: false),
     ]
 

@@ -48,6 +48,7 @@ enum AccessibilityID {
             static let deleteConfirmConfirm = "settings.speech.deleteConfirm.confirm"
             static let deleteConfirmCancel = "settings.speech.deleteConfirm.cancel"
             static func row(_ engineID: String) -> String { "settings.speech.row.\(engineID)" }
+            static func modelStatus(_ engineID: String) -> String { "settings.speech.row.\(engineID).modelStatus" }
             static func advanced(_ engineID: String) -> String { "settings.speech.row.\(engineID).advanced" }
             static func primaryAction(_ engineID: String) -> String { "settings.speech.row.\(engineID).primaryAction" }
             static func test(_ engineID: String) -> String { "settings.speech.row.\(engineID).test" }

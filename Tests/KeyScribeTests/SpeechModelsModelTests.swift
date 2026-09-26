@@ -28,6 +28,7 @@ final class SpeechModelsModelTests: XCTestCase {
         initialFailedIds: Set<String>? = nil,
         replacedActiveId: String? = nil,
         deferWhileBusy: ((@escaping () -> Void) -> Void)? = nil,
+        modelStatus: @escaping (String) async -> String? = { _ in nil },
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void = { _, _ in }
     ) -> SpeechModelsModel {
         SpeechModelsModel(
@@ -55,7 +56,20 @@ final class SpeechModelsModelTests: XCTestCase {
                 if recorder.markRemovedShouldFail { throw Recorder.Failure() }
             },
             markFailed: { recorder.markedFailed.append($0) },
-            clearFailed: { recorder.clearedFailed.append($0) })
+            clearFailed: { recorder.clearedFailed.append($0) },
+            modelStatus: modelStatus)
+    }
+
+    func testModelStatusIsPublishedForTheEngineThatReportsOne() async {
+        let model = makeModel(recorder: Recorder(), modelStatus: { $0 == "parakeet" ? "Using Parakeet" : nil })
+        await model.refreshModelStatuses()
+        XCTAssertEqual(model.modelStatuses, ["parakeet": "Using Parakeet"])
+    }
+
+    func testNoModelStatusWhenNoEngineReportsOne() async {
+        let model = makeModel(recorder: Recorder())
+        await model.refreshModelStatuses()
+        XCTAssertEqual(model.modelStatuses, [:])
     }
 
     func testRetiredActiveModelNoticeNamesTheReplacementUntilAModelIsSelected() {

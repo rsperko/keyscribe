@@ -167,7 +167,7 @@ struct FirstRunView: View {
 
     private func modelMeta(_ info: SpeechModelInfo?) -> String {
         guard let info else { return "" }
-        let lang = info.languageCount <= 1 ? "English" : "\(info.languageCount) languages"
+        let lang = SpeechModelChoiceCopy.languageScope(info)
         let size = info.systemManaged
             ? "system-managed"
             : "~\(ByteCountFormatter.fileStyle.string(fromByteCount: info.approxDownloadBytes))"

@@ -11,7 +11,7 @@ enum EngineRegistry {
         SpeechModelCatalog.all.filter { isAvailable($0.id) }
     }
 
-    // The Apple Speech engine is built on SpeechAnalyzer/DictationTranscriber, which exist only on
+    // The Apple Speech engine is built on SpeechAnalyzer, which exists only on
     // macOS 26+. On older systems it is absent from the catalog the UI and download path derive from.
     static func isAvailable(_ id: String) -> Bool {
         if id == "apple" {
@@ -26,6 +26,11 @@ enum EngineRegistry {
     // The unwrapped `engine(_:)` below stays for install-only queries, which touch no SDK state.
     static func makeAll(modelsDir: URL) -> [any SpeechEngine] {
         availableCatalog.map { SerializedEngine(construct($0.id, modelsDir)) }
+    }
+
+    static func modelStatus(_ id: String) async -> String? {
+        guard id == "apple", #available(macOS 26, *) else { return nil }
+        return await AppleEngine.statusText()
     }
 
     static func engine(_ id: String, modelsDir: URL) -> (any SpeechEngine)? {

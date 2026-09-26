@@ -102,6 +102,8 @@ final class SpeechModelsModel: ObservableObject {
     // removes files an in-flight dictation still needs.
     private let deferWhileBusy: (@escaping () -> Void) -> Void
     private var deleting: Set<String> = []
+    private let resolveModelStatus: (String) async -> String?
+    @Published private(set) var modelStatuses: [String: String] = [:]
 
     init(
         activeId: String,
@@ -123,7 +125,8 @@ final class SpeechModelsModel: ObservableObject {
         markInstalled: @escaping (String) throws -> Void = { try ModelInstallStore.markInstalled($0) },
         markRemoved: @escaping (String) throws -> Void = { try ModelInstallStore.markRemoved($0) },
         markFailed: @escaping (String) -> Void = { ModelHealthStore.markFailed($0) },
-        clearFailed: @escaping (String) -> Void = { ModelHealthStore.clearFailed($0) }
+        clearFailed: @escaping (String) -> Void = { ModelHealthStore.clearFailed($0) },
+        modelStatus: @escaping (String) async -> String? = EngineRegistry.modelStatus
     ) {
         self.stt = stt
         self.download = download
@@ -137,6 +140,7 @@ final class SpeechModelsModel: ObservableObject {
         self.markRemoved = markRemoved
         self.markFailed = markFailed
         self.clearFailed = clearFailed
+        self.resolveModelStatus = modelStatus
         set = SpeechModelSet(
             catalog: EngineRegistry.availableCatalog,
             installed: initialInstalledIds ?? ModelInstallStore.installedIds(),
@@ -145,6 +149,15 @@ final class SpeechModelsModel: ObservableObject {
         self.replacedActiveId = replacedActiveId
         refreshSizes()
         rebuild()
+        Task { await refreshModelStatuses() }
+    }
+
+    func refreshModelStatuses() async {
+        var statuses: [String: String] = [:]
+        for info in EngineRegistry.availableCatalog {
+            statuses[info.id] = await resolveModelStatus(info.id)
+        }
+        modelStatuses = statuses
     }
 
     // Sizing recursively enumerates each bundle's files; doing it synchronously would block the main
