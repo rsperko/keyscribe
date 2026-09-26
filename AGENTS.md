@@ -108,7 +108,8 @@ This file is the entry point. Read the design docs before writing code — they 
   (`teardownAndFinalize`, which `stop()`s a non-Bluetooth unit but **disposes** a Bluetooth one to free
   HFP, then joins the writer thread and closes the WAV — in that order — so no in-flight write races the
   finalize). **`stop()` is the immediate, audio-discarding teardown** (disposes the unit) — keep it for
-  `cancel()`/over-limit abort only; the commit path must use `finishDraining()`. `stop()` also force-resumes
+  `cancel()` only; the commit path must use `finishDraining()` — and that includes reaching the recording
+  limit, which commits the take like a release and never discards it (`docs/development/design.md` §4.8). `stop()` also force-resumes
   any pending drain so a direct stop never strands the awaiter. The `wav … drain=Xms` `DictationController` debug log reports
   the actual flush time (≈300 ms means the backstop fired). Don't reorder the HUD flip after the await —
   the drain latency must stay invisible.

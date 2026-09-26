@@ -5,7 +5,8 @@ enum HUDPreview {
         "ready", "recording", "recording-latched", "loading-model", "transcribing",
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-        "microphone-error", "accessibility-error",
+        "microphone-error", "accessibility-error", "recording-countdown", "stopped-at-limit",
+        "stopped-at-limit-local",
     ]
 
     static func state(from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev) -> HUDState? {
@@ -24,6 +25,9 @@ enum HUDPreview {
             .recording(mode: "Plain Dictation", level: 0.7, latchedTrigger: nil)
         case "recording-latched":
             .recording(mode: "Plain Dictation", level: 0.7, latchedTrigger: "Right-⌥")
+        case "recording-countdown":
+            .recording(mode: "Plain Dictation", level: 0.7, latchedTrigger: nil,
+                       countdown: RecordingCountdown(secondsLeft: 18, totalSeconds: 30))
         case "loading-model":
             .loadingModel(mode: "Email")
         case "transcribing":
@@ -62,6 +66,10 @@ enum HUDPreview {
             .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
         case "accessibility-error":
             .error(message: "Accessibility is off", action: .openAccessibilitySettings)
+        case "stopped-at-limit":
+            .stoppedAtLimit(outcome: .inserted, limit: "5-minute", rewriteSkipped: true)
+        case "stopped-at-limit-local":
+            .stoppedAtLimit(outcome: .inserted, limit: "5-minute", rewriteSkipped: false)
         default:
             nil
         }

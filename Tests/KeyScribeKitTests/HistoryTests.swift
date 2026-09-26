@@ -131,6 +131,41 @@ struct HistoryEntryCodecTests {
         #expect(try HistoryEntry(jsonLine: line).device == nil)
     }
 
+    @Test func aStopAtTheRecordingLimitRoundTrips() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Plain", heard: "hello", result: "hello",
+            outcome: .inserted, cloudInvolved: false, redaction: false, contextCategories: [],
+            stoppedAtLimit: true)
+        let line = try entry.jsonLine()
+        #expect(line.contains("\"stopped_at_limit\":true"))
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+    }
+
+    @Test func anOrdinaryEntryOmitsTheLimitMarker() throws {
+        let line = try sampleEntry().jsonLine()
+        #expect(!line.contains("stopped_at_limit"))
+        #expect(try HistoryEntry(jsonLine: line).stoppedAtLimit == nil)
+    }
+
+    @Test func theListShowsTheResultWhenThereIsOne() {
+        let entry = sampleEntry(heard: "send the report", result: "Send the report.")
+        #expect(entry.listText == "Send the report.")
+        #expect(entry.listTextIsHeard == false)
+    }
+
+    @Test func theListFallsBackToWhatWasHeardWhenNothingWasInserted() {
+        let entry = sampleEntry(heard: "make this shorter", result: "", outcome: .failed)
+        #expect(entry.listText == "make this shorter")
+        #expect(entry.listTextIsHeard)
+    }
+
+    @Test func theListSaysNoTextWhenNothingWasHeardOrInserted() {
+        let entry = sampleEntry(heard: "", result: "", outcome: .failed)
+        #expect(entry.listText == "(no text)")
+        #expect(entry.listTextIsHeard == false)
+    }
+
     @Test func multilineContentStaysOnOneLine() throws {
         let entry = sampleEntry(heard: "first line\nsecond line", result: "A\n\nB")
         let line = try entry.jsonLine()

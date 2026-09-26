@@ -586,6 +586,30 @@ also fix the currently selected text.
 
 HUD states, data-boundary wording, and fallback behavior are normative in `ui_design.md`.
 
+**Recording limit.** One take is bounded (`DictationController.maxRecordingSeconds`) because the whole
+take is transcribed in one batch after release: an unbounded take means an unbounded wait, and memory,
+at the end. The limit bounds that wait, never the user's words — **reaching it commits the take exactly
+as a release would; recorded speech is never discarded.** It follows that:
+
+- **Warn before it lands.** For the final stretch (`limitWarningSeconds`) the recording HUD counts down
+  (`ui_design.md` §5). It is visual only: a warning sound would be recorded into the take, and the
+  "Other audio" setting may have lowered or muted output anyway.
+- **A take the limit stopped is inserted without the AI rewrite.** It ends mid-thought, and a rewrite
+  would present the fragment as finished (a closing, a smoothed-over last sentence) and make the user
+  wait before they can continue. The locally processed text is inserted and the HUD says the rewrite
+  was skipped. A take the user ends themselves, however long, rewrites as usual.
+- **A take the limit stopped is never submitted.** A mode's submit keystroke would send an unfinished
+  message, and sending cannot be undone, so the text is inserted and left for the user to finish.
+- **Edit-in-place stopped by the limit changes nothing.** A cut-off instruction must not drive a
+  destructive edit, so the selection is left untouched. What was said is still kept: it is written to
+  History (when History applies to the dictation), and the error points there only once the write
+  is confirmed.
+- **History and diagnostics mark a limit stop.** The entry carries `stopped_at_limit`, and a skipped
+  rewrite is recorded as local text kept with the reason, so a limit stop is never mistaken for a
+  release.
+
+Silence-based auto-stop is a non-goal (§1) and stays one: the limit is the only automatic stop.
+
 ### 4.9 First-run & onboarding
 - **Progressive permissions** — request the minimum to start (dictation + paste); ask for
   context-reading only when a feature that needs it is enabled.

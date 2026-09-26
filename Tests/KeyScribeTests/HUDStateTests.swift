@@ -9,7 +9,8 @@ struct HUDStateTests {
             "ready", "recording", "recording-latched", "loading-model", "transcribing",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-            "microphone-error", "accessibility-error",
+            "microphone-error", "accessibility-error", "recording-countdown", "stopped-at-limit",
+            "stopped-at-limit-local",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)
@@ -161,5 +162,40 @@ struct HUDStateTests {
     @Test func recordingVoiceOverIsConstantAcrossLevelAndLatchState() {
         #expect(HUDState.recording(mode: "Polish", level: 0.1, latchedTrigger: nil).voiceOverAnnouncement == "Recording")
         #expect(HUDState.recording(mode: "Polish", level: 0.9, latchedTrigger: "Right-⌥").voiceOverAnnouncement == "Recording")
+    }
+    @Test func recordingInTheFinalStretchSaysWhenItStops() {
+        let countdown = RecordingCountdown(secondsLeft: 25, totalSeconds: 30)
+        let state = HUDState.recording(mode: "Plain Dictation", level: 0.4, latchedTrigger: "Right-⌥", countdown: countdown)
+        #expect(state.secondaryText == "Stops in 0:25")
+        #expect(state.voiceOverAnnouncement == "Recording stops in 25 seconds")
+        #expect(state.recordingCountdown == countdown)
+        #expect(state.holdsKeyFocus)
+    }
+
+    @Test func countdownFractionDrainsToZero() {
+        #expect(RecordingCountdown(secondsLeft: 30, totalSeconds: 30).fractionLeft == 1)
+        #expect(RecordingCountdown(secondsLeft: 15, totalSeconds: 30).fractionLeft == 0.5)
+        #expect(RecordingCountdown(secondsLeft: 0, totalSeconds: 30).fractionLeft == 0)
+    }
+
+    @Test func stoppedAtLimitSaysTheRewriteWasSkipped() {
+        let state = HUDState.stoppedAtLimit(outcome: .inserted, limit: "5-minute", rewriteSkipped: true)
+        #expect(state.primaryText == "Stopped at the 5-minute limit")
+        #expect(state.secondaryText == "Inserted without rewriting — dictate again to continue")
+        #expect(state.indicator == .limit)
+        #expect(state.offersPasteLast == false)
+        #expect(state.voiceOverAnnouncement
+            == "Stopped at the 5-minute limit. Inserted without rewriting — dictate again to continue")
+    }
+
+    @Test func stoppedAtLimitWithoutARewriteJustSaysInserted() {
+        let state = HUDState.stoppedAtLimit(outcome: .inserted, limit: "5-minute", rewriteSkipped: false)
+        #expect(state.secondaryText == "Inserted — dictate again to continue")
+    }
+
+    @Test func stoppedAtLimitThatCopiedExplainsWhyAndOffersPaste() {
+        let state = HUDState.stoppedAtLimit(outcome: .copied(.focusChanged), limit: "5-minute", rewriteSkipped: true)
+        #expect(state.secondaryText == "Focus changed while \(Branding.appName) was working")
+        #expect(state.offersPasteLast)
     }
 }

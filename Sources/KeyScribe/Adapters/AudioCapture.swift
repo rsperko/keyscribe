@@ -880,7 +880,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lock.withLock { let s = lastDrainedSamples; lastDrainedSamples = nil; return s }
     }
 
-    // Audio-discarding teardown for cancel()/over-limit abort. Close the file synchronously so the caller
+    // Audio-discarding teardown for cancel(). Close the file synchronously so the caller
     // can delete it, then queue only the potentially-blocking unit teardown.
     func stop() -> URL? {
         resumeDrain()

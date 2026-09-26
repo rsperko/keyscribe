@@ -71,6 +71,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
     public var error: String?
     public var targetBundleId: String?
     public var fallbackReason: String?
+    public var stoppedAtLimit: Bool
 
     public init(modeName: String) {
         self.modeName = modeName
@@ -86,6 +87,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
         self.error = nil
         self.targetBundleId = nil
         self.fallbackReason = nil
+        self.stoppedAtLimit = false
     }
 
     // Real-time factor: STT time / audio duration (< 1 is faster than real time). nil unless both are known.
@@ -124,6 +126,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
 
         if let targetBundleId { parts.append("target=\(targetBundleId)") }
         if let fallbackReason { parts.append("fallback=\(fallbackReason)") }
+        if stoppedAtLimit { parts.append("stopped-at-limit") }
         if let error { parts.append("error=\(error)") }
 
         return parts.joined(separator: " · ")

@@ -387,41 +387,6 @@ struct DictationCancellationTests {
         #expect(controller.lastRecord?.outcome == .failed)
     }
 
-    @Test func overLimitAbortRecordsAFailedOutcomeAndReturnsToIdle() async {
-        let supportDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: supportDir) }
-        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
-
-        let engine = InstantEngine(id: "instant", text: "unreached")
-        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "instant")
-        let hud = HUDSpy()
-        let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
-        var settings = Settings.defaults
-        settings.stt = .init(engine: "instant", eviction: .frugal)
-        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
-        let controller = DictationController(
-            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true }, audio: audio,
-            insert: { _, _, _, _, _ in return true },
-            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
-            micStatus: { .granted }, accessibilityGranted: { true },
-            maxRecordingSeconds: 0.05)
-        var idleCount = 0
-        controller.onBecameIdle = { idleCount += 1 }
-
-        controller.handleStart()
-        await controller.captureBringUpTask?.value
-        for _ in 0..<200 where controller.isBusy { try? await Task.sleep(for: .milliseconds(5)) }
-
-        #expect(controller.isBusy == false)
-        #expect(controller.lastRecord?.outcome == .failed)
-        #expect(controller.lastRecord?.error == "recording limit")
-        #expect(idleCount == 1)
-        #expect(hud.states.contains { if case .error = $0 { return true } else { return false } })
-    }
-
     @Test func aSlowButSuccessfulBringUpIsAdoptedAndRecords() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)

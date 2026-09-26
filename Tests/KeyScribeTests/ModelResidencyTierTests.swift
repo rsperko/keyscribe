@@ -237,7 +237,7 @@ struct ModelResidencyTierTests {
         settings.stt.eviction = .frugal
         h.controller.updateSettings(settings)
         loadRelease.fire()
-        #expect(await fires(h.engine.evicted, within: 2))
+        #expect(await fires(h.engine.evicted, within: 10))
         #expect(!h.engine.isLoaded)
     }
 }

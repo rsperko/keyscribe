@@ -49,7 +49,7 @@ struct UnclaimedPressTests {
         // The mode the HUD announced when recording began — the name the user reads, and the only
         // published view of the resolved mode.
         var recordingModeName: String? {
-            states.compactMap { if case .recording(let mode, _, _) = $0 { return mode } else { return nil } }
+            states.compactMap { if case .recording(let mode, _, _, _) = $0 { return mode } else { return nil } }
                 .last ?? nil
         }
     }

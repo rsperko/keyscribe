@@ -215,22 +215,37 @@ not to its label.
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
+| Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
+| Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
+
+**Recording limit.** A single take has a length limit (`design.md` §4.8). Reaching it ends the take
+the way a release does — the recording is transcribed and inserted, never discarded. The warning
+reuses what the Recording HUD already shows rather than adding to it: in the final stretch a thin
+orange ring drains around the level circle and the “Listening” line becomes a countdown. VoiceOver
+announces the countdown once when it begins, not every second. A take the limit stopped is inserted
+without the AI rewrite, and the completion state says so, so the user never mistakes a raw fragment
+for a rewritten result. An edit-in-place take stopped by the limit leaves the selection unchanged and
+says so as an Error. It adds that what was said is in History only once that entry has been
+confirmed saved — this one write waits for the disk rather than being queued like every other
+History write, so a failed save never sends the user looking for an entry that does not exist. A take
+stopped by the limit never presses the mode's Return, including a take that is only a spoken Return
+command; the latter reports “Stopped at the [limit] limit — Return not pressed”.
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap). The two no-speech outcomes both
 record `.noSpeech` in history; they differ only in the render — the microphone repair action appears
 only when the take's audio peak never cleared the digital-silence floor.
 
-The local-only states — Recording, Transcribing, Complete, Target changed, and Error — are the
-whole HUD for a local dictation. The Ready state is the brief acknowledgment shown only when a
+The local-only states — Recording, Transcribing, Complete, Target changed, Stopped at the limit, and
+Error — are the whole HUD for a local dictation. The Ready state is the brief acknowledgment shown only when a
 one-shot mode is chosen from the menu; there is no separate ready flash on hotkey invoke — see the
 HUD timing contract below. Rewriting and Rewrite fallback
 appear when AI rewrite is enabled for the dictation. There is **one** Rewriting state: a rewrite is
@@ -782,7 +797,9 @@ immediately without confirmation.
 
 The list is grouped by day and supports search over locally stored text. Each row contains:
 
-- final inserted text preview;
+- final inserted text preview — or, when nothing was inserted (an edit-in-place take stopped by the
+  recording limit), what was heard, in secondary text, so the entry the error pointed to is
+  recognizable without opening it;
 - time and mode;
 - outcome (`Inserted`, `Copied`, `Local fallback`, or `Failed`);
 - data-boundary badges relevant to that dictation;

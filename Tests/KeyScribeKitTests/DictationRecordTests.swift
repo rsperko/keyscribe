@@ -91,6 +91,14 @@ struct DictationRecordTests {
         #expect(summary.contains("fast"))
     }
 
+    @Test func humanSummaryMarksATakeStoppedByTheRecordingLimit() {
+        var r = DictationRecord(modeName: "M")
+        r.outcome = .inserted
+        #expect(!r.humanSummary().contains("stopped-at-limit"))
+        r.stoppedAtLimit = true
+        #expect(r.humanSummary().contains("stopped-at-limit"))
+    }
+
     @Test func humanSummaryIncludesFallbackReasonAndError() {
         var r = DictationRecord(modeName: "M")
         r.outcome = .copied

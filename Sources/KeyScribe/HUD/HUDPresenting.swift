@@ -17,15 +17,39 @@ enum HUDErrorAction: Equatable {
     }
 }
 
+struct RecordingCountdown: Equatable {
+    let secondsLeft: Int
+    let totalSeconds: Int
+
+    init(secondsLeft: Int, totalSeconds: Int) {
+        self.secondsLeft = secondsLeft
+        self.totalSeconds = totalSeconds
+    }
+
+    init?(remaining: Double, warningSeconds: Double) {
+        guard remaining <= warningSeconds else { return nil }
+        self.init(secondsLeft: max(0, Int(remaining.rounded(.up))), totalSeconds: Int(warningSeconds.rounded(.up)))
+    }
+
+    var fractionLeft: Double {
+        totalSeconds > 0 ? Double(secondsLeft) / Double(totalSeconds) : 0
+    }
+
+    var clockText: String {
+        String(format: "%d:%02d", secondsLeft / 60, secondsLeft % 60)
+    }
+}
+
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
-    case recording(mode: String?, level: Float, latchedTrigger: String?)
+    case recording(mode: String?, level: Float, latchedTrigger: String?, countdown: RecordingCountdown? = nil)
     case loadingModel(mode: String)
     case transcribing(mode: String)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)
     case complete(outcome: DictationOutcome, mode: String)
+    case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?)
 }
 
@@ -37,6 +61,7 @@ enum HUDIndicator: Equatable {
     case processing
     case complete
     case warning
+    case limit
     case error
 }
 
@@ -57,6 +82,8 @@ extension HUDState {
             return .complete
         case .localFallback:
             return .warning
+        case .stoppedAtLimit:
+            return .limit
         case .error:
             return .error
         }
@@ -68,7 +95,7 @@ extension HUDState {
             return nil
         case .ready(let mode):
             return mode
-        case .recording(let mode, _, _):
+        case .recording(let mode, _, _, _):
             return mode
         case .loadingModel(let mode):
             return mode
@@ -81,6 +108,8 @@ extension HUDState {
             return "Inserted without rewriting"
         case .complete(let outcome, _):
             return Self.completePrimary(outcome)
+        case .stoppedAtLimit(_, let limit, _):
+            return "Stopped at the \(limit) limit"
         case .error(let message, _):
             return message
         }
@@ -95,7 +124,9 @@ extension HUDState {
         switch self {
         case .ready:
             return "Next dictation"
-        case .recording(_, _, let latchedTrigger):
+        case .recording(_, _, _, let countdown?):
+            return "Stops in \(countdown.clockText)"
+        case .recording(_, _, let latchedTrigger, nil):
             return latchedTrigger.map { "Listening — tap \($0) again to stop" } ?? "Listening"
         case .loadingModel:
             return "Loading speech model…"
@@ -103,8 +134,13 @@ extension HUDState {
             return "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
-        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _):
+        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _),
+             .stoppedAtLimit(.copied(let reason), _, _):
             return Self.copiedSecondary(reason)
+        case .stoppedAtLimit(_, _, let rewriteSkipped):
+            return rewriteSkipped
+                ? "Inserted without rewriting — dictate again to continue"
+                : "Inserted — dictate again to continue"
         case .complete(_, let mode):
             return mode
         case .localFallback:
@@ -127,7 +163,8 @@ extension HUDState {
 
     var offersPasteLast: Bool {
         switch self {
-        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _):
+        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _),
+             .stoppedAtLimit(.copied(let reason), _, _):
             // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that can't
             // work — the text is already on the clipboard for a manual paste.
             return reason != .accessibilityDenied
@@ -149,6 +186,11 @@ extension HUDState {
         }
     }
 
+    var recordingCountdown: RecordingCountdown? {
+        if case .recording(_, _, _, let countdown) = self { return countdown }
+        return nil
+    }
+
     var offersLocalTranscript: Bool {
         if case .rewriting(_, _, _, _, let offer) = self { return offer }
         return false
@@ -168,6 +210,8 @@ extension HUDState {
         switch self {
         case .hidden, .ready:
             return nil
+        case .recording(_, _, _, let countdown?):
+            return "Recording stops in \(countdown.secondsLeft) seconds"
         case .recording:
             return "Recording"
         case .loadingModel:
@@ -176,7 +220,7 @@ extension HUDState {
             return "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
-        case .localFallback, .complete, .error:
+        case .localFallback, .complete, .stoppedAtLimit, .error:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         }
     }

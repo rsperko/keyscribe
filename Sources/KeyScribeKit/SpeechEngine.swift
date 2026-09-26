@@ -93,7 +93,7 @@ public protocol StreamingSpeechSession: Sendable {
     func append(samples: [Float]) async throws
     // Run the final chunk and return the whole transcript. Terminal: the session is spent after this.
     func finalizeTranscript() async throws -> String
-    // Abort without a result (ESC/over-limit). Terminal: releases SDK state, no transcript.
+    // Abort without a result (ESC/cancel). Terminal: releases SDK state, no transcript.
     func cancel() async
 }
 

@@ -558,8 +558,9 @@ private struct HistoryRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(entry.result.isEmpty ? "(no text)" : entry.result)
+            Text(entry.listText)
                 .lineLimit(2).font(.body)
+                .foregroundStyle(entry.listTextIsHeard ? .secondary : .primary)
             HStack(spacing: 6) {
                 Text(entry.timestamp, style: .time)
                 Text("·"); Text(entry.modeName)
@@ -841,6 +842,9 @@ private struct HistoryDetailView: View {
                     detailRow("How chosen", howChosen)
                 }
                 detailRow("AI rewrite", rewriteSummary)
+                if entry.stoppedAtLimit == true {
+                    detailRow("Recording", "Stopped at the time limit")
+                }
                 if entry.outcome == .localFallback, let reason = entry.fallbackReason {
                     detailRow("Why local was kept", reason)
                 }

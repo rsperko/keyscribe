@@ -88,6 +88,9 @@ final class DictationController {
         var dictationTask: Task<Void, Never>?
         var rewriteEscapeTask: Task<Void, Never>?
         var recordingLimitTask: Task<Void, Never>?
+        var recordingDeadline: ContinuousClock.Instant?
+        var stoppedAtLimit = false
+        var rewriteSkippedAtLimit = false
         var modeResolveTask: Task<Void, Never>?
         var snapshotAdoptionTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
@@ -151,6 +154,7 @@ final class DictationController {
     private(set) var nextModeOverrideID: String?
 
     private let maxRecordingSeconds: Double
+    private let limitWarningSeconds: Double
 
     private var plan: ResolvedConfig { session?.capturedPlan ?? config.resolved }
 
@@ -185,7 +189,21 @@ final class DictationController {
         guard case .recording = machine.state else { return }
         let quantized = (level * 20).rounded() / 20
         lastRenderedLevel = quantized
-        hud?.render(.recording(mode: activeMode?.name, level: quantized, latchedTrigger: latchedTriggerName))
+        hud?.render(recordingHUD(level: quantized))
+    }
+
+    private func recordingHUD(level: Float) -> HUDState {
+        let countdown = session?.recordingDeadline.flatMap { deadline in
+            RecordingCountdown(
+                remaining: Self.seconds(ContinuousClock.now.duration(to: deadline)),
+                warningSeconds: limitWarningSeconds)
+        }
+        return .recording(mode: activeMode?.name, level: level, latchedTrigger: latchedTriggerName, countdown: countdown)
+    }
+
+    private nonisolated static func seconds(_ duration: Duration) -> Double {
+        let parts = duration.components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
     }
 
     var onDictationCompleted: ((DictationCompletion) -> Void)?
@@ -242,6 +260,7 @@ final class DictationController {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
         },
         maxRecordingSeconds: Double = 300,
+        limitWarningSeconds: Double = 30,
         warmupClip: URL? = DictationController.bundledWarmupClip
     ) {
         self.settings = settings
@@ -269,6 +288,7 @@ final class DictationController {
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
+        self.limitWarningSeconds = limitWarningSeconds
         self.warmupClip = warmupClip
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
@@ -569,7 +589,7 @@ final class DictationController {
                 guard !Task.isCancelled else { return }
                 // A late resolution must not show the HUD before admission opens.
                 if self.machine.state == .recording {
-                    self.hud?.render(.recording(mode: self.activeMode?.name, level: max(0, self.lastRenderedLevel), latchedTrigger: self.latchedTriggerName))
+                    self.hud?.render(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
                 }
             }
         } else {
@@ -768,27 +788,31 @@ final class DictationController {
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
             self.pollLevelWhileRecording()
-            self.hud?.render(.recording(mode: self.activeMode?.name, level: 0, latchedTrigger: self.latchedTriggerName))
+            self.hud?.render(self.recordingHUD(level: 0))
         }
     }
 
     private func startRecordingLimit() {
         session?.recordingLimitTask?.cancel()
         let limit = maxRecordingSeconds
+        session?.recordingDeadline = ContinuousClock.now.advanced(by: .seconds(limit))
         session?.recordingLimitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(limit))
             guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
-            self.abortRecordingOverLimit()
+            self.commitAtRecordingLimit()
         }
     }
 
-    private func abortRecordingOverLimit() {
-        onRecordingChanged?(false)
-        if let url = audio.stop() { try? FileManager.default.removeItem(at: url) }
-        finish(machine: .finish(.failed), cue: .cancel,
-               state: .error(message: "Recording stopped after \(Int(maxRecordingSeconds / 60)) min", action: nil),
-               hideAfter: 4, record: (.failed, "recording limit"))
+    private func commitAtRecordingLimit() {
+        session?.stoppedAtLimit = true
+        building.stoppedAtLimit = true
+        log.notice("recording limit reached after \(self.maxRecordingSeconds, privacy: .public)s — committing the take")
+        handleCommit()
     }
+
+    private var limitPhrase: String { RecordingLimit.phrase(seconds: maxRecordingSeconds) }
+
+    static let rewriteSkippedAtLimitReason = "The recording limit stopped this dictation, so the rewrite was skipped."
 
     // Release the frozen config at a terminal so an idle app doesn't pin a stale ResolvedConfig after a
     // reload. `plan` falls back to live `config.resolved` while nil, so clearing between dictations is safe.
@@ -803,7 +827,7 @@ final class DictationController {
         session?.levelPollTask?.cancel()
         session?.rewriteEscapeTask?.cancel()
         session?.precedingTextTask?.cancel()
-        // Streaming teardown on EVERY terminal (commit, cancel, error, over-limit): finish the feed and
+        // Streaming teardown on EVERY terminal (commit, cancel, error): finish the feed and
         // cancel the driver so a session still holding the SerializedEngine lock releases it. Idempotent — a
         // committed dictation already finalized (driver.finish marked it done), so cancel is a no-op there;
         // an aborted dictation with a live session gets its lock freed here (else the engine wedges).
@@ -1594,7 +1618,10 @@ final class DictationController {
             // A whole-utterance replacement whose entire output is `<CR>` (e.g. "press enter" → Return)
             // trims to empty text, so there is nothing to insert — but the requested keystroke must still
             // land. Fire the submit under the same guards as the insert path (real target, focus unmoved).
-            if let submitOverride, transcript.isEmpty {
+            if submitOverride != nil, transcript.isEmpty, session?.stoppedAtLimit == true {
+                finishError("Stopped at the \(limitPhrase) limit — Return not pressed")
+                return
+            } else if let submitOverride, transcript.isEmpty {
                 // `!captureTruncated` is re-read AFTER the focus check's suspension, exactly as the paste
                 // path's submit does: a Return is the one thing here that cannot be undone.
                 if decision == .insert, await submitTargetStillFocused(), !captureWasLost {
@@ -1619,7 +1646,7 @@ final class DictationController {
             let trailing = bare ? .none : (activeMode?.trailing ?? .none)
             // A `<CR>` on a whole-utterance replacement overrides the mode's standing submit for this
             // insert only; absent an override the mode's submit behaves exactly as before.
-            let submit = submitOverride ?? activeMode?.submit ?? .none
+            let submit = session?.stoppedAtLimit == true ? .none : submitOverride ?? activeMode?.submit ?? .none
             // Await the paste's clipboard settle inline only when a submit Return must land after ⌘V.
             let submitFollows = initialOutcome == .inserted && submit != .none
             let insertStart = DispatchTime.now()
@@ -1673,21 +1700,34 @@ final class DictationController {
         case .noSpeech: endCue = .cancel
         case .failed: endCue = .error
         }
+        let keptLocal = rewrite?.fellBack == true || session?.rewriteSkippedAtLimit == true
         let recordOutcome: DictationRecord.Outcome
         switch outcome {
         case .noSpeech: recordOutcome = .noSpeech
-        case .inserted: recordOutcome = rewrite?.fellBack == true ? .localFallback : .inserted
-        case .copied: recordOutcome = rewrite?.fellBack == true ? .localFallback : .copied
+        case .inserted: recordOutcome = keptLocal ? .localFallback : .inserted
+        case .copied: recordOutcome = keptLocal ? .localFallback : .copied
         case .failed: recordOutcome = .failed
         }
         // Built here, while the session is still alive, so modeId survives releaseCapturedPlan.
         let completion = DictationCompletion(
             outcome: outcome, modeId: activeMode?.id, heard: heard, finalText: transcript)
+        let textLanded: Bool = switch outcome {
+        case .inserted, .copied: true
+        case .noSpeech, .failed: false
+        }
+        let stoppedAtLimit = session?.stoppedAtLimit == true && textLanded
+        let completedState: HUDState
+        if stoppedAtLimit {
+            completedState = .stoppedAtLimit(
+                outcome: outcome, limit: limitPhrase, rewriteSkipped: session?.rewriteSkippedAtLimit == true)
+        } else if rewrite?.fellBack == true {
+            completedState = .localFallback(outcome: outcome, mode: currentModeName)
+        } else {
+            completedState = .complete(outcome: outcome, mode: currentModeName)
+        }
         finish(machine: .alreadyTransitioned, cue: endCue,
-               state: rewrite?.fellBack == true
-                   ? .localFallback(outcome: outcome, mode: currentModeName)
-                   : .complete(outcome: outcome, mode: currentModeName),
-               hideAfter: 2,
+               state: completedState,
+               hideAfter: stoppedAtLimit ? 5 : 2,
                record: (recordOutcome, nil),
                history: HistoryWrite(heard: heard, transformed: transformed, result: transcript,
                                      insertion: outcome, rewrite: rewrite),
@@ -1721,26 +1761,29 @@ final class DictationController {
     // Local history (design.md §4.7): one append per dictation that produced text, unless history is
     // off or the mode opts out. noSpeech is not recorded (nothing was said). Audio and the redaction
     // map are never written; the stored prompt carries tokens, not their originals.
+    @discardableResult
     private func recordHistory(
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
-        rewrite: RewriteDetails?
-    ) {
+        rewrite: RewriteDetails?, confirmWrite: Bool = false
+    ) -> Bool {
         // A secure-field dictation is never persisted, regardless of the history setting or the mode —
         // the spoken text is a password (design.md §4.4). An unconfirmed target (focus moved before the
         // secure-aware snapshot could vet the field) is treated the same way (KS-01). The diagnostics record
         // holds only fingerprints (hashes), never the transcript, so it is safe to keep; this guards the
         // verbatim history store.
         guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false),
-              capturedSnapshot?.isSecureField != true, session?.targetUnconfirmed != true else { return }
+              capturedSnapshot?.isSecureField != true, session?.targetUnconfirmed != true else { return false }
         // Last line of defense: a password field that stole focus after the commit-time probe is still caught
         // by the inserter, which diverts to a concealed copy. That verdict is the system classifying the text
         // as password-grade — it must veto history too (X-1).
-        if case .copied(.secureField) = insertion { return }
+        if case .copied(.secureField) = insertion { return false }
+        let rewriteSkipped = session?.rewriteSkippedAtLimit == true
+        let keptLocal = rewrite?.fellBack == true || rewriteSkipped
         let outcome: HistoryEntry.Outcome
         switch insertion {
-        case .noSpeech: return
-        case .inserted: outcome = rewrite?.fellBack == true ? .localFallback : .inserted
-        case .copied: outcome = rewrite?.fellBack == true ? .localFallback : .copied
+        case .noSpeech: return false
+        case .inserted: outcome = keptLocal ? .localFallback : .inserted
+        case .copied: outcome = keptLocal ? .localFallback : .copied
         case .failed: outcome = .failed
         }
         let entry = HistoryEntry(
@@ -1754,19 +1797,29 @@ final class DictationController {
             received: rewrite?.received,
             modeChoice: session?.modeChoice, routedPhrase: session?.routedPhrase,
             triggerKey: session?.triggerDisplay,
-            fallbackReason: outcome == .localFallback ? rewrite?.fallbackReason : nil)
-        guard let history else { return }
+            fallbackReason: outcome == .localFallback
+                ? (rewriteSkipped ? Self.rewriteSkippedAtLimitReason : rewrite?.fallbackReason) : nil,
+            stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil)
+        guard let history else { return false }
         let retentionDays = settings.history.retentionDays
         let today = HistoryStore.todayString()
         let sweepRetention = lastRetentionSweepDay != today
         lastRetentionSweepDay = today
-        historyWriteQueue.async { [log] in
+        let write = { [log] () -> Bool in
             do {
                 try history.append(entry, today: today)
                 if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays) }
+                return true
+            } catch {
+                log.error("history append failed: \(error.localizedDescription, privacy: .public)")
+                return false
             }
-            catch { log.error("history append failed: \(error.localizedDescription, privacy: .public)") }
         }
+        guard confirmWrite else {
+            historyWriteQueue.async { _ = write() }
+            return true
+        }
+        return historyWriteQueue.sync(execute: write)
     }
 
     // Evicts the engine the dictation actually used (the captured one), not whatever is active now —
@@ -1860,6 +1913,13 @@ final class DictationController {
 
     private func produceFinalText(routed: PhaseBResult, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
         if mode?.source == .selection {
+            if session?.stoppedAtLimit == true {
+                let kept = recordHistory(
+                    heard: routed.transcript, transformed: nil, result: "", insertion: .failed, rewrite: nil,
+                    confirmWrite: true)
+                let message = "Stopped at the \(limitPhrase) limit — selection unchanged"
+                return (.abort(kept ? message + ". What you said is in History." : message, nil), nil, nil)
+            }
             let (final, details) = await rewriteSelection(instruction: routed.transcript, mode: mode)
             return (final, details, nil)
         }
@@ -1872,7 +1932,12 @@ final class DictationController {
     // to live edits / replacements / numbers / fuzzy and to the LLM — protected from everything
     // except STT. On no/failed rewrite we still insert the locally-processed text — you want your words.
     private func produceDictationText(transcript: String, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
-        let resolved = mode.flatMap { m in connection(for: m).map { (mode: m, connection: $0) } }
+        var resolved = mode.flatMap { m in connection(for: m).map { (mode: m, connection: $0) } }
+        if resolved != nil, session?.stoppedAtLimit == true {
+            resolved = nil
+            session?.rewriteSkippedAtLimit = true
+            building.fallbackReason = "recording limit"
+        }
         let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil)
 
         let localStart = DispatchTime.now()

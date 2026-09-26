@@ -42,15 +42,20 @@ final class HUDController: HUDPresenting {
     func render(_ state: HUDState) {
         // Same mode/latch, only the level changed: push just the level so the card chrome isn't rebuilt
         // on every audio tick.
-        if case .recording(let mode, let level, let latched) = state,
-           case .recording(let currentMode, _, let currentLatched) = model.state,
+        if case .recording(let mode, let level, let latched, let countdown) = state,
+           case .recording(let currentMode, _, let currentLatched, let currentCountdown) = model.state,
            mode == currentMode, latched == currentLatched {
             levelModel.level = level
+            if countdown != currentCountdown {
+                model.state = state
+                if let panel { resize(panel, to: state) }
+                if currentCountdown == nil { announce(state) }
+            }
             return
         }
         guard model.state != state else { return }
         let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
-        if case .recording(_, let level, _) = state {
+        if case .recording(_, let level, _, _) = state {
             levelModel.level = level
         }
         model.state = state
@@ -401,7 +406,7 @@ private struct HUDView: View {
         case .preparing:
             PreparingIcon()
         case .recording:
-            RecordingIcon(level: level)
+            RecordingIcon(level: level, countdown: model.state.recordingCountdown)
         case .processing:
             ProcessingIcon()
         case .complete:
@@ -417,6 +422,8 @@ private struct HUDView: View {
             EmptyView()
         case .warning:
             Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(.orange)
+        case .limit:
+            Image(systemName: "timer").foregroundStyle(.orange)
         }
     }
 
@@ -535,7 +542,23 @@ private struct ProcessingIcon: View {
 
 private struct RecordingIcon: View {
     @ObservedObject var level: HUDLevel
-    var body: some View { LevelIndicator(level: level.level) }
+    let countdown: RecordingCountdown?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            LevelIndicator(level: level.level)
+            if let countdown {
+                Circle()
+                    .trim(from: 0, to: countdown.fractionLeft)
+                    .stroke(.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 29, height: 29)
+                    .animation(reduceMotion ? nil : .linear(duration: 1), value: countdown.fractionLeft)
+            }
+        }
+        .frame(width: 30, height: 30)
+    }
 }
 
 private struct LevelIndicator: View {

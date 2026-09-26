@@ -46,6 +46,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // Why a `localFallback` entry kept the local text (an HTTP error, missing key, or validation failure).
     // Provider error text or a fixed local string, never user content. nil on non-fallback and older rows.
     public var fallbackReason: String?
+    public var stoppedAtLimit: Bool?
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -67,6 +68,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case routedPhrase = "routed_phrase"
         case triggerKey = "trigger_key"
         case fallbackReason = "fallback_reason"
+        case stoppedAtLimit = "stopped_at_limit"
     }
 
     public init(
@@ -76,7 +78,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
         connection: String? = nil, model: String? = nil, prompt: String? = nil, received: String? = nil,
         modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
-        triggerKey: String? = nil, fallbackReason: String? = nil
+        triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil
     ) {
         self.timestamp = timestamp
         self.modeName = modeName
@@ -97,6 +99,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.routedPhrase = routedPhrase
         self.triggerKey = triggerKey
         self.fallbackReason = fallbackReason
+        self.stoppedAtLimit = stoppedAtLimit
     }
 
     private static let encoder: JSONEncoder = {
@@ -131,6 +134,13 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     }
 
     public var contextLabels: [String] { contextCategories.compactMap(Self.contextLabel) }
+
+    public var listTextIsHeard: Bool { result.isEmpty && !heard.isEmpty }
+
+    public var listText: String {
+        if !result.isEmpty { return result }
+        return heard.isEmpty ? "(no text)" : heard
+    }
 
     public var dataBoundaryLabels: [String] {
         if !cloudInvolved { return ["On this Mac"] }

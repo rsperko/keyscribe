@@ -144,6 +144,19 @@ shortcut only falls back to Plain Dictation where Plain Dictation also owns it. 
 rule outside its browser, add the browser to the same rule; see
 [Pair a website rule with its browser](docs/getting_started.md#pair-a-website-rule-with-its-browser).
 
+### Is there a limit on how long one dictation can be?
+
+Yes — five minutes per dictation. Thirty seconds before the limit, the recording indicator gets an
+orange ring that runs down and the HUD counts down ("Stops in 0:30"). When time runs out, KeyScribe
+stops listening and inserts everything you said, just as if you had released the key. Start another
+dictation to keep going.
+
+A dictation stopped by the limit is inserted **without** its AI rewrite, even in a mode that normally
+uses one. It ends mid-thought, and a rewrite would treat the fragment as a finished piece. The HUD
+tells you when this happens. A mode that normally presses Return after inserting does not press it, so
+an unfinished message is never sent. In an edit-in-place mode, a dictation stopped by the limit leaves your
+selected text unchanged.
+
 ### Where are my settings and history stored?
 
 Everything is a plain file under `~/Library/Application Support/KeyScribe/` — TOML config, JSONL
