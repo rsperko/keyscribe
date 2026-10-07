@@ -702,6 +702,16 @@ keyscribe/
   3. `.build/checkouts/FluidAudio/Scripts/ane_profile.swift` reports the compute-unit **plan** only —
      it will still say ANE even if the runtime is denied, so the power trace is the ground truth.
   4. Silent-fallback signature: ANE power at zero **plus** a latency regression at unchanged WER.
+  **One macOS 27 Neural Engine failure IS measured, and it is a different mechanism from the entitlement
+  question above — do not fold them together.** On macOS 27.0.1 (2026-10-07) Parakeet TDT-CTC 110M on
+  FluidAudio's default `.cpuAndNeuralEngine` loads without error and decodes every clip to blank (100% WER,
+  1/35 `--commands-check` against a 28 baseline) while the ANE compiler logs `kernel width and height
+  should be multiple of 8 for large kernel but are 512 and 1` — 512 is that model's encoder width, and it is
+  the only Parakeet whose preprocessor+encoder is one fused model on the ANE. Every other engine on the ANE
+  was unaffected, and the v0.8.0 binary that passed preflight on macOS 26.6.2 fails identically on 27.0.1.
+  `ParakeetEngine.modelConfiguration(for:)` pins that one model to `.cpuAndGPU`, which restores its baseline
+  exactly. A silent blank decode is precisely the failure shape the release gate exists for — it shipped in
+  0.8.0 only because preflight had never run on macOS 27.
   **Two gaps this exposes regardless of macOS 27:** `preflight.sh`'s `a-entitlements` greps only for
   the literal `com.apple.security`, so it cannot see a missing or malformed `com.apple.developer.*`
   key; and **no preflight gate measures latency/RTF** — `b-benchmark` gates WER only, and an ANE→CPU

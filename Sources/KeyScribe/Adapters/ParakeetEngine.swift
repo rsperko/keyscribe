@@ -1,3 +1,4 @@
+import CoreML
 import Foundation
 import FluidAudio
 import KeyScribeKit
@@ -71,11 +72,19 @@ actor ParakeetEngine: SpeechEngine {
         let target = modelsDir.appendingPathComponent(
             AsrModels.defaultCacheDirectory(for: version).lastPathComponent, isDirectory: true)
         let models = try await AsrModels.downloadAndLoad(
-            to: target, version: version, progressHandler: handler)
+            to: target, configuration: Self.modelConfiguration(for: version), version: version,
+            progressHandler: handler)
         progress?(.init(phase: "Compiling speech model…", fraction: 0.95))
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)
         self.manager = manager
+    }
+
+    // The 110M model's fused preprocessor+encoder is the one Parakeet component whose ANE compile fails on
+    // macOS 27 (`kernel width and height should be multiple of 8 … are 512 and 1`); left on the Neural
+    // Engine it loads without error and decodes every take to blank. nil keeps FluidAudio's defaults.
+    nonisolated static func modelConfiguration(for version: AsrModelVersion) -> MLModelConfiguration? {
+        version == .tdtCtc110m ? MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuAndGPU) : nil
     }
 
     nonisolated let supportsSampleInput = true
