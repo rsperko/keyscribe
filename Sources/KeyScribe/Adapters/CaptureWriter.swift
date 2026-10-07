@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 import Foundation
 import KeyScribeKit
@@ -49,6 +50,12 @@ final class CaptureWriter: @unchecked Sendable {
     // Writer-thread-only resampling state.
     private var inBuffer: AVAudioPCMBuffer?
     private var inputFormat: AVAudioFormat?
+    // The conversion input is mono once a selector exists, so its format can't key the cache.
+    private var sourceFormat: (sampleRate: Double, channelCount: Int)?
+    private var selector: ChannelSelector?
+    private var selectorSourceID: UInt32 = 0
+    private var publishedChannel = -1
+    private var channelRMS: [Float] = []
     private var converter: AVAudioConverter?
     private var outBuffer: AVAudioPCMBuffer?
     private let feed = FeedOnce()
@@ -84,6 +91,8 @@ final class CaptureWriter: @unchecked Sendable {
     // transcribe during capture. Writer thread ONLY, and MUST be non-blocking (real wiring is a bounded
     // AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
     private let onSamples: (@Sendable ([Float]) -> Void)?
+    // Writer thread only; the RT meter reads what it publishes, so it must be a lock-free store.
+    private let onChannelSelected: (@Sendable (Int) -> Void)?
 
     // Frames accepted off the ring but not persisted — invisible to the ring canaries, so surfaced at teardown.
     private var droppedFrames = 0
@@ -97,6 +106,7 @@ final class CaptureWriter: @unchecked Sendable {
          wantsSamples: Bool = true,
          onSamples: (@Sendable ([Float]) -> Void)? = nil,
          onFirstBuffer: (@Sendable () -> Void)? = nil,
+         onChannelSelected: (@Sendable (Int) -> Void)? = nil,
          observeHostTime: @escaping (UInt64?) -> Bool) {
         self.ring = ring
         self.file = file
@@ -104,6 +114,7 @@ final class CaptureWriter: @unchecked Sendable {
         self.wantsSamples = wantsSamples
         self.onSamples = onSamples
         self.onFirstBuffer = onFirstBuffer
+        self.onChannelSelected = onChannelSelected
         self.observeHostTime = observeHostTime
         // Pre-size to ~30 s of record-rate mono so a multi-minute dictation avoids re-copying the multi-MiB
         // prefix through repeated doubling.
@@ -193,9 +204,14 @@ final class CaptureWriter: @unchecked Sendable {
         }
         input.frameLength = AVAudioFrameCount(count)
         if let dst = input.floatChannelData {
-            for c in 0..<info.channelCount {
-                let src = channel(c)
-                dst[c].update(from: src.baseAddress!.advanced(by: offset), count: count)
+            if selector != nil {
+                let selected = selectChannel(info, channel: channel, offset: offset, count: count)
+                dst[0].update(from: channel(selected).baseAddress!.advanced(by: offset), count: count)
+            } else {
+                for c in 0..<info.channelCount {
+                    let src = channel(c)
+                    dst[c].update(from: src.baseAddress!.advanced(by: offset), count: count)
+                }
             }
         }
         write(input)
@@ -207,6 +223,19 @@ final class CaptureWriter: @unchecked Sendable {
             flushConverterTail()
             sealed = true
         }
+    }
+
+    private func selectChannel(
+        _ info: AudioSampleRing.SlotInfo, channel: (Int) -> UnsafeBufferPointer<Float>, offset: Int, count: Int
+    ) -> Int {
+        for c in 0..<info.channelCount {
+            var level: Float = 0
+            vDSP_rmsqv(channel(c).baseAddress!.advanced(by: offset), 1, &level, vDSP_Length(count))
+            channelRMS[c] = level
+        }
+        let selected = channelRMS.withUnsafeBufferPointer { selector!.observe(rms: $0, frameCount: count) }
+        publishChannel(selected)
+        return selected
     }
 
     private func signalReadyIfFirst() {
@@ -235,23 +264,48 @@ final class CaptureWriter: @unchecked Sendable {
             fallbackDropSeconds: pending.cueWindowSeconds))
     }
 
-    // Rebuild when the native rate/channels change, which also resets the resampler.
+    // Rebuild when the native rate/channels change, which also resets the resampler and the channel selector.
     private func inputBuffer(for info: AudioSampleRing.SlotInfo) -> AVAudioPCMBuffer? {
-        if let inputFormat, inputFormat.sampleRate == info.sampleRate,
-           Int(inputFormat.channelCount) == info.channelCount, let inBuffer {
+        if let sourceFormat, sourceFormat.sampleRate == info.sampleRate,
+           sourceFormat.channelCount == info.channelCount, let inBuffer {
+            // A different input with the same format must not inherit the previous input's levels and choice.
+            if selector != nil, info.sourceID != selectorSourceID { resetSelector(for: info) }
             return inBuffer
         }
+        let multichannel = info.channelCount > 1
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: info.sampleRate,
-            channels: AVAudioChannelCount(info.channelCount), interleaved: false),
+            channels: multichannel ? 1 : AVAudioChannelCount(info.channelCount), interleaved: false),
             let buffer = AVAudioPCMBuffer(
                 pcmFormat: format, frameCapacity: AVAudioFrameCount(ring.maxFramesPerSlot)) else { return nil }
+        sourceFormat = (info.sampleRate, info.channelCount)
         inputFormat = format
         inBuffer = buffer
         converter = nil
         outBuffer = nil
+        if multichannel {
+            resetSelector(for: info)
+            channelRMS = Array(repeating: 0, count: info.channelCount)
+        } else {
+            selector = nil
+            publishChannel(0)
+        }
         return buffer
     }
+
+    private func resetSelector(for info: AudioSampleRing.SlotInfo) {
+        selector = ChannelSelector(channelCount: info.channelCount, sampleRate: info.sampleRate)
+        selectorSourceID = info.sourceID
+    }
+
+    private func publishChannel(_ channel: Int) {
+        guard channel != publishedChannel else { return }
+        publishedChannel = channel
+        onChannelSelected?(channel)
+    }
+
+    // nil for mono input. Safe only after finish() has joined the thread.
+    func channelSelection() -> ChannelSelector? { selector }
 
     // Write to the file and report whether it landed, so callers only expose samples the WAV actually holds.
     private func writeToFile(_ file: any CaptureFileWriting, _ buffer: AVAudioPCMBuffer) -> Bool {

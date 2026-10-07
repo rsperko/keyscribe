@@ -123,7 +123,20 @@ This file is the entry point. Read the design docs before writing code — they 
   (`AVAudioConverter`), the `AVAudioFile` write, and feeding the `TailDrainGate` — runs on a dedicated writer
   thread (`CaptureWriter`) that polls the ring off-RT (5 ms tick, no wakeup is EVER signalled from the RT
   thread). The HUD meter is **pulled** at ~30 Hz (`DictationController` polls `AudioCapture.currentLevel`), not
-  pushed per buffer — there is no per-buffer main-actor hop. The ring is **bound to the unit that writes it**
+  pushed per buffer — there is no per-buffer main-actor hop.
+
+  **Multichannel input is collapsed to ONE channel on the writer thread, before resampling** (`ChannelSelector`,
+  KeyScribeKit). A default `AVAudioConverter` keeps channel 0 only, which silenced a mic on any other input;
+  averaging attenuates a lone mic and summing clips duplicates. A challenger must beat the recorded channel's held
+  peak by `defaultSwitchMarginDB` for `defaultSwitchSustainSeconds`, but a channel earns that held peak (pause
+  protection, decaying over `peakHoldDecaySeconds`) only from a level that lasted the longer `holdQualifySeconds` —
+  so a click or a brief bump on an unused input can win a moment of the take, never keep it. The selector restarts whenever the delivering device changes: each ring slot
+  carries `sourceID` (the unit's bound device, published in `configure` before start), which is race-free where a
+  control-side reset would let the old unit's queued frames feed the new choice. The RT meter follows the writer's
+  published channel through one atomic, and multichannel teardown lines gain `channels=… selected=… switches=…
+  peak=[…] switch=[…]`.
+
+  The ring is **bound to the unit that writes it**
   (`HALInputUnit.ringSlot`, captured immutably by that unit's RT handler) and a FRESH one is ALLOCATED per
   capture in the quiescent arm window — never reset in place and never reachable through a mutable
   `AudioCapture` property. Both halves are load-bearing and neither suffices alone: the RT callback passes its

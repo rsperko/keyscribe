@@ -299,3 +299,18 @@ struct CaptureIdleRebuildTests {
         #expect(!AudioCapture.shouldRebuildWhileIdle(mustRebuild: true, hasSession: false, isArming: true))
     }
 }
+
+struct MeterChannelTests {
+    @Test func theMeterReadsTheSelectedChannel() {
+        #expect(AudioCapture.meterChannel(selected: 1, channelCount: 2) == 1)
+    }
+
+    @Test func aSelectionPastTheBufferIsClampedToTheLastChannel() {
+        #expect(AudioCapture.meterChannel(selected: 3, channelCount: 2) == 1)
+    }
+
+    @Test func monoAlwaysMetersTheOnlyChannel() {
+        #expect(AudioCapture.meterChannel(selected: 5, channelCount: 1) == 0)
+        #expect(AudioCapture.meterChannel(selected: -1, channelCount: 1) == 0)
+    }
+}

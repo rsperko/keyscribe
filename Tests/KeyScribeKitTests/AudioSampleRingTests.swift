@@ -21,7 +21,7 @@ struct AudioSampleRingTests {
             ch0 = Array(channel(0)); ch1 = Array(channel(1))
         }
         #expect(got)
-        #expect(seen == .init(frameCount: 5, channelCount: 2, sampleRate: 48_000, hostTime: 111))
+        #expect(seen == .init(frameCount: 5, channelCount: 2, sampleRate: 48_000, hostTime: 111, sourceID: 0))
         #expect(ch0 == [3, 3, 3, 3, 3])
         #expect(ch1 == [4, 4, 4, 4, 4])
     }
@@ -68,7 +68,7 @@ struct AudioSampleRingTests {
             ch0 = Array(channel(0))
             ch1 = Array(channel(1))
         })
-        #expect(seen == .init(frameCount: 2, channelCount: 2, sampleRate: 48_000, hostTime: 1))
+        #expect(seen == .init(frameCount: 2, channelCount: 2, sampleRate: 48_000, hostTime: 1, sourceID: 0))
         #expect(ch0 == [10, 10])
         #expect(ch1 == [11, 11])
         #expect(ring.droppedCount == 0)

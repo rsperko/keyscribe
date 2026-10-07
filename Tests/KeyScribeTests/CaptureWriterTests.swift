@@ -133,6 +133,227 @@ struct CaptureWriterTests {
         return Array(UnsafeBufferPointer(start: channel[0], count: Int(buffer.frameLength)))
     }
 
+    private typealias Slot = (channels: Int, rate: Double, frames: Int, source: UInt32)
+
+    private struct MultichannelCapture {
+        let writer: CaptureWriter
+        let drained: [Float]
+    }
+
+    // `signal(channel, frame)` is evaluated at the frame's position in the whole take, so a tone stays
+    // phase-continuous across slots. The ring holds every pushed slot, so nothing overruns while the writer polls.
+    private func multichannelCapture(
+        to url: URL, slots: [Slot], recordRate: Double = 16_000,
+        signal: @escaping (Int, Int, Double) -> Float
+    ) throws -> MultichannelCapture {
+        let format = recordFormat(recordRate)
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let ring = AudioSampleRing(
+            slotCount: slots.count + 2, maxFramesPerSlot: slots.map { $0.frames }.max()!, maxChannels: 8)
+        let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
+        writer.start()
+        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
+        var frameStart = 0
+        var rateStart = slots.first?.rate ?? recordRate
+        for (i, slot) in slots.enumerated() {
+            if slot.rate != rateStart { rateStart = slot.rate; frameStart = 0 }
+            let base = frameStart
+            ring.write(channelCount: slot.channels, frameCount: slot.frames, sampleRate: slot.rate,
+                       hostTime: UInt64(i + 1), sourceID: slot.source) { c, dest in
+                for k in 0..<dest.count { dest[k] = signal(c, base + k, slot.rate) }
+            }
+            frameStart += slot.frames
+        }
+        writer.finish(flushConverter: true)
+        return MultichannelCapture(writer: writer, drained: writer.drainedSamples() ?? [])
+    }
+
+    private func rms(_ samples: ArraySlice<Float>) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        return (samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count)).squareRoot()
+    }
+
+    private func tone(_ frame: Int, _ rate: Double, amplitude: Float = 0.3) -> Float {
+        amplitude * Float(sin(2 * Double.pi * 440 * Double(frame) / rate))
+    }
+
+    // Deterministic, roughly uniform noise in [-amplitude, amplitude].
+    private func noise(_ frame: Int, amplitude: Float) -> Float {
+        var x = UInt32(truncatingIfNeeded: frame &* 2_654_435_761 &+ 12_345)
+        x ^= x >> 13; x &*= 0x5bd1_e995; x ^= x >> 15
+        return amplitude * (Float(x) / Float(UInt32.max) * 2 - 1)
+    }
+
+    private func repeated(_ count: Int, channels: Int, rate: Double, frames: Int, source: UInt32 = 0) -> [Slot] {
+        Array(repeating: (channels, rate, frames, source), count: count)
+    }
+
+    @Test func aSignalOnlyOnTheSecondChannelIsWrittenAtFullLevelWithoutResampling() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(20, channels: 2, rate: 16_000, frames: 160)) { c, _, _ in c == 1 ? 0.25 : 0 }
+        let wav = try readMonoFloat(url)
+        #expect(wav.count == 3200)
+        #expect(abs(rms(wav[...]) - 0.25) < 0.0025)
+        #expect(capture.drained == wav)
+    }
+
+    @Test func aToneOnlyOnTheSecondChannelSurvivesResamplingAtFullLevel() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(30, channels: 2, rate: 48_000, frames: 480)) { c, f, r in c == 1 ? tone(f, r) : 0 }
+        let wav = try readMonoFloat(url)
+        let expected = 0.3 / Float(2).squareRoot()
+        #expect(abs(rms(wav[800..<(wav.count - 800)]) - expected) / expected < 0.03)
+        #expect(capture.drained == wav)
+    }
+
+    @Test func aToneOnTheLastOfEightChannelsIsNotAttenuated() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(30, channels: 8, rate: 48_000, frames: 480)) { c, f, r in c == 7 ? tone(f, r) : 0 }
+        let wav = try readMonoFloat(url)
+        let expected = 0.3 / Float(2).squareRoot()
+        #expect(abs(rms(wav[800..<(wav.count - 800)]) - expected) / expected < 0.03)
+        #expect(capture.drained == wav)
+        #expect(capture.writer.channelSelection()?.selected == 7)
+    }
+
+    @Test func theFirstChannelIsNotSpecial() throws {
+        let first = tempURL(), second = tempURL()
+        defer { try? FileManager.default.removeItem(at: first); try? FileManager.default.removeItem(at: second) }
+        let slots = repeated(30, channels: 2, rate: 48_000, frames: 480)
+        _ = try multichannelCapture(to: first, slots: slots) { c, f, r in c == 0 ? tone(f, r) : 0 }
+        _ = try multichannelCapture(to: second, slots: slots) { c, f, r in c == 1 ? tone(f, r) : 0 }
+        #expect(try readMonoFloat(first) == readMonoFloat(second))
+    }
+
+    @Test func identicalChannelsAreWrittenAtTheMonoLevelNotDoubled() throws {
+        let stereo = tempURL(), mono = tempURL()
+        defer { try? FileManager.default.removeItem(at: stereo); try? FileManager.default.removeItem(at: mono) }
+        _ = try multichannelCapture(to: stereo, slots: repeated(30, channels: 2, rate: 48_000, frames: 480)) { _, f, r in
+            tone(f, r)
+        }
+        _ = try multichannelCapture(to: mono, slots: repeated(30, channels: 1, rate: 48_000, frames: 480)) { _, f, r in
+            tone(f, r)
+        }
+        #expect(try readMonoFloat(stereo) == readMonoFloat(mono))
+    }
+
+    @Test func speechArrivingOnAnotherChannelAfterNoiseTakesOverAtFullLevel() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let noiseAmplitude: Float = 0.03
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(60, channels: 2, rate: 48_000, frames: 480)) { c, f, r in
+                if c == 0 { return noise(f, amplitude: noiseAmplitude) }
+                return Double(f) / r < 0.1 ? 0 : tone(f, r)
+            }
+        let wav = try readMonoFloat(url)
+        let expected = 0.3 / Float(2).squareRoot()
+        let afterSwitch = wav[Int(0.25 * 16_000)..<(wav.count - 800)]
+        #expect(abs(rms(afterSwitch) - expected) / expected < 0.03)
+        #expect(capture.drained == wav)
+        let selection = try #require(capture.writer.channelSelection())
+        #expect(selection.selected == 1)
+        #expect(selection.switchCount == 1)
+    }
+
+    @Test func aShortTakeInterruptedByABumpOnAnUnusedInputStillCarriesTheSpeech() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(150, channels: 2, rate: 48_000, frames: 480)) { c, f, r in
+                let t = Double(f) / r
+                if c == 1 { return tone(f, r) }
+                return t >= 0.3 && t < 0.38 ? noise(f, amplitude: 0.9) : noise(f, amplitude: 0.001)
+            }
+        let wav = try readMonoFloat(url)
+        let expected = 0.3 / Float(2).squareRoot()
+        let afterBump = wav[Int(0.5 * 16_000)..<(wav.count - 800)]
+        #expect(abs(rms(afterBump) - expected) / expected < 0.03)
+        let selection = try #require(capture.writer.channelSelection())
+        #expect(selection.selected == 1)
+        #expect(selection.switchCount == 2)
+    }
+
+    @Test func theSelectorKeepsItsStateAcrossManyShortSlots() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(300, channels: 2, rate: 48_000, frames: 96)) { c, f, r in
+                if c == 0 { return noise(f, amplitude: 0.02) }
+                return Double(f) / r < 0.2 ? 0 : tone(f, r)
+            }
+        #expect(capture.writer.channelSelection()?.switchCount == 1)
+        #expect(capture.writer.writerDroppedFrames() == 0)
+    }
+
+    @Test func aRateChangeAtTheSameChannelCountKeepsWriting() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let slots = repeated(10, channels: 2, rate: 48_000, frames: 480)
+            + repeated(10, channels: 2, rate: 16_000, frames: 160)
+        let capture = try multichannelCapture(to: url, slots: slots) { c, _, _ in c == 1 ? 0.25 : 0 }
+        let wav = try readMonoFloat(url)
+        #expect(capture.writer.writerDroppedFrames() == 0)
+        #expect(wav.count > 3000 && wav.count < 3400)
+        #expect(abs(rms(wav[(wav.count - 1600)...]) - 0.25) < 0.0025)
+        #expect(capture.writer.channelSelection()?.selected == 1)
+    }
+
+    @Test func aChangeFromStereoToMonoResumesTheMonoPath() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let slots = repeated(10, channels: 2, rate: 16_000, frames: 160)
+            + repeated(10, channels: 1, rate: 16_000, frames: 160)
+        let capture = try multichannelCapture(to: url, slots: slots) { c, _, _ in c == 1 ? 0.25 : 0.125 }
+        let wav = try readMonoFloat(url)
+        #expect(capture.writer.writerDroppedFrames() == 0)
+        #expect(wav.count == 3200)
+        #expect(wav[0..<1600].allSatisfy { $0 == 0.25 })
+        #expect(wav[1600...].allSatisfy { $0 == 0.125 })
+        #expect(capture.writer.channelSelection() == nil)
+    }
+
+    @Test func aDifferentInputWithTheSameFormatStartsAFreshSelection() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let slots = repeated(20, channels: 2, rate: 16_000, frames: 160, source: 1)
+            + repeated(20, channels: 2, rate: 16_000, frames: 160, source: 2)
+        let capture = try multichannelCapture(to: url, slots: slots) { c, f, _ in
+            f < 3200 ? (c == 1 ? 0.25 : 0) : (c == 0 ? 0.125 : 0)
+        }
+        let wav = try readMonoFloat(url)
+        #expect(wav.count == 6400)
+        #expect(wav[0..<3200].allSatisfy { $0 == 0.25 })
+        #expect(wav[3200...].allSatisfy { $0 == 0.125 })
+        #expect(capture.writer.channelSelection()?.selected == 0)
+        #expect(capture.writer.channelSelection()?.switchCount == 0)
+    }
+
+    @Test func theSameInputKeepsItsSelectionAcrossSlots() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(
+            to: url, slots: repeated(100, channels: 2, rate: 16_000, frames: 160, source: 1)) { c, f, _ in
+                f < 9600 ? (c == 1 ? 0.25 : 0) : (c == 0 ? 0.125 : 0)
+            }
+        #expect(capture.writer.channelSelection()?.selected == 1)
+    }
+
+    @Test func monoInputHasNoChannelSelection() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try multichannelCapture(to: url, slots: repeated(5, channels: 1, rate: 16_000, frames: 160)) { _, _, _ in
+            0.25
+        }
+        #expect(capture.writer.channelSelection() == nil)
+    }
+
     @Test func directWritePathRoundTripsEveryFrame() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }

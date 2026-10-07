@@ -106,6 +106,8 @@ final class HALInputUnit {
                 au, kAudioUnitProperty_ShouldAllocateBuffer, kAudioUnitScope_Output, 1,
                 &shouldAllocate, UInt32(MemoryLayout<UInt32>.size))
 
+            // Published before start, like the ring, so the realtime handler only ever reads a settled value.
+            ringSlot.deviceID = deviceID
             context.unit = au
             context.scratch = AVAudioPCMBuffer(
                 pcmFormat: client,

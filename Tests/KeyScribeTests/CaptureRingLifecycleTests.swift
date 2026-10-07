@@ -121,6 +121,36 @@ struct CaptureRingLifecycleTests {
         #expect(armedRing.slotCount == 16)
     }
 
+    @Test func eachSlotIsTaggedWithTheDeviceItsUnitIsBoundTo() throws {
+        let atGate = DispatchSemaphore(value: 0)
+        let resume = DispatchSemaphore(value: 0)
+        let handled = DispatchSemaphore(value: 0)
+        let capture = AudioCapture(realtimeBarrier: {
+            atGate.signal()
+            resume.wait()
+        })
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let unit = try capture.armForTesting(url: url, geometry: geometry(slots: 16))
+        let armedRing = try #require(capture.armedRingForTesting)
+        unit.ringSlot.deviceID = 42
+
+        let box = UnitBox(unit)
+        Thread.detachNewThread {
+            box.unit.invokeHandlerForTesting(self.buffer(frames: 128, value: 0.5), hostTime: 1_000)
+            handled.signal()
+        }
+        atGate.wait()
+        capture.finalizeForTesting()
+        resume.signal()
+        handled.wait()
+
+        var source: UInt32?
+        armedRing.read { info, _ in source = info.sourceID }
+        #expect(source == 42)
+    }
+
     @Test func eachArmGetsItsOwnRingInstanceEvenWhenTheGeometryIsIdentical() throws {
         let capture = AudioCapture()
         let urlA = tempURL()

@@ -18,6 +18,8 @@ public final class AudioSampleRing: @unchecked Sendable {
         public let channelCount: Int
         public let sampleRate: Double
         public let hostTime: UInt64
+        // Identifies the input that delivered the slot, so the consumer can tell a rebind from a format change.
+        public let sourceID: UInt32
     }
 
     public let slotCount: Int
@@ -32,6 +34,7 @@ public final class AudioSampleRing: @unchecked Sendable {
     private let channelCounts: UnsafeMutableBufferPointer<Int>
     private let sampleRates: UnsafeMutableBufferPointer<Double>
     private let hostTimes: UnsafeMutableBufferPointer<UInt64>
+    private let sourceIDs: UnsafeMutableBufferPointer<UInt32>
 
     private let head = Atomic<Int>(0)
     private let tail = Atomic<Int>(0)
@@ -83,6 +86,7 @@ public final class AudioSampleRing: @unchecked Sendable {
         channelCounts = .allocate(capacity: slotCount); channelCounts.initialize(repeating: 0)
         sampleRates = .allocate(capacity: slotCount); sampleRates.initialize(repeating: 0)
         hostTimes = .allocate(capacity: slotCount); hostTimes.initialize(repeating: 0)
+        sourceIDs = .allocate(capacity: slotCount); sourceIDs.initialize(repeating: 0)
     }
 
     deinit {
@@ -91,6 +95,7 @@ public final class AudioSampleRing: @unchecked Sendable {
         channelCounts.deallocate()
         sampleRates.deallocate()
         hostTimes.deallocate()
+        sourceIDs.deallocate()
     }
 
     private func slotBase(_ slot: Int, _ channel: Int) -> Int {
@@ -98,10 +103,10 @@ public final class AudioSampleRing: @unchecked Sendable {
     }
 
     // Producer side. Extra channels are truncated to the fixed storage geometry because the writer
-    // downmixes to mono.
+    // records one channel.
     @discardableResult
     public func write(
-        channelCount: Int, frameCount: Int, sampleRate: Double, hostTime: UInt64,
+        channelCount: Int, frameCount: Int, sampleRate: Double, hostTime: UInt64, sourceID: UInt32 = 0,
         fill: (_ channel: Int, _ dest: UnsafeMutableBufferPointer<Float>) -> Void
     ) -> Bool {
         guard frameCount > 0, frameCount <= maxFramesPerSlot, channelCount > 0 else {
@@ -120,6 +125,7 @@ public final class AudioSampleRing: @unchecked Sendable {
         channelCounts[slot] = storedChannelCount
         sampleRates[slot] = sampleRate
         hostTimes[slot] = hostTime
+        sourceIDs[slot] = sourceID
         tail.store(t + 1, ordering: .releasing)
         return true
     }
@@ -135,7 +141,7 @@ public final class AudioSampleRing: @unchecked Sendable {
         let slot = h % slotCount
         let info = SlotInfo(
             frameCount: frameCounts[slot], channelCount: channelCounts[slot],
-            sampleRate: sampleRates[slot], hostTime: hostTimes[slot])
+            sampleRate: sampleRates[slot], hostTime: hostTimes[slot], sourceID: sourceIDs[slot])
         let frames = info.frameCount
         body(info) { channel in
             let base = self.storage.baseAddress! + self.slotBase(slot, channel)

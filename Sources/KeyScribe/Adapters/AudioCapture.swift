@@ -107,6 +107,7 @@ private final class CaptureSession: @unchecked Sendable {
 // changes only before that generation can deliver, so realtime reads need no lock.
 final class CaptureRingSlot: @unchecked Sendable {
     var ring: AudioSampleRing?
+    var deviceID: AudioDeviceID = 0
 }
 
 final class AudioCapture: AudioCapturing, @unchecked Sendable {
@@ -138,6 +139,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     private let capturing = Atomic<Bool>(false)
     private let levelBits = Atomic<UInt32>(Float(0).bitPattern)
+    // The channel the writer records, so the meter follows it. Written by the writer thread, read on the RT thread.
+    private let meteredChannel = Atomic<Int>(0)
     // Writer timestamp lets the meter fall to zero after route loss without realtime thread work.
     private let lastBufferTicks = Atomic<UInt64>(0)
     private let overloadCount = Atomic<Int>(0)
@@ -505,6 +508,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         }
         record.stage("configure")
         publishBoundInputName(for: boundDeviceID)
+        if let native = lock.withLock({ unit?.clientFormat?.channelCount }), Int(native) > Self.ringMaxChannels {
+            Log.audio.error(
+                "input has \(native, privacy: .public) channels; only the first \(Self.ringMaxChannels, privacy: .public) are captured")
+        }
 
         // Quiescent window for resetting/replacing the shared ring before the IOProc starts.
         producerGeneration.store(-1, ordering: .releasing)
@@ -559,6 +566,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         overloadCount.store(0, ordering: .relaxed)
         lock.withLock { unit?.resetOversizeDropCount(); oversizeDropsAccumulated = 0 }
         levelBits.store(Float(0).bitPattern, ordering: .relaxed)
+        meteredChannel.store(0, ordering: .relaxed)
         // 0 reads as "no buffer yet", so the meter stays silent until this capture delivers one rather than
         // inheriting the previous capture's freshness.
         lastBufferTicks.store(0, ordering: .relaxed)
@@ -574,6 +582,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             onFirstBuffer: {
                 record.noteFirstBuffer()
                 ready.signal()
+            },
+            onChannelSelected: { [weak self] channel in
+                self?.meteredChannel.store(channel, ordering: .relaxed)
             },
             // Already the writer thread's per-buffer hook, so meter freshness rides it rather than adding a
             // second callback — and stays off the realtime thread entirely.
@@ -696,7 +707,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             #if DEBUG
             self.realtimeBarrier?()
             #endif
-            self.handle(buffer, hostTime: hostTime, ring: ring)
+            self.handle(buffer, hostTime: hostTime, ring: ring, sourceID: ringSlot.deviceID)
         }
     }
 
@@ -863,8 +874,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // restart already disposed. `oversizeDropped` is a silent-loss class upstream of the ring (device grew
         // its IO period past scratch mid-capture).
         lastOversizeDroppedCount = lock.withLock { oversizeDropsAccumulated + (unit?.oversizeDropCount ?? 0) }
+        let channelSuffix = s.writer.channelSelection().map { " " + $0.logSummary } ?? ""
         Log.audio.debug(
-            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public) writerDropped=\(self.lastWriterDroppedCount, privacy: .public) oversizeDropped=\(self.lastOversizeDroppedCount, privacy: .public)")
+            "capture ended: ringDropped=\(self.lastRingDroppedCount, privacy: .public) overloads=\(self.overloadCount.load(ordering: .relaxed), privacy: .public) writerDropped=\(self.lastWriterDroppedCount, privacy: .public) oversizeDropped=\(self.lastOversizeDroppedCount, privacy: .public)\(channelSuffix, privacy: .public)")
         // Nothing resets or replaces a ring here, and nothing needs to: this capture's ring dies with its
         // session, and the next arm builds its own. `capturing` false and a joined writer would NOT have made it
         // safe to — this runs on the caller's thread while the unit is still started (teardown is only
@@ -905,20 +917,27 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
     // Copy delivered frames into the shared ring and publish the meter level. The realtime path stays
     // lock-free, allocation-free, and syscall-free; resampling and file I/O happen on the writer thread.
-    private func handle(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?, ring: AudioSampleRing) {
+    private func handle(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?, ring: AudioSampleRing, sourceID: AudioDeviceID) {
         guard let channels = buffer.floatChannelData else { return }
         let channelCount = Int(buffer.format.channelCount)
         let frameCount = Int(buffer.frameLength)
         ring.write(
             channelCount: channelCount, frameCount: frameCount,
-            sampleRate: buffer.format.sampleRate, hostTime: hostTime ?? 0
+            sampleRate: buffer.format.sampleRate, hostTime: hostTime ?? 0, sourceID: sourceID
         ) { c, dest in
             dest.baseAddress!.update(from: channels[c], count: frameCount)
         }
-        storeLevel(channels[0], frameCount: frameCount)
+        let metered = Self.meterChannel(
+            selected: meteredChannel.load(ordering: .relaxed), channelCount: channelCount)
+        storeLevel(channels[metered], frameCount: frameCount)
     }
 
-    // Publish the latest perceptual level for the HUD meter poll. RMS over channel 0 is an allocation-free
+    // The writer can lag a format change by a poll tick, so its published index may not fit this buffer.
+    static func meterChannel(selected: Int, channelCount: Int) -> Int {
+        min(max(0, selected), max(1, channelCount) - 1)
+    }
+
+    // Publish the latest perceptual level for the HUD meter poll. RMS over one channel is an allocation-free
     // vDSP reduction; the result is stored as a Float bit pattern in an atomic the main actor reads.
     private func storeLevel(_ channel: UnsafePointer<Float>, frameCount: Int) {
         guard frameCount > 0 else { return }
