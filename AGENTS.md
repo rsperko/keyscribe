@@ -972,7 +972,7 @@ removed spotter lives in git history only.
 ### Forked / pinned STT deps
 
 The STT deps, and which of them is forked; the fork works live and costs nothing day-to-day:
-- **WhisperKit** → `argmaxinc/argmax-oss-swift` (upstream, **no fork**), pinned `exact: "1.1.0"`.
+- **WhisperKit** → `argmaxinc/argmax-oss-swift` (upstream, **no fork**), pinned `exact:` in `Package.swift`.
   **1.1.0 is a hard floor, not a preference** — through 1.0.0, a prediction sampled while prompt
   tokens were still being force-fed could complete the segment, so *every* stock release emptied the
   transcript whenever `promptTokens` were set (#372), which is exactly how Whisper bias is

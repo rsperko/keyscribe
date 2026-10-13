@@ -1,13 +1,13 @@
 {
-  "originHash": "68d1db3c6236216ca17d76112317cb4b0451935f393a6e2e88598b2af7654544",
+  "originHash": "43126abe3b2381194ecdf42a246ef052930b87acb4cb88a1f856d2b70bdf6316",
   "pins": [
     {
       "identity": "argmax-oss-swift",
       "kind": "remoteSourceControl",
       "location": "https://github.com/argmaxinc/argmax-oss-swift.git",
       "state": {
-        "revision": "1e2a163736dfa5a198e637ae44c114e1c6d5cc2d",
-        "version": "1.1.0"
+        "revision": "1bbc57cb7fe6410248a685b1c5a3c6d56adc2ed4",
+        "version": "1.1.1"
       }
     },
     {
@@ -24,7 +24,7 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/FluidInference/FluidAudio.git",
       "state": {
-        "revision": "4dbf4f9f9a5ff3a53ade848d7ba4e3df13db859b"
+        "revision": "503b4bd1bbf7220882de39fe8ae6716aae4132da"
       }
     },
     {
@@ -32,8 +32,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/ml-explore/mlx-swift",
       "state": {
-        "revision": "dc43e62d7055353c7f99fa071a4e71d29dfddc44",
-        "version": "0.31.4"
+        "revision": "19601207e9a0de51e03ee6ec0c3c5f3784275075",
+        "version": "0.32.3"
       }
     },
     {
@@ -41,8 +41,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/sparkle-project/Sparkle",
       "state": {
-        "revision": "79bc9e872948e47877e76f194cb0c8e0412b0b90",
-        "version": "2.9.5"
+        "revision": "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version": "2.10.0"
       }
     },
     {
