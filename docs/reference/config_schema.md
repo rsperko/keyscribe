@@ -532,7 +532,7 @@ schema_version = 1
 load_on_login = false
 
 [stt]
-engine = "parakeet"             # the single active engine (default: Parakeet TDT v3)
+engine = "parakeet-ultra"       # the single active engine (default: Parakeet Ultra)
 eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fastest)
 # Governs both STT-model residency AND idle microphone warm-up (the input unit is kept prewarmed for
 # instant starts). Fastest = model loaded + mic held warm (periodic binding refresh); Balanced = both

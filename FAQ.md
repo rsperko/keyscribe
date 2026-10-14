@@ -68,18 +68,21 @@ you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
 ### Which speech model should I pick?
 
 Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint.
-**Settings ▸ Speech Models** lists what is available, with each model's size and language coverage.
-What to look for:
+**Settings ▸ Speech Models** lists what is available, with each model's accuracy (Highest, High,
+Good, or Lower), size, and language coverage. What to look for:
 
-- **Best accuracy:** the largest multilingual model in the list.
-- **Good default:** the one already selected — fast, low-memory, and multilingual. Start there and
-  switch only if something specific pushes you off it.
+- **Good default:** the one marked **Recommended** — accurate, fast, and multilingual. Start there
+  and switch only if something specific pushes you off it.
+- **Best accuracy:** a model labeled Highest accuracy. They are larger and use more memory.
+- **No download:** Apple's built-in speech works immediately, but it is labeled Lower accuracy — fine for
+  trying things out, not the best choice for everyday dictation.
 - **Punctuation without AI rewrite:** one English-only model writes punctuation and capitalization
   for you; its description says so.
-- **Smallest / fastest footprint:** the compact English-only models.
 - **Noisy places:** the large models barely lose accuracy with real background noise; the small ones
   lose noticeably more, and the built-in system model degrades the most. If you often dictate in
   cafés, open offices, or transit, pick a large one.
+- **Legacy:** a model marked Legacy still works but is being phased out; switch to the recommended
+  model when convenient.
 
 You can switch engines anytime in **Settings ▸ Speech Models**; each is downloaded on first use.
 Alongside your first speech model, KeyScribe also fetches a tiny (~1 MB) voice-activity-detection model

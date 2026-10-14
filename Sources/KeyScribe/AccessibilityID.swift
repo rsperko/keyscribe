@@ -233,7 +233,6 @@ enum AccessibilityID {
             static let advancedDisclosure = "firstrun.model.advancedDisclosure"
             static let enginePicker = "firstrun.model.enginePicker"
             static let progress = "firstrun.model.progress"
-            static let useAppleSpeech = "firstrun.model.useAppleSpeech"
             static let download = "firstrun.model.download"
         }
 
@@ -383,7 +382,7 @@ enum AccessibilityID {
         Mode.Editor.Recognition.editVocabulary,
         FirstRun.Intro.getStarted,
         FirstRun.Model.advancedDisclosure, FirstRun.Model.enginePicker, FirstRun.Model.progress,
-        FirstRun.Model.useAppleSpeech, FirstRun.Model.download,
+        FirstRun.Model.download,
         FirstRun.Permissions.skip, FirstRun.Permissions.done, FirstRun.Permissions.relaunch,
         FirstRun.Permissions.relaunchFailed, FirstRun.Permissions.continue,
         FirstRun.TryIt.field, FirstRun.TryIt.skip, FirstRun.TryIt.done,

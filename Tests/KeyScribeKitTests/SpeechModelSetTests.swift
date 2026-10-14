@@ -8,7 +8,8 @@ private func info(
     SpeechModelInfo(
         id: id, kind: .whisper, displayName: id, summary: "", languageCount: 1,
         approxDownloadBytes: system ? 0 : 1, systemManaged: system,
-        isDefaultEnglish: defaultEnglish, supportsRecognitionBias: supportsRecognitionBias)
+        isDefaultEnglish: defaultEnglish, supportsRecognitionBias: supportsRecognitionBias,
+        accuracy: .good)
 }
 
 private let realCatalog = SpeechModelCatalog.all
@@ -170,6 +171,14 @@ struct SpeechModelSetTests {
         #expect(s.activeId == "whisper")
     }
 
+    @Test func unknownActivePrefersAnInstalledLegacyModelOverBuiltInSpeech() {
+        let legacy = realCatalog.first(where: \.isLegacy)!.id
+        var s = SpeechModelSet(catalog: realCatalog, installed: [legacy], activeId: "retired-model")
+        let replaced = s.replaceUnknownActive()
+        #expect(replaced)
+        #expect(s.activeId == legacy)
+    }
+
     @Test func unknownActiveFallsBackToAppleWhenNothingIsInstalled() {
         var s = SpeechModelSet(catalog: realCatalog, installed: [], activeId: "retired-model")
         let replaced = s.replaceUnknownActive()
@@ -182,7 +191,7 @@ struct SpeechModelSetTests {
         var s = SpeechModelSet(catalog: withoutApple, installed: [], activeId: "apple")
         let replaced = s.replaceUnknownActive()
         #expect(replaced)
-        #expect(s.activeId == "parakeet")
+        #expect(s.activeId == SpeechModelCatalog.defaultEnglishId)
         #expect(!s.isUsable(s.activeId))
     }
 

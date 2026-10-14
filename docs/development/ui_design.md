@@ -47,7 +47,11 @@ The sequence is short, and each step states its purpose in plain language:
 
 1. **One sentence on what KeyScribe does**, then a single primary action to begin.
 2. **Choose and download one on-device speech model.** Show its size and that it stays on the
-   Mac; recommend the default English engine. Downloading is required — nothing can be
+   Mac; recommend the default English engine, and offer no legacy model. The built-in macOS model is an
+   ordinary entry in the same picker (its action reads `Use <model>` instead of `Download`), never a
+   separate shortcut, and every choice states its accuracy label. The picker opens on the recommended
+   model unless the active model is one the user already downloaded and setup still offers — never on
+   the built-in model just because it is active. Downloading is required — nothing can be
    transcribed without it. Progress attaches to the choice, not a separate screen.
 3. **Grant Microphone, then Accessibility — in that order, each explained beside its request and
    asked just before it is first needed:** Microphone to hear you, Accessibility to detect a
@@ -519,8 +523,10 @@ always-usable system engine) and **Available to Download** (catalog models not y
 mid-download or verifying stays here until it verifies `Ready`, then promotes). Rows show only names
 plus status; there are no radio controls, per-row actions, or bottom download menu — acquisition is
 the selected model's own **Download** button. Selecting a model fills the right detail pane, under the
-shared detail header (icon + name + **Recommended** badge), with its best-use description, language
-coverage, disk requirement, and light/moderate/high memory use, and the one primary lifecycle action:
+shared detail header (icon + name + **Recommended** or **Legacy** badge), with its best-use description,
+its accuracy label (`Highest` / `High` / `Good` / `Lower accuracy` — a bucket, never a WER figure, so a
+single-voice benchmark is not presented as a score), language coverage, disk requirement, and
+light/moderate/high memory use, and the one primary lifecycle action:
 **Current**, **Use This Model**, **Download**, or its live install/test state. A model in
 **Available to Download** shows an `AVAILABLE TO DOWNLOAD` label and a reduced read-only preview — the
 facts and the `Download` button only, with no recognition or maintenance controls. Downloaded models do not
@@ -531,6 +537,12 @@ model** sits alone at the trailing edge in red — the destructive action is spa
 routine maintenance, never stacked with it. Exactly one active engine is visually enforced, and
 deleting it still requires confirmation.
 
+**Legacy models** are on their way out: they keep working and stay installable, but first run no longer
+offers them, they sort to the end of the list, an uninstalled one's row reads `Legacy · …`, and the
+detail shows an advisory `IssueText` — *Being phased out. Switch to <recommended model>, the recommended
+model.* — including when it is the active model. The app never switches a user off a legacy model on its
+own; that happens only when the model is retired a later release, through the replaced-model notice below.
+
 **Apple Speech** is one entry that runs one of two Apple models. It uses Apple Speech wherever this
 Mac and language support it, and otherwise Apple Dictation, Apple's earlier dictation model. The list
 name never changes. Its detail shows which model is in play as a plain secondary line under the facts:
@@ -539,12 +551,12 @@ on this Mac` (or `… for <language>`, or `… Apple Speech couldn’t be downlo
 failed and Apple Dictation stood in; the app retries in the background and switches back once it lands).
 When neither Apple model covers the user's language, the line
 reads `Apple Speech isn’t available for <language>` and claims no model in use. The fallback is a valid outcome, not a problem, so it is not an
-`IssueText`. Its Languages fact reads `Depends on this Mac`, because macOS sets that coverage and it
+`IssueText`. Its Languages fact reads `Languages vary by Mac`, because macOS sets that coverage and it
 differs between the two models.
 
 When the saved model can no longer run here — it was retired, or it needs a newer macOS — launch picks
-the model deleting the active one would (the default English model if it is usable, otherwise the first
-usable model, which is Apple Speech on macOS 26+) and saves that choice. The new active model's detail
+the model deleting the active one would (the default English model if it is usable, otherwise a downloaded
+model the user already has — legacy included — and only then Apple Speech on macOS 26+) and saves that choice. The new active model's detail
 then shows an advisory `IssueText` naming what changed — for example *Moonshine Base (English) is no
 longer included in KeyScribe. Now using Apple Speech.* — or, when nothing usable is installed, asks for a
 download. The notice clears when the user selects a model. It does not return after a relaunch, because

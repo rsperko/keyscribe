@@ -12,15 +12,49 @@ struct FirstRunFlowTests {
 
     private func makeModel(
         supportDir: URL,
+        activeEngineId: String = SpeechModelCatalog.defaultEnglishId,
+        installedEngineIds: Set<String> = [],
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void = { _, _ in },
         onComplete: @escaping () -> Void = {}
     ) -> FirstRunModel {
         FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
+            activeEngineId: activeEngineId, installedEngineIds: installedEngineIds,
             download: download,
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: onComplete)
+    }
+
+    @Test func wizardOpensOnTheRecommendedModel() {
+        #expect(makeModel(supportDir: tempSupportDir()).selectedEngineId == SpeechModelCatalog.defaultEnglishId)
+    }
+
+    @Test func wizardReopensOnAnInstalledModelTheUserAlreadyChose() {
+        let model = makeModel(supportDir: tempSupportDir(), activeEngineId: "whisper", installedEngineIds: ["whisper"])
+        #expect(model.selectedEngineId == "whisper")
+    }
+
+    @Test func wizardDoesNotPreselectBuiltInSpeech() {
+        let model = makeModel(supportDir: tempSupportDir(), activeEngineId: "apple")
+        #expect(model.selectedEngineId == SpeechModelCatalog.defaultEnglishId)
+    }
+
+    @Test func wizardDoesNotPreselectAModelThatWasNeverDownloaded() {
+        let model = makeModel(supportDir: tempSupportDir(), activeEngineId: "parakeet")
+        #expect(model.selectedEngineId == SpeechModelCatalog.defaultEnglishId)
+    }
+
+    @Test func wizardDoesNotPreselectALegacyModel() {
+        let legacy = SpeechModelCatalog.all.first(where: \.isLegacy)!.id
+        let model = makeModel(supportDir: tempSupportDir(), activeEngineId: legacy, installedEngineIds: [legacy])
+        #expect(model.selectedEngineId == SpeechModelCatalog.defaultEnglishId)
+    }
+
+    @Test func setupOffersEveryCurrentModelIncludingBuiltInSpeech() {
+        let model = makeModel(supportDir: tempSupportDir())
+        #expect(model.setupModels.allSatisfy { !$0.isLegacy })
+        #expect(model.setupModels.first?.id == SpeechModelCatalog.defaultEnglishId)
+        #expect(model.setupModels.contains { $0.id == "apple" })
     }
 
     private func writeDirect(_ triggerKeys: [Mode.TriggerKey], to modesDir: URL) throws {
@@ -126,13 +160,13 @@ struct FirstRunFlowTests {
         final class Box { var ids: [String] = [] }
         let box = Box()
         let model = FirstRunModel(
-            initialEngineId: "whisper",
             download: { _, _ in throw Boom() },
             selectEngine: { _ in },
             cleanupFailedDownload: { box.ids.append($0) },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
+        model.selectedEngineId = "whisper"
         model.beginDownload()
         await model.downloadTask?.value
 
@@ -146,13 +180,13 @@ struct FirstRunFlowTests {
         defer { try? FileManager.default.removeItem(at: supportDir) }
         struct Boom: Error {}
         let model = FirstRunModel(
-            initialEngineId: "whisper",
             download: { _, _ in throw Boom() },
             selectEngine: { _ in },
             cleanupFailedDownload: { _ in throw Boom() },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
+        model.selectedEngineId = "whisper"
         model.beginDownload()
         await model.downloadTask?.value
 
@@ -166,13 +200,13 @@ struct FirstRunFlowTests {
         final class Box { var cleaned = false }
         let box = Box()
         let model = FirstRunModel(
-            initialEngineId: "whisper",
             download: { _, _ in throw FirstRunDownloadError.installStateNotSaved },
             selectEngine: { _ in },
             cleanupFailedDownload: { _ in box.cleaned = true },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
 
+        model.selectedEngineId = "whisper"
         model.beginDownload()
         await model.downloadTask?.value
 

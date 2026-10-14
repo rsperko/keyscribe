@@ -17,7 +17,8 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     let recordingState = HotkeyRecordingState()
 
     init(
-        initialEngineId: String,
+        activeEngineId: String,
+        installedEngineIds: Set<String>,
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
         onReadyToDictate: @escaping () -> Void,
@@ -34,7 +35,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
     ) {
         self.onComplete = onComplete
         model = FirstRunModel(
-            initialEngineId: initialEngineId, download: download,
+            activeEngineId: activeEngineId, installedEngineIds: installedEngineIds, download: download,
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
             resumeOnboarding: resumeOnboarding,
             repository: repository, permits: AIServiceCatalog.permits, saveAPIKey: saveAPIKey,
@@ -166,7 +167,7 @@ final class FirstRunModel: ObservableObject {
     private var rememberedTrigger: Mode.TriggerKey?
 
     let catalog = EngineRegistry.availableCatalog
-    var appleSpeechAvailable: Bool { catalog.contains { $0.id == "apple" } }
+    var setupModels: [SpeechModelInfo] { catalog.filter { !$0.isLegacy } }
     let permissionsOnly: Bool
     private let download: (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void
     // Removes a partially-downloaded model's files when a download fails or is cancelled, so the next
@@ -233,7 +234,8 @@ final class FirstRunModel: ObservableObject {
     var aiModelDiscoveryError: String? { aiDraft.modelDiscoveryError }
 
     init(
-        initialEngineId: String,
+        activeEngineId: String = SpeechModelCatalog.defaultEnglishId,
+        installedEngineIds: Set<String> = [],
         download: @escaping (String, @escaping @Sendable (ModelLoadProgress) -> Void) async throws -> Void,
         selectEngine: @escaping (String) -> Void,
         cleanupFailedDownload: @escaping (String) async throws -> Void = { id in
@@ -255,7 +257,9 @@ final class FirstRunModel: ObservableObject {
         },
         onComplete: @escaping () -> Void
     ) {
-        self.selectedEngineId = initialEngineId
+        let resumable = installedEngineIds.contains(activeEngineId)
+            && EngineRegistry.availableCatalog.contains { $0.id == activeEngineId && !$0.isLegacy }
+        self.selectedEngineId = resumable ? activeEngineId : SpeechModelCatalog.defaultEnglishId
         self.download = download
         self.cleanupFailedDownload = cleanupFailedDownload
         self.selectEngine = selectEngine
@@ -300,10 +304,9 @@ final class FirstRunModel: ObservableObject {
 
     var selectedInfo: SpeechModelInfo? { SpeechModelCatalog.entry(for: selectedEngineId) }
 
-    func skipModelDownload() {
-        if catalog.contains(where: { $0.id == "apple" && $0.systemManaged }) {
-            selectEngine("apple")
-        }
+    func confirmModelChoice() {
+        guard selectedInfo?.systemManaged == true else { return beginDownload() }
+        selectEngine(selectedEngineId)
         step = .permissions
     }
 

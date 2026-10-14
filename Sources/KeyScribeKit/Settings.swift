@@ -363,7 +363,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public static let defaults = Settings(
         schemaVersion: 1,
         loadOnLogin: false,
-        stt: STT(engine: "parakeet", eviction: .fastest),
+        stt: STT(engine: SpeechModelCatalog.defaultEnglishId, eviction: .fastest),
         duringDictation: DuringDictation(
             otherAudio: .quiet, keepDisplayAwake: true, sounds: true, soundVolumePercent: 100),
         history: History(enabled: true, retentionDays: 7),

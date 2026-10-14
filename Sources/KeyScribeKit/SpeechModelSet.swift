@@ -57,8 +57,8 @@ public struct SpeechModelSet: Equatable, Sendable {
     }
 
     private func preferredUsableId() -> String? {
-        let usable = catalog.map(\.id).filter(isUsable)
-        return usable.first { info($0)?.isDefaultEnglish == true } ?? usable.first
+        let usable = catalog.filter { isUsable($0.id) }
+        return (usable.first(where: \.isDefaultEnglish) ?? usable.first { !$0.systemManaged } ?? usable.first)?.id
     }
 
     public mutating func markInstalled(_ id: String) {

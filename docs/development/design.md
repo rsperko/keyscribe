@@ -155,10 +155,12 @@ A single `SpeechEngine` interface; concrete engines (the user selects exactly on
 A **curated set** of models ships across the **Parakeet**, **Whisper**, **Apple Speech**, and
 **Qwen3-ASR** families — `SpeechModelCatalog.all` is the list — all with in-app download/install
 except the system-managed Apple engine:
-- **FluidAudio / Parakeet TDT v3** — **default for English** (`isDefaultEnglish`). Larger
-  multilingual Parakeet (25 languages); **pyannote speaker diarization bundled** in the same SDK.
-- **FluidAudio / Parakeet Unified 0.6B (English)** — the strongest Parakeet on English and the only
-  one that emits punctuation and capitalization. English only, so it is not the default. Reached
+- **FluidAudio / Parakeet Ultra** — **default for English** (`isDefaultEnglish`). A retrained TDT v3:
+  same architecture, API and 25 languages, more accurate at the same speed, larger download.
+- **FluidAudio / Parakeet TDT v3** — the original multilingual Parakeet (25 languages), a smaller
+  download than Ultra; **pyannote speaker diarization bundled** in the same SDK.
+- **FluidAudio / Parakeet Unified 0.6B (English)** — the only Parakeet that emits punctuation and
+  capitalization. English only, so it is not the default. Reached
   through `UnifiedAsrManager`, not `AsrModels`, so it is a separate adapter under the same kind.
 - **FluidAudio / Parakeet TDT-CTC 110M** — compact (~330MB), fast. English only.
 - **Whisper** (Large v3 Turbo via WhisperKit) — broad multilingual coverage, 99 languages.
@@ -178,7 +180,7 @@ except the system-managed Apple engine:
   `--apple-model dictation` (or `KEYSCRIBE_APPLE_MODEL`) forces the fallback so it stays measurable on
   a Mac that would never reach it. Apple Dictation acts on some spoken words itself (it applies
   keyboard-dictation commands), which Apple Speech does not; no API option disables it.
-- **Qwen3-ASR 0.6B** — compact multilingual (52 languages); the speed/accuracy sweet spot.
+- **Qwen3-ASR 0.6B** — compact multilingual (52 languages) with native recognition bias.
 - **Qwen3-ASR 1.7B** — largest multilingual model (52 languages); the strongest Qwen tier in the
   current benchmark.
 

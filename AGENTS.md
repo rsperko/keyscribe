@@ -775,7 +775,16 @@ speaker/mic/room dependent — reference table + caveats in
 `docs/reference/stt_benchmarks.md`, reproduction in `corpus/stt/README.md`. The shipped list order is
 **recommended-first, grouped by engine family** (catalog order in `SpeechModelCatalog.all`), not
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
-"Recommended" badge on the small default.
+"Recommended" badge on the default.
+
+**Every model carries an accuracy bucket and a lifecycle stage, both catalog data.** `accuracy`
+(`SpeechAccuracy`) is assigned from the as-shipped benchmark under the rule in
+`docs/reference/stt_benchmarks.md` ("Accuracy labels") — re-bucket when a model is added or an engine
+dependency moves, never by feel. `isLegacy` is the deprecation path: a legacy model keeps working but is
+not offered at first run, trails the catalog, and shows a "being phased out" advisory naming the
+recommended model; no sooner than one release later it is **retired** — removed from `all` and added to
+`retiredDisplayNames`, which moves its users to a usable model with a notice. Never retire a model that was
+not legacy in a shipped release, and never switch a user off a legacy model automatically.
 
 ### Silence / no-speech behavior — exercise every new model
 
@@ -849,6 +858,7 @@ Empirically observed no-speech output (2026-07-01, one machine — deterministic
 |---|---|
 | Parakeet TDT v3 / TDT-CTC 110M | `""` (clean empty — greedy TDT discards blanks) |
 | Parakeet Unified 0.6B (en) | `""` (clean empty; swept 2026-09-09 over 1/2/3/5 s silence + 3 s and 6 s hiss) |
+| Parakeet Ultra | `""` (clean empty; swept 2026-10-13 over 1/2/3/5/7 s silence + 4 s hiss at 0.01–0.05 and 6 s hiss) |
 | Qwen3-ASR 0.6B | `""` |
 | Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
 | Whisper Large v3 Turbo | lexical hallucinations: `Thank you.`, `.`, `...` |

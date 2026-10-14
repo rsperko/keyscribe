@@ -5,7 +5,7 @@ struct SpeechModelCatalogTests {
     @Test func curatedListIsTheKnownEngines() {
         #expect(
             Set(SpeechModelCatalog.all.map(\.id))
-                == ["parakeet", "parakeet-unified-en", "parakeet-tdt-ctc-110m", "whisper",
+                == ["parakeet", "parakeet-unified-en", "parakeet-ultra", "parakeet-tdt-ctc-110m", "whisper",
                     "whisper-small-en", "apple", "qwen3-asr-0.6b", "qwen3-asr-1.7b"])
     }
 
@@ -18,8 +18,8 @@ struct SpeechModelCatalogTests {
 
     @Test func exactlyOneDefaultEnglishEngine() {
         #expect(SpeechModelCatalog.all.filter(\.isDefaultEnglish).count == 1)
-        #expect(SpeechModelCatalog.defaultEnglishId == "parakeet")
-        #expect(SpeechModelCatalog.entry(for: "parakeet")?.isDefaultEnglish == true)
+        #expect(SpeechModelCatalog.defaultEnglishId == "parakeet-ultra")
+        #expect(SpeechModelCatalog.entry(for: "parakeet-ultra")?.isDefaultEnglish == true)
     }
 
     @Test func appleIsSystemManagedWithNoDownload() {
@@ -65,6 +65,51 @@ struct SpeechModelCatalogTests {
         let ctc = ids.firstIndex(of: "parakeet-tdt-ctc-110m")
         #expect(unified == v3.map { $0 + 1 })
         #expect(unified.map { u in ctc.map { u < $0 } } == true)
+    }
+
+    @Test func parakeetUltraIsTheRecommendedMultilingualParakeet() {
+        let ultra = SpeechModelCatalog.entry(for: "parakeet-ultra")
+        let v3 = SpeechModelCatalog.entry(for: "parakeet")
+        #expect(ultra?.kind == .parakeet)
+        #expect(ultra?.languageCount == v3?.languageCount)
+        #expect(ultra?.isDefaultEnglish == true)
+        #expect(v3?.isDefaultEnglish == false)
+        #expect(ultra?.supportsRecognitionBias == false)
+        #expect((ultra?.approxDownloadBytes ?? 0) > 0)
+        #expect((ultra?.approxMemoryBytes ?? 0) > 0)
+    }
+
+    @Test func recommendedParakeetLeadsTheCatalogAheadOfV3() {
+        let ids = SpeechModelCatalog.all.map(\.id)
+        #expect(ids.first == SpeechModelCatalog.defaultEnglishId)
+        #expect(ids.firstIndex(of: "parakeet") == 1)
+    }
+
+    @Test func recommendedModelIsNeitherLegacyNorLower() {
+        let recommended = SpeechModelCatalog.entry(for: SpeechModelCatalog.defaultEnglishId)
+        #expect(recommended?.isLegacy == false)
+        #expect((recommended?.accuracy ?? .lower) > .lower)
+    }
+
+    @Test func legacyModelsTrailEveryCurrentModel() {
+        let legacy = SpeechModelCatalog.all.enumerated().filter { $0.element.isLegacy }.map(\.offset)
+        let current = SpeechModelCatalog.all.enumerated().filter { !$0.element.isLegacy }.map(\.offset)
+        #expect(!legacy.isEmpty)
+        #expect((current.max() ?? 0) < (legacy.min() ?? .max))
+    }
+
+    @Test func compactParakeetIsLegacy() {
+        #expect(SpeechModelCatalog.entry(for: "parakeet-tdt-ctc-110m")?.isLegacy == true)
+    }
+
+    @Test func appleSpeechIsLabeledLowerSoNoOneMistakesItForTheBest() {
+        #expect(SpeechModelCatalog.entry(for: "apple")?.accuracy == .lower)
+    }
+
+    @Test func accuracyBucketsOrderFromLowerToHighest() {
+        #expect(SpeechAccuracy.lower < .good)
+        #expect(SpeechAccuracy.good < .high)
+        #expect(SpeechAccuracy.high < .highest)
     }
 
     @Test func languageCountsAreSane() {

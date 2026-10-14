@@ -1,3 +1,4 @@
+import Foundation
 import KeyScribeKit
 
 enum SpeechModelChoicePrimaryAction: Equatable {
@@ -11,15 +12,44 @@ enum SpeechModelChoicePrimaryAction: Equatable {
 
 enum SpeechModelChoiceCopy {
     static func bestFor(_ info: SpeechModelInfo) -> String {
-        switch info.id {
-        case "parakeet": "Fast, accurate dictation for most people."
-        case "apple": "No download and the fastest setup."
-        default: info.summary
+        if info.isDefaultEnglish { return "Fast, accurate dictation for most people." }
+        return info.id == "apple" ? "No download and the fastest setup." : info.summary
+    }
+
+    static func accuracy(_ accuracy: SpeechAccuracy) -> String {
+        switch accuracy {
+        case .highest: "Highest accuracy"
+        case .high: "High accuracy"
+        case .good: "Good accuracy"
+        case .lower: "Lower accuracy"
         }
     }
 
+    @MainActor static func setupChoiceLabel(_ info: SpeechModelInfo) -> String {
+        let prefix = info.isDefaultEnglish ? "Recommended: " : ""
+        return "\(prefix)\(info.displayName) — \(accuracy(info.accuracy)) · \(languageScope(info)) · \(footprint(info))"
+    }
+
+    @MainActor static func footprint(_ info: SpeechModelInfo) -> String {
+        info.systemManaged
+            ? "built into macOS"
+            : ByteCountFormatter.fileStyle.string(fromByteCount: info.approxDownloadBytes)
+    }
+
+    static func setupPrimaryAction(_ info: SpeechModelInfo) -> String {
+        if info.systemManaged { return "Use \(info.displayName)" }
+        return info.isDefaultEnglish ? "Download Recommended Model" : "Download \(info.displayName)"
+    }
+
+    static func legacyNotice(for info: SpeechModelInfo) -> String? {
+        guard info.isLegacy else { return nil }
+        let recommended = SpeechModelCatalog.entry(for: SpeechModelCatalog.defaultEnglishId)?.displayName
+            ?? SpeechModelCatalog.defaultEnglishId
+        return "Being phased out. Switch to \(recommended), the recommended model."
+    }
+
     static func languageScope(_ info: SpeechModelInfo) -> String {
-        guard let count = info.languageCount else { return "Depends on this Mac" }
+        guard let count = info.languageCount else { return "Languages vary by Mac" }
         return count <= 1 ? "English" : "\(count) languages"
     }
 

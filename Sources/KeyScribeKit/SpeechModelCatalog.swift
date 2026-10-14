@@ -4,6 +4,14 @@ public enum EngineKind: String, Codable, Sendable, Equatable {
     case parakeet, whisper, apple, qwen3asr
 }
 
+// Bucketed from the as-shipped benchmark WER under the rule in docs/reference/stt_benchmarks.md, and
+// re-bucketed whenever a model is added or an engine dependency moves.
+public enum SpeechAccuracy: Int, Sendable, Comparable, CaseIterable {
+    case lower, good, high, highest
+
+    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
 public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     public let id: String
     public let kind: EngineKind
@@ -18,11 +26,16 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     public let systemManaged: Bool
     public let isDefaultEnglish: Bool
     public let supportsRecognitionBias: Bool
+    public let accuracy: SpeechAccuracy
+    // Still works and stays installable, but is no longer offered to new users; it is retired (moved to
+    // `retiredDisplayNames`) no sooner than a release after it turns legacy.
+    public let isLegacy: Bool
 
     public init(
         id: String, kind: EngineKind, displayName: String, summary: String, languageCount: Int?,
         approxDownloadBytes: Int64, systemManaged: Bool, isDefaultEnglish: Bool,
-        supportsRecognitionBias: Bool, approxMemoryBytes: Int64 = 0
+        supportsRecognitionBias: Bool, accuracy: SpeechAccuracy, approxMemoryBytes: Int64 = 0,
+        isLegacy: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -34,59 +47,67 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
         self.systemManaged = systemManaged
         self.isDefaultEnglish = isDefaultEnglish
         self.supportsRecognitionBias = supportsRecognitionBias
+        self.accuracy = accuracy
+        self.isLegacy = isLegacy
     }
 }
 
 public enum SpeechModelCatalog {
     public static let all: [SpeechModelInfo] = [
         SpeechModelInfo(
+            id: "parakeet-ultra", kind: .parakeet, displayName: "Parakeet Ultra",
+            summary: "Retrained Parakeet TDT v3 — more accurate at the same speed.",
+            languageCount: 25, approxDownloadBytes: 630_000_000, systemManaged: false,
+            isDefaultEnglish: true, supportsRecognitionBias: false, accuracy: .high,
+            approxMemoryBytes: 515_000_000),
+        SpeechModelInfo(
             id: "parakeet", kind: .parakeet, displayName: "Parakeet TDT v3",
-            summary: "Larger multilingual Parakeet; slightly stronger raw accuracy.",
+            summary: "Original multilingual Parakeet — smaller download than Ultra.",
             languageCount: 25, approxDownloadBytes: 480_000_000, systemManaged: false,
-            isDefaultEnglish: true, supportsRecognitionBias: false,
+            isDefaultEnglish: false, supportsRecognitionBias: false, accuracy: .good,
             approxMemoryBytes: 515_000_000),
         SpeechModelInfo(
             id: "parakeet-unified-en", kind: .parakeet,
             displayName: "Parakeet Unified 0.6B (English)",
             summary: "English only — writes punctuation and capitalization for you.",
             languageCount: 1, approxDownloadBytes: 614_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: false,
+            isDefaultEnglish: false, supportsRecognitionBias: false, accuracy: .high,
             approxMemoryBytes: 685_000_000),
-        SpeechModelInfo(
-            id: "parakeet-tdt-ctc-110m", kind: .parakeet, displayName: "Parakeet TDT-CTC 110M",
-            summary: "Compact English model — fast, accurate, and small.",
-            languageCount: 1, approxDownloadBytes: 330_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: false,
-            approxMemoryBytes: 250_000_000),
         SpeechModelInfo(
             id: "whisper-small-en", kind: .whisper, displayName: "Whisper Small (English)",
             summary: "Compact English Whisper — smaller and faster than Turbo, lower accuracy.",
             languageCount: 1, approxDownloadBytes: 220_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: true,
+            isDefaultEnglish: false, supportsRecognitionBias: true, accuracy: .high,
             approxMemoryBytes: 1_200_000_000),
         SpeechModelInfo(
             id: "whisper", kind: .whisper, displayName: "Whisper Large v3 Turbo",
             summary: "Broad language coverage with strong accuracy.",
             languageCount: 99, approxDownloadBytes: 648_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: true,
+            isDefaultEnglish: false, supportsRecognitionBias: true, accuracy: .highest,
             approxMemoryBytes: 3_700_000_000),
         SpeechModelInfo(
             id: "qwen3-asr-0.6b", kind: .qwen3asr, displayName: "Qwen3-ASR 0.6B",
-            summary: "Compact multilingual model; the speed/accuracy sweet spot in our benchmarks.",
+            summary: "Compact multilingual model that steers toward your dictionary words as it listens.",
             languageCount: 52, approxDownloadBytes: 713_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: true,
+            isDefaultEnglish: false, supportsRecognitionBias: true, accuracy: .good,
             approxMemoryBytes: 1_700_000_000),
         SpeechModelInfo(
             id: "qwen3-asr-1.7b", kind: .qwen3asr, displayName: "Qwen3-ASR 1.7B",
             summary: "Largest multilingual model; top accuracy in our benchmarks.",
             languageCount: 52, approxDownloadBytes: 2_470_000_000, systemManaged: false,
-            isDefaultEnglish: false, supportsRecognitionBias: true,
+            isDefaultEnglish: false, supportsRecognitionBias: true, accuracy: .highest,
             approxMemoryBytes: 3_300_000_000),
         SpeechModelInfo(
             id: "apple", kind: .apple, displayName: "Apple Speech",
             summary: "Native macOS transcription. No download, fastest startup.",
             languageCount: nil, approxDownloadBytes: 0, systemManaged: true,
-            isDefaultEnglish: false, supportsRecognitionBias: false),
+            isDefaultEnglish: false, supportsRecognitionBias: false, accuracy: .lower),
+        SpeechModelInfo(
+            id: "parakeet-tdt-ctc-110m", kind: .parakeet, displayName: "Parakeet TDT-CTC 110M",
+            summary: "Compact English model — fast and small.",
+            languageCount: 1, approxDownloadBytes: 330_000_000, systemManaged: false,
+            isDefaultEnglish: false, supportsRecognitionBias: false, accuracy: .lower,
+            approxMemoryBytes: 250_000_000, isLegacy: true),
     ]
 
     // Models that no longer ship, kept so a saved setting that still names one can say what replaced it.

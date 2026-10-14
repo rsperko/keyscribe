@@ -31,6 +31,7 @@ the property of its publisher and is used under its own license.
 |---|---|---|
 | Parakeet TDT v3 / Parakeet TDT-CTC 110M | NVIDIA | CC-BY-4.0 |
 | Parakeet Unified 0.6B (English) | NVIDIA | NVIDIA Open Model License |
+| Parakeet Ultra | moondream, post-trained from NVIDIA's Parakeet TDT v3; Core ML conversion by Fluid Inference | CC-BY-4.0 |
 | pyannote segmentation/speaker models (via FluidAudio) | pyannote | CC-BY-4.0 |
 | Silero VAD Core ML (speech-presence detection) | Silero Team; Core ML conversion by Fluid Inference | MIT |
 | Whisper Large v3 Turbo / Whisper Small (English) | OpenAI | MIT |

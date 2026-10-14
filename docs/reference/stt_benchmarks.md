@@ -35,7 +35,7 @@ Apple rows were measured on the same corpus on 2026-09-25, with the fallback for
 | Qwen3-ASR 1.7B | 5.8% | 0.96 | 0.84 | 0.040 | 2.0 GB |
 | Whisper Small (English) | 6.0% | 0.97 | 0.78 | 0.063 | 217 MB |
 | Parakeet Unified 0.6B (English) | 6.5% | 0.91 | 0.80 | 0.010 | 614 MB |
-| Parakeet TDT v3 (default) | 7.1% | 0.89 | 0.77 | 0.014 | 480 MB |
+| Parakeet TDT v3 | 7.1% | 0.89 | 0.77 | 0.014 | 480 MB |
 | Qwen3-ASR 0.6B | 8.3% | 0.96 | 0.78 | 0.014 | 1.5 GB |
 | Apple Speech | 8.7% | 0.75 | 0.53 | 0.021 | managed |
 | Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 330 MB |
@@ -51,13 +51,18 @@ Apple rows were measured on the same corpus on 2026-09-25, with the fallback for
   and Settings ▸ Speech Models says which does which.
 - **Everything is faster than real time.** Every RTF is well under 1.0, so on this corpus speed is
   rarely the deciding factor — footprint and accuracy are.
-- **The default isn't the most accurate, by design.** Parakeet TDT v3 is the recommended English
-  default because it is multilingual, fast, and low-memory — not because it tops this table.
+- **The default isn't the most accurate, by design.** Parakeet Ultra is the recommended default
+  because it is multilingual, fast, and accurate for its footprint — not because it tops this table.
   "Recommended" means *sensible starting point*, not *highest score*.
-- **Parakeet Unified is the strongest Parakeet on English, and the only one that punctuates.** It
-  beats TDT v3 here on accuracy, recall, and speed, and it writes punctuation and capitalization —
-  which matters most in modes with no LLM rewrite. It is **English-only**, where TDT v3 covers 25
-  languages, which is why the multilingual model remains the default.
+- **Parakeet Unified is the only Parakeet that punctuates.** It beats TDT v3 here on accuracy,
+  recall, and speed, and it writes punctuation and capitalization — which matters most in modes with
+  no LLM rewrite. It is **English-only**, where TDT v3 and Ultra cover 25 languages, which is why
+  the default stays multilingual.
+- **Parakeet Ultra is a retrained TDT v3 covering the same 25 languages.** It is not in the tables
+  on this page because it shipped after those runs. Measured side by side (2026-10-13, no
+  dictionary), Ultra scored 7.1% WER against TDT v3's 8.3% and Parakeet Unified's 7.4% on this
+  corpus, and 9.3% against 12.0% and 9.8% on the noisy corpus below, at the same speed as TDT v3
+  (RTF 0.009) with a larger download (630 MB).
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
   `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 
@@ -96,6 +101,39 @@ sample of it.
 Reproduce with your own noise: record the twin corpus (`bash corpus/record.sh --dir stt-noisy`),
 benchmark both dirs, then `bash corpus/compare-conditions.sh corpus/stt corpus/stt-noisy` for the
 paired per-engine ΔWER, worst-degrading clips, and dictionary-term flips.
+
+## Accuracy labels
+
+Settings shows each model's accuracy as a bucket rather than a number, because a single-voice WER is a
+sanity check, not a score. The rule: take a model's **as-shipped WER** (dictionary active, as above) on
+the quiet corpus and on the noisy corpus, average the two, and bucket the result:
+
+| Label | Average of quiet and noisy WER |
+|---|---|
+| Highest accuracy | below 7.5% |
+| High accuracy | 7.5% to below 9.5% |
+| Good accuracy | 9.5% to below 12% |
+| Lower accuracy | 12% and above |
+
+Re-measure and re-bucket when a model is added or an engine dependency moves; the label lives in each
+model's catalog entry (`SpeechModelCatalog.all`). Apple Speech is bucketed on Apple's current model,
+not its fallback, which only scores lower.
+
+As measured, 2026-10-13, every model on the same day and machine:
+
+| Model | Quiet | Noisy | Average | Label |
+|---|---|---|---|---|
+| Whisper Large v3 Turbo | 5.7% | 8.2% | 6.95% | Highest |
+| Qwen3-ASR 1.7B | 5.9% | 8.0% | 6.95% | Highest |
+| Parakeet Ultra | 7.1% | 9.3% | 8.2% | High |
+| Parakeet Unified 0.6B (English) | 7.4% | 9.8% | 8.6% | High |
+| Whisper Small (English) | 6.0% | 11.9% | 8.95% | High |
+| Parakeet TDT v3 | 8.3% | 12.0% | 10.15% | Good |
+| Qwen3-ASR 0.6B | 8.2% | 13.2% | 10.7% | Good |
+| Apple Speech | 10.5% | 15.9% | 13.2% | Lower |
+| Parakeet TDT-CTC 110M | 12.0% | 18.9% | 15.45% | Lower |
+
+These differ from the tables above, which were measured on earlier dates and app versions.
 
 ## Reproduce on your own voice
 

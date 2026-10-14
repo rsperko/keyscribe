@@ -50,6 +50,7 @@ private struct NoticesView: View {
                 Text("""
                 Speech-recognition and supporting model weights (downloaded at runtime, not part of this app's source):
                 • Parakeet TDT v3 / TDT-CTC 110M — NVIDIA, CC-BY-4.0.
+                • Parakeet Ultra — moondream, post-trained from NVIDIA's Parakeet TDT v3; Core ML conversion by Fluid Inference, CC-BY-4.0.
                 • pyannote segmentation/speaker models — CC-BY-4.0.
                 • Silero VAD speech-presence model — Silero Team; Core ML conversion by Fluid Inference, MIT.
                 • Whisper — OpenAI, MIT.

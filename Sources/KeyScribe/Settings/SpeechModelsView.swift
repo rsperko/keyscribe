@@ -122,9 +122,18 @@ struct SpeechModelsView: View {
                 subtitle: SpeechModelChoiceCopy.bestFor(row.info),
                 badges: {
                     if row.info.isDefaultEnglish { PaneBadge("Recommended", kind: .prominent) }
+                    if row.info.isLegacy { PaneBadge("Legacy") }
                 })
 
+            if let legacy = SpeechModelChoiceCopy.legacyNotice(for: row.info) {
+                IssueText(legacy, severity: .advisory, font: .callout)
+            }
+
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow {
+                    Text("Accuracy").foregroundStyle(.secondary)
+                    Text(SpeechModelChoiceCopy.accuracy(row.info.accuracy))
+                }
                 GridRow {
                     Text("Languages").foregroundStyle(.secondary)
                     Text(languageScope(row.info))
@@ -301,7 +310,8 @@ struct SpeechModelsView: View {
 
     private func listSubtitle(_ row: SpeechModelsModel.Row) -> String? {
         guard listStatus(row) == nil else { return nil }
-        return "\(languageScope(row.info)) · \(ByteCountFormatter.fileStyle.string(fromByteCount: row.info.approxDownloadBytes))"
+        let facts = "\(languageScope(row.info)) · \(ByteCountFormatter.fileStyle.string(fromByteCount: row.info.approxDownloadBytes))"
+        return row.info.isLegacy ? "Legacy · \(facts)" : facts
     }
 
     private func languageScope(_ info: SpeechModelInfo?) -> String {

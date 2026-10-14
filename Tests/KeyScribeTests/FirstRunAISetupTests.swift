@@ -17,7 +17,6 @@ struct FirstRunAISetupTests {
         onComplete: @escaping () -> Void = {}
     ) -> FirstRunModel {
         FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: permits,
@@ -43,7 +42,6 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-resume-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in }, selectEngine: { _ in }, resumeOnboarding: true,
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
@@ -55,7 +53,6 @@ struct FirstRunAISetupTests {
             .appendingPathComponent("keyscribe-first-run-permsonly-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in }, selectEngine: { _ in }, permissionsOnly: true,
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: {})
@@ -165,22 +162,25 @@ struct FirstRunAISetupTests {
         #expect(ledger?.entry("edit-selection")?.fingerprint != nil)
     }
 
-    @Test func skippingModelDownloadSelectsAppleSpeechAndContinuesSetup() {
+    @Test func choosingAppleSpeechSelectsItWithoutDownloadingAndContinuesSetup() {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-ai-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
         var selected: String?
         var completed = 0
+        var downloads = 0
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
-            download: { _, _ in },
+            download: { _, _ in downloads += 1 },
             selectEngine: { selected = $0 },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             onComplete: { completed += 1 })
 
-        model.skipModelDownload()
+        model.selectedEngineId = "apple"
+        model.confirmModelChoice()
 
         #expect(selected == "apple")
+        #expect(downloads == 0)
+        #expect(!model.downloading)
         #expect(model.step == .permissions)
         #expect(completed == 0)
     }
@@ -500,7 +500,6 @@ struct FirstRunAISetupTests {
         let release = Signal()
         var selected: String?
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in started.fire(); await release.wait() },
             selectEngine: { selected = $0 },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },

@@ -10,6 +10,8 @@ struct ParakeetModelProfile {
 
     static let tdtV3 = ParakeetModelProfile(
         id: "parakeet", displayName: "Parakeet TDT v3", version: .v3)
+    static let ultra = ParakeetModelProfile(
+        id: "parakeet-ultra", displayName: "Parakeet Ultra", version: .ultra)
     static let tdtCtc110m = ParakeetModelProfile(
         id: "parakeet-tdt-ctc-110m", displayName: "Parakeet TDT-CTC 110M", version: .tdtCtc110m)
 }

@@ -28,4 +28,14 @@ struct RetiredInstallDirTests {
         let engine = ParakeetEngine(profile: .tdtV3, modelsDir: modelsDir)
         #expect(engine.installDirNames == ["parakeet-tdt-0.6b-v3"])
     }
+
+    @Test func ultraEngineOwnsOnlyItsOwnBundle() {
+        let engine = ParakeetEngine(profile: .ultra, modelsDir: modelsDir)
+        #expect(engine.installDirNames == ["parakeet-ultra"])
+    }
+
+    @Test func registryConstructsUltraUnderItsCatalogId() {
+        let engine = EngineRegistry.engine("parakeet-ultra", modelsDir: modelsDir)
+        #expect(engine?.id == "parakeet-ultra")
+    }
 }

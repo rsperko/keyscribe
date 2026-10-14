@@ -45,7 +45,7 @@ final class SpeechModelChoiceCopyTests: XCTestCase {
 
     func testSystemManagedLanguageCoverageIsNotACount() throws {
         let apple = try XCTUnwrap(SpeechModelCatalog.entry(for: "apple"))
-        XCTAssertEqual(SpeechModelChoiceCopy.languageScope(apple), "Depends on this Mac")
+        XCTAssertEqual(SpeechModelChoiceCopy.languageScope(apple), "Languages vary by Mac")
     }
 
     func testDownloadedModelLanguageCoverageIsItsCount() throws {

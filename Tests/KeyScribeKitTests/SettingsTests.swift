@@ -30,6 +30,10 @@ struct SettingsTests {
         #expect(s.history.retentionDays == 7)
     }
 
+    @Test func freshSettingsStartOnTheRecommendedModel() {
+        #expect(Settings.defaults.stt.engine == SpeechModelCatalog.defaultEnglishId)
+    }
+
     @Test func missingSchemaVersionThrows() {
         #expect(throws: ConfigError.missingSchemaVersion) {
             try SettingsStore.decode(from: "load_on_login = true")

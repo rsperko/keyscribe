@@ -632,17 +632,65 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertFalse(model.onThisMacRows.contains { $0.id == "parakeet" })
     }
 
+    func testAccuracyCopyNamesEachBucket() {
+        XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.highest), "Highest accuracy")
+        XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.high), "High accuracy")
+        XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.good), "Good accuracy")
+        XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.lower), "Lower accuracy")
+    }
+
+    func testSetupChoicesLeadWithAccuracy() {
+        let ultra = SpeechModelCatalog.entry(for: "parakeet-ultra")!
+        let v3 = SpeechModelCatalog.entry(for: "parakeet")!
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.setupChoiceLabel(ultra),
+            "Recommended: Parakeet Ultra — High accuracy · 25 languages · 630 MB")
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.setupChoiceLabel(v3),
+            "Parakeet TDT v3 — Good accuracy · 25 languages · 480 MB")
+    }
+
+    func testBuiltInSpeechIsAnOrdinarySetupChoiceThatStatesItsAccuracy() {
+        let apple = SpeechModelCatalog.entry(for: "apple")!
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.setupChoiceLabel(apple),
+            "Apple Speech — Lower accuracy · Languages vary by Mac · built into macOS")
+    }
+
+    func testSetupPrimaryActionFollowsTheChosenModel() {
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.setupPrimaryAction(SpeechModelCatalog.entry(for: "parakeet-ultra")!),
+            "Download Recommended Model")
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.setupPrimaryAction(SpeechModelCatalog.entry(for: "parakeet")!),
+            "Download Parakeet TDT v3")
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.setupPrimaryAction(SpeechModelCatalog.entry(for: "apple")!),
+            "Use Apple Speech")
+    }
+
+    func testLegacyNoticePointsAtTheRecommendedModel() {
+        let legacy = SpeechModelCatalog.all.first(where: \.isLegacy)!
+        let recommended = SpeechModelCatalog.entry(for: SpeechModelCatalog.defaultEnglishId)!
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.legacyNotice(for: legacy),
+            "Being phased out. Switch to \(recommended.displayName), the recommended model.")
+        XCTAssertNil(SpeechModelChoiceCopy.legacyNotice(for: recommended))
+    }
+
     func testChoiceCopyExplainsTheRecommendedAndBuiltInOptions() {
-        let recommended = SpeechModelCatalog.entry(for: "parakeet")!
+        let recommended = SpeechModelCatalog.entry(for: SpeechModelCatalog.defaultEnglishId)!
+        let formerDefault = SpeechModelCatalog.entry(for: "parakeet")!
         let builtIn = SpeechModelCatalog.entry(for: "apple")!
 
         XCTAssertEqual(
             SpeechModelChoiceCopy.bestFor(recommended),
             "Fast, accurate dictation for most people.")
+        XCTAssertEqual(SpeechModelChoiceCopy.bestFor(formerDefault), formerDefault.summary)
         XCTAssertEqual(
             SpeechModelChoiceCopy.bestFor(builtIn),
             "No download and the fastest setup.")
-        XCTAssertEqual(SpeechModelChoiceCopy.memoryUse(for: recommended), "Light memory use")
+        XCTAssertEqual(SpeechModelChoiceCopy.memoryUse(for: formerDefault), "Light memory use")
         XCTAssertEqual(
             SpeechModelChoiceCopy.memoryUse(for: SpeechModelCatalog.entry(for: "whisper")!),
             "High memory use")

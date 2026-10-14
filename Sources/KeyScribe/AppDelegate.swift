@@ -690,7 +690,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentFirstRun(permissionsOnly: Bool = false, resumeOnboarding: Bool = false) {
         firstRun = FirstRunController(
-            initialEngineId: provider.active.id,
+            activeEngineId: provider.active.id, installedEngineIds: ModelInstallStore.installedIds(),
             download: { [weak self] id, progress in
                 guard let engine = self?.provider.engine(id) else { throw EngineUnavailable.notWired(id) }
                 try await engine.load(progress: progress)

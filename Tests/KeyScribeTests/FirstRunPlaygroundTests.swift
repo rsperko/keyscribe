@@ -11,7 +11,6 @@ struct FirstRunPlaygroundTests {
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         ModeStore.seedStarterFilesForTesting(in: modesDir)
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
@@ -144,7 +143,6 @@ struct FirstRunPlaygroundTests {
         ModeStore.seedStarterFilesForTesting(in: modesDir)
         var completed = 0
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
@@ -162,7 +160,6 @@ struct FirstRunPlaygroundTests {
         defer { try? FileManager.default.removeItem(at: supportDir) }
         var completed = 0
         let model = FirstRunModel(
-            initialEngineId: SpeechModelCatalog.defaultEnglishId,
             download: { _, _ in },
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },

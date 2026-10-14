@@ -84,11 +84,11 @@ struct FirstRunView: View {
                 .foregroundStyle(.secondary)
             modelCard
             DisclosureSection("Choose another model", isExpanded: $modelChoiceExpanded) {
-                Text("Compare accuracy, language support, download size, and startup time. You can change this later in Settings.")
+                Text("Compare accuracy, language support, and download size. You can change this later in Settings.")
                     .font(.caption).foregroundStyle(.secondary)
                 Picker("Model", selection: $model.selectedEngineId) {
-                    ForEach(downloadableModels) { info in
-                        Text(modelChoiceLabel(info)).tag(info.id)
+                    ForEach(model.setupModels) { info in
+                        Text(SpeechModelChoiceCopy.setupChoiceLabel(info)).tag(info.id)
                     }
                 }
                 .labelsHidden()
@@ -106,15 +106,9 @@ struct FirstRunView: View {
             }
             Spacer()
             HStack {
-                if model.appleSpeechAvailable {
-                    Button("Use built-in speech") { model.skipModelDownload() }
-                        .buttonStyle(.link)
-                        .disabled(model.downloading)
-                        .accessibilityIdentifier(AccessibilityID.FirstRun.Model.useAppleSpeech)
-                }
                 Spacer()
-                Button(model.downloading ? "Downloading…" : modelDownloadButtonTitle) {
-                    model.beginDownload()
+                Button(model.downloading ? "Downloading…" : modelPrimaryActionTitle) {
+                    model.confirmModelChoice()
                 }
                 .keyboardShortcut(.defaultAction).controlSize(.large)
                 .disabled(model.downloading)
@@ -146,32 +140,19 @@ struct FirstRunView: View {
     }
 
     private var modelStepSubtitle: String {
-        model.appleSpeechAvailable
-            ? "Download a model for the best accuracy, or use the speech recognition built into macOS. Either way, it stays on this Mac."
-            : "Download one model for fast, accurate dictation. It stays on this Mac."
+        "This model turns your voice into text, entirely on this Mac."
     }
 
-    private var modelDownloadButtonTitle: String {
+    private var modelPrimaryActionTitle: String {
         guard let info = model.selectedInfo else { return "Download Model" }
-        return info.isDefaultEnglish ? "Download Recommended Model" : "Download \(info.displayName)"
-    }
-
-    private var downloadableModels: [SpeechModelInfo] {
-        model.catalog.filter { !$0.systemManaged }
-    }
-
-    private func modelChoiceLabel(_ info: SpeechModelInfo) -> String {
-        let prefix = info.isDefaultEnglish ? "Recommended: " : ""
-        return "\(prefix)\(info.displayName) — \(info.summary)"
+        return SpeechModelChoiceCopy.setupPrimaryAction(info)
     }
 
     private func modelMeta(_ info: SpeechModelInfo?) -> String {
         guard let info else { return "" }
         let lang = SpeechModelChoiceCopy.languageScope(info)
-        let size = info.systemManaged
-            ? "system-managed"
-            : "~\(ByteCountFormatter.fileStyle.string(fromByteCount: info.approxDownloadBytes))"
-        return "\(lang) · \(size) · stays on this Mac"
+        let size = info.systemManaged ? SpeechModelChoiceCopy.footprint(info) : "~\(SpeechModelChoiceCopy.footprint(info))"
+        return "\(SpeechModelChoiceCopy.accuracy(info.accuracy)) · \(lang) · \(size) · stays on this Mac"
     }
 
     private var permissions: some View {
