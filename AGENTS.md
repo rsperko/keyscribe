@@ -777,10 +777,11 @@ speaker/mic/room dependent — reference table + caveats in
 benchmark rank — a single-voice ranking can't carry that authority and would fight the
 "Recommended" badge on the default.
 
-**Every model carries an accuracy bucket and a lifecycle stage, both catalog data.** `accuracy`
-(`SpeechAccuracy`) is assigned from the as-shipped benchmark under the rule in
-`docs/reference/stt_benchmarks.md` ("Accuracy labels") — re-bucket when a model is added or an engine
-dependency moves, never by feel. `isLegacy` is the deprecation path: a legacy model keeps working but is
+**Every model carries measured accuracy and speed plus a lifecycle stage, all catalog data.** Each entry
+stores its no-dictionary average WER and real-time factor; `accuracy` (`SpeechAccuracy`) and `speed`
+(`SpeechSpeed`) are computed from them relative to the best offered model, under the rule in
+`docs/reference/stt_benchmarks.md` ("Accuracy and speed labels") — re-measure when a model is added or an
+engine dependency moves, never edit a label by feel. `isLegacy` is the deprecation path: a legacy model keeps working but is
 not offered at first run, trails the catalog, and shows a "being phased out" advisory naming the
 recommended model; no sooner than one release later it is **retired** — removed from `all` and added to
 `retiredDisplayNames`, which moves its users to a usable model with a notice. Never retire a model that was

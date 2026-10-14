@@ -9,7 +9,7 @@ private func info(
         id: id, kind: .whisper, displayName: id, summary: "", languageCount: 1,
         approxDownloadBytes: system ? 0 : 1, systemManaged: system,
         isDefaultEnglish: defaultEnglish, supportsRecognitionBias: supportsRecognitionBias,
-        accuracy: .good)
+        averageWER: 10, realTimeFactor: 0.01)
 }
 
 private let realCatalog = SpeechModelCatalog.all

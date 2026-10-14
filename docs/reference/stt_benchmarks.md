@@ -1,11 +1,56 @@
 # STT benchmark — reference numbers
 
-> **Read this first.** These numbers are from **one person's voice, in a quiet room, on a
-> built-in MacBook microphone**. Speech recognition is extremely speaker-, accent-, mic-, and
+> **Read this first.** These numbers are from **one person's voice on a built-in MacBook
+> microphone**, recorded twice: once in a quiet room and once with real background noise. Speech recognition is extremely speaker-, accent-, mic-, and
 > room-dependent — your ranking *will* differ, and the top models here are close enough that the
 > order flips easily. Treat this as a sanity check and a reproduction baseline, **not** a
 > leaderboard. To get numbers that reflect *your* setup, record your own corpus — see
 > [`corpus/stt/README.md`](../../corpus/stt/README.md).
+
+## Current comparison — no dictionary
+
+As measured, 2026-10-13, every model on the same day and machine, with an **empty dictionary** — what a
+new user gets before adding any terms. "Quiet" is `corpus/stt`; "noisy" is the same sentences re-recorded
+with real background noise (`corpus/stt-noisy`, see *Noisy environments* below). The accuracy and speed
+columns are the labels Settings shows (rules under *Accuracy and speed labels*).
+
+| Model | Quiet | Noisy | Average | Behind best | Accuracy | RTF | Speed |
+|---|---|---|---|---|---|---|---|
+| Whisper Large v3 Turbo | 6.9% | 8.8% | 7.85% | — | Top | 0.116 | Slower |
+| Qwen3-ASR 1.7B | 6.9% | 9.5% | 8.2% | 0.35 | Top | 0.039 | Fast |
+| Parakeet Ultra | 7.1% | 9.3% | 8.2% | 0.35 | Top | 0.009 | Fastest |
+| Parakeet Unified 0.6B (English) | 7.4% | 9.8% | 8.6% | 0.75 | Top | 0.009 | Fastest |
+| Parakeet TDT v3 | 8.3% | 12.0% | 10.15% | 2.3 | High | 0.009 | Fastest |
+| Whisper Small (English) | 7.7% | 14.4% | 11.05% | 3.2 | Good | 0.059 | Fast |
+| Qwen3-ASR 0.6B | 10.1% | 14.8% | 12.45% | 4.6 | Good | 0.015 | Fastest |
+| Apple Speech | 10.5% | 15.9% | 13.2% | 5.35 | Lower | 0.019 | Fastest |
+| Parakeet TDT-CTC 110M (legacy) | 12.0% | 18.9% | 15.45% | 7.6 | Lower | 0.003 | Fastest |
+
+Apple Speech measured 8.7% / 14.2% on 2026-09-25; the drop coincides with macOS 27 but its cause is
+unconfirmed.
+
+## With a dictionary — potential benefit for known terms
+
+Whisper and Qwen3 can use the dictionary while recognizing speech; the other models cannot, so in this
+recognition-only run their numbers do not change (their final output can still improve through the
+after-transcription recovery every engine gets from the dictionary, which this run does not include). This
+run gives **each clip exactly the dictionary terms spoken in it** (51 of the 107 clips carry terms; the rest
+are unchanged). That is an idealized test: a real dictionary is built up over time, mostly holds terms a
+given dictation never says, and may miss the ones it does — and other dictionary contents could move the
+result either way. Read these as a best-case illustration of what the dictionary can do for terms it
+already knows, not as everyday accuracy.
+
+| Model | Quiet | Noisy | Recall noisy — no dictionary → dictionary |
+|---|---|---|---|
+| Whisper Large v3 Turbo | 5.7% | 8.2% | 81% → 96% |
+| Qwen3-ASR 1.7B | 5.9% | 8.0% | 74% → 95% |
+| Whisper Small (English) | 6.0% | 11.9% | 66% → 97% |
+| Qwen3-ASR 0.6B | 8.2% | 13.2% | 71% → 91% |
+
+## Earlier runs
+
+The tables below are older runs on earlier app versions, kept for their recall, download, and
+noise-penalty columns. They do not match the current comparison above.
 
 **Corpus:** 107 clips (the committed `manifest.json` corpus, Tiers 1–3).
 **Recorded:** 2026-06-30, single speaker, quiet room, built-in mic, normal pace.
@@ -58,11 +103,8 @@ Apple rows were measured on the same corpus on 2026-09-25, with the fallback for
   recall, and speed, and it writes punctuation and capitalization — which matters most in modes with
   no LLM rewrite. It is **English-only**, where TDT v3 and Ultra cover 25 languages, which is why
   the default stays multilingual.
-- **Parakeet Ultra is a retrained TDT v3 covering the same 25 languages.** It is not in the tables
-  on this page because it shipped after those runs. Measured side by side (2026-10-13, no
-  dictionary), Ultra scored 7.1% WER against TDT v3's 8.3% and Parakeet Unified's 7.4% on this
-  corpus, and 9.3% against 12.0% and 9.8% on the noisy corpus below, at the same speed as TDT v3
-  (RTF 0.009) with a larger download (630 MB).
+- **Parakeet Ultra is a retrained TDT v3 covering the same 25 languages.** It shipped after these
+  earlier runs; see the current comparison at the top for its numbers.
 - **The lightest model that stays close to the best is usually your answer.** Record Tier 2, run
   `bash corpus/compare.sh`, and read its "lightest that stays close" pick.
 
@@ -102,38 +144,53 @@ Reproduce with your own noise: record the twin corpus (`bash corpus/record.sh --
 benchmark both dirs, then `bash corpus/compare-conditions.sh corpus/stt corpus/stt-noisy` for the
 paired per-engine ΔWER, worst-degrading clips, and dictionary-term flips.
 
-## Accuracy labels
+## Accuracy and speed labels
 
-Settings shows each model's accuracy as a bucket rather than a number, because a single-voice WER is a
-sanity check, not a score. The rule: take a model's **as-shipped WER** (dictionary active, as above) on
-the quiet corpus and on the noisy corpus, average the two, and bucket the result:
+Settings shows each model's accuracy and speed as a label rather than a number, because a single-voice
+measurement is a sanity check, not a score. Both labels are graded **against the best model offered**
+(legacy models excluded), not against a fixed scale, so the top label always means "no current model in
+this list does noticeably better" — never "a better model exists that we are not offering". A legacy model
+can still beat the bar — the legacy Parakeet TDT-CTC 110M processes faster than the Fastest group's anchor —
+because it is being phased out and must not set the standard the current models are measured against.
 
-| Label | Average of quiet and noisy WER |
+**Accuracy.** Average the model's **no-dictionary WER** on the quiet and noisy corpora, then take how many
+points it trails the most accurate offered model:
+
+| Label | Points behind the best |
 |---|---|
-| Highest accuracy | below 7.5% |
-| High accuracy | 7.5% to below 9.5% |
-| Good accuracy | 9.5% to below 12% |
-| Lower accuracy | 12% and above |
+| Top accuracy | 1 or fewer |
+| High accuracy | up to 2.5 |
+| Good accuracy | up to 5 |
+| Lower accuracy | more than 5 |
 
-Re-measure and re-bucket when a model is added or an engine dependency moves; the label lives in each
-model's catalog entry (`SpeechModelCatalog.all`). Apple Speech is bucketed on Apple's current model,
-not its fallback, which only scores lower.
+**Top accuracy means roughly tied in our tests**, not a ranking within the group: one speaker cannot
+separate models a point apart. Choose among them by speed, languages, punctuation, or dictionary use.
 
-As measured, 2026-10-13, every model on the same day and machine:
+The label assumes no dictionary because a new user has none and builds one gradually, after real misses —
+a per-clip dictionary would grade every model on terms the user has not added. What the dictionary adds is
+shown beside the accuracy label instead, on the models that use it while recognizing speech. Every other
+model still uses the dictionary to fix near-miss spellings after transcription.
 
-| Model | Quiet | Noisy | Average | Label |
-|---|---|---|---|---|
-| Whisper Large v3 Turbo | 5.7% | 8.2% | 6.95% | Highest |
-| Qwen3-ASR 1.7B | 5.9% | 8.0% | 6.95% | Highest |
-| Parakeet Ultra | 7.1% | 9.3% | 8.2% | High |
-| Parakeet Unified 0.6B (English) | 7.4% | 9.8% | 8.6% | High |
-| Whisper Small (English) | 6.0% | 11.9% | 8.95% | High |
-| Parakeet TDT v3 | 8.3% | 12.0% | 10.15% | Good |
-| Qwen3-ASR 0.6B | 8.2% | 13.2% | 10.7% | Good |
-| Apple Speech | 10.5% | 15.9% | 13.2% | Lower |
-| Parakeet TDT-CTC 110M | 12.0% | 18.9% | 15.45% | Lower |
+**Speed.** Divide the model's real-time factor on the quiet corpus, with an empty dictionary, by the
+fastest offered model's. (`--benchmark` times the dictionary-on pass, so the dictionary-capable models were
+timed on a copy of the corpus with its dictionary terms removed; for every other model the two passes are
+the same code path.)
 
-These differ from the tables above, which were measured on earlier dates and app versions.
+| Label | Times slower than the fastest |
+|---|---|
+| Fastest processing | 2.5× or less |
+| Fast processing | up to 8× |
+| Slower processing | more than 8× |
+
+This is warm-engine processing time over the audio, not the user's full wait after they stop talking —
+it excludes model loading and the rest of the pipeline — so the label says "processing" and never claims
+seconds.
+
+Each catalog entry (`SpeechModelCatalog.all`) stores its measured average WER and real-time factor, and
+the labels are computed from them by this rule, so a label cannot be set by hand. Re-measure when a model is
+added or an engine dependency moves. A new best model can lower other models' labels; that is the scale
+working, not a regression. Apple Speech is graded on Apple's current model, not its fallback, which only
+scores lower.
 
 ## Reproduce on your own voice
 

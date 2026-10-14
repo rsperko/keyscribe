@@ -132,6 +132,11 @@ struct FirstRunView: View {
                     }
                 }
                 Text(modelMeta(info)).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let info, let note = SpeechModelChoiceCopy.dictionaryNote(info) {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
         }
@@ -152,7 +157,8 @@ struct FirstRunView: View {
         guard let info else { return "" }
         let lang = SpeechModelChoiceCopy.languageScope(info)
         let size = info.systemManaged ? SpeechModelChoiceCopy.footprint(info) : "~\(SpeechModelChoiceCopy.footprint(info))"
-        return "\(SpeechModelChoiceCopy.accuracy(info.accuracy)) · \(lang) · \(size) · stays on this Mac"
+        let speed = SpeechModelChoiceCopy.speed(info.speed)
+        return "\(SpeechModelChoiceCopy.accuracy(info.accuracy)) · \(speed) · \(lang) · \(size) · stays on this Mac"
     }
 
     private var permissions: some View {

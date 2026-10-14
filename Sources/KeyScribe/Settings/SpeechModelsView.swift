@@ -132,7 +132,12 @@ struct SpeechModelsView: View {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
                     Text("Accuracy").foregroundStyle(.secondary)
-                    Text(SpeechModelChoiceCopy.accuracy(row.info.accuracy))
+                    Text(SpeechModelChoiceCopy.accuracyLine(row.info))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                GridRow {
+                    Text("Speed").foregroundStyle(.secondary)
+                    Text(SpeechModelChoiceCopy.speed(row.info.speed))
                 }
                 GridRow {
                     Text("Languages").foregroundStyle(.secondary)

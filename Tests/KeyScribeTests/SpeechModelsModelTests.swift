@@ -632,11 +632,33 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertFalse(model.onThisMacRows.contains { $0.id == "parakeet" })
     }
 
+    func testDictionaryNoteAppearsOnlyOnModelsThatUseTheDictionaryWhileRecognizing() {
+        for info in SpeechModelCatalog.all {
+            XCTAssertEqual(
+                SpeechModelChoiceCopy.dictionaryNote(info),
+                info.supportsRecognitionBias ? "Better with names and jargon you add to your dictionary" : nil,
+                info.id)
+        }
+    }
+
     func testAccuracyCopyNamesEachBucket() {
-        XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.highest), "Highest accuracy")
+        XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.top), "Top accuracy")
         XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.high), "High accuracy")
         XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.good), "Good accuracy")
         XCTAssertEqual(SpeechModelChoiceCopy.accuracy(.lower), "Lower accuracy")
+    }
+
+    func testAccuracyLineCarriesTheDictionaryBenefitWhereItApplies() {
+        XCTAssertEqual(
+            SpeechModelChoiceCopy.accuracyLine(SpeechModelCatalog.entry(for: "whisper")!),
+            "Top accuracy · Better with names and jargon you add to your dictionary")
+        XCTAssertEqual(SpeechModelChoiceCopy.accuracyLine(SpeechModelCatalog.entry(for: "parakeet-ultra")!), "Top accuracy")
+    }
+
+    func testSpeedCopyNamesProcessingSpeed() {
+        XCTAssertEqual(SpeechModelChoiceCopy.speed(.fastest), "Fastest processing")
+        XCTAssertEqual(SpeechModelChoiceCopy.speed(.fast), "Fast processing")
+        XCTAssertEqual(SpeechModelChoiceCopy.speed(.slower), "Slower processing")
     }
 
     func testSetupChoicesLeadWithAccuracy() {
@@ -644,10 +666,10 @@ final class SpeechModelsModelTests: XCTestCase {
         let v3 = SpeechModelCatalog.entry(for: "parakeet")!
         XCTAssertEqual(
             SpeechModelChoiceCopy.setupChoiceLabel(ultra),
-            "Recommended: Parakeet Ultra — High accuracy · 25 languages · 630 MB")
+            "Recommended: Parakeet Ultra — Top accuracy · 25 languages · 630 MB")
         XCTAssertEqual(
             SpeechModelChoiceCopy.setupChoiceLabel(v3),
-            "Parakeet TDT v3 — Good accuracy · 25 languages · 480 MB")
+            "Parakeet TDT v3 — High accuracy · 25 languages · 480 MB")
     }
 
     func testBuiltInSpeechIsAnOrdinarySetupChoiceThatStatesItsAccuracy() {

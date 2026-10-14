@@ -67,20 +67,24 @@ you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
 
 ### Which speech model should I pick?
 
-Every offered model runs fully on-device; the trade-off is accuracy vs. speed vs. footprint.
-**Settings ▸ Speech Models** lists what is available, with each model's accuracy (Highest, High,
-Good, or Lower), size, and language coverage. What to look for:
+Every offered model runs fully on-device. **Settings ▸ Speech Models** lists what is available, with
+each model's accuracy (Top, High, Good, or Lower), processing speed, size, and language coverage. Both
+labels compare a model with the current models on the list (models marked Legacy aside), so "Top
+accuracy" means no current model does noticeably better. Models labeled Top accuracy were roughly tied in our tests — choose among them by
+speed, languages, punctuation, or dictionary use. What to look for:
 
 - **Good default:** the one marked **Recommended** — accurate, fast, and multilingual. Start there
   and switch only if something specific pushes you off it.
-- **Best accuracy:** a model labeled Highest accuracy. They are larger and use more memory.
+- **Lots of names or jargon:** a model whose accuracy says it is *better with names and jargon you add
+  to your dictionary*. Those models use your dictionary while recognizing speech, so once you add the
+  words it keeps missing, they get them right more often. They use more memory. Every other model still
+  uses your dictionary to fix near-miss spellings after transcription.
 - **No download:** Apple's built-in speech works immediately, but it is labeled Lower accuracy — fine for
   trying things out, not the best choice for everyday dictation.
 - **Punctuation without AI rewrite:** one English-only model writes punctuation and capitalization
   for you; its description says so.
-- **Noisy places:** the large models barely lose accuracy with real background noise; the small ones
-  lose noticeably more, and the built-in system model degrades the most. If you often dictate in
-  cafés, open offices, or transit, pick a large one.
+- **Noisy places:** the models labeled Top accuracy hold up best with real background noise; the
+  others lose noticeably more, and the built-in system model degrades the most.
 - **Legacy:** a model marked Legacy still works but is being phased out; switch to the recommended
   model when convenient.
 

@@ -49,7 +49,7 @@ The sequence is short, and each step states its purpose in plain language:
 2. **Choose and download one on-device speech model.** Show its size and that it stays on the
    Mac; recommend the default English engine, and offer no legacy model. The built-in macOS model is an
    ordinary entry in the same picker (its action reads `Use <model>` instead of `Download`), never a
-   separate shortcut, and every choice states its accuracy label. The picker opens on the recommended
+   separate shortcut, and every choice states its accuracy label; the selected model's card adds its processing speed. The picker opens on the recommended
    model unless the active model is one the user already downloaded and setup still offers — never on
    the built-in model just because it is active. Downloading is required — nothing can be
    transcribed without it. Progress attaches to the choice, not a separate screen.
@@ -524,8 +524,10 @@ mid-download or verifying stays here until it verifies `Ready`, then promotes). 
 plus status; there are no radio controls, per-row actions, or bottom download menu — acquisition is
 the selected model's own **Download** button. Selecting a model fills the right detail pane, under the
 shared detail header (icon + name + **Recommended** or **Legacy** badge), with its best-use description,
-its accuracy label (`Highest` / `High` / `Good` / `Lower accuracy` — a bucket, never a WER figure, so a
-single-voice benchmark is not presented as a score), language coverage, disk requirement, and
+its accuracy label (`Top` / `High` / `Good` / `Lower accuracy` — graded without a dictionary against the
+best offered model, never a WER figure, so a single-voice benchmark is not presented as a score) followed,
+on models that use the dictionary while recognizing speech, by that benefit on the same line; a processing
+speed label (`Fastest` / `Fast` / `Slower processing`, never seconds), language coverage, disk requirement, and
 light/moderate/high memory use, and the one primary lifecycle action:
 **Current**, **Use This Model**, **Download**, or its live install/test state. A model in
 **Available to Download** shows an `AVAILABLE TO DOWNLOAD` label and a reduced read-only preview — the

@@ -106,10 +106,51 @@ struct SpeechModelCatalogTests {
         #expect(SpeechModelCatalog.entry(for: "apple")?.accuracy == .lower)
     }
 
-    @Test func accuracyBucketsOrderFromLowerToHighest() {
+    @Test func accuracyBucketsOrderFromLowerToTop() {
         #expect(SpeechAccuracy.lower < .good)
         #expect(SpeechAccuracy.good < .high)
-        #expect(SpeechAccuracy.high < .highest)
+        #expect(SpeechAccuracy.high < .top)
+    }
+
+    @Test func accuracyIsGradedByPointsBehindTheMostAccurateOfferedModel() {
+        #expect(SpeechAccuracy.grade(averageWER: 7.0, best: 7.0) == .top)
+        #expect(SpeechAccuracy.grade(averageWER: 8.0, best: 7.0) == .top)
+        #expect(SpeechAccuracy.grade(averageWER: 8.1, best: 7.0) == .high)
+        #expect(SpeechAccuracy.grade(averageWER: 9.5, best: 7.0) == .high)
+        #expect(SpeechAccuracy.grade(averageWER: 9.6, best: 7.0) == .good)
+        #expect(SpeechAccuracy.grade(averageWER: 12.0, best: 7.0) == .good)
+        #expect(SpeechAccuracy.grade(averageWER: 12.1, best: 7.0) == .lower)
+    }
+
+    @Test func speedIsGradedAgainstTheFastestOfferedModel() {
+        #expect(SpeechSpeed.grade(realTimeFactor: 0.01, fastest: 0.01) == .fastest)
+        #expect(SpeechSpeed.grade(realTimeFactor: 0.02, fastest: 0.01) == .fastest)
+        #expect(SpeechSpeed.grade(realTimeFactor: 0.03, fastest: 0.01) == .fast)
+        #expect(SpeechSpeed.grade(realTimeFactor: 0.07, fastest: 0.01) == .fast)
+        #expect(SpeechSpeed.grade(realTimeFactor: 0.09, fastest: 0.01) == .slower)
+    }
+
+    @Test func theMostAccurateOfferedModelIsGradedTop() {
+        let offered = SpeechModelCatalog.all.filter { !$0.isLegacy }
+        let best = offered.min { $0.averageWER < $1.averageWER }
+        #expect(best?.accuracy == .top)
+    }
+
+    @Test func theFastestOfferedModelIsGradedFastest() {
+        let offered = SpeechModelCatalog.all.filter { !$0.isLegacy }
+        let fastest = offered.min { $0.realTimeFactor < $1.realTimeFactor }
+        #expect(fastest?.speed == .fastest)
+    }
+
+    @Test func aLegacyModelNeverSetsTheBar() {
+        let legacyChampion = SpeechModelInfo(
+            id: "legacy-best", kind: .parakeet, displayName: "", summary: "", languageCount: 1,
+            approxDownloadBytes: 1, systemManaged: false, isDefaultEnglish: false,
+            supportsRecognitionBias: false, averageWER: 0.1, realTimeFactor: 0.0001, isLegacy: true)
+        let catalog = SpeechModelCatalog.all + [legacyChampion]
+        #expect(SpeechModelCatalog.bestAverageWER(in: catalog) == SpeechModelCatalog.bestAverageWER(in: SpeechModelCatalog.all))
+        #expect(SpeechModelCatalog.fastestRealTimeFactor(in: catalog)
+            == SpeechModelCatalog.fastestRealTimeFactor(in: SpeechModelCatalog.all))
     }
 
     @Test func languageCountsAreSane() {

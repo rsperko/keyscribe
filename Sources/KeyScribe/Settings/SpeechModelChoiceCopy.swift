@@ -18,10 +18,26 @@ enum SpeechModelChoiceCopy {
 
     static func accuracy(_ accuracy: SpeechAccuracy) -> String {
         switch accuracy {
-        case .highest: "Highest accuracy"
+        case .top: "Top accuracy"
         case .high: "High accuracy"
         case .good: "Good accuracy"
         case .lower: "Lower accuracy"
+        }
+    }
+
+    static func dictionaryNote(_ info: SpeechModelInfo) -> String? {
+        info.supportsRecognitionBias ? "Better with names and jargon you add to your dictionary" : nil
+    }
+
+    static func accuracyLine(_ info: SpeechModelInfo) -> String {
+        [accuracy(info.accuracy), dictionaryNote(info)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    static func speed(_ speed: SpeechSpeed) -> String {
+        switch speed {
+        case .fastest: "Fastest processing"
+        case .fast: "Fast processing"
+        case .slower: "Slower processing"
         }
     }
 
