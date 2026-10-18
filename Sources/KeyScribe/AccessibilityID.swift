@@ -178,6 +178,26 @@ enum AccessibilityID {
             static func add(_ seedID: String) -> String { "mode.preview.add.\(seedID)" }
         }
 
+        enum VoiceCommands {
+            static let addPlace = "mode.voiceCommands.addPlace"
+            static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
+            static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
+            static let addApp = "mode.voiceCommands.addApp"
+            static let addWebPage = "mode.voiceCommands.addWebPage"
+            static let tryIt = "mode.voiceCommands.tryIt"
+            static let placeName = "mode.voiceCommands.place.name"
+            static let placeSay = "mode.voiceCommands.place.say"
+            static let placeKind = "mode.voiceCommands.place.kind"
+            static let placeApp = "mode.voiceCommands.place.app"
+            static let placeURL = "mode.voiceCommands.place.url"
+            static let placeBrowser = "mode.voiceCommands.place.browser"
+            static let placeSave = "mode.voiceCommands.place.save"
+            static let placeCancel = "mode.voiceCommands.place.cancel"
+            static let placeDelete = "mode.voiceCommands.place.delete"
+            static let placeDeleteConfirm = "mode.voiceCommands.place.deleteConfirm.confirm"
+            static func placeEdit(_ placeKey: String) -> String { "mode.voiceCommands.place.edit.\(placeKey)" }
+        }
+
         enum Editor {
             static let name = "mode.editor.name"
             static let enabled = "mode.editor.enabled"
@@ -346,6 +366,12 @@ enum AccessibilityID {
     // button's AXMenuBarItem exposes no identifier at all — those items are addressed by title instead.
 
     static let all: [String] = [
+        Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt,
+        Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
+        Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser,
+        Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,
+        Mode.VoiceCommands.placeDeleteConfirm,
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
         Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.history, Settings.Sidebar.permissions,
         Settings.Sidebar.advanced,

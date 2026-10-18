@@ -15,10 +15,12 @@
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
+  voice_commands.toml      # places for the Voice Commands mode (experimental)
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
   modes/                   # one file per mode; filename stem = mode id
     _direct.toml             # the Direct system floor (reserved `_` id)
+    _voice_commands.toml     # the Voice Commands system mode (experimental; seeded only while its flag is on)
     email.toml
     pig-latin.toml
   history/                 # append-only local history, one JSONL file per day
@@ -38,6 +40,14 @@
   trailing, submit, clipboard modifier, live-edits, **and exclude-from-history**) are honored; the
   locked guarantees (no AI rewrite, dictation/cursor only, global vocabulary) are enforced regardless
   of edits. Direct owns Fn by default and records to history per the global setting unless turned off.
+- **`_voice_commands.toml`** is a built-in system mode, behind the `voice_commands` experimental flag.
+  It is seeded (with no shortcut) only while the flag is on; turning the flag off hides it but leaves the
+  file, so a later opt-in keeps the shortcut. Only `trigger_keys[]` and `enabled` are honored; everything
+  else is forced (`output = "voice_command"`, no rewrite, no vocabulary, no phrases or constraints, never
+  recorded to history). It is never the fallback: only its own shortcut starts it. **Its shortcut may not
+  be shared with any other enabled mode**, whatever that mode's context: Settings refuses the edit, and a
+  shared press written by hand stays with the other mode — the Voice Commands binding is dropped and the
+  Modes list marks the mode's shortcut as never firing.
 - Config files are human-editable text. **Model weights** are downloaded at runtime (never
   committed) into `models/`, consolidated under the KeyScribe support dir.
 - **History records** (`history/<day>.jsonl`, one JSON object per line) are additive: each dictation
@@ -220,7 +230,7 @@ context = { app = true, preceding_text = false }
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
-| `output` | enum | `cursor` \| `replace_selection`. |
+| `output` | enum | `cursor` \| `replace_selection` \| `voice_command`. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. Any other mode file that sets it fails to load. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
@@ -441,6 +451,55 @@ heard = "teh"
 replace = "the"
 regex = false
 ```
+
+### `voice_commands.toml` — places for Voice Commands (experimental)
+
+Read only while the `voice_commands` flag is on. The Voice Commands mode understands
+`switch to | go to | focus | focus on | open | launch <target>` and `go back`, matched against the whole
+utterance (case, punctuation, and a leading "the" are ignored). A target is a running app, an app installed
+in an Applications folder (or one folder down inside it), or a place from this file:
+
+```toml
+schema_version = 1
+
+[[place]]
+name = "VS Code"                 # display name; also always a spoken name. Unique, ignoring case.
+say = ["vscode", "editor"]       # optional extra spoken names
+app = "com.microsoft.VSCode"     # bring this app forward, opening it if needed
+
+[[place]]
+name = "Gmail"
+url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it
+browser = "com.google.Chrome"    # optional: only look in, and open with, this browser
+```
+
+- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A file that breaks a rule
+  fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
+- **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
+  contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
+  place names; then installed apps (exact, then partial). Only if nothing matches is a near-miss snapped,
+  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps). Two
+  different targets tied at the winning step are reported as ambiguous and nothing runs. A near-miss
+  picks the closest target; targets tied for closest go through the same order, so a place still beats an
+  app equally close, and two tied at the same step are ambiguous whatever order they are listed in.
+- **Tab matching** ignores the scheme, a leading `www.`, the host's case, and trailing slashes, and respects
+  path boundaries (`mail.example.com` never matches `mail.example.community`). The path, query, and fragment
+  keep their case: `example.com/Project` does not match a tab on `example.com/project`. Browsers are scripted
+  through Apple Events, so macOS asks once per browser for Automation permission; if it is denied, the page
+  is opened in a new tab instead. If the tabs cannot be read in time, the command fails rather than open
+  a second copy of a page that may already be open. A place with a `browser` reads only that browser's tabs, and if that
+  browser is not installed the command fails rather than opening another browser.
+- **Focusing a tab re-checks it first**: the tab must still show the address it had when it was found
+  (looked up again if it moved), compared case-sensitively like the match itself. If the tab is gone, the
+  page is opened instead. If the browser does not answer in time, the command fails and nothing else is
+  opened. An Apple Event already sent cannot be recalled, so a browser that answers late may still select
+  the tab inside its own windows, but it is never brought forward: only an answer in time does that.
+- **A take whose microphone stopped never runs a command**, including a loss that arrives while the command
+  is being looked up or while a tab is being focused. Nothing further is opened or brought forward.
+- `go back` returns to the app that was frontmost before the last command that ran, not to a browser tab or
+  window. It is kept in memory only, so it is lost when the app quits, and a second `go back` returns again.
+- **Try it** in Settings never runs a command, but previewing a web place reads the open tabs, so it can
+  be what first asks macOS for permission to control a browser.
 
 ### Replacement matching & output
 

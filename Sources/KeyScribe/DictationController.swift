@@ -38,6 +38,7 @@ final class DictationController {
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
+    private let voiceCommands: VoiceCommandRunning
     private let permits: @Sendable (Connection) -> Bool
     private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
     private let effects: DuringDictationEffects
@@ -260,6 +261,7 @@ final class DictationController {
         },
         isSessionLocked: @escaping @MainActor () -> Bool = { SessionLockMonitor.isSessionLocked() },
         llmClient: any LLMClient = HTTPLLMClient(),
+        voiceCommands: VoiceCommandRunning? = nil,
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
         },
@@ -290,6 +292,7 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
+        self.voiceCommands = voiceCommands ?? VoiceCommandRunner()
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -966,6 +969,49 @@ final class DictationController {
         return reading
     }
 
+    private func finishVoiceCommand(heard: String) async {
+        guard settings.features.isEnabled(.voiceCommands) else {
+            finishError("Voice commands are turned off.")
+            return
+        }
+        if captureWasLost {
+            finishCommandCaptureLost()
+            return
+        }
+        guard heard.contains(where: { !$0.isWhitespace }) else {
+            finishNoSpeech()
+            return
+        }
+        guard machine.beginInserting() else { return }
+        hud?.relinquishKeyFocus()
+        let origin = capturedSnapshot?.bundleId.map(VoiceCommandOrigin.init(bundleId:))
+        let start = DispatchTime.now()
+        let outcome = await voiceCommands.run(
+            transcript: heard, places: config.voiceCommands.places, origin: origin,
+            stillWanted: { [weak self] in
+                guard let self, !Task.isCancelled else { return false }
+                return !self.captureWasLost
+            })
+        building.stageMillis[.insert] = elapsedMs(since: start)
+        switch outcome {
+        case .abandoned:
+            if captureWasLost { finishCommandCaptureLost() }
+        case .done(let summary):
+            finish(machine: .finish(.inserted), cue: .success, state: .commandDone(summary: summary),
+                   hideAfter: 1.5, record: (.command, nil))
+        case .failed(let message):
+            finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: nil),
+                   hideAfter: 3, record: (.failed, "voice command did not run"))
+        }
+    }
+
+    private func finishCommandCaptureLost() {
+        log.error("capture lost mid-recording — voice command not run")
+        finish(machine: .finish(.failed), cue: .error,
+               state: .error(message: "The microphone stopped, so the command did not run.", action: nil),
+               hideAfter: 8, record: (.failed, "capture lost mid-recording"))
+    }
+
     private func finishNoSpeech() {
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
@@ -1546,6 +1592,11 @@ final class DictationController {
         if rawFromEngine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            let reading, reading.modelUsed, reading.presence == .speech {
             finishHeardButNoText(engine: engine)
+            return
+        }
+
+        if activeMode?.runsVoiceCommands == true {
+            await finishVoiceCommand(heard: raw)
             return
         }
 

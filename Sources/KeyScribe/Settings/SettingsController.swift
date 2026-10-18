@@ -140,7 +140,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
-        modes = ModesSettingsModel(repository: repository)
+        modes = ModesSettingsModel(repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands))
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
@@ -171,6 +171,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 onSaved: onSaved)
         }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
+        modes.voiceCommands.previousApp = { [weak self] in self?.historyPreviousApp }
         history.copyText = { TextInserter.copyToClipboard($0) }
         history.pasteText = { [weak self] in self?.pasteHistoryResult($0) }
         aiServices.onCreateModeWithConnection = { [weak self] connectionId in
@@ -182,6 +183,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func update(settings: Settings) {
         model.apply(settings)
+        modes.setVoiceCommandsEnabled(settings.features.isEnabled(.voiceCommands))
         speechModels.syncActive(settings.stt.engine)
         speechModels.syncSTT(settings.stt)
     }

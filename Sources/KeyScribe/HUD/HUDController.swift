@@ -432,6 +432,11 @@ private struct HUDView: View {
                     .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
                     .foregroundStyle(outcomeStyle(outcome))
                     .frame(width: 30, height: 30)
+            } else if case .commandDone = model.state {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .frame(width: 30, height: 30)
             }
         case .error:
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)

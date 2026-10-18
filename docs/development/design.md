@@ -409,6 +409,17 @@ inline outside that browser and the press is a silent no-op, while inside it the
 A `url_pattern` alone keeps the audible cancel; that is the cost of routing on something only knowable
 once dictation has started.
 
+**A mode whose output is a command (experimental).** The **Voice Commands** system mode
+(`_voice_commands`, behind the `voice_commands` flag) sets `output = "voice_command"`. That is data, not a
+mode identity: the pipeline branches on the output kind. Such a take skips Phase B entirely (a spoken
+suffix never re-routes a command into a dictation mode), and skips the rewrite, insertion, and History —
+the heard transcript is parsed as a closed set of focus verbs and resolved against apps and the user's
+places (`config_schema.md` "`voice_commands.toml`"). It never inserts, pastes, copies, submits, or touches
+the clipboard. Recognition and resolution are local and the transcript is never sent to an AI service;
+the only network effect is that opening a saved web place loads that site in the browser. It opens only
+apps and URLs the system or the user's file names, never a URL built from speech. It is never the Direct fallback and is
+reachable only by its own shortcut.
+
 **Phase B — known only after STT (trigger-phrase routing):**
 - **Trigger phrase(s):** a mode may have **multiple** spoken phrases (e.g. *"as pig latin"*
   or *"pig latinize"* both route to the same mode). Because they depend on STT output they **cannot

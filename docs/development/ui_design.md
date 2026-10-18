@@ -234,6 +234,7 @@ not to its label.
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
+| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) | “Voice command” | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -786,6 +787,27 @@ sections:
 Plain Dictation stays deliberately small: **How to start Plain Dictation**, **Spoken editing**, and **Result handling**.
 Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it
 does not imply an AI rewrite or a separate expert mode.
+
+**Voice Commands** (experimental, shown only while its flag is on) is a built-in mode. It ships
+with no shortcut, and its list row reads `Off — no shortcut` until one is set. Speech on its shortcut is
+never typed: a command it understands runs, and anything else shows an Error naming what was wrong
+(not a command, no match, or more than one match) and changes nothing. Its editor has, in order:
+
+1. **How to start Voice Commands** — the same shortcut structure as Plain Dictation, plus one caption
+   saying speech on the shortcut is never typed, commands are recognized on this Mac, and they are not
+   saved to History. Its shortcut can never be shared with another mode: recording one that another
+   enabled mode uses (or giving another mode this one's) is refused with an Error at the top of the pane
+   naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
+   shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
+2. **What you can say** — the phrases (“switch to …”, “go to …”, “open …”, “focus …”, “go back”) with
+   one line each on what they do.
+3. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
+   without one. **Add Place** offers **Current App (name)** and, when that app is a browser, **Current
+   Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
+   **Web Page…**. Each opens a sheet with the name, other spoken names, and the destination; an existing
+   place's sheet holds the red **Delete Place** action at its trailing edge, with a confirmation. The sheet
+   says that finding an open tab asks macOS for permission to control the browser the first time.
+4. **Try it** — a field that shows what a typed phrase would do, live, without running anything.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to

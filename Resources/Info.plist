@@ -24,6 +24,6 @@
   <key>NSMicrophoneUsageDescription</key>
   <string>$(PRODUCT_NAME) transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>$(PRODUCT_NAME) reads the active browser tab's URL only when you use a mode that routes by website. The URL never leaves this Mac.</string>
+  <string>$(PRODUCT_NAME) asks your browser for the current tab's address when a mode routes by website, and, if you use voice commands, for the addresses and titles of open tabs so it can switch to one. Nothing it reads leaves this Mac.</string>
 </dict>
 </plist>

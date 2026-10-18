@@ -239,6 +239,23 @@ final class ConfigRepository {
         return set
     }
 
+    @discardableResult
+    func mutateVoiceCommands(_ transform: (inout VoiceCommandConfig) throws -> Void) throws -> VoiceCommandConfig {
+        var config = try loadVoiceCommandsForMutation()
+        try transform(&config)
+        if let issue = config.issue { throw ConfigError.invalid(issue) }
+        try commit(touching: [supportDir.appendingPathComponent(VoiceCommandStore.fileName)]) {
+            try VoiceCommandStore.write(config, to: supportDir)
+        }
+        return config
+    }
+
+    private func loadVoiceCommandsForMutation() throws -> VoiceCommandConfig {
+        let file = supportDir.appendingPathComponent(VoiceCommandStore.fileName)
+        guard FileManager.default.fileExists(atPath: file.path) else { return VoiceCommandConfig() }
+        return try VoiceCommandStore.decode(from: String(contentsOf: file, encoding: .utf8))
+    }
+
     // On write success: record the touched files (suppress the watcher echo), invalidate the cache, then
     // notify. On a throw nothing is invalidated (on-disk state unchanged) and the error propagates.
     private func commit(touching paths: [URL], _ write: () throws -> Void) throws {

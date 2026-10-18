@@ -17,17 +17,23 @@ final class ConfigCache {
     private var lastGoodReplacements = ReplacementsSet()
     private var lastGoodConnections = ConnectionSet()
     private var lastGoodDictionary = DictionarySet()
+    private var lastGoodVoiceCommands = VoiceCommandConfig()
 
     private var modesCache: [Mode]?
     private var replacementsCache: ReplacementsSet?
     private var connectionsCache: ConnectionSet?
     private var dictionaryCache: DictionarySet?
+    private var voiceCommandsCache: VoiceCommandConfig?
     private var resolvedCache: ResolvedConfig?
 
     // Per generation: present-but-undecodable files (malformed or newer schema after a downgrade). Recorded
     // so a fat-fingered replacements.toml lights the same user-visible malformed-config warning as
     // settings.toml instead of silently disabling every replacement / connection. Reset by invalidate().
     private(set) var loadFailures: [String] = []
+
+    var voiceCommandsEnabled = false {
+        didSet { if voiceCommandsEnabled != oldValue { invalidate() } }
+    }
 
     init(supportDir: URL) {
         self.supportDir = supportDir
@@ -38,6 +44,7 @@ final class ConfigCache {
         replacementsCache = nil
         connectionsCache = nil
         dictionaryCache = nil
+        voiceCommandsCache = nil
         resolvedCache = nil
         loadFailures = []
     }
@@ -46,6 +53,7 @@ final class ConfigCache {
     // (or absent). Forces the vocabulary/connection loads so the answer is complete regardless of call order.
     var configFileError: String? {
         _ = dictionary; _ = replacements; _ = connections; _ = modes
+        if voiceCommandsEnabled { _ = voiceCommands }
         return loadFailures.isEmpty ? nil : loadFailures.joined(separator: "; ")
     }
 
@@ -115,9 +123,22 @@ final class ConfigCache {
             let message = "\(failure.id).toml — \(failure.message)\(recovery)"
             if !loadFailures.contains(message) { loadFailures.append(message) }
         }
-        modesCache = result.modes
+        let visible = VoiceCommandTriggers.guarded(Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled))
+        modesCache = visible
         lastGoodModes = result.modes
-        return result.modes
+        return visible
+    }
+
+    var voiceCommands: VoiceCommandConfig {
+        if let voiceCommandsCache { return voiceCommandsCache }
+        let loaded: VoiceCommandConfig
+        switch VoiceCommandStore.load(supportDir: supportDir) {
+        case .absent: loaded = VoiceCommandConfig(); lastGoodVoiceCommands = VoiceCommandConfig()
+        case .loaded(let config): loaded = config; lastGoodVoiceCommands = config
+        case .failed(let error): loaded = lastGoodVoiceCommands; recordLoadFailure(VoiceCommandStore.fileName, error)
+        }
+        voiceCommandsCache = loaded
+        return loaded
     }
 
     var replacements: ReplacementsSet {

@@ -25,8 +25,13 @@ final class ModesSettingsModel: ObservableObject {
     // External writes run with this false and do reload.
     private var isApplyingLocalMutation = false
 
-    init(repository: ConfigRepository) {
+    private(set) var voiceCommandsEnabled: Bool
+    let voiceCommands: VoiceCommandsSettingsModel
+
+    init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false) {
         self.repository = repository
+        self.voiceCommandsEnabled = voiceCommandsEnabled
+        voiceCommands = VoiceCommandsSettingsModel(repository: repository)
         reload()
         // Refresh from disk on any external config write (e.g. a mode-scoped term from the correction
         // panel) so it survives the pane's next full-file save. `reload` is signature-guarded.
@@ -34,6 +39,12 @@ final class ModesSettingsModel: ObservableObject {
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
         }
+    }
+
+    func setVoiceCommandsEnabled(_ enabled: Bool) {
+        guard enabled != voiceCommandsEnabled else { return }
+        voiceCommandsEnabled = enabled
+        reload(force: true)
     }
 
     private func applyingLocalMutation<T>(_ body: () throws -> T) rethrows -> T {
@@ -48,9 +59,9 @@ final class ModesSettingsModel: ObservableObject {
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
-        ModeStore.ensureSystemModes(in: modesDir, lkgDir: lkgModesDir)
+        ModeStore.ensureSystemModes(in: modesDir, lkgDir: lkgModesDir, voiceCommands: voiceCommandsEnabled)
         let result = ModeStore.load(in: modesDir, previous: modes, lkgDir: lkgModesDir)
-        modes = result.modes
+        modes = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled)
         loadFailures = result.failures
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         fragmentIds = loadFragmentIds()
@@ -136,6 +147,14 @@ final class ModesSettingsModel: ObservableObject {
     // The first real name re-slugs the id so the TOML filename matches (the id is the filename stem);
     // later renames keep the file so external references stay stable.
     func update(_ mode: Mode) {
+        let previous = modes.first { $0.id == mode.id }
+        if let other = VoiceCommandTriggers.clash(for: mode, in: modes),
+           previous.map({ VoiceCommandTriggers.clash(for: $0, in: modes) == nil }) ?? true {
+            error = mode.runsVoiceCommands
+                ? "\(other.name) already uses that shortcut. \(mode.name) needs one no other mode uses."
+                : "\(other.name) already uses that shortcut, and it cannot share one with another mode."
+            return
+        }
         if mode.id == awaitingInitialName {
             let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
             if newId != mode.id {

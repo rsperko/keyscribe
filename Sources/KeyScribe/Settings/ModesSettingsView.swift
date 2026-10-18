@@ -56,7 +56,11 @@ struct ModesSettingsView: View {
             Divider()
 
             Group {
-                if let mode = model.selected {
+                if let mode = model.selected, mode.runsVoiceCommands {
+                    VoiceCommandsEditorView(
+                        mode: mode, allModes: model.modes, onUpdate: model.update, model: model.voiceCommands)
+                        .id(mode.id)
+                } else if let mode = model.selected {
                     ModeEditorView(
                         mode: mode, allModes: model.modes,
                         connections: model.connections, fragmentIds: model.fragmentIds,
@@ -120,6 +124,10 @@ struct ModesSettingsView: View {
         // A trigger the shadowing pass drops means this mode can never start — worth saying in the list,
         // since the trigger row that explains it is only visible once this mode is selected.
         if TriggerKeyConflicts.conflict(for: mode, in: model.modes)?.kind == .unreachable {
+            return .triggerUnreachable
+        }
+        if mode.runsVoiceCommands, !mode.triggerKeys.isEmpty,
+           VoiceCommandTriggers.guarded(model.modes).first(where: { $0.id == mode.id })?.triggerKeys.isEmpty == true {
             return .triggerUnreachable
         }
         guard let rewrite = mode.aiRewrite else { return nil }
@@ -361,7 +369,8 @@ enum ModeSummary {
     static func whenRuns(_ mode: Mode) -> String {
         let constrained = !mode.constraints.isEmpty
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
-        if mode.isSystem { return triggerDisplay(mode) ?? "Fallback" }
+        if mode.runsVoiceCommands { return triggerDisplay(mode) ?? "Off — no shortcut" }
+        if mode.isDirect { return triggerDisplay(mode) ?? "Fallback" }
         // A constrained mode with no shortcut/phrase never auto-runs (Fn goes to Plain Dictation) — it's
         // menu-reachable, so don't imply it's automatic.
         if let shortcuts = triggerDisplay(mode) {

@@ -43,7 +43,7 @@ public struct TextFingerprint: Codable, Equatable, Sendable {
 // transcript text.
 public struct DictationRecord: Codable, Equatable, Sendable {
     public enum Outcome: String, Codable, Sendable {
-        case inserted, copied, localFallback, noSpeech, failed
+        case inserted, copied, localFallback, noSpeech, failed, command
     }
 
     // Wall-clock stage timings, stamped by the app layer, chronological. `grace` is the physical press until

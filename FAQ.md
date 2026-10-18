@@ -183,9 +183,10 @@ Two for everyday dictation, granted in **System Settings ▸ Privacy & Security*
   transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E is registered as a system
   hotkey and needs no permission.)
 
-A third, **Automation**, is requested only if you set up a mode that routes by website — that is the
-one case where KeyScribe has to ask your browser for the current URL. Modes that do not route by
-website never trigger the request.
+A third, **Automation**, is requested only when KeyScribe has to ask your browser something: the
+current tab's address for a mode that routes by website, or, with the experimental voice commands, the
+open tabs' addresses and titles so it can switch to a saved web page. Nothing it reads leaves your Mac.
+If you use neither, the request never appears.
 
 KeyScribe does **not** request Input Monitoring.
 

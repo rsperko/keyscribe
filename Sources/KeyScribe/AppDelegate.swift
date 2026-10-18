@@ -130,7 +130,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         provider = resolveProvider(engines: engines, activeId: launchEngineId)
         ModeStore.recordStarterOffersIfFresh(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
+        ensureSystemModes()
         let reconciled = ModeStore.reconcileSeeds(
             modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
             settingsDir: KeyScribePaths.supportDir)
@@ -150,6 +150,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onUnreadableFile: { aside in
                 Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
             })
+        config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
             replacementUsage: replacementUsage)
@@ -557,7 +558,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     func reloadConfig() {
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
+        ensureSystemModes()
         // Adopt the post-heal state BEFORE the reads below so this reload does not echo into a second one;
         // an edit landing after is caught by the next fire, never absorbed unread.
         selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
@@ -640,11 +641,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             supportDir: KeyScribePaths.supportDir)
     }
 
+    private func ensureSystemModes() {
+        ModeStore.ensureSystemModes(
+            in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true),
+            voiceCommands: settings.features.isEnabled(.voiceCommands))
+    }
+
     // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
     // this then persists; `reloadConfig` calls it after re-reading an external edit off disk (no write,
     // so an externally-changed field isn't round-tripped and clobbered).
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
+        let voiceCommandsChanged = updated.features.isEnabled(.voiceCommands) != settings.features.isEnabled(.voiceCommands)
         let previousAudio = settings.audio
         // Compared against the provider, not the old setting: launch already activated a replacement for a
         // retired saved id, and persisting it must not evict the engine that preload is warming.
@@ -664,6 +672,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if updated.audio != previousAudio {
             CaptureArchive.publish(updated.audio)
             CaptureArchive.applyRetention()
+        }
+        if voiceCommandsChanged {
+            ensureSystemModes()
+            selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
+            config.voiceCommandsEnabled = updated.features.isEnabled(.voiceCommands)
         }
         controller.updateSettings(updated)
         hud.appearance = updated.hud.appearance
@@ -852,7 +865,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // menuWillOpen rather than on every refreshStatus — the latter fires after each dictation, which
     // otherwise reallocated every submenu item while the menu was closed.
     private func rebuildMenuItems() {
-        let modes = config.modes.filter(\.enabled)
+        let modes = config.modes.filter { $0.enabled && !$0.runsVoiceCommands }
         let automatic = modes.first { $0.id == Mode.directId } ?? modes.first
         var inertReasons: [String: String] = [:]
         for mode in modes where connectionUnavailable(for: mode) {

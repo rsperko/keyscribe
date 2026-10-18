@@ -49,6 +49,7 @@ enum HUDState: Equatable {
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)
     case complete(outcome: DictationOutcome, mode: String)
+    case commandDone(summary: String)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?)
 }
@@ -78,7 +79,7 @@ extension HUDState {
             return .preparing
         case .transcribing, .rewriting:
             return .processing
-        case .complete:
+        case .complete, .commandDone:
             return .complete
         case .localFallback:
             return .warning
@@ -108,6 +109,8 @@ extension HUDState {
             return "Inserted without rewriting"
         case .complete(let outcome, _):
             return Self.completePrimary(outcome)
+        case .commandDone(let summary):
+            return summary
         case .stoppedAtLimit(_, let limit, _):
             return "Stopped at the \(limit) limit"
         case .error(let message, _):
@@ -143,6 +146,8 @@ extension HUDState {
                 : "Inserted — dictate again to continue"
         case .complete(_, let mode):
             return mode
+        case .commandDone:
+            return "Voice command"
         case .localFallback:
             return "Rewrite could not be completed"
         case .error, .hidden:
@@ -220,7 +225,7 @@ extension HUDState {
             return "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
-        case .localFallback, .complete, .stoppedAtLimit, .error:
+        case .localFallback, .complete, .commandDone, .stoppedAtLimit, .error:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         }
     }
