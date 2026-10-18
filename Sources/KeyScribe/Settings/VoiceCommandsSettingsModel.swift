@@ -147,6 +147,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "More than one match", detail: "\(names.joined(separator: ", ")). Say more of the name, or give one a place nickname.", resolved: false)
         case .needsTabs:
             return TryResult(heard: heard, summary: "Could not read browser tabs", detail: "", resolved: false)
+        case .browserNotAllowed(let browser):
+            return TryResult(heard: heard, summary: "Not allowed to control the browser",
+                             detail: VoiceCommandRunner.notAllowedMessage(browser: appName(browser) ?? browser), resolved: false)
         }
     }
 }

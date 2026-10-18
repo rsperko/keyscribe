@@ -336,10 +336,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
-    public static let systemIdPrefix = "_"
     public static let directId = "_direct"
     public static let voiceCommandsId = "_voice_commands"
-    public var isSystem: Bool { id.hasPrefix(Mode.systemIdPrefix) }
+    public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId }
     public var isDirect: Bool { id == Mode.directId }
     public var runsVoiceCommands: Bool { output == .voiceCommand }
 

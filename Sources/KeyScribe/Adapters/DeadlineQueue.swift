@@ -13,11 +13,17 @@ final class DeadlineQueue: Sendable {
     }
 
     func run<T: Sendable>(within seconds: TimeInterval, _ work: @escaping @Sendable () -> T) async -> DeadlineResult<T> {
+        await run(within: seconds) { _ in work() }
+    }
+
+    func run<T: Sendable>(
+        within seconds: TimeInterval, _ work: @escaping @Sendable (_ isCurrent: () -> Bool) -> T
+    ) async -> DeadlineResult<T> {
         await withCheckedContinuation { (continuation: CheckedContinuation<DeadlineResult<T>, Never>) in
             let gate = Gate()
             queue.async {
                 guard gate.isOpen else { return }
-                let value = work()
+                let value = work { gate.isOpen }
                 if gate.close() { continuation.resume(returning: .finished(value)) }
             }
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {

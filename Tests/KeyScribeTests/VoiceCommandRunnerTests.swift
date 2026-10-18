@@ -15,6 +15,10 @@ struct VoiceCommandRunnerTests {
         var notInstalled: Set<String> = []
         var whileFocusing: () -> Void = {}
         var tabsUnreadable = false
+        var refused: [String] = []
+        var unavailable: [String] = []
+        var defaultBrowsers: [String: String] = ["https": "com.google.Chrome"]
+        private(set) var defaultBrowserQueries: [String] = []
         private(set) var opened: [String] = []
         private(set) var focused: [VoiceCommandCatalog.Tab] = []
         private(set) var openedURLs: [(String, String?)] = []
@@ -23,10 +27,16 @@ struct VoiceCommandRunnerTests {
 
         func runningApps() -> [VoiceCommandCatalog.App] { running }
         func installedApps() async -> [VoiceCommandCatalog.App] { installedScans += 1; return installed }
-        func browserTabs(in browser: String?) async -> [VoiceCommandCatalog.Tab]? {
+        func browserTabs(in browser: String?) async -> TabRead? {
             tabReads.append(browser)
             if tabsUnreadable { return nil }
-            return tabs.filter { browser == nil || $0.browserBundleId == browser }
+            return TabRead(tabs: tabs.filter { browser == nil || $0.browserBundleId == browser },
+                           refused: refused.filter { browser == nil || $0 == browser },
+                           unavailable: unavailable.filter { browser == nil || $0 == browser })
+        }
+        func defaultBrowserId(for url: String) -> String? {
+            defaultBrowserQueries.append(url)
+            return URL(string: url)?.scheme.flatMap { defaultBrowsers[$0] }
         }
         func appName(forBundleId bundleId: String) -> String? {
             (running + installed).first { $0.bundleId == bundleId }?.name
@@ -174,8 +184,102 @@ struct VoiceCommandRunnerTests {
         let (runner, system) = make()
         system.tabsUnreadable = true
         #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil)
-                == .failed(message: "The browser did not answer in time, so nothing was opened."))
+                == .failed(message: "The browser did not list its open tabs, so nothing was opened."))
         #expect(system.openedURLs.isEmpty)
+    }
+
+    @Test func aBrowserThatRefusedControlOpensNoDuplicateTab() async {
+        let (runner, system) = make()
+        system.refused = [chrome.bundleId]
+        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil)
+                == .failed(message: "\(Branding.appName) is not allowed to control Google Chrome, so nothing was opened. Allow it in System Settings \u{2192} Privacy & Security \u{2192} Automation."))
+        #expect(system.openedURLs.isEmpty)
+    }
+
+    @Test func aRefusalFromABrowserThatWouldNotOpenThePlaceIsIgnored() async {
+        let (runner, system) = make()
+        system.refused = ["com.apple.Safari"]
+        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail"))
+        #expect(system.openedURLs.map(\.0) == ["https://mail.google.com/"])
+    }
+
+    @Test func aRefusalIsCheckedAgainstTheBrowserThatOpensThatAddress() async {
+        let (runner, system) = make()
+        let plain = VoiceCommandPlace(name: "Wiki", target: .url("http://wiki.example/"))
+        system.defaultBrowsers = ["https": "com.google.Chrome", "http": "com.apple.Safari"]
+        system.refused = [chrome.bundleId]
+        #expect(await runner.run(transcript: "switch to wiki", places: [plain], origin: nil) == .done(summary: "Wiki"))
+        #expect(system.defaultBrowserQueries == ["http://wiki.example/"])
+    }
+
+    @Test(arguments: [nil, "com.google.Chrome"])
+    func aBrowserWhoseTabsCouldNotBeListedOpensNoDuplicate(browser: String?) async {
+        let (runner, system) = make()
+        let place = VoiceCommandPlace(name: "Gmail", target: .url("https://mail.google.com/"), browser: browser)
+        system.unavailable = [chrome.bundleId]
+        #expect(await runner.run(transcript: "switch to gmail", places: [place], origin: nil)
+                == .failed(message: "Google Chrome did not list its open tabs, so nothing was opened."))
+        #expect(system.openedURLs.isEmpty)
+    }
+
+    @Test func aScriptRetryStopsOnceTheCommandHasGivenUp() {
+        var current = true
+        var tried: [String] = []
+        let answer: Int? = BrowserScripting.firstAnswer(["first", "retry"], isCurrent: { current }) { source in
+            tried.append(source)
+            current = false
+            return nil
+        }
+        #expect(answer == nil)
+        #expect(tried == ["first"])
+    }
+
+    @Test func onlyAppsWhoseScriptingDictionaryHasTabsAreAskedForTabs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-sdef-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        func makeApp(_ name: String, sdef: String?) throws -> URL {
+            let app = root.appendingPathComponent("\(name).app")
+            let resources = app.appendingPathComponent("Contents/Resources")
+            try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+            var plist: [String: String] = ["CFBundleIdentifier": "test.\(name)", "CFBundlePackageType": "APPL"]
+            if let sdef {
+                plist["OSAScriptingDefinition"] = "\(name).sdef"
+                try sdef.write(to: resources.appendingPathComponent("\(name).sdef"), atomically: true, encoding: .utf8)
+            }
+            try (plist as NSDictionary).write(to: app.appendingPathComponent("Contents/Info.plist"))
+            return app
+        }
+        let browser = try makeApp("Browser", sdef: #"<dictionary><suite name="S"><class name="tab" code="Ctab"/></suite></dictionary>"#)
+        let reordered = try makeApp("Reordered", sdef: #"<dictionary><suite name="S"><class code="Ctab" name="tab"/></suite></dictionary>"#)
+        let wrapped = try makeApp("Wrapped", sdef: "<dictionary>\n<suite name=\"S\">\n<class\n    name = \"tab\"\n    code=\"Ctab\"/>\n</suite>\n</dictionary>")
+        let tabsOnly = try makeApp("TabsOnly", sdef: #"<dictionary><suite name="tab"><class name="tabs" code="Ctbs"/></suite></dictionary>"#)
+        let automation = try makeApp("Automation", sdef: #"<dictionary><suite name="S"><command name="execute"/></suite></dictionary>"#)
+        let unscriptable = try makeApp("Plain", sdef: nil)
+        #expect(LiveVoiceCommandSystem.hasScriptableTabs(browser))
+        #expect(LiveVoiceCommandSystem.hasScriptableTabs(reordered))
+        #expect(LiveVoiceCommandSystem.hasScriptableTabs(wrapped))
+        #expect(!LiveVoiceCommandSystem.hasScriptableTabs(tabsOnly))
+        #expect(!LiveVoiceCommandSystem.hasScriptableTabs(automation))
+        #expect(!LiveVoiceCommandSystem.hasScriptableTabs(unscriptable))
+    }
+
+    @Test func aTabReadStopsAskingOnceItIsNoLongerWanted() {
+        var current = true
+        var asked: [String] = []
+        let read = LiveVoiceCommandSystem.collectTabs(from: ["a", "b", "c"], isCurrent: { current }) { id in
+            asked.append(id)
+            current = false
+            return .tabs([])
+        }
+        #expect(asked == ["a"])
+        #expect(read == TabRead(tabs: []))
+    }
+
+    @Test func eachBrowserKeepsItsOwnReadOutcome() {
+        let tab = VoiceCommandCatalog.Tab(browserBundleId: "a", window: 1, tab: 1, url: "https://a.example/", title: "A")
+        let replies: [String: BrowserTabsReply] = ["a": .tabs([tab]), "b": .refused, "c": .unavailable]
+        let read = LiveVoiceCommandSystem.collectTabs(from: ["a", "b", "c"], isCurrent: { true }) { replies[$0]! }
+        #expect(read == TabRead(tabs: [tab], refused: ["b"], unavailable: ["c"]))
     }
 
     @Test func installedAppsIncludeOneLevelOfAppFolders() throws {

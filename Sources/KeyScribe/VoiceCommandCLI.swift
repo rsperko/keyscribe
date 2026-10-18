@@ -30,6 +30,7 @@ enum VoiceCommandCLI {
         case .noMatch(let target): return "no match for \u{201C}\(target)\u{201D}"
         case .ambiguous(let names): return "ambiguous: \(names.joined(separator: ", "))"
         case .needsTabs: return "needs browser tabs"
+        case .browserNotAllowed(let browser): return "not allowed to control \(browser)"
         case .action(let action):
             return "\(action.summary(appName: system.appName(forBundleId:))) — \(action.detail(appName: system.appName(forBundleId:)))"
         }

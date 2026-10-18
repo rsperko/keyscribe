@@ -44,4 +44,27 @@ struct DeadlineQueueTests {
         _ = await queue.run(within: 1) { 0 }
         #expect(ran.count == 0)
     }
+
+    @Test func workThatSeesItsDeadlinePassStopsSoTheNextCallRuns() async {
+        let queue = DeadlineQueue(label: "test.deadline.recover")
+        let steps = Counter()
+        let abandoned = await queue.run(within: 0.1) { isCurrent in
+            for _ in 0..<20 {
+                guard isCurrent() else { break }
+                steps.bump()
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            return 0
+        }
+        guard case .expired = abandoned else {
+            Issue.record("expected the first call to expire")
+            return
+        }
+        guard case .finished(let value) = await queue.run(within: 0.3, { 1 }) else {
+            Issue.record("expected the next call to finish")
+            return
+        }
+        #expect(value == 1)
+        #expect(steps.count < 20)
+    }
 }

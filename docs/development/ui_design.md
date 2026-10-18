@@ -806,8 +806,11 @@ never typed: a command it understands runs, and anything else shows an Error nam
    Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
    **Web Page…**. Each opens a sheet with the name, other spoken names, and the destination; an existing
    place's sheet holds the red **Delete Place** action at its trailing edge, with a confirmation. The sheet
-   says that finding an open tab asks macOS for permission to control the browser the first time.
-4. **Try it** — a field that shows what a typed phrase would do, live, without running anything.
+   says that **Any browser** looks through every running browser that can list its tabs, in all its
+   windows (which can include private ones), and that finding an open tab asks macOS for permission to
+   control the browser the first time.
+4. **Try it** — a field that shows what a typed phrase would do, live, without running anything. Its
+   caption says that checking open tabs reads their addresses and titles and may ask to control the browser.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to

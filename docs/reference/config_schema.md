@@ -35,7 +35,7 @@
 - **Mode id = filename stem** (kebab-case). The id is stable; `name` is the display label and
   can change freely.
 - **System modes use a reserved `_`-prefixed id** (`_direct.toml` = the Direct floor, shown to users
-  as "Plain Dictation", `design.md` §4.3). The kebab-case slugger never emits a leading underscore, so user modes can't collide. The
+  as "Plain Dictation", `design.md` §4.3). The kebab-case slugger never emits a leading underscore, so user modes can't collide. Only the built-in ids are treated as system modes; any other `_`-prefixed file is an ordinary mode. The
   file is auto-seeded and re-normalized on load: only its editable fields (trigger keys, insertion,
   trailing, submit, clipboard modifier, live-edits, **and exclude-from-history**) are honored; the
   locked guarantees (no AI rewrite, dictation/cursor only, global vocabulary) are enforced regardless
@@ -484,10 +484,15 @@ browser = "com.google.Chrome"    # optional: only look in, and open with, this b
   app equally close, and two tied at the same step are ambiguous whatever order they are listed in.
 - **Tab matching** ignores the scheme, a leading `www.`, the host's case, and trailing slashes, and respects
   path boundaries (`mail.example.com` never matches `mail.example.community`). The path, query, and fragment
-  keep their case: `example.com/Project` does not match a tab on `example.com/project`. Browsers are scripted
-  through Apple Events, so macOS asks once per browser for Automation permission; if it is denied, the page
-  is opened in a new tab instead. If the tabs cannot be read in time, the command fails rather than open
-  a second copy of a page that may already be open. A place with a `browser` reads only that browser's tabs, and if that
+  keep their case: `example.com/Project` does not match a tab on `example.com/project`. Only browsers whose
+  scripting dictionary describes tabs are asked; any other browser has its page opened directly, since its
+  tabs cannot be read. Asking goes through Apple Events, so macOS asks once per browser for Automation
+  permission. If the browser that would open the page has refused, the command fails with a pointer to
+  that setting instead of opening a second copy. A place with no `browser` is checked against, and opened
+  in, whichever browser macOS opens that address with. If the tabs cannot be read in time, or that browser could not list them, the command also fails
+  rather than open a second copy of a page that may already be open. Once the command gives up, no further
+  browser is asked, and a script already waiting stops on its own a few seconds later, so a browser that
+  hangs holds up a later command for a few seconds at most. A place with a `browser` reads only that browser's tabs, and if that
   browser is not installed the command fails rather than opening another browser.
 - **Focusing a tab re-checks it first**: the tab must still show the address it had when it was found
   (looked up again if it moved), compared case-sensitively like the match itself. If the tab is gone, the

@@ -11,6 +11,18 @@ enum VoiceCommandOutcome: Equatable, Sendable {
     case abandoned
 }
 
+struct TabRead: Equatable, Sendable {
+    var tabs: [VoiceCommandCatalog.Tab]
+    var refused: [String] = []
+    var unavailable: [String] = []
+}
+
+enum BrowserTabsReply: Equatable, Sendable {
+    case tabs([VoiceCommandCatalog.Tab])
+    case refused
+    case unavailable
+}
+
 enum TabFocusResult: Equatable, Sendable {
     case focused
     case gone
@@ -20,9 +32,10 @@ enum TabFocusResult: Equatable, Sendable {
 @MainActor
 protocol VoiceCommandSystem: AnyObject {
     var ownBundleId: String? { get }
+    func defaultBrowserId(for url: String) -> String?
     func runningApps() -> [VoiceCommandCatalog.App]
     func installedApps() async -> [VoiceCommandCatalog.App]
-    func browserTabs(in browser: String?) async -> [VoiceCommandCatalog.Tab]?
+    func browserTabs(in browser: String?) async -> TabRead?
     func appName(forBundleId bundleId: String) -> String?
     func isRunning(bundleId: String) -> Bool
     func isInstalled(bundleId: String) -> Bool
@@ -55,9 +68,15 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             places: places, runningApps: system.runningApps(), installedApps: await system.installedApps())
         let first = VoiceCommandResolver.resolve(transcript, catalog: catalog)
         guard case .needsTabs(let browser) = first else { return first }
-        guard let tabs = await system.browserTabs(in: browser) else { return first }
-        catalog.tabs = tabs
-        return VoiceCommandResolver.resolve(transcript, catalog: catalog)
+        guard let read = await system.browserTabs(in: browser) else { return first }
+        catalog.tabs = read.tabs
+        let resolved = VoiceCommandResolver.resolve(transcript, catalog: catalog)
+        if case .action(.place(_, .openURL(let url, let opener))) = resolved,
+           let destination = opener ?? system.defaultBrowserId(for: url) {
+            if read.refused.contains(destination) { return .browserNotAllowed(destination) }
+            if read.unavailable.contains(destination) { return .needsTabs(browser: destination) }
+        }
+        return resolved
     }
 
     func run(
@@ -81,8 +100,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: "No app or place called \u{201C}\(target)\u{201D}.")
         case .ambiguous(let names):
             return .failed(message: "More than one match: \(names.joined(separator: ", ")). Say more of the name.")
-        case .needsTabs:
-            return .failed(message: "The browser did not answer in time, so nothing was opened.")
+        case .needsTabs(let browser):
+            let name = browser.flatMap(system.appName(forBundleId:)) ?? "The browser"
+            return .failed(message: "\(name) did not list its open tabs, so nothing was opened.")
+        case .browserNotAllowed(let browser):
+            return .failed(message: Self.notAllowedMessage(browser: system.appName(forBundleId: browser) ?? browser))
         case .action(let action):
             return await execute(action, origin: origin, stillWanted: stillWanted)
         }
@@ -130,6 +152,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         return .done(summary: summary)
     }
 
+    static func notAllowedMessage(browser: String) -> String {
+        "\(Branding.appName) is not allowed to control \(browser), so nothing was opened. Allow it in System Settings \u{2192} Privacy & Security \u{2192} Automation."
+    }
+
     private func browserRefusal(_ browser: String?, place: VoiceCommandPlace) -> VoiceCommandOutcome? {
         guard let browser, !system.isInstalled(bundleId: browser) else { return nil }
         return .failed(message: "The browser chosen for \(place.name) is not installed.")
@@ -147,6 +173,10 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     private static let focusDeadline: TimeInterval = 2
 
     var ownBundleId: String? { Bundle.main.bundleIdentifier }
+
+    func defaultBrowserId(for url: String) -> String? {
+        URL(string: url).flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) }.flatMap { Bundle(url: $0)?.bundleIdentifier }
+    }
 
     func runningApps() -> [VoiceCommandCatalog.App] {
         InstalledApps.running()
@@ -241,20 +271,41 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         }
     }
 
-    func browserTabs(in browser: String?) async -> [VoiceCommandCatalog.Tab]? {
-        let browsers = Self.runningBrowsers().filter { browser == nil || $0 == browser }
-        guard !browsers.isEmpty else { return [] }
-        guard case .finished(let tabs) = await Self.scripts.run(within: Self.tabReadDeadline, {
-            browsers.flatMap { Self.readTabs(of: $0) }
+    func browserTabs(in browser: String?) async -> TabRead? {
+        let browsers = Self.runningTabBrowsers().filter { browser == nil || $0 == browser }
+        guard !browsers.isEmpty else { return TabRead(tabs: []) }
+        guard case .finished(let read) = await Self.scripts.run(within: Self.tabReadDeadline, { isCurrent in
+            Self.collectTabs(from: browsers, isCurrent: isCurrent) { BrowserScripting.tabs(of: $0, isCurrent: isCurrent) }
         }) else {
             Log.context.error("voice command: the browser tabs could not be read in time")
             return nil
         }
-        return tabs
+        for bundleId in read.refused {
+            Log.context.error("voice command: \(bundleId, privacy: .public) refused Automation")
+        }
+        for bundleId in read.unavailable {
+            Log.context.error("voice command: \(bundleId, privacy: .public) tabs could not be read")
+        }
+        return read
+    }
+
+    nonisolated static func collectTabs(
+        from browsers: [String], isCurrent: () -> Bool, read: (String) -> BrowserTabsReply
+    ) -> TabRead {
+        var result = TabRead(tabs: [])
+        for bundleId in browsers {
+            guard isCurrent() else { break }
+            switch read(bundleId) {
+            case .tabs(let tabs): result.tabs += tabs
+            case .refused: result.refused.append(bundleId)
+            case .unavailable: result.unavailable.append(bundleId)
+            }
+        }
+        return result
     }
 
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult {
-        switch await Self.scripts.run(within: Self.focusDeadline, { BrowserScripting.focus(tab) }) {
+        switch await Self.scripts.run(within: Self.focusDeadline, { BrowserScripting.focus(tab, isCurrent: $0) }) {
         case .expired:
             Log.context.error("voice command: \(tab.browserBundleId, privacy: .public) did not answer the tab focus in time")
             return .noResponse
@@ -266,9 +317,9 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func frontTab(ofBrowser bundleId: String) async -> (url: String, title: String)? {
-        guard isRunning(bundleId: bundleId), Self.httpsHandlers.contains(bundleId),
+        guard isRunning(bundleId: bundleId), Self.tabBrowsers.contains(bundleId),
               case .finished(let tab) = await Self.scripts.run(within: Self.tabReadDeadline, {
-                  BrowserScripting.frontTab(of: bundleId).map { FrontTab(url: $0.url, title: $0.title) }
+                  BrowserScripting.frontTab(of: bundleId, isCurrent: $0).map { FrontTab(url: $0.url, title: $0.title) }
               }), let tab else { return nil }
         return (tab.url, tab.title)
     }
@@ -280,24 +331,48 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
 
     func isBrowser(_ bundleId: String) -> Bool { Self.httpsHandlers.contains(bundleId) }
 
-    private static func runningBrowsers() -> [String] {
+    private static func runningTabBrowsers() -> [String] {
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        return httpsHandlers.filter { running.contains($0) }.sorted()
+        return tabBrowsers.filter { running.contains($0) }.sorted()
     }
 
-    nonisolated private static func readTabs(of bundleId: String) -> [VoiceCommandCatalog.Tab] {
-        BrowserScripting.tabs(of: bundleId)
+    nonisolated static func hasScriptableTabs(_ app: URL) -> Bool {
+        guard let bundle = Bundle(url: app),
+              let name = bundle.object(forInfoDictionaryKey: "OSAScriptingDefinition") as? String,
+              let sdef = bundle.resourceURL?.appendingPathComponent(name),
+              let parser = XMLParser(contentsOf: sdef) else { return false }
+        let finder = TabClassFinder()
+        parser.delegate = finder
+        parser.parse()
+        return finder.found
     }
 
-    private static let httpsHandlers: Set<String> = {
-        guard let https = URL(string: "https://example.com") else { return [] }
-        return Set(NSWorkspace.shared.urlsForApplications(toOpen: https).compactMap { Bundle(url: $0)?.bundleIdentifier })
-    }()
+    private static let httpsHandlerURLs: [URL] =
+        URL(string: "https://example.com").map { NSWorkspace.shared.urlsForApplications(toOpen: $0) } ?? []
+
+    private static let httpsHandlers = Set(httpsHandlerURLs.compactMap { Bundle(url: $0)?.bundleIdentifier })
+
+    private static let tabBrowsers = Set(httpsHandlerURLs.filter(hasScriptableTabs).compactMap { Bundle(url: $0)?.bundleIdentifier })
 
 }
 
+private final class TabClassFinder: NSObject, XMLParserDelegate {
+    private(set) var found = false
+
+    func parser(
+        _ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?,
+        attributes: [String: String] = [:]
+    ) {
+        guard elementName == "class", attributes["name"] == "tab" else { return }
+        found = true
+        parser.abortParsing()
+    }
+}
+
 enum BrowserScripting {
-    private enum Shape: CaseIterable {
+    static let replyTimeout = 3
+
+    enum Shape: CaseIterable {
         case chromium, safari
 
         var titleProperty: String {
@@ -308,32 +383,63 @@ enum BrowserScripting {
         }
     }
 
-    static func tabs(of bundleId: String) -> [VoiceCommandCatalog.Tab] {
+    static func tabs(of bundleId: String, isCurrent: () -> Bool) -> BrowserTabsReply {
         for shape in Shape.allCases {
-            let source = """
-            tell application id "\(bundleId)" to return {URL of every tab of every window, \
-            \(shape.titleProperty) of every tab of every window}
-            """
-            guard let result = run(source), result.numberOfItems == 2,
-                  let urls = result.atIndex(1), let titles = result.atIndex(2) else { continue }
-            return parse(urls: urls, titles: titles, bundleId: bundleId)
+            guard isCurrent() else { return .unavailable }
+            switch run(tabsSource(of: bundleId, shape: shape)) {
+            case .refused:
+                return .refused
+            case .failed(let code) where code == timedOut:
+                return .unavailable
+            case .failed:
+                continue
+            case .value(let result):
+                guard result.numberOfItems == 2, let urls = result.atIndex(1), let titles = result.atIndex(2) else { continue }
+                return .tabs(parse(urls: urls, titles: titles, bundleId: bundleId))
+            }
         }
-        return []
+        return .unavailable
     }
 
-    static func focus(_ tab: VoiceCommandCatalog.Tab) -> Bool {
+    static func tabsSource(of bundleId: String, shape: Shape) -> String {
+        bounded("""
+        tell application id \(literal(bundleId)) to return {URL of every tab of every window, \
+        \(shape.titleProperty) of every tab of every window}
+        """)
+    }
+
+    static func frontTabSource(of bundleId: String, shape: Shape) -> String {
+        let tabRef = shape == .chromium ? "active tab of front window" : "current tab of front window"
+        return bounded("""
+        tell application id \(literal(bundleId)) to return {URL of \(tabRef), \(shape.titleProperty) of \(tabRef)}
+        """)
+    }
+
+    private static func bounded(_ statements: String) -> String {
+        "with timeout of \(replyTimeout) seconds\n\(statements)\nend timeout"
+    }
+
+    static func focus(_ tab: VoiceCommandCatalog.Tab, isCurrent: () -> Bool) -> Bool {
         let bodies = [
             "set active tab index of window w to t",
             "set current tab of window w to tab t of window w",
         ]
-        for body in bodies {
-            if let result = run(focusSource(tab, selecting: body)) { return result.booleanValue }
+        return firstAnswer(bodies.map { focusSource(tab, selecting: $0) }, isCurrent: isCurrent) { source in
+            guard case .value(let result) = run(source) else { return nil }
+            return result.booleanValue
+        } ?? false
+    }
+
+    static func firstAnswer<T>(_ sources: [String], isCurrent: () -> Bool, run: (String) -> T?) -> T? {
+        for source in sources {
+            guard isCurrent() else { return nil }
+            if let answer = run(source) { return answer }
         }
-        return false
+        return nil
     }
 
     static func focusSource(_ tab: VoiceCommandCatalog.Tab, selecting body: String) -> String {
-        sameURLHandler + """
+        sameURLHandler + bounded("""
         tell application id \(literal(tab.browserBundleId))
             set wanted to \(literal(tab.url))
             set found to missing value
@@ -360,7 +466,7 @@ enum BrowserScripting {
             set index of window w to 1
             return true
         end tell
-        """
+        """)
     }
 
     static let sameURLHandler = """
@@ -376,17 +482,12 @@ enum BrowserScripting {
         "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
-    static func frontTab(of bundleId: String) -> (url: String, title: String)? {
-        for shape in Shape.allCases {
-            let tabRef = shape == .chromium ? "active tab of front window" : "current tab of front window"
-            let source = """
-            tell application id "\(bundleId)" to return {URL of \(tabRef), \(shape.titleProperty) of \(tabRef)}
-            """
-            guard let result = run(source), result.numberOfItems == 2,
-                  let url = result.atIndex(1)?.stringValue, !url.isEmpty else { continue }
+    static func frontTab(of bundleId: String, isCurrent: () -> Bool) -> (url: String, title: String)? {
+        firstAnswer(Shape.allCases.map { frontTabSource(of: bundleId, shape: $0) }, isCurrent: isCurrent) { source in
+            guard case .value(let result) = run(source), result.numberOfItems == 2,
+                  let url = result.atIndex(1)?.stringValue, !url.isEmpty else { return nil }
             return (url, result.atIndex(2)?.stringValue ?? "")
         }
-        return nil
     }
 
     private static func parse(urls: NSAppleEventDescriptor, titles: NSAppleEventDescriptor, bundleId: String) -> [VoiceCommandCatalog.Tab] {
@@ -404,10 +505,21 @@ enum BrowserScripting {
         return tabs
     }
 
-    private static func run(_ source: String) -> NSAppleEventDescriptor? {
-        guard let script = NSAppleScript(source: source) else { return nil }
+    private enum Reply {
+        case value(NSAppleEventDescriptor)
+        case refused
+        case failed(Int)
+    }
+
+    private static let notPermitted = -1743
+    private static let timedOut = -1712
+
+    private static func run(_ source: String) -> Reply {
+        guard let script = NSAppleScript(source: source) else { return .failed(0) }
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
-        return error == nil ? result : nil
+        guard let error else { return .value(result) }
+        let code = (error[NSAppleScript.errorNumber] as? Int) ?? 0
+        return code == notPermitted ? .refused : .failed(code)
     }
 }

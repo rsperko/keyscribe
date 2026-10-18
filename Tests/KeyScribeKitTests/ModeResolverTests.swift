@@ -192,6 +192,11 @@ struct ModeResolverTests {
         #expect(!mode("direct").isSystem)
     }
 
+    @Test func onlyTheBuiltInIdsAreSystemModes() {
+        #expect(Mode.voiceCommands.isSystem)
+        #expect(!mode("_scratch").isSystem)
+    }
+
     @Test func keyPressFallsThroughToDirectWhenAllBoundModesAreIneligible() {
         let slack = mode("slack", keys: ["right_option"], bundles: ["com.tinyspeck.slackmacgap"])
         let obsidian = mode("obsidian", keys: ["right_option"], bundles: ["md.obsidian"])

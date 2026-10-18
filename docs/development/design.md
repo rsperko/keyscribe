@@ -471,7 +471,8 @@ A few fields *are* user-editable — its **trigger keys**, insertion method, tra
 and whether it **records to history** (it records per the global History setting by default; you can
 switch that off for Direct specifically). It occupies a reserved **system-mode id namespace** (a
 leading underscore, `_direct`) that the mode-name slugger can never produce, so a user-created mode can
-never collide with it; locked fields are re-enforced on load so a hand-edit can't weaken the floor. The
+never collide with it (only the built-in ids are system modes; a hand-made `_`-prefixed file is an ordinary
+mode); locked fields are re-enforced on load so a hand-edit can't weaken the floor. The
 recording HUD shows **Plain Dictation** while it runs, so a fallthrough is honest, not silent. This
 makes a key press a two-part promise: a constrained mode scopes only its *processing*, never your
 *ability to dictate* — when the recipe does not apply here, the floor still types your words.

@@ -170,7 +170,7 @@ struct VoiceCommandsEditorView: View {
                     }
                 }
             }
-            Text("Shows what a command would do. Nothing runs from here.")
+            Text("Shows what a command would do without doing it. Checking open tabs reads their addresses and titles, and may ask to control your browser.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -285,7 +285,7 @@ private struct PlaceEditorSheet: View {
                         }
                     }
                     .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeBrowser)
-                    Text("Finding an open tab asks macOS for permission to control the browser the first time.")
+                    Text("Any browser looks through every running browser that can list its tabs, in all its windows, which can include private ones. Finding an open tab asks macOS for permission to control the browser the first time.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

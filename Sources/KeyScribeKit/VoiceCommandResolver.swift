@@ -80,6 +80,7 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case ambiguous([String])
     case noMatch(String)
     case needsTabs(browser: String?)
+    case browserNotAllowed(String)
 }
 
 public enum VoiceCommandResolver {
