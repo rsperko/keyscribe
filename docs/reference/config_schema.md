@@ -42,9 +42,10 @@
   of edits. Direct owns Fn by default and records to history per the global setting unless turned off.
 - **`_voice_commands.toml`** is a built-in system mode, behind the `voice_commands` experimental flag.
   It is seeded (with no shortcut) only while the flag is on; turning the flag off hides it but leaves the
-  file, so a later opt-in keeps the shortcut. Only `trigger_keys[]` and `enabled` are honored; everything
-  else is forced (`output = "voice_command"`, no rewrite, no vocabulary, no phrases or constraints, never
-  recorded to history). It is never the fallback: only its own shortcut starts it. **Its shortcut may not
+  file, so a later opt-in keeps the shortcut. Only `trigger_keys[]`, `enabled`, and its own vocabulary
+  (`[dictionary]` and `[replacements]`, which leave out global vocabulary unless `include_global` says
+  otherwise) are honored; everything else is forced (`output = "voice_command"`, no rewrite, no spoken
+  editing commands, no phrases or constraints, never recorded to history). It is never the fallback: only its own shortcut starts it. **Its shortcut may not
   be shared with any other enabled mode**, whatever that mode's context: Settings refuses the edit, and a
   shared press written by hand stays with the other mode — the Voice Commands binding is dropped and the
   Modes list marks the mode's shortcut as never firing.
@@ -473,6 +474,16 @@ url = "https://mail.google.com/" # focus an open tab whose address starts with t
 browser = "com.google.Chrome"    # optional: only look in, and open with, this browser
 ```
 
+- **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
+  replacements run over the whole utterance, so one can repair a misheard verb (`bitch to` → `switch to`).
+  Then its dictionary fixes near-misses in the **target only** — never in the command words, so a term like
+  `Lunch` cannot turn "launch Safari" into something that no longer parses — which lets a target keep its
+  real spelling (`herdr`, not `herder`). A replacement that owns the whole utterance becomes the command,
+  which makes custom spoken shortcuts (`code` → `switch to Visual Studio Code`). A terminal `<CR>` on a
+  regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
+  as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
+  too. When the file has no `[dictionary]` or `[replacements]` table, or one without `include_global`,
+  global vocabulary is left out.
 - A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A file that breaks a rule
   fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
 - **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a

@@ -72,6 +72,7 @@ final class ConfigRepository {
         notifyChange()
     }
 
+    var resolved: ResolvedConfig { config.resolved }
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
 
     func dictionaryWords() -> [String] { DictionaryStore.loadOrDefault(supportDir: supportDir).words }
@@ -169,7 +170,7 @@ final class ConfigRepository {
     @discardableResult
     func mutateMode(id: String, _ transform: (inout Mode) -> Void) throws -> Mode {
         var mode = try loadModeForMutation(id: id)
-        guard !mode.isSystem else { throw ConfigError.invalid("system modes cannot hold local vocabulary") }
+        guard mode.hasOwnVocabulary else { throw ConfigError.invalid("Plain Dictation uses only global vocabulary") }
         transform(&mode)
         try writeMode(mode)
         return mode

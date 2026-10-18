@@ -583,6 +583,8 @@ Both screens prioritize fast correction over configuration theory.
 **Vocabulary** is the management home for both global and mode-only vocabulary. It uses the shared
 Settings list/detail layout: **Global** is first and applies everywhere; enabled modes follow; disabled
 modes remain visible in their own group so their existing vocabulary and pre-enable setup never disappear.
+Plain Dictation is not listed: it always uses Global. Voice Commands is listed while its flag is on, and
+the correction shortcut can add to it.
 Selecting a scope edits only its own words and replacements. A mode detail states whether it also includes
 Global vocabulary, rather than mixing inherited entries into its editable lists. Mode editors keep an
 always-visible **Recognition and replacements** summary with an **Edit Vocabulary…** action; the full
@@ -809,8 +811,12 @@ never typed: a command it understands runs, and anything else shows an Error nam
    says that **Any browser** looks through every running browser that can list its tabs, in all its
    windows (which can include private ones), and that finding an open tab asks macOS for permission to
    control the browser the first time.
-4. **Try it** — a field that shows what a typed phrase would do, live, without running anything. Its
-   caption says that checking open tabs reads their addresses and titles and may ask to control the browser.
+4. **When a command is misheard** — the same **Recognition and replacements** summary as other modes,
+   with **Edit Vocabulary…** opening Vocabulary on Voice Commands. Its help says the words and
+   replacements apply only to commands, before what was said is read.
+5. **Try it** — a field that shows what a typed phrase would do, live, without running anything. When the
+   mode's vocabulary changed the phrase, it shows `Read as “…”` above the result. Its caption says that
+   checking open tabs reads their addresses and titles and may ask to control the browser.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to

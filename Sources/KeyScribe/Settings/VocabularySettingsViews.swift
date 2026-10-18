@@ -861,7 +861,7 @@ struct VocabularySettingsView: View {
                 onRemoveReplacement: replacements.remove(at:),
                 replacementUsageCaption: { replacements.usageCaption(for: $0, in: .global) })
         case let .mode(id):
-            if let mode = modes.modes.first(where: { $0.id == id && !$0.isSystem }) {
+            if let mode = modes.modes.first(where: { $0.id == id && $0.hasOwnVocabulary }) {
                 modeDetail(mode)
             } else {
                 ContentUnavailableView(
@@ -883,7 +883,9 @@ struct VocabularySettingsView: View {
         return VocabularyEditor(
             title: mode.name,
             subtitle: modeScopeDescription(mode),
-            wordsDescription: "Names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.",
+            wordsDescription: mode.runsVoiceCommands
+                ? "App and place names \(Branding.appName) should recognize as written in a command."
+                : "Names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.",
             scope: scope,
             words: mode.dictionary.words,
             rules: mode.replacements.rules,

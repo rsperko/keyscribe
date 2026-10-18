@@ -221,6 +221,25 @@ struct VocabularyLostWriteTests {
         #expect(updated.replacements.rules == [.init(heard: "cube cuddle", replace: "kubectl", regex: false)])
     }
 
+    @Test func correctionsSaveIntoVoiceCommandsButNeverIntoPlainDictation() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        try ModeStore.write(.voiceCommands, to: repo.modesDir)
+        try ModeStore.write(.direct, to: repo.modesDir)
+
+        #expect(repo.addDictionaryWord("herdr", toMode: Mode.voiceCommandsId))
+        #expect(repo.addReplacement(heard: "bitch to", replace: "switch to", toMode: Mode.voiceCommandsId))
+        #expect(!repo.addDictionaryWord("herdr", toMode: Mode.directId))
+
+        let saved = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("\(Mode.voiceCommandsId).toml"), encoding: .utf8),
+            id: Mode.voiceCommandsId)
+        #expect(saved.dictionary.words == ["herdr"])
+        #expect(saved.replacements.rules == [.init(heard: "bitch to", replace: "switch to", regex: false)])
+        #expect(DictionaryStore.loadOrDefault(supportDir: dir).words.isEmpty)
+    }
+
     @Test func externalEditNotificationRefreshesPaneModels() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -7,8 +7,12 @@ enum VoiceCommandCLI {
         let system = LiveVoiceCommandSystem.shared
         let runner = VoiceCommandRunner(system: system)
         let places = VoiceCommandStore.loadOrDefault(supportDir: KeyScribePaths.supportDir).places
-        let resolution = await runner.resolve(transcript, places: places)
+        let config = ConfigCache(supportDir: KeyScribePaths.supportDir)
+        config.voiceCommandsEnabled = true
+        let readAs = config.resolved.voiceCommandText(heard: transcript)
+        let resolution = await runner.resolve(readAs, places: places)
         print("heard:      \(transcript)")
+        if readAs != transcript { print("read as:    \(readAs)") }
         print("resolution: \(describe(resolution, system: system))")
         guard case .action = resolution else { return 1 }
         if dryRun { return 0 }

@@ -21,6 +21,21 @@ public enum VoiceCommandGrammar {
     static let focusVerbs = ["switch to", "go to", "focus on", "focus", "open", "launch"]
     static let goBack = "go back"
 
+    private static let focusVerbPrefix: NSRegularExpression = {
+        let gap = "[^\\p{L}\\p{N}]+"
+        let verbs = focusVerbs.map { $0.split(separator: " ").joined(separator: gap) }.joined(separator: "|")
+        return try! NSRegularExpression(
+            pattern: "^[^\\p{L}\\p{N}]*(?:\(verbs))(?![\\p{L}\\p{N}])[^\\p{L}\\p{N}]*", options: [.caseInsensitive])
+    }()
+
+    static func targetRange(in transcript: String) -> Range<String.Index>? {
+        guard case .focus = parse(transcript),
+              let match = focusVerbPrefix.firstMatch(in: transcript, range: NSRange(transcript.startIndex..., in: transcript)),
+              let verb = Range(match.range, in: transcript)
+        else { return nil }
+        return verb.upperBound..<transcript.endIndex
+    }
+
     public static func parse(_ transcript: String) -> VoiceCommandIntent? {
         let words = VoiceCommandText.key(transcript)
         if words == goBack { return .goBack }

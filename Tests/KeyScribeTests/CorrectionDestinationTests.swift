@@ -18,6 +18,11 @@ struct CorrectionDestinationTests {
         #expect(!list.contains { $0.scope == .mode(Mode.directId) })
     }
 
+    @Test func voiceCommandsTakesCorrectionsIntoItsOwnVocabulary() {
+        let list = CorrectionDestination.list(for: [.direct, .voiceCommands])
+        #expect(list.contains { $0.scope == .mode(Mode.voiceCommandsId) })
+    }
+
     @MainActor
     @Test func saveFailedMessageNamesTheRightSurface() {
         let global = CorrectionPanelController.saveFailedMessage(for: .global)

@@ -987,7 +987,8 @@ final class DictationController {
         let origin = capturedSnapshot?.bundleId.map(VoiceCommandOrigin.init(bundleId:))
         let start = DispatchTime.now()
         let outcome = await voiceCommands.run(
-            transcript: heard, places: config.voiceCommands.places, origin: origin,
+            transcript: plan.voiceCommandText(heard: heard, mode: activeMode),
+            places: config.voiceCommands.places, origin: origin,
             stillWanted: { [weak self] in
                 guard let self, !Task.isCancelled else { return false }
                 return !self.captureWasLost

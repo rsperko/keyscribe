@@ -58,7 +58,8 @@ struct ModesSettingsView: View {
             Group {
                 if let mode = model.selected, mode.runsVoiceCommands {
                     VoiceCommandsEditorView(
-                        mode: mode, allModes: model.modes, onUpdate: model.update, model: model.voiceCommands)
+                        mode: mode, allModes: model.modes, onUpdate: model.update, model: model.voiceCommands,
+                        onEditVocabulary: { onEditVocabulary(mode.id) })
                         .id(mode.id)
                 } else if let mode = model.selected {
                     ModeEditorView(

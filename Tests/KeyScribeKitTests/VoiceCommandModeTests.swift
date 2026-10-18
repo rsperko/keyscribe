@@ -56,6 +56,45 @@ struct VoiceCommandModeTests {
         #expect(normalized == expected)
     }
 
+    @Test func normalizationKeepsTheModesOwnVocabulary() {
+        var mode = Mode.voiceCommands
+        mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["herdr"])
+        mode.replacements = Mode.ModeReplacements(
+            includeGlobal: true, rules: [ReplacementsSet.Rule(heard: "bitch to", replace: "switch to", regex: false)])
+
+        let normalized = mode.systemNormalized()
+        #expect(normalized.dictionary == mode.dictionary)
+        #expect(normalized.replacements == mode.replacements)
+    }
+
+    @Test func aFileWithoutVocabularySectionsLeavesGlobalOut() throws {
+        let toml = "schema_version = \(ModeStore.currentSchemaVersion)\nname = \"Voice Commands\"\noutput = \"voice_command\"\n"
+        let decoded = try ModeStore.decode(from: toml, id: Mode.voiceCommandsId).systemNormalized()
+        #expect(!decoded.dictionary.includeGlobal)
+        #expect(!decoded.replacements.includeGlobal)
+    }
+
+    @Test func aFileThatOptsIntoGlobalVocabularyKeepsIt() throws {
+        let toml = """
+            schema_version = \(ModeStore.currentSchemaVersion)
+            name = "Voice Commands"
+            output = "voice_command"
+            [dictionary]
+            include_global = true
+            [replacements]
+            rules = []
+            """
+        let decoded = try ModeStore.decode(from: toml, id: Mode.voiceCommandsId).systemNormalized()
+        #expect(decoded.dictionary.includeGlobal)
+        #expect(!decoded.replacements.includeGlobal)
+    }
+
+    @Test func everyModeButPlainDictationHasItsOwnVocabulary() {
+        #expect(!Mode.direct.hasOwnVocabulary)
+        #expect(Mode.voiceCommands.hasOwnVocabulary)
+        #expect(Mode(id: "m", name: "M").hasOwnVocabulary)
+    }
+
     @Test func seedingIsOptInAndIdempotent() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -341,6 +341,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId }
     public var isDirect: Bool { id == Mode.directId }
     public var runsVoiceCommands: Bool { output == .voiceCommand }
+    public var hasOwnVocabulary: Bool { !isDirect }
 
     public static var voiceCommands: Mode {
         var mode = Mode(id: voiceCommandsId, name: "Voice Commands")
@@ -370,6 +371,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             var mode = Mode.voiceCommands
             mode.triggerKeys = triggerKeys
             mode.enabled = enabled
+            mode.dictionary = dictionary
+            mode.replacements = replacements
             return mode
         }
         guard id == Mode.directId else { return self }
@@ -453,6 +456,11 @@ public enum ModeStore {
         }
         if mode.output == .voiceCommand && id != Mode.voiceCommandsId {
             throw ConfigError.invalid("output = \"voice_command\" belongs to the built-in Voice Commands mode")
+        }
+        if id == Mode.voiceCommandsId {
+            let table = try TOMLTable(string: toml)
+            if table["dictionary"]?["include_global"] == nil { mode.dictionary.includeGlobal = false }
+            if table["replacements"]?["include_global"] == nil { mode.replacements.includeGlobal = false }
         }
         mode.id = id
         return mode

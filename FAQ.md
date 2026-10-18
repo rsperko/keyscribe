@@ -131,6 +131,23 @@ words (Mike and "make"). A dictionaried compound also snaps its spoken form ("te
 dictionary terms are shared with your own AI service — marked as intended spellings, not typos, so it
 does not "fix" them — including in privacy modes, which turn context off but still send that term hint.
 
+### A voice command keeps being misheard.
+
+With the experimental voice commands, open **Settings ▸ Vocabulary ▸ Voice Commands**. Words and
+replacements there apply only to commands, and run before KeyScribe reads what you said:
+
+- **A name that comes out wrong:** add the app's real spelling (`herdr`) to the dictionary, and a
+  near-miss of the name ("herder") lands on it. The dictionary only ever changes the name, never the
+  "switch to" or "go back" around it.
+- **A phrase that always comes out wrong:** add a replacement — say your accent turns "switch to" into
+  "which to".
+- **Your own spoken shortcuts:** a replacement for a whole phrase becomes the command, so `code` →
+  `switch to Visual Studio Code` lets you say just "code".
+
+To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Try it**: it shows what
+the phrase is read as and what it would do. Global vocabulary is left out by default, so your prose fixes
+do not change a command.
+
 ### Can I edit text I've already written?
 
 Yes — select the text, trigger an edit-in-place mode, and speak an instruction. KeyScribe rewrites

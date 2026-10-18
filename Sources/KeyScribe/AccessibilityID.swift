@@ -185,6 +185,7 @@ enum AccessibilityID {
             static let addApp = "mode.voiceCommands.addApp"
             static let addWebPage = "mode.voiceCommands.addWebPage"
             static let tryIt = "mode.voiceCommands.tryIt"
+            static let editVocabulary = "mode.voiceCommands.editVocabulary"
             static let placeName = "mode.voiceCommands.place.name"
             static let placeSay = "mode.voiceCommands.place.say"
             static let placeKind = "mode.voiceCommands.place.kind"
@@ -367,7 +368,7 @@ enum AccessibilityID {
 
     static let all: [String] = [
         Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
-        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,

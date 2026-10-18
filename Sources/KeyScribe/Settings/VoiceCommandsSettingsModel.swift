@@ -14,6 +14,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         let summary: String
         let detail: String
         let resolved: Bool
+        var readAs: String? = nil
     }
 
     struct CurrentTab: Equatable {
@@ -127,12 +128,25 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         let places = places
         tryTask = Task { [weak self, system] in
             try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, let readAs = self?.readAs(heard) else { return }
             let runner = VoiceCommandRunner(system: system)
-            let resolution = await runner.resolve(heard, places: places)
+            let resolution = await runner.resolve(readAs, places: places)
             guard !Task.isCancelled, let self else { return }
-            self.tryResult = Self.describe(resolution, heard: heard, appName: { system.appName(forBundleId: $0) })
+            self.tryResult = Self.describe(
+                resolution, heard: heard, readAs: readAs, appName: { system.appName(forBundleId: $0) })
         }
+    }
+
+    func readAs(_ heard: String) -> String {
+        repository.resolved.voiceCommandText(heard: heard)
+    }
+
+    static func describe(
+        _ resolution: VoiceCommandResolution, heard: String, readAs: String, appName: (String) -> String?
+    ) -> TryResult {
+        var result = describe(resolution, heard: heard, appName: appName)
+        if readAs != heard { result.readAs = readAs }
+        return result
     }
 
     static func describe(_ resolution: VoiceCommandResolution, heard: String, appName: (String) -> String?) -> TryResult {

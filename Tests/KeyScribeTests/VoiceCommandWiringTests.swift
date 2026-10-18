@@ -65,7 +65,7 @@ struct VoiceCommandWiringTests {
     private func run(
         transcript: String, outcome: VoiceCommandOutcome = .done(summary: "Ghostty"),
         places: [VoiceCommandPlace] = [], otherModes: [Mode] = [], useVoiceCommands: Bool = true,
-        flagOn: Bool = true, loss: Loss = .none
+        flagOn: Bool = true, loss: Loss = .none, vocabulary: (inout Mode) -> Void = { _ in }
     ) async throws -> Run {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-vcwire-\(UUID().uuidString)", isDirectory: true)
@@ -75,6 +75,7 @@ struct VoiceCommandWiringTests {
 
         var commands = Mode.voiceCommands
         commands.triggerKeys = [.init(key: "right_option")]
+        vocabulary(&commands)
         try ModeStore.write(commands, to: modesDir)
         for mode in otherModes { try ModeStore.write(mode, to: modesDir) }
         try VoiceCommandStore.write(VoiceCommandConfig(places: places), to: supportDir)
@@ -113,6 +114,14 @@ struct VoiceCommandWiringTests {
         await controller.dictationTask?.value
         return Run(runner: runner, hud: hud, inserted: captured.insertedText, historyCount: history.entries().count,
                    record: controller.lastRecord)
+    }
+
+    @Test func theCommandIsReadAfterTheModesOwnVocabularyCleansIt() async throws {
+        let result = try await run(transcript: "Bitch to herder.") { mode in
+            mode.dictionary.words = ["herdr"]
+            mode.replacements.rules = [.init(heard: "bitch to", replace: "switch to", regex: false)]
+        }
+        #expect(result.runner.calls.map(\.transcript) == ["switch to herdr."])
     }
 
     @Test func aVoiceCommandRunsAndNothingIsInserted() async throws {

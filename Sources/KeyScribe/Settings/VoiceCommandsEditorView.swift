@@ -7,6 +7,7 @@ struct VoiceCommandsEditorView: View {
     let allModes: [Mode]
     let onUpdate: (Mode) -> Void
     @ObservedObject var model: VoiceCommandsSettingsModel
+    var onEditVocabulary: () -> Void = {}
     @State private var editing: PlaceDraft?
     @State private var tryText = ""
 
@@ -49,6 +50,19 @@ struct VoiceCommandsEditorView: View {
             }
 
             placesSection
+
+            Section("When a command is misheard") {
+                SettingRow(
+                    title: "Recognition and replacements",
+                    result: VocabularyScopePicker.summary(for: mode),
+                    help: "Words and replacements here apply only to commands, before \(Branding.appName) reads what you said. Add a name as it is really spelled, or replace a phrase that keeps coming out wrong, such as a misheard \u{201C}switch to\u{201D}.",
+                    combinesAccessibilityChildren: false)
+                {
+                    Button("Edit Vocabulary…", action: onEditVocabulary)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.editVocabulary)
+                }
+            }
+
             trySection
         }
         .formStyle(.grouped)
@@ -160,6 +174,9 @@ struct VoiceCommandsEditorView: View {
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.tryIt)
             if let result = model.tryResult, result.heard == tryText.trimmingCharacters(in: .whitespacesAndNewlines) {
                 VStack(alignment: .leading, spacing: 2) {
+                    if let readAs = result.readAs {
+                        Text("Read as \u{201C}\(readAs)\u{201D}").font(.caption).foregroundStyle(.secondary)
+                    }
                     if result.resolved {
                         Label(result.summary, systemImage: "arrow.right.circle").font(.callout)
                     } else {
