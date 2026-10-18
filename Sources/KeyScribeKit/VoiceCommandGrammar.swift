@@ -36,6 +36,50 @@ public enum VoiceCommandGrammar {
         return verb.upperBound..<transcript.endIndex
     }
 
+    struct SpokenWord: Equatable {
+        let key: String
+        let end: String.Index
+    }
+
+    static func spokenWords(_ transcript: String) -> [SpokenWord] {
+        var words: [SpokenWord] = []
+        let scalars = transcript.unicodeScalars
+        var start: String.Index?
+        var index = scalars.startIndex
+        func close(at end: String.Index) {
+            guard let begin = start else { return }
+            for key in VoiceCommandText.key(String(transcript[begin..<end])).split(separator: " ") {
+                words.append(SpokenWord(key: String(key), end: end))
+            }
+            start = nil
+        }
+        while index < scalars.endIndex {
+            if CharacterSet.alphanumerics.contains(scalars[index]) {
+                if start == nil { start = index }
+            } else {
+                close(at: index)
+            }
+            index = scalars.index(after: index)
+        }
+        close(at: scalars.endIndex)
+        return words
+    }
+
+    static func focusVerbLength(_ words: [SpokenWord]) -> Int? {
+        let keys = words.map(\.key)
+        for verb in focusVerbs {
+            let verbWords = verb.split(separator: " ").map(String.init)
+            if keys.count > verbWords.count, Array(keys.prefix(verbWords.count)) == verbWords { return verbWords.count }
+        }
+        return nil
+    }
+
+    private static let textEdges = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:.!?\u{2026}"))
+
+    static func cleanedText(_ text: Substring) -> String {
+        text.trimmingCharacters(in: textEdges)
+    }
+
     public static func parse(_ transcript: String) -> VoiceCommandIntent? {
         let words = VoiceCommandText.key(transcript)
         if words == goBack { return .goBack }

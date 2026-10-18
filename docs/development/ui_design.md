@@ -234,7 +234,7 @@ not to its label.
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
-| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) | “Voice command” | None; dismiss automatically |
+| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) — or the script it started (“Deploy”) | “Voice command” | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -801,8 +801,8 @@ never typed: a command it understands runs, and anything else shows an Error nam
    enabled mode uses (or giving another mode this one's) is refused with an Error at the top of the pane
    naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
    shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
-2. **What you can say** — the phrases (“switch to …”, “go to …”, “open …”, “focus …”, “go back”) with
-   one line each on what they do.
+2. **What you can say** — the phrases (“switch to …”, “go to …”, “open …”, “focus …”, “go back”, and a
+   script's name followed by anything) with one line each on what they do.
 3. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
    without one. **Add Place** offers **Current App (name)** and, when that app is a browser, **Current
    Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
@@ -811,10 +811,20 @@ never typed: a command it understands runs, and anything else shows an Error nam
    says that **Any browser** looks through every running browser that can list its tabs, in all its
    windows (which can include private ones), and that finding an open tab asks macOS for permission to
    control the browser the first time.
-4. **When a command is misheard** — the same **Recognition and replacements** summary as other modes,
+4. **Scripts** — programs to run by name. The empty state says a script runs in the background, so the
+   current app stays in front, and can be passed what is said after its name. Each row shows the spoken
+   names (with `…` when the script takes words), the command line, a `Script` badge, and an orange
+   advisory when the program is missing or not executable. **Add Script** opens a sheet with the name,
+   other spoken names, the program (a path field plus **Choose…**), and the arguments, one per line, with
+   `{text}` marking where the spoken words go. The sheet says the program runs directly without a shell
+   and with a minimal PATH, and that scripts run as the user and can be started by a misheard command. An
+   existing script's sheet holds the red **Delete Script** action at its trailing edge, with a
+   confirmation.
+5. **When a command is misheard** — the same **Recognition and replacements** summary as other modes,
    with **Edit Vocabulary…** opening Vocabulary on Voice Commands. Its help says the words and
    replacements apply only to commands, before what was said is read.
-5. **Try it** — a field that shows what a typed phrase would do, live, without running anything. When the
+6. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
+   shows the exact command line it would run). When the
    mode's vocabulary changed the phrase, it shows `Read as “…”` above the result. Its caption says that
    checking open tabs reads their addresses and titles and may ask to control the browser.
 

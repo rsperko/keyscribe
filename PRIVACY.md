@@ -71,6 +71,15 @@ KeyScribe only reaches the network for these things, and never to send your audi
 
 There is no background phone-home or license check.
 
+## Programs you run by voice
+
+With the experimental voice commands you can name a script that KeyScribe runs when you say its
+name, and pass it the words you say after the name. KeyScribe starts that program on your Mac and
+hands it those words as an argument; it does not send them anywhere itself. What the program does
+with them, including any network use, is up to the program you chose. KeyScribe runs it as you, with
+everything your account can do, and a misheard command can run it, so choose what you connect this
+way with care.
+
 ## The redaction wedge — and its limits
 
 When LLM cleanup is enabled, KeyScribe attempts to keep recognizable sensitive spans out of the

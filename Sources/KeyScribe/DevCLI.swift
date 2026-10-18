@@ -82,7 +82,7 @@ public enum DevCLI {
                 --dictations <n>        How many recent dictation outcomes to include (default 10, 0 for none).
               --voice-command <text>  Resolve <text> as a spoken voice command ("switch to ghostty", "go back")
                                       against this Mac's running and installed apps, open browser tabs, and
-                                      the saved places, print what it resolved to, run it, and exit. Exits
+                                      the saved places and scripts, print what it resolved to, run it, and exit. Exits
                                       non-zero when it does not resolve or does not run.
                 --dry-run               Print the resolution without running it.
               --list-engines          Print each shipped catalog engine and whether it is installed

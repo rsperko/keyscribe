@@ -83,4 +83,23 @@ struct VoiceCommandVocabularyTests {
         let mode = commands()
         #expect(plan(mode: mode).voiceCommandText(heard: "go to new line", mode: mode) == "go to new line")
     }
+
+    @Test func theDictionaryLeavesTheWordsPassedToAScriptAlone() {
+        let mode = commands(words: ["Postgres"])
+        let deploy = VoiceCommandScript(name: "Deploy", run: ["/bin/deploy", "{text}"])
+        let plan = plan(mode: mode)
+        #expect(plan.voiceCommandText(heard: "switch to deploy postgrass", mode: mode, scripts: [deploy])
+            == "switch to deploy postgrass")
+        #expect(plan.voiceCommandText(heard: "switch to postgrass", mode: mode, scripts: [deploy]) == "switch to Postgres")
+    }
+
+    @Test func theDictionaryNeverTurnsAPhraseIntoAScript() {
+        let mode = commands(words: ["herdr", "Postgres"])
+        let herdr = VoiceCommandScript(name: "herdr", run: ["/bin/herdr", "{text}"])
+        let plan = plan(mode: mode)
+        #expect(plan.voiceCommandText(heard: "switch to herder postgrass", mode: mode, scripts: [herdr])
+            == "switch to herder postgrass")
+        #expect(plan.voiceCommandText(heard: "switch to herder", mode: mode, scripts: [herdr]) == "switch to herder")
+        #expect(plan.voiceCommandText(heard: "switch to herder", mode: mode) == "switch to herdr")
+    }
 }

@@ -24,6 +24,8 @@ struct VoiceCommandRunnerTests {
         private(set) var openedURLs: [(String, String?)] = []
         private(set) var tabReads: [String?] = []
         private(set) var installedScans = 0
+        var scriptResult: ScriptRun = .finished(status: 0, lastError: nil)
+        private(set) var scriptRuns: [(program: String, arguments: [String])] = []
 
         func runningApps() -> [VoiceCommandCatalog.App] { running }
         func installedApps() async -> [VoiceCommandCatalog.App] { installedScans += 1; return installed }
@@ -50,6 +52,10 @@ struct VoiceCommandRunnerTests {
             return focusResult
         }
         func openURL(_ url: String, browser: String?) async -> Bool { openedURLs.append((url, browser)); return openSucceeds }
+        func runScript(program: String, arguments: [String]) async -> ScriptRun {
+            scriptRuns.append((program, arguments))
+            return scriptResult
+        }
     }
 
     private let chrome = VoiceCommandCatalog.App(name: "Google Chrome", bundleId: "com.google.Chrome")
@@ -331,7 +337,7 @@ struct VoiceCommandRunnerTests {
     @Test func failuresExplainThemselves() async {
         let (runner, _) = make()
         #expect(await runner.run(transcript: "hello", places: [], origin: nil)
-                == .failed(message: "Not a command. Say \u{201C}switch to\u{201D} an app or place, or \u{201C}go back\u{201D}."))
+                == .failed(message: "Not a command. Say \u{201C}switch to\u{201D} an app or place, \u{201C}go back\u{201D}, or a script\u{2019}s name."))
         #expect(await runner.run(transcript: "switch to banana", places: [], origin: nil)
                 == .failed(message: "No app or place called \u{201C}banana\u{201D}."))
     }
@@ -341,5 +347,61 @@ struct VoiceCommandRunnerTests {
         system.openSucceeds = false
         #expect(await runner.run(transcript: "switch to chrome", places: [], origin: nil)
                 == .failed(message: "Could not switch to Google Chrome."))
+    }
+
+    private let deploy = VoiceCommandScript(name: "Deploy", run: ["~/bin/deploy", "--env", "{text}"])
+
+    @Test func aScriptRunsWithTheSpokenTextAsOneArgument() async {
+        let (runner, system) = make()
+        #expect(await runner.run(transcript: "Deploy staging two.", places: [], scripts: [deploy], origin: nil)
+            == .done(summary: "Deploy"))
+        #expect(system.scriptRuns.map(\.program) == ["~/bin/deploy"])
+        #expect(system.scriptRuns.map(\.arguments) == [["--env", "staging two"]])
+        #expect(system.installedScans == 0)
+        #expect(system.opened.isEmpty)
+    }
+
+    @Test func aScriptThatIsStillRunningCountsAsDone() async {
+        let (runner, system) = make()
+        system.scriptResult = .stillRunning
+        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil) == .done(summary: "Deploy"))
+    }
+
+    @Test func aFailingScriptReportsItsExitStatusAndLastErrorLine() async {
+        let (runner, system) = make()
+        system.scriptResult = .finished(status: 2, lastError: "no such environment")
+        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
+            == .failed(message: "Deploy failed (exit 2): no such environment"))
+        system.scriptResult = .finished(status: 1, lastError: nil)
+        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
+            == .failed(message: "Deploy failed (exit 1)."))
+    }
+
+    @Test func aMissingProgramIsNamed() async {
+        let (runner, system) = make()
+        system.scriptResult = .notRunnable
+        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
+            == .failed(message: "~/bin/deploy is not a program that can be run. Check the path, and that the file is executable."))
+    }
+
+    @Test func aScriptWithoutItsTextDoesNotRun() async {
+        let (runner, system) = make()
+        #expect(await runner.run(transcript: "deploy", places: [], scripts: [deploy], origin: nil)
+            == .failed(message: "Say what to pass to Deploy after its name."))
+        #expect(system.scriptRuns.isEmpty)
+    }
+
+    @Test func anAbandonedCommandNeverRunsTheScript() async {
+        let (runner, system) = make()
+        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil, stillWanted: { false })
+            == .abandoned)
+        #expect(system.scriptRuns.isEmpty)
+    }
+
+    @Test func aScriptDoesNotMoveTheBackTarget() async {
+        let (runner, _) = make()
+        _ = await runner.run(transcript: "switch to ghostty", places: [], origin: .init(bundleId: textEdit.bundleId))
+        _ = await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: .init(bundleId: ghostty.bundleId))
+        #expect(runner.backTarget == .init(bundleId: textEdit.bundleId))
     }
 }

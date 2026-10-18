@@ -6,11 +6,11 @@ enum VoiceCommandCLI {
     static func run(transcript: String, dryRun: Bool) async -> Int32 {
         let system = LiveVoiceCommandSystem.shared
         let runner = VoiceCommandRunner(system: system)
-        let places = VoiceCommandStore.loadOrDefault(supportDir: KeyScribePaths.supportDir).places
+        let commands = VoiceCommandStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
         let config = ConfigCache(supportDir: KeyScribePaths.supportDir)
         config.voiceCommandsEnabled = true
-        let readAs = config.resolved.voiceCommandText(heard: transcript)
-        let resolution = await runner.resolve(readAs, places: places)
+        let readAs = config.resolved.voiceCommandText(heard: transcript, scripts: commands.scripts)
+        let resolution = await runner.resolve(readAs, places: commands.places, scripts: commands.scripts)
         print("heard:      \(transcript)")
         if readAs != transcript { print("read as:    \(readAs)") }
         print("resolution: \(describe(resolution, system: system))")
@@ -35,6 +35,7 @@ enum VoiceCommandCLI {
         case .ambiguous(let names): return "ambiguous: \(names.joined(separator: ", "))"
         case .needsTabs: return "needs browser tabs"
         case .browserNotAllowed(let browser): return "not allowed to control \(browser)"
+        case .scriptNeedsText(let name): return "\(name) needs words after its name"
         case .action(let action):
             return "\(action.summary(appName: system.appName(forBundleId:))) — \(action.detail(appName: system.appName(forBundleId:)))"
         }

@@ -414,11 +414,18 @@ once dictation has started.
 mode identity: the pipeline branches on the output kind. Such a take skips Phase B entirely (a spoken
 suffix never re-routes a command into a dictation mode), and skips the rewrite, insertion, and History —
 the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
-the global one unless it opts in), is parsed as a closed set of focus verbs and resolved against apps and the user's
-places (`config_schema.md` "`voice_commands.toml`"). It never inserts, pastes, copies, submits, or touches
-the clipboard. Recognition and resolution are local and the transcript is never sent to an AI service;
-the only network effect is that opening a saved web place loads that site in the browser. It opens only
-apps and URLs the system or the user's file names, never a URL built from speech. It is never the Direct fallback and is
+the global one unless it opts in), is matched against the user's scripts and then parsed as a closed set of
+focus verbs and resolved against apps and the user's places (`config_schema.md` "`voice_commands.toml`").
+It never inserts, pastes, copies, submits, or touches the clipboard. Recognition and resolution are local
+and the transcript is never sent to an AI service; the only network effect of its own is that opening a
+saved web place loads that site in the browser. It opens only apps and URLs the system or the user's file
+names, never a URL built from speech. **Spoken text reaches exactly one place: a script argument the user
+marked with `{text}`**, passed as a single argv element to a program started directly (`Process`, no shell),
+so speech can never become shell syntax or extra arguments. The program is the user's own code and runs as
+the user; what it does with the text is outside KeyScribe's invariants, which is why `PRIVACY.md` says so.
+A script is never matched by a near-miss, its text is never fuzzy-corrected, and a dictionary correction
+that would make a script match is discarded, because a guess here runs code rather than focusing the wrong
+window. It is never the Direct fallback and is
 reachable only by its own shortcut.
 
 **Phase B — known only after STT (trigger-phrase routing):**

@@ -9,6 +9,7 @@ struct VoiceCommandsEditorView: View {
     @ObservedObject var model: VoiceCommandsSettingsModel
     var onEditVocabulary: () -> Void = {}
     @State private var editing: PlaceDraft?
+    @State private var editingScript: ScriptDraft?
     @State private var tryText = ""
 
     private var trigger: ModeTrigger { ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate) }
@@ -47,9 +48,13 @@ struct VoiceCommandsEditorView: View {
                 phraseRow("\u{201C}switch to …\u{201D}  \u{201C}go to …\u{201D}  \u{201C}open …\u{201D}  \u{201C}focus …\u{201D}",
                           "Any running app, or one in your Applications folders, by name, or a place below. Brings it to the front, opening it if needed.")
                 phraseRow("\u{201C}go back\u{201D}", "Returns to the app you were in before your last command.")
+                phraseRow("A script\u{2019}s name, then anything else",
+                          "Runs the script below. What you say after its name is passed to it wherever its arguments use \(VoiceCommandScript.textPlaceholder).")
             }
 
             placesSection
+
+            scriptsSection
 
             Section("When a command is misheard") {
                 SettingRow(
@@ -69,6 +74,9 @@ struct VoiceCommandsEditorView: View {
         .padding(16)
         .sheet(item: $editing) { draft in
             PlaceEditorSheet(draft: draft, model: model) { editing = nil }
+        }
+        .sheet(item: $editingScript) { draft in
+            ScriptEditorSheet(draft: draft, model: model) { editingScript = nil }
         }
     }
 
@@ -113,6 +121,48 @@ struct VoiceCommandsEditorView: View {
             PaneBadge(place.isWebPage ? "Web page" : "App")
             Button("Edit…") { editing = PlaceDraft(place) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeEdit(VoiceCommandText.key(place.name).replacingOccurrences(of: " ", with: "-")))
+        }
+    }
+
+    private var scriptsSection: some View {
+        Section {
+            if model.scripts.isEmpty {
+                Text("No scripts yet. A script runs a program on this Mac when you say its name, in the background, so the app you are in stays in front. Words you say after the name can be passed to it.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(model.scripts, id: \.name) { script in
+                scriptRow(script)
+            }
+        } header: {
+            HStack {
+                Text("Scripts")
+                Spacer()
+                Button("Add Script") { editingScript = ScriptDraft() }
+                    .buttonStyle(.borderless)
+                    .disabled(model.loadError != nil)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addScript)
+            }
+        }
+    }
+
+    private func scriptRow(_ script: VoiceCommandScript) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(script.name)
+                Text("Say: " + script.spokenForms.map { form in
+                    "\u{201C}\(form)\(script.takesText ? " \u{2026}" : "")\u{201D}"
+                }.joined(separator: ", "))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(script.run.joined(separator: " ")).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                if let issue = VoiceCommandsSettingsModel.programIssue(script.program) {
+                    IssueText(issue, severity: .advisory)
+                }
+            }
+            Spacer()
+            PaneBadge("Script")
+            Button("Edit\u{2026}") { editingScript = ScriptDraft(script) }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptEdit(VoiceCommandText.key(script.name).replacingOccurrences(of: " ", with: "-")))
         }
     }
 
@@ -187,7 +237,7 @@ struct VoiceCommandsEditorView: View {
                     }
                 }
             }
-            Text("Shows what a command would do without doing it. Checking open tabs reads their addresses and titles, and may ask to control your browser.")
+            Text("Shows what a command would do without doing it, and never runs a script. Checking open tabs reads their addresses and titles, and may ask to control your browser.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -347,6 +397,166 @@ private struct PlaceEditorSheet: View {
 
     private func save() {
         issue = model.save(draft.place, replacing: draft.originalName)
+        if issue == nil { onDone() }
+    }
+}
+
+struct ScriptDraft: Identifiable, Equatable {
+    let id = UUID()
+    let originalName: String?
+    var name: String
+    var say: String
+    var program: String
+    var arguments: String
+
+    init() {
+        originalName = nil
+        name = ""
+        say = ""
+        program = ""
+        arguments = ""
+        fixedArguments = nil
+    }
+
+    let fixedArguments: [String]?
+
+    init(_ script: VoiceCommandScript) {
+        originalName = script.name
+        name = script.name
+        say = script.say.joined(separator: ", ")
+        program = script.program
+        let given = Array(script.run.dropFirst())
+        arguments = given.joined(separator: "\n")
+        fixedArguments = Self.lines(arguments) == given ? nil : given
+    }
+
+    var script: VoiceCommandScript {
+        let forms = say.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return VoiceCommandScript(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines), say: forms,
+            run: [program.trimmingCharacters(in: .whitespacesAndNewlines)] + (fixedArguments ?? Self.lines(arguments)))
+    }
+
+    static func lines(_ text: String) -> [String] {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines
+    }
+}
+
+private struct ScriptEditorSheet: View {
+    @State var draft: ScriptDraft
+    @ObservedObject var model: VoiceCommandsSettingsModel
+    let onDone: () -> Void
+    @State private var issue: String?
+    @State private var confirmingDelete = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(draft.originalName == nil ? "Add Script" : "Edit Script").font(.title2.bold())
+            Form {
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Name", text: $draft.name, prompt: Text("deploy"))
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptName)
+                    Text("Say this to run the script. Anything you say after it is the text passed to the script.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Also say", text: $draft.say, prompt: Text("ship, release"))
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSay)
+                    Text("Other names you might say, separated by commas. The name always works.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        TextField("Program", text: $draft.program, prompt: Text("~/bin/deploy"))
+                            .multilineTextAlignment(.leading)
+                            .font(.body.monospaced())
+                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptProgram)
+                        Button("Choose\u{2026}") { chooseProgram() }
+                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptChooseProgram)
+                    }
+                    if let programIssue = VoiceCommandsSettingsModel.programIssue(draft.program) {
+                        IssueText(programIssue, severity: .advisory)
+                    }
+                    Text("The full path to an executable file. It runs directly, not through a shell, with a minimal PATH, so a script that calls other tools should use their full paths or set PATH itself.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Arguments")
+                    if draft.fixedArguments != nil {
+                        Text(draft.arguments).font(.body.monospaced()).textSelection(.enabled)
+                        Text("These arguments end with an empty one, which this editor cannot show, so they are kept as they are. Change them in \(VoiceCommandStore.fileName).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        TextEditor(text: $draft.arguments)
+                            .font(.body.monospaced())
+                            .multilineTextAlignment(.leading)
+                            .ghostText("--env\n\(VoiceCommandScript.textPlaceholder)", visible: draft.arguments.isEmpty)
+                            .frame(minHeight: 72)
+                            .padding(4)
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                            .accessibilityLabel("Arguments")
+                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArguments)
+                        Text("One per line, passed exactly as written, including blank lines between them. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name, always within that one argument; \(Branding.appName) never passes it through a shell, but a program that runs its arguments as code, such as sh -c, will. With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, saying only the name runs it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            Text("Scripts run as you, with everything your account can do. A misheard command can run one, so keep scripts that change or delete things hard to say by accident, and check them in Try it.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let issue { IssueText(issue) }
+            HStack {
+                if draft.originalName != nil {
+                    Button("Cancel", role: .cancel, action: onDone)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptCancel)
+                    Button("Save") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSave)
+                    Spacer()
+                    PaneDeleteButton(title: "Delete Script") { confirmingDelete = true }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptDelete)
+                } else {
+                    Spacer()
+                    Button("Cancel", role: .cancel, action: onDone)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptCancel)
+                    Button("Add Script") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSave)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+        .confirmationDialog("Delete \u{201C}\(draft.originalName ?? draft.name)\u{201D}?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let name = draft.originalName {
+                    issue = model.deleteScript(named: name)
+                    if issue == nil { onDone() }
+                }
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptDeleteConfirm)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saying its name will no longer run it. The program itself is not deleted.")
+        }
+    }
+
+    private func chooseProgram() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        draft.program = url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path
+    }
+
+    private func save() {
+        issue = model.saveScript(draft.script, replacing: draft.originalName)
         if issue == nil { onDone() }
     }
 }

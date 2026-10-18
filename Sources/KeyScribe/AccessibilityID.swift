@@ -197,6 +197,17 @@ enum AccessibilityID {
             static let placeDelete = "mode.voiceCommands.place.delete"
             static let placeDeleteConfirm = "mode.voiceCommands.place.deleteConfirm.confirm"
             static func placeEdit(_ placeKey: String) -> String { "mode.voiceCommands.place.edit.\(placeKey)" }
+            static let addScript = "mode.voiceCommands.addScript"
+            static let scriptName = "mode.voiceCommands.script.name"
+            static let scriptSay = "mode.voiceCommands.script.say"
+            static let scriptProgram = "mode.voiceCommands.script.program"
+            static let scriptChooseProgram = "mode.voiceCommands.script.chooseProgram"
+            static let scriptArguments = "mode.voiceCommands.script.arguments"
+            static let scriptSave = "mode.voiceCommands.script.save"
+            static let scriptCancel = "mode.voiceCommands.script.cancel"
+            static let scriptDelete = "mode.voiceCommands.script.delete"
+            static let scriptDeleteConfirm = "mode.voiceCommands.script.deleteConfirm.confirm"
+            static func scriptEdit(_ scriptKey: String) -> String { "mode.voiceCommands.script.edit.\(scriptKey)" }
         }
 
         enum Editor {
@@ -373,6 +384,10 @@ enum AccessibilityID {
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,
         Mode.VoiceCommands.placeDeleteConfirm,
+        Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay,
+        Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments,
+        Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
+        Mode.VoiceCommands.scriptDeleteConfirm,
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
         Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.history, Settings.Sidebar.permissions,
         Settings.Sidebar.advanced,

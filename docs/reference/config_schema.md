@@ -15,7 +15,7 @@
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
-  voice_commands.toml      # places for the Voice Commands mode (experimental)
+  voice_commands.toml      # places and scripts for the Voice Commands mode (experimental)
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
   modes/                   # one file per mode; filename stem = mode id
@@ -453,7 +453,7 @@ replace = "the"
 regex = false
 ```
 
-### `voice_commands.toml` — places for Voice Commands (experimental)
+### `voice_commands.toml` — places and scripts for Voice Commands (experimental)
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
 `switch to | go to | focus | focus on | open | launch <target>` and `go back`, matched against the whole
@@ -472,7 +472,61 @@ app = "com.microsoft.VSCode"     # bring this app forward, opening it if needed
 name = "Gmail"
 url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it
 browser = "com.google.Chrome"    # optional: only look in, and open with, this browser
+
+[[script]]
+name = "Deploy"                  # display name; also always a spoken name. Unique among places and scripts.
+say = ["ship"]                   # optional extra spoken names
+run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
 ```
+
+**Scripts** run a program when you say their name, and can be handed what you say after it:
+
+- `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
+  directly, never through a shell, from the home folder, with standard input, output, and error not
+  connected to anything you see and the app's own minimal `PATH`. Each argument is passed exactly as
+  written, except that `{text}` is replaced by the spoken text — always inside that one argument, so
+  spoken words can never become shell syntax or extra arguments. `{text}` may not appear in the program.
+- **Matching** happens before the focus verbs and before apps and places, so a script wins over an app of
+  the same name. The utterance must start with one of the script's spoken names, in whole words (case and
+  punctuation ignored), optionally after a focus verb (`switch to deploy staging`). A script whose
+  arguments use `{text}` needs words after its name; saying only the name fails with a message and runs
+  nothing. A script without `{text}` runs only when its name is the whole utterance. The longest spoken
+  name the utterance starts with is chosen first, and only then are its words checked, so "ticket new"
+  asks for text for a `Ticket new` script rather than running `Ticket` with "new"; a longer name without
+  `{text}` that has more words after it is skipped. Two scripts tied for the longest name are ambiguous.
+  A script is never matched by a near-miss, and the dictionary never turns a phrase into a script: when its
+  correction would be what makes a script match, the phrase is left as heard. `go back` is never a script,
+  and a spoken name that is a command phrase or its first words (`open`, `go`, `switch`, `focus on`) is
+  refused so a script cannot take over the built-in phrases; a longer name that starts with one, such as
+  `open ticket`, is allowed.
+- **The text** is what follows the spoken name, in the cleaned transcript's own case and punctuation, with
+  leading and trailing spaces and the `, ; : . ! ? …` that speech recognition adds at the edges removed.
+  The voice-commands dictionary never corrects it.
+- **Running:** the command waits up to about a second and a half. A script that exits with status 0, or is
+  still running then, counts as done and is left to finish: done means started, and a failure after that
+  window is not seen. A nonzero exit within it fails the command, showing the exit status and the last
+  line the script wrote to standard error. A program that is missing or not executable fails without
+  starting. The script's arguments and output are never logged or saved. A newly written or edited file
+  can take longer to start the first time, while macOS checks it.
+- **Arguments are literal**, but KeyScribe cannot stop a program from treating them as code: pointing
+  `run` at `/bin/sh` with `-c` and `{text}` would run spoken words as shell commands. Put the logic in a
+  script file and take the text as `"$1"`.
+- **A complete example.** A file `~/bin/note` containing
+
+  ```sh
+  #!/bin/sh
+  printf '%s\n' "$1" >> "$HOME/notes.txt"
+  ```
+
+  made executable with `chmod +x ~/bin/note`, and the entry
+
+  ```toml
+  [[script]]
+  name = "Note"
+  run = ["~/bin/note", "{text}"]
+  ```
+
+  turns "note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
 
 - **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
   replacements run over the whole utterance, so one can repair a misheard verb (`bitch to` → `switch to`).
@@ -484,7 +538,7 @@ browser = "com.google.Chrome"    # optional: only look in, and open with, this b
   as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
   too. When the file has no `[dictionary]` or `[replacements]` table, or one without `include_global`,
   global vocabulary is left out.
-- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A file that breaks a rule
+- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A script sets `run`. A file that breaks a rule
   fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
 - **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
@@ -514,8 +568,8 @@ browser = "com.google.Chrome"    # optional: only look in, and open with, this b
   is being looked up or while a tab is being focused. Nothing further is opened or brought forward.
 - `go back` returns to the app that was frontmost before the last command that ran, not to a browser tab or
   window. It is kept in memory only, so it is lost when the app quits, and a second `go back` returns again.
-- **Try it** in Settings never runs a command, but previewing a web place reads the open tabs, so it can
-  be what first asks macOS for permission to control a browser.
+- **Try it** in Settings never runs a command or a script, but previewing a web place reads the open tabs,
+  so it can be what first asks macOS for permission to control a browser.
 
 ### Replacement matching & output
 

@@ -39,12 +39,14 @@ struct VoiceCommandWiringTests {
     private final class RunnerSpy: VoiceCommandRunning {
         var outcome: VoiceCommandOutcome = .done(summary: "Ghostty")
         var whileResolving: () -> Void = {}
-        private(set) var calls: [(transcript: String, places: [VoiceCommandPlace], origin: VoiceCommandOrigin?)] = []
+        private(set) var calls: [(
+            transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?
+        )] = []
         func run(
-            transcript: String, places: [VoiceCommandPlace], origin: VoiceCommandOrigin?,
+            transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
             stillWanted: @MainActor () -> Bool
         ) async -> VoiceCommandOutcome {
-            calls.append((transcript, places, origin))
+            calls.append((transcript, places, scripts, origin))
             whileResolving()
             return stillWanted() ? outcome : .abandoned
         }
@@ -64,7 +66,7 @@ struct VoiceCommandWiringTests {
 
     private func run(
         transcript: String, outcome: VoiceCommandOutcome = .done(summary: "Ghostty"),
-        places: [VoiceCommandPlace] = [], otherModes: [Mode] = [], useVoiceCommands: Bool = true,
+        places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = [], otherModes: [Mode] = [], useVoiceCommands: Bool = true,
         flagOn: Bool = true, loss: Loss = .none, vocabulary: (inout Mode) -> Void = { _ in }
     ) async throws -> Run {
         let supportDir = FileManager.default.temporaryDirectory
@@ -78,7 +80,7 @@ struct VoiceCommandWiringTests {
         vocabulary(&commands)
         try ModeStore.write(commands, to: modesDir)
         for mode in otherModes { try ModeStore.write(mode, to: modesDir) }
-        try VoiceCommandStore.write(VoiceCommandConfig(places: places), to: supportDir)
+        try VoiceCommandStore.write(VoiceCommandConfig(places: places, scripts: scripts), to: supportDir)
 
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
@@ -133,6 +135,15 @@ struct VoiceCommandWiringTests {
         #expect(result.inserted == nil)
         #expect(result.historyCount == 0)
         #expect(result.hud.states.last == .commandDone(summary: "Ghostty"))
+    }
+
+    @Test func theSavedScriptsReachTheRunner() async throws {
+        let script = VoiceCommandScript(name: "Deploy", run: ["/usr/bin/true", "{text}"])
+        let result = try await run(transcript: "deploy staging", outcome: .done(summary: "Deploy"), scripts: [script])
+        #expect(result.runner.calls.first?.scripts == [script])
+        #expect(result.inserted == nil)
+        #expect(result.historyCount == 0)
+        #expect(result.hud.states.last == .commandDone(summary: "Deploy"))
     }
 
     @Test func aFailedCommandShowsItsMessageAndInsertsNothing() async throws {

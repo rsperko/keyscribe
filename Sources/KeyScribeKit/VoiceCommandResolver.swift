@@ -26,12 +26,17 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
     }
 
     public var places: [VoiceCommandPlace]
+    public var scripts: [VoiceCommandScript]
     public var runningApps: [App]
     public var installedApps: [App]
     public var tabs: [Tab]?
 
-    public init(places: [VoiceCommandPlace] = [], runningApps: [App] = [], installedApps: [App] = [], tabs: [Tab]? = nil) {
+    public init(
+        places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = [], runningApps: [App] = [],
+        installedApps: [App] = [], tabs: [Tab]? = nil
+    ) {
         self.places = places
+        self.scripts = scripts
         self.runningApps = runningApps
         self.installedApps = installedApps
         self.tabs = tabs
@@ -47,6 +52,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
 
     case app(VoiceCommandCatalog.App)
     case place(VoiceCommandPlace, PlaceTarget)
+    case script(VoiceCommandScript, arguments: [String])
     case goBack
 
     public func summary(appName: (String) -> String?) -> String {
@@ -56,6 +62,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
         case .place(let place, _): return place.name
+        case .script(let script, _): return script.name
         }
     }
 
@@ -70,7 +77,15 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .place(_, .openURL(let url, let browser)):
             let inBrowser = browser.map { " in \(appName($0) ?? $0)" } ?? ""
             return "No open tab matches, so it opens \(url)\(inBrowser)."
+        case .script(let script, let arguments):
+            let line = ([script.program] + arguments.map(Self.shown)).joined(separator: " ")
+            return "Runs \(line) in the background."
         }
+    }
+
+    private static func shown(_ argument: String) -> String {
+        let plain = !argument.isEmpty && !argument.contains { $0.isWhitespace || "\"'\u{201C}\u{201D}".contains($0) }
+        return plain ? argument : "\u{201C}\(argument)\u{201D}"
     }
 }
 
@@ -81,17 +96,51 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case noMatch(String)
     case needsTabs(browser: String?)
     case browserNotAllowed(String)
+    case scriptNeedsText(String)
 }
 
 public enum VoiceCommandResolver {
     static let ambiguityLimit = 3
 
     public static func resolve(_ transcript: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
-        switch VoiceCommandGrammar.parse(transcript) {
+        let intent = VoiceCommandGrammar.parse(transcript)
+        if intent != .goBack, let script = resolveScript(transcript, scripts: catalog.scripts) { return script }
+        switch intent {
         case nil: return .notACommand
         case .goBack: return .action(.goBack)
         case .focus(let target): return resolve(target: target, catalog: catalog)
         }
+    }
+
+    public static func resolveScript(_ transcript: String, scripts: [VoiceCommandScript]) -> VoiceCommandResolution? {
+        guard !scripts.isEmpty else { return nil }
+        let words = VoiceCommandGrammar.spokenWords(transcript)
+        let starts = [0] + (VoiceCommandGrammar.focusVerbLength(words).map { [$0] } ?? [])
+        for start in starts {
+            if let resolution = resolveScript(transcript, words: words, from: start, scripts: scripts) { return resolution }
+        }
+        return nil
+    }
+
+    private static func resolveScript(
+        _ transcript: String, words: [VoiceCommandGrammar.SpokenWord], from start: Int, scripts: [VoiceCommandScript]
+    ) -> VoiceCommandResolution? {
+        var matches: [(script: VoiceCommandScript, length: Int, text: String)] = []
+        for script in scripts {
+            for form in script.spokenForms {
+                let formWords = VoiceCommandText.key(form).split(separator: " ").map(String.init)
+                let end = start + formWords.count
+                guard !formWords.isEmpty, end <= words.count, words[start..<end].map(\.key) == formWords else { continue }
+                let text = VoiceCommandGrammar.cleanedText(transcript[words[end - 1].end...])
+                if script.takesText || text.isEmpty { matches.append((script, formWords.count, text)) }
+            }
+        }
+        guard let longest = matches.map(\.length).max() else { return nil }
+        var seen = Set<String>()
+        let hits = matches.filter { $0.length == longest && seen.insert(VoiceCommandText.key($0.script.name)).inserted }
+        guard hits.count == 1, let hit = hits.first else { return .ambiguous(hits.prefix(ambiguityLimit).map(\.script.name)) }
+        if hit.script.takesText && hit.text.isEmpty { return .scriptNeedsText(hit.script.name) }
+        return .action(.script(hit.script, arguments: hit.script.arguments(text: hit.text)))
     }
 
     private enum Candidate: Equatable {

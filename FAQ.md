@@ -148,6 +148,35 @@ To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it in
 the phrase is read as and what it would do. Global vocabulary is left out by default, so your prose fixes
 do not change a command.
 
+### Can a voice command run my own script?
+
+Yes, with the experimental voice commands. In **Settings ▸ Modes ▸ Voice Commands ▸ Scripts**, choose
+**Add Script**, give it a name to say, and pick the program. Arguments go one per line, and `{text}`
+stands for whatever you say after the name: a script named "deploy" with the arguments `--env` and
+`{text}` turns "deploy staging" into `deploy --env staging`. Saying "switch to deploy staging" works too.
+
+For example, save this as `~/bin/note` and run `chmod +x ~/bin/note` so it can run:
+
+```sh
+#!/bin/sh
+printf '%s\n' "$1" >> "$HOME/notes.txt"
+```
+
+Then add a script named "note" with the program `~/bin/note` and one argument, `{text}`. Saying
+"note buy milk" appends "buy milk" to `notes.txt`.
+
+The script runs in the background, so the app you are in stays in front. KeyScribe waits a moment: if
+the script fails by then, the error shows what it printed last. A script still running after that is
+reported as started and left to finish, so a later failure goes unnoticed. It runs without a shell and
+with a minimal `PATH`, so call other tools by their full path or set `PATH` at the top of the script.
+Use **Try it** to see the exact command a phrase would run, without running it.
+
+The dictionary never changes a script's name or the words you pass it. If a name keeps coming out
+wrong, add the misheard form as another spoken name.
+
+A script runs as you and can be started by a misheard command, so give anything that changes or deletes
+things a name you will not say by accident.
+
 ### Can I edit text I've already written?
 
 Yes — select the text, trigger an edit-in-place mode, and speak an instruction. KeyScribe rewrites

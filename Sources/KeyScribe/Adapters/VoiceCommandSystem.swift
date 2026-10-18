@@ -23,6 +23,13 @@ enum BrowserTabsReply: Equatable, Sendable {
     case unavailable
 }
 
+enum ScriptRun: Equatable, Sendable {
+    case finished(status: Int32, lastError: String?)
+    case stillRunning
+    case notRunnable
+    case couldNotStart(String)
+}
+
 enum TabFocusResult: Equatable, Sendable {
     case focused
     case gone
@@ -42,12 +49,13 @@ protocol VoiceCommandSystem: AnyObject {
     func openApp(bundleId: String) async -> Bool
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult
     func openURL(_ url: String, browser: String?) async -> Bool
+    func runScript(program: String, arguments: [String]) async -> ScriptRun
 }
 
 @MainActor
 protocol VoiceCommandRunning: AnyObject {
     func run(
-        transcript: String, places: [VoiceCommandPlace], origin: VoiceCommandOrigin?,
+        transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
         stillWanted: @MainActor () -> Bool
     ) async -> VoiceCommandOutcome
 }
@@ -61,11 +69,13 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         self.system = system
     }
 
-    func resolve(_ transcript: String, places: [VoiceCommandPlace]) async -> VoiceCommandResolution {
-        let grammarOnly = VoiceCommandResolver.resolve(transcript, catalog: VoiceCommandCatalog())
-        if grammarOnly == .notACommand || grammarOnly == .action(.goBack) { return grammarOnly }
+    func resolve(
+        _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = []
+    ) async -> VoiceCommandResolution {
+        let withoutApps = VoiceCommandResolver.resolve(transcript, catalog: VoiceCommandCatalog(scripts: scripts))
+        guard case .noMatch = withoutApps else { return withoutApps }
         var catalog = VoiceCommandCatalog(
-            places: places, runningApps: system.runningApps(), installedApps: await system.installedApps())
+            places: places, scripts: scripts, runningApps: system.runningApps(), installedApps: await system.installedApps())
         let first = VoiceCommandResolver.resolve(transcript, catalog: catalog)
         guard case .needsTabs(let browser) = first else { return first }
         guard let read = await system.browserTabs(in: browser) else { return first }
@@ -80,10 +90,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     func run(
-        transcript: String, places: [VoiceCommandPlace], origin: VoiceCommandOrigin?,
-        stillWanted: @MainActor () -> Bool = { true }
+        transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [],
+        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true }
     ) async -> VoiceCommandOutcome {
-        let resolution = await resolve(transcript, places: places)
+        let resolution = await resolve(transcript, places: places, scripts: scripts)
         guard stillWanted() else { return .abandoned }
         return await run(resolution, origin: origin, stillWanted: stillWanted)
     }
@@ -95,7 +105,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let origin = origin.flatMap { $0.bundleId == system.ownBundleId ? nil : $0 }
         switch resolution {
         case .notACommand:
-            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} an app or place, or \u{201C}go back\u{201D}.")
+            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} an app or place, \u{201C}go back\u{201D}, or a script\u{2019}s name.")
         case .noMatch(let target):
             return .failed(message: "No app or place called \u{201C}\(target)\u{201D}.")
         case .ambiguous(let names):
@@ -105,6 +115,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: "\(name) did not list its open tabs, so nothing was opened.")
         case .browserNotAllowed(let browser):
             return .failed(message: Self.notAllowedMessage(browser: system.appName(forBundleId: browser) ?? browser))
+        case .scriptNeedsText(let name):
+            return .failed(message: Self.needsTextMessage(script: name))
         case .action(let action):
             return await execute(action, origin: origin, stillWanted: stillWanted)
         }
@@ -146,10 +158,29 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .place(let place, .openURL(let url, let browser)):
             if let refusal = browserRefusal(browser, place: place) { return refusal }
             succeeded = await system.openURL(url, browser: browser)
+        case .script(let script, let arguments):
+            return Self.outcome(of: await system.runScript(program: script.program, arguments: arguments), script: script)
         }
         guard succeeded else { return .failed(message: "Could not switch to \(summary).") }
         if let origin { backTarget = origin }
         return .done(summary: summary)
+    }
+
+    static func needsTextMessage(script: String) -> String {
+        "Say what to pass to \(script) after its name."
+    }
+
+    static func outcome(of run: ScriptRun, script: VoiceCommandScript) -> VoiceCommandOutcome {
+        switch run {
+        case .finished(0, _), .stillRunning:
+            return .done(summary: script.name)
+        case .finished(let status, let lastError):
+            return .failed(message: "\(script.name) failed (exit \(status))" + (lastError.map { ": \($0)" } ?? "."))
+        case .notRunnable:
+            return .failed(message: "\(script.program) is not a program that can be run. Check the path, and that the file is executable.")
+        case .couldNotStart(let reason):
+            return .failed(message: "Could not run \(script.name): \(reason)")
+        }
     }
 
     static func notAllowedMessage(browser: String) -> String {
@@ -269,6 +300,10 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
             Log.context.error("voice command: could not open a URL: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    func runScript(program: String, arguments: [String]) async -> ScriptRun {
+        await ScriptLauncher.run(program: program, arguments: arguments)
     }
 
     func browserTabs(in browser: String?) async -> TabRead? {
