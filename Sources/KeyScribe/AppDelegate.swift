@@ -893,7 +893,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // must not blink on and off as the user switches apps.
             hotkeyConflict: Self.hotkeyConflictDetected(
                 shadowed: shadowedHotkeyIds(in: config.modes.filter(\.enabled))),
-            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes))
+            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes) || config.voiceCommandsShutOut)
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {

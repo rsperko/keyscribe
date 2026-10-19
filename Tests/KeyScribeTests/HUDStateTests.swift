@@ -220,11 +220,11 @@ struct HUDStateTests {
     }
 
     @Test func anUnrecognizedCommandShowsItsTitleThenTheHeardExcerptOnce() {
-        let state = HUDState.error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "which to Mail"))
+        let state = HUDState.error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "stitch to Mail"))
         #expect(state.primaryText == "Command not recognized")
-        #expect(state.secondaryText == "Heard \u{201C}which to Mail\u{201D}")
+        #expect(state.secondaryText == "Heard \u{201C}stitch to Mail\u{201D}")
         #expect(state.secondaryIsHeardExcerpt)
-        #expect(state.voiceOverAnnouncement == "Command not recognized. Heard \u{201C}which to Mail\u{201D}")
+        #expect(state.voiceOverAnnouncement == "Command not recognized. Heard \u{201C}stitch to Mail\u{201D}")
         #expect(state.indicator == .error)
         #expect(state.panelWidth == 280)
         let plain = HUDState.error(message: "Command not recognized", action: nil)

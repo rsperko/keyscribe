@@ -49,9 +49,9 @@
   `false`, so a voice command is recorded like a dictation: Heard is the transcript and Result is the
   command it ran (a script's program and arguments, quoted the way a shell would), with the reason
   when it failed. It is never the fallback: only its own shortcut starts it. **Its shortcut may not
-  be shared with any other enabled mode**, whatever that mode's context: Settings refuses the edit, and a
-  shared press written by hand stays with the other mode — the Voice Commands binding is dropped and the
-  Modes list marks the mode's shortcut as never firing.
+  be shared with any other enabled mode**, whatever that mode's context: Settings offers to move it, and a
+  shared press written by hand stays with the other mode — the Voice Commands binding is dropped, and the
+  Modes list and the menu-bar badge mark the mode's shortcut as never firing.
 - Config files are human-editable text. **Model weights** are downloaded at runtime (never
   committed) into `models/`, consolidated under the KeyScribe support dir.
 - **History records** (`history/<day>.jsonl`, one JSON object per line) are additive: each dictation
@@ -473,8 +473,13 @@ regex = false
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
 an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
-utterance (case, punctuation, and a leading "the" are ignored). A target is a running app, an app installed
-in an Applications folder (or one folder down inside it), or a place from this file:
+utterance (case, punctuation, and a leading "the" are ignored). The app-switching prefixes also accept
+`which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
+`witch`, or `go`. These are exact prefix alternatives, not transcript replacements: target names,
+action input, and the original heard text are preserved. They apply equally to live commands and
+**Try it**. Other command words, including `run` and `go back`, have no sound-alike alternatives.
+A target is a running app, an app installed in an Applications folder (or one folder down inside it),
+or a place from this file:
 
 ```toml
 schema_version = 1
@@ -567,7 +572,8 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   turns "run note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
 
 - **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
-  replacements run over the whole utterance, so one can repair a misheard verb (`which to` → `switch to`).
+  replacements run over the whole utterance, so one can repair other misheard verbs
+  (`stitch to Mail` → `switch to Mail`).
   Then its dictionary fixes near-misses in the **target only** — never in the command words, so a term like
   `Lunch` cannot turn "launch Safari" into something that no longer parses — which lets a target keep its
   real spelling (such as `Spotify`). Dictionary correction is best-effort and excludes terms shorter

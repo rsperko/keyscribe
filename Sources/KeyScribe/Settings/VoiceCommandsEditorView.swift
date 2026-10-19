@@ -6,6 +6,7 @@ struct VoiceCommandsEditorView: View {
     let mode: Mode
     let allModes: [Mode]
     let onUpdate: (Mode) -> Void
+    let onMoveShortcut: (Mode) -> Void
     @ObservedObject var model: VoiceCommandsSettingsModel
     var onEditVocabulary: () -> Void = {}
     @State private var editing: PlaceDraft?
@@ -33,7 +34,9 @@ struct VoiceCommandsEditorView: View {
                 ModeTriggerRow(mode: mode, onUpdate: updateShortcut, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 if let clash = VoiceCommandTriggers.clash(for: mode, in: trigger.allModes) {
-                    IssueText("\(clash.name) also uses this shortcut, so it does not start \(mode.name). Choose one no other mode uses.")
+                    IssueText("\(clash.name) also uses this shortcut, so it does not start \(mode.name). Choose one no other mode uses, or move it here.")
+                    Button("Move Shortcut to \(mode.name)\u{2026}") { onMoveShortcut(mode) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.moveShortcut)
                 } else {
                     TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
                 }

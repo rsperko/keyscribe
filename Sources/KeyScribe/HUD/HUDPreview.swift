@@ -93,7 +93,7 @@ enum HUDPreview {
         case "microphone-error":
             .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
         case "command-not-recognized":
-            .error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "which to Mail"))
+            .error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "stitch to Mail"))
         case "command-not-recognized-long":
             .error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: longHeard))
         case "accessibility-error":

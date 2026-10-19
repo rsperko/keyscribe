@@ -19,7 +19,13 @@ public enum VoiceCommandText {
 }
 
 public enum VoiceCommandGrammar {
-    static let focusVerbs = ["switch to", "go to", "focus on", "focus", "open", "launch"]
+    static let focusVerbs = [
+        "switch to", "switch two", "switch too",
+        "which to", "which two", "which too",
+        "witch to", "witch two", "witch too",
+        "go to", "go two", "go too",
+        "focus on", "focus", "open", "launch",
+    ]
     static let goBack = "go back"
 
     private static let focusVerbPrefix: NSRegularExpression = {

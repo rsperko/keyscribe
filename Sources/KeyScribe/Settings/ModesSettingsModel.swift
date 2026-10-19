@@ -13,6 +13,16 @@ final class ModesSettingsModel: ObservableObject {
     private var awaitingInitialName: String?
     @Published private(set) var error: String?
     @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
+    @Published private(set) var pendingMove: ShortcutMove?
+    @Published private var appliedMove: AppliedShortcutMove?
+    private var pendingMoveBase: Mode?
+    private var pendingClaim: [Mode.TriggerKey] = []
+
+    struct AppliedShortcutMove: Equatable {
+        let move: ShortcutMove
+        let destinationBefore: Mode
+        let modesBefore: [Mode]
+    }
 
     private let repository: ConfigRepository
     private var modesDir: URL { repository.modesDir }
@@ -74,6 +84,7 @@ final class ModesSettingsModel: ObservableObject {
         }
         loadedSignature = configSignature()
         error = nil
+        appliedMove = nil
     }
 
     private func configSignature() -> String {
@@ -148,8 +159,18 @@ final class ModesSettingsModel: ObservableObject {
     // later renames keep the file so external references stay stable.
     func update(_ mode: Mode) {
         let previous = modes.first { $0.id == mode.id }
-        if let other = VoiceCommandTriggers.clash(for: mode, in: modes),
-           previous.map({ VoiceCommandTriggers.clash(for: $0, in: modes) == nil }) ?? true {
+        if let other = VoiceCommandTriggers.clash(for: mode, in: modes) {
+            if let previous {
+                let added = mode.triggerKeys.filter { key in !previous.triggerKeys.contains { $0.key == key.key } }
+                if let move = VoiceCommandTriggers.move(normalized(mode), claiming: added, in: modes) {
+                    propose(move, base: previous, claiming: added)
+                    return
+                }
+            }
+            if let previous, VoiceCommandTriggers.clash(for: previous, in: modes) != nil {
+                save(mode)
+                return
+            }
             error = mode.runsVoiceCommands
                 ? "\(other.name) already uses that shortcut. \(mode.name) needs one no other mode uses."
                 : "\(other.name) already uses that shortcut, and it cannot share one with another mode."
@@ -164,6 +185,84 @@ final class ModesSettingsModel: ObservableObject {
             }
         }
         save(mode)
+    }
+
+    func proposeMove(to mode: Mode) {
+        guard let move = VoiceCommandTriggers.move(normalized(mode), in: modes) else { return }
+        propose(move, base: mode, claiming: mode.triggerKeys)
+    }
+
+    private func propose(_ move: ShortcutMove, base: Mode, claiming keys: [Mode.TriggerKey]) {
+        pendingMove = move
+        pendingMoveBase = base
+        pendingClaim = keys
+        error = nil
+    }
+
+    func cancelMove() {
+        pendingMove = nil
+        pendingMoveBase = nil
+        pendingClaim = []
+    }
+
+    func confirmMove() {
+        guard let pending = pendingMove, let base = pendingMoveBase else { return }
+        let claim = pendingClaim
+        cancelMove()
+        reload()
+        guard modes.first(where: { $0.id == base.id }) == base,
+              let move = VoiceCommandTriggers.move(pending.destination, claiming: claim, in: modes), move == pending else {
+            error = "The modes using that shortcut changed, so nothing was moved. Try again."
+            return
+        }
+        let modesBefore = modes
+        guard apply(move.writes, restoring: [base] + move.losses.map(\.before)) else { return }
+        appliedMove = AppliedShortcutMove(move: move, destinationBefore: base, modesBefore: modesBefore)
+    }
+
+    var undoableMove: AppliedShortcutMove? {
+        guard let appliedMove, appliedMove.move.writes.allSatisfy(modes.contains) else { return nil }
+        return appliedMove
+    }
+
+    func undoMove() {
+        guard let applied = undoableMove else { return }
+        appliedMove = nil
+        reload()
+        let restores = applied.move.losses.map(\.before) + [applied.destinationBefore]
+        let restored = modes.map { mode in restores.first { $0.id == mode.id } ?? mode }
+        guard applied.move.writes.allSatisfy(modes.contains),
+              restores.allSatisfy({ Self.clashers($0, in: restored).isSubset(of: Self.clashers($0, in: applied.modesBefore)) }) else {
+            error = "Those shortcuts changed since the move, so Undo changed nothing."
+            return
+        }
+        _ = apply(restores, restoring: applied.move.writes)
+    }
+
+    private static func clashers(_ mode: Mode, in modes: [Mode]) -> Set<String> {
+        Set(VoiceCommandTriggers.move(mode, in: modes)?.losses.map(\.before.id) ?? [])
+    }
+
+    private func apply(_ writes: [Mode], restoring originals: [Mode]) -> Bool {
+        do {
+            try applyingLocalMutation { try repository.writeModes(writes, restoring: originals) }
+        } catch let incomplete as ConfigRepository.IncompleteRestore {
+            reload(force: true)
+            self.error = "Could not move the shortcut, and \(incomplete.unrestored.joined(separator: ", ")) could not be put back: \(incomplete.underlying.localizedDescription). Check their shortcuts."
+            return false
+        } catch {
+            self.error = "Could not move the shortcut, so nothing was changed: \(error.localizedDescription)"
+            return false
+        }
+        for mode in writes {
+            if let index = modes.firstIndex(where: { $0.id == mode.id }) { modes[index] = mode }
+        }
+        error = nil
+        return true
+    }
+
+    private func normalized(_ mode: Mode) -> Mode {
+        mode.isSystem ? mode.systemNormalized() : mode
     }
 
     private func rename(_ mode: Mode, to newId: String) {
@@ -275,7 +374,7 @@ final class ModesSettingsModel: ObservableObject {
 
     @discardableResult
     private func save(_ mode: Mode) -> Bool {
-        let mode = mode.isSystem ? mode.systemNormalized() : mode
+        let mode = normalized(mode)
         do {
             try applyingLocalMutation { try repository.writeMode(mode) }
             if let index = modes.firstIndex(where: { $0.id == mode.id }) {

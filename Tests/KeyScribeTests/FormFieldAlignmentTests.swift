@@ -45,7 +45,7 @@ struct FormFieldAlignmentTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = VoiceCommandsSettingsModel(repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)))
-        let fields = render(VoiceCommandsEditorView(mode: .voiceCommands, allModes: [.voiceCommands], onUpdate: { _ in }, model: model)
+        let fields = render(VoiceCommandsEditorView(mode: .voiceCommands, allModes: [.voiceCommands], onUpdate: { _ in }, onMoveShortcut: { _ in }, model: model)
             .environmentObject(HotkeyRecordingState()))
         #expect(!fields.isEmpty)
         #expect(fields.allSatisfy { $0.alignment == .natural })

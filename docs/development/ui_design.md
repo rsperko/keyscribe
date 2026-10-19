@@ -236,7 +236,7 @@ not to its label.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**); if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps and places, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, or Script/Shortcut), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
-| Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “which to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
+| Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -831,7 +831,28 @@ does not imply an AI rewrite or a separate expert mode. What it does also carrie
 which says Plain Dictation uses Global vocabulary and whose **Edit Vocabulary…** opens Global.
 
 **Voice Commands** (experimental, shown only while its flag is on) is a built-in mode. It ships
-with no shortcut, and its list row reads `Off — no shortcut` until one is set. Speech on its shortcut is
+with no shortcut, and its list row reads `Off — no shortcut` until one is set. Its shortcut is never
+shared with another enabled mode. Recording one that another mode uses — for Voice Commands, or Voice
+Commands' shortcut for another mode — changes nothing until the user confirms “Use [shortcut] for
+[mode]?”. The confirmation names every mode that uses it, says whether the press will run commands or
+type speech afterwards, names a key given up under a different name (moving ⌘ takes Left-⌘), and says
+which modes are left with no shortcut. On the first Voice Commands shortcut it also carries the
+app-switching notice below. **Move Shortcut** removes only the clashing shortcuts from those modes,
+keeps their others, and assigns it to the destination in one write; **Cancel** keeps everything. The
+check is repeated against the files before writing, and if the modes using the shortcut changed in the
+meantime, nothing moves and the pane says to try again. A failed write restores what it had already
+written; if a restore also fails, the pane names the modes that could not be put back and shows the
+files as they now are, instead of claiming nothing changed. After a move the pane shows “Moved
+[shortcut] to [mode] from [modes].” with **Undo**, which stays only until one of those modes changes or
+the pane is reopened. Undo rereads the files first and changes nothing if those modes were edited
+outside Settings or if another mode has since taken a shortcut it would restore; undoing the repair of
+a clash written by hand puts that clash back. Only a newly added
+shortcut asks: an unrelated edit to a mode whose shortcut already clashes saves as before, but
+recording a different taken shortcut on it still asks. A mode left without a shortcut is
+not marked as needing attention; its row already says how it starts. Enabling a mode whose shortcut
+clashes is still refused. A clash written into the files leaves the press with the other mode; the
+Voice Commands editor says so and offers **Move Shortcut to Voice Commands…**, the same confirmation.
+Speech on its shortcut is
 never typed: a command it understands runs, one that matches more than one destination asks which one
 (§5), and anything else shows an Error naming what was wrong (a command it did not recognize, with what was
 heard; no match; or too many matches) and changes nothing.
@@ -859,13 +880,17 @@ Its sections are, in order:
 
 1. **How to start Voice Commands** — the same shortcut structure as Plain Dictation, plus one caption
    saying speech on the shortcut is never typed and commands are recognized on this Mac. Its shortcut can never be shared with another mode: recording one that another
-   enabled mode uses (or giving another mode this one's) is refused with an Error at the top of the pane
-   naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
-   shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
+   enabled mode uses (or giving another mode this one's) asks to move it, with Undo afterwards (see the
+   Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
+   also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
+   Commands…**, and marks the list row and the menu-bar badge as never firing.
 2. **What it does** — four primary patterns: “switch to …” and “open …” for apps, places, and open
    windows (“Say ‘switch to Budget’ to bring an open window named Budget forward.”), “run …”
    for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs are also accepted
-   (`VoiceCommandGrammar.focusVerbs`). Actions require “run”; neither a bare name nor an app-switching phrase runs one.
+   (`VoiceCommandGrammar.focusVerbs`). “Which to” and “witch to” are accepted as “switch to”; “to” can
+   arrive as “two” or “too” after “switch”, “which”, “witch”, or “go”. These prefix alternatives work
+   in live commands and Try it without changing the original heard text or action input; the panel
+   continues to teach the standard phrases. Actions require “run”; neither a bare name nor an app-switching phrase runs one.
    Each pattern has one line on what it does, then the same **Recognition
    and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
    Voice Commands. Its help adds that the words and replacements apply before a command is read.

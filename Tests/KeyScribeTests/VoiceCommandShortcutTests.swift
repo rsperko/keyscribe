@@ -42,24 +42,155 @@ struct VoiceCommandShortcutTests {
         #expect(saved?.excludeFromHistory == true)
     }
 
-    @Test func settingsRefusesACommandShortcutAnotherModeUses() throws {
-        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
-        defer { try? FileManager.default.removeItem(at: f.dir) }
-        var commands = try #require(f.model.modes.first { $0.runsVoiceCommands })
-        commands.triggerKeys = [.init(key: "right_option")]
-        f.model.update(commands)
-        #expect(f.model.error == "Polish already uses that shortcut. Voice Commands needs one no other mode uses.")
-        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["control+option+v"])
+    private func assign(_ key: String, to id: String, in f: Fixture) throws {
+        var mode = try #require(f.model.modes.first { $0.id == id })
+        mode.triggerKeys = [.init(key: key)]
+        f.model.update(mode)
     }
 
-    @Test func settingsRefusesGivingAnotherModeTheCommandShortcut() throws {
+    @Test func anOccupiedCommandShortcutAsksBeforeMovingAndChangesNothingYet() throws {
         let f = try make(commandKey: "control+option+v", polishKey: "right_option")
         defer { try? FileManager.default.removeItem(at: f.dir) }
-        var polish = try #require(f.model.modes.first { $0.id == "polish" })
-        polish.triggerKeys = [.init(key: "control+option+v")]
-        f.model.update(polish)
-        #expect(f.model.error == "Voice Commands already uses that shortcut, and it cannot share one with another mode.")
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        let move = try #require(f.model.pendingMove)
+        #expect(move.losses.map(\.before.id) == ["polish"])
+        #expect(f.model.error == nil)
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["control+option+v"])
         #expect(onDisk("polish", in: f.dir) == ["right_option"])
+        f.model.cancelMove()
+        #expect(f.model.pendingMove == nil)
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["control+option+v"])
+        #expect(f.model.modes.first { $0.runsVoiceCommands }?.triggerKeys.map(\.key) == ["control+option+v"])
+    }
+
+    @Test func movingTheShortcutUpdatesEveryAffectedModeAndUndoRestoresThem() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        f.model.confirmMove()
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["right_option"])
+        #expect(onDisk("polish", in: f.dir).isEmpty)
+        #expect(f.model.modes.first { $0.id == "polish" }?.triggerKeys.isEmpty == true)
+        #expect(f.config.modes.first { $0.runsVoiceCommands }?.triggerKeys.map(\.key) == ["right_option"])
+        #expect(f.model.undoableMove != nil)
+        f.model.undoMove()
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["control+option+v"])
+        #expect(onDisk("polish", in: f.dir) == ["right_option"])
+        #expect(f.model.undoableMove == nil)
+    }
+
+    @Test func givingAnotherModeTheCommandShortcutMovesItAwayFromVoiceCommands() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        try assign("control+option+v", to: "polish", in: f)
+        #expect(f.model.pendingMove?.losses.map(\.before.id) == [Mode.voiceCommandsId])
+        f.model.confirmMove()
+        #expect(onDisk("polish", in: f.dir) == ["control+option+v"])
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir).isEmpty)
+    }
+
+    @Test func undoGoesAwayOnceAnAffectedModeIsEdited() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        f.model.confirmMove()
+        var polish = try #require(f.model.modes.first { $0.id == "polish" })
+        polish.name = "Polished"
+        f.model.update(polish)
+        #expect(f.model.undoableMove == nil)
+        f.model.undoMove()
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["right_option"])
+    }
+
+    @Test func undoRefusesToRestoreAShortcutAnotherModeTookSince() throws {
+        let f = try make(commandKey: "f12", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        var email = Mode(id: "email", name: "Email")
+        email.triggerKeys = [.init(key: "f11")]
+        try ModeStore.write(email, to: f.dir.appendingPathComponent("modes"))
+        f.model.reload(force: true)
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        f.model.confirmMove()
+        try assign("f12", to: "email", in: f)
+        #expect(f.model.undoableMove != nil)
+        f.model.undoMove()
+        #expect(f.model.error == "Those shortcuts changed since the move, so Undo changed nothing.")
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["right_option"])
+        #expect(onDisk("email", in: f.dir) == ["f12"])
+    }
+
+    @Test func undoNoticesAnEditMadeOutsideSettings() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        f.model.confirmMove()
+        var polish = Mode(id: "polish", name: "Polish")
+        polish.triggerKeys = [.init(key: "f9")]
+        try ModeStore.write(polish, to: f.dir.appendingPathComponent("modes"))
+        f.model.undoMove()
+        #expect(onDisk("polish", in: f.dir) == ["f9"])
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["right_option"])
+    }
+
+    @Test func changingAnAlreadyClashingShortcutToAnotherTakenOneStillAsks() throws {
+        let f = try make(commandKey: "right_option", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        var email = Mode(id: "email", name: "Email")
+        email.triggerKeys = [.init(key: "f12")]
+        try ModeStore.write(email, to: f.dir.appendingPathComponent("modes"))
+        f.model.reload(force: true)
+        try assign("f12", to: Mode.voiceCommandsId, in: f)
+        #expect(f.model.pendingMove?.losses.map(\.before.id) == ["email"])
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["right_option"])
+    }
+
+    @Test func aModeThatTookTheShortcutMeanwhileStopsTheMove() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        var email = Mode(id: "email", name: "Email")
+        email.triggerKeys = [.init(key: "right_option")]
+        try ModeStore.write(email, to: f.dir.appendingPathComponent("modes"))
+        f.model.confirmMove()
+        #expect(f.model.error == "The modes using that shortcut changed, so nothing was moved. Try again.")
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["control+option+v"])
+        #expect(onDisk("polish", in: f.dir) == ["right_option"])
+        #expect(f.model.undoableMove == nil)
+    }
+
+    @Test func enablingAModeThatClashesIsStillRefused() throws {
+        let f = try make(commandKey: "right_option", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        var polish = try #require(f.model.modes.first { $0.id == "polish" })
+        polish.enabled = false
+        f.model.update(polish)
+        polish.enabled = true
+        f.model.update(polish)
+        #expect(f.model.pendingMove == nil)
+        #expect(f.model.error == "Voice Commands already uses that shortcut, and it cannot share one with another mode.")
+    }
+
+    @Test func aClashWrittenOnDiskCanBeMovedToVoiceCommandsFromSettings() throws {
+        let f = try make(commandKey: "right_option", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        #expect(f.config.voiceCommandsShutOut)
+        let commands = try #require(f.model.modes.first { $0.runsVoiceCommands })
+        f.model.proposeMove(to: commands)
+        f.model.confirmMove()
+        #expect(onDisk("polish", in: f.dir).isEmpty)
+        #expect(!f.config.voiceCommandsShutOut)
+    }
+
+    @Test func undoingARepairOfAHandEditedClashRestoresTheClash() throws {
+        let f = try make(commandKey: "right_option", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        let commands = try #require(f.model.modes.first { $0.runsVoiceCommands })
+        f.model.proposeMove(to: commands)
+        f.model.confirmMove()
+        f.model.undoMove()
+        #expect(f.model.error == nil)
+        #expect(onDisk("polish", in: f.dir) == ["right_option"])
+        #expect(f.config.voiceCommandsShutOut)
     }
 
     @Test func aModeAlreadyClashingOnDiskCanStillBeEdited() throws {

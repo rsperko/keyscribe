@@ -20,6 +20,7 @@ final class ConfigCache {
     private var lastGoodVoiceCommands = VoiceCommandConfig()
 
     private var modesCache: [Mode]?
+    private var voiceCommandsShutOutCache = false
     private var replacementsCache: ReplacementsSet?
     private var connectionsCache: ConnectionSet?
     private var dictionaryCache: DictionarySet?
@@ -123,10 +124,17 @@ final class ConfigCache {
             let message = "\(failure.id).toml — \(failure.message)\(recovery)"
             if !loadFailures.contains(message) { loadFailures.append(message) }
         }
-        let visible = VoiceCommandTriggers.guarded(Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled))
+        let unguarded = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled)
+        let visible = VoiceCommandTriggers.guarded(unguarded)
+        voiceCommandsShutOutCache = VoiceCommandTriggers.isShutOut(unguarded)
         modesCache = visible
         lastGoodModes = result.modes
         return visible
+    }
+
+    var voiceCommandsShutOut: Bool {
+        _ = modes
+        return voiceCommandsShutOutCache
     }
 
     var voiceCommands: VoiceCommandConfig {

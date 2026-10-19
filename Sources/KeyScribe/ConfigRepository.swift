@@ -195,6 +195,36 @@ final class ConfigRepository {
         try commit(touching: [modeFileURL(id: mode.id)]) { try ModeStore.write(mode, to: modesDir) }
     }
 
+    struct IncompleteRestore: Error {
+        let underlying: Error
+        let unrestored: [String]
+    }
+
+    func writeModes(
+        _ modes: [Mode], restoring originals: [Mode], using write: ((Mode) throws -> Void)? = nil
+    ) throws {
+        let write = write ?? { [modesDir] in try ModeStore.write($0, to: modesDir) }
+        try commit(touching: modes.map { modeFileURL(id: $0.id) }) {
+            var written: Set<String> = []
+            do {
+                for mode in modes {
+                    try write(mode)
+                    written.insert(mode.id)
+                }
+            } catch {
+                let unrestored = originals.filter { written.contains($0.id) }.compactMap { original -> String? in
+                    (try? write(original)) == nil ? original.name : nil
+                }
+                guard unrestored.isEmpty else {
+                    config.invalidate()
+                    notifyChange()
+                    throw IncompleteRestore(underlying: error, unrestored: unrestored)
+                }
+                throw error
+            }
+        }
+    }
+
     @discardableResult
     func mutateMode(id: String, _ transform: (inout Mode) -> Void) throws -> Mode {
         var mode = try loadModeForMutation(id: id)

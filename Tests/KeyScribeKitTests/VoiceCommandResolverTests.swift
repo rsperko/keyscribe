@@ -33,6 +33,10 @@ struct VoiceCommandResolverTests {
         #expect(resolve("switch to ghostty", running: [ghostty, chrome]) == .action(.app(ghostty)))
     }
 
+    @Test func aSoundAlikePrefixResolvesTheSameApp() {
+        #expect(resolve("Witch too Ghostty.", running: [ghostty, chrome]) == .action(.app(ghostty)))
+    }
+
     @Test func runningAppByTrailingWords() {
         #expect(resolve("switch to chrome", running: [ghostty, chrome]) == .action(.app(chrome)))
         #expect(resolve("open code", running: [code]) == .action(.app(code)))

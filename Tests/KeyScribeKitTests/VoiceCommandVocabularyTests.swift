@@ -34,6 +34,24 @@ struct VoiceCommandVocabularyTests {
         #expect(plan(mode: mode).voiceCommandText(heard: "switch to herder", mode: mode) == "switch to herdr")
     }
 
+    @Test(arguments: [
+        "switch two", "switch too", "which to", "which two", "which too",
+        "witch to", "witch two", "witch too", "go two", "go too",
+    ])
+    func soundAlikePrefixesAllowTargetCorrectionWithoutRewritingThePrefix(_ prefix: String) {
+        let mode = commands(words: ["herdr"])
+        let heard = "\(prefix) herder"
+        let corrected = plan(mode: mode).voiceCommandText(heard: heard, mode: mode)
+        #expect(corrected == "\(prefix) herdr")
+        #expect(VoiceCommandGrammar.parse(corrected) == .focus(target: "herdr"))
+    }
+
+    @Test func aPunctuatedSoundAlikePrefixStillAllowsTargetCorrection() {
+        let mode = commands(words: ["herdr"])
+        #expect(plan(mode: mode).voiceCommandText(heard: "Witch-too, the herder.", mode: mode)
+            == "Witch-too, the herdr.")
+    }
+
     @Test func aDictionaryWordNeverRewritesTheCommandWords() {
         let mode = commands(words: ["Lunch", "Bach"])
         let plan = plan(mode: mode)

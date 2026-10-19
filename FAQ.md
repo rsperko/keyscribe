@@ -134,8 +134,10 @@ does not "fix" them — including in privacy modes, which turn context off but s
 ### Can I switch apps or run actions by voice?
 
 Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸
-Experimental features**, then assign a shortcut in **Settings ▸ Modes ▸ Voice Commands**. Use that
-shortcut when you want to speak a command:
+Experimental features**, then assign a shortcut in **Settings ▸ Modes ▸ Voice Commands**. It can't
+be shared with another mode: if you pick one that a dictation mode already uses, KeyScribe asks before
+moving it, names the modes that lose it, and offers **Undo** afterwards. Use that shortcut when you
+want to speak a command:
 
 - **“switch to Mail”** or **“open Safari”** brings the app forward, opening it if needed. App names
   work without setup.
@@ -190,8 +192,12 @@ that saying it will ask you to choose. If your answer is consistently misheard �
 
 ### A voice command keeps being misheard.
 
+Some command-word mishearings work automatically: `which to Mail` and `witch to Mail` are understood
+as “switch to Mail”. The word `to` can also arrive as `two` or `too` after `switch`, `which`, `witch`,
+or `go`. These alternatives work in **Try it**, too, and leave the original words in History.
+
 When KeyScribe does not recognize a command, or an answer to “Which one?”, it briefly shows what it
-heard, such as **Heard “which to Mail”**. That is what your speech model wrote, before any of your
+heard, such as **Heard “stitch to Mail”**. That is what your speech model wrote, before any of your
 replacements, and a long phrase is shortened. Other problems, such as a name that matches nothing, say
 what went wrong instead. The heard phrase is hidden, leaving only **Command not recognized**, when you
 were in a password field or KeyScribe could not confirm which field you were in. When the command is saved to History, its entry has the complete
@@ -214,7 +220,7 @@ replacements there apply only to commands, and run before KeyScribe reads what y
   | Match heard phrase as a regular expression (under Pattern matching) | Off |
 
   Another example: if "open Zoom" is consistently heard as "open soon", replace `open soon` with
-  `open Zoom`. A replacement can also fix the command words: `which to Mail` → `switch to Mail`.
+  `open Zoom`. A replacement can also fix other misheard command words: `stitch to Mail` → `switch to Mail`.
   Prefer the complete command over replacing a common word everywhere: mode replacements also apply to
   words passed to scripts and shortcuts.
 

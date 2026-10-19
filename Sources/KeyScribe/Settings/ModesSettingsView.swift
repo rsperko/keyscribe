@@ -26,6 +26,15 @@ struct ModesSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                 Divider()
+            } else if let applied = model.undoableMove {
+                HStack {
+                    Text(ShortcutMoveCopy(applied.move, notice: nil).done).font(.caption)
+                    Spacer()
+                    Button("Undo") { model.undoMove() }
+                        .accessibilityIdentifier(AccessibilityID.Mode.List.moveShortcutUndo)
+                }
+                .padding(10)
+                Divider()
             }
             paneBody
         }
@@ -58,7 +67,8 @@ struct ModesSettingsView: View {
             Group {
                 if let mode = model.selected, mode.runsVoiceCommands {
                     VoiceCommandsEditorView(
-                        mode: mode, allModes: model.modes, onUpdate: model.update, model: model.voiceCommands,
+                        mode: mode, allModes: model.modes, onUpdate: model.update,
+                        onMoveShortcut: model.proposeMove(to:), model: model.voiceCommands,
                         onEditVocabulary: { onEditVocabulary(mode.id) })
                         .id(mode.id)
                 } else if let mode = model.selected {
@@ -102,6 +112,20 @@ struct ModesSettingsView: View {
                 },
                 onCancel: { showingAddMode = false })
         }
+        .alert(moveCopy?.title ?? "", isPresented: Binding(
+            get: { model.pendingMove != nil },
+            set: { if !$0 { model.cancelMove() } }))
+        {
+            Button("Move Shortcut") {
+                if moveNotice != nil { model.voiceCommands.notices.acknowledge(.apps) }
+                model.confirmMove()
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.List.moveShortcutConfirm)
+            Button("Cancel", role: .cancel) { model.cancelMove() }
+                .accessibilityIdentifier(AccessibilityID.Mode.List.moveShortcutCancel)
+        } message: {
+            Text(moveCopy?.message ?? "")
+        }
         .confirmationDialog(
             "Delete this mode?", isPresented: Binding(
                 get: { modePendingDelete != nil },
@@ -120,6 +144,16 @@ struct ModesSettingsView: View {
         }
     }
 
+    private var moveNotice: String? {
+        guard model.pendingMove?.destination.runsVoiceCommands == true,
+              model.voiceCommands.notices.needsAcknowledgment(.apps) else { return nil }
+        return VoiceCommandNotices.Kind.apps.message
+    }
+
+    private var moveCopy: ShortcutMoveCopy? {
+        model.pendingMove.map { ShortcutMoveCopy($0, notice: moveNotice) }
+    }
+
     private func issue(for mode: Mode) -> ModeSummaryIssue? {
         guard mode.enabled else { return nil }
         // A trigger the shadowing pass drops means this mode can never start — worth saying in the list,
@@ -127,8 +161,7 @@ struct ModesSettingsView: View {
         if TriggerKeyConflicts.conflict(for: mode, in: model.modes)?.kind == .unreachable {
             return .triggerUnreachable
         }
-        if mode.runsVoiceCommands, !mode.triggerKeys.isEmpty,
-           VoiceCommandTriggers.guarded(model.modes).first(where: { $0.id == mode.id })?.triggerKeys.isEmpty == true {
+        if mode.runsVoiceCommands, VoiceCommandTriggers.isShutOut(model.modes) {
             return .triggerUnreachable
         }
         guard let rewrite = mode.aiRewrite else { return nil }

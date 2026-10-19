@@ -123,6 +123,17 @@ struct VoiceCommandScriptTests {
         #expect(resolve("open herdr", scripts: [herdr]) == .noMatch("herdr"))
     }
 
+    @Test func soundAlikeAppPrefixesNeverRunAnAction() {
+        let shortcut = VoiceCommandScript(name: "Journal", shortcut: .init(name: "Journal"))
+        #expect(resolve("witch too herdr", scripts: [herdr]) == .noMatch("herdr"))
+        #expect(resolve("go two journal", scripts: [shortcut]) == .noMatch("journal"))
+    }
+
+    @Test func soundAlikePrefixesInsideActionInputStayAsSpoken() {
+        #expect(resolve("run ship Which to choose, witch too?", scripts: [deploy])
+            == .action(.script(deploy, arguments: ["--env", "Which to choose, witch too"])))
+    }
+
     @Test func aScriptWithoutTextIgnoresAnUtteranceWithMoreWords() {
         #expect(resolve("run herdr please", scripts: [herdr]) == .scriptNotFound("herdr please"))
     }

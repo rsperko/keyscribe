@@ -495,16 +495,28 @@ struct VoiceCommandChoiceWiringTests {
     nonisolated private static let secureTarget = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: true)
     nonisolated private static let movedTarget = TargetSnapshot(bundleId: "com.example.Other", pid: 2)
 
+    @Test func aSoundAlikePrefixAsksWhichPlaceAndKeepsTheOriginalHeardText() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("Witch too mail")
+        #expect(h.prompt != nil)
+        let entry = try #require(h.history.entries().first)
+        #expect(entry.heard == "Witch too mail")
+        #expect(entry.transformed == "Witch too mail")
+        #expect(entry.outcome == .commandNeedsChoice)
+        await h.dictate("two")
+        #expect(h.system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
+    }
+
     @Test func anUnrecognizedCommandShowsAShortTitleAndWhatTheSpeechModelHeard() async throws {
-        let h = try Harness(places: [personal, work], replacements: [.init(heard: "which", replace: "witch", regex: false)])
-        await h.dictate("which  to\nMail")
+        let h = try Harness(places: [personal, work], replacements: [.init(heard: "stitch", replace: "snitch", regex: false)])
+        await h.dictate("stitch  to\nMail")
         #expect(h.hud.last == .error(message: "Command not recognized", action: nil,
-                                     heard: HeardExcerpt(heard: "which to Mail")))
+                                     heard: HeardExcerpt(heard: "stitch to Mail")))
         #expect(h.captured.inserted.isEmpty)
         #expect(h.system.openedURLs.isEmpty)
         let entry = try #require(h.history.entries().first)
-        #expect(entry.heard == "which  to\nMail")
-        #expect(entry.transformed == "witch  to\nMail")
+        #expect(entry.heard == "stitch  to\nMail")
+        #expect(entry.transformed == "snitch  to\nMail")
         #expect(entry.failureReason == Self.notACommand)
         #expect(entry.outcome == .commandFailed)
     }
@@ -519,16 +531,16 @@ struct VoiceCommandChoiceWiringTests {
     @Test(arguments: [secureTarget, movedTarget])
     func aSecureOrUnconfirmedTargetShowsOnlyTheTitle(_ target: TargetSnapshot) async throws {
         let h = try Harness(places: [personal, work], target: target)
-        await h.dictate("which to Mail")
+        await h.dictate("stitch to Mail")
         #expect(h.hud.last == .error(message: "Command not recognized", action: nil))
         #expect(h.hud.last?.voiceOverAnnouncement == "Command not recognized")
     }
 
     @Test func historyOffStillShowsTheExcerpt() async throws {
         let h = try Harness(places: [personal, work], historyEnabled: false)
-        await h.dictate("which to Mail")
+        await h.dictate("stitch to Mail")
         #expect(h.hud.last == .error(message: "Command not recognized", action: nil,
-                                     heard: HeardExcerpt(heard: "which to Mail")))
+                                     heard: HeardExcerpt(heard: "stitch to Mail")))
         #expect(h.history.entries().isEmpty)
     }
 

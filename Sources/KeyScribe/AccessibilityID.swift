@@ -170,6 +170,9 @@ enum AccessibilityID {
             static let chooserCancel = "mode.chooser.cancel"
             static let deleteConfirmConfirm = "mode.list.deleteConfirm.confirm"
             static let deleteConfirmCancel = "mode.list.deleteConfirm.cancel"
+            static let moveShortcutConfirm = "mode.list.moveShortcut.confirm"
+            static let moveShortcutCancel = "mode.list.moveShortcut.cancel"
+            static let moveShortcutUndo = "mode.list.moveShortcut.undo"
             static func row(_ modeID: String) -> String { "mode.list.row.\(modeID)" }
             static func starterRow(_ seedID: String) -> String { "mode.list.starter.\(seedID)" }
         }
@@ -182,6 +185,7 @@ enum AccessibilityID {
             static let appNotice = "mode.voiceCommands.appNotice"
             static let appNoticeConfirm = "mode.voiceCommands.appNotice.confirm"
             static let appNoticeCancel = "mode.voiceCommands.appNotice.cancel"
+            static let moveShortcut = "mode.voiceCommands.moveShortcut"
             static let placeNotice = "mode.voiceCommands.place.notice"
             static let scriptNotice = "mode.voiceCommands.scriptNotice"
             static let addPlace = "mode.voiceCommands.addPlace"
@@ -408,6 +412,7 @@ enum AccessibilityID {
 
     static let all: [String] = [
         Mode.VoiceCommands.appNotice, Mode.VoiceCommands.appNoticeConfirm, Mode.VoiceCommands.appNoticeCancel,
+        Mode.VoiceCommands.moveShortcut,
         Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice,
         Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
         Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.editVocabulary,
@@ -469,6 +474,7 @@ enum AccessibilityID {
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
+        Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle,
         Mode.Editor.extraTriggersNote,
         Mode.Editor.rewriteSelection, Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,

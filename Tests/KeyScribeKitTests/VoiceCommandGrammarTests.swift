@@ -18,6 +18,22 @@ struct VoiceCommandGrammarTests {
         #expect(VoiceCommandGrammar.parse(transcript) == .focus(target: target))
     }
 
+    @Test(arguments: [
+        "switch two", "switch too", "which to", "which two", "which too",
+        "witch to", "witch two", "witch too", "go two", "go too",
+    ])
+    func acceptsSoundAlikesOnlyAsCommandPrefixes(_ prefix: String) {
+        #expect(VoiceCommandGrammar.parse("\(prefix) the Mail.") == .focus(target: "mail"))
+        #expect(VoiceCommandGrammar.parse(prefix) == nil)
+        #expect(VoiceCommandGrammar.parse("\(prefix) the") == nil)
+        #expect(VoiceCommandGrammar.parse("please \(prefix) Mail") == nil)
+    }
+
+    @Test func preservesSoundAlikesInsideTheTarget() {
+        #expect(VoiceCommandGrammar.parse("Which too Which to Choose") == .focus(target: "which to choose"))
+        #expect(VoiceCommandGrammar.parse("open Witch Too") == .focus(target: "witch too"))
+    }
+
     @Test(arguments: ["go back", "Go back.", "GO BACK!", "  go   back "])
     func parsesGoBack(transcript: String) {
         #expect(VoiceCommandGrammar.parse(transcript) == .goBack)
@@ -43,6 +59,16 @@ struct VoiceCommandGrammarTests {
         "run",
         "please run foo",
         "running foo",
+        "which Mail",
+        "witch Mail",
+        "which together Mail",
+        "witch toolbox",
+        "go toolbox",
+        "lunch Safari",
+        "ran deploy",
+        "Ron deploy",
+        "rune deploy",
+        "go bag",
     ])
     func rejectsAnythingElse(transcript: String) {
         #expect(VoiceCommandGrammar.parse(transcript) == nil)
