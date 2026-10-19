@@ -319,6 +319,22 @@ struct VoiceCommandRunnerTests {
         #expect(read == TabRead(tabs: [tab], refused: ["b"], unavailable: ["c"]))
     }
 
+    @Test func eitherNameOfAnAppReachesItRunningOrNotWithoutReadingWindows() async {
+        let code = VoiceCommandCatalog.App(
+            name: "Visual Studio Code", bundleId: "com.microsoft.VSCode", spokenNames: ["Visual Studio Code", "Code"])
+        let done = VoiceCommandOutcome.done(
+            summary: "Visual Studio Code", command: "Brings Visual Studio Code to the front, opening it if needed.")
+        for running in [true, false] {
+            let (runner, system) = make()
+            system.installed = [running ? VoiceCommandCatalog.App(name: "Code Copy", bundleId: code.bundleId) : code]
+            system.running = running ? [code] : []
+            for name in ["code", "visual studio code"] {
+                #expect(await runner.run(transcript: "switch to \(name)", places: [], origin: nil) == done)
+            }
+            #expect(system.windowReads == 0)
+        }
+    }
+
     @Test func installedAppsIncludeOneLevelOfAppFolders() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-apps-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

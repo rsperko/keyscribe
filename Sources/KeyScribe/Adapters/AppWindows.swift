@@ -64,11 +64,13 @@ struct WindowSteps {
 enum AppWindows {
     nonisolated static let messagingTimeout: Float = 0.1
 
-    nonisolated static func processes(excluding ownPid: Int32) -> [WindowProcess] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
+    nonisolated static func processes(excluding ownPid: Int32, named apps: [VoiceCommandCatalog.App]) -> [WindowProcess] {
+        let names = Dictionary(apps.map { ($0.bundleId, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return NSWorkspace.shared.runningApplications.compactMap { app in
             guard app.activationPolicy == .regular, !app.isTerminated, app.processIdentifier != ownPid,
                   let bundleId = app.bundleIdentifier else { return nil }
-            return WindowProcess(pid: app.processIdentifier, bundleId: bundleId, appName: app.localizedName ?? bundleId)
+            let appName = names[bundleId] ?? AppNaming.usable(app.localizedName) ?? bundleId
+            return WindowProcess(pid: app.processIdentifier, bundleId: bundleId, appName: appName)
         }
     }
 

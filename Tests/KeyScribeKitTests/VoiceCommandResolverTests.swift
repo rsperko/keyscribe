@@ -189,6 +189,48 @@ struct VoiceCommandResolverTests {
         #expect(resolve("switch to chrome", running: [chrome, chrome]) == .action(.app(chrome)))
     }
 
+    private var aliasedCode: App {
+        App(name: "Visual Studio Code", bundleId: "com.microsoft.VSCode", spokenNames: ["Visual Studio Code", "Code"])
+    }
+
+    @Test func everySpokenNameResolvesTheSameAppInEitherTier() {
+        for name in ["visual studio code", "code"] {
+            #expect(resolve("switch to \(name)", running: [aliasedCode]) == .action(.app(aliasedCode)))
+            #expect(resolve("switch to \(name)", installed: [aliasedCode], windows: nil) == .action(.app(aliasedCode)))
+        }
+        #expect(VoiceCommandAction.app(aliasedCode).summary(appName: { _ in nil }) == "Visual Studio Code")
+    }
+
+    @Test func anInstalledAliasIsMatchedBeforeAnyWindowIsRead() {
+        let titled = VoiceCommandCatalog.Window(bundleId: textEdit.bundleId, appName: "TextEdit", pid: 4, id: "cg:1", title: "Code")
+        #expect(resolve("switch to code", installed: [aliasedCode], windows: nil) == .action(.app(aliasedCode)))
+        #expect(resolve("switch to code", installed: [aliasedCode], windows: .complete([titled])) == .action(.app(aliasedCode)))
+    }
+
+    @Test func oneBundleInBothPoolsIsNeverOfferedTwice() {
+        #expect(resolve("switch to code", running: [aliasedCode, aliasedCode], installed: [aliasedCode]) == .action(.app(aliasedCode)))
+        #expect(resolve("switch to visual", running: [aliasedCode], installed: [aliasedCode]) == .action(.app(aliasedCode)))
+    }
+
+    @Test func twoAppsSharingASpokenNameAskWhichOne() {
+        let codeShim = App(name: "Code Runner", bundleId: "com.example.coderunner", spokenNames: ["Code Runner", "Code"])
+        #expect(ambiguousNames(resolve("switch to code", running: [codeShim, aliasedCode])) == ["Code Runner", "Visual Studio Code"])
+        #expect(ambiguousNames(resolve("switch to code", installed: [codeShim, aliasedCode])) == ["Code Runner", "Visual Studio Code"])
+    }
+
+    @Test func aliasesMatchPartiallyAndThroughNearMisses() {
+        let teams = App(name: "Microsoft Teams", bundleId: "com.microsoft.teams2", spokenNames: ["Microsoft Teams", "Teams Work"])
+        #expect(resolve("switch to work", running: [teams]) == .action(.app(teams)))
+        let chat = App(name: "Messages Desktop", bundleId: "com.example.chat", spokenNames: ["Messages Desktop", "Chatterbox"])
+        #expect(resolve("switch to chaterbox", running: [chat, ghostty]) == .action(.app(chat)))
+    }
+
+    @Test func anExactPlaceStillBeatsAnAppAlias() {
+        let place = VoiceCommandPlace(name: "Code", target: .url("https://code.example.org/"))
+        #expect(resolve("switch to code", places: [place], running: [aliasedCode], tabs: [])
+                == .action(.place(place, .openURL("https://code.example.org/", browser: nil))))
+    }
+
     @Test func summaryNamesTheDestination() {
         let place = VoiceCommandPlace(name: "Gmail", target: .url("https://mail.google.com/"))
         let tab = Tab(browserBundleId: chrome.bundleId, window: 1, tab: 1, url: "https://mail.google.com/", title: "Inbox")

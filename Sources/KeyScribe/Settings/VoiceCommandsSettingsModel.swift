@@ -174,7 +174,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         guard let app = previousApp(), let bundleId = app.bundleIdentifier, bundleId != Bundle.main.bundleIdentifier else {
             return nil
         }
-        return VoiceCommandCatalog.App(name: app.localizedName ?? bundleId, bundleId: bundleId)
+        return InstalledApps.app(forBundleId: bundleId) ?? AppNaming.app(bundleId: bundleId, names: [app.localizedName])
     }
 
     func currentTab() async -> CurrentTab? {

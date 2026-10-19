@@ -4,10 +4,17 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
     public struct App: Equatable, Hashable, Sendable {
         public var name: String
         public var bundleId: String
-        public init(name: String, bundleId: String) {
+        public var spokenNames: [String]
+        public init(name: String, bundleId: String, spokenNames: [String]? = nil) {
             self.name = name
             self.bundleId = bundleId
+            self.spokenNames = spokenNames ?? [name]
         }
+    }
+
+    public static func reconciling(installed: [App], with running: [App]) -> [App] {
+        let byId = Dictionary(running.map { ($0.bundleId, $0) }, uniquingKeysWith: { first, _ in first })
+        return installed.map { byId[$0.bundleId] ?? $0 }
     }
 
     public struct Tab: Equatable, Sendable {
@@ -70,6 +77,24 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
         self.installedApps = installedApps
         self.tabs = tabs
         self.windows = windows
+    }
+}
+
+public enum AppNaming {
+    private static let directionMarks = CharacterSet(charactersIn:
+        "\u{200E}\u{200F}\u{061C}\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}")
+
+    public static func usable(_ name: String?) -> String? {
+        guard let name else { return nil }
+        let cleaned = name.trimmingCharacters(in: directionMarks.union(.whitespacesAndNewlines))
+        return VoiceCommandText.key(cleaned).isEmpty ? nil : cleaned
+    }
+
+    public static func app(bundleId: String, names: [String?]) -> VoiceCommandCatalog.App {
+        var seen = Set<String>()
+        let spoken = names.compactMap(usable).filter { seen.insert(VoiceCommandText.key($0)).inserted }
+        guard let shown = spoken.first else { return VoiceCommandCatalog.App(name: bundleId, bundleId: bundleId) }
+        return VoiceCommandCatalog.App(name: shown, bundleId: bundleId, spokenNames: spoken)
     }
 }
 

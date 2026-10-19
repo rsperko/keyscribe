@@ -27,7 +27,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
     var spokenForms: [String] {
         switch self {
         case .place(let place): return place.spokenForms
-        case .app(let app): return [app.name]
+        case .app(let app): return app.spokenNames
         case .script(let script): return script.spokenForms
         case .window(let window):
             let segments = WindowTitle.segments(window.title)

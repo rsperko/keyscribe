@@ -478,6 +478,8 @@ utterance (case, punctuation, and a leading "the" are ignored). The app-switchin
 `witch`, or `go`. These are exact prefix alternatives, not transcript replacements: target names,
 action input, and the original heard text are preserved. They apply equally to live commands and
 **Try it**. Other command words, including `run` and `go back`, have no sound-alike alternatives.
+An app answers, in every tier, to the name shown in the Applications folder and to the name in its own
+menu bar when the two differ; the name KeyScribe shows and sorts by is the Applications-folder one.
 A target is a running app, an app installed in an Applications folder (or one folder down inside it),
 or a place from this file:
 

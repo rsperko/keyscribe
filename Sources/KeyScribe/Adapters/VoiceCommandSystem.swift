@@ -191,8 +191,9 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let withoutApps = VoiceCommandResolver.resolve(
             transcript, catalog: VoiceCommandCatalog(scripts: scripts, windows: .complete([])))
         guard case .noMatch = withoutApps else { return withoutApps }
-        let catalog = VoiceCommandCatalog(
-            places: places, scripts: scripts, runningApps: system.runningApps(), installedApps: await system.installedApps())
+        let running = system.runningApps()
+        let installed = VoiceCommandCatalog.reconciling(installed: await system.installedApps(), with: running)
+        let catalog = VoiceCommandCatalog(places: places, scripts: scripts, runningApps: running, installedApps: installed)
         return await readingWindows(catalog) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
     }
 
@@ -552,9 +553,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func runningApps() -> [VoiceCommandCatalog.App] {
-        InstalledApps.running()
-            .filter { $0.bundleId != ownBundleId }
-            .map { VoiceCommandCatalog.App(name: $0.name, bundleId: $0.bundleId) }
+        InstalledApps.runningApps().filter { $0.bundleId != ownBundleId }
     }
 
     func installedApps() async -> [VoiceCommandCatalog.App] {
@@ -563,7 +562,9 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         }
         let own = ownBundleId
         let apps = await Task.detached(priority: .userInitiated) {
-            Self.scanInstalledApps(in: Self.applicationRoots, excluding: own)
+            Self.scanInstalledApps(in: Self.applicationRoots, excluding: own) {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+            }
         }.value
         installedCache = (apps, Date())
         return apps
@@ -574,7 +575,9 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
     ]
 
-    nonisolated static func scanInstalledApps(in roots: [URL], excluding own: String?) -> [VoiceCommandCatalog.App] {
+    nonisolated static func scanInstalledApps(
+        in roots: [URL], excluding own: String?, registered: (String) -> URL? = { _ in nil }
+    ) -> [VoiceCommandCatalog.App] {
         let fm = FileManager.default
         func children(of dir: URL) -> [URL] {
             (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
@@ -582,18 +585,24 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         func isFolder(_ url: URL) -> Bool {
             url.pathExtension.isEmpty && (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
         }
-        var seen = Set<String>()
-        var apps: [VoiceCommandCatalog.App] = []
+        var copies: [String: [URL]] = [:]
         for root in roots {
             let entries = children(of: root)
             let candidates = entries + entries.filter(isFolder).flatMap(children(of:))
             for url in candidates where url.pathExtension == "app" {
-                guard let bundleId = Bundle(url: url)?.bundleIdentifier, bundleId != own,
-                      seen.insert(bundleId).inserted else { continue }
-                apps.append(VoiceCommandCatalog.App(name: url.deletingPathExtension().lastPathComponent, bundleId: bundleId))
+                guard let bundleId = Bundle(url: url)?.bundleIdentifier, bundleId != own else { continue }
+                copies[bundleId, default: []].append(url)
             }
         }
-        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let apps = copies.compactMap { bundleId, urls -> VoiceCommandCatalog.App? in
+            guard let url = registered(bundleId) ?? urls.min(by: { $0.path < $1.path }) else { return nil }
+            return AppNames.app(at: url, bundleId: bundleId)
+                ?? AppNaming.app(bundleId: bundleId, names: [url.deletingPathExtension().lastPathComponent])
+        }
+        return apps.sorted { a, b in
+            let byName = a.name.localizedCaseInsensitiveCompare(b.name)
+            return byName != .orderedSame ? byName == .orderedAscending : a.bundleId < b.bundleId
+        }
     }
 
     func appName(forBundleId bundleId: String) -> String? {
@@ -746,7 +755,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func windows() async -> VoiceCommandCatalog.WindowScan {
-        let processes = AppWindows.processes(excluding: ProcessInfo.processInfo.processIdentifier)
+        let processes = AppWindows.processes(excluding: ProcessInfo.processInfo.processIdentifier, named: runningApps())
         let trusted = AXIsProcessTrusted()
         let started = DispatchTime.now()
         guard case .finished(let scan) = await Self.accessibility.run(within: Self.windowReadDeadline, { isCurrent in

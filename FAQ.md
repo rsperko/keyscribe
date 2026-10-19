@@ -140,7 +140,8 @@ moving it, names the modes that lose it, and offers **Undo** afterwards. Use tha
 want to speak a command:
 
 - **“switch to Mail”** or **“open Safari”** brings the app forward, opening it if needed. App names
-  work without setup.
+  work without setup, and so does the name in an app's menu bar when it differs from the one in the
+  Applications folder (“switch to Code” for Visual Studio Code).
 - **“open inbox”** goes to an app or web page you have named `inbox` under **Places**. For a web page,
   it uses a matching open tab when possible.
 - **“run journal buy milk”** runs an action you have added under **Actions**. A script or macOS

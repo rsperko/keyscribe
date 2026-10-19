@@ -911,7 +911,8 @@ Its sections are, in order:
    **Web Page…**. Each opens a sheet that starts with the destination: the app, chosen with the same app
    chooser as a mode's **Where it works** (running apps with their icons, **Choose from Applications…**,
    **Enter Bundle ID…**), or the web page and browser. The name follows the chosen app or page until the
-   user types their own, then optional other spoken names, then a live example (“Say “switch to inbox” to
+   user types their own; for an app it is the name shown in the Applications folder, whichever way the app
+   was chosen, then optional other spoken names, then a live example (“Say “switch to inbox” to
    bring Mail to the front.”). A field's problem shows beside that field, and **Add Place** stays disabled
    until the place is valid. An existing place's sheet holds the red **Delete Place** action at its
    trailing edge, with a confirmation. The sheet says that **Any browser** looks through every running

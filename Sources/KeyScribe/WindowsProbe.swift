@@ -7,7 +7,7 @@ enum WindowsProbe {
     static func list() -> Int32 {
         print("trusted: \(AXIsProcessTrusted())")
         let total = DispatchTime.now()
-        for process in AppWindows.processes(excluding: ProcessInfo.processInfo.processIdentifier) {
+        for process in AppWindows.processes(excluding: ProcessInfo.processInfo.processIdentifier, named: InstalledApps.runningApps()) {
             let started = DispatchTime.now()
             let reply = AppWindows.read(pid: process.pid) { true }
             let ms = milliseconds(since: started)
