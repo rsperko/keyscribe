@@ -995,6 +995,7 @@ final class DictationController {
         }
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
+        let excerpt = targetMayHoldSecureText ? nil : HeardExcerpt(heard: heard)
         let origin = capturedSnapshot.flatMap { snapshot in
             snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
         }
@@ -1024,7 +1025,7 @@ final class DictationController {
         if voiceCommands.pendingChoice == nil { clearVoiceCommandChoice() }
         switch reply {
         case .command(let outcome):
-            finishCommand(outcome, heard: heard, transcript: transcript, late: late)
+            finishCommand(outcome, heard: heard, transcript: transcript, late: late, excerpt: excerpt)
         case .selected(let selection):
             finishCommand(selection.outcome, heard: heard, transcript: transcript, late: late,
                           resultPrefix: Self.selectionPrefix(selection))
@@ -1033,9 +1034,10 @@ final class DictationController {
                    history: HistoryWrite(heard: heard, transformed: transcript,
                                          result: "Cancelled the choice for \u{201C}\(request)\u{201D}.", insertion: .inserted,
                                          rewrite: nil, outcome: .commandCancelled))
-        case .retry(let message):
-            let state: HUDState = choicePrompt.map { .choice($0, status: .waiting(note: message)) }
-                ?? .error(message: message, action: nil)
+        case .retry(let message, let reason):
+            let shown = reason == .unrecognizedAnswer ? excerpt : nil
+            let status: VoiceCommandChoiceStatus = shown.map { .waiting(note: nil, heard: $0) } ?? .waiting(note: message)
+            let state: HUDState = choicePrompt.map { .choice($0, status: status) } ?? .error(message: message, action: nil)
             finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: state,
                    hideAfter: choicePrompt == nil ? 3 : nil, record: (.command, nil),
                    history: HistoryWrite(heard: heard, transformed: transcript, result: message, insertion: .inserted,
@@ -1056,7 +1058,11 @@ final class DictationController {
         let failure: String?
     }
 
-    private static func presentation(of outcome: VoiceCommandOutcome, resultPrefix: String) -> CommandPresentation? {
+    private static let unrecognizedCommandTitle = "Command not recognized"
+
+    private static func presentation(
+        of outcome: VoiceCommandOutcome, resultPrefix: String, excerpt: HeardExcerpt? = nil
+    ) -> CommandPresentation? {
         switch outcome {
         case .done(let summary, let command):
             CommandPresentation(state: .commandDone(summary: summary), cue: .success, hideAfter: 1.5, outcome: .command,
@@ -1065,8 +1071,11 @@ final class DictationController {
             CommandPresentation(state: .commandDone(summary: summary, detail: HUDState.commandStillRunningDetail),
                                 cue: .success, hideAfter: 1.5, outcome: .commandStarted, result: resultPrefix + command,
                                 failure: nil)
-        case .failed(let message, let command, let action):
-            CommandPresentation(state: .error(message: message, action: action), cue: .error, hideAfter: 3,
+        case .failed(let message, let command, let action, let kind):
+            CommandPresentation(state: kind == .unrecognizedCommand
+                                    ? .error(message: unrecognizedCommandTitle, action: action, heard: excerpt)
+                                    : .error(message: message, action: action),
+                                cue: .error, hideAfter: 3,
                                 outcome: .commandFailed, result: resultPrefix + (command ?? ""), failure: message)
         case .needsChoice, .abandoned:
             nil
@@ -1074,9 +1083,10 @@ final class DictationController {
     }
 
     private func finishCommand(
-        _ outcome: VoiceCommandOutcome, heard: String, transcript: String, late: LateCommandResult, resultPrefix: String = ""
+        _ outcome: VoiceCommandOutcome, heard: String, transcript: String, late: LateCommandResult, resultPrefix: String = "",
+        excerpt: HeardExcerpt? = nil
     ) {
-        if let shown = Self.presentation(of: outcome, resultPrefix: resultPrefix) {
+        if let shown = Self.presentation(of: outcome, resultPrefix: resultPrefix, excerpt: excerpt) {
             let failed = shown.failure != nil
             var write = HistoryWrite(heard: heard, transformed: transcript, result: shown.result,
                                      insertion: failed ? .failed : .inserted, rewrite: nil, failureReason: shown.failure,
@@ -1129,12 +1139,12 @@ final class DictationController {
         return VoiceCommandChoicePrompt(id: pending.id, title: pending.choice.title, rows: pending.rows, hint: hint)
     }
 
-    private static func choiceNote(after state: HUDState?) -> String? {
+    private static func choiceWaiting(after state: HUDState?) -> VoiceCommandChoiceStatus {
         switch state {
-        case .error(let message, _): message
-        case .complete(.noSpeech, _): "No speech detected"
-        case .choice(_, .waiting(let note), _): note
-        default: nil
+        case .error(let message, _, _): .waiting(note: message)
+        case .complete(.noSpeech, _): .waiting(note: "No speech detected")
+        case .choice(_, .waiting(let note, let heard), _): .waiting(note: note, heard: heard)
+        default: .waiting(note: nil)
         }
     }
 
@@ -1319,7 +1329,7 @@ final class DictationController {
         late.applied = true
         let failure: String?
         switch outcome {
-        case .failed(let message, _, _): failure = message
+        case .failed(let message, _, _, _): failure = message
         case .done: failure = nil
         case .started, .needsChoice, .abandoned: return
         }
@@ -1588,7 +1598,7 @@ final class DictationController {
     // secure-aware snapshot could not prove the field is safe because focus moved during the probe) is
     // treated identically — forced fully local (KS-01).
     private func securePolicyApplied(_ mode: Mode?) -> Mode? {
-        guard capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true else { return mode }
+        guard targetMayHoldSecureText else { return mode }
         return mode?.localOnlyForSecureField()
     }
 
@@ -2156,6 +2166,10 @@ final class DictationController {
     // map are never written; the stored prompt carries tokens, not their originals.
     func waitForHistoryWrites() { historyWriteQueue.sync {} }
 
+    private var targetMayHoldSecureText: Bool {
+        capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true
+    }
+
     @discardableResult
     private func recordHistory(
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
@@ -2168,8 +2182,7 @@ final class DictationController {
         // secure-aware snapshot could vet the field) is treated the same way (KS-01). The diagnostics record
         // holds only fingerprints (hashes), never the transcript, so it is safe to keep; this guards the
         // verbatim history store.
-        guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false),
-              capturedSnapshot?.isSecureField != true, session?.targetUnconfirmed != true else { return false }
+        guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false), !targetMayHoldSecureText else { return false }
         // Last line of defense: a password field that stole focus after the commit-time probe is still caught
         // by the inserter, which diverts to a concealed copy. That verdict is the system classifying the text
         // as password-grade — it must veto history too (X-1).
@@ -2756,7 +2769,7 @@ final class DictationController {
         var resumedChoice: Int?
         if let id = session?.choiceId, voiceCommands.resumeChoice(id) {
             if let prompt = choicePrompt, prompt.id == id {
-                state = .choice(prompt, status: .waiting(note: Self.choiceNote(after: state)))
+                state = .choice(prompt, status: Self.choiceWaiting(after: state))
                 hideAfter = nil
                 resumedChoice = id
             } else {

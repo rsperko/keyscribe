@@ -78,7 +78,7 @@ struct VoiceCommandWindowRunnerTests {
     func aWindowThatCannotComeForwardRaisesNoSubstitute(result: WindowFocusResult, message: String) async {
         let (runner, system) = make()
         system.windowFocusResults = [result]
-        guard case .failed(let shown, _, _) = await switchTo(runner, "keyscribe", from: textEdit) else {
+        guard case .failed(let shown, _, _, _) = await switchTo(runner, "keyscribe", from: textEdit) else {
             Issue.record("expected a failure"); return
         }
         #expect(shown == message)

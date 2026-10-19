@@ -14,10 +14,20 @@ struct VoiceCommandOrigin: Equatable, Sendable {
     }
 }
 
+enum VoiceCommandFailureKind: Equatable, Sendable {
+    case unrecognizedCommand
+    case other
+}
+
+enum VoiceCommandRetryReason: Equatable, Sendable {
+    case unrecognizedAnswer
+    case invalidSelection
+}
+
 enum VoiceCommandOutcome: Equatable, Sendable {
     case done(summary: String, command: String)
     case started(summary: String, command: String)
-    case failed(message: String, command: String? = nil, action: HUDErrorAction? = nil)
+    case failed(message: String, command: String? = nil, action: HUDErrorAction? = nil, kind: VoiceCommandFailureKind = .other)
     case needsChoice(VoiceCommandPendingChoice)
     case abandoned
 }
@@ -48,7 +58,7 @@ struct VoiceCommandSelection: Equatable, Sendable {
 enum VoiceCommandAnswer: Equatable, Sendable {
     case selected(VoiceCommandSelection)
     case cancelled(request: String)
-    case retry(message: String)
+    case retry(message: String, reason: VoiceCommandRetryReason)
     case command(VoiceCommandOutcome)
 }
 
@@ -304,9 +314,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             self.live = nil
             return .cancelled(request: pending.request)
         case .invalidSelection:
-            return .retry(message: pending.choice.retryMessage)
+            return .retry(message: pending.choice.retryMessage, reason: .invalidSelection)
         case .unrecognized:
-            guard VoiceCommandGrammar.parse(transcript) != nil else { return .retry(message: pending.choice.retryMessage) }
+            guard VoiceCommandGrammar.parse(transcript) != nil else {
+                return .retry(message: pending.choice.retryMessage, reason: .unrecognizedAnswer)
+            }
             return .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
                                       stillWanted: stillWanted, onLateResult: onLateResult))
         }
@@ -340,7 +352,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let origin = origin.flatMap { $0.bundleId == system.ownBundleId ? nil : $0 }
         switch resolution {
         case .notACommand:
-            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.")
+            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
+                           kind: .unrecognizedCommand)
         case .scriptNotFound(let target):
             return .failed(message: Self.notFoundMessage(target))
         case .noMatch(let target):

@@ -236,6 +236,7 @@ not to its label.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**); if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps and places, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, or Script/Shortcut), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
+| Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “which to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -259,8 +260,10 @@ last one”, “cancel”). The list is frozen when it appears: rows never reord
 that has since disappeared reports that rather than choosing its neighbour. While answering, the list
 stays on screen with the normal status (`Listening`, `Transcribing`) in place of its subtitle — never a
 microphone-only HUD — and during microphone bring-up the question stays exactly as it was, so the timing
-contract above still holds. A reply that is not a valid answer keeps the list and says how to answer;
-silence, a failed transcription, or cancelling the answer recording also keep it. The question is
+contract above still holds. A reply that is neither a number nor a command keeps the list and shows
+what was heard in place of its subtitle (“Heard “tube””), without repeating the answer hint below the
+rows; a number outside the list keeps the list and says which numbers are valid. The next answer
+recording replaces that line, and nothing restores it afterwards. Silence, a failed transcription, or cancelling the answer recording also keep it. The question is
 neither success nor failure, so it plays no cue. It is dismissed by an answer, spoken or clicked
 **Cancel**, a new command, the idle timeout (`VoiceCommandRunner.choiceIdleSeconds`, restarted each
 time the list is shown again), starting another mode, switching to an app other than the one the
@@ -275,7 +278,20 @@ transcribed, exactly like Recording. There is no keyboard selection — no numbe
 or Escape for the list — because the answer is spoken (see §9).
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
-grows vertically (its per-state height is a minimum, not a cap). The two no-speech outcomes both
+grows vertically (its per-state height is a minimum, not a cap).
+
+**Heard excerpt.** An unrecognized voice command, and an answer to a choice that was not understood,
+show what the speech model heard so a mishearing is visible at a glance. It is the raw transcript,
+never the text after vocabulary replacements, and the HUD does not claim it is what the command
+reader received: Try it (§7) shows how a typed phrase reads after replacements. It is the one HUD text
+that truncates. Whitespace is folded to single spaces, the phrase is cut to
+`HeardExcerpt.characterBudget` characters, and it shows at most two lines; a shortened excerpt keeps
+its start and ends in a single ellipsis. Titles, choice rows, hints, and actions keep wrapping. The
+excerpt is not shown, read by VoiceOver, or kept in a note when the take's target was a password
+field or could not be confirmed, the same rule that keeps such a take out of History; History being
+off or the mode being excluded from it does not hide it. VoiceOver reads the title, then the excerpt,
+once; a retained list announces only the changed line. Timing is unchanged: the standalone Error
+dismisses after three seconds and a new recording replaces it. The two no-speech outcomes both
 record `.noSpeech` in history; they differ only in the render — the microphone repair action appears
 only when the take's audio peak never cleared the digital-silence floor.
 
@@ -817,8 +833,8 @@ which says Plain Dictation uses Global vocabulary and whose **Edit Vocabulary…
 **Voice Commands** (experimental, shown only while its flag is on) is a built-in mode. It ships
 with no shortcut, and its list row reads `Off — no shortcut` until one is set. Speech on its shortcut is
 never typed: a command it understands runs, one that matches more than one destination asks which one
-(§5), and anything else shows an Error naming what was wrong (not a command, no match, or too many
-matches) and changes nothing.
+(§5), and anything else shows an Error naming what was wrong (a command it did not recognize, with what was
+heard; no match; or too many matches) and changes nothing.
 
 Before first enabling Voice Commands in Maintenance, an app-switching notice explains:
 “Voice recognition can make mistakes and open or switch to an unintended app. Its open windows may
@@ -1026,9 +1042,11 @@ recorded as **Needs a choice**, its result listing the numbered rows. A spoken a
 heard “two”, its result beginning “Selected Work Mail for “switch to mail”:” followed by what ran — so
 the pair reads correctly even when other entries fall between them or a filter hides one. A spoken
 cancel reads **Choice cancelled**, and a reply that was not an answer reads **Needs a choice** with the
-hint it showed. Clicking a row completes the question's own entry instead, since nothing was spoken; the
-Cancel button marks it **Choice cancelled**. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details with the
-message the HUD showed. **Paste Result** is hidden for commands, since there is nothing to insert;
+standard instruction for answering (“Choose 1–2, say “cancel”, or give a new command.”), even when the
+HUD showed what was heard instead. Clicking a row completes the question's own entry instead, since nothing was spoken; the
+Cancel button marks it **Choice cancelled**. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details explaining the
+failure. That row can say more than the compact HUD: an unrecognized command keeps the full “Not a
+command. Say …” guidance there while the HUD shows only “Command not recognized” and what was heard. **Paste Result** is hidden for commands, since there is nothing to insert;
 **Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
 Voice Commands vocabulary, not the global one, since that is what reads commands. The Voice Commands
 editor carries its own **Do not save this mode in history** toggle.

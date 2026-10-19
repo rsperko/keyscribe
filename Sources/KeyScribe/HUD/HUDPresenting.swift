@@ -53,7 +53,7 @@ struct VoiceCommandChoicePrompt: Equatable {
 }
 
 enum VoiceCommandChoiceStatus: Equatable {
-    case waiting(note: String?)
+    case waiting(note: String?, heard: HeardExcerpt? = nil)
     case listening(latchedTrigger: String?)
     case working
 }
@@ -69,7 +69,7 @@ enum HUDState: Equatable {
     case complete(outcome: DictationOutcome, mode: String)
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
-    case error(message: String, action: HUDErrorAction?)
+    case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil)
     case choice(VoiceCommandChoicePrompt, status: VoiceCommandChoiceStatus, level: Float = 0)
 }
 
@@ -139,7 +139,7 @@ extension HUDState {
             return summary
         case .stoppedAtLimit(_, let limit, _):
             return "Stopped at the \(limit) limit"
-        case .error(let message, _):
+        case .error(let message, _, _):
             return message
         case .choice(let prompt, _, _):
             return prompt.title
@@ -147,7 +147,7 @@ extension HUDState {
     }
 
     var errorAction: HUDErrorAction? {
-        if case .error(_, let action) = self { return action }
+        if case .error(_, let action, _) = self { return action }
         return nil
     }
 
@@ -178,14 +178,23 @@ extension HUDState {
             return detail
         case .localFallback:
             return "Rewrite could not be completed"
-        case .choice(_, .waiting(let note), _):
-            return note
+        case .choice(_, .waiting(let note, let heard), _):
+            return heard?.text ?? note
         case .choice(_, .listening(let latchedTrigger), _):
             return latchedTrigger.map { "Listening \u{2014} tap \($0) again to stop" } ?? "Listening"
         case .choice(_, .working, _):
             return "Transcribing"
-        case .error, .hidden:
+        case .error(_, _, let heard):
+            return heard?.text
+        case .hidden:
             return nil
+        }
+    }
+
+    var secondaryIsHeardExcerpt: Bool {
+        switch self {
+        case .error(_, _, _?), .choice(_, .waiting(_, _?), _): true
+        default: false
         }
     }
 
@@ -271,7 +280,7 @@ extension HUDState {
         guard case .choice(let prompt, let status, _) = self,
               case .choice(let shown, _, _) = previous, shown.id == prompt.id else { return voiceOverAnnouncement }
         switch status {
-        case .waiting(let note): return note
+        case .waiting(let note, let heard): return heard?.text ?? note
         case .listening: return "Recording"
         case .working: return "Transcribing"
         }

@@ -5,8 +5,9 @@ enum HUDPreview {
         "ready", "recording", "recording-latched", "loading-model", "transcribing",
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-        "microphone-error", "accessibility-error", "recording-countdown", "stopped-at-limit",
-        "stopped-at-limit-local", "choice", "choice-five", "choice-listening", "choice-retry",
+        "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
+        "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
+        "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
     ]
 
     static let choicePrompt = VoiceCommandChoicePrompt(
@@ -91,6 +92,10 @@ enum HUDPreview {
             .localFallback(outcome: .inserted, mode: "Cleanup")
         case "microphone-error":
             .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
+        case "command-not-recognized":
+            .error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "which to Mail"))
+        case "command-not-recognized-long":
+            .error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: longHeard))
         case "accessibility-error":
             .error(message: "Accessibility is off", action: .openAccessibilitySettings)
         case "stopped-at-limit":
@@ -105,8 +110,15 @@ enum HUDPreview {
             .choice(choicePrompt, status: .listening(latchedTrigger: nil), level: 0.6)
         case "choice-retry":
             .choice(choicePrompt, status: .waiting(note: "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."))
+        case "choice-heard":
+            .choice(choicePrompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: "tube")))
+        case "choice-heard-long":
+            .choice(choicePrompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: longHeard)))
         default:
             nil
         }
     }
+
+    static let longHeard = "switch over to the window where I was writing the quarterly budget review notes for the "
+        + "planning meeting with everyone on Thursday afternoon"
 }

@@ -436,13 +436,17 @@ private struct HUDView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(primary).font(.system(size: 13, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                if let secondary {
-                    Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if let secondary { secondaryText(secondary) }
             }
             Spacer(minLength: 0)
         }
+    }
+
+    private func secondaryText(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
+            .lineLimit(model.state.secondaryIsHeardExcerpt ? 2 : nil)
+            .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var standardBody: some View {
@@ -452,10 +456,7 @@ private struct HUDView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primary).font(.system(size: 13, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let secondary {
-                        Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    if let secondary { secondaryText(secondary) }
                     if !model.state.dataBoundaryBadges.isEmpty {
                         // Wrap to as many rows as needed so badges never clip; each is `.fixedSize()` so a
                         // label never ellipsizes.

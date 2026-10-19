@@ -10,8 +10,9 @@ struct HUDStateTests {
             "ready", "recording", "recording-latched", "loading-model", "transcribing",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-            "microphone-error", "accessibility-error", "recording-countdown", "stopped-at-limit",
-            "stopped-at-limit-local", "choice", "choice-five", "choice-listening", "choice-retry",
+            "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
+            "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
+            "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)
@@ -216,6 +217,49 @@ struct HUDStateTests {
         #expect(waiting.voiceOverAnnouncement(after: listening) == nil)
         let retry = HUDState.choice(prompt, status: .waiting(note: "Choose 1\u{2013}2."))
         #expect(retry.voiceOverAnnouncement(after: listening) == "Choose 1\u{2013}2.")
+    }
+
+    @Test func anUnrecognizedCommandShowsItsTitleThenTheHeardExcerptOnce() {
+        let state = HUDState.error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "which to Mail"))
+        #expect(state.primaryText == "Command not recognized")
+        #expect(state.secondaryText == "Heard \u{201C}which to Mail\u{201D}")
+        #expect(state.secondaryIsHeardExcerpt)
+        #expect(state.voiceOverAnnouncement == "Command not recognized. Heard \u{201C}which to Mail\u{201D}")
+        #expect(state.indicator == .error)
+        #expect(state.panelWidth == 280)
+        let plain = HUDState.error(message: "Command not recognized", action: nil)
+        #expect(plain.secondaryText == nil)
+        #expect(plain.voiceOverAnnouncement == "Command not recognized")
+        #expect(!plain.secondaryIsHeardExcerpt)
+        #expect(!HUDState.commandDone(summary: "Mail").secondaryIsHeardExcerpt)
+    }
+
+    @Test func aRetainedQuestionAnnouncesOnlyTheHeardExcerptThatReplacedItsNote() {
+        let prompt = HUDPreview.choicePrompt
+        let listening = HUDState.choice(prompt, status: .listening(latchedTrigger: nil))
+        let heard = HUDState.choice(prompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: "tube")))
+        #expect(heard.secondaryText == "Heard \u{201C}tube\u{201D}")
+        #expect(heard.secondaryIsHeardExcerpt)
+        #expect(heard.voiceOverAnnouncement(after: listening) == "Heard \u{201C}tube\u{201D}")
+        #expect(!HUDState.choice(prompt, status: .waiting(note: "Choose 1\u{2013}2.")).secondaryIsHeardExcerpt)
+    }
+
+    @Test(arguments: [false, true])
+    func aHeardExcerptNeverGrowsPastTwoLines(_ inChoice: Bool) throws {
+        func height(_ heard: String) throws -> CGFloat {
+            let hud = HUDController()
+            let excerpt = HeardExcerpt(heard: heard)
+            hud.render(inChoice
+                ? .choice(HUDPreview.choicePrompt, status: .waiting(note: nil, heard: excerpt))
+                : .error(message: "Command not recognized", action: nil, heard: excerpt))
+            defer { hud.render(.hidden) }
+            return try #require(hud.panelFrame?.height)
+        }
+        let short = try height("tube")
+        let wide = try height(String(repeating: "\u{8A71}", count: HeardExcerpt.characterBudget))
+        let line = NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: 11))
+        #expect(wide > short)
+        #expect(wide - short < line * 1.5)
     }
 
     @Test func aWaitingPanelRefusesKeyFocusEvenWhenClicked() {

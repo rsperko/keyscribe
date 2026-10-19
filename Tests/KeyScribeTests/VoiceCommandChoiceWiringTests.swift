@@ -87,7 +87,8 @@ struct VoiceCommandChoiceWiringTests {
 
         init(
             places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [], historyEnabled: Bool = true,
-            titleScopedMode: Bool = false
+            titleScopedMode: Bool = false, target: TargetSnapshot = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1),
+            replacements: [ReplacementsSet.Rule] = []
         ) throws {
             supportDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("keyscribe-vcchoice-\(UUID().uuidString)", isDirectory: true)
@@ -95,6 +96,7 @@ struct VoiceCommandChoiceWiringTests {
             try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
             var commands = Mode.voiceCommands
             commands.triggerKeys = [.init(key: "right_option")]
+            commands.replacements.rules = replacements
             try ModeStore.write(commands, to: modesDir)
             var email = Mode(id: "email", name: "Email")
             email.triggerKeys = [.init(key: "right_command")]
@@ -132,7 +134,7 @@ struct VoiceCommandChoiceWiringTests {
                 submitKey: { _ in },
                 clipboard: { captured.clipboardReads += 1; return nil },
                 pressSnapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1) },
-                snapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1) },
+                snapshot: { target },
                 micStatus: { .granted },
                 accessibilityGranted: { true },
                 voiceCommands: runner)
@@ -485,5 +487,87 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("switch to mail")
         await h.dictate("two")
         #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1))
+    }
+
+    private static let notACommand = "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, "
+        + "\u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."
+    private static let retryNote = "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."
+    nonisolated private static let secureTarget = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: true)
+    nonisolated private static let movedTarget = TargetSnapshot(bundleId: "com.example.Other", pid: 2)
+
+    @Test func anUnrecognizedCommandShowsAShortTitleAndWhatTheSpeechModelHeard() async throws {
+        let h = try Harness(places: [personal, work], replacements: [.init(heard: "which", replace: "witch", regex: false)])
+        await h.dictate("which  to\nMail")
+        #expect(h.hud.last == .error(message: "Command not recognized", action: nil,
+                                     heard: HeardExcerpt(heard: "which to Mail")))
+        #expect(h.captured.inserted.isEmpty)
+        #expect(h.system.openedURLs.isEmpty)
+        let entry = try #require(h.history.entries().first)
+        #expect(entry.heard == "which  to\nMail")
+        #expect(entry.transformed == "witch  to\nMail")
+        #expect(entry.failureReason == Self.notACommand)
+        #expect(entry.outcome == .commandFailed)
+    }
+
+    @Test func otherCommandFailuresDoNotGainATranscript() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to banana")
+        #expect(h.hud.last == .error(
+            message: "No matching app, place, or window found for \u{201C}banana\u{201D}.", action: nil))
+    }
+
+    @Test(arguments: [secureTarget, movedTarget])
+    func aSecureOrUnconfirmedTargetShowsOnlyTheTitle(_ target: TargetSnapshot) async throws {
+        let h = try Harness(places: [personal, work], target: target)
+        await h.dictate("which to Mail")
+        #expect(h.hud.last == .error(message: "Command not recognized", action: nil))
+        #expect(h.hud.last?.voiceOverAnnouncement == "Command not recognized")
+    }
+
+    @Test func historyOffStillShowsTheExcerpt() async throws {
+        let h = try Harness(places: [personal, work], historyEnabled: false)
+        await h.dictate("which to Mail")
+        #expect(h.hud.last == .error(message: "Command not recognized", action: nil,
+                                     heard: HeardExcerpt(heard: "which to Mail")))
+        #expect(h.history.entries().isEmpty)
+    }
+
+    @Test func anUnrecognizedAnswerReplacesTheNoteWithWhatWasHeardAndKeepsTheList() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        await h.dictate("tube")
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: "tube"))))
+        #expect(h.history.entries().first?.result == Self.retryNote)
+        await h.dictate("seven")
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: Self.retryNote)))
+        await h.dictate("2")
+        #expect(h.system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
+    }
+
+    @Test func anEarlierExcerptIsNeverRestoredByALaterTake() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        await h.dictate("tube")
+        await h.press()
+        #expect(h.hud.last.map { if case .choice(prompt, .listening, _) = $0 { true } else { false } } == true)
+        h.controller.cancel()
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: nil)))
+        await h.dictate("tube")
+        await h.dictate("   ")
+        guard case .choice(prompt, .waiting(_, let heard), _)? = h.hud.last else { Issue.record("expected the list"); return }
+        #expect(heard == nil)
+        await h.dictate("tube")
+        await h.dictate("cancel")
+        #expect(h.hud.last == .hidden)
+    }
+
+    @Test func aSecureTargetKeepsTheOrdinaryRetryNote() async throws {
+        let h = try Harness(places: [personal, work], target: Self.secureTarget)
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        await h.dictate("tube")
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: Self.retryNote)))
     }
 }

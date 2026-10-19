@@ -186,7 +186,7 @@ struct EmptyTranscriptRecoveryTests {
     }
 
     private func terminalMessage(_ states: [HUDState]) -> String? {
-        if case .error(let message, _) = states.last { return message }
+        if case .error(let message, _, _) = states.last { return message }
         return nil
     }
 

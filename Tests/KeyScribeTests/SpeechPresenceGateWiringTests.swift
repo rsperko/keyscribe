@@ -84,7 +84,7 @@ struct SpeechPresenceGateWiringTests {
         let (record, states) = await runWithHUD(detector: StubPresence(presence: .noSpeech, peak: 0))
         #expect(record?.outcome == .noSpeech)
         let terminal = states.last
-        if case .error(let message, let action) = terminal {
+        if case .error(let message, let action, _) = terminal {
             #expect(message == "Nothing heard — check your microphone")
             #expect(action == .openMicrophoneSettings)
         } else {

@@ -25,7 +25,7 @@ enum VoiceCommandCLI {
             print("started:    \(summary) (still running)")
             print("command:    \(command)")
             return 0
-        case .failed(let message, _, _):
+        case .failed(let message, _, _, _):
             print("failed:     \(message)")
             return 1
         case .needsChoice, .abandoned:

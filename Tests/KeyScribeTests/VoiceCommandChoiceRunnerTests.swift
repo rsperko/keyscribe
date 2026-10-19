@@ -108,10 +108,10 @@ struct VoiceCommandChoiceRunnerTests {
     @Test func anUnrecognizedOrOutOfRangeReplyKeepsTheList() async throws {
         let (runner, system, _) = make()
         let pending = try #require(await ask(runner))
-        let retry = VoiceCommandAnswer.retry(message: "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command.")
-        #expect(await answer(runner, "seven") == retry)
+        let message = "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."
+        #expect(await answer(runner, "seven") == .retry(message: message, reason: .invalidSelection))
         #expect(runner.resumeChoice(pending.id))
-        #expect(await answer(runner, "the work one I think") == retry)
+        #expect(await answer(runner, "the work one I think") == .retry(message: message, reason: .unrecognizedAnswer))
         #expect(runner.resumeChoice(pending.id))
         #expect(runner.pendingChoice?.id == pending.id)
         #expect(system.opened.isEmpty && system.openedURLs.isEmpty)

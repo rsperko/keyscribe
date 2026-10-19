@@ -178,7 +178,8 @@ command. The number you answer with is never passed to the action.
 
 You can also click a row. To dismiss the list, say **“cancel”** or **“never mind”**, or click
 **Cancel**. Saying a whole new command, such as **“open Work Mail”**, replaces the list. If what you say
-is neither a number in the list nor a command, the list stays and says how to answer. The list also goes
+is neither a number in the list nor a command, the list stays and shows what was heard, so you can tell
+whether your answer was misheard. The list also goes
 away after 30 seconds without an answer, when you switch to another app or start a different mode, and
 when you change your places or actions; after that, a number means nothing. When more than five match,
 KeyScribe asks you to say more of the name instead of listing them.
@@ -188,6 +189,13 @@ that saying it will ask you to choose. If your answer is consistently misheard �
 “tube”, say — add a replacement from `tube` to `two` under **Vocabulary ▸ Voice Commands**.
 
 ### A voice command keeps being misheard.
+
+When KeyScribe does not recognize a command, or an answer to “Which one?”, it briefly shows what it
+heard, such as **Heard “which to Mail”**. That is what your speech model wrote, before any of your
+replacements, and a long phrase is shortened. Other problems, such as a name that matches nothing, say
+what went wrong instead. The heard phrase is hidden, leaving only **Command not recognized**, when you
+were in a password field or KeyScribe could not confirm which field you were in. When the command is saved to History, its entry has the complete
+phrase.
 
 With the experimental voice commands, open **Settings ▸ Vocabulary ▸ Voice Commands**. Words and
 replacements there apply only to commands, and run before KeyScribe reads what you said:
@@ -218,7 +226,8 @@ replacements there apply only to commands, and run before KeyScribe reads what y
   `switch to Visual Studio Code` lets you say just "code".
 
 To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Try it**: it shows what
-the phrase is read as and what it would do, without opening an app or running a script or shortcut.
+the phrase is read as after your replacements and what it would do. Try it reads what you type; it
+does not listen. It works without opening an app or running a script or shortcut.
 For the example above, type `switch to male` and check that it resolves to Mail.
 
 Keep these corrections scoped to **Voice Commands**. Global words and replacements apply here only if

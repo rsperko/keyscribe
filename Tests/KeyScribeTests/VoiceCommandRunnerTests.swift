@@ -368,9 +368,22 @@ struct VoiceCommandRunnerTests {
     @Test func failuresExplainThemselves() async {
         let (runner, _) = make()
         #expect(await runner.run(transcript: "hello", places: [], origin: nil)
-                == .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."))
+                == .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
+                           kind: .unrecognizedCommand))
         #expect(await runner.run(transcript: "switch to banana", places: [], origin: nil)
                 == .failed(message: "No matching app, place, or window found for \u{201C}banana\u{201D}."))
+    }
+
+    @Test func onlyAGrammarMissIsMarkedUnrecognizedOnEveryEntryPath() async {
+        let (runner, _) = make()
+        guard case .failed(_, _, _, let kind) = await runner.run(.notACommand, origin: nil) else {
+            Issue.record("expected a failure"); return
+        }
+        #expect(kind == .unrecognizedCommand)
+        guard case .failed(_, _, _, let other) = await runner.run(transcript: "switch to banana", places: [], origin: nil) else {
+            Issue.record("expected a failure"); return
+        }
+        #expect(other == .other)
     }
 
     @Test func anAppThatWillNotOpenFails() async {
