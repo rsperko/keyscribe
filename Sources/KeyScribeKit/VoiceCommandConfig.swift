@@ -90,6 +90,24 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
         run.dropFirst().map { $0.replacingOccurrences(of: Self.textPlaceholder, with: text) }
     }
 
+    public func commandLine(arguments: [String]) -> String {
+        let shownProgram = program.hasPrefix("~/") && !Self.isShellSafe(program.dropFirst(2))
+            ? "~/" + Self.shellQuoted(program.dropFirst(2))
+            : Self.shellQuoted(program, allowingHome: true)
+        return ([shownProgram] + arguments.map { Self.shellQuoted($0) }).joined(separator: " ")
+    }
+
+    private static func isShellSafe(_ text: Substring, allowingHome: Bool = false) -> Bool {
+        !text.isEmpty && text.first != "=" && text.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || "_-./:,@%+=".contains($0) || (allowingHome && $0 == "~"))
+        }
+    }
+
+    private static func shellQuoted(_ text: some StringProtocol, allowingHome: Bool = false) -> String {
+        if isShellSafe(Substring(text), allowingHome: allowingHome) { return String(text) }
+        return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     public var spokenForms: [String] {
         var seen = Set<String>()
         return ([name] + say).filter { seen.insert(VoiceCommandText.key($0)).inserted }

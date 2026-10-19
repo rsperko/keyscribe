@@ -45,7 +45,10 @@
   file, so a later opt-in keeps the shortcut. Only `trigger_keys[]`, `enabled`, and its own vocabulary
   (`[dictionary]` and `[replacements]`, which leave out global vocabulary unless `include_global` says
   otherwise) are honored; everything else is forced (`output = "voice_command"`, no rewrite, no spoken
-  editing commands, no phrases or constraints, never recorded to history). It is never the fallback: only its own shortcut starts it. **Its shortcut may not
+  editing commands, no phrases or constraints). `exclude_from_history` is honored too and defaults to
+  `false`, so a voice command is recorded like a dictation: Heard is the transcript and Result is the
+  command it ran (a script's program and arguments, quoted the way a shell would), with the reason
+  when it failed. It is never the fallback: only its own shortcut starts it. **Its shortcut may not
   be shared with any other enabled mode**, whatever that mode's context: Settings refuses the edit, and a
   shared press written by hand stays with the other mode — the Voice Commands binding is dropped and the
   Modes list marks the mode's shortcut as never firing.
@@ -59,6 +62,12 @@
   `prompt`, never their originals) — behind History's "Show exactly what was received". Old rows
   lacking optional fields decode as absent — History renders without the corresponding line. Audio
   and the redaction map are never stored.
+  A **voice command** writes `outcome = "command"` or `"command_failed"`. Its `heard` is the
+  transcript, `transformed` the text after the Voice Commands vocabulary, and `result` what ran: a
+  script's command line, quoted the way a shell would, or the description of a switch. A command that
+  matched nothing has an empty `result`. A failed command adds the optional `failure_reason` — the
+  message the HUD showed, which for a script can include the last line it wrote to standard error.
+  An app older than this change skips these rows rather than failing to load history.
 
 ### Model storage
 
@@ -506,7 +515,9 @@ run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
   still running then, counts as done and is left to finish: done means started, and a failure after that
   window is not seen. A nonzero exit within it fails the command, showing the exit status and the last
   line the script wrote to standard error. A program that is missing or not executable fails without
-  starting. The script's arguments and output are never logged or saved. A newly written or edited file
+  starting. The script's arguments and output are never logged. Standard output is never kept; with history on,
+  History saves the command line, arguments included, and a failure's message, which can carry the last line
+  the script wrote to standard error (see *History records* above). A newly written or edited file
   can take longer to start the first time, while macOS checks it.
 - **Arguments are literal**, but KeyScribe cannot stop a program from treating them as code: pointing
   `run` at `/bin/sh` with `-c` and `{text}` would run spoken words as shell commands. Put the logic in a

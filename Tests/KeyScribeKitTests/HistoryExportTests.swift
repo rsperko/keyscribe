@@ -88,6 +88,32 @@ struct HistoryStatsTests {
         #expect(s.wordsDictated == 6)        // 3 + 1 + 2
     }
 
+    @Test func aCommandIsNotCountedAsDictatedWords() {
+        let s = HistoryStats.compute(from: [
+            entry("one two", outcome: .inserted),
+            entry("~/bin/deploy --env staging", outcome: .command),
+            entry("~/bin/deploy --env prod", outcome: .commandFailed),
+        ])
+        #expect(s.byOutcome[.command] == 1)
+        #expect(s.wordsDictated == 2)
+    }
+
+    @Test func textAndMarkdownExportsSayWhyACommandFailed() {
+        var failed = entry("~/bin/deploy prod", heard: "deploy prod", outcome: .commandFailed)
+        failed.failureReason = "Deploy failed (exit 2): no such environment"
+        let txt = HistoryExport.export([failed], format: .text, formatting: utc(), appName: "KeyScribe")
+        let md = HistoryExport.export([failed], format: .markdown, formatting: utc(), appName: "KeyScribe")
+        #expect(txt.contains("    Why it failed: Deploy failed (exit 2): no such environment\n"))
+        #expect(md.contains("  - Why it failed: Deploy failed (exit 2): no such environment\n"))
+    }
+
+    @Test func exportsLabelACommandAsOne() {
+        let entries = [entry("~/bin/deploy staging", outcome: .command), entry("~/bin/deploy prod", outcome: .commandFailed)]
+        let txt = HistoryExport.export(entries, format: .text, formatting: utc(), appName: "KeyScribe")
+        #expect(txt.contains("Plain Dictation · Command  [On this Mac]"))
+        #expect(txt.contains("Plain Dictation · Command failed  [On this Mac]"))
+    }
+
     @Test func redactionRateIsFractionOfTotal() {
         let s = HistoryStats.compute(from: [
             entry("a", redaction: true), entry("b"), entry("c", redaction: true), entry("d"),

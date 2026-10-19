@@ -31,6 +31,17 @@ struct VoiceCommandShortcutTests {
         ModeStore.loadAll(in: dir.appendingPathComponent("modes")).first { $0.id == id }?.triggerKeys.map(\.key) ?? []
     }
 
+    @Test func settingsSavesTheChoiceToKeepCommandsOutOfHistory() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        var commands = try #require(f.model.modes.first { $0.runsVoiceCommands })
+        #expect(!commands.excludeFromHistory)
+        commands.excludeFromHistory = true
+        f.model.update(commands)
+        let saved = ModeStore.loadAll(in: f.dir.appendingPathComponent("modes")).first { $0.runsVoiceCommands }
+        #expect(saved?.excludeFromHistory == true)
+    }
+
     @Test func settingsRefusesACommandShortcutAnotherModeUses() throws {
         let f = try make(commandKey: "control+option+v", polishKey: "right_option")
         defer { try? FileManager.default.removeItem(at: f.dir) }

@@ -80,6 +80,11 @@ with them, including any network use, is up to the program you chose. KeyScribe 
 everything your account can do, and a misheard command can run it, so choose what you connect this
 way with care.
 
+When history is on, each voice command is saved there like a dictation: what you said, the command it
+ran with those words, and, if it failed, the error message, which can include the last line the script
+wrote to its error output. Turning history off stops this along with everything else; to keep only voice
+commands out, turn on **Do not save commands in history** in the Voice Commands settings.
+
 ## The redaction wedge — and its limits
 
 When LLM cleanup is enabled, KeyScribe attempts to keep recognizable sensitive spans out of the

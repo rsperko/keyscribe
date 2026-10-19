@@ -91,6 +91,34 @@ final class ConfigRepository {
         }) != nil
     }
 
+    func addDictionaryWord(_ word: String, to scope: CorrectionDestination.Scope) -> Bool {
+        switch scope {
+        case .global: addDictionaryWord(word)
+        case .mode(let id): addDictionaryWord(word, toMode: id)
+        }
+    }
+
+    func addReplacement(heard: String, replace: String, regex: Bool = false, to scope: CorrectionDestination.Scope) -> Bool {
+        switch scope {
+        case .global: addReplacement(heard: heard, replace: replace, regex: regex)
+        case .mode(let id): addReplacement(heard: heard, replace: replace, regex: regex, toMode: id)
+        }
+    }
+
+    func vocabularyScope(for scope: CorrectionDestination.Scope) -> VocabularyScope {
+        let globalWords = dictionaryWords()
+        let globalRules = replacementRules()
+        guard case .mode(let id) = scope, let mode = resolved.modes.first(where: { $0.id == id }) else {
+            return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
+        }
+        return VocabularyScope(
+            globalWords: globalWords, globalRules: globalRules,
+            local: VocabularyScope.Local(
+                words: mode.dictionary.words, rules: mode.replacements.rules,
+                includeGlobalWords: mode.dictionary.includeGlobal,
+                includeGlobalRules: mode.replacements.includeGlobal))
+    }
+
     @discardableResult
     func mutateDictionary(_ transform: (DictionarySet) -> DictionarySet) throws -> DictionarySet {
         let updated = transform(try loadDictionaryForMutation())

@@ -164,6 +164,23 @@ struct VoiceCommandScriptTests {
         let action = VoiceCommandAction.script(deploy, arguments: ["--env", "staging two"])
         #expect(action.summary(appName: { _ in nil }) == "Deploy")
         #expect(action.detail(appName: { _ in nil })
-            == "Runs ~/bin/deploy --env \u{201C}staging two\u{201D} in the background.")
+            == "Runs ~/bin/deploy --env 'staging two' in the background.")
+    }
+
+    @Test func theCommandLineQuotesArgumentsTheWayAShellWould() {
+        #expect(deploy.commandLine(arguments: ["--env", "staging"]) == "~/bin/deploy --env staging")
+        #expect(deploy.commandLine(arguments: ["buy milk; rm -rf ~", "", "  ", "it's", "~/x"])
+            == "~/bin/deploy 'buy milk; rm -rf ~' '' '  ' 'it'\\''s' '~/x'")
+    }
+
+    @Test func theCommandLineQuotesAnArgumentThatStartsWithAnEqualsSign() {
+        #expect(deploy.commandLine(arguments: ["=sh", "a=b"]) == "~/bin/deploy '=sh' a=b")
+    }
+
+    @Test func theCommandLineQuotesAProgramPathWithSpacesButKeepsItsHome() {
+        let script = VoiceCommandScript(name: "Note", run: ["~/My Scripts/note", "{text}"])
+        #expect(script.commandLine(arguments: ["hi"]) == "~/'My Scripts/note' hi")
+        let absolute = VoiceCommandScript(name: "Note", run: ["/opt/my tools/note"])
+        #expect(absolute.commandLine(arguments: []) == "'/opt/my tools/note'")
     }
 }

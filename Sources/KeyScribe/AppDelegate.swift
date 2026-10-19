@@ -207,23 +207,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     case .replacement: return VocabularyAnalysis(action: .addReplacement)
                     }
                 }
-                return VocabularyAdvisor.analyze(proposal, in: self.vocabularyScope(for: destination))
+                return VocabularyAdvisor.analyze(proposal, in: self.configRepository.vocabularyScope(for: destination.scope))
             },
             addDictionaryWord: { [weak self] word, destination in
-                switch destination.scope {
-                case .global:
-                    return self?.configRepository.addDictionaryWord(word) ?? false
-                case .mode(let id):
-                    return self?.configRepository.addDictionaryWord(word, toMode: id) ?? false
-                }
+                self?.configRepository.addDictionaryWord(word, to: destination.scope) ?? false
             },
             addReplacement: { [weak self] heard, replace, regex, destination in
-                switch destination.scope {
-                case .global:
-                    return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex) ?? false
-                case .mode(let id):
-                    return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, toMode: id) ?? false
-                }
+                self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, to: destination.scope) ?? false
             },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
 
@@ -764,21 +754,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func correctionDestinations() -> [CorrectionDestination] {
         CorrectionDestination.list(for: config.modes)
-    }
-
-    private func vocabularyScope(for destination: CorrectionDestination) -> VocabularyScope {
-        let globalWords = configRepository.dictionaryWords()
-        let globalRules = configRepository.replacementRules()
-        guard case .mode(let id) = destination.scope,
-              let mode = config.modes.first(where: { $0.id == id }) else {
-            return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
-        }
-        return VocabularyScope(
-            globalWords: globalWords, globalRules: globalRules,
-            local: VocabularyScope.Local(
-                words: mode.dictionary.words, rules: mode.replacements.rules,
-                includeGlobalWords: mode.dictionary.includeGlobal,
-                includeGlobalRules: mode.replacements.includeGlobal))
     }
 
     // Relaunch into guided setup so the new process reads the just-granted Accessibility verdict fresh

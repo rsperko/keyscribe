@@ -72,7 +72,7 @@ struct VoiceCommandRunnerTests {
     @Test func switchesToARunningApp() async {
         let (runner, system) = make()
         let outcome = await runner.run(transcript: "Switch to Ghostty.", places: [], origin: .init(bundleId: textEdit.bundleId))
-        #expect(outcome == .done(summary: "Ghostty"))
+        #expect(outcome == .done(summary: "Ghostty", command: "Brings Ghostty to the front, opening it if needed."))
         #expect(system.opened == [ghostty.bundleId])
         #expect(system.tabReads.isEmpty)
     }
@@ -81,9 +81,9 @@ struct VoiceCommandRunnerTests {
         let (runner, system) = make()
         _ = await runner.run(transcript: "switch to ghostty", places: [], origin: .init(bundleId: textEdit.bundleId))
         #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
-                == .done(summary: "TextEdit"))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
         #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: textEdit.bundleId))
-                == .done(summary: "Ghostty"))
+                == .done(summary: "Ghostty", command: "Returns to Ghostty."))
         #expect(system.opened == [ghostty.bundleId, textEdit.bundleId, ghostty.bundleId])
     }
 
@@ -122,7 +122,7 @@ struct VoiceCommandRunnerTests {
         let (runner, system) = make()
         let tab = VoiceCommandCatalog.Tab(browserBundleId: chrome.bundleId, window: 1, tab: 2, url: "https://mail.google.com/mail/u/0/", title: "Inbox")
         system.tabs = [tab]
-        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail · Google Chrome"))
+        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail · Google Chrome", command: "Focuses the open tab \u{201C}Inbox\u{201D} in Google Chrome."))
         #expect(system.focused == [tab])
         #expect(system.opened == [chrome.bundleId])
         #expect(system.openedURLs.isEmpty)
@@ -164,7 +164,7 @@ struct VoiceCommandRunnerTests {
 
     @Test func aURLPlaceOpensWhenNoTabMatches() async {
         let (runner, system) = make()
-        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail"))
+        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail", command: "No open tab matches, so it opens https://mail.google.com/."))
         #expect(system.openedURLs.map(\.0) == ["https://mail.google.com/"])
     }
 
@@ -172,7 +172,8 @@ struct VoiceCommandRunnerTests {
         let (runner, system) = make()
         system.tabs = [VoiceCommandCatalog.Tab(browserBundleId: chrome.bundleId, window: 1, tab: 1, url: "https://mail.google.com/", title: "Inbox")]
         system.focusResult = .gone
-        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail · Google Chrome"))
+        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil)
+                == .done(summary: "Gmail · Google Chrome", command: "No open tab matches, so it opens https://mail.google.com/."))
         #expect(system.openedURLs.map(\.0) == ["https://mail.google.com/"])
     }
 
@@ -181,7 +182,8 @@ struct VoiceCommandRunnerTests {
         system.tabs = [VoiceCommandCatalog.Tab(browserBundleId: chrome.bundleId, window: 1, tab: 1, url: "https://mail.google.com/", title: "Inbox")]
         system.focusResult = .noResponse
         #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: .init(bundleId: textEdit.bundleId))
-                == .failed(message: "Google Chrome did not respond, so Gmail was not opened again."))
+                == .failed(message: "Google Chrome did not respond, so Gmail was not opened again.",
+                           command: "Focuses the open tab \u{201C}Inbox\u{201D} in Google Chrome."))
         #expect(system.openedURLs.isEmpty)
         #expect(runner.backTarget == nil)
     }
@@ -205,7 +207,8 @@ struct VoiceCommandRunnerTests {
     @Test func aRefusalFromABrowserThatWouldNotOpenThePlaceIsIgnored() async {
         let (runner, system) = make()
         system.refused = ["com.apple.Safari"]
-        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil) == .done(summary: "Gmail"))
+        #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil)
+                == .done(summary: "Gmail", command: "No open tab matches, so it opens https://mail.google.com/."))
         #expect(system.openedURLs.map(\.0) == ["https://mail.google.com/"])
     }
 
@@ -214,7 +217,8 @@ struct VoiceCommandRunnerTests {
         let plain = VoiceCommandPlace(name: "Wiki", target: .url("http://wiki.example/"))
         system.defaultBrowsers = ["https": "com.google.Chrome", "http": "com.apple.Safari"]
         system.refused = [chrome.bundleId]
-        #expect(await runner.run(transcript: "switch to wiki", places: [plain], origin: nil) == .done(summary: "Wiki"))
+        #expect(await runner.run(transcript: "switch to wiki", places: [plain], origin: nil)
+                == .done(summary: "Wiki", command: "No open tab matches, so it opens http://wiki.example/."))
         #expect(system.defaultBrowserQueries == ["http://wiki.example/"])
     }
 
@@ -346,7 +350,8 @@ struct VoiceCommandRunnerTests {
         let (runner, system) = make()
         system.openSucceeds = false
         #expect(await runner.run(transcript: "switch to chrome", places: [], origin: nil)
-                == .failed(message: "Could not switch to Google Chrome."))
+                == .failed(message: "Could not switch to Google Chrome.",
+                           command: "Brings Google Chrome to the front, opening it if needed."))
     }
 
     private let deploy = VoiceCommandScript(name: "Deploy", run: ["~/bin/deploy", "--env", "{text}"])
@@ -354,7 +359,7 @@ struct VoiceCommandRunnerTests {
     @Test func aScriptRunsWithTheSpokenTextAsOneArgument() async {
         let (runner, system) = make()
         #expect(await runner.run(transcript: "Deploy staging two.", places: [], scripts: [deploy], origin: nil)
-            == .done(summary: "Deploy"))
+            == .done(summary: "Deploy", command: "~/bin/deploy --env 'staging two'"))
         #expect(system.scriptRuns.map(\.program) == ["~/bin/deploy"])
         #expect(system.scriptRuns.map(\.arguments) == [["--env", "staging two"]])
         #expect(system.installedScans == 0)
@@ -364,24 +369,27 @@ struct VoiceCommandRunnerTests {
     @Test func aScriptThatIsStillRunningCountsAsDone() async {
         let (runner, system) = make()
         system.scriptResult = .stillRunning
-        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil) == .done(summary: "Deploy"))
+        #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
+            == .done(summary: "Deploy", command: "~/bin/deploy --env prod"))
     }
 
     @Test func aFailingScriptReportsItsExitStatusAndLastErrorLine() async {
         let (runner, system) = make()
         system.scriptResult = .finished(status: 2, lastError: "no such environment")
         #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
-            == .failed(message: "Deploy failed (exit 2): no such environment"))
+            == .failed(message: "Deploy failed (exit 2): no such environment", command: "~/bin/deploy --env prod"))
         system.scriptResult = .finished(status: 1, lastError: nil)
         #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
-            == .failed(message: "Deploy failed (exit 1)."))
+            == .failed(message: "Deploy failed (exit 1).", command: "~/bin/deploy --env prod"))
     }
 
     @Test func aMissingProgramIsNamed() async {
         let (runner, system) = make()
         system.scriptResult = .notRunnable
         #expect(await runner.run(transcript: "deploy prod", places: [], scripts: [deploy], origin: nil)
-            == .failed(message: "~/bin/deploy is not a program that can be run. Check the path, and that the file is executable."))
+            == .failed(
+                message: "~/bin/deploy is not a program that can be run. Check the path, and that the file is executable.",
+                command: "~/bin/deploy --env prod"))
     }
 
     @Test func aScriptWithoutItsTextDoesNotRun() async {

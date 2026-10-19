@@ -796,8 +796,7 @@ never typed: a command it understands runs, and anything else shows an Error nam
 (not a command, no match, or more than one match) and changes nothing. Its editor has, in order:
 
 1. **How to start Voice Commands** — the same shortcut structure as Plain Dictation, plus one caption
-   saying speech on the shortcut is never typed, commands are recognized on this Mac, and they are not
-   saved to History. Its shortcut can never be shared with another mode: recording one that another
+   saying speech on the shortcut is never typed and commands are recognized on this Mac. Its shortcut can never be shared with another mode: recording one that another
    enabled mode uses (or giving another mode this one's) is refused with an Error at the top of the pane
    naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
    shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
@@ -823,7 +822,10 @@ never typed: a command it understands runs, and anything else shows an Error nam
 5. **When a command is misheard** — the same **Recognition and replacements** summary as other modes,
    with **Edit Vocabulary…** opening Vocabulary on Voice Commands. Its help says the words and
    replacements apply only to commands, before what was said is read.
-6. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
+6. **History** — **Do not save commands in history**, off by default. Its help says History keeps what
+   was said, what ran (including the words passed to a script), and why it failed, which can include the
+   last line a script wrote to its error output.
+7. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
    shows the exact command line it would run). When the
    mode's vocabulary changed the phrase, it shows `Read as “…”` above the result. Its caption says that
    checking open tabs reads their addresses and titles and may ask to control the browser.
@@ -913,7 +915,8 @@ The list is grouped by day and supports search over locally stored text. Each ro
   recording limit), what was heard, in secondary text, so the entry the error pointed to is
   recognizable without opening it;
 - time and mode;
-- outcome (`Inserted`, `Copied`, `Local fallback`, or `Failed`);
+- outcome (`Inserted`, `Copied`, `Local fallback`, or `Failed`; a voice command reads `Command` or
+  `Command failed`);
 - data-boundary badges relevant to that dictation;
 - no audio indicator because audio is never stored.
 
@@ -933,6 +936,14 @@ enabled, which context categories were sent, and the raw cloud exchange as sibli
 provider's reply, verbatim — before any output enforcement, so model misbehavior stays visible
 rather than silently corrected). On a local-fallback entry the received view notes the reply was
 not used. Redaction maps are never shown or persisted.
+
+A **voice command** entry reuses the same detail: the comparison reads **Heard → Command**, where
+Command is what ran — a script's exact command line, quoted the way a shell would so it can be copied
+into a terminal, or what a switch did. A failed command adds a **Why it failed** row in Details with the
+message the HUD showed. **Paste Result** is hidden for commands, since there is nothing to insert;
+**Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
+Voice Commands vocabulary, not the global one, since that is what reads commands. The Voice Commands
+editor carries its own **Do not save commands in history** toggle.
 
 Correction actions are directly beside the relevant text:
 

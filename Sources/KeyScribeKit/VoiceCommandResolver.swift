@@ -78,14 +78,13 @@ public enum VoiceCommandAction: Equatable, Sendable {
             let inBrowser = browser.map { " in \(appName($0) ?? $0)" } ?? ""
             return "No open tab matches, so it opens \(url)\(inBrowser)."
         case .script(let script, let arguments):
-            let line = ([script.program] + arguments.map(Self.shown)).joined(separator: " ")
-            return "Runs \(line) in the background."
+            return "Runs \(script.commandLine(arguments: arguments)) in the background."
         }
     }
 
-    private static func shown(_ argument: String) -> String {
-        let plain = !argument.isEmpty && !argument.contains { $0.isWhitespace || "\"'\u{201C}\u{201D}".contains($0) }
-        return plain ? argument : "\u{201C}\(argument)\u{201D}"
+    public func command(appName: (String) -> String?) -> String {
+        if case .script(let script, let arguments) = self { return script.commandLine(arguments: arguments) }
+        return detail(appName: appName)
     }
 }
 

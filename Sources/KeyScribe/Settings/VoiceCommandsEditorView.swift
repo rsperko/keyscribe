@@ -40,7 +40,7 @@ struct VoiceCommandsEditorView: View {
                     Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Speech on this shortcut is never typed. If it isn’t a command \(Branding.appName) understands, nothing happens. Commands are recognized on this Mac and are not saved to History.")
+                Text("Speech on this shortcut is never typed. If it isn’t a command \(Branding.appName) understands, nothing happens. Commands are recognized on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -65,6 +65,19 @@ struct VoiceCommandsEditorView: View {
                 {
                     Button("Edit Vocabulary…", action: onEditVocabulary)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.editVocabulary)
+                }
+            }
+
+            Section("History") {
+                SettingRow(
+                    title: "Do not save commands in history",
+                    help: "When off, History keeps each command: what you said, what ran, including the words passed to a script, and why it failed, which can include the last line a script wrote to its error output. History must also be on.")
+                {
+                    Toggle("", isOn: Binding(
+                        get: { mode.excludeFromHistory },
+                        set: { var updated = mode; updated.excludeFromHistory = $0; onUpdate(updated) }))
+                        .labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.excludeFromHistory)
                 }
             }
 

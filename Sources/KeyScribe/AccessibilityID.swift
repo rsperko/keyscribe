@@ -185,6 +185,7 @@ enum AccessibilityID {
             static let addApp = "mode.voiceCommands.addApp"
             static let addWebPage = "mode.voiceCommands.addWebPage"
             static let tryIt = "mode.voiceCommands.tryIt"
+            static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
             static let editVocabulary = "mode.voiceCommands.editVocabulary"
             static let placeName = "mode.voiceCommands.place.name"
             static let placeSay = "mode.voiceCommands.place.say"

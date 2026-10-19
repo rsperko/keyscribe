@@ -412,7 +412,8 @@ once dictation has started.
 **A mode whose output is a command (experimental).** The **Voice Commands** system mode
 (`_voice_commands`, behind the `voice_commands` flag) sets `output = "voice_command"`. That is data, not a
 mode identity: the pipeline branches on the output kind. Such a take skips Phase B entirely (a spoken
-suffix never re-routes a command into a dictation mode), and skips the rewrite, insertion, and History —
+suffix never re-routes a command into a dictation mode), and skips the rewrite and insertion; History
+records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
 the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
 the global one unless it opts in), is matched against the user's scripts and then parsed as a closed set of
 focus verbs and resolved against apps and the user's places (`config_schema.md` "`voice_commands.toml`").

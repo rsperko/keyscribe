@@ -46,6 +46,26 @@ struct HistoryEntryCodecTests {
         #expect(decoded.triggerKey == nil)
     }
 
+    @Test func aVoiceCommandRoundTripsWithItsFailureReason() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Voice Commands", heard: "deploy staging", transformed: "deploy staging",
+            result: "~/bin/deploy staging", outcome: .commandFailed,
+            cloudInvolved: false, redaction: false, contextCategories: [],
+            failureReason: "Deploy failed (exit 2): no such environment")
+        let line = try entry.jsonLine()
+        #expect(line.contains("\"outcome\":\"command_failed\""))
+        #expect(line.contains("\"failure_reason\":\"Deploy failed (exit 2): no such environment\""))
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+    }
+
+    @Test func onlyCommandOutcomesAreCommands() {
+        #expect(HistoryEntry.Outcome.command.isCommand)
+        #expect(HistoryEntry.Outcome.commandFailed.isCommand)
+        #expect(!HistoryEntry.Outcome.inserted.isCommand)
+        #expect(!HistoryEntry.Outcome.failed.isCommand)
+    }
+
     @Test func triggerKeyRoundTrips() throws {
         let entry = HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
@@ -241,6 +261,12 @@ struct HistorySearchTests {
         #expect(filter("plain").count == 1)
         #expect(filter("Meeting notes").count == 1)
         #expect(filter("absent").isEmpty)
+    }
+
+    @Test func matchesWhyACommandFailed() {
+        var failed = sampleEntry(heard: "deploy prod", result: "~/bin/deploy prod", mode: "Voice Commands", outcome: .commandFailed)
+        failed.failureReason = "Deploy failed (exit 2): no such environment"
+        #expect(HistorySearch.matches(failed, query: "no such environment"))
     }
 }
 

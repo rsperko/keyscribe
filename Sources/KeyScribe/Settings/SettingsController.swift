@@ -144,11 +144,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
-            addDictionaryWord: { repository.addDictionaryWord($0) },
-            analyzeDictionaryWord: {
-                VocabularyAdvisor.analyze(.word($0), in: VocabularyScope(globalWords: repository.dictionaryWords()))
-            },
-            addReplacement: { repository.addReplacement(heard: $0, replace: $1) },
+            addDictionaryWord: { repository.addDictionaryWord($0, to: $1) },
+            analyzeDictionaryWord: { VocabularyAdvisor.analyze(.word($0), in: repository.vocabularyScope(for: $1)) },
+            addReplacement: { repository.addReplacement(heard: $0, replace: $1, to: $2) },
             openSettings: { _ in })
         super.init()
         historyReplacementsLauncher = HistoryReplacementsLauncher { [weak self] word, destination, name, onSaved in

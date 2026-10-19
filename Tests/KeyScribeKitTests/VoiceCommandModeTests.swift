@@ -16,7 +16,7 @@ struct VoiceCommandModeTests {
         #expect(mode.output == .voiceCommand)
         #expect(mode.triggerKeys.isEmpty)
         #expect(mode.aiRewrite == nil)
-        #expect(mode.excludeFromHistory)
+        #expect(!mode.excludeFromHistory)
         #expect(mode.constraints.isEmpty)
         #expect(mode.triggerPhrases.isEmpty)
         #expect(!mode.commands.liveEdits)
@@ -37,14 +37,14 @@ struct VoiceCommandModeTests {
         #expect(try ModeStore.decode(from: toml, id: Mode.voiceCommandsId).output == .voiceCommand)
     }
 
-    @Test func normalizationKeepsOnlyTheShortcutAndEnabled() {
+    @Test func normalizationKeepsTheShortcutEnabledAndHistoryChoice() {
         var tampered = Mode.voiceCommands
         tampered.triggerKeys = [.init(key: "right_option", pressStyle: "tap-to-toggle")]
         tampered.enabled = false
         tampered.name = "Renamed"
         tampered.output = .cursor
         tampered.aiRewrite = Mode.AIRewrite(connection: "x", prompt: "leak")
-        tampered.excludeFromHistory = false
+        tampered.excludeFromHistory = true
         tampered.triggerPhrases = ["as a command"]
         tampered.constraints = [Mode.Constraint(bundleId: "com.example")]
         tampered.commands.liveEdits = true
@@ -53,6 +53,7 @@ struct VoiceCommandModeTests {
         var expected = Mode.voiceCommands
         expected.triggerKeys = [.init(key: "right_option", pressStyle: "tap-to-toggle")]
         expected.enabled = false
+        expected.excludeFromHistory = true
         #expect(normalized == expected)
     }
 

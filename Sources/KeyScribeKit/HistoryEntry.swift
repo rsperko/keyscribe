@@ -10,6 +10,10 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case copied
         case localFallback = "local_fallback"
         case failed
+        case command
+        case commandFailed = "command_failed"
+
+        public var isCommand: Bool { self == .command || self == .commandFailed }
     }
 
     public var timestamp: Date
@@ -47,6 +51,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // Provider error text or a fixed local string, never user content. nil on non-fallback and older rows.
     public var fallbackReason: String?
     public var stoppedAtLimit: Bool?
+    public var failureReason: String?
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -69,6 +74,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case triggerKey = "trigger_key"
         case fallbackReason = "fallback_reason"
         case stoppedAtLimit = "stopped_at_limit"
+        case failureReason = "failure_reason"
     }
 
     public init(
@@ -78,7 +84,8 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
         connection: String? = nil, model: String? = nil, prompt: String? = nil, received: String? = nil,
         modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
-        triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil
+        triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil,
+        failureReason: String? = nil
     ) {
         self.timestamp = timestamp
         self.modeName = modeName
@@ -100,6 +107,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.triggerKey = triggerKey
         self.fallbackReason = fallbackReason
         self.stoppedAtLimit = stoppedAtLimit
+        self.failureReason = failureReason
     }
 
     private static let encoder: JSONEncoder = {

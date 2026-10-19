@@ -37,7 +37,7 @@ struct VoiceCommandWiringTests {
     }
 
     private final class RunnerSpy: VoiceCommandRunning {
-        var outcome: VoiceCommandOutcome = .done(summary: "Ghostty")
+        var outcome: VoiceCommandOutcome = .done(summary: "Ghostty", command: "Brings Ghostty to the front, opening it if needed.")
         var whileResolving: () -> Void = {}
         private(set) var calls: [(
             transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?
@@ -60,14 +60,16 @@ struct VoiceCommandWiringTests {
         let runner: RunnerSpy
         let hud: HUDSpy
         let inserted: String?
-        let historyCount: Int
+        let history: [HistoryEntry]
         let record: DictationRecord?
     }
 
     private func run(
-        transcript: String, outcome: VoiceCommandOutcome = .done(summary: "Ghostty"),
+        transcript: String, outcome: VoiceCommandOutcome = .done(summary: "Ghostty", command: "Brings Ghostty to the front, opening it if needed."),
         places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = [], otherModes: [Mode] = [], useVoiceCommands: Bool = true,
-        flagOn: Bool = true, loss: Loss = .none, vocabulary: (inout Mode) -> Void = { _ in }
+        flagOn: Bool = true, historyEnabled: Bool = true, secureField: Bool = false, focusMoves: Bool = false,
+        loss: Loss = .none,
+        vocabulary: (inout Mode) -> Void = { _ in }
     ) async throws -> Run {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-vcwire-\(UUID().uuidString)", isDirectory: true)
@@ -85,7 +87,7 @@ struct VoiceCommandWiringTests {
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
-        settings.history = .init(enabled: true, retentionDays: 7)
+        settings.history = .init(enabled: historyEnabled, retentionDays: 7)
         settings.features.setEnabled(flagOn, for: .voiceCommands)
 
         let config = ConfigCache(supportDir: supportDir)
@@ -104,17 +106,24 @@ struct VoiceCommandWiringTests {
             audio: audio,
             insert: { _, _, _, text, _ in captured.insertedText = text; return true },
             submitKey: { _ in },
-            snapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit") },
+            pressSnapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1) },
+            snapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: secureField) },
+            snapshotAsync: {
+                focusMoves ? TargetSnapshot(bundleId: "com.example.other", pid: 2)
+                    : TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: secureField)
+            },
             micStatus: { .granted },
             accessibilityGranted: { true },
             voiceCommands: runner)
 
         controller.handleStart(triggerKey: useVoiceCommands ? "right_option" : nil)
         await controller.captureBringUpTask?.value
+        await controller.snapshotAdoptionTask?.value
         if loss == .beforeRelease { audio.loseCapture() }
         controller.handleCommit()
         await controller.dictationTask?.value
-        return Run(runner: runner, hud: hud, inserted: captured.insertedText, historyCount: history.entries().count,
+        controller.waitForHistoryWrites()
+        return Run(runner: runner, hud: hud, inserted: captured.insertedText, history: history.entries(),
                    record: controller.lastRecord)
     }
 
@@ -133,16 +142,73 @@ struct VoiceCommandWiringTests {
         #expect(result.runner.calls.first?.places == [place])
         #expect(result.runner.calls.first?.origin == VoiceCommandOrigin(bundleId: "com.apple.TextEdit"))
         #expect(result.inserted == nil)
-        #expect(result.historyCount == 0)
         #expect(result.hud.states.last == .commandDone(summary: "Ghostty"))
+    }
+
+    @Test func aVoiceCommandIsRecordedWithTheCommandItRan() async throws {
+        let result = try await run(transcript: "Bitch to Ghostty.") { mode in
+            mode.replacements.rules = [.init(heard: "bitch to", replace: "switch to", regex: false)]
+        }
+        let entry = try #require(result.history.first)
+        #expect(result.history.count == 1)
+        #expect(entry.heard == "Bitch to Ghostty.")
+        #expect(entry.transformed == "switch to Ghostty.")
+        #expect(entry.result == "Brings Ghostty to the front, opening it if needed.")
+        #expect(entry.outcome == .command)
+        #expect(entry.failureReason == nil)
+        #expect(entry.modeName == Mode.voiceCommands.name)
+    }
+
+    @Test func aFailedCommandIsRecordedWithWhyItFailed() async throws {
+        let result = try await run(
+            transcript: "deploy prod",
+            outcome: .failed(message: "Deploy failed (exit 2): no such environment", command: "~/bin/deploy prod"))
+        let entry = try #require(result.history.first)
+        #expect(entry.result == "~/bin/deploy prod")
+        #expect(entry.outcome == .commandFailed)
+        #expect(entry.failureReason == "Deploy failed (exit 2): no such environment")
+    }
+
+    @Test func aCommandThatMatchedNothingIsRecordedWithNoCommand() async throws {
+        let result = try await run(transcript: "switch to banana", outcome: .failed(message: "No app or place called “banana”."))
+        let entry = try #require(result.history.first)
+        #expect(entry.heard == "switch to banana")
+        #expect(entry.result == "")
+        #expect(entry.outcome == .commandFailed)
+        #expect(entry.failureReason == "No app or place called “banana”.")
+    }
+
+    @Test func aCommandIsNotRecordedWhileHistoryIsOff() async throws {
+        let result = try await run(transcript: "switch to ghostty", historyEnabled: false)
+        #expect(result.runner.calls.count == 1)
+        #expect(result.history.isEmpty)
+    }
+
+    @Test func aCommandSpokenIntoAPasswordFieldIsNotRecorded() async throws {
+        let result = try await run(transcript: "deploy hunter2", secureField: true)
+        #expect(result.runner.calls.count == 1)
+        #expect(result.history.isEmpty)
+    }
+
+    @Test func aCommandWhoseTargetCouldNotBeConfirmedIsNotRecorded() async throws {
+        let result = try await run(transcript: "deploy hunter2", focusMoves: true)
+        #expect(result.runner.calls.count == 1)
+        #expect(result.history.isEmpty)
+        #expect(try await run(transcript: "deploy hunter2").history.count == 1)
+    }
+
+    @Test func aCommandModeExcludedFromHistoryRecordsNothing() async throws {
+        let result = try await run(transcript: "switch to ghostty") { mode in mode.excludeFromHistory = true }
+        #expect(result.runner.calls.count == 1)
+        #expect(result.history.isEmpty)
     }
 
     @Test func theSavedScriptsReachTheRunner() async throws {
         let script = VoiceCommandScript(name: "Deploy", run: ["/usr/bin/true", "{text}"])
-        let result = try await run(transcript: "deploy staging", outcome: .done(summary: "Deploy"), scripts: [script])
+        let result = try await run(transcript: "deploy staging", outcome: .done(summary: "Deploy", command: "/usr/bin/true staging"), scripts: [script])
         #expect(result.runner.calls.first?.scripts == [script])
         #expect(result.inserted == nil)
-        #expect(result.historyCount == 0)
+        #expect(result.history.map(\.result) == ["/usr/bin/true staging"])
         #expect(result.hud.states.last == .commandDone(summary: "Deploy"))
     }
 
@@ -169,6 +235,7 @@ struct VoiceCommandWiringTests {
     @Test func aCommandModeDoesNothingWhileTheFlagIsOff() async throws {
         let result = try await run(transcript: "switch to chrome", flagOn: false)
         #expect(result.runner.calls.isEmpty)
+        #expect(result.history.isEmpty)
         #expect(result.inserted == nil)
         #expect(result.hud.states.last == .error(message: "Voice commands are turned off.", action: nil))
     }
@@ -177,7 +244,7 @@ struct VoiceCommandWiringTests {
         let result = try await run(transcript: "switch to gmail", loss: .beforeRelease)
         #expect(result.runner.calls.isEmpty)
         #expect(result.inserted == nil)
-        #expect(result.historyCount == 0)
+        #expect(result.history.isEmpty)
         #expect(result.record?.outcome == .failed)
         #expect(result.hud.states.last == .error(message: "The microphone stopped, so the command did not run.", action: nil))
     }
@@ -186,7 +253,7 @@ struct VoiceCommandWiringTests {
         let result = try await run(transcript: "switch to gmail", loss: .whileResolving)
         #expect(result.runner.calls.count == 1)
         #expect(result.inserted == nil)
-        #expect(result.historyCount == 0)
+        #expect(result.history.isEmpty)
         #expect(result.hud.states.last == .error(message: "The microphone stopped, so the command did not run.", action: nil))
     }
 

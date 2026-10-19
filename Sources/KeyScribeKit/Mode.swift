@@ -349,7 +349,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         mode.dictionary = ModeDictionary(includeGlobal: false, words: [])
         mode.replacements = ModeReplacements(includeGlobal: false, rules: [])
         mode.trailing = .none
-        mode.excludeFromHistory = true
         return mode
     }
 
@@ -373,6 +372,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             mode.enabled = enabled
             mode.dictionary = dictionary
             mode.replacements = replacements
+            mode.excludeFromHistory = excludeFromHistory
             return mode
         }
         guard id == Mode.directId else { return self }

@@ -6,8 +6,8 @@ struct VoiceCommandOrigin: Equatable, Sendable {
 }
 
 enum VoiceCommandOutcome: Equatable, Sendable {
-    case done(summary: String)
-    case failed(message: String)
+    case done(summary: String, command: String)
+    case failed(message: String, command: String? = nil)
     case abandoned
 }
 
@@ -126,17 +126,18 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool
     ) async -> VoiceCommandOutcome {
         let summary = action.summary(appName: system.appName(forBundleId:))
+        var command = action.command(appName: system.appName(forBundleId:))
         let succeeded: Bool
         switch action {
         case .goBack:
             guard let back = backTarget, system.isRunning(bundleId: back.bundleId) else {
                 return .failed(message: "Nothing to go back to.")
             }
+            let name = system.appName(forBundleId: back.bundleId) ?? summary
+            command = "Returns to \(name)."
             succeeded = await system.openApp(bundleId: back.bundleId)
             if succeeded { backTarget = origin }
-            return succeeded
-                ? .done(summary: system.appName(forBundleId: back.bundleId) ?? summary)
-                : .failed(message: "Could not go back.")
+            return succeeded ? .done(summary: name, command: command) : .failed(message: "Could not go back.", command: command)
         case .app(let app):
             succeeded = await system.openApp(bundleId: app.bundleId)
         case .place(_, .app(let bundleId)):
@@ -149,37 +150,45 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 succeeded = await system.openApp(bundleId: tab.browserBundleId)
             case .noResponse:
                 let browser = system.appName(forBundleId: tab.browserBundleId) ?? "The browser"
-                return .failed(message: "\(browser) did not respond, so \(place.name) was not opened again.")
+                return .failed(message: "\(browser) did not respond, so \(place.name) was not opened again.", command: command)
             case .gone:
-                guard case .url(let url) = place.target else { return .failed(message: "Could not switch to \(summary).") }
+                guard case .url(let url) = place.target else {
+                    return .failed(message: "Could not switch to \(summary).", command: command)
+                }
                 if let refusal = browserRefusal(place.browser, place: place) { return refusal }
+                command = VoiceCommandAction.place(place, .openURL(url, browser: place.browser))
+                    .command(appName: system.appName(forBundleId:))
                 succeeded = await system.openURL(url, browser: place.browser)
             }
         case .place(let place, .openURL(let url, let browser)):
             if let refusal = browserRefusal(browser, place: place) { return refusal }
             succeeded = await system.openURL(url, browser: browser)
         case .script(let script, let arguments):
-            return Self.outcome(of: await system.runScript(program: script.program, arguments: arguments), script: script)
+            return Self.outcome(
+                of: await system.runScript(program: script.program, arguments: arguments), script: script, command: command)
         }
-        guard succeeded else { return .failed(message: "Could not switch to \(summary).") }
+        guard succeeded else { return .failed(message: "Could not switch to \(summary).", command: command) }
         if let origin { backTarget = origin }
-        return .done(summary: summary)
+        return .done(summary: summary, command: command)
     }
 
     static func needsTextMessage(script: String) -> String {
         "Say what to pass to \(script) after its name."
     }
 
-    static func outcome(of run: ScriptRun, script: VoiceCommandScript) -> VoiceCommandOutcome {
+    static func outcome(of run: ScriptRun, script: VoiceCommandScript, command: String) -> VoiceCommandOutcome {
         switch run {
         case .finished(0, _), .stillRunning:
-            return .done(summary: script.name)
+            return .done(summary: script.name, command: command)
         case .finished(let status, let lastError):
-            return .failed(message: "\(script.name) failed (exit \(status))" + (lastError.map { ": \($0)" } ?? "."))
+            return .failed(
+                message: "\(script.name) failed (exit \(status))" + (lastError.map { ": \($0)" } ?? "."), command: command)
         case .notRunnable:
-            return .failed(message: "\(script.program) is not a program that can be run. Check the path, and that the file is executable.")
+            return .failed(
+                message: "\(script.program) is not a program that can be run. Check the path, and that the file is executable.",
+                command: command)
         case .couldNotStart(let reason):
-            return .failed(message: "Could not run \(script.name): \(reason)")
+            return .failed(message: "Could not run \(script.name): \(reason)", command: command)
         }
     }
 
