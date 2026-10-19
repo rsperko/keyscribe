@@ -106,6 +106,61 @@ struct VoiceCommandsSettingsModelTests {
         #expect(unchanged.readAs == nil)
     }
 
+    @Test func tryItRefreshesWhenAPlaceIsSaved() async throws {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        model.tryIt("switch to zzqvplace")
+        try await waitFor { model.tryResult?.summary == "No match" }
+        let place = VoiceCommandPlace(name: "Zzqvplace", target: .app(bundleId: "com.apple.finder"))
+        #expect(model.save(place, replacing: nil) == nil)
+        try await waitFor { model.tryResult?.resolved == true }
+        #expect(model.tryResult?.summary == "Zzqvplace")
+    }
+
+    private func waitFor(_ condition: () -> Bool) async throws {
+        for _ in 0..<100 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(condition())
+    }
+
+    @Test func aPlaceRowShowsPhrasesThatActuallyWork() {
+        #expect(mail.spokenExamples == ["open Mail", "open inbox"])
+        let code = VoiceCommandPlace(name: "Code", say: ["editor"], target: .app(bundleId: "com.microsoft.VSCode"))
+        #expect(code.spokenExamples == ["switch to Code", "switch to editor"])
+    }
+
+    @Test func choosingAnAppSuggestsItsNameUntilTheUserTypesOne() {
+        var draft = PlaceDraft(name: "", kind: .app)
+        draft.choose(VoiceCommandCatalog.App(name: "Mail", bundleId: "com.apple.mail"))
+        #expect(draft.name == "Mail")
+        draft.choose(VoiceCommandCatalog.App(name: "Ghostty", bundleId: "com.mitchellh.ghostty"))
+        #expect(draft.name == "Ghostty")
+        #expect(draft.bundleId == "com.mitchellh.ghostty")
+        draft.name = "terminal"
+        draft.choose(VoiceCommandCatalog.App(name: "Mail", bundleId: "com.apple.mail"))
+        #expect(draft.name == "terminal")
+    }
+
+    @Test func aPlaceStartedFromTheCurrentAppStillFollowsALaterChoice() {
+        var draft = PlaceDraft(name: "Safari", kind: .app, bundleId: "com.apple.Safari")
+        draft.choose(VoiceCommandCatalog.App(name: "Mail", bundleId: "com.apple.mail"))
+        #expect(draft.name == "Mail")
+        var existing = PlaceDraft(VoiceCommandPlace(name: "Work", target: .app(bundleId: "com.apple.Safari")))
+        existing.choose(VoiceCommandCatalog.App(name: "Mail", bundleId: "com.apple.mail"))
+        #expect(existing.name == "Work")
+    }
+
+    @Test func thePlaceSheetShowsALiveExample() {
+        var draft = PlaceDraft(name: "", kind: .app, bundleId: "com.apple.mail")
+        #expect(draft.example(destination: "Mail") == nil)
+        draft.name = "Mail"
+        draft.say = "inbox, letters"
+        #expect(draft.example(destination: "Mail") == "Say \u{201C}switch to inbox\u{201D} to bring Mail to the front.")
+        var page = PlaceDraft(name: "Gmail", kind: .webPage, url: "https://mail.google.com/")
+        #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open Gmail\u{201D} to go to mail.google.com.")
+        page.say = "inbox"
+        #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open inbox\u{201D} to go to mail.google.com.")
+    }
+
     @Test func suggestedPlaceNameComesFromTheTabTitle() {
         #expect(VoiceCommandsEditorView.suggestedName(title: "Inbox - me@example.com - Gmail", url: "https://mail.google.com/") == "Inbox")
         #expect(VoiceCommandsEditorView.suggestedName(title: "", url: "https://www.github.com/x") == "github.com")

@@ -29,6 +29,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     private let repository: ConfigRepository
     private let system: LiveVoiceCommandSystem
     private var tryTask: Task<Void, Never>?
+    private var lastTried = ""
 
     init(repository: ConfigRepository, system: LiveVoiceCommandSystem = .shared) {
         self.repository = repository
@@ -50,6 +51,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         case .failed(let error):
             loadError = "\(VoiceCommandStore.fileName) could not be read (\(Self.describe(error))). Fix or remove the file to edit places and scripts here."
         }
+        if !lastTried.isEmpty { tryIt(lastTried) }
     }
 
     private static func describe(_ error: ConfigError) -> String {
@@ -125,7 +127,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         return nil
     }
 
-    private func nameTaken(_ name: String, except originalKey: String?) -> Bool {
+    func nameTaken(_ name: String, except originalKey: String?) -> Bool {
         let key = VoiceCommandText.key(name)
         guard key != originalKey else { return false }
         return (places.map(\.name) + scripts.map(\.name)).contains { VoiceCommandText.key($0) == key }
@@ -175,6 +177,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     func tryIt(_ text: String) {
         tryTask?.cancel()
         let heard = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastTried = heard
         guard !heard.isEmpty else { tryResult = nil; return }
         let places = places
         let scripts = scripts

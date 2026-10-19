@@ -83,7 +83,7 @@ way with care.
 When history is on, each voice command is saved there like a dictation: what you said, the command it
 ran with those words, and, if it failed, the error message, which can include the last line the script
 wrote to its error output. Turning history off stops this along with everything else; to keep only voice
-commands out, turn on **Do not save commands in history** in the Voice Commands settings.
+commands out, turn on **Do not save this mode in history** in the Voice Commands settings.
 
 ## The redaction wedge — and its limits
 

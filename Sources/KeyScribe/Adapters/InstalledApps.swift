@@ -47,6 +47,16 @@ enum InstalledApps {
         return icon
     }
 
+    private static var menuIconCache: [String: NSImage?] = [:]
+
+    static func menuIcon(forBundleId bundleId: String) -> NSImage? {
+        if let cached = menuIconCache[bundleId] { return cached }
+        let small = icon(forBundleId: bundleId).flatMap { $0.copy() as? NSImage }
+        small?.size = NSSize(width: 16, height: 16)
+        menuIconCache[bundleId] = small
+        return small
+    }
+
     static func chooseFromApplications() -> Info? {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.application]

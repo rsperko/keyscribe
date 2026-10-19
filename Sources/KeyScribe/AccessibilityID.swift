@@ -191,6 +191,11 @@ enum AccessibilityID {
             static let placeSay = "mode.voiceCommands.place.say"
             static let placeKind = "mode.voiceCommands.place.kind"
             static let placeApp = "mode.voiceCommands.place.app"
+            static func placeAppChoice(_ bundleId: String) -> String { "mode.voiceCommands.place.app.\(bundleId)" }
+            static let placeChooseFromApplications = "mode.voiceCommands.place.chooseFromApplications"
+            static let placeEnterBundleID = "mode.voiceCommands.place.enterBundleId"
+            static let placeBundleID = "mode.voiceCommands.place.bundleId"
+            static let placeExample = "mode.voiceCommands.place.example"
             static let placeURL = "mode.voiceCommands.place.url"
             static let placeBrowser = "mode.voiceCommands.place.browser"
             static let placeSave = "mode.voiceCommands.place.save"
@@ -204,6 +209,7 @@ enum AccessibilityID {
             static let scriptProgram = "mode.voiceCommands.script.program"
             static let scriptChooseProgram = "mode.voiceCommands.script.chooseProgram"
             static let scriptArguments = "mode.voiceCommands.script.arguments"
+            static let scriptArgumentDetails = "mode.voiceCommands.script.argumentDetails"
             static let scriptSave = "mode.voiceCommands.script.save"
             static let scriptCancel = "mode.voiceCommands.script.cancel"
             static let scriptDelete = "mode.voiceCommands.script.delete"
@@ -383,6 +389,8 @@ enum AccessibilityID {
         Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser,
+        Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
+        Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,
         Mode.VoiceCommands.placeDeleteConfirm,
         Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay,

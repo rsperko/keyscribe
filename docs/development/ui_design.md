@@ -769,7 +769,7 @@ sections:
    shortcut another mode already claims is reported as never firing, in red, even while the mode's
    other shortcuts keep it reachable; only a mode with no working shortcut is flagged in the list.
 3. **Where it works** — states whether the mode is available everywhere or only in listed places.
-   **Add app or website…** precedes saved places and offers running apps, Choose from Applications…,
+   **Add app or website…** precedes saved places and offers running apps (with their icons), Choose from Applications…,
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
    **More precise matching**. Availability is separate from the ways a user starts or selects a mode.
 4. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
@@ -801,34 +801,41 @@ never typed: a command it understands runs, and anything else shows an Error nam
    naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
    shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
 2. **What you can say** — the phrases (“switch to …”, “go to …”, “open …”, “focus …”, “go back”, and a
-   script's name followed by anything) with one line each on what they do.
-3. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
-   without one. **Add Place** offers **Current App (name)** and, when that app is a browser, **Current
+   script's name followed by anything) with one line each on what they do, then the same **Recognition
+   and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
+   Voice Commands. Its help adds that the words and replacements apply before a command is read.
+3. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
+   shows the exact command line it would run). It sits beside the phrases it tests and re-checks the typed
+   phrase whenever a place, a script, or the vocabulary changes. When the mode's vocabulary changed the
+   phrase, it shows `Read as “…”` above the result. Its caption says that checking open tabs reads their
+   addresses and titles and may ask to control the browser.
+4. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
+   without one. Each row's `Say:` line shows complete phrases that work (“switch to Mail”, “open Gmail”),
+   never a bare name. **Add Place** offers **Current App (name)** and, when that app is a browser, **Current
    Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
-   **Web Page…**. Each opens a sheet with the name, other spoken names, and the destination; an existing
-   place's sheet holds the red **Delete Place** action at its trailing edge, with a confirmation. The sheet
-   says that **Any browser** looks through every running browser that can list its tabs, in all its
-   windows (which can include private ones), and that finding an open tab asks macOS for permission to
-   control the browser the first time.
-4. **Scripts** — programs to run by name. The empty state says a script runs in the background, so the
+   **Web Page…**. Each opens a sheet that starts with the destination: the app, chosen with the same app
+   chooser as a mode's **Where it works** (running apps with their icons, **Choose from Applications…**,
+   **Enter Bundle ID…**), or the web page and browser. The name follows the chosen app or page until the
+   user types their own, then optional other spoken names, then a live example (“Say “switch to inbox” to
+   bring Mail to the front.”). A field's problem shows beside that field, and **Add Place** stays disabled
+   until the place is valid. An existing place's sheet holds the red **Delete Place** action at its
+   trailing edge, with a confirmation. The sheet says that **Any browser** looks through every running
+   browser that can list its tabs, in all its windows (which can include private ones), and that finding an
+   open tab asks macOS for permission to control the browser the first time.
+5. **Scripts** — programs to run by name. The empty state says a script runs in the background, so the
    current app stays in front, and can be passed what is said after its name. Each row shows the spoken
    names (with `…` when the script takes words), the command line, a `Script` badge, and an orange
    advisory when the program is missing or not executable. **Add Script** opens a sheet with the name,
    other spoken names, the program (a path field plus **Choose…**), and the arguments, one per line, with
-   `{text}` marking where the spoken words go. The sheet says the program runs directly without a shell
-   and with a minimal PATH, and that scripts run as the user and can be started by a misheard command. An
-   existing script's sheet holds the red **Delete Script** action at its trailing edge, with a
-   confirmation.
-5. **When a command is misheard** — the same **Recognition and replacements** summary as other modes,
-   with **Edit Vocabulary…** opening Vocabulary on Voice Commands. Its help says the words and
-   replacements apply only to commands, before what was said is read.
-6. **History** — **Do not save commands in history**, off by default. Its help says History keeps what
-   was said, what ran (including the words passed to a script), and why it failed, which can include the
-   last line a script wrote to its error output.
-7. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
-   shows the exact command line it would run). When the
-   mode's vocabulary changed the phrase, it shows `Read as “…”` above the result. Its caption says that
-   checking open tabs reads their addresses and titles and may ask to control the browser.
+   `{text}` marking where the spoken words go. Beside the arguments it says they never pass through a
+   shell but a program that runs its arguments as code will; the finer rules (blank lines, when words are
+   needed) sit in a collapsed **How arguments are passed** section. The sheet says the program runs
+   directly without a shell and with a minimal PATH, and that scripts run as the user and can be started by
+   a misheard command. An existing script's sheet holds the red **Delete Script** action at its trailing
+   edge, with a confirmation.
+6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
+   default. Its help says each saved command keeps what was said, what ran (including the words passed to
+   a script), and why it failed, which can include the last line a script wrote to its error output.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to
@@ -943,7 +950,7 @@ into a terminal, or what a switch did. A failed command adds a **Why it failed**
 message the HUD showed. **Paste Result** is hidden for commands, since there is nothing to insert;
 **Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
 Voice Commands vocabulary, not the global one, since that is what reads commands. The Voice Commands
-editor carries its own **Do not save commands in history** toggle.
+editor carries its own **Do not save this mode in history** toggle.
 
 Correction actions are directly beside the relevant text:
 

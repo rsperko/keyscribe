@@ -49,18 +49,11 @@ struct VoiceCommandsEditorView: View {
                           "Any running app, or one in your Applications folders, by name, or a place below. Brings it to the front, opening it if needed.")
                 phraseRow("\u{201C}go back\u{201D}", "Returns to the app you were in before your last command.")
                 phraseRow("A script\u{2019}s name, then anything else",
-                          "Runs the script below. What you say after its name is passed to it wherever its arguments use \(VoiceCommandScript.textPlaceholder).")
-            }
-
-            placesSection
-
-            scriptsSection
-
-            Section("When a command is misheard") {
+                          "Runs a script below. Words you say after its name can be passed to it.")
                 SettingRow(
                     title: "Recognition and replacements",
                     result: VocabularyScopePicker.summary(for: mode),
-                    help: "Words and replacements here apply only to commands, before \(Branding.appName) reads what you said. Add a name as it is really spelled, or replace a phrase that keeps coming out wrong, such as a misheard \u{201C}switch to\u{201D}.",
+                    help: ModeEditorView.vocabularyHelp(for: mode) + " They apply before \(Branding.appName) reads a command, so they can fix a name that keeps coming out wrong, or a misheard \u{201C}switch to\u{201D}.",
                     combinesAccessibilityChildren: false)
                 {
                     Button("Edit Vocabulary…", action: onEditVocabulary)
@@ -68,10 +61,16 @@ struct VoiceCommandsEditorView: View {
                 }
             }
 
-            Section("History") {
+            trySection
+
+            placesSection
+
+            scriptsSection
+
+            Section("Result handling") {
                 SettingRow(
-                    title: "Do not save commands in history",
-                    help: "When off, History keeps each command: what you said, what ran, including the words passed to a script, and why it failed, which can include the last line a script wrote to its error output. History must also be on.")
+                    title: "Do not save this mode in history",
+                    help: "When on, this mode's commands are never written to local history. Otherwise each command records per your History setting: what you said, what ran, including the words passed to a script, and why it failed, which can include the last line a script wrote to its error output.")
                 {
                     Toggle("", isOn: Binding(
                         get: { mode.excludeFromHistory },
@@ -80,8 +79,6 @@ struct VoiceCommandsEditorView: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.excludeFromHistory)
                 }
             }
-
-            trySection
         }
         .formStyle(.grouped)
         .padding(16)
@@ -125,7 +122,7 @@ struct VoiceCommandsEditorView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(place.name)
-                Text("Say: " + place.spokenForms.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", "))
+                Text("Say: " + place.spokenExamples.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", "))
                     .font(.caption).foregroundStyle(.secondary)
                 Text(destination(place)).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
@@ -261,6 +258,10 @@ extension VoiceCommandPlace {
         if case .url = target { return true }
         return false
     }
+
+    var spokenExamples: [String] {
+        spokenForms.map { "\(isWebPage ? "open" : "switch to") \($0)" }
+    }
 }
 
 struct PlaceDraft: Identifiable, Equatable {
@@ -274,10 +275,12 @@ struct PlaceDraft: Identifiable, Equatable {
     var bundleId: String
     var url: String
     var browser: String
+    private var suggestion: String?
 
     init(name: String, kind: Kind, bundleId: String = "", url: String = "", browser: String? = nil) {
         originalName = nil
         self.name = name
+        suggestion = name.isEmpty ? nil : name
         say = ""
         self.kind = kind
         self.bundleId = bundleId
@@ -298,6 +301,27 @@ struct PlaceDraft: Identifiable, Equatable {
         browser = place.browser ?? ""
     }
 
+    mutating func suggest(_ suggested: String) {
+        let current = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current.isEmpty || current == suggestion else { return }
+        name = suggested
+        suggestion = suggested
+    }
+
+    mutating func choose(_ app: VoiceCommandCatalog.App) {
+        bundleId = app.bundleId
+        suggest(app.name)
+    }
+
+    func example(destination: String) -> String? {
+        let place = place
+        guard !place.name.isEmpty, !destination.isEmpty else { return nil }
+        let form = place.say.first ?? place.name
+        return kind == .app
+            ? "Say \u{201C}switch to \(form)\u{201D} to bring \(destination) to the front."
+            : "Say \u{201C}open \(form)\u{201D} to go to \(destination)."
+    }
+
     var place: VoiceCommandPlace {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let forms = say.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
@@ -315,21 +339,12 @@ private struct PlaceEditorSheet: View {
     let onDone: () -> Void
     @State private var issue: String?
     @State private var confirmingDelete = false
+    @State private var enteringBundleID = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(draft.originalName == nil ? "Add Place" : "Edit Place").font(.title2.bold())
             Form {
-                TextField("Name", text: $draft.name)
-                    .multilineTextAlignment(.leading)
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeName)
-                VStack(alignment: .leading, spacing: 4) {
-                    TextField("Also say", text: $draft.say, prompt: Text("mail, inbox"))
-                        .multilineTextAlignment(.leading)
-                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSay)
-                    Text("Other names you might say for this place, separated by commas. The name always works.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 Picker("Goes to", selection: $draft.kind) {
                     Text("An app").tag(PlaceDraft.Kind.app)
                     Text("A web page").tag(PlaceDraft.Kind.webPage)
@@ -337,21 +352,13 @@ private struct PlaceEditorSheet: View {
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeKind)
                 if draft.kind == .app {
-                    Picker("App", selection: $draft.bundleId) {
-                        if draft.bundleId.isEmpty { Text("Choose an app").tag("") }
-                        if !draft.bundleId.isEmpty, !model.appChoices.contains(where: { $0.bundleId == draft.bundleId }) {
-                            Text(model.appName(draft.bundleId)).tag(draft.bundleId)
-                        }
-                        ForEach(model.appChoices, id: \.bundleId) { app in
-                            Text(app.name).tag(app.bundleId)
-                        }
-                    }
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeApp)
+                    appRow
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         TextField("Web page", text: $draft.url, prompt: Text("https://mail.google.com/"))
                             .multilineTextAlignment(.leading)
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeURL)
+                        if let urlIssue { IssueText(urlIssue) }
                         Text("An open tab whose address starts with this is brought to the front. With no such tab, the page opens.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -368,8 +375,26 @@ private struct PlaceEditorSheet: View {
                     Text("Any browser looks through every running browser that can list its tabs, in all its windows, which can include private ones. Finding an open tab asks macOS for permission to control the browser the first time.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Name", text: $draft.name, prompt: Text("What would you like to call it?"))
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeName)
+                    if let nameIssue { IssueText(nameIssue) }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Also say", text: $draft.say, prompt: Text("Optional, such as inbox, email"))
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSay)
+                    if let sayIssue { IssueText(sayIssue) }
+                    Text("Other names for this place, separated by commas. Say any of them after \u{201C}switch to\u{201D} or \u{201C}open\u{201D}.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
+            if let example = draft.example(destination: destinationName) {
+                Label(example, systemImage: "arrow.right.circle").font(.callout)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeExample)
+            }
             if let issue { IssueText(issue) }
             HStack {
                 if draft.originalName != nil {
@@ -377,6 +402,7 @@ private struct PlaceEditorSheet: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeCancel)
                     Button("Save") { save() }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(!canSave)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSave)
                     Spacer()
                     PaneDeleteButton(title: "Delete Place") { confirmingDelete = true }
@@ -387,6 +413,7 @@ private struct PlaceEditorSheet: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeCancel)
                     Button("Add Place") { save() }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(!canSave)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSave)
                 }
             }
@@ -394,6 +421,9 @@ private struct PlaceEditorSheet: View {
         .padding(24)
         .frame(width: 520)
         .task { await model.loadAppChoices() }
+        .onChange(of: draft.url) { _, url in
+            if let host = Self.host(url) { draft.suggest(host) }
+        }
         .confirmationDialog("Delete \u{201C}\(draft.originalName ?? draft.name)\u{201D}?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 if let name = draft.originalName {
@@ -407,6 +437,68 @@ private struct PlaceEditorSheet: View {
             Text("Saying its name will no longer go there. Apps themselves are not affected.")
         }
     }
+
+    private var appRow: some View {
+        LabeledContent("App") {
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 6) {
+                    if draft.bundleId.isEmpty {
+                        Text("None chosen").foregroundStyle(.secondary)
+                    } else {
+                        if let icon = InstalledApps.menuIcon(forBundleId: draft.bundleId) { Image(nsImage: icon) }
+                        Text(model.appName(draft.bundleId))
+                    }
+                    AppChooserMenu(
+                        title: draft.bundleId.isEmpty ? "Choose App" : "Change",
+                        ids: .init(
+                            menu: AccessibilityID.Mode.VoiceCommands.placeApp,
+                            app: AccessibilityID.Mode.VoiceCommands.placeAppChoice,
+                            chooseFromApplications: AccessibilityID.Mode.VoiceCommands.placeChooseFromApplications,
+                            enterBundleID: AccessibilityID.Mode.VoiceCommands.placeEnterBundleID),
+                        onChoose: { draft.choose(VoiceCommandCatalog.App(name: $0.name, bundleId: $0.bundleId)) },
+                        onEnterBundleID: { enteringBundleID = true })
+                }
+                if enteringBundleID {
+                    TextField("Bundle ID", text: $draft.bundleId, prompt: Text("com.apple.mail"))
+                        .multilineTextAlignment(.leading)
+                        .labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeBundleID)
+                }
+            }
+        }
+    }
+
+    private var destinationName: String {
+        switch draft.kind {
+        case .app: draft.bundleId.isEmpty ? "" : model.appName(draft.bundleId)
+        case .webPage: Self.host(draft.url) ?? ""
+        }
+    }
+
+    private static func host(_ url: String) -> String? {
+        guard UserInputValidation.endpointIssue(url) == nil,
+              let host = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines))?.host else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    private var nameIssue: String? {
+        let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        if let issue = UserInputValidation.nameIssue(name) { return issue.message }
+        return model.nameTaken(name, except: draft.originalName.map(VoiceCommandText.key))
+            ? "Another place or script already uses this name." : nil
+    }
+
+    private var sayIssue: String? {
+        draft.place.say.lazy.compactMap { UserInputValidation.phraseIssue($0)?.message }.first
+    }
+
+    private var urlIssue: String? {
+        draft.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil : UserInputValidation.endpointIssue(draft.url)?.message
+    }
+
+    private var canSave: Bool { draft.place.issue == nil && nameIssue == nil }
 
     private func save() {
         issue = model.save(draft.place, replacing: draft.originalName)
@@ -463,6 +555,7 @@ private struct ScriptEditorSheet: View {
     let onDone: () -> Void
     @State private var issue: String?
     @State private var confirmingDelete = false
+    @State private var argumentDetailsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -513,8 +606,15 @@ private struct ScriptEditorSheet: View {
                             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                             .accessibilityLabel("Arguments")
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArguments)
-                        Text("One per line, passed exactly as written, including blank lines between them. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name, always within that one argument; \(Branding.appName) never passes it through a shell, but a program that runs its arguments as code, such as sh -c, will. With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, saying only the name runs it.")
+                        Text("One per line. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name. \(Branding.appName) never passes it through a shell, but a program that runs its arguments as code, such as sh -c, will.")
                             .font(.caption).foregroundStyle(.secondary)
+                        DisclosureSection(isExpanded: $argumentDetailsExpanded) {
+                            DisclosureSummaryLabel(title: "How arguments are passed", summary: "Blank lines, and when words are needed")
+                        } content: {
+                            Text("Each line is passed exactly as written, including blank lines between them, and the words you say always stay within the one argument that holds \(VoiceCommandScript.textPlaceholder). With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, saying only the name runs it.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArgumentDetails)
                     }
                 }
             }
