@@ -141,6 +141,7 @@ public struct HistoryStore: Sendable {
     }
 
     private static func isSameRecord(_ a: HistoryEntry, _ b: HistoryEntry) -> Bool {
+        if let first = a.id, let second = b.id { return first == second }
         guard a.outcome.isCommand, b.outcome.isCommand else { return a == b }
         var a = a, b = b
         a.outcome = .command; a.failureReason = nil

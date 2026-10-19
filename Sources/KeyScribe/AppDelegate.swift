@@ -31,6 +31,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // System sleep suspends CoreAudio, so the resident capture engine's cached device binding is stale on
     // wake. Refresh it while idle (off the hot path) so the first post-wake dictation binds cleanly.
     private var wakeObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
     private var lockMonitor: SessionLockMonitor?
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
@@ -161,6 +162,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // rebinds until relaunch.
             self?.rebuildHotkeyMonitor()
             self?.refreshStatus()
+            self?.controller.voiceCommandConfigurationChanged()
             // Off the write path, so saving never pays it and the next press does not either.
             Task { @MainActor [weak self] in self?.config.prewarm() }
         }
@@ -190,6 +192,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.appearance = settings.hud.appearance
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
+        hud.onChooseVoiceCommand = { [weak self] id, identity in
+            self?.controller.chooseVoiceCommand(choice: id, candidate: identity)
+        }
+        hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
@@ -372,6 +378,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.controller.refreshCaptureBinding() }
         }
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.controller.handleSystemSleep() }
+        }
 
         lockMonitor = SessionLockMonitor { [weak self] in self?.controller.handleScreenLocked() }
         launched = true
@@ -492,6 +502,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                       bundleId != Bundle.main.bundleIdentifier,
                       bundleId != self.frontBundleId else { return }
                 self.frontBundleId = bundleId
+                self.controller.noteAppActivated(bundleId: bundleId)
                 // Most switches change nothing — no scoped mode, or the same ones stay claimable — and a
                 // rebuild tears down and re-registers every Carbon hot key, so only act on a real change.
                 guard self.claimableModes().map(\.id) != self.registeredClaimIds else { return }
@@ -568,6 +579,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildHotkeyMonitor()
         }
         refreshStatus()
+        controller.voiceCommandConfigurationChanged()
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
         // modes/dictionary/fragments realization invalidate() just discarded (mirrors the launch warm).

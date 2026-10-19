@@ -433,6 +433,20 @@ A script is never matched by a near-miss, and its name and arguments are never f
 dictionary. Dictionary correction applies only to an app or place target, so a guess cannot turn an
 app-switching command into script execution. It is never the Direct fallback and is
 reachable only by its own shortcut.
+**Ambiguity asks; it never guesses.** Ties at the winning match step resolve to a typed
+`VoiceCommandChoice` (frozen candidate identities and order, the spoken target, any `{text}` input, and
+the full match count) rather than to a recency or intent tie-break, because a wrong switch can expose a
+window that "go back" cannot un-show. `VoiceCommandRunner` keeps the one live choice in memory beside
+`backTarget` — never persisted — with the original origin, and owns its validity and idle expiry on an
+injected monotonic clock. The Voice Commands trigger claims it when the mode resolves, before recording,
+so expiry is suspended for the whole answer; any other mode starting dismisses it. An answer is parsed by
+the pure `VoiceCommandChoiceAnswer` (an explicit table of digits, cardinals, ordinals, and STT homophones,
+whole-utterance only) after the mode's replacements; a number is never action input. A selection
+consumes the choice before any `await`, so a click and a voice answer cannot both run, and it resolves
+**only the chosen candidate** against the current configuration — re-reading browser tabs for a place,
+and reporting a removed or repointed entry as unavailable instead of re-searching by name. A row click,
+Cancel, a voice answer, and every timer carry the choice's id, so a stale one cannot affect a newer list.
+Numbers mean nothing outside a live choice.
 
 **Phase B — known only after STT (trigger-phrase routing):**
 - **Trigger phrase(s):** a mode may have **multiple** spoken phrases (e.g. *"as pig latin"*

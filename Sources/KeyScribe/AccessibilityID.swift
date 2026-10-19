@@ -354,6 +354,8 @@ enum AccessibilityID {
         static let insertWithoutRewriting = "hud.action.insertWithoutRewriting"
         static let pasteLast = "hud.action.pasteLast"
         static let repairAction = "hud.action.repair"
+        static let choiceRow = "hud.choice.row"
+        static let choiceCancel = "hud.choice.cancel"
     }
 
     enum History {

@@ -24,6 +24,10 @@ public struct VoiceCommandPlace: Codable, Equatable, Sendable {
         return ([name] + say).filter { seen.insert(VoiceCommandText.key($0)).inserted }
     }
 
+    public func hasSameDestination(as other: VoiceCommandPlace) -> Bool {
+        VoiceCommandText.key(name) == VoiceCommandText.key(other.name) && target == other.target && browser == other.browser
+    }
+
     public var issue: String? {
         if let issue = UserInputValidation.nameIssue(name) { return "Name: \(issue.message)" }
         for form in say {
@@ -299,6 +303,46 @@ public struct VoiceCommandConfig: Codable, Equatable, Sendable {
             guard names.insert(VoiceCommandText.key(script.name)).inserted else {
                 return "script \"\(script.name)\": a place or script already uses this name"
             }
+        }
+        return nil
+    }
+}
+
+extension VoiceCommandConfig {
+    public func sharedNameAdvisory(for place: VoiceCommandPlace, replacing originalName: String?) -> String? {
+        let others = places.filter { !Self.isSame($0.name, place.name, originalName) }
+        return Self.sharedNameAdvisory(name: place.name, forms: place.spokenForms, kind: "places",
+                                       among: others.map { ($0.name, $0.spokenForms) }, spoken: VoiceCommandText.compact)
+    }
+
+    public func sharedNameAdvisory(for script: VoiceCommandScript, replacing originalName: String?) -> String? {
+        let others = scripts.filter { !Self.isSame($0.name, script.name, originalName) }
+        return Self.sharedNameAdvisory(name: script.name, forms: script.spokenForms, kind: "actions",
+                                       among: others.map { ($0.name, $0.spokenForms) }, spoken: VoiceCommandText.key)
+    }
+
+    private static func isSame(_ saved: String, _ edited: String, _ original: String?) -> Bool {
+        let key = VoiceCommandText.key(saved)
+        return key == VoiceCommandText.key(original ?? edited)
+    }
+
+    private static func sharedNameAdvisory(
+        name: String, forms: [String], kind: String, among others: [(name: String, forms: [String])],
+        spoken comparable: (String) -> String
+    ) -> String? {
+        for form in forms {
+            let spoken = comparable(form)
+            guard !spoken.isEmpty else { continue }
+            let sharers = others.filter { $0.forms.contains { comparable($0) == spoken } }.map(\.name)
+            guard !sharers.isEmpty else { continue }
+            let names = [name] + sharers
+            guard names.count <= VoiceCommandChoice.displayLimit else {
+                return "\(names.count) \(kind) answer to \u{201C}\(form)\u{201D}, too many to choose from. Give this one a name of its own."
+            }
+            let list = names.count == 2
+                ? "\(names[0]) and \(names[1])"
+                : names.dropLast().joined(separator: ", ") + ", and \(names[names.count - 1])"
+            return "Saying \u{201C}\(form)\u{201D} will ask you to choose between \(list)."
         }
         return nil
     }

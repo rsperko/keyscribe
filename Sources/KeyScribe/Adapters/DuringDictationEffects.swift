@@ -169,12 +169,12 @@ final class DuringDictationEffects {
         play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent)
     }
 
-    func end(_ config: Settings.DuringDictation, cue: EndCue = .success) {
+    func end(_ config: Settings.DuringDictation, cue: EndCue? = .success) {
         generation &+= 1
         pendingDuck = nil
         releaseDisplayAssertion()
         restoreOutput()
-        if config.sounds { play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent) }
+        if config.sounds, let cue { play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent) }
     }
 
     private func acquireDisplayAssertion() {

@@ -40,6 +40,24 @@ struct RecordingCountdown: Equatable {
     }
 }
 
+struct VoiceCommandChoicePrompt: Equatable {
+    let id: Int
+    let title: String
+    let rows: [VoiceCommandChoiceRow]
+    let hint: String
+
+    var announcement: String {
+        let rows = rows.map { "\($0.number), \($0.name), \($0.detail)" }
+        return ([title] + rows + [hint]).joined(separator: ". ")
+    }
+}
+
+enum VoiceCommandChoiceStatus: Equatable {
+    case waiting(note: String?)
+    case listening(latchedTrigger: String?)
+    case working
+}
+
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
@@ -52,10 +70,12 @@ enum HUDState: Equatable {
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?)
+    case choice(VoiceCommandChoicePrompt, status: VoiceCommandChoiceStatus, level: Float = 0)
 }
 
 enum HUDIndicator: Equatable {
     case none
+    case choice
     case ready
     case preparing
     case recording
@@ -87,6 +107,12 @@ extension HUDState {
             return .limit
         case .error:
             return .error
+        case .choice(_, .waiting, _):
+            return .choice
+        case .choice(_, .listening, _):
+            return .recording
+        case .choice(_, .working, _):
+            return .processing
         }
     }
 
@@ -115,6 +141,8 @@ extension HUDState {
             return "Stopped at the \(limit) limit"
         case .error(let message, _):
             return message
+        case .choice(let prompt, _, _):
+            return prompt.title
         }
     }
 
@@ -150,6 +178,12 @@ extension HUDState {
             return detail
         case .localFallback:
             return "Rewrite could not be completed"
+        case .choice(_, .waiting(let note), _):
+            return note
+        case .choice(_, .listening(let latchedTrigger), _):
+            return latchedTrigger.map { "Listening \u{2014} tap \($0) again to stop" } ?? "Listening"
+        case .choice(_, .working, _):
+            return "Transcribing"
         case .error, .hidden:
             return nil
         }
@@ -227,7 +261,30 @@ extension HUDState {
             return "Rewriting with \(connection)"
         case .localFallback, .complete, .commandDone, .stoppedAtLimit, .error:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
+        case .choice(let prompt, _, _):
+            return prompt.announcement
         }
+    }
+
+    // A retained list is announced once; later edges announce only what changed about it.
+    func voiceOverAnnouncement(after previous: HUDState) -> String? {
+        guard case .choice(let prompt, let status, _) = self,
+              case .choice(let shown, _, _) = previous, shown.id == prompt.id else { return voiceOverAnnouncement }
+        switch status {
+        case .waiting(let note): return note
+        case .listening: return "Recording"
+        case .working: return "Transcribing"
+        }
+    }
+
+    var isWaitingForChoice: Bool {
+        if case .choice(_, .waiting, _) = self { return true }
+        return false
+    }
+
+    var panelWidth: CGFloat {
+        if case .choice = self { return 320 }
+        return 280
     }
 
     // The cancellable states that are also VISIBLE (machine.state stays .transcribing through the cloud
@@ -236,6 +293,7 @@ extension HUDState {
     var holdsKeyFocus: Bool {
         switch self {
         case .recording, .loadingModel, .transcribing, .rewriting: return true
+        case .choice(_, .listening, _), .choice(_, .working, _): return true
         default: return false
         }
     }

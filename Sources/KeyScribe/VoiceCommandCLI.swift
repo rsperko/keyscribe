@@ -28,7 +28,7 @@ enum VoiceCommandCLI {
         case .failed(let message, _):
             print("failed:     \(message)")
             return 1
-        case .abandoned:
+        case .needsChoice, .abandoned:
             return 1
         }
     }
@@ -37,7 +37,13 @@ enum VoiceCommandCLI {
         switch resolution {
         case .notACommand: return "not a command"
         case .noMatch(let target): return "no match for \u{201C}\(target)\u{201D}"
-        case .ambiguous(let names): return "ambiguous: \(names.joined(separator: ", "))"
+        case .ambiguous(let choice):
+            guard choice.isOffered else { return choice.tooManyMessage }
+            let rows = choice.candidates.enumerated().map { index, candidate in
+                "\n  \(index + 1). \(candidate.name) \u{00B7} \(candidate.detail(appName: system.appName(forBundleId:), among: choice.candidates))"
+            }
+            return "spoken, this asks \u{201C}\(choice.title)\u{201D} and you answer with a number; the command line cannot answer, so give more of the name to run one directly:\(rows.joined())"
+        case .unavailable(let name): return VoiceCommandRunner.unavailableMessage(name)
         case .needsTabs: return "needs browser tabs"
         case .browserNotAllowed(let browser): return "not allowed to control \(browser)"
         case .scriptNeedsText(let name): return "\(name) needs words after its name"

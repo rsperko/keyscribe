@@ -6,8 +6,25 @@ enum HUDPreview {
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
         "microphone-error", "accessibility-error", "recording-countdown", "stopped-at-limit",
-        "stopped-at-limit-local",
+        "stopped-at-limit-local", "choice", "choice-five", "choice-listening", "choice-retry",
     ]
+
+    static let choicePrompt = VoiceCommandChoicePrompt(
+        id: 1, title: "Which one?",
+        rows: [
+            VoiceCommandChoiceRow(number: 1, name: "Personal Mail", detail: "Safari \u{00B7} mail.example.net", identity: "place:personal mail"),
+            VoiceCommandChoiceRow(number: 2, name: "Work Mail", detail: "Google Chrome \u{00B7} inbox.example.org", identity: "place:work mail"),
+        ],
+        hint: "Use Right-\u{2325} and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. Say \u{201C}cancel\u{201D} to dismiss, or give a new command.")
+
+    static let fiveChoicePrompt = VoiceCommandChoicePrompt(
+        id: 2, title: "Which one?",
+        rows: (1...5).map {
+            VoiceCommandChoiceRow(
+                number: $0, name: $0 == 3 ? "Quarterly Planning Notes for the Platform Infrastructure Team" : "Notes \($0)",
+                detail: $0 == 4 ? "com.example.notes.enterprise.preview" : "App", identity: "app:\($0)")
+        },
+        hint: choicePrompt.hint)
 
     static func state(from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev) -> HUDState? {
         guard isDevelopmentBuild,
@@ -80,6 +97,14 @@ enum HUDPreview {
             .stoppedAtLimit(outcome: .inserted, limit: "5-minute", rewriteSkipped: true)
         case "stopped-at-limit-local":
             .stoppedAtLimit(outcome: .inserted, limit: "5-minute", rewriteSkipped: false)
+        case "choice":
+            .choice(choicePrompt, status: .waiting(note: nil))
+        case "choice-five":
+            .choice(fiveChoicePrompt, status: .waiting(note: nil))
+        case "choice-listening":
+            .choice(choicePrompt, status: .listening(latchedTrigger: nil), level: 0.6)
+        case "choice-retry":
+            .choice(choicePrompt, status: .waiting(note: "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."))
         default:
             nil
         }

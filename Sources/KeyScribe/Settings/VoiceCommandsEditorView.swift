@@ -281,6 +281,8 @@ struct VoiceCommandsEditorView: View {
                     }
                     if result.resolved {
                         Label(result.summary, systemImage: "arrow.right.circle").font(.callout)
+                    } else if result.asksChoice {
+                        Label(result.summary, systemImage: "list.number").font(.callout)
                     } else {
                         IssueText(result.summary, severity: .advisory, font: .callout)
                     }
@@ -430,6 +432,9 @@ private struct PlaceEditorSheet: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSay)
                         .formFieldLabel("Also say")
                     if let sayIssue { IssueText(sayIssue) }
+                    if let shared = model.sharedNameAdvisory(for: draft.place, replacing: draft.originalName) {
+                        IssueText(shared, severity: .advisory)
+                    }
                     Text("Other names for this place, separated by commas. Say any of them after \u{201C}switch to\u{201D} or \u{201C}open\u{201D}.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -618,6 +623,9 @@ private struct ScriptEditorSheet: View {
                     TextField("Also say", text: $draft.say, prompt: Text("ship, release"))
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSay)
                         .formFieldLabel("Also say")
+                    if let shared = model.sharedNameAdvisory(for: draft.script, replacing: draft.originalName) {
+                        IssueText(shared, severity: .advisory)
+                    }
                     Text("Other names for this script, separated by commas. Say any of them after \u{201C}run\u{201D}.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -853,6 +861,9 @@ private struct ShortcutEditorSheet: View {
                     TextField("Also say", text: $draft.say, prompt: Text("Optional, such as log, note"))
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutSay)
                         .formFieldLabel("Also say")
+                    if let shared = model.sharedNameAdvisory(for: draft.script, replacing: draft.originalName) {
+                        IssueText(shared, severity: .advisory)
+                    }
                     Text("Other names for this shortcut, separated by commas. Say any of them after \u{201C}run\u{201D}.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

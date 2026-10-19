@@ -62,6 +62,7 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | Editable replacement row | Global and mode scopes in Vocabulary: readable rule text with a bounded one-line Use-instead preview, a roomy edit popover with an inline multiline editor, and direct tie-priority reordering with keyboard and VoiceOver alternatives. |
 | Shortcut well | Every keyboard/mouse shortcut binding; one control that always shows the current binding with an attached menu (never picker⇄recorder mode-swapping). |
 | App chooser | Every place a user picks an app — a mode's **Where it works** and a voice command place: one menu of running apps with their icons, then **Choose from Applications…** and **Enter Bundle ID…**, with room for a surface's own extra items. |
+| Voice command choice | The HUD's numbered question for an ambiguous voice command: a title, one row per candidate (number, name, distinguishing detail), the answer hint naming the real shortcut, and Cancel. Rows are clickable but the waiting panel never takes key focus. |
 | Voice command notice | One warning per kind of entry — places, scripts, shortcuts — each written for what that kind can do, shown expanded on every new entry and collapsed when editing. A separate app-switching notice gates first enabling Voice Commands and is remembered for each configuration. |
 | Keycap glyph | *Displaying* (never editing) a trigger as small physical keys — onboarding trial/playground, the General trigger pointer. |
 | Step indicator | The onboarding wizard's progress dots. |

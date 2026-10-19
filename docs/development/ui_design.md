@@ -234,7 +234,8 @@ not to its label.
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
-| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished; if it later fails, an Error naming the failure follows unless a dictation is in progress | None; dismiss automatically |
+| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished; if it later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
+| Voice command needs a choice (Voice Commands mode) | “Which one?” for apps and places, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, or Script/Shortcut), then how to answer with the actual Voice Commands shortcut | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -251,6 +252,27 @@ confirmed saved — this one write waits for the disk rather than being queued l
 History write, so a failed save never sends the user looking for an entry that does not exist. A take
 stopped by the limit never presses the mode's Return, including a take that is only a spoken Return
 command; the latter reports “Stopped at the [limit] limit — Return not pressed”.
+
+**Voice command choice.** When a command matches more than one destination at the same step, the HUD
+asks instead of guessing, and the user answers with the same shortcut (“two”, “the second one”, “the
+last one”, “cancel”). The list is frozen when it appears: rows never reorder or refill, and a chosen row
+that has since disappeared reports that rather than choosing its neighbour. While answering, the list
+stays on screen with the normal status (`Listening`, `Transcribing`) in place of its subtitle — never a
+microphone-only HUD — and during microphone bring-up the question stays exactly as it was, so the timing
+contract above still holds. A reply that is not a valid answer keeps the list and says how to answer;
+silence, a failed transcription, or cancelling the answer recording also keep it. The question is
+neither success nor failure, so it plays no cue. It is dismissed by an answer, spoken or clicked
+**Cancel**, a new command, the idle timeout (`VoiceCommandRunner.choiceIdleSeconds`, restarted each
+time the list is shown again), starting another mode, switching to an app other than the one the
+command was given in (any app, when it was given in KeyScribe's own window), locking the screen,
+sleep, turning Voice Commands off, or editing its places and actions. More matches than
+`VoiceCommandChoice.displayLimit` offer no list: the Error asks the user to say more of the name.
+A clicked row runs only if no new dictation starts while its destination is being looked up, and its
+result appears once any interrupted answer recording has finished unwinding.
+**Focus:** the waiting question never takes key focus, including when a row is clicked, so typing
+keeps reaching the app the user was in; it holds key focus only while an answer is recording or being
+transcribed, exactly like Recording. There is no keyboard selection — no number keys, arrows, Return,
+or Escape for the list — because the answer is spoken (see §9).
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap). The two no-speech outcomes both
@@ -794,8 +816,9 @@ which says Plain Dictation uses Global vocabulary and whose **Edit Vocabulary…
 
 **Voice Commands** (experimental, shown only while its flag is on) is a built-in mode. It ships
 with no shortcut, and its list row reads `Off — no shortcut` until one is set. Speech on its shortcut is
-never typed: a command it understands runs, and anything else shows an Error naming what was wrong
-(not a command, no match, or more than one match) and changes nothing.
+never typed: a command it understands runs, one that matches more than one destination asks which one
+(§5), and anything else shows an Error naming what was wrong (not a command, no match, or too many
+matches) and changes nothing.
 
 Before first enabling Voice Commands in Maintenance, an app-switching notice explains:
 “Voice recognition can make mistakes and open or switch to an unintended app. Its open windows may
@@ -830,7 +853,9 @@ Its sections are, in order:
    and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
    Voice Commands. Its help adds that the words and replacements apply before a command is read.
 3. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
-   shows the exact command line it would run, a shortcut its name and input). It sits beside the phrases it
+   shows the exact command line it would run, a shortcut its name and input). A phrase that would ask which one
+   says so neutrally (“Would ask “Which one?””) and lists the numbered choices; it never invites an answer,
+   since a preview creates no question to answer. It sits beside the phrases it
    tests and re-checks the typed phrase whenever a place, an action, or the vocabulary changes. When the mode's vocabulary changed the
    phrase, it shows `Read as “…”` above the result. Its caption says that checking open tabs reads their
    addresses and titles and may ask to control the browser.
@@ -967,8 +992,8 @@ The list is grouped by day and supports search over locally stored text. Each ro
   recording limit), what was heard, in secondary text, so the entry the error pointed to is
   recognizable without opening it;
 - time and mode;
-- outcome (`Inserted`, `Copied`, `Local fallback`, or `Failed`; a voice command reads `Command` or
-  `Command failed`);
+- outcome (`Inserted`, `Copied`, `Local fallback`, or `Failed`; a voice command reads `Command`,
+  `Command failed`, `Command started`, `Needs a choice`, or `Choice cancelled`);
 - data-boundary badges relevant to that dictation;
 - no audio indicator because audio is never stored.
 
@@ -994,7 +1019,13 @@ Command is what ran — a script's exact command line, quoted the way a shell wo
 into a terminal, the shortcut and its input, or what a switch did. An action still running when it was
 recorded reads **Command started** until it finishes, when the entry is updated to **Command** or
 **Command failed**. An open History pane refreshes when that happens and keeps the entry selected, and
-the entry can be deleted whether or not the pane saw the update. A failed command adds a **Why it failed** row in Details with the
+the entry can be deleted whether or not the pane saw the update. A command that asked which one is
+recorded as **Needs a choice**, its result listing the numbered rows. A spoken answer is its own entry —
+heard “two”, its result beginning “Selected Work Mail for “switch to mail”:” followed by what ran — so
+the pair reads correctly even when other entries fall between them or a filter hides one. A spoken
+cancel reads **Choice cancelled**, and a reply that was not an answer reads **Needs a choice** with the
+hint it showed. Clicking a row completes the question's own entry instead, since nothing was spoken; the
+Cancel button marks it **Choice cancelled**. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details with the
 message the HUD showed. **Paste Result** is hidden for commands, since there is nothing to insert;
 **Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
 Voice Commands vocabulary, not the global one, since that is what reads commands. The Voice Commands
@@ -1030,7 +1061,10 @@ controls and each mode's Result handling.
 ## 9. Accessibility and keyboard behavior
 
 - Every action is usable by keyboard and reachable through standard SwiftUI/AppKit accessibility
-  semantics.
+  semantics. One deliberate exception: the Voice Commands choice (§5) is answered by voice with the
+  user's own shortcut, so it installs no keyboard selection and never takes key focus while waiting.
+  Its question, numbered rows with their details, status, and Cancel all carry accessibility labels,
+  and a new question is announced once with its rows; a retained list is not announced again.
 - Status uses text labels in addition to color, glyphs, and motion.
 - HUD content has stable VoiceOver announcements: recording started, processing path, inserted,
   copied instead, and failure. Do not announce continuous input-level changes.

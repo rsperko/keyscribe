@@ -114,7 +114,7 @@ struct VoiceCommandScriptTests {
         let longer = VoiceCommandScript(name: "Ticket new", run: ["/bin/ticket", "new", "{text}"])
         #expect(resolve("run ticket new", scripts: [ticket, longer]) == .scriptNeedsText("Ticket new"))
         let other = VoiceCommandScript(name: "Other", say: ["ship"], run: ["/bin/other", "{text}"])
-        #expect(resolve("run ship staging", scripts: [deploy, other]) == .ambiguous(["Deploy", "Other"]))
+        #expect(ambiguousNames(resolve("run ship staging", scripts: [deploy, other])) == ["Deploy", "Other"])
     }
 
     @Test func appVerbsNeverRunAScript() {
@@ -169,7 +169,7 @@ struct VoiceCommandScriptTests {
     @Test func twoScriptsWithTheSameSpokenNameAreAmbiguous() {
         let a = VoiceCommandScript(name: "Build", run: ["/bin/a"])
         let b = VoiceCommandScript(name: "Builder", say: ["build"], run: ["/bin/b"])
-        #expect(resolve("run build", scripts: [a, b]) == .ambiguous(["Build", "Builder"]))
+        #expect(ambiguousNames(resolve("run build", scripts: [a, b])) == ["Build", "Builder"])
     }
 
     @Test func theVerbChoosesBetweenAnAppAndAScriptOfTheSameName() {

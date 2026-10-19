@@ -92,7 +92,8 @@ public enum VoiceCommandAction: Equatable, Sendable {
 public enum VoiceCommandResolution: Equatable, Sendable {
     case notACommand
     case action(VoiceCommandAction)
-    case ambiguous([String])
+    case ambiguous(VoiceCommandChoice)
+    case unavailable(String)
     case noMatch(String)
     case needsTabs(browser: String?)
     case browserNotAllowed(String)
@@ -101,8 +102,6 @@ public enum VoiceCommandResolution: Equatable, Sendable {
 }
 
 public enum VoiceCommandResolver {
-    static let ambiguityLimit = 3
-
     public static func resolve(_ transcript: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         let intent = VoiceCommandGrammar.parse(transcript)
         switch intent {
@@ -136,44 +135,22 @@ public enum VoiceCommandResolver {
         guard let longest = matches.map(\.length).max() else { return nil }
         var seen = Set<String>()
         let hits = matches.filter { $0.length == longest && seen.insert(VoiceCommandText.key($0.script.name)).inserted }
-        guard hits.count == 1, let hit = hits.first else { return .ambiguous(hits.prefix(ambiguityLimit).map(\.script.name)) }
+        guard hits.count == 1, let hit = hits.first else {
+            let target = words[start..<(start + longest)].map(\.key).joined(separator: " ")
+            return .ambiguous(VoiceCommandChoice(
+                family: .action, target: target, matches: hits.map { .script($0.script) }, text: hits.first?.text ?? ""))
+        }
         if hit.script.takesText && hit.text.isEmpty { return .scriptNeedsText(hit.script.name) }
         return .action(.script(hit.script, arguments: hit.script.arguments(text: hit.text)))
-    }
-
-    private enum Candidate: Equatable {
-        case place(VoiceCommandPlace)
-        case app(VoiceCommandCatalog.App)
-
-        var identity: String {
-            switch self {
-            case .place(let place): "place:\(VoiceCommandText.key(place.name))"
-            case .app(let app): "app:\(app.bundleId)"
-            }
-        }
-
-        var displayName: String {
-            switch self {
-            case .place(let place): place.name
-            case .app(let app): app.name
-            }
-        }
-
-        var spokenForms: [String] {
-            switch self {
-            case .place(let place): place.spokenForms
-            case .app(let app): [app.name]
-            }
-        }
     }
 
     private enum Match { case exact, partial }
 
     private static func resolve(target: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
-        let places = catalog.places.map(Candidate.place)
-        let running = catalog.runningApps.map(Candidate.app)
-        let installed = catalog.installedApps.map(Candidate.app)
-        let tiers: [([Candidate], Match)] = [
+        let places = catalog.places.map(VoiceCommandCandidate.place)
+        let running = Self.ordered(catalog.runningApps).map(VoiceCommandCandidate.app)
+        let installed = Self.ordered(catalog.installedApps).map(VoiceCommandCandidate.app)
+        let tiers: [([VoiceCommandCandidate], Match)] = [
             (places, .exact), (running, .exact), (running, .partial), (places, .partial),
             (installed, .exact), (installed, .partial),
         ]
@@ -184,10 +161,10 @@ public enum VoiceCommandResolver {
     }
 
     private static func nearestMiss(
-        _ target: String, among pool: [Candidate], tiers: [([Candidate], Match)], catalog: VoiceCommandCatalog
+        _ target: String, among pool: [VoiceCommandCandidate], tiers: [([VoiceCommandCandidate], Match)], catalog: VoiceCommandCatalog
     ) -> VoiceCommandResolution? {
         let spoken = VoiceCommandText.key(target)
-        var nearest: [(candidate: Candidate, snapped: String)] = []
+        var nearest: [(candidate: VoiceCommandCandidate, snapped: String)] = []
         var nearestDistance = Int.max
         for candidate in pool {
             let terms = candidate.spokenForms.flatMap { [$0] + $0.split(separator: " ").map(String.init) }
@@ -207,13 +184,13 @@ public enum VoiceCommandResolver {
                     && seen.insert(entry.candidate.identity).inserted
             }.map(\.candidate)
             if hits.count == 1 { return action(for: hits[0], catalog: catalog) }
-            if hits.count > 1 { return .ambiguous(hits.prefix(ambiguityLimit).map(\.displayName)) }
+            if hits.count > 1 { return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits)) }
         }
         return nil
     }
 
     private static func firstTier(
-        _ tiers: [([Candidate], Match)], target: String, catalog: VoiceCommandCatalog
+        _ tiers: [([VoiceCommandCandidate], Match)], target: String, catalog: VoiceCommandCatalog
     ) -> VoiceCommandResolution? {
         for (pool, match) in tiers {
             var seen = Set<String>()
@@ -221,9 +198,38 @@ public enum VoiceCommandResolver {
                 candidate.spokenForms.contains { matches(target, $0, match) } && seen.insert(candidate.identity).inserted
             }
             if hits.count == 1 { return action(for: hits[0], catalog: catalog) }
-            if hits.count > 1 { return .ambiguous(hits.prefix(ambiguityLimit).map(\.displayName)) }
+            if hits.count > 1 { return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits)) }
         }
         return nil
+    }
+
+    private static func ordered(_ apps: [VoiceCommandCatalog.App]) -> [VoiceCommandCatalog.App] {
+        apps.enumerated().sorted { a, b in
+            let byName = a.element.name.localizedStandardCompare(b.element.name)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            if a.element.bundleId != b.element.bundleId { return a.element.bundleId < b.element.bundleId }
+            return a.offset < b.offset
+        }.map(\.element)
+    }
+
+    public static func resolve(
+        _ candidate: VoiceCommandCandidate, text: String, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution {
+        switch candidate {
+        case .app(let app):
+            return .action(.app(app))
+        case .place(let chosen):
+            guard let current = catalog.places.first(where: { $0.hasSameDestination(as: chosen) }) else {
+                return .unavailable(chosen.name)
+            }
+            return action(for: .place(current), catalog: catalog)
+        case .script(let chosen):
+            guard let current = catalog.scripts.first(where: {
+                VoiceCommandText.key($0.name) == VoiceCommandText.key(chosen.name) && $0.action == chosen.action
+            }) else { return .unavailable(chosen.name) }
+            if current.takesText && text.isEmpty { return .scriptNeedsText(current.name) }
+            return .action(.script(current, arguments: current.arguments(text: text)))
+        }
     }
 
     private static func matches(_ target: String, _ form: String, _ match: Match) -> Bool {
@@ -242,10 +248,12 @@ public enum VoiceCommandResolver {
         }
     }
 
-    private static func action(for candidate: Candidate, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
+    private static func action(for candidate: VoiceCommandCandidate, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         switch candidate {
         case .app(let app):
             return .action(.app(app))
+        case .script(let script):
+            return .unavailable(script.name)
         case .place(let place):
             switch place.target {
             case .app(let bundleId):

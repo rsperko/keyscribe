@@ -105,6 +105,8 @@ public enum HistoryExport {
         case .command: "Command"
         case .commandFailed: "Command failed"
         case .commandStarted: "Command started"
+        case .commandNeedsChoice: "Needs a choice"
+        case .commandCancelled: "Choice cancelled"
         }
     }
 }

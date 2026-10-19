@@ -62,7 +62,14 @@
   `prompt`, never their originals) — behind History's "Show exactly what was received". Old rows
   lacking optional fields decode as absent — History renders without the corresponding line. Audio
   and the redaction map are never stored.
-  A **voice command** writes `outcome = "command"` or `"command_failed"`. Its `heard` is the
+  Each record also carries an optional `id`, fixed when it is written, which an in-place update (a late
+  command result, a clicked choice) keeps; History matches rows and deletes by it. Older rows without one
+  are matched by their content.
+  A **voice command** writes `outcome = "command"`, `"command_failed"`, or `"command_started"` (an
+  action still running, later rewritten to one of the first two). A command that matched more than one
+  destination writes `"command_needs_choice"`, its `result` listing the numbered choices; a spoken answer
+  is a separate entry whose `result` starts `Selected <name> for “<command>”:`, and a cancelled choice
+  writes `"command_cancelled"`. A choice answered by clicking rewrites the question's own entry. Its `heard` is the
   transcript, `transformed` the text after the Voice Commands vocabulary, and `result` what ran: a
   script's command line, quoted the way a shell would, or the description of a switch. A command that
   matched nothing has an empty `result`. A failed command adds the optional `failure_reason` — the
@@ -512,7 +519,8 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   only when `run {name}` is the whole utterance. The longest spoken name after **run** is chosen first,
   and only then are its words checked, so "run ticket new"
   asks for text for a `Ticket new` script rather than running `Ticket` with "new"; a longer name without
-  `{text}` that has more words after it is skipped. Two scripts tied for the longest name are ambiguous.
+  `{text}` that has more words after it is skipped. Scripts tied for the longest name are offered as a
+  numbered choice, and the words after the name are kept for whichever one is chosen.
   A script is never matched by a near-miss, and the dictionary never corrects its name or arguments.
   These matching rules apply after mode replacements, which can explicitly produce a **run** command.
   `go back` returns to the
@@ -582,10 +590,15 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
 - **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
   place names; then installed apps (exact, then partial). Only if nothing matches is a near-miss snapped,
-  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps). Two
-  different targets tied at the winning step are reported as ambiguous and nothing runs. A near-miss
-  picks the closest target; targets tied for closest go through the same order, so a place still beats an
-  app equally close, and two tied at the same step are ambiguous whatever order they are listed in.
+  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps).
+  Different targets tied at the winning step are offered as a numbered choice and nothing runs until one
+  is chosen; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
+  name. Places and actions keep their configured order in the choice, apps are sorted by name. A
+  near-miss picks the closest target; targets tied for closest go through the same order, so a place
+  still beats an app equally close, and two tied at the same step are offered whatever order they are
+  listed in. Places or actions may share a spoken name on purpose — that is how to get the choice — so a
+  shared name is an advisory in Settings, never a load error; primary names must still be unique. The
+  advisory compares names the way each family is matched: places ignoring spaces, actions word by word.
 - **Tab matching** ignores the scheme, a leading `www.`, the host's case, and trailing slashes, and respects
   path boundaries (`mail.example.com` never matches `mail.example.community`). The path, query, and fragment
   keep their case: `example.com/Project` does not match a tab on `example.com/project`. Only browsers whose

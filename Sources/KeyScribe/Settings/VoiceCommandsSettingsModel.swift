@@ -23,6 +23,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         let detail: String
         let resolved: Bool
         var readAs: String? = nil
+        var asksChoice = false
     }
 
     struct CurrentTab: Equatable {
@@ -148,6 +149,14 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         return (places.map(\.name) + scripts.map(\.name)).contains { VoiceCommandText.key($0) == key }
     }
 
+    func sharedNameAdvisory(for place: VoiceCommandPlace, replacing originalName: String?) -> String? {
+        VoiceCommandConfig(places: places, scripts: scripts).sharedNameAdvisory(for: place, replacing: originalName)
+    }
+
+    func sharedNameAdvisory(for script: VoiceCommandScript, replacing originalName: String?) -> String? {
+        VoiceCommandConfig(places: places, scripts: scripts).sharedNameAdvisory(for: script, replacing: originalName)
+    }
+
     func delete(named name: String) -> String? {
         let key = VoiceCommandText.key(name)
         do {
@@ -240,8 +249,19 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "No matching action", detail: VoiceCommandRunner.notFoundMessage(target), resolved: false)
         case .noMatch(let target):
             return TryResult(heard: heard, summary: "No match", detail: "No running or installed app, and no place, is called \u{201C}\(target)\u{201D}.", resolved: false)
-        case .ambiguous(let names):
-            return TryResult(heard: heard, summary: "More than one match", detail: "\(names.joined(separator: ", ")). Say more of the name, or give one a place nickname.", resolved: false)
+        case .ambiguous(let choice):
+            guard choice.isOffered else {
+                return TryResult(heard: heard, summary: "Too many matches", detail: choice.tooManyMessage, resolved: false)
+            }
+            let rows = choice.candidates.enumerated().map { index, candidate in
+                "\(index + 1). \(candidate.name) (\(candidate.detail(appName: appName, among: choice.candidates)))"
+            }
+            return TryResult(
+                heard: heard, summary: "Would ask \u{201C}\(choice.title)\u{201D}",
+                detail: "When spoken, this command would ask you to choose: " + rows.joined(separator: "  "),
+                resolved: false, asksChoice: true)
+        case .unavailable(let name):
+            return TryResult(heard: heard, summary: "Not available", detail: VoiceCommandRunner.unavailableMessage(name), resolved: false)
         case .scriptNeedsText(let name):
             return TryResult(heard: heard, summary: "Needs more words", detail: VoiceCommandRunner.needsTextMessage(script: name), resolved: false)
         case .needsTabs:

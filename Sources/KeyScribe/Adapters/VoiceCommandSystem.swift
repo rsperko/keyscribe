@@ -9,7 +9,38 @@ enum VoiceCommandOutcome: Equatable, Sendable {
     case done(summary: String, command: String)
     case started(summary: String, command: String)
     case failed(message: String, command: String? = nil)
+    case needsChoice(VoiceCommandPendingChoice)
     case abandoned
+}
+
+struct VoiceCommandChoiceRow: Equatable, Sendable {
+    let number: Int
+    let name: String
+    let detail: String
+    let identity: String
+}
+
+struct VoiceCommandPendingChoice: Equatable, Sendable {
+    let id: Int
+    let choice: VoiceCommandChoice
+    let request: String
+    let origin: VoiceCommandOrigin?
+    let rows: [VoiceCommandChoiceRow]
+    let places: [VoiceCommandPlace]
+    let scripts: [VoiceCommandScript]
+}
+
+struct VoiceCommandSelection: Equatable, Sendable {
+    let name: String
+    let request: String
+    let outcome: VoiceCommandOutcome
+}
+
+enum VoiceCommandAnswer: Equatable, Sendable {
+    case selected(VoiceCommandSelection)
+    case cancelled(request: String)
+    case retry(message: String)
+    case command(VoiceCommandOutcome)
 }
 
 struct TabRead: Equatable, Sendable {
@@ -61,15 +92,74 @@ protocol VoiceCommandRunning: AnyObject {
         transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
         stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome
+    var pendingChoice: VoiceCommandPendingChoice? { get }
+    func claimChoice() -> Int?
+    func resumeChoice(_ id: Int) -> Bool
+    func choiceSecondsLeft(_ id: Int) -> Double?
+    func expireChoice(_ id: Int) -> Bool
+    func dismissChoice(_ id: Int?)
+    func takeChoice(_ id: Int) -> VoiceCommandPendingChoice?
+    func answer(
+        _ transcript: String, choice id: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
+        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool,
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+    ) async -> VoiceCommandAnswer
+    func runChoice(
+        _ pending: VoiceCommandPendingChoice, candidate identity: String, places: [VoiceCommandPlace],
+        scripts: [VoiceCommandScript], stillWanted: @MainActor () -> Bool,
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+    ) async -> VoiceCommandSelection?
+}
+
+extension VoiceCommandRunning {
+    var pendingChoice: VoiceCommandPendingChoice? { nil }
+    func claimChoice() -> Int? { nil }
+    func resumeChoice(_ id: Int) -> Bool { false }
+    func choiceSecondsLeft(_ id: Int) -> Double? { nil }
+    func expireChoice(_ id: Int) -> Bool { false }
+    func dismissChoice(_ id: Int?) {}
+    func takeChoice(_ id: Int) -> VoiceCommandPendingChoice? { nil }
+    func answer(
+        _ transcript: String, choice id: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
+        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool,
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+    ) async -> VoiceCommandAnswer {
+        .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
+                           stillWanted: stillWanted, onLateResult: onLateResult))
+    }
+    func runChoice(
+        _ pending: VoiceCommandPendingChoice, candidate identity: String, places: [VoiceCommandPlace],
+        scripts: [VoiceCommandScript], stillWanted: @MainActor () -> Bool,
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+    ) async -> VoiceCommandSelection? { nil }
 }
 
 @MainActor
 final class VoiceCommandRunner: VoiceCommandRunning {
-    private let system: VoiceCommandSystem
-    private(set) var backTarget: VoiceCommandOrigin?
+    static let choiceIdleSeconds: Double = 30
 
-    init(system: VoiceCommandSystem = LiveVoiceCommandSystem.shared) {
+    private let system: VoiceCommandSystem
+    private let now: () -> Double
+    private let idleSeconds: Double
+    private(set) var backTarget: VoiceCommandOrigin?
+    private var live: (choice: VoiceCommandPendingChoice, phase: ChoicePhase)?
+    private var lastChoiceId = 0
+
+    private enum ChoicePhase: Equatable {
+        case waiting(until: Double)
+        case answering
+    }
+
+    var pendingChoice: VoiceCommandPendingChoice? { live?.choice }
+
+    init(
+        system: VoiceCommandSystem = LiveVoiceCommandSystem.shared,
+        now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
+        idleSeconds: Double = VoiceCommandRunner.choiceIdleSeconds
+    ) {
         self.system = system
+        self.now = now
+        self.idleSeconds = idleSeconds
     }
 
     func resolve(
@@ -77,13 +167,20 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     ) async -> VoiceCommandResolution {
         let withoutApps = VoiceCommandResolver.resolve(transcript, catalog: VoiceCommandCatalog(scripts: scripts))
         guard case .noMatch = withoutApps else { return withoutApps }
-        var catalog = VoiceCommandCatalog(
+        let catalog = VoiceCommandCatalog(
             places: places, scripts: scripts, runningApps: system.runningApps(), installedApps: await system.installedApps())
-        let first = VoiceCommandResolver.resolve(transcript, catalog: catalog)
+        return await readingTabs(catalog) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
+    }
+
+    private func readingTabs(
+        _ catalog: VoiceCommandCatalog, _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
+    ) async -> VoiceCommandResolution {
+        var catalog = catalog
+        let first = resolve(catalog)
         guard case .needsTabs(let browser) = first else { return first }
         guard let read = await system.browserTabs(in: browser) else { return first }
         catalog.tabs = read.tabs
-        let resolved = VoiceCommandResolver.resolve(transcript, catalog: catalog)
+        let resolved = resolve(catalog)
         if case .action(.place(_, .openURL(let url, let opener))) = resolved,
            let destination = opener ?? system.defaultBrowserId(for: url) {
             if read.refused.contains(destination) { return .browserNotAllowed(destination) }
@@ -97,9 +194,118 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
+        live = nil
         let resolution = await resolve(transcript, places: places, scripts: scripts)
         guard stillWanted() else { return .abandoned }
+        if case .ambiguous(let choice) = resolution, choice.isOffered {
+            return .needsChoice(offer(choice, request: transcript, origin: origin, places: places, scripts: scripts))
+        }
         return await run(resolution, origin: origin, stillWanted: stillWanted, onLateResult: onLateResult)
+    }
+
+    private func offer(
+        _ choice: VoiceCommandChoice, request: String, origin: VoiceCommandOrigin?, places: [VoiceCommandPlace],
+        scripts: [VoiceCommandScript]
+    ) -> VoiceCommandPendingChoice {
+        lastChoiceId += 1
+        let rows = choice.candidates.enumerated().map { index, candidate in
+            VoiceCommandChoiceRow(
+                number: index + 1, name: candidate.name,
+                detail: candidate.detail(appName: system.appName(forBundleId:), among: choice.candidates),
+                identity: candidate.identity)
+        }
+        let pending = VoiceCommandPendingChoice(
+            id: lastChoiceId, choice: choice, request: request, origin: origin, rows: rows, places: places, scripts: scripts)
+        live = (pending, .waiting(until: now() + idleSeconds))
+        return pending
+    }
+
+    private func deadline(of id: Int) -> Double? {
+        guard let live, live.choice.id == id, case .waiting(let until) = live.phase else { return nil }
+        return until
+    }
+
+    func claimChoice() -> Int? {
+        guard let live, let until = deadline(of: live.choice.id) else { return nil }
+        guard now() < until else { self.live = nil; return nil }
+        self.live?.phase = .answering
+        return live.choice.id
+    }
+
+    func resumeChoice(_ id: Int) -> Bool {
+        guard live?.choice.id == id, live?.phase == .answering else { return false }
+        live?.phase = .waiting(until: now() + idleSeconds)
+        return true
+    }
+
+    func choiceSecondsLeft(_ id: Int) -> Double? {
+        deadline(of: id).map { max(0, $0 - now()) }
+    }
+
+    func expireChoice(_ id: Int) -> Bool {
+        guard let until = deadline(of: id), now() >= until else { return false }
+        live = nil
+        return true
+    }
+
+    func dismissChoice(_ id: Int? = nil) {
+        guard let live, id == nil || live.choice.id == id else { return }
+        self.live = nil
+    }
+
+    func takeChoice(_ id: Int) -> VoiceCommandPendingChoice? {
+        guard let live, live.choice.id == id else { return nil }
+        self.live = nil
+        return live.choice
+    }
+
+    func answer(
+        _ transcript: String, choice id: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
+        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true },
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
+    ) async -> VoiceCommandAnswer {
+        guard let live, live.choice.id == id, live.phase == .answering else {
+            return .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
+                                      stillWanted: stillWanted, onLateResult: onLateResult))
+        }
+        let pending = live.choice
+        switch VoiceCommandChoiceAnswer.parse(transcript, count: pending.rows.count) {
+        case .select(let index):
+            self.live = nil
+            let selection = await runChoice(
+                pending, candidate: pending.rows[index].identity, places: places, scripts: scripts,
+                stillWanted: stillWanted, onLateResult: onLateResult)
+            return selection.map(VoiceCommandAnswer.selected) ?? .command(.abandoned)
+        case .cancel:
+            self.live = nil
+            return .cancelled(request: pending.request)
+        case .invalidSelection:
+            return .retry(message: pending.choice.retryMessage)
+        case .unrecognized:
+            guard VoiceCommandGrammar.parse(transcript) != nil else { return .retry(message: pending.choice.retryMessage) }
+            return .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
+                                      stillWanted: stillWanted, onLateResult: onLateResult))
+        }
+    }
+
+    func runChoice(
+        _ pending: VoiceCommandPendingChoice, candidate identity: String, places: [VoiceCommandPlace],
+        scripts: [VoiceCommandScript], stillWanted: @MainActor () -> Bool = { true },
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
+    ) async -> VoiceCommandSelection? {
+        if live?.choice.id == pending.id { live = nil }
+        guard let candidate = pending.choice.candidates.first(where: { $0.identity == identity }) else { return nil }
+        let resolution: VoiceCommandResolution
+        if case .app(let app) = candidate, !system.isInstalled(bundleId: app.bundleId), !system.isRunning(bundleId: app.bundleId) {
+            resolution = .unavailable(app.name)
+        } else {
+            resolution = await readingTabs(VoiceCommandCatalog(places: places, scripts: scripts)) {
+                VoiceCommandResolver.resolve(candidate, text: pending.choice.text, catalog: $0)
+            }
+        }
+        guard stillWanted() else { return VoiceCommandSelection(name: candidate.name, request: pending.request, outcome: .abandoned) }
+        let outcome = await run(resolution, origin: pending.origin, stillWanted: stillWanted, onLateResult: onLateResult)
+        return VoiceCommandSelection(name: candidate.name, request: pending.request, outcome: outcome)
     }
 
     func run(
@@ -115,8 +321,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: Self.notFoundMessage(target))
         case .noMatch(let target):
             return .failed(message: "No app or place called \u{201C}\(target)\u{201D}.")
-        case .ambiguous(let names):
-            return .failed(message: "More than one match: \(names.joined(separator: ", ")). Say more of the name.")
+        case .ambiguous(let choice):
+            return .failed(message: choice.tooManyMessage)
+        case .unavailable(let name):
+            return .failed(message: Self.unavailableMessage(name))
         case .needsTabs(let browser):
             let name = browser.flatMap(system.appName(forBundleId:)) ?? "The browser"
             return .failed(message: "\(name) did not list its open tabs, so nothing was opened.")
@@ -180,6 +388,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         guard succeeded else { return .failed(message: "Could not switch to \(summary).", command: command) }
         if let origin { backTarget = origin }
         return .done(summary: summary, command: command)
+    }
+
+    static func unavailableMessage(_ name: String) -> String {
+        "\(name) is no longer available, so nothing was run."
     }
 
     static func needsTextMessage(script: String) -> String {

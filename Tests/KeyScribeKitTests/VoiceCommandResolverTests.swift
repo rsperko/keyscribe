@@ -57,16 +57,17 @@ struct VoiceCommandResolverTests {
 
     @Test func partialMatchesThatDisagreeAreAmbiguous() {
         let vsStudio = App(name: "Visual Studio", bundleId: "com.microsoft.visual-studio")
-        #expect(resolve("switch to studio", running: [androidStudio, vsStudio])
-                == .ambiguous(["Android Studio", "Visual Studio"]))
+        #expect(ambiguousNames(resolve("switch to studio", running: [androidStudio, vsStudio]))
+                == ["Android Studio", "Visual Studio"])
     }
 
-    @Test func ambiguityListsAtMostThree() {
-        let apps = (1...5).map { App(name: "Note \($0)", bundleId: "com.example.note\($0)") }
-        guard case .ambiguous(let names) = resolve("switch to note", running: apps) else {
+    @Test func ambiguityListsAtMostFive() {
+        let apps = (1...7).map { App(name: "Note \($0)", bundleId: "com.example.note\($0)") }
+        guard case .ambiguous(let choice) = resolve("switch to note", running: apps) else {
             Issue.record("expected ambiguity"); return
         }
-        #expect(names.count == 3)
+        #expect(choice.candidates.count == 5)
+        #expect(choice.total == 7)
     }
 
     @Test func nearMissSnapsToARunningApp() {
@@ -75,8 +76,8 @@ struct VoiceCommandResolverTests {
 
     @Test func equallyCloseNearMissesAreAmbiguousInAnyOrder() {
         let ghostey = App(name: "Ghostey", bundleId: "com.example.ghostey")
-        #expect(resolve("open ghosty", running: [ghostty, ghostey]) == .ambiguous(["Ghostty", "Ghostey"]))
-        #expect(resolve("open ghosty", running: [ghostey, ghostty]) == .ambiguous(["Ghostey", "Ghostty"]))
+        #expect(ambiguousNames(resolve("open ghosty", running: [ghostty, ghostey])) == ["Ghostey", "Ghostty"])
+        #expect(ambiguousNames(resolve("open ghosty", running: [ghostey, ghostty])) == ["Ghostey", "Ghostty"])
     }
 
     @Test func theCloserNearMissWins() {
@@ -175,8 +176,8 @@ struct VoiceCommandResolverTests {
     @Test func twoPlacesSharingANicknameAreAmbiguous() {
         let personal = VoiceCommandPlace(name: "Personal Mail", say: ["mail"], target: .url("https://mail.google.com/mail/u/0/"))
         let work = VoiceCommandPlace(name: "Work Mail", say: ["mail"], target: .url("https://mail.google.com/mail/u/1/"))
-        #expect(resolve("switch to mail", places: [personal, work], tabs: [])
-                == .ambiguous(["Personal Mail", "Work Mail"]))
+        #expect(ambiguousNames(resolve("switch to mail", places: [personal, work], tabs: []))
+                == ["Personal Mail", "Work Mail"])
     }
 
     @Test func theSameAppRunningTwiceIsNotAmbiguous() {
@@ -191,4 +192,10 @@ struct VoiceCommandResolverTests {
                 == "Gmail · Google Chrome")
         #expect(VoiceCommandAction.goBack.summary(appName: { _ in nil }) == "Back")
     }
+}
+
+
+func ambiguousNames(_ resolution: VoiceCommandResolution) -> [String]? {
+    guard case .ambiguous(let choice) = resolution else { return nil }
+    return choice.candidates.map(\.name)
 }

@@ -38,6 +38,7 @@ struct HistoryRow: Identifiable, Sendable {
     }
 
     private static func identity(_ entry: HistoryEntry) -> String {
+        if let id = entry.id { return "id|\(id)" }
         var hash: UInt64 = 14_695_981_039_346_656_037
         let outcome = entry.outcome.isCommand ? HistoryEntry.Outcome.command.rawValue : entry.outcome.rawValue
         for byte in "\(entry.modeName)\u{1F}\(entry.heard)\u{1F}\(entry.result)\u{1F}\(outcome)".utf8 {
@@ -942,5 +943,7 @@ private func outcomeLabel(_ outcome: HistoryEntry.Outcome) -> String {
     case .command: "Command"
     case .commandFailed: "Command failed"
     case .commandStarted: "Command started"
+    case .commandNeedsChoice: "Needs a choice"
+    case .commandCancelled: "Choice cancelled"
     }
 }

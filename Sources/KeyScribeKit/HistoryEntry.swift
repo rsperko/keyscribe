@@ -13,10 +13,20 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case command
         case commandFailed = "command_failed"
         case commandStarted = "command_started"
+        case commandNeedsChoice = "command_needs_choice"
+        case commandCancelled = "command_cancelled"
 
-        public var isCommand: Bool { self == .command || self == .commandFailed || self == .commandStarted }
+        public var isCommand: Bool {
+            switch self {
+            case .command, .commandFailed, .commandStarted, .commandNeedsChoice, .commandCancelled: true
+            case .inserted, .copied, .localFallback, .failed: false
+            }
+        }
     }
 
+    // Stable across in-place updates (a late command result, a clicked choice), so a row and a delete
+    // keep pointing at the same record. nil on older entries.
+    public var id: String?
     public var timestamp: Date
     public var modeName: String
     // Display name of the STT engine that produced `heard`. nil on older entries (detail shows "On-device").
@@ -55,6 +65,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var failureReason: String?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case timestamp
         case modeName = "mode"
         case engine
@@ -79,7 +90,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     }
 
     public init(
-        timestamp: Date, modeName: String, engine: String? = nil, device: String? = nil,
+        id: String? = nil, timestamp: Date, modeName: String, engine: String? = nil, device: String? = nil,
         heard: String, transformed: String? = nil,
         result: String, outcome: Outcome,
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
@@ -88,6 +99,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil,
         failureReason: String? = nil
     ) {
+        self.id = id
         self.timestamp = timestamp
         self.modeName = modeName
         self.engine = engine

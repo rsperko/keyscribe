@@ -31,8 +31,10 @@ struct VoiceCommandRunnerTests {
 
         func runningApps() -> [VoiceCommandCatalog.App] { running }
         func installedApps() async -> [VoiceCommandCatalog.App] { installedScans += 1; return installed }
+        var whileReadingTabs: (() async -> Void)?
         func browserTabs(in browser: String?) async -> TabRead? {
             tabReads.append(browser)
+            await whileReadingTabs?()
             if tabsUnreadable { return nil }
             return TabRead(tabs: tabs.filter { browser == nil || $0.browserBundleId == browser },
                            refused: refused.filter { browser == nil || $0 == browser },

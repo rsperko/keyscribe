@@ -146,12 +146,42 @@ shortcut when you want to speak a command:
 - **“go back”** returns to the app you were using before your last app switch by voice. Say it again
   to switch back. Running an action does not change that destination.
 
-Commands never type your words. An unrecognized or ambiguous command shows an explanation and runs
-nothing. **Try it** previews what a typed command would do without running it.
+Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
+command that matches more than one place, app, or action asks which one (below). **Try it** previews
+what a typed command would do without running it.
 
 Before enabling the feature, a notice explains that a recognition mistake can bring an unintended
 app and its windows forward, including while sharing your screen. Cancel leaves the feature off.
 The explanation remains available under Places in the mode panel.
+
+### A voice command asked “Which one?”
+
+Two or more places, apps, or actions answered to what you said, so KeyScribe lists them, numbered,
+instead of guessing. Nothing runs and nothing is typed while the list is shown, and while it waits for
+your answer your keystrokes keep going to the app you were in.
+
+Say you have two places, **Personal Mail** and **Work Mail**, each with `mail` under **Also say**:
+
+1. Say **“switch to mail”** with your Voice Commands shortcut. A list of both appears.
+2. Use the same shortcut again and say **“two”**, **“number two”**, **“the second one”**, or
+   **“the last one”**. The list stays visible while you speak.
+3. Work Mail opens. **“go back”** later returns to the app you were in when you gave the first
+   command.
+
+Actions work the same way. If two actions answer to `ship`, **“run ship staging”** asks **Which
+action?**, and answering **“two”** runs the second one with `staging`, the words from your original
+command. The number you answer with is never passed to the action.
+
+You can also click a row. To dismiss the list, say **“cancel”** or **“never mind”**, or click
+**Cancel**. Saying a whole new command, such as **“open Work Mail”**, replaces the list. If what you say
+is neither a number in the list nor a command, the list stays and says how to answer. The list also goes
+away after 30 seconds without an answer, when you switch to another app or start a different mode, and
+when you change your places or actions; after that, a number means nothing. When more than five match,
+KeyScribe asks you to say more of the name instead of listing them.
+
+To get this question on purpose, give two places the same name under **Also say**: Settings explains
+that saying it will ask you to choose. If your answer is consistently misheard — “two” arriving as
+“tube”, say — add a replacement from `tube` to `two` under **Vocabulary ▸ Voice Commands**.
 
 ### A voice command keeps being misheard.
 

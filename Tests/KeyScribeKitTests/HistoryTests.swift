@@ -447,6 +447,56 @@ struct HistoryStoreTests {
         #expect(store.entries().map(\.heard) == ["later"])
     }
 
+    @Test func aQuestionAnsweredByClickCanStillBeDeletedFromItsEarlierCopy() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var asked = sampleEntry(heard: "switch to mail", result: "Asked to choose: 1. Personal Mail, 2. Work Mail",
+                                mode: "Voice Commands", outcome: .commandNeedsChoice)
+        asked.id = "question"
+        try store.append(asked, today: "2026-06-20")
+        var answered = asked
+        answered.outcome = .command
+        answered.result = "Selected Work Mail for \u{201C}switch to mail\u{201D}: Opens Work Mail."
+        #expect(store.replace(asked, with: answered))
+        #expect(store.delete(asked) == .deleted)
+        #expect(store.entries().isEmpty)
+    }
+
+    @Test func repeatedIdenticalCommandsAreDeletedOneAtATimeByTheirIds() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var first = sampleEntry(heard: "go back", result: "Returns to Mail.", mode: "Voice Commands", outcome: .command)
+        first.id = "first"
+        var second = first
+        second.id = "second"
+        try store.append(first, today: "2026-06-20")
+        try store.append(second, today: "2026-06-20")
+        #expect(store.delete(second) == .deleted)
+        #expect(store.entries().map(\.id) == ["first"])
+    }
+
+    @Test func anEntryWithoutAnIdStillNeedsItsResultToMatch() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let old = sampleEntry(heard: "run deploy", result: "~/bin/deploy", mode: "Voice Commands", outcome: .command)
+        var other = old
+        other.result = "~/bin/other"
+        try store.append(old, today: "2026-06-20")
+        #expect(store.delete(other) != .deleted)
+        #expect(store.entries().count == 1)
+    }
+
+    @Test func choiceOutcomesAreNeutralCommandsThatRoundTrip() throws {
+        for outcome in [HistoryEntry.Outcome.commandNeedsChoice, .commandCancelled] {
+            #expect(outcome.isCommand)
+            var entry = sampleEntry(mode: "Voice Commands", outcome: outcome)
+            entry.id = "abc"
+            #expect(try HistoryEntry(jsonLine: entry.jsonLine()) == entry)
+        }
+        #expect(HistoryEntry.Outcome.commandNeedsChoice.rawValue == "command_needs_choice")
+        #expect(HistoryEntry.Outcome.commandCancelled.rawValue == "command_cancelled")
+    }
+
     @Test func deletingMatchesOnlyTheSameRecord() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }

@@ -79,6 +79,37 @@ struct VoiceCommandsSettingsModelTests {
         #expect(action.summary == "Ghostty")
     }
 
+    @Test func tryItShowsTheChoiceItWouldOfferWithoutOfferingIt() {
+        let personal = VoiceCommandPlace(name: "Personal Mail", say: ["mail"], target: .url("https://mail.example.net/"))
+        let work = VoiceCommandPlace(name: "Work Mail", say: ["mail"], target: .url("https://inbox.example.org/"))
+        let choice = VoiceCommandChoice(family: .navigation, target: "mail", matches: [.place(personal), .place(work)])
+        let asked = VoiceCommandsSettingsModel.describe(.ambiguous(choice), heard: "switch to mail", appName: { _ in nil })
+        #expect(!asked.resolved)
+        #expect(asked.summary == "Would ask \u{201C}Which one?\u{201D}")
+        #expect(asked.asksChoice)
+        #expect(asked.detail.hasPrefix("When spoken, this command would ask you to choose: "))
+        #expect(asked.detail.contains("1. Personal Mail (Default browser \u{00B7} mail.example.net)"))
+        #expect(asked.detail.contains("2. Work Mail (Default browser \u{00B7} inbox.example.org)"))
+        let many = VoiceCommandChoice(
+            family: .navigation, target: "note",
+            matches: (1...6).map { .app(.init(name: "Note \($0)", bundleId: "com.example.\($0)")) })
+        #expect(VoiceCommandsSettingsModel.describe(.ambiguous(many), heard: "open note", appName: { _ in nil }).detail
+                == "6 matches for \u{201C}note\u{201D}. Say more of the name.")
+    }
+
+    @Test func aSharedSpokenNameIsAnAdvisoryAndStillSaves() {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let personal = VoiceCommandPlace(name: "Personal Mail", say: ["mail"], target: .url("https://mail.example.net/"))
+        let work = VoiceCommandPlace(name: "Work Mail", say: ["mail"], target: .url("https://inbox.example.org/"))
+        #expect(model.save(personal, replacing: nil) == nil)
+        #expect(model.sharedNameAdvisory(for: work, replacing: nil)
+                == "Saying \u{201C}mail\u{201D} will ask you to choose between Work Mail and Personal Mail.")
+        #expect(model.save(work, replacing: nil) == nil)
+        model.reload()
+        #expect(model.places.map(\.name) == ["Personal Mail", "Work Mail"])
+    }
+
     @Test func tryItReadsWithTheVocabularyLiveCommandsUse() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-vcsettings-\(UUID().uuidString)")
         let modesDir = dir.appendingPathComponent("modes", isDirectory: true)
