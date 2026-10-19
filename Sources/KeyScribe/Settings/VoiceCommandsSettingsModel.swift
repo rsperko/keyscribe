@@ -8,8 +8,13 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     @Published private(set) var scripts: [VoiceCommandScript] = []
     @Published private(set) var loadError: String?
     @Published private(set) var tryResult: TryResult?
-    @Published private(set) var appChoices: [VoiceCommandCatalog.App] = []
+    @Published private(set) var browserChoices: BrowserChoices = .loading
     @Published private(set) var shortcutChoices: ShortcutChoices = .loading
+
+    enum BrowserChoices: Equatable {
+        case loading
+        case loaded(browsers: [VoiceCommandCatalog.App], tabBrowsers: Set<String>)
+    }
 
     enum ShortcutChoices: Equatable {
         case loading
@@ -177,21 +182,29 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         return InstalledApps.app(forBundleId: bundleId) ?? AppNaming.app(bundleId: bundleId, names: [app.localizedName])
     }
 
-    func currentTab() async -> CurrentTab? {
-        guard let app = currentApp, system.isBrowser(app.bundleId),
+    func currentTab(of app: VoiceCommandCatalog.App) async -> CurrentTab? {
+        let scan = await system.installedSnapshot()
+        guard !Task.isCancelled, scan.tabBrowsers.contains(app.bundleId),
               let tab = await system.frontTab(ofBrowser: app.bundleId) else { return nil }
         return CurrentTab(url: tab.url, title: tab.title, browserBundleId: app.bundleId)
     }
 
     var browsers: [VoiceCommandCatalog.App] {
-        appChoices.filter { system.isBrowser($0.bundleId) }
+        guard case .loaded(let browsers, _) = browserChoices else { return [] }
+        return browsers
     }
 
-    func loadAppChoices() async {
-        var seen = Set<String>()
-        let all = system.runningApps() + (await system.installedApps())
-        appChoices = all.filter { seen.insert($0.bundleId).inserted }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    var isCheckingBrowsers: Bool { browserChoices == .loading }
+
+    func canCaptureTab(of bundleId: String) -> Bool {
+        guard case .loaded(_, let tabBrowsers) = browserChoices else { return false }
+        return tabBrowsers.contains(bundleId)
+    }
+
+    func loadBrowserChoices() async {
+        let scan = await system.installedSnapshot()
+        let loaded = BrowserChoices.loaded(browsers: scan.browsers, tabBrowsers: scan.tabBrowsers)
+        if browserChoices != loaded { browserChoices = loaded }
     }
 
     func loadShortcutChoices() async {

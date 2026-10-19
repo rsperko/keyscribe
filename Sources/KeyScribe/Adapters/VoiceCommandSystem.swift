@@ -538,13 +538,36 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 final class LiveVoiceCommandSystem: VoiceCommandSystem {
     static let shared = LiveVoiceCommandSystem()
 
-    private var installedCache: (apps: [VoiceCommandCatalog.App], loadedAt: Date)?
-    private static let installedTTL: TimeInterval = 60
+    struct InstalledScan: Sendable {
+        let apps: [VoiceCommandCatalog.App]
+        let browsers: [VoiceCommandCatalog.App]
+        let tabBrowsers: Set<String>
+        let generation: Int
+        let completedAt: ContinuousClock.Instant
+    }
+
+    private var snapshot: InstalledScan?
+    private var scanning: Task<InstalledScan, Never>?
+    private var generations = 0
+    private let roots: [URL]
+    private let handlers: @Sendable () -> [URL]
+    private let now: () -> ContinuousClock.Instant
+    private static let installedTTL: Duration = .seconds(60)
     private static let scripts = DeadlineQueue(label: "com.keyscribe.voice-commands.applescript")
     private static let accessibility = DeadlineQueue(label: "com.keyscribe.voice-commands.accessibility")
     private static let windowReadDeadline: TimeInterval = 1
     private static let tabReadDeadline: TimeInterval = 1.5
     private static let focusDeadline: TimeInterval = 2
+
+    init(
+        roots: [URL] = LiveVoiceCommandSystem.applicationRoots,
+        handlers: @escaping @Sendable () -> [URL] = LiveVoiceCommandSystem.httpsHandlerURLs,
+        now: @escaping () -> ContinuousClock.Instant = { .now }
+    ) {
+        self.roots = roots
+        self.handlers = handlers
+        self.now = now
+    }
 
     var ownBundleId: String? { Bundle.main.bundleIdentifier }
 
@@ -557,23 +580,72 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func installedApps() async -> [VoiceCommandCatalog.App] {
-        if let installedCache, Date().timeIntervalSince(installedCache.loadedAt) < Self.installedTTL {
-            return installedCache.apps
-        }
-        let own = ownBundleId
-        let apps = await Task.detached(priority: .userInitiated) {
-            Self.scanInstalledApps(in: Self.applicationRoots, excluding: own) {
-                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
-            }
-        }.value
-        installedCache = (apps, Date())
-        return apps
+        await installedSnapshot().apps
     }
 
-    nonisolated private static let applicationRoots = [
+    func installedSnapshot() async -> InstalledScan {
+        if let snapshot, now() - snapshot.completedAt < Self.installedTTL { return snapshot }
+        if let scanning { return await scanning.value }
+        let own = ownBundleId
+        let (roots, handlers) = (roots, self.handlers)
+        let running = InstalledApps.runningBundleURLs()
+        generations += 1
+        let generation = generations
+        let task = Task { @MainActor in
+            let found = await Task.detached(priority: .userInitiated) {
+                let registered: @Sendable (String) -> URL? = { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+                let apps = Self.scanInstalledApps(in: roots, excluding: own, registered: registered)
+                let browsers = Self.scanBrowsers(handlers(), excluding: own, running: running, registered: registered)
+                return (apps, browsers)
+            }.value
+            let scan = InstalledScan(
+                apps: found.0, browsers: found.1.browsers, tabBrowsers: found.1.tabBrowsers,
+                generation: generation, completedAt: self.now())
+            self.snapshot = scan
+            self.scanning = nil
+            return scan
+        }
+        scanning = task
+        return await task.value
+    }
+
+    nonisolated static let applicationRoots = [
         URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/System/Applications"),
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
     ]
+
+    nonisolated static func httpsHandlerURLs() -> [URL] {
+        URL(string: "https://example.com").map { NSWorkspace.shared.urlsForApplications(toOpen: $0) } ?? []
+    }
+
+    nonisolated static func scanBrowsers(
+        _ handlers: [URL], excluding own: String?, running: [String: URL], registered: (String) -> URL? = { _ in nil }
+    ) -> (browsers: [VoiceCommandCatalog.App], tabBrowsers: Set<String>) {
+        var copies: [String: [URL]] = [:]
+        for url in handlers {
+            guard let bundleId = infoPlist(of: url)?["CFBundleIdentifier"] as? String, bundleId != own else { continue }
+            copies[bundleId, default: []].append(url)
+        }
+        var tabBrowsers = Set<String>()
+        let browsers = copies.compactMap { bundleId, urls -> VoiceCommandCatalog.App? in
+            guard let url = running[bundleId] ?? registered(bundleId) ?? urls.min(by: { $0.path < $1.path }) else { return nil }
+            if hasScriptableTabs(url) { tabBrowsers.insert(bundleId) }
+            return AppNames.app(at: url, bundleId: bundleId)
+                ?? AppNaming.app(bundleId: bundleId, names: [url.deletingPathExtension().lastPathComponent])
+        }
+        return (sortedByName(browsers), tabBrowsers)
+    }
+
+    nonisolated private static func sortedByName(_ apps: [VoiceCommandCatalog.App]) -> [VoiceCommandCatalog.App] {
+        apps.sorted { a, b in
+            let byName = a.name.localizedCaseInsensitiveCompare(b.name)
+            return byName != .orderedSame ? byName == .orderedAscending : a.bundleId < b.bundleId
+        }
+    }
+
+    nonisolated private static func infoPlist(of app: URL) -> [String: Any]? {
+        NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
+    }
 
     nonisolated static func scanInstalledApps(
         in roots: [URL], excluding own: String?, registered: (String) -> URL? = { _ in nil }
@@ -599,10 +671,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
             return AppNames.app(at: url, bundleId: bundleId)
                 ?? AppNaming.app(bundleId: bundleId, names: [url.deletingPathExtension().lastPathComponent])
         }
-        return apps.sorted { a, b in
-            let byName = a.name.localizedCaseInsensitiveCompare(b.name)
-            return byName != .orderedSame ? byName == .orderedAscending : a.bundleId < b.bundleId
-        }
+        return sortedByName(apps)
     }
 
     func appName(forBundleId bundleId: String) -> String? {
@@ -710,7 +779,8 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func browserTabs(in browser: String?) async -> TabRead? {
-        let browsers = Self.runningTabBrowsers().filter { browser == nil || $0 == browser }
+        let scan = await installedSnapshot()
+        let browsers = Self.runningTabBrowsers(in: scan, running: Self.runningIds()).filter { browser == nil || $0 == browser }
         guard !browsers.isEmpty else { return TabRead(tabs: []) }
         guard case .finished(let read) = await Self.scripts.run(within: Self.tabReadDeadline, { isCurrent in
             Self.collectTabs(from: browsers, isCurrent: isCurrent) { BrowserScripting.tabs(of: $0, isCurrent: isCurrent) }
@@ -831,7 +901,8 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func frontTab(ofBrowser bundleId: String) async -> (url: String, title: String)? {
-        guard isRunning(bundleId: bundleId), Self.tabBrowsers.contains(bundleId),
+        let scan = await installedSnapshot()
+        guard isRunning(bundleId: bundleId), scan.tabBrowsers.contains(bundleId),
               case .finished(let tab) = await Self.scripts.run(within: Self.tabReadDeadline, {
                   BrowserScripting.frontTab(of: bundleId, isCurrent: $0).map { FrontTab(url: $0.url, title: $0.title) }
               }), let tab else { return nil }
@@ -843,30 +914,23 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         let title: String
     }
 
-    func isBrowser(_ bundleId: String) -> Bool { Self.httpsHandlers.contains(bundleId) }
+    private static func runningIds() -> Set<String> {
+        Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+    }
 
-    private static func runningTabBrowsers() -> [String] {
-        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        return tabBrowsers.filter { running.contains($0) }.sorted()
+    nonisolated static func runningTabBrowsers(in scan: InstalledScan, running: Set<String>) -> [String] {
+        scan.tabBrowsers.filter { running.contains($0) }.sorted()
     }
 
     nonisolated static func hasScriptableTabs(_ app: URL) -> Bool {
-        guard let bundle = Bundle(url: app),
-              let name = bundle.object(forInfoDictionaryKey: "OSAScriptingDefinition") as? String,
-              let sdef = bundle.resourceURL?.appendingPathComponent(name),
-              let parser = XMLParser(contentsOf: sdef) else { return false }
+        guard let name = infoPlist(of: app)?["OSAScriptingDefinition"] as? String,
+              let parser = XMLParser(contentsOf: app.appendingPathComponent("Contents/Resources").appendingPathComponent(name))
+        else { return false }
         let finder = TabClassFinder()
         parser.delegate = finder
         parser.parse()
         return finder.found
     }
-
-    private static let httpsHandlerURLs: [URL] =
-        URL(string: "https://example.com").map { NSWorkspace.shared.urlsForApplications(toOpen: $0) } ?? []
-
-    private static let httpsHandlers = Set(httpsHandlerURLs.compactMap { Bundle(url: $0)?.bundleIdentifier })
-
-    private static let tabBrowsers = Set(httpsHandlerURLs.filter(hasScriptableTabs).compactMap { Bundle(url: $0)?.bundleIdentifier })
 
 }
 

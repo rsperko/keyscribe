@@ -14,6 +14,7 @@ struct VoiceCommandsEditorView: View {
     @State private var editingShortcut: ShortcutDraft?
     @State private var tryText = ""
     @State private var pendingShortcut: Mode?
+    @State private var capturingTab: Task<Void, Never>?
 
     private var trigger: ModeTrigger { ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate) }
 
@@ -87,6 +88,11 @@ struct VoiceCommandsEditorView: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .task { await model.loadBrowserChoices() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.loadBrowserChoices() }
+        }
+        .onDisappear { capturingTab?.cancel() }
         .sheet(item: $editing) { draft in
             PlaceEditorSheet(draft: draft, model: model) { editing = nil }
         }
@@ -161,7 +167,7 @@ struct VoiceCommandsEditorView: View {
             }
             Spacer()
             PaneBadge(place.isWebPage ? "Web page" : "App")
-            Button("Edit…") { editing = PlaceDraft(place) }
+            Button("Edit…") { edit(place: PlaceDraft(place)) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeEdit(VoiceCommandText.key(place.name).replacingOccurrences(of: " ", with: "-")))
         }
     }
@@ -169,9 +175,9 @@ struct VoiceCommandsEditorView: View {
     private var actionsSection: some View {
         Section("Actions") {
             Menu("Add Action\u{2026}") {
-                Button("Script\u{2026}") { editingScript = ScriptDraft() }
+                Button("Script\u{2026}") { edit(script: ScriptDraft()) }
                     .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addScript)
-                Button("Shortcut\u{2026}") { editingShortcut = ShortcutDraft() }
+                Button("Shortcut\u{2026}") { edit(shortcut: ShortcutDraft()) }
                     .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addShortcut)
             }
             .fixedSize()
@@ -216,7 +222,7 @@ struct VoiceCommandsEditorView: View {
             Spacer()
             PaneBadge(script.isShortcut ? "Shortcut" : "Script")
             Button("Edit\u{2026}") {
-                if script.isShortcut { editingShortcut = ShortcutDraft(script) } else { editingScript = ScriptDraft(script) }
+                if script.isShortcut { edit(shortcut: ShortcutDraft(script)) } else { edit(script: ScriptDraft(script)) }
             }
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptEdit(VoiceCommandText.key(script.name).replacingOccurrences(of: " ", with: "-")))
         }
@@ -234,33 +240,59 @@ struct VoiceCommandsEditorView: View {
         Menu("Add Place…") {
             if let app = model.currentApp {
                 Button("Current App (\(app.name))") {
-                    editing = PlaceDraft(name: app.name, kind: .app, bundleId: app.bundleId)
+                    edit(place: PlaceDraft(name: app.name, kind: .app, bundleId: app.bundleId))
                 }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addCurrentApp)
-                if LiveVoiceCommandSystem.shared.isBrowser(app.bundleId) {
-                    Button("Current Browser Tab") {
-                        Task {
-                            if let tab = await model.currentTab() {
-                                editing = PlaceDraft(
-                                    name: Self.suggestedName(title: tab.title, url: tab.url), kind: .webPage,
-                                    url: tab.url, browser: tab.browserBundleId)
-                            } else {
-                                editing = PlaceDraft(name: "", kind: .webPage, browser: app.bundleId)
-                            }
-                        }
-                    }
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addCurrentTab)
+                if model.isCheckingBrowsers {
+                    Button("Checking browsers\u{2026}") {}
+                        .disabled(true)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addCurrentTab)
+                } else if model.canCaptureTab(of: app.bundleId) {
+                    Button("Current Browser Tab") { captureTab(of: app) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addCurrentTab)
                 }
                 Divider()
             }
-            Button("App…") { editing = PlaceDraft(name: "", kind: .app) }
+            Button("App…") { edit(place: PlaceDraft(name: "", kind: .app)) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addApp)
-            Button("Web Page…") { editing = PlaceDraft(name: "", kind: .webPage) }
+            Button("Web Page…") { edit(place: PlaceDraft(name: "", kind: .webPage)) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addWebPage)
         }
         .fixedSize()
         .disabled(model.loadError != nil)
         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addPlace)
+    }
+
+    private func edit(place draft: PlaceDraft) {
+        capturingTab?.cancel()
+        editing = draft
+    }
+
+    private func edit(script draft: ScriptDraft) {
+        capturingTab?.cancel()
+        editingScript = draft
+    }
+
+    private func edit(shortcut draft: ShortcutDraft) {
+        capturingTab?.cancel()
+        editingShortcut = draft
+    }
+
+    private func captureTab(of app: VoiceCommandCatalog.App) {
+        capturingTab?.cancel()
+        capturingTab = Task {
+            let tab = await model.currentTab(of: app)
+            guard !Task.isCancelled, editing == nil, editingScript == nil, editingShortcut == nil else { return }
+            if let tab {
+                editing = PlaceDraft(
+                    name: Self.suggestedName(title: tab.title, url: tab.url), kind: .webPage,
+                    url: tab.url, browser: tab.browserBundleId)
+            } else {
+                var draft = PlaceDraft(name: "", kind: .webPage, browser: app.bundleId)
+                draft.notice = "Could not read the current tab. Enter the web page address."
+                editing = draft
+            }
+        }
     }
 
     static func suggestedName(title: String, url: String) -> String {
@@ -322,6 +354,7 @@ struct PlaceDraft: Identifiable, Equatable {
     var bundleId: String
     var url: String
     var browser: String
+    var notice: String?
     private var suggestion: String?
 
     init(name: String, kind: Kind, bundleId: String = "", url: String = "", browser: String? = nil) {
@@ -408,6 +441,7 @@ private struct PlaceEditorSheet: View {
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeURL)
                             .formFieldLabel("Web page")
                         if let urlIssue { IssueText(urlIssue) }
+                        if let notice = draft.notice { IssueText(notice, severity: .advisory) }
                         Text("An open tab whose address starts with this is brought to the front. With no such tab, the page opens.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -421,6 +455,9 @@ private struct PlaceEditorSheet: View {
                         }
                     }
                     .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeBrowser)
+                    if model.isCheckingBrowsers {
+                        Text("Checking browsers\u{2026}").font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("Any browser looks through every running browser that can list its tabs, in all its windows, which can include private ones. Finding an open tab asks macOS for permission to control the browser the first time.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -472,9 +509,15 @@ private struct PlaceEditorSheet: View {
         }
         .padding(24)
         .frame(width: 520)
-        .task { await model.loadAppChoices() }
+        .task { await model.loadBrowserChoices() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.loadBrowserChoices() }
+        }
         .onChange(of: draft.url) { _, url in
-            if let host = Self.host(url) { draft.suggest(host) }
+            if let host = Self.host(url) {
+                draft.suggest(host)
+                draft.notice = nil
+            }
         }
         .confirmationDialog("Delete \u{201C}\(draft.originalName ?? draft.name)\u{201D}?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {

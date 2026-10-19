@@ -26,6 +26,15 @@ enum InstalledApps {
         return order.compactMap { bundleId in copies[bundleId].flatMap(preferredCopy).map(app(for:)) }
     }
 
+    static func runningBundleURLs() -> [String: URL] {
+        var copies: [String: [NSRunningApplication]] = [:]
+        for app in NSWorkspace.shared.runningApplications {
+            guard let bundleId = app.bundleIdentifier else { continue }
+            copies[bundleId, default: []].append(app)
+        }
+        return copies.compactMapValues { preferredCopy($0)?.bundleURL }
+    }
+
     static func app(forBundleId bundleId: String) -> VoiceCommandCatalog.App? {
         if let running = preferredCopy(NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)) {
             return app(for: running)

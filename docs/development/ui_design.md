@@ -906,16 +906,23 @@ Its sections are, in order:
    without one. Each row leads with an icon: the app's own for an app place, the chosen browser's for a web
    page (a globe for **Any browser**), and a generic symbol when that app is not on this Mac. Icons come
    from the installed apps only; no site icon is fetched. Each row's `Say:` line shows complete phrases that work (“switch to Mail”, “open Gmail”),
-   never a bare name. **Add Place…** offers **Current App (name)** and, when that app is a browser, **Current
-   Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
-   **Web Page…**. Each opens a sheet that starts with the destination: the app, chosen with the same app
+   never a bare name. **Add Place…** offers **Current App (name)** and, when that app is a browser that can list its
+   tabs, **Current Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
+   **Web Page…**. Until the browsers on this Mac have been checked, a disabled **Checking browsers…** item
+   stands where **Current Browser Tab** would be. If the tab cannot be read, the web-page sheet opens with
+   that browser chosen and an orange advisory asking for the address. Each opens a sheet that starts with the destination: the app, chosen with the same app
    chooser as a mode's **Where it works** (running apps with their icons, **Choose from Applications…**,
    **Enter Bundle ID…**), or the web page and browser. The name follows the chosen app or page until the
    user types their own; for an app it is the name shown in the Applications folder, whichever way the app
    was chosen, then optional other spoken names, then a live example (“Say “switch to inbox” to
    bring Mail to the front.”). A field's problem shows beside that field, and **Add Place** stays disabled
    until the place is valid. An existing place's sheet holds the red **Delete Place** action at its
-   trailing edge, with a confirmation. The sheet says that **Any browser** looks through every running
+   trailing edge, with a confirmation. The web-page sheet's **Browser** picker lists every app that opens web links, including ones
+   whose tabs cannot be read (their pages open directly). While browsers are being checked, a caption says
+   **Checking browsers…**, and **Any browser** or a saved browser stays selected; a refresh never changes a
+   choice the user made. Entering Voice Commands, opening the sheet, or returning to KeyScribe while either
+   is open re-checks the browsers once the last check is older than the installed-apps refresh window, so
+   a browser installed moments earlier can still be missing until that window passes. The sheet says that **Any browser** looks through every running
    browser that can list its tabs, in all its windows (which can include private ones), and that finding an
    open tab asks macOS for permission to control the browser the first time.
 5. **Actions** — scripts and shortcuts to run with “run” and their spoken name, in one list. The empty

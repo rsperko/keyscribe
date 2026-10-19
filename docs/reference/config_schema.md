@@ -630,7 +630,8 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   path boundaries (`mail.example.com` never matches `mail.example.community`). The path, query, and fragment
   keep their case: `example.com/Project` does not match a tab on `example.com/project`. Only browsers whose
   scripting dictionary describes tabs are asked; any other browser has its page opened directly, since its
-  tabs cannot be read. Asking goes through Apple Events, so macOS asks once per browser for Automation
+  tabs cannot be read. Which browsers can be asked is rechecked while KeyScribe runs, so a browser installed or
+  updated later is used without relaunching. Asking goes through Apple Events, so macOS asks once per browser for Automation
   permission. If the browser that would open the page has refused, the command fails with a pointer to
   that setting instead of opening a second copy. A place with no `browser` is checked against, and opened
   in, whichever browser macOS opens that address with. If the tabs cannot be read in time, or that browser could not list them, the command also fails
