@@ -230,6 +230,19 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.scripts.isEmpty)
     }
 
+    @Test func anInterpreterGivenSpokenTextIsRefusedWithoutTouchingTheFile() throws {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(model.saveScript(deploy, replacing: nil) == nil)
+        let file = dir.appendingPathComponent(VoiceCommandStore.fileName)
+        let before = try String(contentsOf: file, encoding: .utf8)
+        #expect(model.saveScript(VoiceCommandScript(name: "Shell", run: ["/bin/sh", "-c", "{text}"]), replacing: nil)
+            == "Program: With {text}, “sh” could run spoken words as code. Put the logic in an executable script file and choose that file instead.")
+        #expect(model.saveScript(VoiceCommandScript(name: deploy.name, run: ["/usr/bin/env", "{text}"]), replacing: deploy.name) != nil)
+        #expect(model.scripts == [deploy])
+        #expect(try String(contentsOf: file, encoding: .utf8) == before)
+    }
+
     @Test func scriptValidationExplainsWhatPreventsSavingWithoutWriting() {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }

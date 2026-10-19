@@ -69,6 +69,82 @@ struct VoiceCommandScriptTests {
         #expect(VoiceCommandScript(name: "X", run: ["/bin/x", "a\nb"]).issue == "Argument 1: Use one line.")
     }
 
+    private static let interpreters = [
+        "sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "osascript", "python", "perl", "ruby", "node",
+        "nodejs", "swift", "awk", "gawk", "mawk", "nawk", "env",
+    ]
+
+    @Test func refusesAnInterpreterGivenSpokenText() {
+        #expect(VoiceCommandScript(name: "X", run: ["/bin/sh", "-c", "{text}"]).issue
+            == "Program: With {text}, “sh” could run spoken words as code. Put the logic in an executable script file and choose that file instead.")
+    }
+
+    @Test(arguments: interpreters)
+    func refusesEveryKnownInterpreterGivenSpokenText(_ name: String) {
+        #expect(VoiceCommandScript(name: "X", run: ["/usr/bin/\(name)", "-c", "{text}"]).issue?.hasPrefix("Program: With {text}, “\(name)”") == true)
+        #expect(VoiceCommandScript(name: "X", run: ["/usr/bin/\(name)", "-c", "echo hi"]).issue == nil)
+    }
+
+    @Test(arguments: [
+        ["/opt/homebrew/bin/python3", "-c", "{text}"],
+        ["/opt/homebrew/bin/python3.12", "-c", "{text}"],
+        ["/usr/bin/Python3", "-c", "{text}"],
+        ["/BIN/BASH", "-c", "{text}"],
+        ["~/.local/bin/node22", "-e", "{text}"],
+        ["/usr/bin/env", "sh", "-c", "{text}"],
+        ["/usr/bin/ruby", "--input={text}"],
+        ["/bin/zsh", "-c", "{text}", "{text}"],
+        ["/bin/sh", "/Users/alex/bin/note.sh", "{text}"],
+        ["/usr/bin/python3", "/Users/alex/bin/note.py", "say {text} now"],
+    ])
+    func refusesInterpreterInvocationsThatUseTheText(_ run: [String]) {
+        let name = (run[0] as NSString).lastPathComponent
+        #expect(VoiceCommandScript(name: "X", run: run).issue?.hasPrefix("Program: With {text}, “\(name)”") == true)
+    }
+
+    @Test(arguments: [
+        ["/usr/bin/osascript", "-e", "tell application \"Music\" to play"],
+        ["/usr/bin/env", "FOO=1", "/usr/local/bin/tool"],
+        ["/Users/alex/bin/note.sh", "{text}"],
+        ["~/bin/note", "{text}"],
+        ["/usr/local/bin/bashful", "{text}"],
+        ["/usr/local/bin/awkward", "{text}"],
+        ["/usr/local/bin/python-tool", "{text}"],
+        ["/usr/local/bin/python3x", "{text}"],
+        ["/usr/local/bin/sh.py", "{text}"],
+        ["/usr/local/bin/mysh", "{text}"],
+    ])
+    func allowsOrdinaryProgramsAndInterpretersWithoutText(_ run: [String]) {
+        #expect(VoiceCommandScript(name: "X", run: run).issue == nil)
+    }
+
+    @Test func earlierProgramErrorsComeBeforeTheInterpreterRule() {
+        #expect(VoiceCommandScript(name: "X", run: ["sh", "-c", "{text}"]).issue
+            == "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool.")
+        #expect(VoiceCommandScript(name: "X", run: ["/bin/sh\n", "{text}"]).issue == "Program: Use one line.")
+        #expect(VoiceCommandScript(name: "X", run: ["/bin/sh{text}", "{text}"]).issue
+            == "Program: {text} can only be used in an argument.")
+        #expect(VoiceCommandScript(name: "X", run: ["/bin/sh", "-c", "a\nb"]).issue == "Argument 2: Use one line.")
+    }
+
+    @Test func aFileWithARefusedScriptIsRejectedWhole() {
+        let toml = """
+        schema_version = 1
+
+        [[place]]
+        name = "Gmail"
+        url = "https://mail.google.com/"
+
+        [[script]]
+        name = "Shell"
+        run = ["/bin/sh", "-c", "{text}"]
+        """
+        #expect(throws: ConfigError.invalid(
+            "script \"Shell\": Program: With {text}, “sh” could run spoken words as code. Put the logic in an executable script file and choose that file instead.")) {
+            try VoiceCommandStore.decode(from: toml)
+        }
+    }
+
     @Test func commandWordsCanBeScriptNamesBecauseRunSeparatesThem() {
         #expect(VoiceCommandScript(name: "Open", run: ["/bin/x"]).issue == nil)
         #expect(VoiceCommandScript(name: "Tool", say: ["go"], run: ["/bin/x"]).issue == nil)

@@ -947,12 +947,14 @@ Its sections are, in order:
 
    **Script…** opens a sheet with the name,
    other spoken names, the program (a path field plus **Choose…**), and the arguments, one per line, with
-   `{text}` marking where the spoken words go. Beside the arguments it says they never pass through a
-   shell but a program that runs its arguments as code will; the finer rules (blank lines, when words are
+   `{text}` marking where the spoken words go. Beside the arguments it says the script should treat
+   those words as input, not as code to run; the finer rules (blank lines, when words are
    needed) sit in a collapsed **How arguments are passed** section. The sheet says the program runs
    directly without a shell and with a minimal PATH. **Add Script** and **Save** stay disabled until
    the name, program, and arguments are valid; an incomplete or conflicting entry explains what prevents
-   saving. A program that is not installed yet remains an advisory. An existing script's sheet holds the
+   saving. A program with a known interpreter file name (a shell or `env`, for example) cannot take
+   `{text}` in its arguments; the issue names the program and points to choosing an executable script
+   file instead. A program that is not installed yet remains an advisory. An existing script's sheet holds the
    red **Delete Script** action at its trailing edge, with a confirmation.
 6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
    default. Its help says saved commands include what was said, what ran (including input), and any

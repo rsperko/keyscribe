@@ -706,12 +706,12 @@ private struct ScriptEditorSheet: View {
                             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                             .accessibilityLabel("Arguments")
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArguments)
-                        Text("One per line. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name. \(Branding.appName) never passes it through a shell, but a program that runs its arguments as code, such as sh -c, will.")
+                        Text("One per line. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name. Your script should treat those words as input, not as code to run.")
                             .font(.caption).foregroundStyle(.secondary)
                         DisclosureSection(isExpanded: $argumentDetailsExpanded) {
                             DisclosureSummaryLabel(title: "How arguments are passed", summary: "Blank lines, and when words are needed")
                         } content: {
-                            Text("Each line is passed exactly as written, including blank lines between them, and the words you say always stay within the one argument that holds \(VoiceCommandScript.textPlaceholder). With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, say \u{201C}run\u{201D} and the name with no words after it.")
+                            Text("Each line is passed exactly as written, including blank lines between them, and the words you say stay within each argument that contains \(VoiceCommandScript.textPlaceholder). With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, say \u{201C}run\u{201D} and the name with no words after it.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArgumentDetails)

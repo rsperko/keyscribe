@@ -516,8 +516,8 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
 - `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
   directly, never through a shell, from the home folder, with standard input, output, and error not
   connected to anything you see and the app's own minimal `PATH`. Each argument is passed exactly as
-  written, except that `{text}` is replaced by the spoken text — always inside that one argument, so
-  spoken words can never become shell syntax or extra arguments. `{text}` may not appear in the program.
+  written, except that `{text}` is replaced by the spoken text inside that argument: the words never
+  become extra arguments, and KeyScribe never evaluates them. `{text}` may not appear in the program.
 - **Matching** requires **run** (`run deploy staging`), followed by one of the script's spoken names in
   whole words (case and punctuation ignored). A bare name or an app-switching phrase never runs a script;
   **run** never opens an app or place. The spoken name is independent of the executable's filename:
@@ -553,9 +553,21 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   History saves the command line, arguments included, and a failure's message, which can carry the last line
   the script wrote to standard error (see *History records* above). A newly written or edited file
   can take longer to start the first time, while macOS checks it.
-- **Arguments are literal**, but KeyScribe cannot stop a program from treating them as code: pointing
-  `run` at `/bin/sh` with `-c` and `{text}` would run spoken words as shell commands. Put the logic in a
-  script file and take the text as `"$1"`.
+- **Interpreters cannot take `{text}`.** A script whose program has a known interpreter file name, such
+  as `sh` or `env`, including a version suffix like `python3.12`, is refused when any of its arguments
+  contains `{text}`, because `/bin/sh -c {text}` would run spoken words as shell commands. The rule
+  checks only the program's file name, so it also refuses an interpreter given a script file
+  (`/bin/sh ~/bin/note.sh {text}`); instead, start that file with a `#!` line naming its interpreter and
+  any options it needs, make it executable, and choose the file itself as the program. An interpreter
+  without `{text}`, such as `osascript -e` with fixed code, is allowed. The rule prevents a common
+  mistake; it does not make other programs safe. A renamed interpreter, a wrapper, or a script that
+  runs its input as code (`eval "$1"`) can still run spoken words as code, so write scripts that treat
+  the text as data, as in `"$1"` below.
+- **An invalid entry rejects the whole file**, like any other validation error in it: when KeyScribe
+  starts with such a file, no saved places or actions are available until it is fixed (apps still open
+  by name), and while KeyScribe is running it keeps the last version that loaded. The Voice Commands
+  editor names the offending entry and why it is invalid. Fix or remove that entry in
+  `voice_commands.toml` and save; the file is read again automatically.
 - **A complete example.** A file `~/bin/note` containing
 
   ```sh

@@ -199,10 +199,26 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
         guard program.hasPrefix("/") || program.hasPrefix("~/") else {
             return "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool."
         }
+        let fileName = (program as NSString).lastPathComponent
+        if isInterpreter(fileName), run.dropFirst().contains(where: { $0.contains(textPlaceholder) }) {
+            return "Program: With \(textPlaceholder), “\(fileName)” could run spoken words as code. "
+                + "Put the logic in an executable script file and choose that file instead."
+        }
         for (index, argument) in run.dropFirst().enumerated() {
             if let issue = UserInputValidation.identifierIssue(argument) { return "Argument \(index + 1): \(issue.message)" }
         }
         return nil
+    }
+
+    private static let interpreterNames: Set<String> = [
+        "sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "osascript", "python", "perl", "ruby", "node",
+        "nodejs", "swift", "awk", "gawk", "mawk", "nawk", "env",
+    ]
+
+    private static func isInterpreter(_ fileName: String) -> Bool {
+        let name = fileName.lowercased()
+        let base = name.firstMatch(of: /^([a-z]+)[0-9]+(?:\.[0-9]+)*$/).map { String($0.1) } ?? name
+        return interpreterNames.contains(base)
     }
 
     private static func shortcutIssue(_ shortcut: VoiceCommandShortcut) -> String? {

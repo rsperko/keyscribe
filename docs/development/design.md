@@ -423,10 +423,14 @@ It never inserts, pastes, copies, submits, or touches the clipboard. Recognition
 and the transcript is never sent to an AI service; the only network effect of its own is that opening a
 saved web place loads that site in the browser. It opens only apps and URLs the system or the user's file
 names, never a URL built from speech. **Spoken text reaches only an action's input the user marked with
-`{text}`**: for a script, a single argv element of a program started directly (`Process`, no shell), so speech
-can never become shell syntax or extra arguments; for a macOS shortcut, the standard input of
+`{text}`**: for a script, the argv elements of a program started directly (`Process`, no shell) that contain
+the placeholder, so speech keeps those argument boundaries, never becomes extra arguments, and is never
+evaluated by KeyScribe, though the program itself can still interpret it as code; for a macOS shortcut, the standard input of
 `/usr/bin/shortcuts run`, with the shortcut named by identifier as one argv element. The script or shortcut
-is the user's own and runs as the user; what it does with the text, including sending it to online
+is the user's own. As an added guardrail, validation refuses a script whose program has a
+known interpreter file name (a shell, `env`, `osascript`, …) when any argument carries `{text}`, so the direct
+`sh -c {text}` setup cannot be saved or loaded; that is accident prevention by name, not proof that an accepted
+script is safe. Either runs as the user; what it does with the text, including sending it to online
 services, is outside KeyScribe's invariants, which is why `PRIVACY.md` says so. An action still running
 after the short report window is shown as started and never killed; its later result updates the History
 entry it wrote.
