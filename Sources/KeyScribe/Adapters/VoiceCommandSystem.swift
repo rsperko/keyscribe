@@ -353,7 +353,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let origin = origin.flatMap { $0.bundleId == system.ownBundleId ? nil : $0 }
         switch resolution {
         case .notACommand:
-            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
+            return .failed(message: "Not a command. \(Self.notACommandHint)",
                            kind: .unrecognizedCommand)
         case .scriptNotFound(let target):
             return .failed(message: Self.notFoundMessage(target))
@@ -499,6 +499,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     static func needsTextMessage(script: String) -> String {
         "Say what to pass to \(script) after its name."
     }
+
+    static let notACommandHint = "Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."
 
     static func notFoundMessage(_ target: String) -> String {
         "No script or shortcut is called \u{201C}\(target)\u{201D}."

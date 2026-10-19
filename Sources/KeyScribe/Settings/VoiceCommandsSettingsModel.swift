@@ -257,7 +257,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         case .action(let action):
             return TryResult(heard: heard, summary: action.summary(appName: appName), detail: action.detail(appName: appName), resolved: true)
         case .notACommand:
-            return TryResult(heard: heard, summary: "Not a command", detail: "Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.", resolved: false)
+            return TryResult(heard: heard, summary: "Not a command", detail: VoiceCommandRunner.notACommandHint, resolved: false)
         case .scriptNotFound(let target):
             return TryResult(heard: heard, summary: "No matching action", detail: VoiceCommandRunner.notFoundMessage(target), resolved: false)
         case .noMatch(let target):
