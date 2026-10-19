@@ -73,6 +73,7 @@ final class ConfigRepository {
     }
 
     var resolved: ResolvedConfig { config.resolved }
+    var voiceCommandsEnabled: Bool { config.voiceCommandsEnabled }
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
 
     func dictionaryWords() -> [String] { DictionaryStore.loadOrDefault(supportDir: supportDir).words }

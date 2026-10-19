@@ -101,9 +101,39 @@ enum InstalledApps {
 }
 
 enum AppNames {
+    private struct Key: Hashable {
+        let path: String
+        let bundleId: String
+        let preferences: [String]
+    }
+
+    private final class Cache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [Key: (stamp: Date, app: VoiceCommandCatalog.App?)] = [:]
+
+        func app(_ key: Key, stamp: Date, read: () -> VoiceCommandCatalog.App?) -> VoiceCommandCatalog.App? {
+            if let hit = lock.withLock({ entries[key] }), hit.stamp == stamp { return hit.app }
+            let app = read()
+            lock.withLock { entries[key] = (stamp, app) }
+            return app
+        }
+    }
+
+    nonisolated private static let cache = Cache()
+
     nonisolated static func app(
         at url: URL, bundleId: String, preferences: [String] = Locale.preferredLanguages
     ) -> VoiceCommandCatalog.App? {
+        let plist = url.appendingPathComponent("Contents/Info.plist")
+        guard let stamp = (try? FileManager.default.attributesOfItem(atPath: plist.path))?[.modificationDate] as? Date else {
+            return nil
+        }
+        return cache.app(Key(path: url.path, bundleId: bundleId, preferences: preferences), stamp: stamp) {
+            read(at: url, bundleId: bundleId, preferences: preferences)
+        }
+    }
+
+    nonisolated private static func read(at url: URL, bundleId: String, preferences: [String]) -> VoiceCommandCatalog.App? {
         let contents = url.appendingPathComponent("Contents")
         guard let info = NSDictionary(contentsOf: contents.appendingPathComponent("Info.plist")) as? [String: Any] else {
             return nil

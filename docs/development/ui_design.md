@@ -884,14 +884,14 @@ Its sections are, in order:
    Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
    also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
    Commands…**, and marks the list row and the menu-bar badge as never firing.
-2. **What it does** — four primary patterns: “switch to …” and “open …” for apps, places, and open
+2. **What it does** — one row per taught phrase (`VoiceCommandPhrase`, which also writes the
+   “Not a command” guidance and the feature's summary): “switch to …” and “open …” for apps, places, and open
    windows (“Say ‘switch to Budget’ to bring an open window named Budget forward.”), “run …”
-   for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs are also accepted
-   (`VoiceCommandGrammar.focusVerbs`). “Which to” and “witch to” are accepted as “switch to”; “to” can
-   arrive as “two” or “too” after “switch”, “which”, “witch”, or “go”. These prefix alternatives work
+   for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs, and
+   common mishearings of them such as “witch to”, are also accepted (`VoiceCommandGrammar.focusVerbs`). These prefix alternatives work
    in live commands and Try it without changing the original heard text or action input; the panel
    continues to teach the standard phrases. Actions require “run”; neither a bare name nor an app-switching phrase runs one.
-   Each pattern has one line on what it does, then the same **Recognition
+   Each row has one line on what it does, then the same **Recognition
    and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
    Voice Commands. Its help adds that the words and replacements apply before a command is read.
 3. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
@@ -1083,7 +1083,8 @@ Cancel button marks it **Choice cancelled**. An idle timeout records nothing. A 
 failure. That row can say more than the compact HUD: an unrecognized command keeps the full “Not a
 command. Say …” guidance there while the HUD shows only “Command not recognized” and what was heard. **Paste Result** is hidden for commands, since there is nothing to insert;
 **Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
-Voice Commands vocabulary, not the global one, since that is what reads commands. The Voice Commands
+Voice Commands vocabulary, not the global one, since that is what reads commands. While voice commands
+are turned off, a command entry shows no corrections, since that vocabulary cannot be seen or edited. The Voice Commands
 editor carries its own **Do not save this mode in history** toggle.
 
 Correction actions are directly beside the relevant text:

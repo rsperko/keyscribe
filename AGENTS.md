@@ -396,7 +396,8 @@ keyscribe/
   value back, else falls back to paste).
 - **Permissions = Accessibility + Automation (+ Microphone). Input Monitoring is NOT used.**
   Accessibility covers post ⌘V/⌘C + AX reads **and** the modifier-only trigger event tap;
-  Automation is browser URL via AppleScript (requested only when a mode opts into URL context);
+  Automation is browser URL and tabs via AppleScript (requested only when a mode opts into URL context, or
+  Voice Commands reads or focuses a browser tab);
   Microphone is capture.
   - **The hotkey mechanism is split by trigger type, and no path needs Input Monitoring**
     (`HotkeyMonitor` + `CarbonHotKeys`):

@@ -170,6 +170,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 onSaved: onSaved)
         }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
+        history.voiceCommandsEnabled = { repository.voiceCommandsEnabled }
         modes.voiceCommands.previousApp = { [weak self] in self?.historyPreviousApp }
         history.copyText = { TextInserter.copyToClipboard($0) }
         history.pasteText = { [weak self] in self?.pasteHistoryResult($0) }

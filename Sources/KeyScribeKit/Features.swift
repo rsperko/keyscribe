@@ -39,7 +39,7 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public static let voiceCommands = Feature(
         id: "voice_commands",
         title: "Voice commands",
-        summary: "Adds a built-in Voice Commands mode: give it a shortcut, then say \u{201C}switch to\u{201D} an app or a saved place, or \u{201C}go back\u{201D}. Speech on that shortcut is never typed."
+        summary: "Adds a built-in Voice Commands mode: give it a shortcut, then \(VoiceCommandPhrase.guidance). Speech on that shortcut is never typed."
     )
 
     public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands]

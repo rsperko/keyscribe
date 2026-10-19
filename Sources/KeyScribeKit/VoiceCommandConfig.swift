@@ -19,20 +19,14 @@ public struct VoiceCommandPlace: Codable, Equatable, Sendable {
         self.browser = browser
     }
 
-    public var spokenForms: [String] {
-        var seen = Set<String>()
-        return ([name] + say).filter { seen.insert(VoiceCommandText.key($0)).inserted }
-    }
+    public var spokenForms: [String] { VoiceCommandNaming.spokenForms(name: name, say: say) }
 
     public func hasSameDestination(as other: VoiceCommandPlace) -> Bool {
         VoiceCommandText.key(name) == VoiceCommandText.key(other.name) && target == other.target && browser == other.browser
     }
 
     public var issue: String? {
-        if let issue = UserInputValidation.nameIssue(name) { return "Name: \(issue.message)" }
-        for form in say {
-            if let issue = UserInputValidation.phraseIssue(form) { return "Spoken name: \(issue.message)" }
-        }
+        if let issue = VoiceCommandNaming.issue(name: name, say: say) { return issue }
         switch target {
         case .app(let bundleId):
             if let issue = UserInputValidation.identifierIssue(bundleId, required: true) { return "App: \(issue.message)" }
@@ -175,16 +169,10 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
         return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    public var spokenForms: [String] {
-        var seen = Set<String>()
-        return ([name] + say).filter { seen.insert(VoiceCommandText.key($0)).inserted }
-    }
+    public var spokenForms: [String] { VoiceCommandNaming.spokenForms(name: name, say: say) }
 
     public var issue: String? {
-        if let issue = UserInputValidation.nameIssue(name) { return "Name: \(issue.message)" }
-        for form in say {
-            if let issue = UserInputValidation.phraseIssue(form) { return "Spoken name: \(issue.message)" }
-        }
+        if let issue = VoiceCommandNaming.issue(name: name, say: say) { return issue }
         switch action {
         case .program(let run): return Self.programIssue(run)
         case .shortcut(let shortcut): return Self.shortcutIssue(shortcut)
@@ -392,5 +380,20 @@ public enum VoiceCommandStore {
     public static func write(_ config: VoiceCommandConfig, to supportDir: URL) throws {
         try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         try encode(config).write(to: supportDir.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
+    }
+}
+
+enum VoiceCommandNaming {
+    static func spokenForms(name: String, say: [String]) -> [String] {
+        var seen = Set<String>()
+        return ([name] + say).filter { seen.insert(VoiceCommandText.key($0)).inserted }
+    }
+
+    static func issue(name: String, say: [String]) -> String? {
+        if let issue = UserInputValidation.nameIssue(name) { return "Name: \(issue.message)" }
+        for form in say {
+            if let issue = UserInputValidation.phraseIssue(form) { return "Spoken name: \(issue.message)" }
+        }
+        return nil
     }
 }

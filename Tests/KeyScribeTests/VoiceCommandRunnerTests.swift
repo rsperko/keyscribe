@@ -114,6 +114,14 @@ struct VoiceCommandRunnerTests {
         #expect(system.opened == [ghostty.bundleId, textEdit.bundleId, ghostty.bundleId])
     }
 
+    @Test func repeatingACommandForTheFrontAppKeepsTheEarlierReturnDestination() async {
+        let (runner, _) = make()
+        _ = await runner.run(transcript: "switch to ghostty", places: [], origin: .init(bundleId: textEdit.bundleId))
+        _ = await runner.run(transcript: "switch to ghostty", places: [], origin: .init(bundleId: ghostty.bundleId))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+    }
+
     @Test func goBackWithNothingToReturnToFails() async {
         let (runner, system) = make()
         #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: textEdit.bundleId))

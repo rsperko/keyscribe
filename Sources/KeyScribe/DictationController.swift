@@ -1938,6 +1938,15 @@ final class DictationController {
             return
         }
 
+        // Fold the commit-time probe in before anything reads the flag. Secure is sticky and only the flag is
+        // adopted: bundleId/pid must stay the PRESS-time target, since decideInsertion compares captured
+        // against current to detect focus moves.
+        let secureAtCommit = await commitSecureProbe.value
+        if Task.isCancelled { return }
+        if secureAtCommit, capturedSnapshot != nil {
+            capturedSnapshot?.isSecureField = true
+        }
+
         if activeMode?.runsVoiceCommands == true {
             await finishVoiceCommand(heard: raw)
             return
@@ -1950,12 +1959,6 @@ final class DictationController {
         if let phraseModeId = routed.routedModeId, eligible.contains(where: { $0.id == phraseModeId }) {
             session?.modeChoice = .spokenPhrase
             session?.routedPhrase = routed.matchedPhrase
-        }
-        // Fold the commit-time probe in before anything reads the flag. Secure is sticky and only the flag is
-        // adopted: bundleId/pid must stay the PRESS-time target, since decideInsertion compares captured
-        // against current to detect focus moves.
-        if await commitSecureProbe.value, capturedSnapshot != nil {
-            capturedSnapshot?.isSecureField = true
         }
         // Neuter the routed mode BEFORE it drives the rewrite: produceFinalText resolves the connection off
         // this mode, so a Phase-B re-route to a cloud mode from a secure field must be local-only here, not

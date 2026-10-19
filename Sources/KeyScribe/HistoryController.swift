@@ -300,12 +300,14 @@ final class HistoryPaneModel: ObservableObject {
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
 
+    var voiceCommandsEnabled: () -> Bool = { true }
     var correctsCommands: Bool { selected?.outcome.isCommand == true }
+    var canCorrect: Bool { !correctsCommands || voiceCommandsEnabled() }
     private var correctionScope: CorrectionDestination.Scope { correctsCommands ? .mode(Mode.voiceCommandsId) : .global }
 
-    func addDictionaryWord(_ word: String) -> Bool { saveWord(word, correctionScope) }
+    func addDictionaryWord(_ word: String) -> Bool { canCorrect && saveWord(word, correctionScope) }
     func analyzeDictionaryWord(_ word: String) -> VocabularyAnalysis { analyzeWord(word, correctionScope) }
-    func addReplacement(_ heard: String, _ replace: String) -> Bool { saveReplacement(heard, replace, correctionScope) }
+    func addReplacement(_ heard: String, _ replace: String) -> Bool { canCorrect && saveReplacement(heard, replace, correctionScope) }
 
     func deleteSelected() {
         guard let entry = selected else { return }
@@ -632,7 +634,7 @@ private struct HistoryDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     stageContent
-                    if stage != .details {
+                    if stage != .details, model.canCorrect {
                         Divider()
                         corrections
                     }

@@ -88,7 +88,7 @@ struct VoiceCommandChoiceWiringTests {
         init(
             places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [], historyEnabled: Bool = true,
             titleScopedMode: Bool = false, target: TargetSnapshot = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1),
-            replacements: [ReplacementsSet.Rule] = []
+            replacements: [ReplacementsSet.Rule] = [], snapshot: (@Sendable () -> TargetSnapshot)? = nil
         ) throws {
             supportDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("keyscribe-vcchoice-\(UUID().uuidString)", isDirectory: true)
@@ -134,7 +134,7 @@ struct VoiceCommandChoiceWiringTests {
                 submitKey: { _ in },
                 clipboard: { captured.clipboardReads += 1; return nil },
                 pressSnapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1) },
-                snapshot: { target },
+                snapshot: snapshot ?? { target },
                 micStatus: { .granted },
                 accessibilityGranted: { true },
                 voiceCommands: runner)
@@ -534,6 +534,22 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("stitch to Mail")
         #expect(h.hud.last == .error(message: "Command not recognized", action: nil))
         #expect(h.hud.last?.voiceOverAnnouncement == "Command not recognized")
+    }
+
+    @Test func aPasswordFieldFocusedDuringRecordingHidesTheExcerptAndSkipsHistory() async throws {
+        let reads = SnapshotCounter()
+        let h = try Harness(places: [personal, work], snapshot: {
+            TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: reads.next() >= 1)
+        })
+        await h.dictate("stitch to Mail")
+        #expect(h.hud.last == .error(message: "Command not recognized", action: nil))
+        #expect(h.history.entries().isEmpty)
+    }
+
+    private final class SnapshotCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func next() -> Int { lock.withLock { defer { count += 1 }; return count } }
     }
 
     @Test func historyOffStillShowsTheExcerpt() async throws {

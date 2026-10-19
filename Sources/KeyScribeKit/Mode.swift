@@ -451,16 +451,16 @@ public enum ModeStore {
     ] }
 
     public static func decode(from toml: String, id: String) throws -> Mode {
-        var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion, migrations: migrations) {
-            try TOMLDecoder().decode(Mode.self, from: $0)
+        var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion, migrations: migrations) { table in
+            var mode = try TOMLDecoder().decode(Mode.self, from: table)
+            if id == Mode.voiceCommandsId {
+                if table["dictionary"]?["include_global"] == nil { mode.dictionary.includeGlobal = false }
+                if table["replacements"]?["include_global"] == nil { mode.replacements.includeGlobal = false }
+            }
+            return mode
         }
         if mode.output == .voiceCommand && id != Mode.voiceCommandsId {
             throw ConfigError.invalid("output = \"voice_command\" belongs to the built-in Voice Commands mode")
-        }
-        if id == Mode.voiceCommandsId {
-            let table = try TOMLTable(string: toml)
-            if table["dictionary"]?["include_global"] == nil { mode.dictionary.includeGlobal = false }
-            if table["replacements"]?["include_global"] == nil { mode.replacements.includeGlobal = false }
         }
         mode.id = id
         return mode
@@ -703,13 +703,13 @@ public enum ModeStore {
     public static func ensureSystemModes(in dir: URL, lkgDir: URL? = nil, voiceCommands: Bool = false) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if voiceCommands {
-            ensureSystemMode(.voiceCommands, in: dir, lkgDir: lkgDir, unreadable: .voiceCommands) { .voiceCommands }
+            ensureSystemMode(.voiceCommands, in: dir, lkgDir: lkgDir) { .voiceCommands }
         }
-        ensureSystemMode(.direct, in: dir, lkgDir: lkgDir, unreadable: nil) { migratedDirect(in: dir) }
+        ensureSystemMode(.direct, in: dir, lkgDir: lkgDir) { migratedDirect(in: dir) }
     }
 
     private static func ensureSystemMode(
-        _ seed: Mode, in dir: URL, lkgDir: URL?, unreadable fallback: Mode?, missing initial: () -> Mode
+        _ seed: Mode, in dir: URL, lkgDir: URL?, missing initial: () -> Mode
     ) {
         let url = fileURL(for: seed, in: dir)
         guard let current = try? String(contentsOf: url, encoding: .utf8) else {
@@ -722,7 +722,7 @@ public enum ModeStore {
         } catch ConfigError.newerSchemaVersion {
             return
         } catch {
-            resolved = lkgDir.flatMap { loadLKG(id: seed.id, in: $0) }?.systemNormalized() ?? fallback
+            resolved = lkgDir.flatMap { loadLKG(id: seed.id, in: $0) }?.systemNormalized()
         }
         guard let resolved, let encoded = try? encode(resolved), encoded != current else { return }
         try? encoded.write(to: url, atomically: true, encoding: .utf8)

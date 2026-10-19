@@ -18,6 +18,34 @@ public enum VoiceCommandText {
     }
 }
 
+public enum VoiceCommandPhrase: CaseIterable, Sendable {
+    case focus, run, goBack
+
+    public var words: [String] {
+        switch self {
+        case .focus: ["switch to", "open"]
+        case .run: [VoiceCommandGrammar.run]
+        case .goBack: [VoiceCommandGrammar.goBack]
+        }
+    }
+
+    var reaches: String? {
+        switch self {
+        case .focus: "an app or place"
+        case .run: "a script or shortcut"
+        case .goBack: nil
+        }
+    }
+
+    public static var guidance: String {
+        let clauses = allCases.map { phrase in
+            let quoted = phrase.words.map { "\u{201C}\($0)\u{201D}" }.joined(separator: " or ")
+            return phrase.reaches.map { "\(quoted) \($0)" } ?? quoted
+        }
+        return "say " + clauses.dropLast().joined(separator: ", ") + ", or " + (clauses.last ?? "")
+    }
+}
+
 public enum VoiceCommandGrammar {
     static let focusVerbs = [
         "switch to", "switch two", "switch too",
@@ -27,6 +55,7 @@ public enum VoiceCommandGrammar {
         "focus on", "focus", "open", "launch",
     ]
     static let goBack = "go back"
+    static let run = "run"
 
     private static let focusVerbPrefix: NSRegularExpression = {
         let gap = "[^\\p{L}\\p{N}]+"
@@ -81,8 +110,8 @@ public enum VoiceCommandGrammar {
     public static func parse(_ transcript: String) -> VoiceCommandIntent? {
         let words = VoiceCommandText.key(transcript)
         if words == goBack { return .goBack }
-        if words.hasPrefix("run ") {
-            return .runScript(target: String(words.dropFirst(4)))
+        if words.hasPrefix(run + " ") {
+            return .runScript(target: String(words.dropFirst(run.count + 1)))
         }
         for verb in focusVerbs {
             guard words.hasPrefix(verb + " ") else { continue }

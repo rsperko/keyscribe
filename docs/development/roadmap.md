@@ -43,8 +43,10 @@ intentionally short. It records work with a concrete user outcome, not a running
     on the recommended speech model. No corpus covers these phrases yet, so record one first.
   - The Voice Commands editor, Try it, the choice list, and the HUD outcomes have had a hands-on
     review against [`ui_design.md`](ui_design.md) §7, including keyboard and VoiceOver.
-  - Saved web places work in each browser that can list tabs, including the Automation prompt and a
-    denied grant.
+  - Saved web places work in each browser that can list tabs, including a denied grant and the first
+    command after install, which waits on the Automation prompt and then reads the tabs. A command
+    given while that prompt is still unanswered says the browser is waiting for permission, not that it
+    could not list its tabs.
   - A hung browser has been measured against the next command, and its stall on the shared
     AppleScript queue is either accepted or removed by giving each browser its own queue.
   - Rolling out makes every gate unconditional. Find them by searching for `.voiceCommands` and

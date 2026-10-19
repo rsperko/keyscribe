@@ -79,4 +79,21 @@ struct VoiceCommandGrammarTests {
         #expect(VoiceCommandText.key("VS-Code") == "vs code")
         #expect(VoiceCommandText.compact("VS Code") == "vscode")
     }
+
+    @Test(arguments: VoiceCommandPhrase.allCases)
+    func everyTaughtPhraseIsOneTheGrammarAccepts(_ phrase: VoiceCommandPhrase) {
+        for words in phrase.words {
+            let intent = VoiceCommandGrammar.parse(phrase == .goBack ? words : "\(words) mail")
+            switch phrase {
+            case .focus: #expect(intent == .focus(target: "mail"))
+            case .run: #expect(intent == .runScript(target: "mail"))
+            case .goBack: #expect(intent == .goBack)
+            }
+        }
+    }
+
+    @Test func theGuidanceTeachesEveryPhrase() {
+        #expect(VoiceCommandPhrase.guidance
+                == "say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}")
+    }
 }

@@ -437,8 +437,16 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return Self.outcome(of: run, script: script, command: command)
         }
         guard succeeded else { return .failed(message: "Could not switch to \(summary).", command: command) }
-        if let origin { backTarget = origin }
+        if let origin, origin.bundleId != Self.appBundleId(of: action) { backTarget = origin }
         return .done(summary: summary, command: command)
+    }
+
+    private static func appBundleId(of action: VoiceCommandAction) -> String? {
+        switch action {
+        case .app(let app): return app.bundleId
+        case .place(_, .app(let bundleId)): return bundleId
+        default: return nil
+        }
     }
 
     private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool) async -> VoiceCommandOutcome {
@@ -500,7 +508,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "Say what to pass to \(script) after its name."
     }
 
-    static let notACommandHint = "Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."
+    static let notACommandHint = VoiceCommandPhrase.guidance.prefix(1).uppercased() + VoiceCommandPhrase.guidance.dropFirst() + "."
 
     static func notFoundMessage(_ target: String) -> String {
         "No script or shortcut is called \u{201C}\(target)\u{201D}."
@@ -746,13 +754,16 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     nonisolated static let shortcutListDeadline: TimeInterval = 10
 
     func shortcuts() async -> [VoiceCommandShortcut]? {
-        await Task.detached {
-            guard let output = Self.readOutput(
-                program: Self.shortcutsTool, arguments: ["list", "--show-identifiers"], within: Self.shortcutListDeadline)
-            else { return nil }
-            return VoiceCommandShortcut.parseList(output)
-                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        }.value
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let output = Self.readOutput(
+                    program: Self.shortcutsTool, arguments: ["list", "--show-identifiers"], within: Self.shortcutListDeadline)
+                continuation.resume(returning: output.map {
+                    VoiceCommandShortcut.parseList($0)
+                        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                })
+            }
+        }
     }
 
     nonisolated static func readOutput(program: String, arguments: [String], within seconds: TimeInterval) -> String? {
@@ -784,12 +795,20 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         let scan = await installedSnapshot()
         let browsers = Self.runningTabBrowsers(in: scan, running: Self.runningIds()).filter { browser == nil || $0 == browser }
         guard !browsers.isEmpty else { return TabRead(tabs: []) }
-        guard case .finished(let read) = await Self.scripts.run(within: Self.tabReadDeadline, { isCurrent in
-            Self.collectTabs(from: browsers, isCurrent: isCurrent) { BrowserScripting.tabs(of: $0, isCurrent: isCurrent) }
-        }) else {
-            Log.context.error("voice command: the browser tabs could not be read in time")
-            return nil
+        let consent = await AutomationConsent.settle(browsers)
+        guard !Task.isCancelled else { return nil }
+        var read = TabRead(tabs: [])
+        if !consent.readable.isEmpty {
+            guard case .finished(let found) = await Self.scripts.run(within: Self.tabReadDeadline, { isCurrent in
+                Self.collectTabs(from: consent.readable, isCurrent: isCurrent) { BrowserScripting.tabs(of: $0, isCurrent: isCurrent) }
+            }) else {
+                Log.context.error("voice command: the browser tabs could not be read in time")
+                return nil
+            }
+            read = found
         }
+        read.refused += consent.refused
+        read.unavailable += consent.unanswered
         for bundleId in read.refused {
             Log.context.error("voice command: \(bundleId, privacy: .public) refused Automation")
         }
@@ -905,6 +924,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     func frontTab(ofBrowser bundleId: String) async -> (url: String, title: String)? {
         let scan = await installedSnapshot()
         guard isRunning(bundleId: bundleId), scan.tabBrowsers.contains(bundleId),
+              await AutomationConsent.settle([bundleId]).readable == [bundleId],
               case .finished(let tab) = await Self.scripts.run(within: Self.tabReadDeadline, {
                   BrowserScripting.frontTab(of: bundleId, isCurrent: $0).map { FrontTab(url: $0.url, title: $0.title) }
               }), let tab else { return nil }

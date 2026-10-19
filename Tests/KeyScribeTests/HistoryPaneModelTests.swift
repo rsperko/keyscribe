@@ -149,6 +149,18 @@ struct HistoryPaneModelTests {
         #expect(corrections.replacements.map(\.2) == [.mode(Mode.voiceCommandsId)])
     }
 
+    @Test func aCommandCannotBeCorrectedWhileVoiceCommandsIsOff() async throws {
+        var command = entry("~/bin/deploy prod")
+        command.outcome = .command
+        let corrections = Corrections()
+        let model = try await selectingOnly(command, corrections: corrections)
+        model.voiceCommandsEnabled = { false }
+        #expect(!model.canCorrect)
+        #expect(!model.addDictionaryWord("Hydra"))
+        #expect(!model.addReplacement("hydro", "Hydra"))
+        #expect(corrections.words.isEmpty && corrections.replacements.isEmpty)
+    }
+
     @Test func correctionsFromADictationGoToTheGlobalVocabulary() async throws {
         let corrections = Corrections()
         let model = try await selectingOnly(entry("hello"), corrections: corrections)

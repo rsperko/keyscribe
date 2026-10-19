@@ -51,11 +51,9 @@ struct VoiceCommandsEditorView: View {
             }
 
             Section("What it does") {
-                phraseRow("\u{201C}switch to …\u{201D}  \u{201C}open …\u{201D}",
-                          "Brings an app or saved place to the front, opening it if needed. App names work without setup. Say \u{2018}switch to Budget\u{2019} to bring an open window named Budget forward.")
-                phraseRow("\u{201C}go back\u{201D}", "Returns to the window or app you were using before your last switch by voice. Say it again to switch back.")
-                phraseRow("\u{201C}run …\u{201D}",
-                          "Runs a script or shortcut below. Say its name after \u{201C}run\u{201D}, followed by any words it accepts.")
+                ForEach(VoiceCommandPhrase.allCases, id: \.self) { phrase in
+                    phraseRow(Self.label(for: phrase), Self.explanation(for: phrase))
+                }
                 SettingRow(
                     title: "Recognition and replacements",
                     result: VocabularyScopePicker.summary(for: mode),
@@ -127,6 +125,21 @@ struct VoiceCommandsEditorView: View {
             pendingShortcut = updated
         } else {
             onUpdate(updated)
+        }
+    }
+
+    private static func label(for phrase: VoiceCommandPhrase) -> String {
+        phrase.words.map { phrase == .goBack ? "\u{201C}\($0)\u{201D}" : "\u{201C}\($0) …\u{201D}" }.joined(separator: "  ")
+    }
+
+    private static func explanation(for phrase: VoiceCommandPhrase) -> String {
+        switch phrase {
+        case .focus:
+            "Brings an app or saved place to the front, opening it if needed. App names work without setup. Say \u{2018}switch to Budget\u{2019} to bring an open window named Budget forward."
+        case .run:
+            "Runs a script or shortcut below. Say its name after \u{201C}run\u{201D}, followed by any words it accepts."
+        case .goBack:
+            "Returns to the window or app you were using before your last switch by voice. Say it again to switch back."
         }
     }
 

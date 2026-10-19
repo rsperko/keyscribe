@@ -136,6 +136,18 @@ struct VoiceCommandModeTests {
         #expect(healed.triggerKeys == [.init(key: "right_command")])
     }
 
+    @Test func seedingLeavesAnUndecodableFileUntouchedWithNoLKG() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(Mode.voiceCommandsId).toml")
+        let broken = "trigger_keys = [{ key = \"right_command\" }\n"
+        try broken.write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.ensureSystemModes(in: dir, voiceCommands: true)
+        #expect(try String(contentsOf: url, encoding: .utf8) == broken)
+    }
+
     @Test func seedingDoesNotTakeAShortcutFromDirect() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
